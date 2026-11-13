@@ -726,6 +726,30 @@ class MusicBrainzClient:
             logger.error(f"Error browsing releases for release-group {release_group_mbid}: {e}")
             return []
 
+    def browse_recording_releases(self, recording_mbid: str, limit: int = 100,
+                                  offset: int = 0) -> List[Dict[str, Any]]:
+        """Browse the releases one recording is on, with each one's release
+        group and credits (#2077).
+
+        A lookup of the recording itself (``inc=releases``) stops at 25, and a
+        hit's compilations fill those 25 before its own album appears. The
+        browse pages through all of them."""
+        try:
+            params = {
+                'recording': recording_mbid,
+                'fmt': 'json',
+                'limit': min(limit, 100),
+                'offset': offset,
+                # media: the format and disc count, to pick a standard edition
+                'inc': 'release-groups+artist-credits+media',
+            }
+            response = self._get("/release", params=params)
+            response.raise_for_status()
+            return response.json().get('releases', [])
+        except Exception as e:
+            logger.error(f"Error browsing releases for recording {recording_mbid}: {e}")
+            return []
+
     def search_labels(self, label_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search record labels by name (labels feature). Each hit has `id`
         (MBID), `name`, `disambiguation`, `type` (imprint/production/etc.),

@@ -4,7 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
-import { activeResults, resetPersistedSearch, useSearchController } from './-search.use-controller';
+import {
+  activeResults,
+  activeSourceLoading,
+  activeSourceSettled,
+  activeUnifiedProgress,
+  allSourceMembers,
+  resetPersistedSearch,
+  useSearchController,
+} from './-search.use-controller';
 
 /** A search handler you can settle per source, so races are observable. */
 function deferredSearch() {
@@ -411,5 +419,204 @@ describe('syncQuery', () => {
     // Same query: the cache is still good and must not be thrown away.
     act(() => result.current.syncQuery('aphex'));
     expect(result.current.state.sources.spotify).toBeDefined();
+  });
+});
+
+describe('all sources (#2051)', () => {
+  const MEMBERS = ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz'];
+
+  beforeEach(() => {
+    resetPersistedSearch();
+    server.use(
+      http.get('/status', () => HttpResponse.json({ metadata_source: { source: 'spotify' } })),
+      http.get('/api/settings/config-status', () =>
+        HttpResponse.json({
+          spotify: { configured: true },
+          itunes: { configured: true },
+          deezer: { configured: true },
+          discogs: { configured: true },
+          hydrabase: { configured: true },
+          soulseek: { configured: true },
+        }),
+      ),
+    );
+  });
+
+  it('asks every source that is set up, once each, side by side', async () => {
+    const pending = deferredSearch();
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+
+    act(() => result.current.submitQuery('radiohead'));
+    act(() => result.current.setActiveSource('all'));
+    await waitFor(() => expect(pending).toHaveLength(MEMBERS.length));
+    // all of them are out at the same time: none waited for another
+    expect(pending.map((p) => p.source).sort()).toEqual([...MEMBERS].sort());
+    expect(allSourceMembers(result.current.state)).toEqual(MEMBERS);
+    expect(activeSourceLoading(result.current.state)).toBe(true);
+    // spotify was already being asked as the single source: not asked twice
+    expect(pending.filter((p) => p.source === 'spotify')).toHaveLength(1);
+  });
+
+  it('leaves out a source with no credentials', async () => {
+    server.use(
+      http.get('/api/settings/config-status', () =>
+        HttpResponse.json({ spotify: { configured: true }, deezer: { configured: false } }),
+      ),
+    );
+    const seen = stubSearch({});
+    const { result } = renderHook(() => useSearchController());
+    await waitFor(() => expect(result.current.state.configuredSources.deezer).toBe(false));
+
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await flush();
+    expect(seen).not.toContain('deezer');
+    expect(seen).toContain('spotify');
+  });
+
+  it('shows results as each source answers, the same release once', async () => {
+    const pending = deferredSearch();
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(pending).toHaveLength(MEMBERS.length));
+    expect(activeSourceSettled(result.current.state)).toBe(false);
+
+    const kidA = (id: string) => ({
+      spotify_albums: [{ id, name: 'Kid A', artist: 'Radiohead', album_type: 'album' }],
+    });
+    await act(async () => {
+      pending.find((p) => p.source === 'deezer')!.settle(kidA('dz'));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    // one answer in: results are on the page while the rest are still out
+    expect(activeSourceSettled(result.current.state)).toBe(true);
+    expect(activeSourceLoading(result.current.state)).toBe(true);
+    expect(activeResults(result.current.state).albums.map((a) => a.sources)).toEqual([['deezer']]);
+    expect(activeUnifiedProgress(result.current.state)).toMatchObject({
+      total: 7,
+      answered: ['deezer'],
+    });
+
+    await act(async () => {
+      pending.find((p) => p.source === 'spotify')!.settle(kidA('sp'));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    const albums = activeResults(result.current.state).albums;
+    expect(albums).toHaveLength(1);
+    // the user's own source leads the shared card
+    expect(albums[0]).toMatchObject({
+      id: 'sp',
+      source: 'spotify',
+      sources: ['spotify', 'deezer'],
+    });
+  });
+
+  it('switching to one of its sources afterwards costs no request', async () => {
+    const seen = stubSearch({
+      deezer: { spotify_albums: [{ id: 'dz', name: 'Kid A', artist: 'Radiohead' }] },
+    });
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(activeSourceLoading(result.current.state)).toBe(false));
+    const asked = seen.length;
+
+    act(() => result.current.setActiveSource('deezer'));
+    await flush();
+    expect(seen).toHaveLength(asked);
+    expect(activeResults(result.current.state).albums.map((a) => a.id)).toEqual(['dz']);
+    // and back: still nothing asked
+    act(() => result.current.setActiveSource('all'));
+    await flush();
+    expect(seen).toHaveLength(asked);
+  });
+
+  it('a source that fails is named, not left spinning, and is asked again on a retry', async () => {
+    let deezerCalls = 0;
+    server.use(
+      http.post('/api/enhanced-search', async ({ request }) => {
+        const body = (await request.json()) as { source: string };
+        if (body.source === 'deezer') {
+          deezerCalls += 1;
+          if (deezerCalls === 1) return HttpResponse.json({ error: 'boom' }, { status: 500 });
+        }
+        return HttpResponse.json({ spotify_artists: [{ id: body.source, name: 'Radiohead' }] });
+      }),
+    );
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(activeSourceLoading(result.current.state)).toBe(false));
+
+    const progress = activeUnifiedProgress(result.current.state)!;
+    expect(progress.failed).toEqual(['deezer']);
+    expect(progress.pending).toEqual([]);
+    expect(progress.answered).toHaveLength(6);
+    // not cached as an empty answer: opened on its own it would search again
+    expect(result.current.state.sources.deezer).toBeUndefined();
+
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(deezerCalls).toBe(2));
+    await waitFor(() => expect(activeUnifiedProgress(result.current.state)!.failed).toEqual([]));
+    expect(activeUnifiedProgress(result.current.state)!.answered).toHaveLength(7);
+  });
+
+  it('a new query drops every answer and every late one from the old query', async () => {
+    const pending = deferredSearch();
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(pending).toHaveLength(MEMBERS.length));
+    const old = [...pending];
+
+    act(() => result.current.submitQuery('portishead'));
+    await waitFor(() => expect(pending).toHaveLength(MEMBERS.length * 2));
+    // the old query's answers land late
+    await act(async () => {
+      for (const p of old) p.settle({ spotify_artists: [{ id: 'old', name: 'Radiohead' }] });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(result.current.state.sources).toEqual({});
+    expect(activeResults(result.current.state).artists).toEqual([]);
+    expect(activeSourceLoading(result.current.state)).toBe(true);
+  });
+
+  it('is never where the page starts', async () => {
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    expect(result.current.state.activeSource).toBe('spotify');
+    expect(activeUnifiedProgress(result.current.state)).toBeNull();
+  });
+
+  it('does nothing until there is something to search for', async () => {
+    const seen = stubSearch({});
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    await flush();
+    expect(seen).toEqual([]);
+    expect(result.current.state.activeSource).toBe('all');
+  });
+
+  it('a source answered from somewhere else is not counted twice', async () => {
+    stubSearch({
+      deezer: { spotify_albums: [{ id: 'dz', name: 'Kid A', artist: 'Radiohead' }] },
+      discogs: {
+        primary_source: 'deezer',
+        spotify_albums: [{ id: 'dz', name: 'Kid A', artist: 'Radiohead' }],
+      },
+    });
+    const { result } = renderHook(() => useSearchController());
+    await flush();
+    act(() => result.current.setActiveSource('all'));
+    act(() => result.current.submitQuery('radiohead'));
+    await waitFor(() => expect(activeSourceLoading(result.current.state)).toBe(false));
+    expect(activeResults(result.current.state).albums.map((a) => a.sources)).toEqual([['deezer']]);
   });
 });

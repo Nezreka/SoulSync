@@ -214,6 +214,7 @@ export function findingSeverityClass(severity: string | null | undefined): strin
 
 export const FINDING_TYPE_LABELS: Record<string, string> = {
   dead_file: 'Dead File',
+  library_unreachable: 'Unreachable Library',
   orphan_file: 'Orphan',
   acoustid_mismatch: 'Wrong Song',
   acoustid_no_match: 'No Match',
@@ -256,6 +257,7 @@ export function findingTypeLabel(findingType: string): string {
  *  above — that asymmetry is in the vanilla and is preserved. */
 export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   dead_file: 'Re-download',
+  library_unreachable: 'They are gone',
   orphan_file: 'Resolve',
   track_number_mismatch: 'Fix',
   missing_cover_art: 'Apply Art',
@@ -926,9 +928,19 @@ export const COMMA_SPLIT_TRACK_CAP = 40;
  * keys, which are already rendered as images by the media strip.
  */
 export function genericDetailRows(details: Details | null | undefined): FindingDetailRow[] {
-  return Object.entries(details || {})
-    .filter(([k, v]) => typeof v !== 'object' && !k.endsWith('_thumb_url'))
-    .map(([k, v]) => [k.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()), String(v)]);
+  return (
+    Object.entries(details || {})
+      // ids, fingerprints and bookkeeping flags are ours, not the reader's
+      .filter(
+        ([k, v]) =>
+          typeof v !== 'object' &&
+          v !== '' &&
+          !k.startsWith('_') &&
+          !/(_thumb_url|_url|_id|_ids|_fingerprint|_native|_scope|_hash)$/.test(k) &&
+          k !== 'schema',
+      )
+      .map(([k, v]) => [k.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()), String(v)])
+  );
 }
 
 // ── Bulk fix ─────────────────────────────────────────────────────────────────

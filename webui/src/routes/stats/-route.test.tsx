@@ -98,7 +98,7 @@ describe('stats route', () => {
     renderStatsRoute();
 
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
-    expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Stats' })).toBeInTheDocument();
     expect(screen.getByText('24')).toBeInTheDocument();
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('stats');
     expect(window.SoulSyncWebShellBridge?.setActivePageChrome).toHaveBeenCalledWith('stats');
@@ -114,7 +114,7 @@ describe('stats route', () => {
     renderStatsRoute();
 
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
-    expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Stats' })).toBeInTheDocument();
     expect(screen.getByText('Not synced yet')).toBeInTheDocument();
     // by label, not role: a role query walks the whole stats page (~3s alone,
     // past the time budget under a full run)
@@ -131,7 +131,7 @@ describe('stats route', () => {
     renderStatsRoute();
 
     await waitFor(() => expect(screen.getByTestId('stats-page')).toBeInTheDocument());
-    expect(await screen.findByText('Listening Stats')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Stats' })).toBeInTheDocument();
     expect(screen.getByText('Standalone mode: manual sync unavailable')).toBeInTheDocument();
     expect(screen.queryByLabelText('Sync listening stats')).not.toBeInTheDocument();
   });
@@ -187,13 +187,15 @@ describe('stats route', () => {
   it('links artist names to the artist-detail route', async () => {
     const { history } = renderStatsRoute();
 
-    const bubbleLink = await screen.findByRole('link', {
+    // the portrait the page opens on, and the same artist on the shelf
+    const links = await screen.findAllByRole('link', {
       name: 'Open artist detail for Artist A',
     });
-    expect(bubbleLink).toHaveAttribute('href', '/library?artist=7&view=discovery&immersive=true');
-
-    const rankedLink = screen.getByRole('link', { name: 'Artist A' });
-    expect(rankedLink).toHaveAttribute('href', '/library?artist=7&view=discovery&immersive=true');
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/library?artist=7&view=discovery&immersive=true');
+    }
+    const bubbleLink = links[1];
 
     fireEvent.click(bubbleLink);
 
@@ -232,6 +234,96 @@ describe('stats route', () => {
     expect(window.SoulSyncWebShellBridge?.playLibraryTrack).not.toHaveBeenCalled();
   });
 
+  /**
+   * The redesign: the page opens on the period itself, a sentence and the
+   * artist it belonged to, before any list.
+   */
+  it('opens on the period in a sentence, beside its most played artist', async () => {
+    renderStatsRoute();
+    const hero = await screen.findByRole('region', { name: 'This period' });
+    expect(hero.textContent).toContain(
+      'You played 12 songs by 3 artists for 1h 50m. Mostly House, most often on Wed around 9pm, and 7 of the 7 days had music in them.',
+    );
+    expect(hero.textContent).toContain('Most played artist');
+    expect(document.querySelector('h1')?.nextElementSibling?.textContent).toBe(
+      '24 plays in the last 7 days',
+    );
+  });
+
+  it('opens what was played on a day from its bar', async () => {
+    let asked = '';
+    server.use(
+      http.get('/api/stats/listening-events', ({ request }) => {
+        asked = new URL(request.url).search;
+        return HttpResponse.json({ success: true, title: 'May 10', total: 0, items: [] });
+      }),
+    );
+    renderStatsRoute();
+    fireEvent.click(await screen.findByLabelText('May 10: 4 plays'));
+    await screen.findByRole('dialog', { name: 'Listening details' });
+    await waitFor(() => expect(asked).toContain('date=May'));
+  });
+
+  it('plays an album from its cover, loading the tracks at click time', async () => {
+    const playTrackList = vi.fn(async (..._args: unknown[]) => {});
+    window.playTrackList = playTrackList as never;
+    let fetched = 0;
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 5, unique_artists: 1, unique_tracks: 2 },
+          top_albums: [
+            { id: 42, name: 'Owned Album', artist: 'Artist A', artist_id: 7, play_count: 5 },
+            { name: 'Not In Library', artist: 'Someone', play_count: 2 },
+          ],
+        }),
+      ),
+      http.get('/api/stats/album-tracks/42', () => {
+        fetched += 1;
+        return HttpResponse.json({ success: true, tracks: [{ id: 1, title: 'One' }] });
+      }),
+    );
+    renderStatsRoute();
+    const play = await screen.findByRole('button', { name: 'Play Owned Album' });
+    expect(fetched).toBe(0);
+    // an album the library does not have is a cover, not a dead button
+    expect(screen.queryByRole('button', { name: 'Play Not In Library' })).toBeNull();
+    fireEvent.click(play);
+    await waitFor(() => expect(playTrackList).toHaveBeenCalledTimes(1));
+    expect(playTrackList.mock.calls[0][1]).toBe('Owned Album');
+    delete window.playTrackList;
+  });
+
+  it('shows ten tracks until asked for the rest', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 50, unique_artists: 1, unique_tracks: 14 },
+          top_tracks: Array.from({ length: 14 }, (_, i) => ({
+            name: `Song ${i + 1}`,
+            artist: 'Artist A',
+            play_count: 20 - i,
+          })),
+        }),
+      ),
+    );
+    const { container } = renderStatsRoute();
+    await screen.findByText('Song 1');
+    expect(container.querySelectorAll('#stats-top-tracks > div')).toHaveLength(10);
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 14' }));
+    expect(container.querySelectorAll('#stats-top-tracks > div')).toHaveLength(14);
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(container.querySelectorAll('#stats-top-tracks > div')).toHaveLength(10);
+  });
+
+  it('says what you play most under what you own', async () => {
+    renderStatsRoute();
+    const line = await screen.findByText(/Most played:/);
+    expect(line.textContent).toBe('Most played: House 80%');
+  });
+
   it('redirects back home when the page is not allowed', async () => {
     window.SoulSyncWebShellBridge = createShellBridge({
       isPageAllowed: vi.fn((pageId) => pageId !== 'stats'),
@@ -249,10 +341,10 @@ describe('stats route', () => {
   it('shows each tile its change against the previous period', async () => {
     renderStatsRoute();
     // plays 24/12, time 6.6M/3.3M, albums 4/2, tracks 12/6 all doubled.
-    const doubled = await screen.findAllByText(/↑ 100% vs previous 7 days/);
+    const doubled = await screen.findAllByText('up 100% vs previous 7 days');
     expect(doubled).toHaveLength(4);
-    // Artists were 3 both periods — flat, and deliberately not an arrow.
-    expect(screen.getByText(/· 0% vs previous 7 days/)).toBeTruthy();
+    // Artists were 3 both periods: flat, said as such.
+    expect(screen.getByText('no change vs previous 7 days')).toBeTruthy();
   });
 
   /**
@@ -292,10 +384,10 @@ describe('stats route', () => {
       ),
     );
     renderStatsRoute(['/stats?range=all']);
-    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    expect(await screen.findByText('listening time')).toBeTruthy();
     // The symptom is NOT the string "undefined" — React renders a null label
     // as empty. It is a naked "↑ 100%" with nothing saying what it is against.
-    expect(screen.queryByText(/↑\s*100%/)).toBeNull();
+    expect(screen.queryByText(/up\s*100%/)).toBeNull();
     expect(screen.queryByText(/vs previous/)).toBeNull();
   });
 
@@ -307,33 +399,33 @@ describe('stats route', () => {
    */
   it('shows listening facts by default and hides the operational ones', async () => {
     renderStatsRoute();
-    expect(await screen.findByText('Top Artists')).toBeTruthy();
-    expect(screen.queryByText('Library Disk Usage')).toBeNull();
-    expect(screen.queryByText('Database Storage')).toBeNull();
+    expect(await screen.findByText('Top artists')).toBeTruthy();
+    expect(screen.queryByText('Library disk usage')).toBeNull();
+    expect(screen.queryByText('Database storage')).toBeNull();
   });
 
   it('the library tab shows the operational facts and none of the personal ones', async () => {
     renderStatsRoute(['/stats?tab=library']);
-    expect(await screen.findByText('Library Disk Usage')).toBeTruthy();
-    expect(screen.getByText('Database Storage')).toBeTruthy();
-    expect(screen.getByText('Library Health')).toBeTruthy();
-    expect(screen.queryByText('Top Artists')).toBeNull();
+    expect(await screen.findByText('Library disk usage')).toBeTruthy();
+    expect(screen.getByText('Database storage')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Library health' })).toBeTruthy();
+    expect(screen.queryByText('Top artists')).toBeNull();
   });
 
   it('hides the range picker on the library tab', async () => {
     // Disk usage is what it is today — a range picker there is a control that
     // does nothing, which is worse than no control.
     const { container } = renderStatsRoute(['/stats?tab=library']);
-    await screen.findByText('Library Disk Usage');
+    await screen.findByText('Library disk usage');
     expect(container.querySelector('#stats-time-range')?.hasAttribute('hidden')).toBe(true);
   });
 
   it('keeps the chosen range when switching tabs', async () => {
     // Switching to Library and back must not silently reset a chosen range.
     const { history } = renderStatsRoute(['/stats?range=30d']);
-    await screen.findByText('Top Artists');
+    await screen.findByText('Top artists');
     fireEvent.click(screen.getByRole('tab', { name: 'Library' }));
-    await screen.findByText('Library Disk Usage');
+    await screen.findByText('Library disk usage');
     expect(history.location.search).toContain('range=30d');
     expect(history.location.search).toContain('tab=library');
   });
@@ -396,7 +488,7 @@ describe('stats route', () => {
    */
   it('shows what you own against what you actually play', async () => {
     renderStatsRoute();
-    expect(await screen.findByText('Own vs Play')).toBeTruthy();
+    expect(await screen.findByText('What you own and what you play')).toBeTruthy();
     expect(screen.getByText('Metal')).toBeTruthy();
     // Owning far more than you play reads as a negative gap.
     expect(screen.getByText('-80')).toBeTruthy();
@@ -406,7 +498,7 @@ describe('stats route', () => {
   it('lists albums you own and have never played', async () => {
     renderStatsRoute();
     expect(await screen.findByText('Dusty Record')).toBeTruthy();
-    expect(screen.getByText(/Never played \(1\)/)).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Never played' })).toBeTruthy();
   });
 
   it('says so plainly when there is not enough tagged metadata to compare', async () => {
@@ -462,7 +554,7 @@ describe('stats route', () => {
       ),
     );
     renderStatsRoute(['/stats?range=all']);
-    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    expect(await screen.findByText('listening time')).toBeTruthy();
     expect(screen.queryByText(/vs previous/)).toBeNull();
   });
 });

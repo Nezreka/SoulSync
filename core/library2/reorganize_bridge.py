@@ -150,6 +150,8 @@ def enqueue_artist_reorganize_all(db: Any, lib2_artist_id: int) -> Dict[str, Any
     return {
         "enqueued": result["enqueued"],
         "already_queued": result["already_queued"],
+        # #2046: reviewed albums a bulk run leaves where they are
+        "locked": result.get("locked", 0),
         "total_albums": result["total"],
     }
 

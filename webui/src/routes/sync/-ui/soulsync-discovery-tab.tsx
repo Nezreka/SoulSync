@@ -7,6 +7,10 @@
  * the matches inline, and lands you on it under Mirrored. Once it's in, the
  * card opens it, and the mirror's Refresh from source regenerates it (the
  * automation does too, on its schedule).
+ *
+ * A playlist put on the Auto-Sync board without being imported syncs to the
+ * server straight from its generator, with no mirror. Its card says so, or it
+ * reads as a playlist SoulSync is doing nothing with.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -14,7 +18,8 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ImportSpec } from '../-sync.importer';
 import type { SsdRecord } from '../-sync.lb-tabs';
 
-import { postMirrorPlaylist } from '../-sync.api';
+import { fetchAutomations, postMirrorPlaylist } from '../-sync.api';
+import { autoSyncPersonalizedCadences } from '../-sync.autosync';
 import {
   buildSsdMirrorPayload,
   fetchSsdRecords,
@@ -87,9 +92,26 @@ export function SoulsyncDiscoveryTab() {
   const [records, setRecords] = useState<SsdRecord[] | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading SoulSync Discovery playlists...');
   const [refreshing, setRefreshing] = useState(false);
+  const [cadences, setCadences] = useState<Map<string, string>>(new Map());
   const importer = useImporter();
 
+  // what Auto-Sync already keeps up, read beside the list. the list never
+  // waits on it and a failure only means the cards say less
+  const loadCadences = useCallback(async () => {
+    try {
+      const response = await fetchAutomations();
+      const data: unknown = await response.json();
+      const rows = Array.isArray(data)
+        ? data
+        : ((data as { automations?: unknown[] } | null)?.automations ?? []);
+      setCadences(autoSyncPersonalizedCadences(rows as never[]));
+    } catch {
+      setCadences(new Map());
+    }
+  }, []);
+
   const load = useCallback(async () => {
+    void loadCadences();
     setPlaceholder('🔄 Loading SoulSync Discovery playlists...');
     setRecords(null);
     setRefreshing(true);
@@ -107,7 +129,7 @@ export function SoulsyncDiscoveryTab() {
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [loadCadences]);
 
   useEffect(() => {
     void load();
@@ -180,6 +202,7 @@ export function SoulsyncDiscoveryTab() {
                         }
                         glyph="✨"
                         status={importer.statusOf(SSD_SOURCE, rid)}
+                        note={cadences.has(rid) ? `Auto-Sync, ${cadences.get(rid)}` : undefined}
                         onAction={() => void importer.importOrOpen(ssdImportSpec(r, onBuilt))}
                         onEdit={importer.editorFor(SSD_SOURCE, rid, recordName(r))}
                       />

@@ -53,14 +53,50 @@ logger = get_logger("tidal_download_client")
 # pushback (429/401/403) lands, we can log the request rate that immediately
 # preceded it — turning "probably a burst" into evidence, and distinguishing it
 # from a deauth at low volume (which points at IP/account, not our request rate).
-# Diagnostic ONLY: it records and logs, it does NOT throttle anything (a
-# proactive limiter is a separate, deliberate change).
+# The meter records and logs. The pacing below it is the proactive limiter
+# (#2069): downloads were already one at a time per source (the engine's
+# per-source semaphore), but nothing spaced the REQUESTS, and one track can
+# ask for four manifests in a row as it steps down the quality chain. Five
+# requests in ten seconds from a serial queue is what the report shows.
 _dl_req_lock = threading.Lock()
 _dl_req_times: "deque[float]" = deque(maxlen=2048)
 
+# Default wait between two Tidal download requests (search or manifest).
+# tidal_download.min_request_gap_seconds overrides it; 0 turns it off.
+DEFAULT_DOWNLOAD_REQUEST_GAP_SECONDS = 1.0
+_dl_next_slot = [0.0]          # monotonic time the next request may go out
+
+
+def _download_request_gap() -> float:
+    try:
+        gap = config_manager.get('tidal_download.min_request_gap_seconds',
+                                 DEFAULT_DOWNLOAD_REQUEST_GAP_SECONDS)
+        gap = float(gap) if gap is not None else DEFAULT_DOWNLOAD_REQUEST_GAP_SECONDS
+    except Exception:  # noqa: BLE001 - an unreadable setting must never block a download
+        return DEFAULT_DOWNLOAD_REQUEST_GAP_SECONDS
+    return max(0.0, min(gap, 60.0))
+
+
+def _reserve_download_slot() -> float:
+    """Seconds to wait before the next Tidal download request may go out.
+
+    The slot is reserved under the lock and slept on outside it, so two
+    callers arriving together get two different slots instead of both
+    reading "no wait" (the same model as core.prowlarr_throttle)."""
+    gap = _download_request_gap()
+    with _dl_req_lock:
+        now = time.monotonic()
+        at = max(now, _dl_next_slot[0])
+        _dl_next_slot[0] = at + gap
+        return at - now
+
 
 def _record_download_request() -> None:
-    """Timestamp one outbound Tidal download request (search or manifest)."""
+    """Pace, then timestamp, one outbound Tidal download request (search or
+    manifest). Both callers run on a worker thread, never the event loop."""
+    wait = _reserve_download_slot()
+    if wait > 0:
+        time.sleep(wait)
     with _dl_req_lock:
         _dl_req_times.append(time.time())
 
@@ -87,6 +123,12 @@ def _classify_tidal_pushback(text: str) -> Optional[str]:
     if not text:
         return None
     low = text.lower()
+    # #2069: "Client cannot access this content". Tidal is saying this client
+    # may not have this track at this quality (or at all, in this region or on
+    # this plan). The session is still signed in: calling it a deauth sent
+    # people looking for a login problem that was not there.
+    if 'client_not_entitled' in low or 'cannot access this content' in low:
+        return 'not_entitled'
     if 'captcha' in low or 'bot-like' in low or 'bot like' in low or 'challenge' in low:
         return 'bot_challenge'
     if '429' in low or 'too many requests' in low or 'rate limit' in low:
@@ -109,9 +151,18 @@ def _log_tidal_download_pushback(context: str, *, status=None, body: str = '',
         rate60 = _download_request_rate(60.0)
         snippet = (body or (str(exc) if exc else '') or '').strip().replace('\n', ' ')[:300]
         reason = _classify_tidal_pushback(f"{status or ''} {snippet}") or 'unknown'
+        if reason == 'not_entitled':
+            # not pushback at all: an answer about this one track. The quality
+            # chain steps down from here, and the session is untouched.
+            logger.warning(
+                "Tidal will not serve this track to this account at the quality asked "
+                "[%s] status=%s. Not a sign-in or rate problem; trying the next quality "
+                "if fallback is on. body=%r", context, status, snippet)
+            return
         logger.error(
             "TIDAL DOWNLOAD PUSHBACK [%s] reason=%s status=%s — %d download req in last 10s, "
-            "%d in last 60s. The download path is NOT globally rate-limited; this is the request "
+            "%d in last 60s. Downloads run one at a time and requests are spaced "
+            "(tidal_download.min_request_gap_seconds); this is the request "
             "rate that preceded the pushback. body=%r",
             context, reason, status, rate10, rate60, snippet,
         )

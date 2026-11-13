@@ -267,6 +267,10 @@ def repair_findings_list():
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
         for item in result.get('items', []):
+            # the row's own pictures (core.repair_worker.attach_finding_art)
+            for key in ('album_thumb_url', 'artist_thumb_url'):
+                if item.get(key):
+                    item[key] = fix_artist_image_url(item[key])
             details = item.get('details')
             if details and isinstance(details, dict):
                 for key in ('album_thumb_url', 'artist_thumb_url'):
@@ -303,9 +307,13 @@ def repair_findings_groups():
             return jsonify({'groups': []}), 200
         # the inbox's job and severity filters: each row counts what its
         # bulk buttons act on (review 5 W3-TT)
-        return jsonify({'groups': _repair_worker().get_finding_groups(
+        groups = _repair_worker().get_finding_groups(
             job_id=request.args.get('job_id') or None,
-            severity=request.args.get('severity') or None)}), 200
+            severity=request.args.get('severity') or None)
+        for group in groups:
+            if group.get('art'):
+                group['art'] = [fix_artist_image_url(url) for url in group['art']]
+        return jsonify({'groups': groups}), 200
     except Exception as e:
         logger.error(f"Error grouping repair findings: {e}")
         return jsonify({'error': str(e)}), 500
@@ -378,6 +386,19 @@ def repair_findings_album_action():
     except Exception as e:
         logger.error(f"Error running album action: {e}")
         return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/repair/findings/<int:finding_id>/undo', methods=['POST'])
+def repair_finding_undo(finding_id):
+    """Put back the tags a fix changed, from the before values kept on the
+    finding, and reopen it."""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        result = _repair_worker().undo_finding(finding_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        logger.error(f"Error undoing finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
 def repair_finding_reopen(finding_id):

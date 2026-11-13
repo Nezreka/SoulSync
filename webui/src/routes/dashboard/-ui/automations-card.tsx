@@ -29,7 +29,8 @@ import type {
   AutomationProgressState,
 } from '../-dash.automations';
 
-import { automationCardRows } from '../-dash.automations';
+import { automationCardRows, groupUpNextMarks, justRan, upNextMarks } from '../-dash.automations';
+import { Glyph, automationGlyph } from '../../automations/-ui/automation-art';
 
 function useAutomationsCard(side: 'music' | 'video') {
   const [rows, setRows] = useState<AutomationApiRow[] | null>(null);
@@ -286,7 +287,8 @@ export function QuickSettings() {
 /** The engine's next moves. `compact` is the dashboard rail's "Up next": the
  *  next three with a "See all" for the rest, no quick-settings footer (that
  *  lives at the page bottom). */
-/** the automations page for a side: the video one is a vanilla video page */
+/** the automations page for a side: the video shell hands its own off to
+ *  /automations?media=video and keeps the sidebar on the video side */
 function openAutomations(side: 'music' | 'video') {
   if (side === 'video')
     document.dispatchEvent(
@@ -295,13 +297,125 @@ function openAutomations(side: 'music' | 'video') {
   else void window.navigateToPage?.('automations');
 }
 
+function openHistory(row: AutomationCardRow) {
+  window.showAutomationHistory?.(Number(row.id), row.name, row.actionType);
+}
+
+/** "14:30" for a run's next fire, in the viewer's own clock. */
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * What a point on the Up next line stands for, shown on hover or focus: each
+ * run with when it fires, how often, what its last run did and how many times
+ * it has run. A point that stands for several runs lists them all. Each run
+ * opens its history.
+ */
+function MarkCard({ stops }: { stops: readonly AutomationCardRow[] }) {
+  if (stops.length === 0) return null;
+  return (
+    <span className="dash-autom-pop" role="group" aria-label="Run details">
+      {stops.length > 1 ? (
+        <span className="dash-autom-pop-title">{stops.length} runs close together</span>
+      ) : null}
+      {stops.map((row) => (
+        <button
+          key={row.id}
+          type="button"
+          className="dash-autom-pop-run"
+          title="Run history"
+          onClick={() => openHistory(row)}
+        >
+          <span className="dash-autom-pop-head">
+            <span className="dash-autom-glyph" aria-hidden="true">
+              <Glyph
+                name={automationGlyph({
+                  action_type: row.actionType,
+                  trigger_type: 'schedule',
+                  owned_by: null,
+                })}
+              />
+            </span>
+            <span className="dash-autom-pop-name">{row.name}</span>
+            <span
+              className={
+                row.running
+                  ? 'dash-autom-pop-when dash-autom-pop-when--live'
+                  : 'dash-autom-pop-when'
+              }
+            >
+              {row.running
+                ? row.running.progress > 0
+                  ? `${row.running.progress}%`
+                  : 'running'
+                : row.nextRun}
+            </span>
+          </span>
+          <span className="dash-autom-pop-facts">
+            {row.running ? (
+              <span className="dash-autom-pop-fact">
+                <i>Now</i>
+                <b>{row.running.phase}</b>
+              </span>
+            ) : row.nextRunAt !== null ? (
+              <span className="dash-autom-pop-fact">
+                <i>{row.nextRunAt < Date.now() ? 'Was due' : 'Runs at'}</i>
+                <b>{clockTime(row.nextRunAt)}</b>
+              </span>
+            ) : null}
+            <span className="dash-autom-pop-fact">
+              <i>Schedule</i>
+              <b>{row.trigger}</b>
+            </span>
+            <span className="dash-autom-pop-fact">
+              <i>Last run</i>
+              <b>{row.lastRun ? row.lastRun.ago : 'Not yet'}</b>
+            </span>
+            <span className="dash-autom-pop-fact">
+              <i>Runs so far</i>
+              <b>{row.runCount.toLocaleString()}</b>
+            </span>
+          </span>
+          {row.lastRun ? (
+            <span
+              className={
+                row.lastRun.ok
+                  ? 'dash-autom-pop-said'
+                  : 'dash-autom-pop-said dash-autom-pop-said--bad'
+              }
+            >
+              {row.lastRun.said}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 export function AutomationsCard({
   compact = false,
   side = 'music',
-}: { compact?: boolean; side?: 'music' | 'video' } = {}) {
+  timeline = false,
+}: {
+  compact?: boolean;
+  side?: 'music' | 'video';
+  /** the music dashboard's Up next: a line of the next hour over the list,
+   *  and five rows where the narrow rail had room for three */
+  timeline?: boolean;
+} = {}) {
   const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard(side);
   const [showAll, setShowAll] = useState(false);
-  const view = compact && !showAll ? allRows.slice(0, 3) : allRows;
+  const shownCompact = timeline ? 5 : 3;
+  const view = compact && !showAll ? allRows.slice(0, shownCompact) : allRows;
+  const marks = timeline ? groupUpNextMarks(upNextMarks(allRows, Date.now())) : [];
+  // the first mark is named on the line: the one thing the line is asked
+  const lead = marks.find((mark) => !mark.running) ?? null;
+  const leadRow = lead ? allRows.find((row) => row.id === lead.id) : undefined;
+  const ran = timeline && !showAll ? justRan(allRows) : [];
+  const dueSoon = marks.reduce((n, mark) => n + mark.count, 0);
+  const rowsById = new Map(allRows.map((row) => [row.id, row]));
 
   return (
     <article className={compact ? 'dash-card dash-side-card' : 'dash-card'} data-card="automations">
@@ -309,6 +423,11 @@ export function AutomationsCard({
         <h3 className={compact ? 'dash-side-title' : 'dash-card__title'}>
           {compact ? 'Up next' : 'Automations'}
         </h3>
+        {timeline && loaded && dueSoon > 0 ? (
+          <span className="dash-autom-count">
+            {dueSoon} {dueSoon === 1 ? 'run' : 'runs'} in the next hour
+          </span>
+        ) : null}
         {compact ? null : <p className="dash-card__sub">What the engine runs next.</p>}
         <button
           type="button"
@@ -319,129 +438,245 @@ export function AutomationsCard({
         </button>
       </header>
       <div className="dash-card__body">
-        <div className="dash-autom-rows">
-          {!loaded ? null : view.length === 0 ? (
-            <div className="autosync-empty">
-              <strong>No automations yet</strong>
-              <span>
-                {side === 'video'
-                  ? 'Automations keep the video side moving on their own: airing episodes onto the wishlist, scans, upgrades.'
-                  : 'Automations run the machinery on triggers you set — scans, wishlist processing, backups, notifications.'}
-              </span>
-              <button
-                type="button"
-                className="autosync-empty-cta"
-                onClick={() => openAutomations(side)}
-              >
-                Create one
-              </button>
-            </div>
-          ) : (
-            view.map((row) => (
-              <div
-                key={row.id}
-                className={[
-                  'dash-autom-row',
-                  row.enabled ? '' : 'dash-autom-row--off',
-                  row.running ? 'dash-autom-row--live' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                role="button"
-                title="Run history"
-                onClick={() =>
-                  window.showAutomationHistory?.(Number(row.id), row.name, row.actionType)
+        {timeline && loaded && allRows.length > 0 ? (
+          <div className="dash-autom-lane" aria-label="Automations due in the next hour">
+            {lead && leadRow?.nextRun ? (
+              <span
+                className={
+                  lead.at > 55 ? 'dash-autom-flag dash-autom-flag--left' : 'dash-autom-flag'
                 }
+                style={{ left: `${lead.at}%` }}
               >
+                <b>{lead.name}</b> {leadRow.nextRun}
+              </span>
+            ) : null}
+            {marks.map((mark) => {
+              const stops = mark.ids
+                .map((id) => rowsById.get(id))
+                .filter((row): row is AutomationCardRow => row !== undefined);
+              const only = stops.length === 1 ? stops[0] : null;
+              return (
                 <span
-                  className={
-                    row.running
-                      ? 'dash-autom-dot dash-autom-dot--live'
-                      : !row.lastRun
-                        ? 'dash-autom-dot'
-                        : row.lastRun.ok
-                          ? 'dash-autom-dot dash-autom-dot--ok'
-                          : 'dash-autom-dot dash-autom-dot--err'
-                  }
-                  title={
-                    row.running
-                      ? row.running.phase
-                      : !row.lastRun
-                        ? 'No runs yet'
-                        : row.lastRun.ok
-                          ? `Last run ${row.lastRun.ago} · ${row.runCount} runs`
-                          : `Last run failed: ${row.lastRun.error}`
-                  }
-                ></span>
-                <span className="dash-autom-main">
-                  <span className="dash-autom-name" title={row.name}>
-                    {row.name}
+                  key={mark.id}
+                  className="dash-autom-stop"
+                  style={{ left: `${mark.at}%`, ['--at' as string]: mark.at }}
+                >
+                  <button
+                    type="button"
+                    className={[
+                      'dash-autom-mark',
+                      mark.running ? 'dash-autom-mark--live' : '',
+                      mark.count > 1 ? 'dash-autom-mark--many' : '',
+                      mark === lead ? 'dash-autom-mark--lead' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    aria-label={
+                      only ? `${only.name}, details` : `${mark.count} runs close together, details`
+                    }
+                    onClick={() => (only ? openHistory(only) : undefined)}
+                  >
+                    {mark.count > 1 ? mark.count : null}
+                  </button>
+                  <MarkCard stops={stops} />
+                </span>
+              );
+            })}
+            <span className="dash-autom-tick dash-autom-tick--start">now</span>
+            <span className="dash-autom-tick dash-autom-tick--mid">30m</span>
+            <span className="dash-autom-tick dash-autom-tick--end">1h</span>
+          </div>
+        ) : null}
+        <div className={ran.length ? 'dash-autom-cols' : undefined}>
+          <div className="dash-autom-col">
+            {ran.length ? <p className="dash-autom-col-title">Coming up</p> : null}
+            <div className="dash-autom-rows">
+              {!loaded ? null : view.length === 0 ? (
+                <div className="autosync-empty">
+                  <strong>No automations yet</strong>
+                  <span>
+                    {side === 'video'
+                      ? 'Automations keep the video side moving on their own: airing episodes onto the wishlist, scans, upgrades.'
+                      : 'Automations run the machinery on triggers you set — scans, wishlist processing, backups, notifications.'}
                   </span>
-                  {row.running ? (
-                    <span className="dash-autom-meta dash-autom-phase" title={row.running.phase}>
-                      {row.running.phase}
-                    </span>
-                  ) : (
-                    <span className="dash-autom-meta">
-                      <span>{row.trigger}</span>
-                      {row.lastRun ? (
+                  <button
+                    type="button"
+                    className="autosync-empty-cta"
+                    onClick={() => openAutomations(side)}
+                  >
+                    Create one
+                  </button>
+                </div>
+              ) : (
+                view.map((row) => (
+                  <div
+                    key={row.id}
+                    className={[
+                      'dash-autom-row',
+                      row.enabled ? '' : 'dash-autom-row--off',
+                      row.running ? 'dash-autom-row--live' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    role="button"
+                    title="Run history"
+                    onClick={() =>
+                      window.showAutomationHistory?.(Number(row.id), row.name, row.actionType)
+                    }
+                  >
+                    {timeline ? (
+                      <span className="dash-autom-glyph" aria-hidden="true">
+                        <Glyph
+                          name={automationGlyph({
+                            action_type: row.actionType,
+                            trigger_type: 'schedule',
+                            owned_by: null,
+                          })}
+                        />
+                      </span>
+                    ) : null}
+                    <span
+                      className={
+                        row.running
+                          ? 'dash-autom-dot dash-autom-dot--live'
+                          : !row.lastRun
+                            ? 'dash-autom-dot'
+                            : row.lastRun.ok
+                              ? 'dash-autom-dot dash-autom-dot--ok'
+                              : 'dash-autom-dot dash-autom-dot--err'
+                      }
+                      title={
+                        row.running
+                          ? row.running.phase
+                          : !row.lastRun
+                            ? 'No runs yet'
+                            : row.lastRun.ok
+                              ? `Last run ${row.lastRun.ago} · ${row.runCount} runs`
+                              : `Last run failed: ${row.lastRun.error}`
+                      }
+                    ></span>
+                    <span className="dash-autom-main">
+                      <span className="dash-autom-name" title={row.name}>
+                        {row.name}
+                      </span>
+                      {row.running ? (
                         <span
-                          className={
-                            row.lastRun.ok
-                              ? 'dash-autom-last'
-                              : 'dash-autom-last dash-autom-last--bad'
-                          }
+                          className="dash-autom-meta dash-autom-phase"
+                          title={row.running.phase}
                         >
-                          {row.lastRun.ok ? row.lastRun.ago : `⚠ ${row.lastRun.ago}`}
+                          {row.running.phase}
                         </span>
+                      ) : (
+                        <span className="dash-autom-meta">
+                          <span>{row.trigger}</span>
+                          {row.lastRun ? (
+                            <span
+                              className={
+                                row.lastRun.ok
+                                  ? 'dash-autom-last'
+                                  : 'dash-autom-last dash-autom-last--bad'
+                              }
+                            >
+                              {row.lastRun.ok ? row.lastRun.ago : `⚠ ${row.lastRun.ago}`}
+                            </span>
+                          ) : null}
+                        </span>
+                      )}
+                    </span>
+                    <span className="dash-autom-when">
+                      {row.running ? (
+                        <span className="dash-autom-live-pill">
+                          {row.running.progress > 0 ? `${row.running.progress}%` : 'running'}
+                        </span>
+                      ) : row.enabled ? (
+                        row.nextRun ? (
+                          <span className="dash-autom-next">{row.nextRun}</span>
+                        ) : null
+                      ) : (
+                        <span className="dash-autom-paused">paused</span>
+                      )}
+                    </span>
+                    <span className="dash-autom-actions" onClick={(e) => e.stopPropagation()}>
+                      {!row.running ? (
+                        <>
+                          <button
+                            type="button"
+                            className="dash-autom-run"
+                            disabled={busyId !== null}
+                            title={row.enabled ? 'Pause this automation' : 'Resume this automation'}
+                            onClick={() => void toggle(row)}
+                          >
+                            {busyId === row.id ? '…' : row.enabled ? '⏸' : '▶'}
+                          </button>
+                          {row.enabled ? (
+                            <button
+                              type="button"
+                              className="dash-autom-run"
+                              disabled={busyId !== null}
+                              title="Run this automation now"
+                              onClick={() => void runNow(row)}
+                            >
+                              {busyId === row.id ? '…' : 'Run'}
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                     </span>
-                  )}
-                </span>
-                <span className="dash-autom-when">
-                  {row.running ? (
-                    <span className="dash-autom-live-pill">
-                      {row.running.progress > 0 ? `${row.running.progress}%` : 'running'}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          {ran.length ? (
+            <div className="dash-autom-ran" aria-label="Just ran">
+              <p className="dash-autom-col-title">Just ran</p>
+              {ran.map((row) => (
+                <div
+                  key={row.id}
+                  className="dash-autom-ran-row"
+                  role="button"
+                  title="Run history"
+                  onClick={() =>
+                    window.showAutomationHistory?.(Number(row.id), row.name, row.actionType)
+                  }
+                >
+                  <span
+                    className={
+                      row.lastRun?.ok
+                        ? 'dash-autom-ran-when'
+                        : 'dash-autom-ran-when dash-autom-ran-when--bad'
+                    }
+                  >
+                    {row.lastRun?.ago}
+                  </span>
+                  <span className="dash-autom-glyph" aria-hidden="true">
+                    <Glyph
+                      name={automationGlyph({
+                        action_type: row.actionType,
+                        trigger_type: 'schedule',
+                        owned_by: null,
+                      })}
+                    />
+                  </span>
+                  <span className="dash-autom-main">
+                    <span className="dash-autom-name" title={row.name}>
+                      {row.name}
                     </span>
-                  ) : row.enabled ? (
-                    row.nextRun ? (
-                      <span className="dash-autom-next">{row.nextRun}</span>
-                    ) : null
-                  ) : (
-                    <span className="dash-autom-paused">paused</span>
-                  )}
-                </span>
-                <span className="dash-autom-actions" onClick={(e) => e.stopPropagation()}>
-                  {!row.running ? (
-                    <>
-                      <button
-                        type="button"
-                        className="dash-autom-run"
-                        disabled={busyId !== null}
-                        title={row.enabled ? 'Pause this automation' : 'Resume this automation'}
-                        onClick={() => void toggle(row)}
-                      >
-                        {busyId === row.id ? '…' : row.enabled ? '⏸' : '▶'}
-                      </button>
-                      {row.enabled ? (
-                        <button
-                          type="button"
-                          className="dash-autom-run"
-                          disabled={busyId !== null}
-                          title="Run this automation now"
-                          onClick={() => void runNow(row)}
-                        >
-                          {busyId === row.id ? '…' : 'Run'}
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                </span>
-              </div>
-            ))
-          )}
+                    <span
+                      className={
+                        row.lastRun?.ok ? 'dash-autom-meta' : 'dash-autom-meta dash-autom-last--bad'
+                      }
+                      title={row.lastRun?.said}
+                    >
+                      {row.lastRun?.said}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
-        {compact && allRows.length > 3 ? (
+        {compact && allRows.length > shownCompact ? (
           <button type="button" className="dash-side-more" onClick={() => setShowAll((v) => !v)}>
             {showAll ? 'Show less' : `See all ${allRows.length} automations`}
           </button>

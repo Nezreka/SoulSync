@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { IdLookupResponse } from './-search.api';
 import type { SearchSource, SourceResults } from './-search.types';
@@ -17,8 +17,16 @@ import {
   pickerSource,
   resolveInitialSource,
   sourceResultsFromResponse,
+  visibleSources,
 } from './-search.helpers';
 import { SOURCE_ORDER } from './-search.types';
+import {
+  ALL_SOURCES,
+  type UnifiedProgress,
+  mergeUnified,
+  unifiedMembers,
+  unifiedProgress,
+} from './-search.unified';
 
 export interface SearchControllerState {
   query: string;
@@ -38,6 +46,13 @@ export interface SearchControllerState {
    * flight would be overwritten a moment later.
    */
   userPickedSource: boolean;
+  /** The user's own primary source, from /status. "All sources" leads a
+   *  shared card with this source's copy. */
+  primarySource: string;
+  /** Sources asked for the current query that never answered (a failure, not
+   *  an abort). Only "All sources" reads it: one source down must not look
+   *  like a search that is still running. */
+  failedSources: ReadonlySet<string>;
 }
 
 export interface SearchController {
@@ -135,6 +150,8 @@ export function useSearchController({
     configuredSources: optimisticConfigured(),
     enabledExperimental: new Set<string>(),
     userPickedSource: persisted?.userPickedSource ?? false,
+    primarySource: pickerSource(initialSource),
+    failedSources: new Set<string>(),
   }));
 
   // Mirrored on every change rather than on unmount: an unmount hook would not
@@ -150,6 +167,9 @@ export function useSearchController({
   const tokensRef = useRef<Record<string, number>>(Object.create(null));
   const seqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // "All sources" runs its members side by side, so they share one controller
+  // of their own: the single-source one above aborts on every new fetch
+  const allAbortRef = useRef<AbortController | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const soulseekRef = useRef(onSoulseekSelected);
@@ -185,6 +205,7 @@ export function useSearchController({
         ...prev,
         configuredSources: { ...prev.configuredSources, ...configured },
         enabledExperimental,
+        primarySource: pickerSource(status.source || initialSource),
         // Only adopted while the user has not picked anything themselves; their
         // click always outranks the configured default.
         activeSource: prev.userPickedSource
@@ -201,7 +222,13 @@ export function useSearchController({
     };
   }, [initialSource]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      allAbortRef.current?.abort();
+    },
+    [],
+  );
 
   const fetchSource = useCallback(async (source: string, query: string) => {
     if (!query) return;
@@ -279,6 +306,75 @@ export function useSearchController({
   }, []);
 
   /**
+   * "All sources" (#2051): ask every member that has no answer yet, side by
+   * side, each with the same request a click on that source makes.
+   *
+   * Each member keeps its own token, so one that answers after the query
+   * moved on writes nothing. A member that fails is remembered as failed
+   * rather than cached as empty: an empty slot would read as "no results"
+   * when that source is opened on its own, where a retry is the right thing.
+   */
+  const fetchAll = useCallback((query: string) => {
+    if (!query) return;
+    const current = stateRef.current;
+    const members = unifiedMembers(
+      visibleSources(current.enabledExperimental),
+      current.configuredSources,
+    ).filter((source) => !current.sources[source] && !current.loadingSources.has(source));
+    if (!members.length) return;
+
+    if (!allAbortRef.current || allAbortRef.current.signal.aborted) {
+      allAbortRef.current = new AbortController();
+    }
+    const { signal } = allAbortRef.current;
+
+    const stamps = members.map((source) => {
+      const requestId = ++seqRef.current;
+      tokensRef.current[source] = requestId;
+      return { source, requestId };
+    });
+    setState((prev) => {
+      const loading = new Set(prev.loadingSources);
+      const failed = new Set(prev.failedSources);
+      for (const { source } of stamps) {
+        loading.add(source);
+        failed.delete(source);
+      }
+      return { ...prev, loadingSources: loading, failedSources: failed };
+    });
+
+    for (const { source, requestId } of stamps) {
+      const stillCurrent = () => tokensRef.current[source] === requestId;
+      void (async () => {
+        let failed = false;
+        try {
+          const data = await fetchEnhancedSearch(query, source, signal);
+          if (!stillCurrent()) return;
+          const served = fallbackFor(source, data);
+          setState((prev) => ({
+            ...prev,
+            sources: { ...prev.sources, [source]: sourceResultsFromResponse(data) },
+            fallbacks: served ? { ...prev.fallbacks, [source]: served } : prev.fallbacks,
+          }));
+        } catch {
+          failed = !signal.aborted;
+        } finally {
+          if (stillCurrent()) {
+            setState((prev) => {
+              const loading = new Set(prev.loadingSources);
+              loading.delete(source);
+              if (!failed) return { ...prev, loadingSources: loading };
+              const failedSources = new Set(prev.failedSources);
+              failedSources.add(source);
+              return { ...prev, loadingSources: loading, failedSources };
+            });
+          }
+        }
+      })();
+    }
+  }, []);
+
+  /**
    * Adopt a query WITHOUT searching for it.
    *
    * This is the global download widget's handoff. It writes the basic-search
@@ -301,7 +397,15 @@ export function useSearchController({
     for (const key of Object.keys(tokensRef.current)) delete tokensRef.current[key];
     abortRef.current?.abort();
     abortRef.current = null;
-    const reset = { query, sources: {}, fallbacks: {}, loadingSources: new Set<string>() };
+    allAbortRef.current?.abort();
+    allAbortRef.current = null;
+    const reset = {
+      query,
+      sources: {},
+      fallbacks: {},
+      loadingSources: new Set<string>(),
+      failedSources: new Set<string>(),
+    };
     // callers click the soulseek icon right after this, before any render.
     // the click reads stateRef, so it has to hold the new query now or the
     // handoff searches the old one (#1294)
@@ -328,16 +432,29 @@ export function useSearchController({
         for (const key of Object.keys(tokensRef.current)) delete tokensRef.current[key];
         abortRef.current?.abort();
         abortRef.current = null;
-        setState((prev) => ({
-          ...prev,
+        allAbortRef.current?.abort();
+        allAbortRef.current = null;
+        const reset = {
           query,
           sources: {},
           fallbacks: {},
           loadingSources: new Set<string>(),
-        }));
+          failedSources: new Set<string>(),
+        };
+        // fetchAll reads stateRef for what is already cached or in flight, and
+        // it runs before this render: it must not see the old query's answers
+        stateRef.current = { ...previous, ...reset };
+        setState((prev) => ({ ...prev, ...reset }));
       }
 
       const source = previous.activeSource;
+
+      if (source === ALL_SOURCES) {
+        // also how a failed member gets asked again: submitting the same
+        // query re-asks whatever has no answer
+        fetchAll(query);
+        return;
+      }
 
       // Soulseek is not a metadata source — the page hands the query to basic
       // search instead of fetching anything here.
@@ -352,7 +469,7 @@ export function useSearchController({
 
       void fetchSource(source, query);
     },
-    [fetchSource],
+    [fetchSource, fetchAll],
   );
 
   const setActiveSource = useCallback(
@@ -381,10 +498,17 @@ export function useSearchController({
         return;
       }
       if (!previous.query) return;
+      if (source === ALL_SOURCES) {
+        fetchAll(previous.query);
+        return;
+      }
       if (previous.sources[source]) return;
+      // "All sources" is already asking this one: its answer lands in the same
+      // slot, and a second request would only race it
+      if (previous.loadingSources.has(source)) return;
       void fetchSource(source, previous.query);
     },
-    [fetchSource],
+    [fetchSource, fetchAll],
   );
 
   const seedFromIdLookup = useCallback((raw: string, data: IdLookupResponse) => {
@@ -410,14 +534,80 @@ export function useSearchController({
   return { state, submitQuery, setActiveSource, syncQuery, seedFromIdLookup };
 }
 
-/** The slice the page renders — the active source's results, or an empty one. */
+/** The sources "All sources" asks on this page, in picker order. */
+export function allSourceMembers(state: SearchControllerState): string[] {
+  return unifiedMembers(visibleSources(state.enabledExperimental), state.configuredSources);
+}
+
+/** The slice the page renders — the active source's results, or an empty one.
+ *  "All sources" is every member's answer so far, folded into one list. */
 export function activeResults(state: SearchControllerState): SourceResults {
+  if (state.activeSource === ALL_SOURCES) {
+    return mergeUnified(
+      allSourceMembers(state),
+      state.sources,
+      state.fallbacks,
+      state.primarySource,
+    );
+  }
   return state.sources[state.activeSource] ?? emptySourceResults();
+}
+
+/**
+ * `activeResults`, held steady between renders.
+ *
+ * A single source's slice is the cached object itself. The merged one is
+ * built, and a fresh build every render would restart everything keyed on
+ * the lists (the library check, the artist photos) on every keystroke.
+ */
+export function useActiveResults(state: SearchControllerState): SourceResults {
+  const {
+    activeSource,
+    sources,
+    fallbacks,
+    primarySource,
+    enabledExperimental,
+    configuredSources,
+  } = state;
+  return useMemo(
+    () =>
+      activeResults({
+        activeSource,
+        sources,
+        fallbacks,
+        primarySource,
+        enabledExperimental,
+        configuredSources,
+      } as SearchControllerState),
+    [activeSource, sources, fallbacks, primarySource, enabledExperimental, configuredSources],
+  );
 }
 
 /** Has the active source answered yet for the current query? */
 export function activeSourceSettled(state: SearchControllerState): boolean {
+  if (state.activeSource === ALL_SOURCES) {
+    return allSourceMembers(state).some((source) => Boolean(state.sources[source]));
+  }
   return Boolean(state.sources[state.activeSource]);
+}
+
+/** Is the active source still searching? For "All sources", is any member. */
+export function activeSourceLoading(state: SearchControllerState): boolean {
+  if (state.activeSource === ALL_SOURCES) {
+    return allSourceMembers(state).some((source) => state.loadingSources.has(source));
+  }
+  return state.loadingSources.has(state.activeSource);
+}
+
+/** Where an "All sources" search stands, or null on a single source. */
+export function activeUnifiedProgress(state: SearchControllerState): UnifiedProgress | null {
+  if (state.activeSource !== ALL_SOURCES) return null;
+  return unifiedProgress(
+    allSourceMembers(state),
+    state.sources,
+    state.loadingSources,
+    state.failedSources,
+  );
 }
 
 export type { SearchSource };

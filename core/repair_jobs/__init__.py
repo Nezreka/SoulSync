@@ -31,6 +31,9 @@ JOB_DATA_BASIS: dict[str, str] = {
     'fake_lossless_detector': 'lib2',
     'lossy_converter': 'lib2',
     'album_tag_consistency': 'lib2',
+    'use_file_tags': 'lib2',
+    'compilation_origins': 'lib2',
+    'artist_merge_review': 'lib2',
     'live_commentary_cleaner': 'lib2',
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
@@ -103,6 +106,12 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'fake_lossless_detector': frozenset({'observe', 'delete', 'wanted'}),
     'lossy_converter': frozenset({'observe', 'new_file', 'tags'}),
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
+    # reads tags, and an approved finding saves them as manual edits. no file is written
+    'use_file_tags': frozenset({'observe', 'metadata'}),
+    # an approved finding retags the files and moves the tracks in the library
+    'compilation_origins': frozenset({'observe', 'metadata', 'tags'}),
+    # reads folders and tags; an approved finding moves albums between artist rows
+    'artist_merge_review': frozenset({'observe', 'metadata'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
@@ -148,6 +157,88 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # the file itself is moved by Library Reorganize.
     'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'wanted'}),
 }
+
+# #2046: what a reviewed and locked album or artist means to each job. Every
+# job declares it, the same way it declares its effects above, so a new job
+# cannot ship without someone deciding whether a lock stops it.
+#   a scope   the job changes that part of an album. a lock on that scope
+#             keeps the job away: no finding, no fix.
+#   'report'  the job reports damage (a missing or broken file). a locked
+#             album is still reported; only a person can run the fix.
+#   'none'    the job has no album or artist it could change.
+JOB_LOCK_SCOPES = ('tags', 'artwork', 'metadata', 'files', 'match', 'upgrades',
+                   'report', 'none')
+JOB_LOCK_SCOPE: dict[str, str] = {
+    'acoustid_scanner': 'match',
+    'album_catalogue_backfill': 'metadata',
+    # missing tracks of a reviewed album are still wanted: a lock keeps what
+    # is there as it is, it does not stop the album being completed
+    'album_completeness': 'none',
+    'album_edition_review': 'match',
+    'album_release_year_repair': 'tags',
+    'album_tag_consistency': 'tags',
+    # whose albums are whose: a reviewed artist keeps what it holds
+    'artist_merge_review': 'match',
+    'artist_nfo_backfill': 'files',
+    'audio_corruption_detector': 'report',
+    'bpm_backfill': 'tags',
+    'cache_evictor': 'none',
+    'comma_artist_splitter': 'tags',
+    # it rewrites album tags, which a reviewed album keeps
+    'compilation_origins': 'tags',
+    'dead_file_cleaner': 'report',
+    'empty_folder_cleaner': 'none',
+    'expired_download_cleaner': 'none',
+    'fake_lossless_detector': 'upgrades',
+    'genre_cleanup': 'metadata',
+    'genre_enrichment': 'metadata',
+    'library_reorganize': 'files',
+    'library_retag': 'tags',
+    'live_commentary_cleaner': 'files',
+    'lossy_converter': 'files',
+    'mbid_mismatch_detector': 'tags',
+    'metadata_gap_filler': 'metadata',
+    'missing_cover_art': 'artwork',
+    'missing_lyrics': 'tags',
+    'monitored_discography_refresh': 'none',
+    'monitoring_list_reconcile': 'none',
+    'native_duplicate_detector': 'files',
+    'native_enrichment_sweep': 'metadata',
+    'orphan_file_detector': 'none',
+    'path_drift_reconcile': 'report',
+    # re-measures bitrate and sample rate into the catalogue. nothing a person
+    # reviewed changes
+    'quality_info_backfill': 'none',
+    'quality_profile_audit': 'upgrades',
+    'replaygain_filler': 'tags',
+    'short_preview_track': 'report',
+    'skip_audit_cleanup': 'none',
+    'streamed_aac_repair': 'report',
+    'suspect_album_tag_detector': 'match',
+    'track_number_repair': 'tags',
+    'unknown_artist_fixer': 'match',
+    # an approved finding saves metadata the files name. a reviewed album keeps its own
+    'use_file_tags': 'metadata',
+    'untagged_downloads': 'tags',
+}
+# findings left by jobs that no longer run still have a fix
+RETIRED_JOB_LOCK_SCOPE: dict[str, str] = {
+    'quality_upgrade_scanner': 'upgrades',
+    'quality_upgrade': 'upgrades',
+    'quality_upgrade_scan': 'upgrades',
+    'discography_backfill': 'none',
+    'canonical_version_resolve': 'match',
+    'duplicate_detector': 'files',
+    'single_album_dedup': 'files',
+}
+
+
+def job_lock_scope(job_id) -> str:
+    """The lock scope of a job id, live or retired. A job nobody declared is
+    treated as a report: a locked album's findings then need a person."""
+    key = str(job_id or '')
+    return JOB_LOCK_SCOPE.get(key) or RETIRED_JOB_LOCK_SCOPE.get(key) or 'report'
+
 
 # Jobs deliberately retired after their function moved to a native Library-v2
 # engine (P2 consolidation). Listed explicitly so the worker can prune their
@@ -235,14 +326,21 @@ def register_job(cls: type[RepairJob]) -> type[RepairJob]:
     effects = JOB_LIBRARY_V2_EFFECTS.get(cls.job_id)
     if not effects or not effects.issubset(LIBRARY_V2_EFFECTS):
         raise ValueError(
-            f"Repair job {cls.job_id!r} has no valid Library-v2 effects declaration"
+            f"Repair job {cls.job_id!r} has no valid Library effects declaration"
         )
     if 'none' in effects and len(effects) != 1:
         raise ValueError(
-            f"Repair job {cls.job_id!r} mixes the 'none' Library-v2 effect with mutations"
+            f"Repair job {cls.job_id!r} mixes the 'none' Library effect with mutations"
+        )
+    lock_scope = JOB_LOCK_SCOPE.get(cls.job_id)
+    if lock_scope not in JOB_LOCK_SCOPES:
+        raise ValueError(
+            f"Repair job {cls.job_id!r} does not say what a locked album means to it "
+            f"(JOB_LOCK_SCOPE)"
         )
     cls.data_basis = basis
     cls.library_v2_effects = effects
+    cls.lock_scope = lock_scope
     JOB_REGISTRY[cls.job_id] = cls
     return cls
 
@@ -274,6 +372,9 @@ _JOB_MODULES = [
     'core.repair_jobs.fake_lossless_detector',
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
+    'core.repair_jobs.use_file_tags',
+    'core.repair_jobs.compilation_origins',
+    'core.repair_jobs.artist_merge_review',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',

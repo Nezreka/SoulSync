@@ -2179,6 +2179,9 @@ const SHARED_VIDEO_VIEWS = {
     calendar: { media: ['video'], videoPage: 'video-calendar' },
     // /dashboard?media=video is the video dashboard
     dashboard: { media: ['video'], videoPage: 'video-dashboard' },
+    // /automations?media=video is the video side's automations. admins only,
+    // like the sidebar entry: it runs and switches off jobs for everyone
+    automations: { media: ['video'], videoPage: 'video-automations', adminOnly: true },
 };
 
 function isPageAccessAllowed(pageId, search) {
@@ -2189,6 +2192,7 @@ function isPageAccessAllowed(pageId, search) {
     }
     if (!view || view.media.indexOf(media) === -1) return isPageAllowed(pageId);
     if (profileAllowedSides() === 'music') return false;
+    if (view.adminOnly) return !currentProfile || !!currentProfile.is_admin || currentProfile.id === 1;
     return isPageAllowed(view.videoPage);
 }
 

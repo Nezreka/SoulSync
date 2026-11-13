@@ -388,14 +388,14 @@ def registered_lib2_file_id(context: Dict[str, Any]) -> Optional[int]:
         ).fetchone()
         return int(row[0]) if row else None
     except Exception as e:
-        logger.debug("library v2 file lookup failed: %s", e)
+        logger.debug("library file lookup failed: %s", e)
         return None
     finally:
         if conn is not None:
             try:
                 conn.close()
             except Exception as close_err:
-                logger.debug("library v2 file lookup close failed: %s", close_err)
+                logger.debug("library file lookup close failed: %s", close_err)
 
 
 def require_library_v2_registration(context: Dict[str, Any]) -> None:
@@ -410,7 +410,7 @@ def require_library_v2_registration(context: Dict[str, Any]) -> None:
     """
     if registered_lib2_file_id(context) is None:
         raise RuntimeError(
-            "The file was written, but Library v2 did not create a file row"
+            "The file was written, but the Library did not create a file row"
         )
 
 
@@ -558,9 +558,9 @@ def record_download_provenance(context: Dict[str, Any],
     except Exception as e:
         if require_library:
             raise RuntimeError(
-                "The file was written, but Library v2 could not register it"
+                "The file was written, but the Library could not register it"
             ) from e
-        logger.debug("library v2 autolink skipped: %s", e)
+        logger.debug("library autolink skipped: %s", e)
     if require_library and linked_lib2_file_id is None:
         require_library_v2_registration(context)
 
@@ -591,7 +591,7 @@ def record_download_provenance(context: Dict[str, Any],
                 _get_config_manager(),
             )
         except Exception as e:
-            logger.debug("library v2 track-identity reconcile not scheduled: %s", e)
+            logger.debug("library track-identity reconcile not scheduled: %s", e)
 
     # ...and heal the artists that link just created. Featured credits and
     # wishlist/discography rows are born without a provider id, so their chips
@@ -604,7 +604,7 @@ def record_download_provenance(context: Dict[str, Any],
             from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
             schedule_unmapped_artist_reconcile(_get_config_manager())
         except Exception as e:
-            logger.debug("library v2 unmapped-artist reconcile not scheduled: %s", e)
+            logger.debug("library unmapped-artist reconcile not scheduled: %s", e)
 
     # Persistent acquisition completion is intentionally downstream of every
     # shared pipeline guard and the Library-v2 autolink. Quarantined files never

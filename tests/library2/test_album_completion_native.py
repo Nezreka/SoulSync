@@ -30,7 +30,7 @@ def run(db, *, settings=None, scope=None, as_shipped=False, create_finding=None)
     scan, with no owned-track floor. ``as_shipped`` runs the defaults instead."""
     from core.repair_jobs import get_all_jobs
     cls = get_all_jobs().get('album_completeness')
-    assert cls is not None, 'The opt-in completion job must run on Library v2'
+    assert cls is not None, 'The opt-in completion job must run on the Library'
     if not as_shipped:
         settings = {'mode': 'automatic', 'min_owned_tracks': 0, **(settings or {})}
     cfg = SimpleNamespace(get=lambda key, default=None: settings if key.endswith('.settings') else default)

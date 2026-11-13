@@ -77,7 +77,7 @@ def materialize_wanted_requests(
     """
     profile_id = int(profile_id)
     if profile_id != 1:
-        raise ValueError("Library v2 wanted acquisition is admin-profile only")
+        raise ValueError("Library wanted acquisition is admin-profile only")
     scope_sql = ""
     args: list[Any] = [profile_id]
     if track_ids is not None:

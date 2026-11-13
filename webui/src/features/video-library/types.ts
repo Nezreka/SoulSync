@@ -48,6 +48,33 @@ export interface LibraryFile {
   naming?: { expected?: string; expected_name?: string; conforms: boolean } | null;
   best?: boolean;
   below_cutoff?: boolean;
+  /** the download that landed this file; absent for one soulsync didn't fetch */
+  source?: FileSource;
+}
+
+export interface FileSource {
+  release: string | null;
+  via: string | null;
+  indexer: string | null;
+  at: string | null;
+}
+
+/** copies beyond the best one of each movie or episode */
+export interface ExtraCopies {
+  titles: number;
+  files: number;
+  size_bytes: number;
+}
+
+export interface ShowFolder {
+  path: string | null;
+  files: number;
+  size_bytes?: number;
+  /** the drive or share the folder is on */
+  root?: string | null;
+  name?: string;
+  /** the fullest folder: where the rest would be brought */
+  main?: boolean;
 }
 
 export interface Identity {
@@ -87,6 +114,7 @@ export interface MovieLibrary {
   };
   quality: QualityBlock;
   copies: { count: number; roots: string[]; spans_drives: boolean; same_resolution: boolean };
+  extra_copies?: ExtraCopies;
   files: LibraryFile[];
   recycle: boolean;
   can_manage: boolean;
@@ -101,10 +129,16 @@ export interface LibraryEpisode {
   monitored: boolean;
   watched: boolean;
   aired: boolean;
+  has_still?: boolean;
+  runtime_minutes?: number | null;
   files: LibraryFile[];
 }
 
 export interface LibrarySeason {
+  /** the season's own row, for its poster; absent on a show with no season rows */
+  id?: number | null;
+  has_poster?: boolean;
+  extra_copies?: ExtraCopies;
   season_number: number;
   title: string;
   owned: number;
@@ -134,12 +168,14 @@ export interface ShowLibrary {
     size_bytes: number;
     res_mix: { label: string; count: number }[];
     roots: string[];
-    folders: { path: string | null; files: number }[];
+    folders: ShowFolder[];
+    seasons?: number;
     watched_episodes: number;
     series_type: string | null;
     monitored: boolean;
   };
   quality: QualityBlock;
+  extra_copies?: ExtraCopies;
   seasons: LibrarySeason[];
   detail_season: number | null;
   recycle: boolean;

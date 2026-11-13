@@ -380,7 +380,8 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                  include_size: bool = True, letter: str = "all",
                  watchlist_filter: str = "all", source_filter: str = "",
                  quality_filter: str = "", profile_id: int = 1,
-                 require_legacy_id: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+                 require_legacy_id: bool = False,
+                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """Paginated artist overview with per-artist roll-up stats.
 
     ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
@@ -526,6 +527,25 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
             parts.append(f"COALESCE(a.{source}_id,'') <> ''")
         predicate = "(" + " OR ".join(parts) + ")"
         clauses.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
+    # #2046: "reviewed" is every album with files locked; "unreviewed" is at
+    # least one that is not. an artist with no files is neither
+    if review_filter in ("reviewed", "unreviewed"):
+        open_album = (
+            "EXISTS (SELECT 1 FROM lib2_albums ral WHERE ral.primary_artist_id=a.id"
+            " AND NOT EXISTS (SELECT 1 FROM lib2_entity_locks rlk"
+            "                  WHERE rlk.entity_type='album' AND rlk.entity_id=ral.id)"
+            " AND EXISTS (SELECT 1 FROM lib2_tracks rt JOIN lib2_track_files rf"
+            "              ON rf.track_id=rt.id WHERE rt.album_id=ral.id"
+            "                AND COALESCE(rf.file_state,'active')='active'))")
+        if review_filter == "unreviewed":
+            clauses.append(open_album)
+        else:
+            # from the locks outward: there are few of them
+            clauses.append(
+                "a.id IN (SELECT ral.primary_artist_id FROM lib2_entity_locks rlk"
+                " JOIN lib2_albums ral ON ral.id=rlk.entity_id"
+                " WHERE rlk.entity_type='album')")
+            clauses.append(f"NOT {open_album}")
     if quality_filter == "upgradable":
         ids = _upgradable_artist_ids(conn, " AND ".join(clauses), params)
         params["upgrade_artists"] = json.dumps(sorted(ids))

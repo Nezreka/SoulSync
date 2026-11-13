@@ -16,6 +16,8 @@ export interface RotationPreview {
   maintenance_enabled?: boolean;
   dry_run?: boolean;
   rotation_grace?: string;
+  /** false: a play does not keep a song that left a rotating playlist (#2047) */
+  keep_played?: boolean;
   /** false when the playlist's track list is empty or unreadable */
   membership_known?: boolean;
   downloads?: number;
@@ -96,7 +98,9 @@ export function rotationStatus(p: RotationPreview | null): string {
 export function rotationConfirmMessage(name: string, p: RotationPreview | null): string {
   const lines = [
     `Songs "${name}" downloaded are removed from your library once they leave the playlist.`,
-    'Anything you played, favourited, rated or still have in another playlist is kept.',
+    p?.keep_played === false
+      ? 'Anything you favourited, rated or still have in another playlist is kept. Played songs are not.'
+      : 'Anything you played, favourited, rated or still have in another playlist is kept.',
   ];
   if (p && p.membership_known && (p.left ?? 0) > 0) {
     lines.push(`${songs(p.left ?? 0)} already left, ${p.removing ?? 0} would be removed.`);

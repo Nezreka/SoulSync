@@ -802,6 +802,74 @@
 
 .badgeSlot {
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── all sources (#2051) ──────────────────────────────────────────────── */
+
+/* which sources a result came from. quiet: it is a footnote, the first mark
+   is the one the card opens from */
+.marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 16px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: var(--white-a08);
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  font-weight: 700;
+  overflow: hidden;
+  opacity: 0.6;
+}
+
+.mark:first-child {
+  opacity: 1;
+}
+
+.mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.unified {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.unifiedDot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  animation: unifiedPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes unifiedPulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unifiedDot {
+    animation: none;
+  }
 }
 
 .duration {

@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LibraryFile, MovieLibrary, ShowLibrary } from './types';
 
+import { EpisodeFiles } from './episode-files';
 import { videoLibraryTab } from './host';
-import { LibraryTab } from './library-tab';
+import { invalidate } from './library-store';
+import { LibraryTab, SELECTION_EVENT } from './library-tab';
 
 interface Call {
   url: string;
@@ -204,6 +206,8 @@ function show(): ShowLibrary {
 beforeEach(() => {
   calls = [];
   routes = {};
+  // the season cache is the module's own: each test reads afresh
+  invalidate('show', 445);
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -243,8 +247,10 @@ describe('movie tab', () => {
     expect(screen.getByText('2 copies · 9.0 GB on 2 drives')).toBeTruthy();
     expect(screen.getByText('Only your media server can see this file')).toBeTruthy();
     expect(screen.getByText('English')).toBeTruthy();
-    expect(screen.getByText('✓ Named by your template')).toBeTruthy();
-    expect(screen.getByText('Meets your 1080p target')).toBeTruthy();
+    expect(screen.getByText('Named by your template')).toBeTruthy();
+    // the copy that is not the best one says what it is
+    expect(screen.getByText('Extra copy')).toBeTruthy();
+    expect(screen.getByText(/Meets your 1080p target/)).toBeTruthy();
   });
 
   it('says the audio languages and every subtitle, in the file or beside it', async () => {
@@ -286,7 +292,8 @@ describe('movie tab', () => {
       message: 'Renamed to Heat (1995) Bluray-1080p.mkv',
     });
     render(<LibraryTab kind="movie" id={7} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+    // the file's own Rename; the same fix is offered up in Needs attention
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Rename' })).at(-1)!);
     await waitFor(() =>
       expect(calls.some((c) => c.url.endsWith('/files/1/rename') && c.method === 'POST')).toBe(
         true,
@@ -390,106 +397,513 @@ describe('movie tab', () => {
   });
 });
 
-describe('show tab', () => {
-  it('summarises the show and loads a season’s files when it opens', async () => {
-    routes['/library'] = (_b, url) => ({
-      ...show(),
-      detail_season: url.includes('season=1') ? 1 : null,
-    });
-    render(<LibraryTab kind="show" id={445} />);
+describe('the one-page show', () => {
+  it('says what you have in one line and hands the page its data', async () => {
+    const onLibrary = vi.fn();
+    window.SoulSyncVideoDetail = { onLibrary };
+    routes['/library'] = () => show();
+    const { container } = render(<LibraryTab kind="show" id={445} />);
     expect(await screen.findByText('2 files below your 1080p target')).toBeTruthy();
+    expect(container.textContent).toContain('3 of 4 aired episodes');
+    expect(container.textContent).toContain('1080p 1 · SD 2');
     expect(screen.getByText('/mnt/easystore/TV/Breaking Bad')).toBeTruthy();
     expect(screen.getByText('Fixed by you')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Season 1/ }));
-    await waitFor(() => expect(calls.some((c) => c.url.includes('/library?season=1'))).toBe(true));
-    expect(await screen.findByText('Pilot')).toBeTruthy();
-    expect(screen.getByText('Missing')).toBeTruthy();
+    // the episode list is the page's own: it gets the data, and no season is
+    // probed until one of its episodes is opened
+    expect(onLibrary).toHaveBeenCalledWith(expect.objectContaining({ kind: 'show', id: 445 }));
+    expect(calls.some((c) => c.url.includes('season='))).toBe(false);
   });
 
-  it('says a season-wide fact once, not on every episode', async () => {
-    const far = (id: number, n: number): LibraryFile =>
-      file({
-        id,
-        filename: `S02E0${n}.mkv`,
-        reachable: false,
-        subtitles: null,
-        naming: null,
-        below_cutoff: true,
-      });
-    routes['/library'] = () => {
-      const d = show();
-      d.seasons[1] = {
-        ...d.seasons[1],
-        owned: 2,
-        below_cutoff: 2,
-        episodes: [1, 2].map((n) => ({
-          id: 20 + n,
-          episode_number: n,
-          title: `Ep ${n}`,
-          air_date: '2009-03-08',
-          has_file: true,
-          monitored: true,
-          watched: false,
-          aired: true,
-          files: [far(40 + n, n)],
-        })),
-      };
-      return d;
-    };
-    render(<LibraryTab kind="show" id={445} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Season 2/ }));
-    expect(await screen.findByText(/only your media server can see, so SoulSync/)).toBeTruthy();
-    expect(screen.getByText(/Every file here is/)).toBeTruthy();
-    expect(screen.queryByText('Only your media server can see this file')).toBeNull();
-    expect(screen.queryByText('Below your quality target')).toBeNull();
-  });
-
-  it('renames every drifted file in a season after one confirm', async () => {
-    routes['/library'] = () => {
-      const d = show();
-      d.seasons[0].episodes[0].files = [
-        file({ id: 51, naming: { conforms: false, expected_name: 'a.mkv' } }),
-        file({ id: 52, naming: { conforms: false, expected_name: 'b.mkv' } }),
-      ];
-      return d;
-    };
-    routes['/rename'] = () => ({ success: true, action: 'renamed' });
-    render(<LibraryTab kind="show" id={445} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Season 1/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Rename all' }));
-    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/rename')).length).toBe(2));
-    expect(window.showConfirmDialog).toHaveBeenCalledTimes(1);
-  });
-
-  it('the monitored switch flips the season on the server', async () => {
+  it('puts each part where the page asks for it', async () => {
     routes['/library'] = () => show();
-    routes['/monitor'] = () => ({ success: true });
+    const hero = document.body.appendChild(document.createElement('div'));
+    const foot = document.body.appendChild(document.createElement('div'));
+    const { container } = render(<LibraryTab kind="show" id={445} slots={{ hero, foot }} />);
+    await screen.findByText('2 files below your 1080p target');
+    expect(hero.textContent).toContain('3 of 4 aired episodes');
+    expect(within(hero).getByRole('button', { name: 'Fix match' })).toBeTruthy();
+    expect(foot.textContent).toContain('/mnt/easystore/TV/Breaking Bad');
+    expect(container.textContent).not.toContain('aired episodes');
+    hero.remove();
+    foot.remove();
+  });
+
+  function tick(episodeIds: number[], showId = 445) {
+    act(() => {
+      document.dispatchEvent(
+        new CustomEvent(SELECTION_EVENT, { detail: { showId, season: 1, episodeIds } }),
+      );
+    });
+  }
+
+  it('deletes the episodes ticked in the page’s list, in one request, after asking', async () => {
+    const clearSelection = vi.fn();
+    const reloadPage = vi.fn();
+    window.SoulSyncVideoDetail = { clearSelection, reloadPage };
+    routes['/library'] = () => show();
+    routes['/files/bulk'] = () => ({ success: true, done: 1, unchanged: 0, failed: 0, errors: [] });
+    const select = document.body.appendChild(document.createElement('div'));
+    render(<LibraryTab kind="show" id={445} slots={{ select }} />);
+    await screen.findByText('2 files below your 1080p target');
+    expect(select.textContent).toBe('');
+    tick([11, 12]);
+    // episode 12 has no file, so there is nothing of it to act on
+    expect(within(select).getByText(/1 episode selected/)).toBeTruthy();
+    fireEvent.click(within(select).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/files/bulk'))).toBe(true));
+    const opts = vi.mocked(window.showConfirmDialog!).mock.calls[0][0];
+    expect((opts as { destructive?: boolean } | undefined)?.destructive).toBe(true);
+    expect(calls.find((c) => c.url.endsWith('/files/bulk'))?.body).toEqual({
+      action: 'delete',
+      file_ids: [31],
+      kind: 'show',
+    });
+    await waitFor(() => expect(clearSelection).toHaveBeenCalled());
+    expect(reloadPage).toHaveBeenCalled();
+    select.remove();
+  });
+
+  it('a cancelled confirm deletes none of them', async () => {
+    window.showConfirmDialog = vi.fn(async () => false);
+    routes['/library'] = () => show();
     render(<LibraryTab kind="show" id={445} />);
-    await screen.findByText('Season 2');
-    const switches = screen.getAllByRole('checkbox');
-    expect((switches[1] as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(switches[1]);
+    await screen.findByText('2 files below your 1080p target');
+    tick([11]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.some((c) => c.url.endsWith('/files/bulk'))).toBe(false);
+  });
+
+  it('ticks meant for another show are not this one’s', async () => {
+    routes['/library'] = () => show();
+    render(<LibraryTab kind="show" id={445} />);
+    await screen.findByText('2 files below your 1080p target');
+    tick([11], 999);
+    expect(screen.queryByText(/selected/)).toBeNull();
+  });
+
+  it('renames the ticked episodes’ files and says when none needed it', async () => {
+    routes['/library'] = () => show();
+    routes['/files/bulk'] = () => ({ success: true, done: 0, unchanged: 1, failed: 0, errors: [] });
+    render(<LibraryTab kind="show" id={445} />);
+    await screen.findByText('2 files below your 1080p target');
+    tick([11]);
+    fireEvent.click(screen.getByRole('button', { name: 'Rename to template' }));
     await waitFor(() =>
-      expect(
-        calls.some(
-          (c) =>
-            c.url.endsWith('/detail/show/445/season/2/monitor') &&
-            (c.body as { monitored: boolean }).monitored,
-        ),
-      ).toBe(true),
+      expect(calls.find((c) => c.url.endsWith('/files/bulk'))?.body).toEqual({
+        action: 'rename',
+        file_ids: [31],
+        kind: 'show',
+      }),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Every file was already named by your template',
+        'success',
+      ),
     );
   });
 
-  it('season actions hand off to the page’s own grab and search flows', async () => {
-    const grabSeason = vi.fn();
-    const manualSearch = vi.fn();
-    window.SoulSyncVideoDetail = { grabSeason, manualSearch };
+  it('looks for upgrades of exactly the ticked episodes', async () => {
     routes['/library'] = () => show();
+    routes['/wishlist/add'] = () => ({ success: true, added: 1 });
+    routes['/wishlist/search'] = () => ({ success: true });
     render(<LibraryTab kind="show" id={445} />);
-    await screen.findByText('Season 1');
-    const menu = await openMenu('Season 1 actions');
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Grab 1 missing' }));
-    expect(grabSeason).toHaveBeenCalledWith(1);
+    await screen.findByText('2 files below your 1080p target');
+    tick([11]);
+    const bar = screen.getByText(/1 episode selected/).closest('div')!;
+    fireEvent.click(within(bar).getByRole('button', { name: 'Look for upgrades' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/search'))).toBe(true));
+    const add = calls.find((c) => c.url.endsWith('/wishlist/add'))?.body as {
+      episodes: { season_number: number; episode_number: number }[];
+    };
+    expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 1]]);
+  });
+
+  it('a stuck grab and a running one are rows in needs attention', async () => {
+    routes['/library'] = () => show();
+    routes['/acquisition'] = () => ({ success: true, counts: { failed: 2, downloading: 1 } });
+    render(<LibraryTab kind="show" id={445} />);
+    expect(await screen.findByText('2 downloads stuck')).toBeTruthy();
+    expect(screen.getByText('1 episode downloading now')).toBeTruthy();
+  });
+});
+
+describe('what a file says', () => {
+  it('leads with picture and sound, and names the download it came from', async () => {
+    routes['/library'] = () =>
+      movie({
+        files: [
+          file({
+            dynamic_range: 'DV',
+            atmos: true,
+            source: {
+              release: 'Heat.1995.2160p.UHD.BluRay-GRP',
+              via: 'torrent',
+              indexer: '1337x',
+              at: '2026-11-05',
+            },
+          }),
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Dolby Vision')).toBeTruthy();
+    expect(screen.getByText('EAC3 5.1 Atmos')).toBeTruthy();
+    // the foot says when and from where; the release name is on hover
+    const foot = screen.getByText(/^Downloaded .* from 1337x$/);
+    expect(foot.getAttribute('title')).toBe('Heat.1995.2160p.UHD.BluRay-GRP');
+  });
+
+  it('a file soulsync did not download claims no source', async () => {
+    routes['/library'] = () => movie();
+    render(<LibraryTab kind="movie" id={7} />);
+    await screen.findByText('Bluray-1080p');
+    expect(screen.queryByText(/^Downloaded/)).toBeNull();
+    expect(screen.getAllByText('No download on record').length).toBe(2);
+  });
+
+  it('names the first few subtitle tracks and counts the rest', async () => {
+    routes['/library'] = () =>
+      movie({
+        files: [file({ subtitles: [], subtitle_languages: ['en', 'ar', 'de', 'fr', 'ja'] })],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    // all five are inside the file: the count says so once, the first few are
+    // named, and the rest are counted
+    expect(await screen.findByText('5 in the file')).toBeTruthy();
+    expect(screen.getByText('English, Arabic, German and 2 more')).toBeTruthy();
+  });
+});
+
+describe('needs attention', () => {
+  it('says so when nothing does', async () => {
+    routes['/library'] = () =>
+      movie({ files: [file()], extra_copies: { titles: 0, files: 0, size_bytes: 0 } });
+    render(<LibraryTab kind="movie" id={7} />);
+    // a healthy movie shows no section at all: the page is just the page
+    await screen.findByText('Bluray-1080p');
+    expect(screen.queryByText(/Needs attention/)).toBeNull();
+    expect(screen.queryByText('Nothing here needs attention.')).toBeNull();
+  });
+
+  it('a movie with extra copies shows the plan and removes them only on the button', async () => {
+    routes['/library'] = () =>
+      movie({ extra_copies: { titles: 1, files: 1, size_bytes: 1073741824 } });
+    routes['/files/extra-copies/movie/7'] = (body) =>
+      body
+        ? { success: true, removed: 1, failed: 0, size_bytes: 1073741824, unreachable: 0 }
+        : {
+            success: true,
+            files: 1,
+            size_bytes: 1073741824,
+            unreachable: 0,
+            groups: [
+              {
+                label: 'Heat',
+                keep: {
+                  file_id: 1,
+                  filename: 'Heat (1995) Bluray-1080p.mkv',
+                  size_bytes: 8,
+                  resolution_label: '1080p',
+                },
+                remove: [
+                  {
+                    file_id: 2,
+                    filename: 'heat.720p.mkv',
+                    size_bytes: 1073741824,
+                    resolution_label: '720p',
+                    reachable: true,
+                  },
+                ],
+              },
+            ],
+          };
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('1 extra copy of this movie')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep the best…' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('heat.720p.mkv')).toBeTruthy();
+    // opening it only looked
+    expect(calls.some((c) => c.url.includes('/extra-copies') && c.method === 'POST')).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove 1 copy (1.0 GB)' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('/extra-copies') && c.method === 'POST')).toBe(true),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Removed 1 copy, 1.0 GB freed', 'success'),
+    );
+  });
+
+  it('look for upgrades wishlists exactly the episodes below target, then searches', async () => {
+    routes['/library'] = () => {
+      const d = show();
+      d.seasons[0].episodes[0].files = [file({ id: 31, below_cutoff: true })];
+      return d;
+    };
+    routes['/wishlist/add'] = () => ({ success: true, added: 1 });
+    routes['/wishlist/search'] = () => ({ success: true });
+    render(<LibraryTab kind="show" id={445} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Look for upgrades' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/search'))).toBe(true));
+    const add = calls.find((c) => c.url.endsWith('/wishlist/add'))?.body as {
+      show: { tmdb_id: number; library_id: number };
+      episodes: { season_number: number; episode_number: number }[];
+    };
+    expect(add.show).toMatchObject({ tmdb_id: 1396, library_id: 445 });
+    expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 1]]);
+    expect(calls.find((c) => c.url.endsWith('/wishlist/search'))?.body).toEqual({
+      scope: 'show',
+      tmdb_id: 1396,
+    });
+  });
+
+  it('episodes already on the wishlist are not an error', async () => {
+    routes['/library'] = () => {
+      const d = show();
+      d.seasons[0].episodes[0].files = [file({ id: 31, below_cutoff: true })];
+      return d;
+    };
+    routes['/wishlist/add'] = () => ({ success: false, added: 0 });
+    routes['/wishlist/search'] = () => ({ success: true });
+    render(<LibraryTab kind="show" id={445} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Look for upgrades' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/search'))).toBe(true));
+    expect(vi.mocked(window.showToast!).mock.calls.at(-1)?.[1] ?? 'success').toBe('success');
+  });
+
+  it('get missing wishlists the aired episodes it does not have', async () => {
+    routes['/library'] = () => show();
+    routes['/wishlist/add'] = () => ({ success: true, added: 1 });
+    routes['/wishlist/search'] = () => ({ success: true });
+    render(<LibraryTab kind="show" id={445} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Get missing' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/add'))).toBe(true));
+    const add = calls.find((c) => c.url.endsWith('/wishlist/add'))?.body as {
+      episodes: { season_number: number; episode_number: number }[];
+    };
+    expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 2]]);
+  });
+
+  it('a split show is brought together: plan first, then the move with its progress', async () => {
+    let polls = 0;
+    routes['/library'] = () => {
+      const d = show();
+      d.summary.folders = [
+        {
+          path: '/mnt/a/TV/Breaking Bad',
+          files: 2,
+          name: 'Breaking Bad',
+          root: '/mnt/a',
+          main: true,
+        },
+        { path: '/mnt/b/BB.S01E02', files: 1, name: 'BB.S01E02', root: '/mnt/b' },
+      ];
+      return d;
+    };
+    routes['/status'] = () => {
+      polls += 1;
+      return polls < 2
+        ? { success: true, known: false, running: false }
+        : { success: true, known: true, running: false, total: 1, done: 1, moved: 1, failed: 0 };
+    };
+    routes['/files/consolidate/445'] = (body) =>
+      body
+        ? { success: true, files: 1 }
+        : {
+            success: true,
+            target: '/mnt/a/TV/Breaking Bad',
+            files: 1,
+            size_bytes: 1073741824,
+            copy_bytes: 1073741824,
+            free_bytes: 50 * 1073741824,
+            enough_room: true,
+            moves: [],
+            skipped: [],
+          };
+    render(<LibraryTab kind="show" id={445} />);
+    expect(await screen.findByText('Split across 2 folders')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Bring together…' }));
+    const dialog = await screen.findByRole('dialog');
+    // a move to another drive is a copy: it says so, and what room there is
+    expect(await within(dialog).findByText(/is on another drive/)).toBeTruthy();
+    expect(calls.some((c) => c.url.endsWith('/files/consolidate/445') && c.method === 'POST')).toBe(
+      false,
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move 1 file' }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.url.endsWith('/files/consolidate/445') && c.method === 'POST')?.body,
+      ).toEqual({
+        target: '/mnt/a/TV/Breaking Bad',
+      }),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Moved 1 file into one folder', 'success'),
+    );
+    expect(within(dialog).getByRole('button', { name: 'Done' })).toBeTruthy();
+  });
+
+  it('a profile that is not an admin sees the problems without the fixes', async () => {
+    routes['/library'] = () =>
+      movie({ can_manage: false, extra_copies: { titles: 1, files: 1, size_bytes: 5 } });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('1 extra copy of this movie')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Keep the best…' })).toBeNull();
+  });
+});
+
+describe('an opened episode', () => {
+  function twoCopies(): ShowLibrary {
+    const d = show();
+    d.seasons[0].episodes[0].files = [
+      file({ id: 32, filename: 'other.mkv', best: false, resolution_label: '720p', quality: null }),
+      file({ id: 31, filename: 'best.mkv', best: true }),
+    ];
+    d.seasons[0].episodes[1] = {
+      ...d.seasons[0].episodes[1],
+      has_file: true,
+      files: [file({ id: 33, filename: 'Breaking Bad - S01E02.mkv' })],
+    };
+    return d;
+  }
+
+  it('asks for its season’s disk checks and shows the cards, best copy first', async () => {
+    routes['/library'] = () => twoCopies();
+    render(<EpisodeFiles showId={445} season={1} episodeId={11} />);
+    expect(await screen.findByText('best.mkv')).toBeTruthy();
+    expect(calls.filter((c) => c.url.includes('/library?season=1')).length).toBe(1);
+    const cards = [...document.querySelectorAll('[data-file-id]')];
+    expect(cards.map((c) => c.getAttribute('data-file-id'))).toEqual(['31', '32']);
+    expect(screen.getByText('Extra copy')).toBeTruthy();
+  });
+
+  it('two opened episodes of a season share one read', async () => {
+    routes['/library'] = () => twoCopies();
+    render(
+      <>
+        <EpisodeFiles showId={445} season={1} episodeId={11} />
+        <EpisodeFiles showId={445} season={1} episodeId={12} />
+      </>,
+    );
+    expect(await screen.findByText('Breaking Bad - S01E02.mkv')).toBeTruthy();
+    expect(calls.filter((c) => c.url.includes('/library?season=1')).length).toBe(1);
+  });
+
+  it('a change made in the cards is read again by everything on the page', async () => {
+    routes['/library'] = () => twoCopies();
+    routes['/delete'] = () => ({ success: true, recycled: true, remaining: 1 });
+    render(
+      <>
+        <LibraryTab kind="show" id={445} />
+        <EpisodeFiles showId={445} season={1} episodeId={11} />
+      </>,
+    );
+    await screen.findByText('best.mkv');
+    const before = calls.filter((c) => c.url.includes('/library')).length;
+    const menu = await openMenu('S01E01 file actions', 1);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete to recycle bin' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/files/32/delete'))).toBe(true));
+    // the island under the hero and the episode's cards both read again
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/library')).length).toBe(before + 2),
+    );
+  });
+
+  it('moves a file to the episode it really is', async () => {
+    routes['/library'] = () => twoCopies();
+    routes['/reassign'] = () => ({ success: true, action: 'reassigned', renamed: true });
+    render(<EpisodeFiles showId={445} season={1} episodeId={12} />);
+    await screen.findByText('Breaking Bad - S01E02.mkv');
+    const menu = await openMenu('S01E02 file actions');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to another episode…' }));
+    const dialog = await screen.findByRole('dialog');
+    // where it already is can't be picked
+    expect(
+      (within(dialog).getByRole('option', { name: /Cat's in the Bag/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(within(dialog).getByRole('option', { name: /Pilot/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move here' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/files/33/reassign'))?.body).toEqual({
+        episode_id: 11,
+      }),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Moved, and renamed to match the episode',
+        'success',
+      ),
+    );
+  });
+
+  it('a file that kept its name says the server may file it back', async () => {
+    routes['/library'] = () => twoCopies();
+    routes['/reassign'] = () => ({ success: true, action: 'reassigned', renamed: false });
+    render(<EpisodeFiles showId={445} season={1} episodeId={12} />);
+    await screen.findByText('Breaking Bad - S01E02.mkv');
+    const menu = await openMenu('S01E02 file actions');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to another episode…' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('option', { name: /Pilot/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move here' }));
+    await waitFor(() => expect(window.showToast).toHaveBeenCalled());
+    expect(vi.mocked(window.showToast!).mock.calls.at(-1)).toEqual([
+      expect.stringContaining('may file it back'),
+      'warning',
+    ]);
+  });
+
+  it('an episode with no file shows nothing', async () => {
+    routes['/library'] = () => show();
+    const { container } = render(<EpisodeFiles showId={445} season={1} episodeId={12} />);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('season=1'))).toBe(true));
+    await waitFor(() => expect(container.textContent).toBe(''));
+  });
+});
+
+describe('the one-page movie', () => {
+  it('puts the library line in the slot the page hands over', async () => {
+    routes['/library'] = () => movie();
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const { container } = render(<LibraryTab kind="movie" id={7} heroSlot={slot} />);
+    await screen.findByText('Bluray-1080p');
+    expect(slot.textContent).toContain('2 copies · 9.0 GB on 2 drives');
+    expect(within(slot).getByRole('button', { name: 'Fix match' })).toBeTruthy();
+    // and not a second time in the panel
+    expect(container.textContent).not.toContain('2 copies · 9.0 GB');
+    slot.remove();
+  });
+
+  it('a stuck download is a row in needs attention, with a way out', async () => {
+    const search = vi.fn();
+    window.SoulSyncVideoDetail = { manualSearch: search };
+    routes['/library'] = () => movie({ files: [file()] });
+    routes['/acquisition'] = () => ({ success: true, total: 1, counts: { failed: 1 } });
+    render(<LibraryTab kind="movie" id={7} />);
+    const row = (await screen.findByText('A download for this movie is stuck')).closest('li')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Search releases' }));
+    expect(search).toHaveBeenCalledWith('movie');
+  });
+
+  it('a file card names what is not known instead of guessing', async () => {
+    routes['/library'] = () =>
+      movie({
+        files: [
+          file({
+            reachable: false,
+            subtitles: null,
+            subtitle_languages: null,
+            audio_languages: null,
+            naming: null,
+          }),
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Not known')).toBeTruthy();
+    expect(screen.getByText('SoulSync can’t see the folder')).toBeTruthy();
+    expect(screen.getByText('Languages not read yet')).toBeTruthy();
   });
 });
 

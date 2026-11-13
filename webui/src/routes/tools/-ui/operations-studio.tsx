@@ -1,58 +1,36 @@
 /**
- * Simple mode: the maintenance surface for people who want a tidy library
- * without managing thirty jobs. Same page on both sides; what differs (the
- * pillars, the playbooks, the album spotlight) comes from a per-side table.
+ * The top of the Jobs panel: what is running, the checks that queue a few
+ * jobs together, and the areas the jobs are grouped into. Same on both
+ * sides; what differs (the areas, the checks) comes from a per-side table.
  *
- * Oct 27 2026 rework. Simple mode used to open with its OWN health number,
- * "(library − open findings) / library", while Advanced opened with the
- * weighted score from -tools.groups. Same page, two numbers that disagreed
- * (0% here, 95 there on the same library). There is one score now, and it is
- * the weighted one.
+ * This used to be "Simple mode", a second page with its own health number,
+ * its own triage cards and an album grid. Those now live once, on the
+ * Findings pill. What stayed here is the part about RUNNING things.
  *
- * The three triage cards also said things that weren't true: "Quarantine" for
- * findings nothing had quarantined, "zero-risk" fixes listed as "high-res vinyl
- * covers". They are now sorted by what a fix actually does, they name the
- * finding types inside them, and every name is a link into those findings.
+ * The triage rule is still defined here because the areas and the findings
+ * inbox both sort by it:
  *
  *   safe to fix      fixable, touches no file, starts no download
  *   needs your call  fixable, but moves/deletes/renames files or downloads
  *   review only      no automatic fix; something for you to look at
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 
-import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
-import type {
-  BulkFixStatus,
-  RepairFinding,
-  RepairJob,
-  RepairJobProgress,
-  RepairJobRun,
-} from '../-tools.types';
+import type { RepairJob, RepairJobProgress } from '../-tools.types';
 
 import {
-  dismissFinding,
-  fetchBulkFixStatus,
   fetchFindingGroups,
-  fetchFindingTypes,
-  reopenFinding,
   runRepairJob,
   setRepairJobEnabled,
-  startBulkFix,
-  stopBulkFix,
   stopRepairJob,
 } from '../-tools.api';
-import { findingRedownloadTrackId, repairJobBadge } from '../-tools.core';
-import { healthBandLabel, isSafeType, libraryHealth } from '../-tools.groups';
+import { repairJobBadge } from '../-tools.core';
+import { isSafeType } from '../-tools.groups';
 import { useToolsMedia, type ToolsMedia } from '../-tools.media';
-import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
-import { AlbumInspectionTray } from './album-inspection-tray';
-import { ReidentifyFindingModal, useFindingFix } from './finding-fix';
-import { useFindingPrompts } from './finding-prompts';
-import { FindingsAlbumGrid } from './findings-album-grid';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -109,6 +87,9 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'Splits combined artists, cleans genres, lines up track numbers and release years, and flags tracks filed under the wrong album.',
     jobIds: [
       'album_tag_consistency',
+      'use_file_tags',
+      'compilation_origins',
+      'artist_merge_review',
       'album_release_year_repair',
       'comma_artist_splitter',
       'genre_cleanup',
@@ -116,15 +97,28 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'track_number_repair',
       'mbid_mismatch_detector',
       'untagged_downloads',
+      // the two jobs behind the biggest tag types. they only report (neither
+      // fixes by itself), so checking or scheduling the area can't write a file
+      'library_retag',
+      'album_edition_review',
     ],
     findingTypes: [
       'album_tag_inconsistency',
+      'file_tags_differ',
+      'compilation_track_origin',
+      'artist_merge_made',
+      'artist_merge_doubt',
+      'artist_merged_by_mistake',
       'album_release_year_mismatch',
       'comma_artist_split',
       'genre_cleanup',
       'suspect_album_tag',
       'track_number_mismatch',
       'untagged_download',
+      // the two biggest tag types had no area, so this one read "Clean" over
+      // tens of thousands of open findings
+      'library_retag',
+      'canonical_version',
     ],
   },
   {
@@ -159,6 +153,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'duplicate_tracks',
       'orphan_file',
       'dead_file',
+      'library_unreachable',
       'empty_folder',
     ],
   },
@@ -390,90 +385,38 @@ export function triageBuckets(
 export interface OperationsStudioProps {
   jobs: RepairJob[] | null;
   progress: Record<string, RepairJobProgress>;
-  runs: RepairJobRun[];
-  trackCount?: number | null;
-  /** the library size in its own words (video: movies + episodes) */
-  sizeLabel?: string | null;
   onChanged: () => void;
   onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
-  onSwitchToAdvanced: (category?: string) => void;
+  /** an area's "Job settings": scroll to that family in the job list */
+  onShowFamily: (category?: string) => void;
 }
 
-/** the chips under a triage card: the types inside it, each a way in. */
-function TriageTypes({
-  bucket,
-  onOpen,
-}: {
-  bucket: TriageBucket;
-  onOpen: (findingType: string) => void;
-}) {
-  if (!bucket.types.length) return null;
-  const shown = bucket.types.slice(0, 4);
+function PlayIcon() {
   return (
-    <div className="operations-triage-types">
-      {shown.map((entry) => (
-        <button
-          type="button"
-          key={entry.type}
-          className="operations-triage-type"
-          onClick={() => onOpen(entry.type)}
-          title={`Open the ${entry.count.toLocaleString()} ${entry.label.toLowerCase()} findings`}
-        >
-          <span className="operations-triage-type-label">{entry.label}</span>
-          <span className="operations-triage-type-count">{entry.count.toLocaleString()}</span>
-        </button>
-      ))}
-      {bucket.types.length > shown.length ? (
-        <span className="operations-triage-type-more">
-          +{bucket.types.length - shown.length} more
-        </span>
-      ) : null}
-    </div>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M7 4.5v15l13-7.5z" />
+    </svg>
   );
 }
 
 export function OperationsStudio({
   jobs,
   progress,
-  runs: _runs,
-  trackCount,
-  sizeLabel,
   onChanged,
   onShowFindings,
-  onSwitchToAdvanced,
+  onShowFamily,
 }: OperationsStudioProps) {
   const media = useToolsMedia();
   const config = STUDIO_CONFIG[media];
   const [runningPlaybook, setRunningPlaybook] = useState<string | null>(null);
   const [runningPillar, setRunningPillar] = useState<string | null>(null);
   const [groups, setGroups] = useState<FindingGroup[]>([]);
-  /** until the first groups land, every count here would read zero, and a
-   *  zero health page says "nothing needs you". say we're checking instead. */
-  const [loaded, setLoaded] = useState(false);
-  const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
-  const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
-  const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
-  const [albumGridToken, setAlbumGridToken] = useState(0);
-  const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
-  const redownloadTrackId = redownloadFinding ? findingRedownloadTrackId(redownloadFinding) : null;
-  const bulkTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const [groupsData, typesData] = await Promise.all([
-        fetchFindingGroups(),
-        fetchFindingTypes(),
-      ]);
-      setGroups(groupsData || []);
-      const catMap: Record<string, FindingTypeInfo> = {};
-      for (const t of typesData || []) {
-        catMap[t.type] = t;
-      }
-      setCatalog(catMap);
+      setGroups((await fetchFindingGroups()) || []);
     } catch {
-      // Ignore load error
-    } finally {
-      setLoaded(true);
+      // the areas show no counts; everything else still works
     }
   }, []);
 
@@ -483,91 +426,10 @@ export function OperationsStudio({
 
   // G16-4: another library picked in the header; its findings, not these
   useEffect(() => {
-    const switched = () => {
-      setSelectedAlbum(null);
-      // review 4 R4-E-1: the album grid loads on its own token
-      setAlbumGridToken((token) => token + 1);
-      void loadData();
-    };
+    const switched = () => void loadData();
     window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
     return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
   }, [loadData]);
-
-  // a fix-all started elsewhere (advanced, another tab) shows its progress here too
-  useEffect(() => {
-    void fetchBulkFixStatus().then((status) => {
-      if (status?.running) setBulkStatus(status);
-    });
-  }, []);
-
-  // Poll bulk fix progress if active
-  useEffect(() => {
-    const poll = async () => {
-      const status = await fetchBulkFixStatus();
-      if (!status) return;
-      setBulkStatus(status);
-      if (!status.running) {
-        if (bulkTimerRef.current) {
-          clearInterval(bulkTimerRef.current);
-          bulkTimerRef.current = null;
-        }
-        if (status.fixed && status.fixed > 0) {
-          toast(
-            `Fixed ${status.fixed.toLocaleString()}${status.failed ? `, ${status.failed.toLocaleString()} failed` : ''}`,
-            status.failed ? 'warning' : 'success',
-          );
-        }
-        onChanged();
-        void loadData();
-      }
-    };
-
-    if (bulkStatus?.running && !bulkTimerRef.current) {
-      bulkTimerRef.current = setInterval(() => void poll(), 1000);
-      void poll();
-    }
-
-    return () => {
-      if (bulkTimerRef.current) {
-        clearInterval(bulkTimerRef.current);
-        bulkTimerRef.current = null;
-      }
-    };
-  }, [bulkStatus?.running, onChanged, loadData]);
-
-  // ── The album tray's per-row fix and dismiss ───────────────────────────────
-
-  const prompts = useFindingPrompts();
-  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
-  const studioTypeInfo = useCallback((findingType: string) => catalog[findingType], [catalog]);
-  const refreshAfterFix = useCallback(() => {
-    onChanged();
-    void loadData();
-  }, [loadData, onChanged]);
-  const dismissOne = useCallback(
-    async (id: number) => {
-      try {
-        await dismissFinding(id);
-      } catch (error) {
-        toast(`Could not dismiss finding: ${(error as Error).message}`, 'error');
-        return;
-      }
-      refreshAfterFix();
-    },
-    [refreshAfterFix],
-  );
-  /** the same fix Advanced mode runs: its per-type question, the confirm
-   *  before a subjectless Delete File, and a toast with the result. this
-   *  used to be a bare fixFinding(id) that dropped the answer (review 5
-   *  W3-TT-3). */
-  const fixOne = useFindingFix({
-    video: media === 'video',
-    typeInfo: studioTypeInfo,
-    prompts,
-    dismiss: dismissOne,
-    refresh: refreshAfterFix,
-    onReidentify: setReidentifyingFinding,
-  });
 
   const jobMap = useMemo(() => {
     const map = new Map<string, RepairJob>();
@@ -576,16 +438,6 @@ export function OperationsStudio({
     }
     return map;
   }, [jobs]);
-
-  const infoOf = useCallback((findingType: string) => catalog[findingType], [catalog]);
-  const buckets = useMemo(() => triageBuckets(groups, infoOf), [groups, infoOf]);
-  const safeCount = buckets.safe.count;
-
-  // ONE health number, the same one advanced mode shows
-  const health = useMemo(() => libraryHealth(groups, trackCount), [groups, trackCount]);
-  const runningCount = (jobs || []).filter(
-    (job) => job.is_running || progress[job.job_id]?.status === 'running',
-  ).length;
 
   // Active running job for the "running now" strip
   const activeRunningJob = useMemo(() => {
@@ -604,45 +456,6 @@ export function OperationsStudio({
     (findingType: string) => onShowFindings('', { findingType }),
     [onShowFindings],
   );
-
-  const handleApplyAllSafeFixes = useCallback(async () => {
-    const confirmed = await window.showConfirmDialog?.({
-      title: 'Fix all safe findings',
-      message: `Apply the default fix to ${safeCount.toLocaleString()} findings? ${config.safeHint}`,
-      confirmText: 'Fix all safe',
-      destructive: false,
-    });
-    if (confirmed === false) return;
-    try {
-      const result = await startBulkFix({ safeOnly: true });
-      if (result.started) {
-        toast(
-          `Fixing ${(result.total || safeCount).toLocaleString()} findings in the background…`,
-          'info',
-        );
-        setBulkStatus({ running: true, done: 0, total: result.total || safeCount });
-      } else if (result.already_running) {
-        toast('A fix is already running, showing its progress', 'info');
-        setBulkStatus({ running: true });
-      } else {
-        toast(result.error || 'Could not start the fixes', 'error');
-      }
-    } catch {
-      toast('Could not start the fixes', 'error');
-    }
-  }, [config.safeHint, safeCount]);
-
-  const handleStopBulkFix = useCallback(async () => {
-    try {
-      stopBulkFix();
-      toast('Stopping after the current fix…', 'info');
-      setBulkStatus((prev) => (prev ? { ...prev, running: false } : null));
-      onChanged();
-      void loadData();
-    } catch {
-      toast('Could not stop the fix', 'error');
-    }
-  }, [loadData, onChanged]);
 
   const handleStopSingleJob = useCallback(
     async (jobId: string) => {
@@ -731,186 +544,28 @@ export function OperationsStudio({
     [jobMap, onChanged],
   );
 
-  const pending = health.pending;
-  const sizeLine = sizeLabel || (trackCount ? `${trackCount.toLocaleString()} tracks` : '');
-
   return (
     <div className="operations-studio" data-studio-media={media}>
-      {/* ── Health ─────────────────────────────────────────────────────── */}
-      <div className={`operations-executive-hero ${loaded ? health.band : ''}`}>
-        <div className="operations-exec-metric">
-          <div className={`operations-exec-score ${loaded ? health.band : ''}`}>
-            <span className="operations-exec-num">{loaded ? health.score : '–'}</span>
-            <span className="operations-exec-status">
-              {loaded ? healthBandLabel(health.band) : 'checking'}
-            </span>
-          </div>
-          <div className="operations-exec-detail">
-            <div className="operations-exec-title">
-              {!loaded
-                ? 'Looking at your findings…'
-                : pending > 0
-                  ? `${pending.toLocaleString()} open finding${pending === 1 ? '' : 's'}`
-                  : 'Nothing needs you'}
-            </div>
-            <div className="operations-exec-sub">
-              {[
-                sizeLine,
-                safeCount > 0 ? `${safeCount.toLocaleString()} safe to fix in one click` : '',
-                runningCount > 0
-                  ? `${runningCount} job${runningCount === 1 ? '' : 's'} running`
-                  : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-          </div>
-        </div>
-
-        {safeCount > 0 && !bulkStatus?.running ? (
-          <button
-            type="button"
-            className="operations-exec-cta"
-            onClick={() => void handleApplyAllSafeFixes()}
-            title={config.safeHint}
-          >
-            Fix {safeCount.toLocaleString()} safe
-          </button>
-        ) : null}
-      </div>
-
-      {/* ── Triage ─────────────────────────────────────────────────────── */}
-      <div className="operations-triage-section">
-        <div className="operations-triage-header">
-          <div className="operations-triage-title-group">
-            <h5 className="operations-triage-title">What needs you</h5>
-          </div>
-          <p className="operations-triage-sub">
-            Every open finding, sorted by what fixing it would do. Click a type to see its findings.
-          </p>
-        </div>
-
-        <div className="operations-triage-grid">
-          <div className="operations-triage-card safe">
-            <div className="operations-triage-top">
-              <span className="operations-triage-icon">⚡</span>
-              <span className="operations-triage-count-pill safe">
-                {safeCount > 0 ? `${safeCount.toLocaleString()} ready` : 'All clear'}
-              </span>
-            </div>
-            <h6 className="operations-triage-heading">Safe to fix</h6>
-            <p className="operations-triage-desc">{config.safeHint}</p>
-            <TriageTypes bucket={buckets.safe} onOpen={openType} />
-            <div className="operations-triage-action-row">
-              <button
-                type="button"
-                className="operations-triage-btn safe"
-                disabled={safeCount === 0 || Boolean(bulkStatus?.running)}
-                onClick={() => void handleApplyAllSafeFixes()}
-              >
-                {bulkStatus?.running
-                  ? `Fixing ${bulkStatus.done || 0} / ${bulkStatus.total || safeCount}…`
-                  : safeCount > 0
-                    ? `Fix all ${safeCount.toLocaleString()}`
-                    : 'Nothing to fix'}
-              </button>
-            </div>
-          </div>
-
-          <div className="operations-triage-card quarantine">
-            <div className="operations-triage-top">
-              <span className="operations-triage-icon">🛡️</span>
-              <span className="operations-triage-count-pill quarantine">
-                {buckets.call.count > 0
-                  ? `${buckets.call.count.toLocaleString()} to decide`
-                  : 'None'}
-              </span>
-            </div>
-            <h6 className="operations-triage-heading">Needs your call</h6>
-            <p className="operations-triage-desc">{config.callHint}</p>
-            <TriageTypes bucket={buckets.call} onOpen={openType} />
-            <div className="operations-triage-action-row">
-              <button
-                type="button"
-                className="operations-triage-btn quarantine"
-                disabled={buckets.call.count === 0}
-                onClick={() => openType(buckets.call.types[0]?.type || '')}
-              >
-                Review {buckets.call.types[0]?.label || 'findings'} →
-              </button>
-            </div>
-          </div>
-
-          <div className="operations-triage-card suggestions">
-            <div className="operations-triage-top">
-              <span className="operations-triage-icon">💡</span>
-              <span className="operations-triage-count-pill suggestions">
-                {buckets.review.count > 0
-                  ? `${buckets.review.count.toLocaleString()} to look at`
-                  : 'None'}
-              </span>
-            </div>
-            <h6 className="operations-triage-heading">Review only</h6>
-            <p className="operations-triage-desc">{config.reviewHint}</p>
-            <TriageTypes bucket={buckets.review} onOpen={openType} />
-            <div className="operations-triage-action-row">
-              <button
-                type="button"
-                className="operations-triage-btn suggestions"
-                disabled={buckets.review.count === 0}
-                onClick={() => openType(buckets.review.types[0]?.type || '')}
-              >
-                Review {buckets.review.types[0]?.label || 'findings'} →
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {bulkStatus?.running ? (
-          <div className="operations-triage-bulk-banner" role="status">
-            <div className="operations-triage-bulk-info">
-              <span className="operations-triage-bulk-pulse" />
-              <span className="operations-triage-bulk-text">
-                Fixing in the background: {bulkStatus.done || 0} / {bulkStatus.total || safeCount}{' '}
-                done
-              </span>
-            </div>
-            <button
-              type="button"
-              className="operations-triage-bulk-stop"
-              onClick={() => void handleStopBulkFix()}
-            >
-              Stop
-            </button>
-          </div>
-        ) : null}
-      </div>
-
       {/* ── Running now ────────────────────────────────────────────────── */}
       {activeRunningJob ? (
         <div className="operations-live-hud" role="status" aria-live="polite">
           <div className="operations-live-hud-head">
-            <div className="operations-live-hud-radar">
-              <span className="operations-live-hud-ping" />
-              <span className="operations-live-hud-dot" />
-            </div>
+            <span className="operations-live-hud-dot" aria-hidden="true" />
             <div className="operations-live-hud-title-wrap">
-              <span className="operations-live-hud-badge">Running now</span>
               <h6 className="operations-live-hud-name">{activeRunningJob.job.display_name}</h6>
-              {activeRunningJob.prog?.phase ? (
-                <span className="operations-live-hud-phase">{activeRunningJob.prog.phase}</span>
-              ) : null}
+              <span className="operations-live-hud-phase">
+                <span className="operations-live-hud-badge">Running now</span>
+                {activeRunningJob.prog?.phase ? ` · ${activeRunningJob.prog.phase}` : ''}
+              </span>
             </div>
-            <div className="operations-live-hud-actions">
-              <button
-                type="button"
-                className="operations-live-hud-stop-btn"
-                onClick={() => void handleStopSingleJob(activeRunningJob.job.job_id)}
-                title={`Stop ${activeRunningJob.job.display_name}`}
-              >
-                ⏹ Stop
-              </button>
-            </div>
+            <button
+              type="button"
+              className="operations-live-hud-stop-btn"
+              onClick={() => void handleStopSingleJob(activeRunningJob.job.job_id)}
+              title={`Stop ${activeRunningJob.job.display_name}`}
+            >
+              Stop
+            </button>
           </div>
           {typeof activeRunningJob.prog?.progress === 'number' &&
           activeRunningJob.prog.progress > 0 ? (
@@ -924,15 +579,13 @@ export function OperationsStudio({
         </div>
       ) : null}
 
-      {/* ── Playbooks ──────────────────────────────────────────────────── */}
-      <div className="operations-playbooks-section">
-        <div className="operations-playbooks-header">
-          <div className="operations-playbooks-title-group">
-            <h5 className="operations-playbooks-title">Run a check</h5>
-          </div>
-          <p className="operations-playbooks-sub">
-            Each one queues a handful of jobs together. Their findings land above.
-          </p>
+      {/* ── Checks ─────────────────────────────────────────────────────── */}
+      <section className="operations-playbooks-section">
+        <div className="tools-section-head">
+          <h3 className="tools-section-title">Run a check</h3>
+          <span className="tools-section-blurb">
+            Each one queues a handful of jobs together. What they find lands on Findings.
+          </span>
         </div>
 
         <div className="operations-playbooks-grid">
@@ -947,32 +600,30 @@ export function OperationsStudio({
                 onClick={() => void handlePlaybookRun(playbook)}
                 title={`Run ${playbook.title}`}
               >
-                <div className="operations-playbook-card-top">
-                  <span className="operations-playbook-icon">{playbook.icon}</span>
-                  <span className="operations-playbook-arrow">→</span>
-                </div>
-                <h6 className="operations-playbook-name">{playbook.title}</h6>
-                <p className="operations-playbook-desc">{playbook.subtitle}</p>
-                <div className="operations-playbook-action-row">
-                  <span className="operations-playbook-cta">
-                    {isRunning ? 'Queuing…' : '▶ Run'}
-                  </span>
-                </div>
+                <span className="operations-playbook-name">{playbook.title}</span>
+                <span className="operations-playbook-desc">{playbook.subtitle}</span>
+                <span className="operations-playbook-cta">
+                  {isRunning ? (
+                    'Queuing…'
+                  ) : (
+                    <>
+                      <PlayIcon /> Run
+                    </>
+                  )}
+                </span>
               </button>
             );
           })}
         </div>
-      </div>
+      </section>
 
       {/* ── Areas ──────────────────────────────────────────────────────── */}
-      <div className="operations-pillars-section">
-        <div className="operations-pillars-header">
-          <div className="operations-pillars-title-group">
-            <h5 className="operations-pillars-title">Areas</h5>
-          </div>
-          <p className="operations-pillars-sub">
+      <section className="operations-pillars-section">
+        <div className="tools-section-head">
+          <h3 className="tools-section-title">Areas</h3>
+          <span className="tools-section-blurb">
             The jobs grouped by what they look after. Put an area on its schedule, or check it now.
-          </p>
+          </span>
         </div>
 
         <div className="operations-pillars-grid">
@@ -991,25 +642,47 @@ export function OperationsStudio({
 
             const allEnabled = pillarJobs.length > 0 && pillarJobs.every((j) => j.enabled);
             const enabledCount = pillarJobs.filter((j) => j.enabled).length;
-            // the biggest open type in this area is where its badge goes
+            // the biggest open type in this area is where its count goes
             const topType = groups
               .filter((g) => pillar.findingTypes.includes(g.finding_type) && (g.pending || 0) > 0)
               .sort((a, b) => (b.pending || 0) - (a.pending || 0))[0]?.finding_type;
+            const jobNames =
+              pillarJobs
+                .map((j) => j.display_name)
+                .slice(0, 3)
+                .join(', ') + (pillarJobs.length > 3 ? ` +${pillarJobs.length - 3} more` : '');
 
             return (
               <div
                 className={`operations-pillar-card ${isRunning ? 'running' : ''}`}
-                style={{ ['--pillar-glow' as string]: pillar.glow }}
                 key={pillar.id}
               >
-                <div className="operations-pillar-head">
-                  <div className="operations-pillar-icon-box">
-                    <span>{pillar.icon}</span>
-                  </div>
-                  <div className="operations-pillar-head-info">
-                    <h6 className="operations-pillar-name">{pillar.title}</h6>
-                    <span className="operations-pillar-tagline">{pillar.tagline}</span>
-                  </div>
+                <div className="operations-pillar-head-info">
+                  <h6 className="operations-pillar-name">{pillar.title}</h6>
+                  <span className="operations-pillar-tagline" title={pillar.description}>
+                    {pillar.tagline}
+                  </span>
+                  <span className="operations-pillar-subjob-hint">
+                    {jobNames}
+                    {jobNames ? ' · ' : ''}
+                    <button
+                      type="button"
+                      className="operations-pillar-inspect-link"
+                      onClick={() => onShowFamily(pillar.category)}
+                      title="See each job's schedule and settings below"
+                    >
+                      Job settings
+                    </button>
+                  </span>
+                </div>
+
+                <div className="operations-pillar-stat">
+                  <span className="operations-pillar-stat-val">
+                    {isRunning ? 'Checking' : `${enabledCount} of ${pillarJobs.length} on schedule`}
+                  </span>
+                </div>
+
+                <div className="operations-pillar-stat">
                   {openFindings > 0 ? (
                     <button
                       type="button"
@@ -1028,217 +701,44 @@ export function OperationsStudio({
                     >
                       {openFindings.toLocaleString()} open
                     </button>
-                  ) : null}
+                  ) : (
+                    <span className="operations-pillar-stat-val">Clean</span>
+                  )}
                 </div>
 
-                <p className="operations-pillar-desc">{pillar.description}</p>
-
-                <div className="operations-pillar-stats-row">
-                  <div className="operations-pillar-stat">
-                    <span className="operations-pillar-stat-val">
-                      {enabledCount}/{pillarJobs.length}
-                    </span>
-                    <span className="operations-pillar-stat-lbl">On schedule</span>
-                  </div>
-                  <div className="operations-pillar-stat">
-                    <span className="operations-pillar-stat-val">
-                      {isRunning
-                        ? 'Checking'
-                        : allEnabled
-                          ? 'Scheduled'
-                          : enabledCount
-                            ? 'Partly'
-                            : 'Off'}
-                    </span>
-                    <span className="operations-pillar-stat-lbl">Status</span>
-                  </div>
-                  <div className="operations-pillar-stat">
-                    <span className="operations-pillar-stat-val">
-                      {openFindings > 0 ? `${openFindings.toLocaleString()} open` : 'Clean'}
-                    </span>
-                    <span className="operations-pillar-stat-lbl">Findings</span>
-                  </div>
-                </div>
-
-                <div className="operations-pillar-actions">
-                  <label
-                    className="operations-pillar-autopilot"
-                    title={
-                      allEnabled
-                        ? 'Take every job in this area off its schedule'
-                        : 'Put every job in this area on its schedule'
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      checked={allEnabled}
-                      onChange={(e) => void handlePillarAutopilotToggle(pillar, e.target.checked)}
-                    />
-                    <span className="repair-toggle-slider small" />
-                    <span className="operations-pillar-autopilot-label">
-                      {allEnabled ? 'On schedule' : 'Off schedule'}
-                    </span>
-                  </label>
-
-                  <button
-                    type="button"
-                    className="operations-pillar-scan-btn"
-                    disabled={isRunning}
-                    onClick={() => void handlePillarScan(pillar)}
-                    title={`Check ${pillar.title} now`}
-                  >
-                    {isRunning ? 'Checking…' : '▶ Check now'}
-                  </button>
-                </div>
-
-                <div className="operations-pillar-footer">
-                  <span className="operations-pillar-subjob-hint">
-                    {pillarJobs
-                      .map((j) => j.display_name)
-                      .slice(0, 3)
-                      .join(', ')}
-                    {pillarJobs.length > 3 ? ` +${pillarJobs.length - 3} more` : ''}
+                <label
+                  className="operations-pillar-autopilot"
+                  title={
+                    allEnabled
+                      ? 'Take every job in this area off its schedule'
+                      : 'Put every job in this area on its schedule'
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={allEnabled}
+                    onChange={(e) => void handlePillarAutopilotToggle(pillar, e.target.checked)}
+                  />
+                  <span className="repair-toggle-slider small" />
+                  <span className="operations-pillar-autopilot-label">
+                    {allEnabled ? 'On schedule' : 'Off schedule'}
                   </span>
-                  <button
-                    type="button"
-                    className="operations-pillar-inspect-link"
-                    onClick={() => onSwitchToAdvanced(pillar.category)}
-                    title="See each job's schedule and settings in Advanced"
-                  >
-                    Job settings →
-                  </button>
-                </div>
+                </label>
+
+                <button
+                  type="button"
+                  className="operations-pillar-scan-btn"
+                  disabled={isRunning}
+                  onClick={() => void handlePillarScan(pillar)}
+                  title={`Check ${pillar.title} now`}
+                >
+                  {isRunning ? 'Checking…' : 'Check now'}
+                </button>
               </div>
             );
           })}
         </div>
-      </div>
-
-      {/* ── Releases needing attention (music) ─────────────────────────── */}
-      {config.spotlight ? (
-        <div className="operations-spotlight-section">
-          <div className="operations-spotlight-header">
-            <div className="operations-spotlight-title-group">
-              <h5 className="operations-spotlight-title">Albums with findings</h5>
-            </div>
-            <p className="operations-spotlight-sub">
-              The album-level view of what the jobs found. Open one to work on it track by track.
-            </p>
-          </div>
-
-          {selectedAlbum ? (
-            <AlbumInspectionTray
-              group={selectedAlbum}
-              status="pending"
-              onClose={() => setSelectedAlbum(null)}
-              onFixFinding={fixOne}
-              onDismissFinding={dismissOne}
-              onInspectRedownload={(f) => {
-                setRedownloadFinding(f);
-              }}
-              onRefresh={() => {
-                onChanged();
-                void loadData();
-              }}
-              onReopenFinding={async (id) => {
-                await reopenFinding(id);
-                onChanged();
-                void loadData();
-              }}
-            />
-          ) : null}
-
-          <FindingsAlbumGrid
-            refreshToken={albumGridToken}
-            groupBy="album"
-            status="pending"
-            selectedGroupKey={selectedAlbum?.key}
-            onOpen={(group) => setSelectedAlbum(group)}
-          />
-        </div>
-      ) : null}
-
-      {prompts.promptNode}
-
-      {reidentifyingFinding ? (
-        <ReidentifyFindingModal
-          finding={reidentifyingFinding}
-          onApplied={async () => {
-            await dismissOne(reidentifyingFinding.id);
-          }}
-          onClose={() => {
-            setReidentifyingFinding(null);
-            refreshAfterFix();
-          }}
-        />
-      ) : null}
-
-      {/* ── Redownload Modal ──────────────────────────────────────────────── */}
-      {/* a finding with no track behind it (a fake-lossless FILE finding) has no
-          id to search for; its finding id is not a track id */}
-      {redownloadFinding && redownloadTrackId ? (
-        <RedownloadModal
-          track={{
-            id: redownloadTrackId,
-            track_id: redownloadTrackId,
-            title: String(
-              (redownloadFinding.details as Record<string, any>)?.track_title ||
-                redownloadFinding.title ||
-                '',
-            ),
-            file_path:
-              (redownloadFinding.details as Record<string, any>)?.file_path ||
-              redownloadFinding.file_path ||
-              '',
-            format: (redownloadFinding.details as Record<string, any>)?.format || '',
-            bitrate: (redownloadFinding.details as Record<string, any>)?.bitrate || 0,
-          }}
-          album={{
-            id: (redownloadFinding.details as Record<string, any>)?.album_id || '',
-            name:
-              (redownloadFinding.details as Record<string, any>)?.album_title ||
-              (redownloadFinding.details as Record<string, any>)?.album ||
-              '',
-            title:
-              (redownloadFinding.details as Record<string, any>)?.album_title ||
-              (redownloadFinding.details as Record<string, any>)?.album ||
-              '',
-            tracks: [
-              {
-                id: redownloadTrackId,
-                track_id: redownloadTrackId,
-                title: String(
-                  (redownloadFinding.details as Record<string, any>)?.track_title ||
-                    redownloadFinding.title ||
-                    '',
-                ),
-                file_path:
-                  (redownloadFinding.details as Record<string, any>)?.file_path ||
-                  redownloadFinding.file_path ||
-                  '',
-              },
-            ],
-          }}
-          artistName={String(
-            (redownloadFinding.details as Record<string, any>)?.artist_name ||
-              (redownloadFinding.details as Record<string, any>)?.artist ||
-              '',
-          )}
-          upgrade={
-            redownloadFinding.finding_type === 'quality_upgrade' ||
-            redownloadFinding.finding_type === 'fake_lossless'
-          }
-          onReload={() => {
-            onChanged();
-            void loadData();
-          }}
-          onClose={() => {
-            setRedownloadFinding(null);
-            onChanged();
-            void loadData();
-          }}
-        />
-      ) : null}
+      </section>
     </div>
   );
 }

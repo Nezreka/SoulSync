@@ -204,6 +204,18 @@ def get_automation_progress():
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route('/api/automations/activity', methods=['GET'])
+def get_automations_activity():
+    """The last 24 hours by automation and the last week by day, for one side."""
+    try:
+        side = 'video' if request.args.get('side') == 'video' else 'music'
+        profile_id = session.get('profile_id', 1)
+        return jsonify(_auto_api.get_activity(get_database(), profile_id, side=side))
+    except Exception as e:
+        logger.error(f"Error getting automation activity: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @bp.route('/api/automations/<int:automation_id>/history', methods=['GET'])
 def get_automation_history(automation_id):
     """Get run history for a specific automation."""

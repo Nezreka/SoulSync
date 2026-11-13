@@ -102,23 +102,80 @@ def update_stored_path(db, file_id, old_local: str, new_local: str) -> None:
         logger.debug("stored-path update failed for file %s", file_id, exc_info=True)
 
 
-def move_into_place(db, file_id, cur: str, want: str) -> Dict[str, Any]:
+_PART_SUFFIX = ".soulsync-part"
+
+
+def safe_move(cur: str, want: str, *, progress: Optional[Callable[[int], None]] = None,
+              rename: Optional[Callable] = None) -> None:
+    """move one file, to another drive if need be, so that the destination
+    only ever exists whole.
+
+    on one drive it's a rename. across drives ``shutil.move`` copies straight
+    onto the final name, so a copy that dies halfway leaves a broken file
+    where the good one is expected, and the source is still there to confuse
+    the next scan. here the copy lands beside the destination under a part
+    name, is checked against the source's size, and takes the real name only
+    then; the source is removed last. raises OSError and leaves the source in
+    place on any failure. ``progress`` is called with bytes copied so far."""
+    rename = rename or os.rename
+    try:
+        rename(cur, want)
+        return
+    except OSError:
+        pass   # another drive (or a share that won't rename across folders): copy
+    part = want + _PART_SUFFIX
+    size = os.path.getsize(cur)
+    try:
+        done = 0
+        with open(cur, "rb") as src, open(part, "wb") as dst:
+            while True:
+                chunk = src.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done)
+        if os.path.getsize(part) != size:
+            raise OSError("the copy came out a different size than the original")
+        try:
+            shutil.copystat(cur, part)
+        except OSError:
+            pass   # times and modes are a nicety; the bytes are what matter
+        os.replace(part, want)
+    except BaseException:
+        try:
+            if os.path.exists(part):
+                os.remove(part)
+        except OSError:
+            pass
+        raise
+    os.remove(cur)
+
+
+def move_into_place(db, file_id, cur: str, want: str, *, stored: Optional[str] = None,
+                    progress: Optional[Callable[[int], None]] = None) -> Dict[str, Any]:
     """rename ``cur`` to ``want`` with its sidecars, mirror the stored path and
-    tidy the emptied folder. never overwrites."""
+    tidy the emptied folder. never overwrites. ``stored``: the server's view of
+    ``want`` when the caller knows it (a move to another folder, where the old
+    path says nothing about the new one)."""
     if not os.path.isfile(cur):
         return {"success": False, "error": "the file moved since the scan — re-run it"}
     if os.path.exists(want):
         return {"success": False, "error": "destination already exists — nothing overwritten"}
     try:
         os.makedirs(os.path.dirname(want) or ".", exist_ok=True)
-        shutil.move(cur, want)
+        safe_move(cur, want, progress=progress)
     except OSError as e:
         return {"success": False, "error": f"rename failed: {e}"}
     moved = move_sidecars(cur, want)
     # the library's stored path must follow, or every lookup by that path
     # (upgrades, a new episode finding its show's folder) misses the file
     # until the media server rescans -- the same mirror Mass Rename keeps
-    update_stored_path(db, file_id, cur, want)
+    if stored:
+        db.set_media_file_stored_path(int(file_id), stored)
+    else:
+        update_stored_path(db, file_id, cur, want)
     # tidy an emptied folder (only ever the file's own former dir)
     try:
         old_dir = os.path.dirname(cur)
@@ -201,6 +258,6 @@ def delete_to_recycle(db, file_id, *, resolve: Optional[Callable] = None,
             "kind": dropped.get("kind"), "item_id": dropped.get("item_id")}
 
 
-__all__ = ["naming_fields", "same_path", "expected_path", "move_sidecars",
+__all__ = ["naming_fields", "same_path", "expected_path", "move_sidecars", "safe_move",
            "update_stored_path", "move_into_place", "rename_plan",
            "rename_to_template", "delete_to_recycle"]

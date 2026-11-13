@@ -135,7 +135,7 @@ def test_library_v2_row_without_any_image_gets_a_cover():
     tracks = [_lib2_row(lib2_album_id=4158)]
     routes._enrich_wishlist_images(tracks, _DB(albums=[(4158, "METAMORPHOSIS 2", None)]))
     images = tracks[0]["spotify_data"]["album"]["images"]
-    assert images, "a Library-v2 row must never come back image-less"
+    assert images, "a Library row must never come back image-less"
     assert images[0]["url"] == "/api/library/v2/artwork/album/4158"
 
 

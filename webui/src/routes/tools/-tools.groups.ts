@@ -29,6 +29,8 @@ export interface FindingGroup {
   severity_max: string;
   last_seen?: string | null;
   job_ids?: string[];
+  /** a few covers off this type's newest open findings, for the inbox row */
+  art?: string[];
   /** Pending rows in this group that would overwrite a value someone set by
    *  hand. Counted server-side: "apply all" and "apply all except my own
    *  edits" are two different requests, and the choice has to be made before
@@ -79,6 +81,7 @@ export function isSafeType(info: FindingTypeInfo | undefined): boolean {
  */
 export const FINDING_TYPE_BLURBS: Record<string, string> = {
   dead_file: 'Library rows whose audio file is missing from disk.',
+  library_unreachable: 'Most of the library could not be reached at once.',
   orphan_file: 'Audio files on disk with no matching row in the library.',
   track_number_mismatch: "Tag track numbers disagree with the release's order.",
   missing_cover_art: 'Albums or artists with no artwork stored.',
@@ -98,6 +101,11 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   mbid_mismatch: 'Track MusicBrainz IDs disagree with the tags on disk.',
   album_mbid_mismatch: 'Album MusicBrainz IDs disagree with the tags on disk.',
   album_tag_inconsistency: 'Tracks in one album carrying conflicting album tags.',
+  file_tags_differ: 'Albums whose files say something the Library does not.',
+  artist_merge_made: 'Artist merges SoulSync made by itself. Approve to undo one.',
+  artist_merge_doubt: 'Two artists sharing one catalogue id, left for you to decide.',
+  artist_merged_by_mistake: 'One artist whose albums are filed under two names.',
+  compilation_track_origin: 'Greatest hits songs that can go back to their original albums.',
   incomplete_album: 'Albums missing tracks you do not own yet.',
   path_mismatch: 'Files stored outside your file-organization template.',
   missing_lossy_copy: 'Lossless tracks with no lossy copy for portable use.',
@@ -333,6 +341,59 @@ export function safeFixablePending(
     if (isSafeType(infoOf(group.finding_type))) total += Math.max(0, group.pending || 0);
   }
   return total;
+}
+
+/** how many types the fix-all-safe question names before it sums the rest */
+const SAFE_PLAN_MAX = 6;
+
+/**
+ * What "Fix all safe" is about to do, for the question it asks first.
+ *
+ * One click can write to tens of thousands of files, so "apply the default
+ * fix to 83,619 findings?" is not enough to say yes to. This names each kind
+ * of finding, how many, and what its fix is called, biggest first, and says
+ * in plain words what a tag fix writes.
+ */
+export function fixAllSafePlan(
+  groups: readonly FindingGroup[],
+  infoOf: (findingType: string) => FindingTypeInfo | undefined,
+  video = false,
+): { total: number; message: string; confirmText: string } {
+  const rows = groups
+    .map((group) => ({ group, info: infoOf(group.finding_type) }))
+    .filter(({ group, info }) => isSafeType(info) && (group.pending || 0) > 0)
+    .sort((a, b) => (b.group.pending || 0) - (a.group.pending || 0));
+  const total = rows.reduce((sum, { group }) => sum + (group.pending || 0), 0);
+  const line = ({ group, info }: (typeof rows)[number]) =>
+    `${(group.pending || 0).toLocaleString()}  ${info?.label || group.finding_type.replace(/_/g, ' ')}${
+      info?.verb ? ` (${info.verb})` : ''
+    }`;
+  const shown = rows.slice(0, SAFE_PLAN_MAX);
+  const rest = rows.slice(SAFE_PLAN_MAX);
+  const lines = shown.map(line);
+  if (rest.length) {
+    const restTotal = rest.reduce((sum, { group }) => sum + (group.pending || 0), 0);
+    lines.push(
+      `${restTotal.toLocaleString()}  in ${rest.length} more type${rest.length === 1 ? '' : 's'}`,
+    );
+  }
+  const retag = rows.some(({ group }) => group.finding_type === 'library_retag');
+  const paragraphs = [
+    `This applies the default fix to ${total.toLocaleString()} finding${total === 1 ? '' : 's'}:`,
+    lines.join('\n'),
+    video
+      ? "These only change SoulSync's own data. Nothing on disk is touched and nothing is downloaded."
+      : 'These only write tags and library data. No file is moved or deleted, and any finding that would do that is left alone.',
+    retag
+      ? "Library Re-tag writes into each file's tags: only the fields that finding names (genre and year included), and a cover where the file has none."
+      : '',
+    'It runs in the background and you can stop it at any time.',
+  ];
+  return {
+    total,
+    message: paragraphs.filter(Boolean).join('\n\n'),
+    confirmText: `Fix ${total.toLocaleString()}`,
+  };
 }
 
 // ── History sparkline ────────────────────────────────────────────────────────

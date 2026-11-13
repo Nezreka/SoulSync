@@ -41,11 +41,11 @@ from core.download_plugins.release_identity import dedupe_prowlarr_releases, tor
 from core.download_plugins.torrent import (
     prowlarr_search_with_variants,
     prowlarr_track_search,
-    _adapter_state_to_display,
     _decode_filename,
     _guess_quality_from_title,
     _parse_indexer_id_filter,
     _parse_release_title,
+    _poll_display_state,
     _row_to_status,
     _COMPLETE_STATES,
     _FILENAME_SEP,
@@ -817,7 +817,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 row['transferred'] = status.downloaded
                 row['speed'] = status.download_speed
                 row['size'] = status.size or row.get('size', 0)
-                row['state'] = _adapter_state_to_display(status.state)
+                # never "Completed" from a poll: the finalizer says so, with the files (#2064)
+                row['state'] = _poll_display_state(status.state)
                 row['error'] = status.error
             if status.save_path:
                 last_save_path = status.save_path

@@ -25,16 +25,30 @@ The Library page shows every artist in your collection as cards with images, alb
 - **Alphabet navigation** (A–Z, #) — jump through large collections
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")
+- **Reviewed filter** — All, Not reviewed, or Reviewed. An artist is reviewed when every album of theirs with files is locked
 
-Click any artist card to open their detail page: albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live, compilations, featured), or status (owned, missing). **View on** buttons at the top link the artist on each matched external service.
+#### Reviewed and locked
+
+The **padlock** on an album or an artist is for when you have gone through it and it is right. Locking it does two things: it counts as reviewed, and nothing automated changes it after that.
+
+- **What is left alone** is a set of switches, all on by default: tags in the files, artwork, library details, file names and folders, the release match, and quality upgrades. Switch one off to keep that part handled for you
+- **What a lock does not stop**: missing tracks still download, and a missing or damaged file is still reported on the Tools page (marked **Locked**). **Fix all** passes a locked finding over; the button on the finding itself still works
+- **Your own hands are never blocked** — editing, retagging or reorganizing a locked album from its page works as before
+- **Kept away** lists the jobs the lock turned back, so you can see it working
+- **Changed since your review** shows when a file of a locked album was replaced, renamed, added or removed outside SoulSync. **Mark reviewed again** clears it
+- **Lock and next** locks the album and opens the artist's next album that is not reviewed. The artist's toolbar shows the count, e.g. "14 of 20 reviewed"
+- **An artist's lock** covers the artist (photo, details, folder, match). Albums are locked one by one, so a new release still gets tagged; locking an artist offers **And all current albums**
+- Locking needs the admin profile. Everyone sees the padlock on what is locked
+
+Click any artist card to open their detail page: albums, EPs, and singles as cards with completion percentages. Live records, compilations, soundtracks, remixes, demos and spoken word each get a section of their own under Albums, EPs and Singles, so the studio albums are not buried: the **Show** pills are those sections, each with its count, and a kind the artist has nothing of is not listed. A release is placed by its MusicBrainz release type when that is known (SoulSync looks it up in the background for every album it has matched), and by its title until then. Filter by section, featured releases, or status (owned, missing). **View on** buttons at the top link the artist on each matched external service.
 `
         },
         {
             id: 'lib-enhanced',
             title: 'Library Management',
-            lede: 'Manage catalogue metadata and physical file versions in Library v2.',
+            lede: 'Manage catalogue metadata and physical file versions in the Library.',
             body: `
-The Library route opens **Library v2** directly. Management actions are part of that page; there is no separate Enhanced toggle.
+Management actions are part of the Library page; there is no separate Enhanced toggle.
 
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
 `
@@ -44,7 +58,7 @@ Catalogue tracks and their physical files are managed separately. **File version
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
-Library v2 exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
+The Library exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
@@ -101,7 +115,7 @@ From any album card showing missing tracks, click **Download Missing** to open a
             title: 'Remove Entries and Files',
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
-Library v2 previews the affected entries and file paths before removal:
+The Library previews the affected entries and file paths before removal:
 
 - **Remove from library database only** — removes the selected library records and keeps the physical files on disk.
 - **Permanently delete files** — removes the corresponding records and disk files after explicit confirmation. Paths outside configured Music Library Paths, or on unavailable storage, are blocked.

@@ -15,12 +15,17 @@ import { formatCacheAge, parseDbTimestamp } from './-tools.core';
 import {
   filterRuns,
   formatDuration,
+  formatSpan,
   groupRunsByDay,
   runClock,
   runCounters,
+  runDayBars,
   runJobFilters,
+  runJobSummaries,
   runOutcome,
+  runReason,
   runSummary,
+  runTotals,
 } from './-tools.runs';
 
 const run = (over: Partial<RepairJobRun> = {}): RepairJobRun => ({
@@ -236,5 +241,95 @@ describe('runClock', () => {
   it('is empty rather than "Invalid Date" for junk', () => {
     expect(runClock(null)).toBe('');
     expect(runClock('not a date')).toBe('');
+  });
+});
+
+describe('the history page’s numbers', () => {
+  const at = (iso: string, over: Partial<RepairJobRun> = {}): RepairJobRun => ({
+    id: Math.floor(Math.random() * 1e9),
+    job_id: 'alpha',
+    display_name: 'Alpha',
+    started_at: iso,
+    finished_at: iso,
+    status: 'completed',
+    items_scanned: 10,
+    findings_created: 0,
+    auto_fixed: 0,
+    duration_seconds: 30,
+    errors: 0,
+    ...over,
+  });
+
+  it('adds up what the runs did, leaving out one still running', () => {
+    const totals = runTotals([
+      at('2026-11-10 08:00:00', { findings_created: 3, auto_fixed: 2 }),
+      at('2026-11-09 08:00:00', { status: 'failed', duration_seconds: 5 }),
+      at('2026-11-10 09:00:00', { status: 'running', finished_at: null }),
+    ]);
+    expect(totals).toEqual({
+      runs: 2,
+      failed: 1,
+      busy: 1,
+      checked: 20,
+      found: 3,
+      fixed: 2,
+      seconds: 35,
+      since: '2026-11-09 08:00:00',
+    });
+  });
+
+  it('draws a bar for every day, empty ones too, oldest first', () => {
+    const now = new Date(2026, 10, 10, 15, 0, 0).getTime();
+    const local = (day: number, hour: number) =>
+      new Date(2026, 10, day, hour).toISOString().replace('T', ' ').slice(0, 19);
+    const bars = runDayBars(
+      [at(local(10, 9)), at(local(10, 10), { status: 'failed' }), at(local(8, 9))],
+      3,
+      now,
+    );
+    expect(bars.map((bar) => [bar.ok, bar.failed])).toEqual([
+      [1, 0],
+      [0, 0],
+      [1, 1],
+    ]);
+    // a run older than the window is not squeezed into the first bar
+    expect(runDayBars([at(local(1, 9))], 3, now).every((bar) => bar.ok === 0)).toBe(true);
+  });
+
+  it('folds runs per job, the one that ran last first', () => {
+    const jobs = runJobSummaries([
+      at('2026-11-10 08:00:00', { duration_seconds: 20, findings_created: 4 }),
+      at('2026-11-09 08:00:00', { duration_seconds: 40, status: 'failed' }),
+      at('2026-11-10 09:00:00', { job_id: 'beta', display_name: 'Beta', duration_seconds: 0 }),
+    ]);
+    expect(jobs.map((job) => job.jobId)).toEqual(['beta', 'alpha']);
+    expect(jobs[1]).toMatchObject({
+      runs: 2,
+      failed: 1,
+      found: 4,
+      averageSeconds: 30,
+      // its newest run, not its failed older one
+      lastOutcome: 'success',
+      lastStarted: '2026-11-10 08:00:00',
+    });
+    // a job with no timed run has no average, not a divide by zero
+    expect(jobs[0].averageSeconds).toBe(0);
+  });
+
+  it('gives a failed run its reason in one line', () => {
+    expect(runReason(at('2026-11-10 08:00:00'))).toBe('');
+    expect(
+      runReason(at('x', { status: 'failed', error_text: '\n  AcoustID key missing\nTraceback…' })),
+    ).toBe('AcoustID key missing');
+    expect(runReason(at('x', { status: 'completed', errors: 12 }))).toBe('12 errors along the way');
+    expect(runReason(at('x', { status: 'failed' }))).toBe('No reason was recorded');
+    expect(runReason(at('x', { status: 'stopped' }))).toBe('Stopped before the end');
+  });
+
+  it('says a long stretch in its two biggest units', () => {
+    expect(formatSpan(45)).toBe('45s');
+    expect(formatSpan(125)).toBe('2m 5s');
+    expect(formatSpan(56640)).toBe('15h 44m');
+    expect(formatSpan(3 * 86400 + 7200)).toBe('3d 2h');
   });
 });

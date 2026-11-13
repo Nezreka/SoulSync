@@ -79,6 +79,8 @@ _SEARCH_MAX_FILES = 20_000
 _SEARCH_STATE_GRACE_POLLS = 15
 # Without a readable state, this many polls with nothing new ends the search.
 _SEARCH_QUIET_POLLS = 5
+# Reads of a finished search's responses before giving up on them (#2065).
+_SEARCH_FINAL_READS = 4
 
 
 def _index_transfers(downloads) -> Dict[tuple, DownloadStatus]:
@@ -811,6 +813,38 @@ class SoulseekClient(DownloadSourcePlugin):
                         logger.debug("Soulseek search status unavailable: %s", exc)
                         search_state = None
                     if self._search_is_terminal(search_state):
+                        # One more read of the responses before leaving (#2065).
+                        # slskd files a search's responses as it completes, so a
+                        # search that ends between this poll's read above and
+                        # the state read here has its results on the server and
+                        # none of them in hand: the search came back empty after
+                        # the full timeout while slskd listed hundreds of files.
+                        # While the state reports responses we have not seen,
+                        # give them a few seconds to become readable.
+                        reported = 0
+                        if isinstance(search_state, dict):
+                            reported = int(search_state.get('responseCount') or 0)
+                        for attempt in range(_SEARCH_FINAL_READS):
+                            final = self._normalize_search_responses(
+                                await self._make_request('GET', f'searches/{search_id}/responses'))
+                            if final and self._merge_search_responses(final, responses_by_peer, seen_files):
+                                all_tracks, all_albums = self._process_search_responses(
+                                    list(responses_by_peer.values()), extra_extensions)
+                                all_tracks.sort(key=lambda x: x.quality_score, reverse=True)
+                                all_albums.sort(key=lambda x: x.quality_score, reverse=True)
+                                if progress_callback:
+                                    try:
+                                        progress_callback(all_tracks, all_albums, len(responses_by_peer))
+                                    except Exception as e:
+                                        logger.error(f"Error in progress callback: {e}")
+                            if responses_by_peer or not reported:
+                                break
+                            if attempt < _SEARCH_FINAL_READS - 1:
+                                await asyncio.sleep(poll_interval)
+                        if reported and not responses_by_peer:
+                            logger.warning(
+                                "Soulseek search %s ended with %d responses on slskd and none readable",
+                                search_id, reported)
                         logger.info("Soulseek search reached terminal state after %d peers", len(responses_by_peer))
                         break
                     has_search_state = isinstance(search_state, dict) and bool(

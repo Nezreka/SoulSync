@@ -138,6 +138,23 @@ def register_routes(bp):
         # The row dicts carry `id` so the cursor can be built; the allowlist
         # serializer drops it, so it never reaches the response.
         items = [serializer(row) for row in rows]
+        # §2.4 / §5.1 G1: the per-value network bit. A depot-promoted
+        # value — promoted values reach the library through the
+        # file's tags at import, and values fetched by way of a
+        # promoted ID inherit the mark — is marked in
+        # metasync_network_marks, and the
+        # claim builder must emit it with source 'network' — zero
+        # support, never re-served as own-library data. Without this
+        # list the depot would launder network answers into
+        # independent assertions. Computed from the library's current
+        # values, so a mark whose value was replaced stops applying.
+        from core import metasync_depot
+        # a library with no marked value at all (every install that never
+        # promoted anything) answers without a query per row
+        marked = metasync_depot.has_marks(db)
+        for row, item in zip(rows, items, strict=True):
+            item["network_fields"] = (
+                metasync_depot.network_fields_for_export(db, entity, row) if marked else [])
         next_cursor = _encode_cursor(rows[-1].get("id")) if rows else ""
 
         return api_success({

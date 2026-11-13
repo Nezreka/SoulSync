@@ -500,6 +500,7 @@ class AcoustIDVerification:
         context: Optional[Dict[str, Any]] = None,
         min_score: Optional[float] = None,
         expected_duration_s: Optional[float] = None,
+        require_enabled: bool = True,
     ) -> Tuple[VerificationResult, str]:
         """
         Verify that an audio file matches expected track metadata.
@@ -526,6 +527,9 @@ class AcoustIDVerification:
                 exposes it as a job setting; the download uses the constant.
             expected_duration_s: the metadata source's length for the expected
                 track. only pass it when it doesn't come from the file itself.
+            require_enabled: False for a check a person started by hand (the
+                library scan run from Tools). the download verification
+                setting is about new downloads, not about that (#2042).
 
         Returns:
             Tuple of (VerificationResult, reason_message)
@@ -535,7 +539,10 @@ class AcoustIDVerification:
             # client has already decided the client is usable, and need not
             # implement the probe — the library scan passes whatever the job
             # context carries.
-            probe_available = getattr(self.acoustid_client, 'is_available', None)
+            probe_available = None if require_enabled else getattr(
+                self.acoustid_client, 'can_fingerprint', None)
+            if not callable(probe_available):
+                probe_available = getattr(self.acoustid_client, 'is_available', None)
             if callable(probe_available):
                 available, reason = probe_available()
                 if not available:

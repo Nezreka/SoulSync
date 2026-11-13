@@ -171,3 +171,75 @@ def test_the_plan_check_sees_a_scan(tmp_path):
     conn.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, title TEXT)")
     assert _big_scans(conn, "SELECT id FROM lib2_tracks t WHERE lower(t.title)='x'") == ["lib2_tracks"]
     assert _big_scans(conn, "SELECT id FROM lib2_tracks WHERE id=1") == []
+
+
+def test_lock_reads_do_not_scan_a_big_table(world, monkeypatch):
+    """#2046: the padlock's reads with a lock in place (the sweep above runs
+    with nothing locked, so the review and drift queries never fire there),
+    and the reviewed filters on the artist list."""
+    from core.library2 import locks
+
+    db = world.db
+    locks.reset_for_tests()
+    with db._get_connection() as conn:
+        artist_id = world.ids["h"]
+        album_id = conn.execute("SELECT id FROM lib2_albums WHERE primary_artist_id=?",
+                                (artist_id,)).fetchone()[0]
+        locks.set_lock(conn, "album", album_id)
+        locks.set_lock(conn, "artist", artist_id)
+        conn.commit()
+
+    statements: list = []
+    real_get = type(db)._get_connection
+    request_thread = threading.get_ident()
+
+    def traced(self, *a, **k):
+        conn = real_get(self, *a, **k)
+        if threading.get_ident() == request_thread:
+            try:
+                conn.set_trace_callback(statements.append)
+            except Exception:  # noqa: BLE001
+                pass
+        return conn
+
+    monkeypatch.setattr(type(db), "_get_connection", traced)
+    world.as_profile(1)
+    urls = [
+        f"/api/library/v2/albums/{album_id}/lock",
+        f"/api/library/v2/artists/{artist_id}/lock",
+        f"/api/library/v2/artists/{artist_id}/review?after={album_id}",
+        "/api/library/v2/locks",
+        "/api/library/v2/artists?review=reviewed",
+        "/api/library/v2/artists?review=unreviewed",
+    ]
+    found: Counter = Counter()
+    try:
+        for url in urls:
+            statements.clear()
+            assert world.client.get(url).status_code == 200, url
+            seen = list(statements)
+            with real_get(db) as plan_conn:
+                for sql in seen:
+                    head = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
+                    if head in ("SELECT", "WITH"):
+                        for table in _big_scans(plan_conn, sql):
+                            found[(url.split("?")[0] + ("?review" if "review=" in url else ""),
+                                   table)] += 1
+        # the automation side: the files of locked albums, and the enrichment queue
+        with real_get(db) as plan_conn:
+            for sql in (
+                "SELECT f.path, t.album_id FROM lib2_entity_locks lk "
+                "JOIN lib2_tracks t ON t.album_id=lk.entity_id "
+                "JOIN lib2_track_files f ON f.track_id=t.id "
+                "WHERE lk.entity_type='album' AND f.path IS NOT NULL AND f.path<>''",
+                f"SELECT e.id FROM lib2_tracks e WHERE e.id=1 AND "
+                f"{locks.unlocked_sql('track', 'e', 'metadata')}",
+            ):
+                for table in _big_scans(plan_conn, sql):
+                    found[("automation", table)] += 1
+    finally:
+        locks.reset_for_tests()
+    # the plain artist list reads lib2_artists once already (BASELINE above)
+    allowed = {("/api/library/v2/artists?review", "lib2_artists"): 2}
+    over = {key: n for key, n in found.items() if n > allowed.get(key, 0)}
+    assert not over, over

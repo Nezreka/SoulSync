@@ -11,9 +11,9 @@ describe('discography filters follow the provider (review 4 R4-E-2)', () => {
     expect(result.current.filters.mbDeclutter).toBeFalsy();
     rerender({ source: 'musicbrainz' });
     expect(result.current.filters.mbDeclutter).toBe(true);
-    expect(result.current.filters.content.live).toBe(false);
+    expect(result.current.filters.categories.live).toBe(false);
     rerender({ source: 'deezer' });
     expect(result.current.filters.mbDeclutter).toBeFalsy();
-    expect(result.current.filters.content.live).toBe(true);
+    expect(result.current.filters.categories.live).toBe(true);
   });
 });

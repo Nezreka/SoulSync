@@ -51,6 +51,10 @@ def propose_album_edition(database, config_manager, album_id, *, mode='active_pr
         album = conn.execute('SELECT * FROM lib2_albums WHERE id=?', (int(album_id),)).fetchone()
         if album is None or album['canonical_locked']:
             return None
+        from core.library2 import locks
+        if locks.blocks('album', album_id, 'match', 'Edition review', conn=conn):
+            # #2046: reviewed and locked, no other edition is proposed
+            return None
         source_ids = album_release_ids(album)
         reference_context = _album_tracklist_context(conn, album_id)
         cached = {}

@@ -1100,7 +1100,7 @@ def precache_tracklists(database, config_manager, *, progress=None) -> int:
         logger.debug("tracklist precache error: %s", e)
     if progress:
         progress("tracklists", total, total)
-    logger.info("Library v2 tracklist precache: %d resolved", resolved)
+    logger.info("Library tracklist precache: %d resolved", resolved)
     return resolved
 
 

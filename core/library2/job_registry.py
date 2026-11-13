@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 class JobAlreadyRunning(RuntimeError):
     def __init__(self, state: Dict[str, Any]):
-        super().__init__(f"Library v2 job {state['kind']} is already running")
+        super().__init__(f"Library job {state['kind']} is already running")
         self.state = state
 
 

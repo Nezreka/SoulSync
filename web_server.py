@@ -52,7 +52,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.4"
+_SOULSYNC_BASE_VERSION = "3.6.5"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -289,7 +289,9 @@ if os.path.exists(config_path):
             config_manager._load_config()
         logger.info("Web server configuration loaded successfully.")
 else:
-    logger.warning(f"config.json not found at {config_path}. Using default settings.")
+    # settings live in the database now. the file is only read when someone
+    # still has one, so its absence is the normal case, not a warning
+    logger.debug(f"No config.json at {config_path}: settings are read from the database.")
 # Correctly point to the 'webui' directory for templates and static files
 app = Flask(
     __name__,
@@ -394,7 +396,7 @@ def _hold_catalogue_jobs_during_upgrade():
         from core.library2.migration_gate import migration_required
         blocked = migration_required(get_database())
     except Exception as exc:  # fail closed: a half-known migration state is not writable
-        logger.warning("Could not verify Library v2 upgrade barrier: %s", exc)
+        logger.warning("Could not verify Library upgrade barrier: %s", exc)
         blocked = True
     if blocked:
         return jsonify({
@@ -6511,7 +6513,7 @@ def search_music():
     from core.library2.grab_context import resolve_lib2_grab_context
     _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
     if _lib2_state == 'invalid':
-        return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
+        return jsonify({"error": "Unknown Library entity for this search."}), 400
     # A Library-v2 Interactive Search sends no text: it asks the sources what
     # an automatic download would ask, and every hit carries the verdict.
     queries = [query] if query else (
@@ -7385,7 +7387,7 @@ def start_download():
         _lib2_state, _lib2_ctx = resolve_lib2_grab_context(
             get_database(), raw_data)
         if _lib2_state == 'invalid':
-            return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+            return jsonify({"error": "Unknown Library entity for this grab."}), 400
         from core.imports.upgrade_intent import (
             attach_upgrade_intent,
             issue_upgrade_intent,
@@ -7401,7 +7403,7 @@ def start_download():
                 "success": False,
                 "error": (
                     "Album results cannot be grabbed for a track-scoped "
-                    "Library v2 search. Select one track result instead."
+                    "Library search. Select one track result instead."
                 ),
             }), 400
 
@@ -13980,6 +13982,8 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            # the always-on pair starts with $disc: strip it whole first (#2044)
+            part = part.replace('$discnumalways', '').replace('$discalways', '')
             part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)
@@ -14269,6 +14273,8 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            # the always-on pair starts with $disc: strip it whole first (#2044)
+            part = part.replace('$discnumalways', '').replace('$discalways', '')
             part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)   # empty []
@@ -14781,14 +14787,20 @@ def notification_history():
     pid = get_current_profile_id()
     if request.method == 'DELETE':
         return jsonify({'success': True, 'removed': db.clear_notification_history(pid)})
+    type_filter = request.args.get('type')
+    search = request.args.get('q')
     rows = db.get_notification_history(
         pid,
-        type_filter=request.args.get('type'),
-        search=request.args.get('q'),
+        type_filter=type_filter,
+        search=search,
         limit=request.args.get('limit', default=100, type=int) or 100,
         offset=request.args.get('offset', default=0, type=int) or 0,
     )
-    return jsonify({'success': True, 'notifications': rows})
+    # how many of each kind match the search (the filter chips), and how many
+    # this request pages through ("Showing 100 of 1,204")
+    counts = db.get_notification_counts(pid, search=search)
+    total = counts.get(type_filter, 0) if type_filter in counts else sum(counts.values())
+    return jsonify({'success': True, 'notifications': rows, 'counts': counts, 'total': total})
 
 
 def _simple_monitor_task():
@@ -20667,7 +20679,7 @@ def _autostart_library_v2_bootstrap_import():
         settled = reconcile_incomplete_deletes(get_database())
         if settled:
             logger.info(
-                "Library v2 delete journal: settled %d item(s) left by an "
+                "Library delete journal: settled %d item(s) left by an "
                 "interrupted delete", settled,
             )
     except Exception as e:
@@ -20685,7 +20697,7 @@ def _autostart_library_v2_bootstrap_import():
     try:
         lib2_bootstrap.run_deferred_backfills(get_database())
     except Exception as e:
-        logger.warning(f"Library v2 convergence pass failed (retries next start): {e}")
+        logger.warning(f"Library convergence pass failed (retries next start): {e}")
 
     # iss29-A06: the backoff must describe how long we have been waiting for
     # something to happen, not how many times we have looked.
@@ -23866,6 +23878,10 @@ app.register_blueprint(_bp_upl())
 from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
 _cfg_msc(get_database=get_database)
 app.register_blueprint(_bp_msc())
+# MetaSync metadata depot: status + reconcile for the UI (the
+# node-facing push routes live on the v1 blueprint, api/metasync_depot)
+from api.metasync_depot import create_blueprint as _bp_msd
+app.register_blueprint(_bp_msd())
 # your own playlists identify themselves in the background after every edit,
 # so they are always ready to sync (core/playlists/auto_identify)
 from core.playlists import auto_identify as _auto_identify

@@ -22,6 +22,12 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDashboardHeader } from '../-dash.header';
+import {
+  publishHeroArt,
+  publishTileFacts,
+  publishTilePictures,
+  resetDashRoom,
+} from '../-dash.room';
 import { vanillaDashboardHtml } from './dash-artefact';
 import { DashboardHeaderView, QuickNavTiles } from './dashboard-header';
 
@@ -127,6 +133,90 @@ async function mountHeader() {
   });
   return view!;
 }
+
+describe('the listening room pieces', () => {
+  afterEach(() => act(() => resetDashRoom()));
+
+  it('the hero has no backdrop until a cover is known, then that cover', async () => {
+    const view = await mountHeader();
+    expect(view.container.querySelector('.room-backdrop')).toBeNull();
+    act(() => publishHeroArt('/art/geometry.jpg'));
+    const backdrop = view.container.querySelector<HTMLImageElement>('.dash-hero > .room-backdrop')!;
+    expect(backdrop.getAttribute('src')).toBe('/art/geometry.jpg');
+    // decoration only: nothing for a screen reader, and never a child of the orb stage
+    expect(backdrop.getAttribute('aria-hidden')).toBe('true');
+    expect(view.container.querySelector('.orb-stage .room-backdrop')).toBeNull();
+  });
+
+  it('each count tile shows a few of what it counts', async () => {
+    const view = await mountHeader();
+    const art = (id: string) =>
+      Array.from(view.container.querySelectorAll(`#${id} .room-tile-art img`)).map((img) =>
+        img.getAttribute('src'),
+      );
+    // the slots are there from the start, so the two tiles stay level
+    expect(view.container.querySelector('#watchlist-button .room-tile-art--faces')).not.toBeNull();
+    expect(view.container.querySelector('#wishlist-button .room-tile-art--sleeves')).not.toBeNull();
+    expect(art('watchlist-button')).toEqual([]);
+
+    act(() => {
+      publishTilePictures('faces', [
+        { name: 'Hotel Pools', image_url: 'https://cdn.example/hp.jpg' },
+        { name: 'Max Future', image_url: 'https://cdn.example/mf.jpg' },
+      ]);
+      publishTilePictures('sleeves', [{ name: 'pillows', image_url: 'https://cdn.example/p.jpg' }]);
+    });
+    expect(art('watchlist-button')).toEqual([
+      'https://cdn.example/hp.jpg',
+      'https://cdn.example/mf.jpg',
+    ]);
+    expect(art('wishlist-button')).toEqual(['https://cdn.example/p.jpg']);
+    // the count is the information: the pictures are hidden from readers
+    expect(
+      view.container.querySelector('#watchlist-button .room-tile-art')!.getAttribute('aria-hidden'),
+    ).toBe('true');
+  });
+
+  it('the watchlist count says what it is made of, and names its newest release', async () => {
+    const view = await mountHeader();
+    expect(view.container.querySelector('#watchlist-button .dash-tile-facts')).toBeNull();
+    act(() =>
+      publishTileFacts({
+        watchlist: {
+          released_month: 9,
+          releases_month: 1,
+          added_week: 0,
+          newest: {
+            album: 'Currents',
+            artist: 'Tame Impala',
+            date: '2026-11-09',
+            image_url: 'https://cdn.example/c.jpg',
+          },
+        },
+      }),
+    );
+    const tile = view.container.querySelector('#watchlist-button')!;
+    // a part that is zero is not a line
+    expect(
+      Array.from(tile.querySelectorAll('.dash-tile-fact')).map((row) => row.textContent),
+    ).toEqual(['9released something this month', '1new release this month']);
+    expect(tile.querySelector('.dash-tile-newest')!.textContent).toBe(
+      'Newest release: Currents by Tame Impala, Nov 9',
+    );
+    // an empty wishlist has nothing to break down
+    expect(view.container.querySelector('#wishlist-button .dash-tile-facts')).toBeNull();
+  });
+
+  it('a picture that fails to load steps out of the way', async () => {
+    const view = await mountHeader();
+    act(() =>
+      publishTilePictures('faces', [{ name: 'Gone', image_url: 'https://cdn.example/404.jpg' }]),
+    );
+    const img = view.container.querySelector<HTMLImageElement>('#watchlist-button img')!;
+    fireEvent.error(img);
+    expect(img.hidden).toBe(true);
+  });
+});
 
 describe('the artefact differential', () => {
   it('renders the vanilla orb strip 1:1, on the stage', async () => {

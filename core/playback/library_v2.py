@@ -91,7 +91,7 @@ def resolve_native_queue_track(db, raw, *, profile_id, library_owner_id, is_admi
 
     state, context = resolve_lib2_grab_context(db, raw)
     if state != 'ok' or not context.get('track_id'):
-        raise ValueError('Unknown Library v2 entity for playback')
+        raise ValueError('Unknown Library entity for playback')
     if not is_admin and not profile_may_grab(db, profile_id, raw):
         raise PermissionError('Downloads require an owned library for this profile')
 

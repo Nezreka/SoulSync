@@ -149,27 +149,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('OperationsStudio (Simple Mode)', () => {
-  it('a header library switch reloads the album grid too (review 4 R4-E-1)', async () => {
-    routes({ '/api/repair/findings/albums': { albums: [] } });
-    const albumCalls = () =>
-      fetchMock.mock.calls.filter(([url]) => String(url).includes('/findings/albums')).length;
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(albumCalls()).toBeGreaterThan(0));
-    const before = albumCalls();
-    window.dispatchEvent(new CustomEvent('ss:webui-library-scope-changed'));
-    await waitFor(() => expect(albumCalls()).toBeGreaterThan(before));
-  });
-
+describe('OperationsStudio (the top of the Jobs panel)', () => {
   it('renders all 4 Strategic Pillars and their titles', () => {
     const onShowFindings = vi.fn();
     const onSwitchToAdvanced = vi.fn();
@@ -179,115 +159,15 @@ describe('OperationsStudio (Simple Mode)', () => {
       <OperationsStudio
         jobs={testJobs}
         progress={{}}
-        runs={[]}
         onChanged={onChanged}
         onShowFindings={onShowFindings}
-        onSwitchToAdvanced={onSwitchToAdvanced}
+        onShowFamily={onSwitchToAdvanced}
       />,
     );
 
     for (const pillar of STRATEGIC_PILLARS) {
       expect(screen.getByText(pillar.title)).not.toBeNull();
     }
-  });
-
-  it('sorts every open type into what fixing it would do', async () => {
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('What needs you')).not.toBeNull();
-    expect(screen.getByText('Safe to fix')).not.toBeNull();
-    expect(screen.getByText('Needs your call')).not.toBeNull();
-    expect(screen.getByText('Review only')).not.toBeNull();
-
-    await waitFor(() => {
-      expect(screen.getByText('42 ready')).not.toBeNull();
-      expect(screen.getByText('3 to decide')).not.toBeNull();
-      expect(screen.getByText('8 to look at')).not.toBeNull();
-    });
-    // each card names the types inside it
-    const chips = [...document.querySelectorAll('.operations-triage-type')].map((el) =>
-      el.textContent?.trim(),
-    );
-    expect(chips).toEqual(['Missing Lyrics42', 'Corrupt Audio3', 'Canonical Version8']);
-  });
-
-  it('shows the same health score advanced mode does', async () => {
-    // 42 info (0.02 each) + 3 errors (1 each) + 8 info over a 1,000 track
-    // library: 100 - (0.84 + 3 + 0.16) = 96. the old simple-mode number was
-    // (1000 - 53) / 1000 = 95%, and advanced said something else again.
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        trackCount={1000}
-        onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-    await waitFor(() =>
-      expect(document.querySelector('.operations-exec-num')?.textContent).toBe('96'),
-    );
-    expect(document.querySelector('.operations-exec-status')?.textContent).toBe('healthy');
-    expect(screen.getByText('53 open findings')).not.toBeNull();
-  });
-
-  it('opens a type straight from its chip', async () => {
-    const onShowFindings = vi.fn();
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={onShowFindings}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-    await waitFor(() =>
-      expect(document.querySelectorAll('.operations-triage-type').length).toBe(3),
-    );
-    fireEvent.click(document.querySelectorAll('.operations-triage-type')[1]);
-    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'corrupt_audio' });
-  });
-
-  it('triggers the safe fix-all when "Fix all" is clicked', async () => {
-    routes({
-      '/api/repair/findings/groups': { groups: mockFindingGroups },
-      '/api/repair/findings/bulk-fix-start': { started: true, total: 42 },
-    });
-
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Fix all 42')).not.toBeNull();
-    });
-
-    fireEvent.click(screen.getByText('Fix all 42'));
-
-    await waitFor(() => {
-      const calls = fetchMock.mock.calls.map((c) => String(c[0]));
-      expect(calls.some((url) => url.includes('bulk-fix-start'))).toBe(true);
-    });
   });
 
   it('renders Live Mission Control HUD when a job is actively running', async () => {
@@ -309,10 +189,9 @@ describe('OperationsStudio (Simple Mode)', () => {
             phase: 'Verifying FLAC frame signatures…',
           },
         }}
-        runs={[]}
         onChanged={vi.fn()}
         onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
+        onShowFamily={vi.fn()}
       />,
     );
 
@@ -320,39 +199,10 @@ describe('OperationsStudio (Simple Mode)', () => {
     expect(document.querySelector('.operations-live-hud-name')?.textContent).toBe(
       'Audio Corruption Detector',
     );
-    expect(screen.getByText('Verifying FLAC frame signatures…')).not.toBeNull();
-    expect(screen.getByText('⏹ Stop')).not.toBeNull();
-  });
-
-  it('opens the biggest type in each bucket when Quarantine or Suggestions is clicked', async () => {
-    // the buckets are destructive / fixable, not severity. a severity filter
-    // showed something other than what the card counted (orphans are 'info')
-    const onShowFindings = vi.fn();
-    render(
-      <OperationsStudio
-        jobs={testJobs}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={onShowFindings}
-        onSwitchToAdvanced={vi.fn()}
-      />,
+    expect(document.querySelector('.operations-live-hud-phase')?.textContent).toContain(
+      'Verifying FLAC frame signatures…',
     );
-
-    await waitFor(() => {
-      expect(screen.getByText('Review Canonical Version →')).not.toBeNull();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Review Canonical Version →').closest('button')?.disabled).toBe(
-        false,
-      );
-    });
-    fireEvent.click(screen.getByText('Review Canonical Version →'));
-    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'canonical_version' });
-
-    fireEvent.click(screen.getByText('Review Corrupt Audio →'));
-    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'corrupt_audio' });
+    expect(screen.getByRole('button', { name: 'Stop' })).not.toBeNull();
   });
 
   it('renders all 1-Click Playbooks', () => {
@@ -360,10 +210,9 @@ describe('OperationsStudio (Simple Mode)', () => {
       <OperationsStudio
         jobs={testJobs}
         progress={{}}
-        runs={[]}
         onChanged={vi.fn()}
         onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
+        onShowFamily={vi.fn()}
       />,
     );
 
@@ -380,10 +229,9 @@ describe('OperationsStudio (Simple Mode)', () => {
       <OperationsStudio
         jobs={testJobs}
         progress={{}}
-        runs={[]}
         onChanged={onChanged}
         onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
+        onShowFamily={vi.fn()}
       />,
     );
 
@@ -445,10 +293,9 @@ describe('OperationsStudio (Simple Mode)', () => {
       <OperationsStudio
         jobs={catalogueIds.map((job_id) => mockJob({ job_id }))}
         progress={{}}
-        runs={[]}
         onChanged={vi.fn()}
         onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
+        onShowFamily={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByText(title).closest('button')!);
@@ -460,17 +307,16 @@ describe('OperationsStudio (Simple Mode)', () => {
     });
   });
 
-  it('navigates to advanced mode when "Inspect in Advanced" is clicked', () => {
-    const onSwitchToAdvanced = vi.fn();
+  it("an area's Job settings asks for its family in the job list", () => {
+    const onShowFamily = vi.fn();
 
     const { container } = render(
       <OperationsStudio
         jobs={testJobs}
         progress={{}}
-        runs={[]}
         onChanged={vi.fn()}
         onShowFindings={vi.fn()}
-        onSwitchToAdvanced={onSwitchToAdvanced}
+        onShowFamily={onShowFamily}
       />,
     );
 
@@ -478,163 +324,63 @@ describe('OperationsStudio (Simple Mode)', () => {
     expect(inspectLinks.length).toBeGreaterThan(0);
 
     fireEvent.click(inspectLinks[0]);
-    expect(onSwitchToAdvanced).toHaveBeenCalledWith('Audio quality');
-  });
-});
-
-describe('Operations component mode switcher', () => {
-  it('defaults to Simple Mode and renders the mode toggle bar', () => {
-    const { container } = render(
-      <Operations
-        jobs={testJobs}
-        error={false}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onHelp={vi.fn()}
-        onShowFindings={vi.fn()}
-      />,
-    );
-
-    expect(container.querySelector('.operations-mode-bar')).not.toBeNull();
-    expect(container.querySelector('.operations-studio')).not.toBeNull();
-
-    const simpleBtn = container.querySelector('.operations-mode-toggle-btn[aria-selected="true"]');
-    expect(simpleBtn?.textContent).toContain('Simple Mode');
+    expect(onShowFamily).toHaveBeenCalledWith('Audio quality');
   });
 
-  it('switches between Simple and Advanced modes when toggle buttons are clicked', () => {
-    const onModeChange = vi.fn();
-
-    const { container } = render(
-      <Operations
-        jobs={testJobs}
-        error={false}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onHelp={vi.fn()}
-        onShowFindings={vi.fn()}
-        onModeChange={onModeChange}
-      />,
-    );
-
-    // Click Advanced Mode button
-    const advancedBtn = [...container.querySelectorAll('.operations-mode-toggle-btn')].find((btn) =>
-      btn.textContent?.includes('Advanced Mode'),
-    );
-    expect(advancedBtn).not.toBeUndefined();
-
-    fireEvent.click(advancedBtn!);
-
-    expect(onModeChange).toHaveBeenCalledWith('advanced');
-    expect(localStorage.getItem('soulsync_operations_mode')).toBe('advanced');
-
-    // Advanced mode reveals the repair families container
-    const families = container.querySelector('.repair-families') as HTMLElement;
-    expect(families.hidden).toBe(false);
-  });
-});
-
-// ── the album tray fixes like Advanced mode does (review 5 W3-TT-3) ──────────
-
-describe('Simple mode album tray fixes', () => {
-  const card = {
-    group_by: 'album',
-    key: 'band|record',
-    artist: 'Band',
-    album: 'Record',
-    count: 1,
-    worst_score: null,
-    best_score: null,
-    worst_quality: '',
-    best_quality: '',
-    album_thumb_url: null,
-    artist_thumb_url: null,
-    artist_id: null,
-    first_seen: null,
-    last_seen: null,
-  };
-  const row = (over: Record<string, unknown>) => ({
-    id: 9,
-    job_id: 'audio_corruption_detector',
-    finding_type: 'corrupt_audio',
-    severity: 'error',
-    status: 'pending',
-    title: 'Broken track',
-    description: 'damaged',
-    file_path: '/music/Band/Record/01.flac',
-    entity_type: 'file',
-    entity_id: null,
-    created_at: '2026-11-01',
-    details: { artist: 'Band', album: 'Record' },
-    ...over,
-  });
-  const confirmSpy = vi.fn();
-
-  async function openTray(finding: Record<string, unknown>, fix: unknown = { success: true }) {
-    routes({
-      '/api/repair/findings/albums': { groups: [card] },
-      '/api/repair/findings?': { items: [finding], total: 1, page: 0 },
-      '/api/repair/findings/9/fix': fix,
-    });
-    Object.assign(window, { showConfirmDialog: confirmSpy });
+  it('an area counts its open findings and opens the biggest type', async () => {
+    const onShowFindings = vi.fn();
     render(
       <OperationsStudio
         jobs={testJobs}
         progress={{}}
-        runs={[]}
         onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
+        onShowFindings={onShowFindings}
+        onShowFamily={vi.fn()}
       />,
     );
-    const cardButton = await waitFor(() => {
-      const node = document.querySelector('.repair-album-card');
-      expect(node).not.toBeNull();
-      return node as HTMLElement;
-    });
-    fireEvent.click(cardButton);
-  }
-
-  const fixCalls = () =>
-    fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/findings/9/fix'));
-
-  beforeEach(() => confirmSpy.mockReset());
-
-  it('asks before a Delete File moves an uncatalogued file away', async () => {
-    confirmSpy.mockResolvedValue(false);
-    await openTray(row({}));
-    fireEvent.click(await screen.findByText('Delete File'));
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
-    expect(confirmSpy.mock.calls[0][0]).toMatchObject({
-      title: 'Delete File',
-      destructive: true,
-    });
-    expect(confirmSpy.mock.calls[0][0].message).toContain('deleted-files folder');
-    expect(fixCalls()).toHaveLength(0);
+    // artwork & lyrics holds the 42 missing lyrics; audio holds the 3 corrupt
+    fireEvent.click(await screen.findByRole('button', { name: '42 open' }));
+    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'missing_lyrics' });
+    fireEvent.click(screen.getByRole('button', { name: '3 open' }));
+    expect(onShowFindings).toHaveBeenLastCalledWith('', { findingType: 'corrupt_audio' });
   });
 
-  it('sends the delete it confirmed and shows the result', async () => {
-    confirmSpy.mockResolvedValue(true);
-    await openTray(row({}), { success: true, message: 'Moved to deleted files' });
-    fireEvent.click(await screen.findByText('Delete File'));
-    await waitFor(() => expect(fixCalls()).toHaveLength(1));
-    expect(JSON.parse(String(fixCalls()[0][1]?.body))).toEqual({ fix_action: 'delete' });
-    await waitFor(() => expect(toastSpy).toHaveBeenCalledWith('Moved to deleted files', 'success'));
-  });
-
-  it('asks the orphan question instead of posting a fix with no action', async () => {
-    await openTray(
-      row({ finding_type: 'orphan_file', severity: 'warning', job_id: 'orphan_file_detector' }),
+  it('the tag area owns re-tag and edition findings', async () => {
+    // they had no area, so tags read Clean over tens of thousands of them
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onShowFamily={vi.fn()}
+      />,
     );
-    const fixButton = await waitFor(() => {
-      const node = document.querySelector('.album-action-btn.btn--primary');
-      expect(node).not.toBeNull();
-      return node as HTMLElement;
-    });
-    fireEvent.click(fixButton);
-    await waitFor(() => expect(document.getElementById('_orphan-staging')).not.toBeNull());
-    expect(fixCalls()).toHaveLength(0);
+    expect(await screen.findByRole('button', { name: '8 open' })).not.toBeNull();
+    const tags = STRATEGIC_PILLARS.find((pillar) => pillar.id === 'metadata')!;
+    expect(tags.findingTypes).toContain('library_retag');
+    expect(tags.findingTypes).toContain('canonical_version');
+    // and the area that counts them also checks them
+    expect(tags.jobIds).toContain('library_retag');
+    expect(tags.jobIds).toContain('album_edition_review');
+  });
+});
+
+describe('the job list has no mode', () => {
+  it('shows every family and job without a switch', () => {
+    const { container } = render(
+      <Operations
+        jobs={testJobs}
+        error={false}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onHelp={vi.fn()}
+        onShowFindings={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.operations-mode-toggle-btn')).toBeNull();
+    expect(container.querySelectorAll('.repair-job-card').length).toBe(testJobs.length);
+    expect((container.querySelector('.repair-families') as HTMLElement).hidden).toBe(false);
   });
 });

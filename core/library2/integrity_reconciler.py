@@ -292,7 +292,7 @@ def build_integrity_report(
                     "library_v2",
                     row["id"],
                     (
-                        "Active Library-v2 file is absent on a healthy storage root"
+                        "Active Library file is absent on a healthy storage root"
                         if healthy else
                         "File cannot be resolved; unhealthy storage prevents confirmation"
                     ),
@@ -303,7 +303,7 @@ def build_integrity_report(
             if len(track_ids) > 1:
                 collector.add(
                     "lib2_path_multiple_tracks", "error", "library_v2", key,
-                    "One physical file is attached to multiple Library-v2 tracks",
+                    "One physical file is attached to multiple Library tracks",
                     track_ids=sorted(track_ids),
                 )
 

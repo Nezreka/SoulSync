@@ -16,6 +16,7 @@ import {
   findingSeverityIcon,
   findingTypeLabel,
 } from '../-tools.core';
+import { describeFinding } from '../-tools.finding-copy';
 import { VinylCoverFallback } from './album-cover-fallback';
 
 export interface AlbumInspectionTrayProps {
@@ -312,12 +313,13 @@ export function AlbumInspectionTray({
 
         <div className="album-tray-info">
           <div className="album-tray-badges">
-            <span className="album-tray-type-badge">Album Action Center</span>
             {group.worst_quality ? (
               <span className="album-tray-quality-badge">{group.worst_quality}</span>
             ) : null}
             {group.error_count && group.error_count > 0 ? (
-              <span className="album-tray-error-badge">⚠️ {group.error_count} Failed Fixes</span>
+              <span className="album-tray-error-badge">
+                {group.error_count} fix{group.error_count === 1 ? '' : 'es'} failed
+              </span>
             ) : null}
           </div>
           <h3 className="album-tray-title">{albumName}</h3>
@@ -333,16 +335,6 @@ export function AlbumInspectionTray({
                 onClick={() => void handleFixAllOnAlbum()}
                 title="Automatically resolve all safe issues on this album"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                </svg>
                 Resolve Album
               </button>
               <button
@@ -375,7 +367,7 @@ export function AlbumInspectionTray({
                 onClick={() => void handleReopenAllOnAlbum()}
                 title="Reopen all resolved issues on this album"
               >
-                ↺ Reopen Album
+                Reopen Album
               </button>
             </>
           ) : status === 'dismissed' ? (
@@ -387,7 +379,7 @@ export function AlbumInspectionTray({
                 onClick={() => void handleReopenAllOnAlbum()}
                 title="Reopen all dismissed issues on this album"
               >
-                ↺ Reopen Album
+                Reopen Album
               </button>
             </>
           ) : null}
@@ -416,7 +408,6 @@ export function AlbumInspectionTray({
 
       {actionError ? (
         <div className="album-tray-alert error">
-          <span>⚠️</span>
           <span>{actionError}</span>
         </div>
       ) : null}
@@ -438,7 +429,7 @@ export function AlbumInspectionTray({
           </div>
         ) : !findings || findings.length === 0 ? (
           <div className="album-tray-empty">
-            <span>✨ No issues found on this album for the current filter.</span>
+            <span>No issues found on this album for the current filter.</span>
           </div>
         ) : (
           <div className="album-tray-tracks-list">
@@ -475,7 +466,7 @@ export function AlbumInspectionTray({
                     <div className="album-track-meta">
                       <div className="album-track-title-row">
                         <span className="album-track-title">
-                          {details.track_title || details.title || f.title}
+                          {details.track_title || details.title || describeFinding(f).title}
                         </span>
                         <span className={`album-track-issue-tag ${f.finding_type}`}>
                           {findingTypeLabel(f.finding_type)}
@@ -486,12 +477,11 @@ export function AlbumInspectionTray({
                       </div>
 
                       <div className="album-track-desc">
-                        {f.description || details.description || f.file_path}
+                        {describeFinding(f, fixLabel).problem || details.description || f.file_path}
                       </div>
 
                       {f.finding_type === 'corrupt_audio' ? (
                         <div className="album-track-diagnostic corrupt">
-                          <span className="diagnostic-icon">🔴</span>
                           <span className="diagnostic-text">
                             <strong>Corrupt Audio:</strong>{' '}
                             {details.error_type ||
@@ -500,7 +490,6 @@ export function AlbumInspectionTray({
                         </div>
                       ) : f.finding_type === 'fake_lossless' ? (
                         <div className="album-track-diagnostic fake">
-                          <span className="diagnostic-icon">🟡</span>
                           <span className="diagnostic-text">
                             <strong>Spectral Transcode:</strong>{' '}
                             {details.spectral_status ||
@@ -511,21 +500,9 @@ export function AlbumInspectionTray({
 
                       {f.last_error ? (
                         <div className="album-track-error-callout" role="alert">
-                          <span className="error-icon">⚠️</span>
                           <span className="error-text">
-                            <strong>Last attempt failed:</strong> {f.last_error}
+                            <strong>Last try failed:</strong> {f.last_error}
                           </span>
-                          {fixLabel && (
-                            <button
-                              type="button"
-                              className="album-error-retry-btn"
-                              disabled={busy}
-                              onClick={() => void handleFixOne(f)}
-                              title="Retry resolving this track"
-                            >
-                              {busy ? '...' : 'Retry'}
-                            </button>
-                          )}
                         </div>
                       ) : null}
                     </div>
@@ -598,7 +575,7 @@ export function AlbumInspectionTray({
                             onClick={() => void handleReopenOne(f.id)}
                             title="Reopen issue and move back to Pending"
                           >
-                            ↺ Reopen
+                            Reopen
                           </button>
                         </div>
                       ) : (
@@ -611,7 +588,7 @@ export function AlbumInspectionTray({
                             onClick={() => void handleReopenOne(f.id)}
                             title="Reopen issue and move back to Pending"
                           >
-                            ↺ Reopen
+                            Reopen
                           </button>
                         </div>
                       )}

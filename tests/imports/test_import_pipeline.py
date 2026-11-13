@@ -245,7 +245,7 @@ def test_existing_destination_is_not_success_when_library_registration_fails(
 
     assert confirmed is False
     assert context.get("_pipeline_import_succeeded") is not True
-    assert "Library v2" in context["_context_failure_msg"]
+    assert "Library" in context["_context_failure_msg"]
 
 
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):

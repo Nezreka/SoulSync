@@ -51,33 +51,44 @@ export function DashboardPage() {
   }, []);
 
   return (
-    <div className="page-shell dashboard-container" id="dashboard-page">
+    <div className="page-shell dashboard-container dash-room" id="dashboard-page">
       <DashboardHeaderView header={header} library={<LibraryCard />} />
       {/* The exception surface: renders NOTHING while every core connection
           is healthy — the one place that shouts when a human is needed. */}
       <AlertsBand />
-      <div className="dash-layout">
-        <div className="dash-main">
-          {/* What setup left for later. Renders nothing once it's all done,
-              dismissed, or for anyone who isn't an admin. */}
-          <FinishSetupCard />
-          {/* This week in listening — renders nothing until plays exist. */}
+      <div className="room-top">
+        {/* What setup left for later. Renders nothing once it's all done,
+            dismissed, or for anyone who isn't an admin. */}
+        <FinishSetupCard />
+        {/* Only while something is downloading. The download cards are
+            painted by vanilla into this shell. */}
+        <ActiveDownloadsShell />
+        {/* What you came to play: Library Radio and the mixes, first thing
+            under the hero. */}
+        <ListenBand />
+      </div>
+      {/* The music comes first: the mixes, then what just arrived, the full
+          width of the page. Renders nothing until a feed has rows. */}
+      <div className="room-shelves">
+        <ContentBand />
+      </div>
+      {/* The system as a board: your week, what you watch and wish for,
+          playlist sync, what runs next. Two by two, and all four in one row
+          once the page is wide enough to give each its own column (the
+          wrap is what the board measures itself against). Each card renders
+          nothing when its part is off or empty, and the grid closes up. */}
+      <div className="room-board-wrap">
+        <section className="room-board" aria-label="Your system">
           {statsOn ? <WeeklyDigest /> : null}
-          {/* Only while something is downloading. It stays full width: the
-              download cards are painted by vanilla into this shell. */}
-          <ActiveDownloadsShell />
-          {/* What's new in the library. Renders nothing until a feed has rows. */}
-          <ContentBand />
-          {/* What you've been playing. Renders nothing until history exists. */}
-          <ListeningHistoryBand />
-          {/* The payoff: Library Radio and the Mixes doorway — below the rails. */}
-          <ListenBand />
-        </div>
-        <aside className="dash-side" aria-label="Your system">
-          {playlistsOn ? <SyncRail /> : null}
-          {automationsOn ? <AutomationsCard compact /> : null}
           <QuickNavTiles header={header} />
-        </aside>
+          {playlistsOn ? <SyncRail /> : null}
+          {automationsOn ? <AutomationsCard compact timeline /> : null}
+        </section>
+      </div>
+      {/* What you've been playing, last on the page: it is a look back, not
+          something to act on. Renders nothing until history exists. */}
+      <div className="room-shelves room-shelves--last">
+        <ListeningHistoryBand />
       </div>
       <footer className="dash-footer">
         <QuickSettings />

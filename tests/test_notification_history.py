@@ -104,3 +104,39 @@ def test_frontend_wiring():
     assert '_openNotifHistory' in js and 'notif-history-modal' in css
     # destructive clear goes through the SoulSync confirm dialog, never window.confirm
     assert 'showConfirmDialog' in js.split('function _clearServerNotifHistory')[1][:600]
+
+
+def test_counts_by_type_follow_the_search_not_the_type_filter(db):
+    db.add_notifications([
+        {'type': 'error', 'message': 'Download failed: Adrianne'},
+        {'type': 'success', 'message': 'Downloaded: Adrianne'},
+        {'type': 'success', 'message': 'Playlist synced'},
+        {'type': 'info', 'message': '100% done_now'},
+    ])
+    assert db.get_notification_counts() == {'success': 2, 'error': 1, 'warning': 0, 'info': 1}
+    assert db.get_notification_counts(search='adrianne') == {
+        'success': 1, 'error': 1, 'warning': 0, 'info': 0}
+    # wildcards typed into the search are letters, as in the list itself
+    assert sum(db.get_notification_counts(search='%').values()) == 1
+    assert sum(db.get_notification_counts(search='_').values()) == 1
+    assert sum(db.get_notification_counts(profile_id=2).values()) == 0
+
+
+def test_the_panel_is_built_to_be_read_and_used():
+    js = (_ROOT / 'webui' / 'static' / 'downloads.js').read_text(encoding='utf-8', errors='replace')
+    # the history endpoint hands back what the chips and the footer show
+    src = (_ROOT / 'web_server.py').read_text(encoding='utf-8', errors='replace')
+    assert "'counts': counts, 'total': total" in src
+    # notes stay new until the panel closes, and a reload fills it from the journal
+    assert '_notifMarkSeen()' in js.split('function _closeNotifPanel')[1][:700]
+    assert '_notifMarkSeen' not in js.split('function _openNotifPanel')[1].split('function _closeNotifPanel')[0]
+    assert '_seedNotifPanelFromJournal' in js
+    # the filters are words with counts, not four symbols
+    assert "['error', 'Problems']" in js and "['success', 'Done']" in js
+    # the panel is a dialog that Escape closes, and the bell says whether it is open
+    opener = js.split('function _openNotifPanel')[1].split('function _closeNotifPanel')[0]
+    assert "setAttribute('role', 'dialog')" in opener and "'Escape'" in opener
+    assert "setAttribute('aria-expanded', 'true')" in opener
+    # no emoji left standing in for an icon
+    for emoji in ('\\ud83e\\ude7a', '🔔', '🔴', '⚠️'):
+        assert emoji not in js.split('function _notifHealthHTML')[1].split('function _notifTimeAgo')[0]

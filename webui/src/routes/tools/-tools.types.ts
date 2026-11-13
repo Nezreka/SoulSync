@@ -124,6 +124,16 @@ export interface RepairFinding {
   created_at?: string | null;
   user_action?: string | null;
   last_error?: string | null;
+  /** #2046: its album or artist is reviewed and locked. a bulk fix leaves
+   *  it alone; Fix on the row itself still works */
+  locked?: { entity_type: 'album' | 'artist'; entity_id: number } | null;
+  /** the cover and artist picture to show beside the row, looked up by the
+   *  server from the catalogue when the finding stored none */
+  album_thumb_url?: string | null;
+  artist_thumb_url?: string | null;
+  /** an open re-tag finding: every tag Apply Tags would change, with the
+   *  value in the file beside the one the library holds */
+  preview?: unknown;
   /** Per-finding-type payload. Deliberately unknown — every one of the 20
    *  renderers reads a different set of keys. */
   details?: Record<string, unknown> | null;

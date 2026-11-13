@@ -10,7 +10,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
+import {
+  DbUpdaterCard,
+  DuplicateCleanerCard,
+  formatDatabaseSize,
+  ReconcileIdsCard,
+} from './scanning-cards';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -82,7 +87,7 @@ describe('DbUpdaterCard', () => {
     await waitFor(() =>
       expect(container.querySelector('#db-stat-artists')?.textContent).toBe('1,234'),
     );
-    expect(container.querySelector('#db-stat-size')?.textContent).toBe('42.13 MB');
+    expect(container.querySelector('#db-stat-size')?.textContent).toBe('42 MB');
     expect(container.querySelector('#db-last-refresh')?.textContent).toBe('Never');
   });
 
@@ -605,5 +610,14 @@ describe('reconcile has THREE button states, not two', () => {
     await act(async () => {
       resolveStart({ ok: true, status: 200, json: async () => ({}) });
     });
+  });
+});
+
+describe('formatDatabaseSize', () => {
+  it('says megabytes whole and anything past a gigabyte in GB', () => {
+    expect(formatDatabaseSize(0)).toBe('0 MB');
+    expect(formatDatabaseSize(42.13)).toBe('42 MB');
+    expect(formatDatabaseSize(1023.4)).toBe('1023 MB');
+    expect(formatDatabaseSize(10749.96)).toBe('10.5 GB');
   });
 });

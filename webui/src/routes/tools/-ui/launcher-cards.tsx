@@ -49,6 +49,7 @@ export function DiscoveryPoolCard() {
     <ToolCard
       variant="launcher"
       id="discovery-pool-card"
+      icon="review"
       title="Match Review"
       info="View and fix matched/failed identification results across all mirrored playlists"
       statsId="discovery-pool-stats"
@@ -58,7 +59,9 @@ export function DiscoveryPoolCard() {
           label: 'Failed:',
           valueId: 'discovery-pool-failed-count',
           value: failed,
-          valueStyle: { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' },
+          // red only when there is something failed to look at; it used to be
+          // a red pill around a dash
+          valueStyle: Number(failed) > 0 ? { color: 'var(--danger-light)' } : undefined,
         },
       ]}
       controls={
@@ -79,6 +82,7 @@ export function ManualLibraryMatchCard() {
     <ToolCard
       variant="launcher"
       id="manual-library-match-card"
+      icon="link"
       title="Manual Library Match"
       info="Map wishlist and playlist source tracks to library tracks you already own"
       statsClassName="tool-card-stats manual-library-match-stats"
@@ -101,6 +105,7 @@ export function ConfigMigrationCard() {
     <ToolCard
       variant="launcher"
       id="config-migration-card"
+      icon="transfer"
       title="Config Migration"
       info="Export every setting (music + video) as one JSON file to move to a new install, or import one here."
       controls={
@@ -145,6 +150,7 @@ export function MetadataCacheCard() {
     <ToolCard
       variant="launcher"
       id="metadata-cache-card"
+      icon="cache"
       title="Metadata Cache"
       helpTool="metadata-cache"
       info={<>Cached API responses from Spotify &amp; iTunes</>}
@@ -198,6 +204,7 @@ export function BlacklistCard() {
     <ToolCard
       variant="launcher"
       id="blacklist-card"
+      icon="block"
       title="Download Blacklist"
       info="Blocked sources that won't be used for future downloads"
       stats={[{ label: 'Blocked:', valueId: 'blacklist-count', value: count }]}

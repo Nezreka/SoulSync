@@ -94,8 +94,8 @@ export function AutoSyncBoard({
   return (
     <>
       <AutoSyncBoardIntro
-        heading="Drag playlists into an interval"
-        blurb="Each placement creates or updates an Auto-Sync-owned playlist-pipeline automation."
+        heading="Drag a playlist onto how often it should sync"
+        blurb="Or tap a playlist to pick. Each one syncs on the interval it sits in."
       />
       <div className="auto-sync-body">
         <AutoSyncSidebar

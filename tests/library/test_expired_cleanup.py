@@ -276,6 +276,30 @@ def test_rotated_out_skips_nothing_else():
     assert _check(dict(base, play_count=2), pl="off") is False
 
 
+def _rotating(entry, **over):
+    return is_expired(dict(entry, rotated_out=True, **over), watchlist_retention="off",
+                      playlist_retention="off", min_plays=2, now=NOW,
+                      rotation_keeps_played=False)
+
+
+def test_a_play_need_not_keep_a_rotated_song():
+    """#2047: a rotating playlist is listened to. its owner can say a play is
+    no reason to keep what has left it."""
+    base = _entry(days_old=1)
+    assert _rotating(base, play_count=40) is True
+    assert _rotating(base, play_count=None) is True
+    # a deliberate act still keeps it, and so does everything else
+    assert _rotating(base, play_count=40, curated=True) is False
+    assert _rotating(base, protected=True) is False
+    assert _rotating(base, grandfathered=True) is False
+
+
+def test_the_switch_only_reaches_songs_that_left_a_rotating_playlist():
+    played = dict(_entry(days_old=400), play_count=5)
+    assert is_expired(played, watchlist_retention="off", playlist_retention="2mo",
+                      min_plays=2, now=NOW, rotation_keeps_played=False) is False
+
+
 def test_rotation_grace():
     from core.library.expired_cleanup import ROTATION_GRACE_OPTIONS, rotation_grace_passed
 

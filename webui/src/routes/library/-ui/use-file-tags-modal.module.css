@@ -1,0 +1,108 @@
+/* The Use file tags preview (#2070): what the files say against what the
+   Library has, as a short list a person can read before agreeing to it. */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 120px;
+}
+
+.summary {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.groupTitle {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rows {
+  display: flex;
+  overflow-y: auto;
+  flex-direction: column;
+  max-height: 46vh;
+  border: 1px solid var(--white-a08);
+  border-radius: 12px;
+  background: var(--white-a03);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 4px 16px;
+  padding: 10px 14px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--white-a06);
+}
+
+.name {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.changes b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.changes s {
+  color: var(--text-3);
+}
+
+.move {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.note {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.footNote {
+  margin-right: auto;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

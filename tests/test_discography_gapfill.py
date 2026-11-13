@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from core.metadata.discography_gapfill import (
     find_gap_releases,
     gap_fill_buckets,
@@ -226,3 +228,110 @@ def test_download_discography_modal_includes_gaps():
     assert "_gap_source: (release._gap_source" in module
     assert "source: e.gapSource || sourceForBatch" in module
     assert "data-gap-source=" in component
+
+
+# ── #2050: a single and the album named after it; the Library page's own base ─
+
+def test_a_title_track_single_does_not_hide_its_album():
+    """the page already had the single "Legacy". another source's 15 track
+    album "Legacy" was dropped as the same release."""
+    base = {"albums": [], "eps": [], "singles": [_c("Legacy", 2025, total_tracks=1)]}
+    others = {"deezer": {"albums": [_c("Legacy", 2025, "dz-lp", total_tracks=15)],
+                         "eps": [], "singles": [_c("Legacy", 2025, "dz-s", total_tracks=1)]}}
+    gaps = gap_fill_buckets(base, others, ["deezer"])
+    assert [g["id"] for g in gaps["albums"]] == ["dz-lp"]
+    assert gaps["singles"] == []          # the single is still one release
+
+
+def test_a_refiled_release_is_still_one_release():
+    # the same four tracks, an EP on one source and an album on the other
+    base = {"albums": [_c("Short One", 2020, total_tracks=4)], "eps": [], "singles": []}
+    others = {"deezer": {"albums": [], "eps": [_c("Short One", 2020, "dz-e", total_tracks=4)],
+                         "singles": []}}
+    assert gap_fill_buckets(base, others, ["deezer"]) == {"albums": [], "eps": [], "singles": []}
+    # and with no counts to go on, the older rule holds: one release
+    base = {"albums": [_c("Blue Album", 2005)], "eps": [], "singles": []}
+    others = {"deezer": {"albums": [], "eps": [],
+                         "singles": [_c("Blue Album", 2005, "dz-1", total_tracks=1)]}}
+    assert gap_fill_buckets(base, others, ["deezer"]) == {"albums": [], "eps": [], "singles": []}
+
+
+def test_size_only_separates_across_buckets():
+    # two "albums" of one name and year stay one card whatever their counts:
+    # an edition is told by its title, as before
+    base = {"albums": [_c("Same", 2010, total_tracks=2)], "eps": [], "singles": []}
+    others = {"deezer": {"albums": [_c("Same", 2010, "dz", total_tracks=14)],
+                         "eps": [], "singles": []}}
+    assert gap_fill_buckets(base, others, ["deezer"])["albums"] == []
+
+
+def _library_client(tmp_path, monkeypatch, fetched):
+    flask = pytest.importorskip("flask")
+    import api.artist_detail as ad
+    from core.library2.schema import ensure_library_v2_schema
+    from core.metadata import discography_strict
+    from tests.lib2_seed import row_conn
+
+    path = str(tmp_path / "lib2.db")
+    conn = row_conn(path)
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists(id, name, sort_name, musicbrainz_id, external_ids) "
+                 "VALUES(1, 'Mendo Dope', 'Mendo Dope', 'mb-1', '{\"deezer\":\"dz-1\"}')")
+    conn.execute("INSERT INTO lib2_artists(id, name, sort_name, canonical_artist_id) "
+                 "VALUES(2, 'Mendo Dope', 'Mendo Dope', 1)")
+    for album_id, artist, title, kind, year in (
+            (10, 1, "Savages", "album", 2015), (11, 1, "Legacy", "single", 2025),
+            (12, 2, "Planters of the Trees", "album", 2013)):
+        conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, album_type, year, "
+                     "expected_track_count) VALUES(?,?,?,?,?,?)",
+                     (album_id, artist, title, kind, year, 1 if kind == "single" else 12))
+    conn.commit()
+    conn.close()
+
+    class _Db:
+        def _get_connection(self):
+            return row_conn(path)
+
+    def fake(artist_id, artist_name="", options=None):
+        source = options.source_override
+        fetched.append((source, artist_id))
+        if source == "deezer":
+            return {"state": "results", "source": "deezer", "eps": [], "singles": [], "albums": [
+                {"id": "d1", "title": "Savages", "year": 2015, "total_tracks": 12},
+                {"id": "d2", "title": "Legacy", "year": 2025, "total_tracks": 15},
+                {"id": "d3", "title": "Censored", "year": 2026, "total_tracks": 14},
+                {"id": "d4", "title": "Planters Of The Trees", "year": 2013, "total_tracks": 12},
+            ]}
+        return {"state": "empty"}
+
+    monkeypatch.setattr(ad, "get_database", lambda: _Db())
+    monkeypatch.setattr(discography_strict, "get_artist_detail_discography", fake)
+    app = flask.Flask(__name__)
+    app.register_blueprint(ad.bp)
+    return app.test_client()
+
+
+def test_the_library_page_is_diffed_against_what_it_lists(tmp_path, monkeypatch):
+    """the page lists the catalogue. with a provider as the base, Deezer's own
+    albums the catalogue lacked were never offered (Deezer was "the base"),
+    and ones the catalogue held were offered again."""
+    fetched = []
+    client = _library_client(tmp_path, monkeypatch, fetched)
+    payload = client.get("/api/artist/dz-1/discography/gap-fill"
+                         "?artist_name=Mendo+Dope&library_artist=1").get_json()
+    assert payload["success"] is True and payload["base_source"] == "library"
+    # Savages and Planters (held, one under an alias row) are not offered again;
+    # Legacy the album is not the single; Censored is new
+    assert [g["title"] for g in payload["gaps"]["albums"]] == ["Legacy", "Censored"]
+    assert {g["gap_source"] for g in payload["gaps"]["albums"]} == {"deezer"}
+    # every source the artist has a verified id for was asked, by ITS id
+    assert ("deezer", "dz-1") in fetched and ("musicbrainz", "mb-1") in fetched
+    assert payload["sources_checked"] == ["deezer"]
+
+
+def test_an_artist_not_in_the_catalogue_keeps_the_provider_base(tmp_path, monkeypatch):
+    fetched = []
+    client = _library_client(tmp_path, monkeypatch, fetched)
+    payload = client.get("/api/artist/dz-1/discography/gap-fill"
+                         "?artist_name=Mendo+Dope&library_artist=999").get_json()
+    assert payload["success"] is True and payload["base_source"] != "library"

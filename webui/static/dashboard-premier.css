@@ -1448,3 +1448,1885 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     border: 0;
     box-shadow: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   9. THE LISTENING ROOM (Nov 2026)
+
+   The page is rearranged, so this section supersedes the "layout contract"
+   at the top of the file for the music dashboard: the right-hand rail is
+   gone. The hero keeps the greeting, the library and the orbs; what you
+   came to play is the first row under it; the system is a board of four
+   cards, two by two; the shelves run the full width.
+
+   Everything is scoped to .dash-room, the class the music dashboard's root
+   carries. The video dashboard shares these components and does not have
+   it, so nothing here reaches it.
+
+   The orb contract still holds: .orb-stage and its ancestors get no
+   transform, filter or opacity. The backdrop is a child that clips itself,
+   so the hero needs no overflow and the orb tooltips still escape it.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+#dashboard-page.dash-room {
+    gap: 22px;
+}
+
+/* ── the hero ── */
+/* No frame. The greeting sits on the page and the orbs have the right half
+   to themselves: a card around the two left the space between them reading
+   as an empty box. The stage is wide on purpose, worker-orbs.js stretches
+   the orbit to fill a wide stage. */
+#dashboard-page.dash-room .dashboard-header.dash-hero {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 24px;
+    align-items: center;
+    margin: 0;
+    padding: 10px 6px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+/* the old card's accent lines along its bottom edge */
+#dashboard-page.dash-room .dashboard-header.dash-hero .dashboard-header-sweep,
+#dashboard-page.dash-room .dashboard-header.dash-hero::after {
+    display: none;
+}
+/* The last cover you played, behind the greeting. It clips itself to the
+   hero's corners, so the blur cannot spill and the hero stays overflow
+   visible for the orbs. */
+#dashboard-page.dash-room .room-backdrop {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    pointer-events: none;
+    filter: blur(52px) saturate(1.5);
+    opacity: 0.5;
+    /* a pool of colour behind the orbs that is gone well before the edges
+       (a blurred image still ends in a hard line where its box does), so the
+       cover lights the right of the page without drawing a box round it */
+    -webkit-mask-image: radial-gradient(closest-side at 72% 50%, var(--black-a90) 0%, var(--black-a40) 45%, transparent 82%);
+    mask-image: radial-gradient(closest-side at 72% 50%, var(--black-a90) 0%, var(--black-a40) 45%, transparent 82%);
+    animation: room-drift 40s ease-in-out infinite alternate;
+}
+@keyframes room-drift {
+    to { object-position: 60% 40%; }
+}
+body.reduce-effects #dashboard-page.dash-room .room-backdrop,
+body.max-performance #dashboard-page.dash-room .room-backdrop {
+    display: none;
+}
+#dashboard-page.dash-room .dash-hero-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px clamp(18px, 2.4vw, 34px);
+}
+#dashboard-page.dash-room .orb-stage {
+    min-height: 240px;
+    padding: 18px 12px 34px;
+    /* the orbs' own light, for when no cover has been played yet */
+    background: radial-gradient(closest-side at 50% 46%, rgba(var(--accent-rgb), 0.14), transparent 100%);
+}
+/* "2 workers busy" sits under the nucleus it describes, not in a far corner */
+#dashboard-page.dash-room .orb-stage-caption {
+    left: 0;
+    right: 0;
+    justify-content: center;
+}
+/* Quick scan sits on the library line it acts on, not across the hero */
+#dashboard-page.dash-room .dash-hero-library .library-status-header {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+}
+#dashboard-page.dash-room .dash-hero-library .library-status-info {
+    flex: 0 1 auto;
+}
+#dashboard-page.dash-room .dash-hero-library .library-status-actions {
+    margin-left: 0;
+}
+
+/* ── under the hero: setup, downloads, and what you came to play ── */
+#dashboard-page.dash-room .room-top {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-width: 0;
+}
+
+/* everything on the page shares the hero's left and right edge */
+#dashboard-page.dash-room .room-top > .dash-card,
+#dashboard-page.dash-room .room-shelves > .dash-card {
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* ── the board: two by two ── */
+#dashboard-page.dash-room .room-board {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+}
+#dashboard-page.dash-room .room-board > * {
+    grid-column: span 5;
+    min-width: 0;
+    margin: 0;
+}
+#dashboard-page.dash-room .room-board > .weekly-digest,
+#dashboard-page.dash-room .room-board > [data-card='sync'] {
+    grid-column: span 7;
+}
+/* the video dashboard's board: its week leads the first row, and its count
+   tiles (three or four of them, no pictures) share the rest evenly */
+#dashboard-page.dash-room .room-board > [data-card='week'] {
+    grid-column: span 7;
+}
+#dashboard-page.dash-room .room-board > .dash-tiles[data-rail='tiles'] {
+    width: auto;
+    max-width: none;
+    grid-template-columns: none;
+}
+#dashboard-page.dash-room .dash-tiles[data-rail='tiles'] .dash-tile {
+    max-width: none;
+    justify-content: center;
+}
+/* Up next alone on its row (nothing downloading): its list runs in two
+   columns so the row is used, not stretched */
+#dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+}
+/* a card alone on its row takes the row */
+#dashboard-page.dash-room .room-board > :only-child,
+#dashboard-page.dash-room .room-board > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+}
+#dashboard-page.dash-room .room-board > .weekly-digest,
+#dashboard-page.dash-room .room-board > .dash-side-card,
+#dashboard-page.dash-room .room-board > .dash-tiles {
+    background: var(--white-a03);
+    border: 1px solid var(--white-a08);
+    border-radius: 20px;
+    box-shadow: none;
+}
+#dashboard-page.dash-room .room-board > .weekly-digest,
+#dashboard-page.dash-room .room-board > .dash-side-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+/* card heads on the board: a quiet label, its link as a capsule */
+#dashboard-page.dash-room .dash-side-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+}
+#dashboard-page.dash-room .dash-side-title,
+#dashboard-page.dash-room .wd-kicker {
+    flex: 1;
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-side-link,
+#dashboard-page.dash-room .wd-link {
+    height: 30px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+#dashboard-page.dash-room .dash-side-link:hover,
+#dashboard-page.dash-room .wd-link:hover {
+    background: var(--white-a16);
+}
+#dashboard-page.dash-room .dash-side-more {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-side-more:hover {
+    color: var(--text-1);
+}
+
+/* ── this week ── */
+#dashboard-page.dash-room .wd-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    margin: 0;
+}
+#dashboard-page.dash-room .wd-kicker {
+    flex: none;
+}
+#dashboard-page.dash-room .wd-range {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .wd-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 0;
+}
+#dashboard-page.dash-room .wd-lead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 6px 14px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .wd-lead .wd-num {
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .wd-lead .wd-label {
+    margin-top: 0;
+    padding-bottom: 4px;
+    font-size: 13px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-2);
+}
+/* the week keeps its shape on a wide screen: seven bars close enough to
+   read as one chart, not seven marks across the card */
+#dashboard-page.dash-room .wd-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    width: 100%;
+    height: 150px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+#dashboard-page.dash-room .wd-bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    min-width: 0;
+    height: 100%;
+}
+/* what the bar is worth, over it */
+#dashboard-page.dash-room .wd-val {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-3);
+    white-space: nowrap;
+}
+/* the room a bar grows in: the top of it is kept for the cover a bar wears */
+#dashboard-page.dash-room .wd-stick {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    width: 100%;
+    min-height: 0;
+    padding-top: 16px;
+}
+/* the album played most that day, on top of its bar */
+#dashboard-page.dash-room .wd-bar-cover {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    width: 28px;
+    height: 28px;
+    margin-left: -14px;
+    border-radius: 7px;
+    outline: 2px solid var(--bg-primary);
+    object-fit: cover;
+    box-shadow: 0 8px 18px var(--black-a45);
+}
+#dashboard-page.dash-room .wd-bar-cover--none {
+    display: none;
+}
+#dashboard-page.dash-room .wd-bar-col--best .wd-val,
+#dashboard-page.dash-room .wd-bar-col--today .wd-day {
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .wd-bar-col--today .wd-day {
+    font-weight: 700;
+}
+/* a bar that wears a cover is tall enough to carry it clear of the day */
+#dashboard-page.dash-room .wd-bar:has(.wd-bar-cover) {
+    min-height: 16px;
+}
+/* a day with nothing played is a mark on the floor, not a missing bar */
+#dashboard-page.dash-room .wd-bar-col--none .wd-bar {
+    background: var(--white-a16);
+    animation: none;
+}
+#dashboard-page.dash-room .wd-bar {
+    position: relative;
+    width: 100%;
+    max-width: 46px;
+    min-height: 3px;
+    border-radius: 9px 9px 4px 4px;
+    background: linear-gradient(rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
+    transform-origin: bottom;
+    animation: room-grow 0.9s var(--ease-decelerate) 0.3s both;
+}
+@keyframes room-grow {
+    from { transform: scaleY(0.08); }
+}
+#dashboard-page.dash-room .wd-day {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-3);
+}
+/* this week against the last one */
+#dashboard-page.dash-room .wd-trend {
+    margin-left: auto;
+    margin-bottom: 3px;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .wd-trend--up {
+    background: rgba(var(--success-rgb), 0.14);
+    color: var(--success);
+}
+/* on repeat: the albums the week was made of */
+#dashboard-page.dash-room .wd-repeat {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+#dashboard-page.dash-room .wd-repeat-title {
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .wd-repeat-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 12px;
+    padding: 6px 0;
+}
+#dashboard-page.dash-room .wd-repeat-row + .wd-repeat-row {
+    border-top: 1px solid var(--white-a06);
+}
+#dashboard-page.dash-room .wd-repeat-art {
+    width: 38px;
+    height: 38px;
+    border-radius: 7px;
+    object-fit: cover;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .wd-repeat-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .wd-repeat-text > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .wd-repeat-text b {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .wd-repeat-plays {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-2);
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .wd-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: auto;
+}
+#dashboard-page.dash-room .wd-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 12.5px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .wd-chip b {
+    color: var(--text-1);
+    font-weight: 700;
+}
+#dashboard-page.dash-room .wd-chip--artist img {
+    width: 22px;
+    height: 22px;
+    margin-left: -6px;
+    border-radius: var(--radius-circle);
+    object-fit: cover;
+}
+
+/* ── the two counts: a few of what each one counts ── */
+/* the pictures are sized off the card's own width (cqw), so five faces fit
+   a half-width tile on a small laptop as well as on a wide screen */
+#dashboard-page.dash-room .room-board > .dash-tiles {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    container-type: inline-size;
+}
+#dashboard-page.dash-room .dash-tiles .dash-tile {
+    flex: 1;
+    min-width: 0;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 2px;
+    padding: 18px 20px 20px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    text-align: left;
+    background: radial-gradient(120% 90% at 100% 0%, rgba(var(--accent-rgb), 0.16), transparent 62%);
+    transition: background-color var(--dur-fast) ease;
+}
+#dashboard-page.dash-room .dash-tiles .dash-tile + .dash-tile {
+    border-left: 1px solid var(--white-a08);
+}
+#dashboard-page.dash-room .dash-tiles .dash-tile:hover {
+    background-color: var(--white-a05);
+    transform: none;
+}
+#dashboard-page.dash-room .dash-tiles .hero-btn-badge {
+    position: static;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    font-size: 52px;
+    font-weight: 800;
+    letter-spacing: -0.045em;
+    line-height: 0.95;
+    font-variant-numeric: tabular-nums;
+    color: transparent;
+    background: linear-gradient(180deg, var(--text-1) 30%, rgb(var(--accent-rgb)));
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+#dashboard-page.dash-room .dash-tiles .hero-btn-badge::after {
+    display: none;
+}
+#dashboard-page.dash-room .dash-tiles .hero-btn-label {
+    margin-top: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-tiles .dash-tile-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-tiles .dash-tile-sub::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-circle);
+    background: rgb(var(--accent-rgb));
+    animation: room-blink 2.4s ease-in-out infinite;
+}
+@keyframes room-blink {
+    50% { opacity: 0.25; }
+}
+/* the slot keeps its height with no pictures, so the two tiles stay level */
+#dashboard-page.dash-room .room-tile-art {
+    --room-pic: clamp(34px, 10.5cqw, 54px);
+    display: flex;
+    min-height: calc(var(--room-pic) + 4px);
+    margin-bottom: 14px;
+}
+#dashboard-page.dash-room .room-tile-art img {
+    width: var(--room-pic);
+    height: var(--room-pic);
+    object-fit: cover;
+    box-shadow: 0 8px 18px var(--black-a45);
+    transition: transform var(--dur-base) var(--ease-standard);
+}
+/* watched artists are people: round, overlapping, the newest in front */
+#dashboard-page.dash-room .room-tile-art--faces {
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+}
+#dashboard-page.dash-room .room-tile-art--faces img {
+    margin-left: calc(var(--room-pic) * -0.3);
+    border-radius: var(--radius-circle);
+    outline: 3px solid var(--bg-primary);
+}
+#dashboard-page.dash-room .room-tile-art--faces img:last-child {
+    margin-left: 0;
+}
+#dashboard-page.dash-room .dash-tile:hover .room-tile-art--faces img {
+    transform: translateX(calc(var(--n) * 5px));
+}
+/* wished songs are records: square sleeves, fanned like a hand of cards */
+#dashboard-page.dash-room .room-tile-art--sleeves {
+    position: relative;
+    align-self: stretch;
+}
+#dashboard-page.dash-room .room-tile-art--sleeves img {
+    position: absolute;
+    left: calc(var(--n) * var(--room-pic) * 0.56);
+    top: 2px;
+    border-radius: 9px;
+    transform: rotate(calc((var(--n) - 2) * 5deg));
+    transform-origin: 50% 120%;
+}
+#dashboard-page.dash-room .dash-tile:hover .room-tile-art--sleeves img {
+    transform: rotate(calc((var(--n) - 2) * 9deg)) translateY(-3px);
+}
+
+/* ── the two counts, what each is made of ── */
+#dashboard-page.dash-room .dash-tile-lead {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-tile-from {
+    font-size: 12px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-tile-facts {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    gap: 6px;
+    min-width: 0;
+    margin-top: 12px;
+}
+#dashboard-page.dash-room .dash-tile-fact {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-tile-fact b {
+    color: var(--text-1);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+#dashboard-page.dash-room .dash-tile-newest {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    gap: 10px;
+    min-width: 0;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--white-a06);
+    font-size: 12px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .dash-tile-newest img {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    object-fit: cover;
+}
+#dashboard-page.dash-room .dash-tile-newest > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-tile-newest b {
+    color: var(--text-1);
+    font-weight: 600;
+}
+/* the music board's two counts are always one over the other: each has a
+   number, what it is made of and its newest thing, which is a row's worth.
+   with room (the card is the container) the parts sit beside the number */
+#dashboard-page.dash-room .room-board > .header-quick-nav {
+    flex-direction: column;
+}
+#dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile + .dash-tile {
+    border-left: 0;
+    border-top: 1px solid var(--white-a08);
+}
+@container (min-width: 440px) {
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+        align-content: center;
+        align-items: center;
+        column-gap: 20px;
+    }
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile-facts {
+        align-self: center;
+        margin-top: 0;
+    }
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile-newest {
+        grid-column: 1 / -1;
+    }
+}
+
+/* ── playlist sync ── */
+#dashboard-page.dash-room .dash-sync-say {
+    flex: 1;
+    min-width: 0;
+}
+/* the playlists themselves: how many are whole, how many are short */
+#dashboard-page.dash-room .dash-sync-mix {
+    display: flex;
+    gap: 2px;
+    height: 6px;
+    margin-top: 9px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .dash-sync-mix i {
+    display: block;
+    flex-basis: 0;
+    height: 100%;
+}
+#dashboard-page.dash-room .dash-sync-mix-whole {
+    background: var(--success);
+}
+#dashboard-page.dash-room .dash-sync-mix-short {
+    background: var(--warning);
+}
+#dashboard-page.dash-room .dash-sync-mixkey {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 6px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+}
+#dashboard-page.dash-room .dash-sync-mixkey span::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 6px;
+    border-radius: var(--radius-circle);
+    background: currentColor;
+}
+#dashboard-page.dash-room .dash-sync-mixkey-whole {
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-sync-mixkey-short {
+    color: var(--warning);
+}
+/* how much of one playlist is in the library */
+#dashboard-page.dash-room .dash-sync-cover {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5px;
+}
+#dashboard-page.dash-room .dash-sync-cover i {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .dash-sync-cover u {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: rgba(var(--accent-rgb), 0.8);
+}
+#dashboard-page.dash-room .dash-sync-cover em {
+    flex: none;
+    font-size: 11.5px;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-sync-health {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 0;
+    margin: 0;
+}
+@property --room-pct {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: 0%;
+}
+#dashboard-page.dash-room .dash-sync-ring {
+    --room-pct: var(--pct);
+    flex: none;
+    width: 92px;
+    height: 92px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-circle);
+    background: conic-gradient(rgb(var(--accent-rgb)) 0 var(--room-pct), var(--white-a08) var(--room-pct) 100%);
+    animation: room-sweep 1.1s var(--ease-out) 0.35s both;
+}
+@keyframes room-sweep {
+    from { --room-pct: 0%; }
+}
+#dashboard-page.dash-room .dash-sync-ring .dash-sync-pct {
+    width: 74px;
+    height: 74px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-circle);
+    background: var(--bg-primary);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-sync-of {
+    margin: 0;
+    min-width: 0;
+    font-size: 13px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-sync-of b {
+    display: block;
+    font-size: 15px;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-sync-sortbar {
+    display: flex;
+    justify-content: flex-start;
+    gap: 0;
+    padding: 2px;
+    margin: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+    overflow-x: auto;
+}
+#dashboard-page.dash-room .dash-sync-sort {
+    flex: 1 0 auto;
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-3);
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-sync-sort[aria-pressed='true'] {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-sync-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+#dashboard-page.dash-room .dash-sync-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px 6px;
+    margin: 0 -6px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+}
+#dashboard-page.dash-room .dash-sync-row:hover,
+#dashboard-page.dash-room .dash-sync-row:focus-within {
+    background: var(--white-a06);
+}
+#dashboard-page.dash-room .dash-sync-row .syncband-art {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 9px;
+}
+#dashboard-page.dash-room .dash-sync-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+#dashboard-page.dash-room .dash-sync-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#dashboard-page.dash-room .dash-sync-sub {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-sync-sub > * {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: inherit;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+#dashboard-page.dash-room .dash-sync-sub > * + *::before {
+    content: '·';
+    margin-right: 6px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .dash-sync-missing {
+    color: var(--warning);
+}
+#dashboard-page.dash-room .dash-sync-done,
+#dashboard-page.dash-room .dash-sync-live {
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-sync-next {
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* the row's actions show when you point at it; always on touch */
+#dashboard-page.dash-room .dash-sync-actions,
+#dashboard-page.dash-room .dash-autom-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity var(--dur-fast) ease;
+}
+#dashboard-page.dash-room .dash-sync-row:hover .dash-sync-actions,
+#dashboard-page.dash-room .dash-sync-row:focus-within .dash-sync-actions,
+#dashboard-page.dash-room .dash-autom-row:hover .dash-autom-actions,
+#dashboard-page.dash-room .dash-autom-row:focus-within .dash-autom-actions {
+    opacity: 1;
+}
+@media (hover: none) {
+    #dashboard-page.dash-room .dash-sync-actions,
+    #dashboard-page.dash-room .dash-autom-actions {
+        opacity: 1;
+    }
+}
+#dashboard-page.dash-room .dash-sync-act {
+    width: 28px;
+    height: 28px;
+    min-height: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: var(--white-a08);
+    color: var(--text-2);
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-sync-act:hover:not(:disabled) {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+
+/* ── up next ── */
+#dashboard-page.dash-room [data-card='automations'] .dash-card__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 14px;
+    padding: 0;
+}
+#dashboard-page.dash-room .dash-autom-lane {
+    position: relative;
+    height: 34px;
+    /* the hover card places itself in lane widths (cqw) */
+    container-type: inline-size;
+}
+#dashboard-page.dash-room .dash-autom-lane::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 9px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--white-a16);
+}
+#dashboard-page.dash-room .dash-autom-mark {
+    position: absolute;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    margin-left: -6px;
+    border-radius: var(--radius-circle);
+    background: rgb(var(--accent-rgb));
+    outline: 3px solid var(--bg-primary);
+    border: 0;
+    padding: 0;
+    /* mobile.css gives every button a 38px floor: the point is a dot, and
+       the stop around it is the place to tap */
+    min-height: 0;
+    font: inherit;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out);
+}
+#dashboard-page.dash-room .dash-autom-mark--live {
+    margin-left: 0;
+    background: var(--success);
+    animation: room-ping 1.8s ease-out infinite;
+}
+@keyframes room-ping {
+    0% { box-shadow: 0 0 0 3px rgba(var(--success-rgb), 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(var(--success-rgb), 0); }
+}
+#dashboard-page.dash-room .dash-autom-tick {
+    position: absolute;
+    bottom: 0;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .dash-autom-tick--start { left: 0; }
+#dashboard-page.dash-room .dash-autom-tick--mid { left: 50%; transform: translateX(-50%); }
+#dashboard-page.dash-room .dash-autom-tick--end { right: 0; }
+#dashboard-page.dash-room .dash-autom-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+#dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px 6px;
+    margin: 0 -6px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+}
+#dashboard-page.dash-room .dash-autom-row:hover,
+#dashboard-page.dash-room .dash-autom-row:focus-within {
+    background: var(--white-a06);
+}
+/* how long until it runs comes first: it is what the card is about */
+#dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-when {
+    order: -1;
+    flex: none;
+    width: 70px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    text-align: left;
+}
+#dashboard-page.dash-room .dash-autom-when > * {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    letter-spacing: 0;
+    text-transform: none;
+    color: rgb(var(--accent-light-rgb));
+}
+#dashboard-page.dash-room .dash-autom-when .dash-autom-live-pill {
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-autom-when .dash-autom-paused {
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .dash-autom-row .dash-autom-dot {
+    display: none;
+}
+#dashboard-page.dash-room .dash-autom-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+#dashboard-page.dash-room .dash-autom-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#dashboard-page.dash-room .dash-autom-meta {
+    display: flex;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+}
+#dashboard-page.dash-room .dash-autom-last--bad {
+    color: var(--warning);
+}
+#dashboard-page.dash-room .dash-autom-run {
+    height: 28px;
+    min-width: 28px;
+    min-height: 0;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-autom-run:hover:not(:disabled) {
+    background: var(--white-a16);
+}
+
+/* ── the shelves: the newest leads, the row fades where it runs on ── */
+#dashboard-page.dash-room .room-shelves {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    min-width: 0;
+}
+/* the feed switch is the same pill row the other redrawn pages use */
+#dashboard-page.dash-room .dash-band-tabs {
+    gap: 0;
+    padding: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+    max-width: 100%;
+    overflow-x: auto;
+}
+#dashboard-page.dash-room .dash-band-tab {
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-band-tab.active {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+/* every card on a shelf is the same size. the first one used to be larger,
+   which left the row ragged and a band of nothing under the other eight */
+#dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-img {
+    transition:
+        transform var(--dur-base) var(--ease-standard),
+        box-shadow var(--dur-base) var(--ease-standard);
+}
+#dashboard-page.dash-room .room-shelves .dash-rail-card:hover .ya-card-img,
+#dashboard-page.dash-room .room-shelves .dash-rail-card:focus-within .ya-card-img {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 34px var(--black-a50);
+}
+#dashboard-page.dash-room .room-shelves .dash-rail {
+    -webkit-mask-image: linear-gradient(90deg, var(--black-a95) calc(100% - 56px), transparent);
+    mask-image: linear-gradient(90deg, var(--black-a95) calc(100% - 56px), transparent);
+}
+
+/* ── things arrive in order, once ── */
+#dashboard-page.dash-room .room-top,
+#dashboard-page.dash-room .room-board > *,
+#dashboard-page.dash-room .room-shelves > * {
+    animation: room-rise 0.6s var(--ease-decelerate) both;
+}
+#dashboard-page.dash-room .room-board > :nth-child(1) { animation-delay: 0.08s; }
+#dashboard-page.dash-room .room-board > :nth-child(2) { animation-delay: 0.13s; }
+#dashboard-page.dash-room .room-board > :nth-child(3) { animation-delay: 0.18s; }
+#dashboard-page.dash-room .room-board > :nth-child(4) { animation-delay: 0.23s; }
+#dashboard-page.dash-room .room-shelves > * { animation-delay: 0.28s; }
+@keyframes room-rise {
+    from {
+        opacity: 0.35;
+        transform: translateY(14px);
+    }
+}
+body.reduce-effects #dashboard-page.dash-room .room-top,
+body.reduce-effects #dashboard-page.dash-room .room-board > *,
+body.reduce-effects #dashboard-page.dash-room .room-shelves > *,
+body.reduce-effects #dashboard-page.dash-room .wd-bar,
+body.reduce-effects #dashboard-page.dash-room .dash-sync-ring,
+body.reduce-effects #dashboard-page.dash-room .dash-autom-mark--live,
+body.reduce-effects #dashboard-page.dash-room .dash-tile-sub::before,
+body.max-performance #dashboard-page.dash-room .room-top,
+body.max-performance #dashboard-page.dash-room .room-board > *,
+body.max-performance #dashboard-page.dash-room .room-shelves > *,
+body.max-performance #dashboard-page.dash-room .wd-bar,
+body.max-performance #dashboard-page.dash-room .dash-sync-ring,
+body.max-performance #dashboard-page.dash-room .dash-autom-mark--live,
+body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
+    animation: none;
+}
+
+/* ── tablet and down: the board is one column, the hero stacks. Between
+   this and 1200 the shell itself holds a 1200px floor, so the desktop
+   layout is what a landscape tablet gets. ── */
+@media (max-width: 768px) {
+    #dashboard-page.dash-room .dashboard-header.dash-hero {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 0 4px;
+        gap: 14px;
+    }
+    /* the workers sit in three tight rows of five (spacing pass, below) */
+    #dashboard-page.dash-room .orb-stage {
+        min-height: 0;
+    }
+    #dashboard-page.dash-room .room-board > *,
+    #dashboard-page.dash-room .room-board > .weekly-digest,
+    #dashboard-page.dash-room .room-board > [data-card='week'],
+    #dashboard-page.dash-room .room-board > [data-card='sync'] {
+        grid-column: 1 / -1;
+    }
+    #dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ── phone ── */
+@media (max-width: 640px) {
+    #dashboard-page.dash-room {
+        gap: 16px;
+    }
+    #dashboard-page.dash-room .dashboard-header.dash-hero {
+        padding: 22px 18px;
+        border-radius: 22px;
+    }
+    #dashboard-page.dash-room .room-backdrop {
+        clip-path: inset(0 round 22px);
+    }
+    #dashboard-page.dash-room .room-board > .weekly-digest,
+    #dashboard-page.dash-room .room-board > .dash-side-card {
+        padding: 16px;
+    }
+    #dashboard-page.dash-room .wd-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .dash-tiles .dash-tile {
+        padding: 16px;
+    }
+    #dashboard-page.dash-room .dash-tiles .hero-btn-badge {
+        font-size: 42px;
+    }
+    #dashboard-page.dash-room .dash-sync-ring {
+        width: 76px;
+        height: 76px;
+    }
+    #dashboard-page.dash-room .dash-sync-ring .dash-sync-pct {
+        width: 60px;
+        height: 60px;
+        font-size: 18px;
+    }
+    #dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-when {
+        width: 58px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #dashboard-page.dash-room .room-backdrop,
+    #dashboard-page.dash-room .room-top,
+    #dashboard-page.dash-room .room-board > *,
+    #dashboard-page.dash-room .room-shelves > *,
+    #dashboard-page.dash-room .wd-bar,
+    #dashboard-page.dash-room .dash-sync-ring,
+    #dashboard-page.dash-room .dash-autom-mark--live,
+    #dashboard-page.dash-room .dash-tile-sub::before {
+        animation: none;
+    }
+}
+
+/* ── the video dashboard's board ──
+   The week beside the counts, then what is downloading and what runs next,
+   each across the whole row. Side by side they left a sixth of the row empty
+   and stretched whichever card was shorter to the height of the other. */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='downloads'],
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] {
+    grid-column: 1 / -1;
+}
+/* Up next runs in two columns whatever sits around it */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+}
+/* downloads sit side by side, a card wide each, at their own height */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='downloads'] .vdn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+    gap: 10px;
+}
+/* posters, not record sleeves: taller than wide, and the tile makes room */
+#dashboard-page.dash-room .room-tile-art--posters {
+    min-height: calc(var(--room-pic) * 1.5 + 6px);
+}
+#dashboard-page.dash-room .room-tile-art--posters img {
+    height: calc(var(--room-pic) * 1.5);
+    border-radius: 7px;
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .dash-tile {
+    justify-content: flex-start;
+    overflow: hidden;
+}
+/* three or four tiles share the card, so the posters are smaller than the
+   music tiles' pictures and a long label takes a second line */
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .room-tile-art {
+    --room-pic: clamp(24px, 6.4cqw, 46px);
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .hero-btn-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.25;
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .hero-btn-badge {
+    font-size: clamp(30px, 9cqw, 52px);
+}
+
+@media (max-width: 768px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-rows {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-tile-art--posters {
+        display: none;
+    }
+}
+#dashboard-page.dash-room[data-media='video'] .room-shelves {
+    gap: 38px;
+}
+
+/* ═══════════════════════════════════════════════
+   THE LISTENING ROOM, spacing pass (Nov 12 2026)
+   Nothing new on the page: the same sections, given the room they need and
+   no more. On a wide screen the four system cards were two by two, each a
+   thousand pixels wide around three hundred pixels of content.
+   ═══════════════════════════════════════════════ */
+
+/* ── the hero's left side: date, greeting, name, numbers, library ── */
+#dashboard-page.dash-room .dash-hero-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 14px;
+    align-content: center;
+}
+#dashboard-page.dash-room .dash-hero-main > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+/* the date is a chip, not a bar: a grid child stretches unless told not to */
+#dashboard-page.dash-room .dash-hero-main > .dash-hero-eyebrow {
+    justify-self: start;
+}
+/* the three numbers are a quiet line under the name, not a second headline */
+#dashboard-page.dash-room .dash-hero-numbers .dash-hero-number-value {
+    font-size: 17px;
+}
+
+/* ── the board: all four across when each can have a column of its own ── */
+#dashboard-page.dash-room .room-board-wrap {
+    container: room-board / inline-size;
+    min-width: 0;
+}
+@container room-board (min-width: 1500px) {
+    #dashboard-page.dash-room .room-board {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-board > *,
+    #dashboard-page.dash-room .room-board > .weekly-digest,
+    #dashboard-page.dash-room .room-board > [data-card='sync'],
+    #dashboard-page.dash-room .room-board > :only-child,
+    #dashboard-page.dash-room .room-board > :last-child:nth-child(odd) {
+        grid-column: auto;
+    }
+    /* a column is narrow: the week's number over its chart, the chart the
+       width of the card */
+    #dashboard-page.dash-room .room-board .wd-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-board .wd-chart {
+        justify-self: stretch;
+        max-width: none;
+        height: 132px;
+    }
+    #dashboard-page.dash-room .room-board > .weekly-digest .wd-chips {
+        margin-top: 0;
+    }
+    /* the two counts one over the other */
+    #dashboard-page.dash-room .room-board > .dash-tiles {
+        flex-direction: column;
+    }
+
+    #dashboard-page.dash-room .room-board > .dash-tiles .dash-tile + .dash-tile {
+        border-left: 0;
+        border-top: 1px solid var(--white-a08);
+    }
+    #dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+        display: block;
+    }
+}
+
+/* ── a phone: the name on one line, whatever its length ── */
+@media (max-width: 768px) {
+    #dashboard-page.dash-room .hello-greet-name {
+        font-size: min(42px, calc((100vw - 92px) / (var(--name-len, 12) * 0.6)));
+        white-space: nowrap;
+        text-wrap: nowrap;
+    }
+    #dashboard-page.dash-room .dash-hero-main {
+        row-gap: 10px;
+    }
+    /* one frame, not two: the shell already insets the page, so the page's
+       own border and padding only narrowed everything by another 26px */
+    #dashboard-page.dash-room {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+        gap: 16px;
+    }
+    /* stacked, the hero is tall and narrow and the cover's glow became a
+       streak down through the text. the workers keep their own light */
+    #dashboard-page.dash-room .dashboard-header.dash-hero > .room-backdrop {
+        display: none;
+    }
+    /* the workers as three tight rows of five, not a square a screen tall */
+    #dashboard-page.dash-room .orb-stage .header-actions {
+        display: grid;
+        grid-template-columns: repeat(5, 40px);
+        justify-content: space-between;
+        gap: 10px 0;
+        width: 100%;
+        height: auto;
+    }
+    #dashboard-page.dash-room .orb-stage .header-actions .enrich-worker,
+    #dashboard-page.dash-room .orb-stage .header-actions .enrich-worker-btn {
+        width: 40px;
+        height: 40px;
+    }
+    #dashboard-page.dash-room .orb-stage .header-actions .em-manage-btn {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+        justify-content: center;
+        margin-top: 4px;
+    }
+    /* shelves: the caption's lines sit together under the cover */
+    #dashboard-page.dash-room .room-shelves {
+        gap: 22px;
+    }
+    #dashboard-page.dash-room .room-shelves > .dash-card {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-img {
+        margin-bottom: 8px;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .dash-rail-caption,
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-info {
+        gap: 1px;
+        margin: 0;
+        padding: 0;
+        min-height: 0;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .dash-rail-caption > *,
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-info > * {
+        margin: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        min-height: 0;
+        line-height: 1.3;
+    }
+    /* four sort pills share the row instead of the last one running off it */
+    #dashboard-page.dash-room .dash-sync-sortbar {
+        display: flex;
+    }
+    #dashboard-page.dash-room .dash-sync-sort {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    /* quick settings: a label, then the switches two by two */
+    #dashboard-page.dash-room .dash-quick-settings {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    #dashboard-page.dash-room .dash-quick-settings-label,
+    #dashboard-page.dash-room .dash-qs-accent {
+        grid-column: 1 / -1;
+    }
+    #dashboard-page.dash-room .dash-qs-toggle {
+        justify-content: flex-start;
+        min-width: 0;
+    }
+}
+
+/* The hovered worker comes to the front, tooltip and all. Each worker is its
+   own layer while the grid is shown (the reveal animation and the fade make
+   one), so a tooltip's own z-index only counted inside its worker, and the
+   workers after it in the grid were painted over it. */
+#dashboard-page.dash-room .orb-stage .header-actions > .enrich-worker:hover,
+#dashboard-page.dash-room .orb-stage .header-actions > .enrich-worker:focus-within,
+#dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:hover,
+#dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:focus-within {
+    z-index: 20;
+}
+
+/* ═══════════════════════════════════════════════
+   THE BOARD'S CARDS, refined (Nov 12 2026)
+   This Week as seven days and the counts with what they are made of are the
+   video dashboard's (video-dashboard.module.css). Up next is shared by both
+   dashboards: the next run named on the line, close runs as one mark, and
+   what just ran beside what is coming.
+   ═══════════════════════════════════════════════ */
+
+/* ── the video board: the week across the row, or two thirds beside the counts ── */
+#dashboard-page.dash-room .video-board-wrap {
+    container: video-board / inline-size;
+    min-width: 0;
+}
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='week'],
+#dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+    grid-column: 1 / -1;
+}
+#dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+    flex-wrap: wrap;
+    align-content: stretch;
+}
+@container video-board (min-width: 1180px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='week'] {
+        grid-column: span 8;
+    }
+    /* beside the week the counts are a column: one over the other, the
+       issues and findings line at the foot */
+    #dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+        grid-column: span 4;
+        flex-direction: column;
+        flex-wrap: nowrap;
+    }
+}
+
+/* Make it yours sits on the board: no frame of its own, its two studios are
+   the cards */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='studios'] {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    container: studios-band / inline-size;
+}
+@container video-board (min-width: 1180px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations']:not(:last-child) {
+        grid-column: span 8;
+    }
+    /* beside Up next: its heading starts where that card's heading does */
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='studios'] {
+        grid-column: span 4;
+        padding-top: 22px;
+    }
+}
+
+/* ── up next ── */
+#dashboard-page.dash-room .dash-autom-count {
+    font-size: 12.5px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+/* the next run, named where it sits on the line */
+#dashboard-page.dash-room .dash-autom-lane:has(.dash-autom-flag) {
+    margin-top: 24px;
+}
+#dashboard-page.dash-room .dash-autom-flag {
+    position: absolute;
+    bottom: calc(100% - 1px);
+    max-width: 70%;
+    padding: 2px 9px;
+    border-radius: 7px;
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-2);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transform: translateX(-9px);
+}
+#dashboard-page.dash-room .dash-autom-flag--left {
+    transform: translateX(calc(-100% + 9px));
+}
+#dashboard-page.dash-room .dash-autom-flag b {
+    color: var(--text-1);
+    font-weight: 600;
+}
+#dashboard-page.dash-room .dash-autom-mark--lead {
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.22);
+}
+/* several runs landing together: one mark that says how many */
+#dashboard-page.dash-room .dash-autom-mark--many {
+    top: 1px;
+    width: auto;
+    min-width: 20px;
+    height: 18px;
+    margin-left: -10px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    color: var(--bg-primary);
+    font-size: 10.5px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+/* ── a point on the line, and the card it opens ──
+   each point is a stop: hover or focus it and a card says what the run is,
+   when it fires, how often, and what its last run did. the card places
+   itself: centred on the point, held inside the line at either end */
+#dashboard-page.dash-room .dash-autom-stop {
+    position: absolute;
+    top: 0;
+    width: 0;
+    height: 22px;
+}
+/* a wider place to rest the pointer, and the way down to the card */
+#dashboard-page.dash-room .dash-autom-stop::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -14px;
+    width: 28px;
+    height: 34px;
+}
+#dashboard-page.dash-room .dash-autom-lane:hover,
+#dashboard-page.dash-room .dash-autom-lane:focus-within,
+#dashboard-page.dash-room .dash-autom-stop:hover,
+#dashboard-page.dash-room .dash-autom-stop:focus-within {
+    z-index: 20;
+}
+#dashboard-page.dash-room .dash-autom-stop:hover > .dash-autom-mark,
+#dashboard-page.dash-room .dash-autom-mark:focus-visible {
+    transform: scale(1.25);
+}
+#dashboard-page.dash-room .dash-autom-mark:focus-visible {
+    outline-color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-autom-pop {
+    --pop-w: min(330px, 100cqw);
+    position: absolute;
+    top: calc(100% + 8px);
+    left: clamp(
+        calc(var(--at) * -1cqw),
+        calc(var(--pop-w) / -2),
+        calc((100 - var(--at)) * 1cqw - var(--pop-w))
+    );
+    width: var(--pop-w);
+    max-height: min(460px, 70vh);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    border: 1px solid var(--white-a14);
+    border-radius: var(--radius-xl);
+    background: var(--bg-raised);
+    box-shadow: 0 16px 40px var(--black-a40);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-5px);
+    transition:
+        opacity var(--dur-fast) ease,
+        transform var(--dur-quick) var(--ease-out),
+        visibility 0s linear var(--dur-quick);
+}
+#dashboard-page.dash-room .dash-autom-stop:hover > .dash-autom-pop,
+#dashboard-page.dash-room .dash-autom-stop:focus-within > .dash-autom-pop {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+}
+#dashboard-page.dash-room .dash-autom-pop-title {
+    padding: 6px 10px 4px;
+    color: var(--text-3);
+    font-size: 11.5px;
+}
+#dashboard-page.dash-room .dash-autom-pop-run {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+#dashboard-page.dash-room .dash-autom-pop-run:hover,
+#dashboard-page.dash-room .dash-autom-pop-run:focus-visible {
+    background: var(--white-a06);
+}
+#dashboard-page.dash-room .dash-autom-pop-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-pop-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-1);
+    font-size: 13.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-autom-pop-when {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+#dashboard-page.dash-room .dash-autom-pop-when--live {
+    background: rgba(var(--success-rgb), 0.18);
+}
+#dashboard-page.dash-room .dash-autom-pop-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact i {
+    color: var(--text-3);
+    font-size: 11px;
+    font-style: normal;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact b {
+    overflow: hidden;
+    color: var(--text-1);
+    font-size: 12.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-autom-pop-said {
+    padding-top: 9px;
+    border-top: 1px solid var(--white-a08);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+#dashboard-page.dash-room .dash-autom-pop-said--bad {
+    color: var(--warning);
+}
+/* coming up beside just ran */
+#dashboard-page.dash-room .dash-autom-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 14px 34px;
+    align-items: start;
+}
+#dashboard-page.dash-room .dash-autom-col,
+#dashboard-page.dash-room .dash-autom-ran {
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-col-title {
+    margin: 0 0 2px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+/* with just ran beside it the list is one column, wherever the card sits */
+#dashboard-page.dash-room .room-board > [data-card='automations'] .dash-autom-cols .dash-autom-rows,
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-cols .dash-autom-rows {
+    display: flex;
+}
+#dashboard-page.dash-room .dash-autom-glyph {
+    flex: none;
+    order: -1;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--white-a06);
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-autom-glyph svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+/* the countdown still leads the row, then the picture of the work */
+#dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-glyph ~ .dash-autom-when {
+    order: -2;
+}
+#dashboard-page.dash-room .dash-autom-ran-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    margin: 0 -6px;
+    padding: 8px 6px;
+    border-radius: 12px;
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-autom-ran-row:hover {
+    background: var(--white-a06);
+}
+#dashboard-page.dash-room .dash-autom-ran-when {
+    flex: none;
+    order: -2;
+    width: 70px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-autom-ran-when--bad {
+    color: var(--warning);
+}
+/* the card measures itself: under 700px it has room for what is coming, not
+   for both lists side by side (half a board, or one of four across) */
+#dashboard-page.dash-room .room-board > [data-card='automations'] {
+    container: up-next / inline-size;
+    /* a point's card may hang below a short Up next: it is not cut off, and
+       the card it belongs to comes above its neighbours while it is open */
+    overflow: visible;
+}
+#dashboard-page.dash-room .room-board > [data-card='automations']:hover,
+#dashboard-page.dash-room .room-board > [data-card='automations']:focus-within {
+    z-index: 20;
+}
+@container up-next (max-width: 700px) {
+    #dashboard-page.dash-room .dash-autom-cols {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .dash-autom-ran {
+        display: none;
+    }
+    #dashboard-page.dash-room .dash-autom-col-title {
+        display: none;
+    }
+}
+@media (max-width: 768px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+        flex-direction: column;
+        flex-wrap: nowrap;
+    }
+    #dashboard-page.dash-room .dash-autom-cols {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .dash-autom-flag {
+        max-width: 92%;
+    }
+    /* a phone scrolls: just ran goes under what is coming, with its heading */
+    #dashboard-page.dash-room .dash-autom-ran,
+    #dashboard-page.dash-room .dash-autom-col-title {
+        display: block;
+    }
+    /* what a run did is the point of the row: let it take a second line */
+    #dashboard-page.dash-room .dash-autom-ran-row .dash-autom-meta {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+    }
+    /* a phone has room for two thirds of a name on one line: give it two */
+    #dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-name {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+        line-height: 1.25;
+    }
+}

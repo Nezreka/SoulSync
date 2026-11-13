@@ -1052,6 +1052,48 @@ def test_query_watchlist_default_sort_is_alphabetical(db):
     assert added[0] == "Holy Marvels with Dennis Quaid"   # most recently added
 
 
+def _wl_show(db, n, title, owned, missing):
+    """A followed library show with `owned` episodes on disk and `missing` aired ones."""
+    eps = [{"episode_number": i + 1, "air_date": "2020-01-01",
+            "file": {"relative_path": "%s-%d.mkv" % (title, i)}} for i in range(owned)]
+    eps += [{"episode_number": owned + i + 1, "air_date": "2020-01-01"} for i in range(missing)]
+    db.upsert_show_tree("plex", {"server_id": "s%d" % n, "title": title, "tmdb_id": n,
+                                 "status": "Ended",
+                                 "seasons": [{"season_number": 1, "episodes": eps}]})
+    db.add_to_watchlist("show", n, title)
+
+
+def test_query_watchlist_show_facets_filters_and_missing_sort(db):
+    _wl_show(db, 1, "Complete", owned=3, missing=0)
+    _wl_show(db, 2, "Behind A Bit", owned=2, missing=1)
+    _wl_show(db, 3, "Way Behind", owned=1, missing=5)
+    db.add_to_watchlist("show", 4, "Not Owned")          # followed from tmdb, no library row
+
+    res = db.query_watchlist("show")
+    assert res["facets"] == {"all": 4, "missing": 2, "complete": 1, "unowned": 1,
+                             "missing_episodes": 6}
+
+    def titles(**kw):
+        return [it["title"] for it in db.query_watchlist("show", **kw)["items"]]
+
+    assert titles(show_filter="missing") == ["Behind A Bit", "Way Behind"]
+    assert titles(show_filter="complete") == ["Complete"]
+    assert titles(show_filter="unowned") == ["Not Owned"]
+    assert len(titles(show_filter="bogus")) == 4          # an unknown filter is every show
+    # the furthest behind first, then by name; a show not in the library has no gap
+    assert titles(sort="missing") == ["Way Behind", "Behind A Bit", "Complete", "Not Owned"]
+    # the chips count the whole list, not the search or the filter
+    narrowed = db.query_watchlist("show", search="way", show_filter="missing")
+    assert [it["title"] for it in narrowed["items"]] == ["Way Behind"]
+    assert narrowed["facets"]["all"] == 4 and narrowed["pagination"]["total_count"] == 1
+
+
+def test_query_watchlist_people_have_no_show_facets(db):
+    db.add_to_watchlist("person", 287, "Brad Pitt")
+    res = db.query_watchlist("person", show_filter="missing", sort="missing")
+    assert "facets" not in res and [it["title"] for it in res["items"]] == ["Brad Pitt"]
+
+
 # ── wishlist (movies + episodes; show/season are bulk ops over episodes) ──────
 
 def test_wishlist_movie_add_is_idempotent(db):
@@ -1559,3 +1601,59 @@ def test_person_lookback_get_set(db):
     # not-followed person → None / False
     assert db.get_person_lookback(999999) is None
     assert db.set_person_lookback(999999, 3) is False
+
+
+# --- a file that is not a database must not stop the app ---------------------
+
+def test_an_unreadable_video_database_is_set_aside_and_a_new_one_started(tmp_path):
+    # a restart after a crash left /config/video_library.db unreadable and the
+    # whole app sat on "Preparing your library", for a library with no videos
+    path = tmp_path / "video_library.db"
+    path.write_bytes(b"this is not sqlite" * 200)
+    Path(str(path) + "-wal").write_bytes(b"stale wal")
+
+    db = VideoDatabase(str(path))
+
+    with db.connect() as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "movies" in tables
+    # nothing was deleted: the unreadable file and its wal are kept, renamed
+    # and its stale wal is not left where the new database would replay it
+    left = Path(str(path) + "-wal")
+    assert not left.exists() or left.read_bytes() != b"stale wal"
+    kept = next(p for p in tmp_path.iterdir()
+                if ".unreadable-" in p.name and not p.name.endswith(("-wal", "-shm")))
+    assert kept.read_bytes().startswith(b"this is not sqlite")
+
+
+def test_a_healthy_video_database_is_never_set_aside(tmp_path):
+    path = tmp_path / "video_library.db"
+    first = VideoDatabase(str(path))
+    with first.connect() as conn:
+        conn.execute("INSERT INTO video_settings(key, value) VALUES('k', 'v')")
+        conn.commit()
+    from database import video_database as module
+    module._initialized_paths.clear()
+
+    again = VideoDatabase(str(path))
+
+    assert [p.name for p in tmp_path.iterdir() if ".unreadable-" in p.name] == []
+    with again.connect() as conn:
+        assert conn.execute("SELECT value FROM video_settings WHERE key='k'").fetchone()[0] == 'v'
+
+
+def test_a_locked_video_database_is_an_error_not_a_reset(tmp_path, monkeypatch):
+    # only "this is not a database" starts a new one. anything else (locked,
+    # no permission, disk full) must stay an error and leave the file alone
+    path = tmp_path / "video_library.db"
+    VideoDatabase(str(path))
+    from database import video_database as module
+    module._initialized_paths.clear()
+
+    def locked(self):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(VideoDatabase, "_get_connection", locked)
+
+    with pytest.raises(sqlite3.OperationalError):
+        VideoDatabase(str(path))
+    assert [p.name for p in tmp_path.iterdir() if ".unreadable-" in p.name] == []

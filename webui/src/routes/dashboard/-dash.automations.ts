@@ -13,6 +13,7 @@
  * weekly_time, monthly_time) and everything else renders as an event.
  */
 
+import { automationOutcome } from '../automations/-automations.format';
 import { intervalLabel, nextRunText, parseDbUtc, weeklyLabel } from './-dash.autosync';
 import { relativeTime } from './-dash.library';
 
@@ -27,6 +28,8 @@ export interface AutomationApiRow {
   next_run?: string | null;
   run_count?: number;
   last_error?: string | null;
+  /** the handler's own result dict; -automations.format puts it into words */
+  last_result?: unknown;
   is_system?: number | boolean;
   [key: string]: unknown;
 }
@@ -106,10 +109,108 @@ export interface AutomationCardRow {
   trigger: string;
   enabled: boolean;
   nextRun: string | null;
-  lastRun: { ago: string; ok: boolean; error: string | null } | null;
+  /** next_run as epoch ms, for the dashboard's timeline; null when it has none */
+  nextRunAt: number | null;
+  lastRun: {
+    ago: string;
+    ok: boolean;
+    error: string | null;
+    /** when it ran, epoch ms: the Just ran list sorts on it */
+    at: number;
+    /** what the run did, in words: the handler's own outcome, or "Completed" */
+    said: string;
+  } | null;
   /** Live state from /api/automations/progress while a run is in flight. */
   running: { phase: string; progress: number } | null;
   runCount: number;
+}
+
+/** How far ahead the dashboard's Up next line looks. */
+export const UP_NEXT_WINDOW_MS = 60 * 60 * 1000;
+
+export interface UpNextMark {
+  id: number | string;
+  name: string;
+  /** 0-100 along the line */
+  at: number;
+  running: boolean;
+  /** how many runs this mark stands for: runs that land close together are
+   *  one mark with a number, not a smear of overlapping dots */
+  count: number;
+  /** every run in the mark, for its tooltip */
+  names: string[];
+  /** the same runs by id, in the same order: the hover card looks each up */
+  ids: Array<number | string>;
+}
+
+/** Marks closer than this (percent of the line) are drawn as one. */
+export const UP_NEXT_MERGE_PCT = 2.4;
+
+/** Fold marks that land almost on top of each other into one. The first of
+ *  a group keeps its place and its name; a running mark never merges. */
+export function groupUpNextMarks(marks: readonly UpNextMark[]): UpNextMark[] {
+  const sorted = [...marks].sort((a, b) => Number(b.running) - Number(a.running) || a.at - b.at);
+  const out: UpNextMark[] = [];
+  for (const mark of sorted) {
+    const last = out[out.length - 1];
+    if (last && !last.running && !mark.running && mark.at - last.at <= UP_NEXT_MERGE_PCT) {
+      last.count += 1;
+      last.names.push(mark.name);
+      last.ids.push(mark.id);
+    } else {
+      out.push({ ...mark, names: [...mark.names], ids: [...mark.ids] });
+    }
+  }
+  return out;
+}
+
+/** The runs that finished most recently, newest first: the Just ran list. */
+export function justRan(rows: readonly AutomationCardRow[], max = 4): AutomationCardRow[] {
+  return rows
+    .filter((row) => row.lastRun && Number.isFinite(row.lastRun.at) && !row.running)
+    .sort((a, b) => (b.lastRun?.at ?? 0) - (a.lastRun?.at ?? 0))
+    .slice(0, max);
+}
+
+/**
+ * The marks on the Up next line: one per automation running now or due
+ * inside the window, placed by how soon it runs. A run already under way
+ * sits at the start. Anything further out is not on the line, it is in the
+ * list under it.
+ */
+export function upNextMarks(
+  rows: readonly AutomationCardRow[],
+  nowMs: number,
+  windowMs: number = UP_NEXT_WINDOW_MS,
+): UpNextMark[] {
+  const marks: UpNextMark[] = [];
+  for (const row of rows) {
+    if (row.running) {
+      marks.push({
+        id: row.id,
+        name: row.name,
+        at: 0,
+        running: true,
+        count: 1,
+        names: [row.name],
+        ids: [row.id],
+      });
+      continue;
+    }
+    if (!row.enabled || row.nextRunAt === null) continue;
+    const ahead = row.nextRunAt - nowMs;
+    if (ahead > windowMs) continue;
+    marks.push({
+      id: row.id,
+      name: row.name,
+      at: Math.round((Math.max(0, ahead) / windowMs) * 1000) / 10,
+      running: false,
+      count: 1,
+      names: [row.name],
+      ids: [row.id],
+    });
+  }
+  return marks;
 }
 
 export function automationCardRows(
@@ -144,6 +245,10 @@ export function automationCardRows(
             }
           : null,
       nextRun: enabled ? nextRunText(row.next_run, nowMs) : null,
+      nextRunAt:
+        enabled && row.next_run && Number.isFinite(parseDbUtc(String(row.next_run)))
+          ? parseDbUtc(String(row.next_run))
+          : null,
       lastRun: row.last_run
         ? {
             ago: relativeTime(
@@ -153,6 +258,10 @@ export function automationCardRows(
             ),
             ok: !row.last_error,
             error: row.last_error ? String(row.last_error) : null,
+            at: parseDbUtc(String(row.last_run)),
+            said: row.last_error
+              ? `Failed: ${String(row.last_error)}`
+              : (automationOutcome(actionType, row.last_result)?.text ?? 'Completed'),
           }
         : null,
       runCount: Number(row.run_count) || 0,

@@ -1048,7 +1048,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
         linked_lib2_file_id = link_download_into_library_v2(
             context, raise_on_error=True)
         if linked_lib2_file_id is None:
-            raise RuntimeError("Library v2 did not create a file row")
+            raise RuntimeError("The Library did not create a file row")
         from core.settings import config_manager
         from database.music_database import get_database
         from core.library2.track_reconcile_trigger import (
@@ -1060,7 +1060,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
             config_manager,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Post-move Library-v2 reconciliation failed: %s", exc)
+        logger.warning("Post-move Library reconciliation failed: %s", exc)
         return False
     try:
         from core.acquisition.pipeline_callback import notify_pipeline_import_success
@@ -1091,7 +1091,7 @@ def _confirm_existing_file_bookkeeping(context, artist_context=None, album_info=
         return True
     context.setdefault(
         '_context_failure_msg',
-        'the file is at its destination, but Library v2 could not register it',
+        'the file is at its destination, but the Library could not register it',
     )
     return False
 
@@ -2597,14 +2597,14 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         if _verified_upgrade:
             if not _upgrade_snapshot_still_current(_upgrade_snapshot):
                 raise RuntimeError(
-                    "Library-v2 upgrade conflict: primary file or profile changed; "
+                    "Library upgrade conflict: primary file or profile changed; "
                     "previous file kept and incoming artifact left recoverable"
                 )
             if (_upgrade_old_local and os.path.exists(_upgrade_old_local)
                     and not _replacement_length_is_safe(
                         _upgrade_old_local, file_path)):
                 raise RuntimeError(
-                    "Library-v2 upgrade rejected: retained artifact is materially "
+                    "Library upgrade rejected: retained artifact is materially "
                     "shorter than the current primary"
                 )
 
@@ -2809,7 +2809,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             else:
                 context.setdefault(
                     '_context_failure_msg',
-                    'the file was moved, but Library v2 could not register it',
+                    'the file was moved, but the Library could not register it',
                 )
                 logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
@@ -3167,7 +3167,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # explicit failure rather than an unverifiable success.
             failure_msg = str(context.get(
                 '_context_failure_msg',
-                'post-processing did not complete Library v2 registration',
+                'post-processing did not complete Library registration',
             ))
             logger.error(
                 "Post-processing did not import (task=%s): %s", task_id, failure_msg,

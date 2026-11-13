@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import type { AutomationRunState } from '../-automations.progress';
 import type { Automation, AutomationsSearch } from '../-automations.types';
 
 import { formatAction, formatTrigger } from '../-automations.format';
@@ -8,141 +9,195 @@ import { AUTO_FILTER_BAR_MIN } from '../-automations.types';
 import { type AutomationCardHandlers, AutomationCard } from './automation-card';
 
 export interface LibraryGroupActions {
-  /** Every member is enabled — drives the Enable all / Disable all label. */
+  /** Every member is enabled: drives the Enable all / Disable all label. */
   allEnabled: boolean;
   onBulkToggle: () => void;
   onRename: (next: string) => void;
   onDeleteGroup: () => void;
 }
 
-interface Props extends AutomationCardHandlers {
+export interface LibraryLens {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface LibrarySection {
   def: CollectionDef;
-  /** Collection members before the text/trigger/action filter. */
-  members: Automation[];
-  /** Members after the filter. */
-  visible: Automation[];
+  /** the section's automations after the lens and the filters */
+  rows: Automation[];
+}
+
+export interface SectionDnd {
+  zoneProps: (
+    key: string,
+    group: string | null,
+    opts?: { isProtected?: boolean; onExpand?: () => void },
+  ) => Record<string, unknown>;
+  overKey: string | null;
+  dragging: boolean;
+}
+
+interface Props extends AutomationCardHandlers {
+  /** All, Needs attention, Scheduled, Event-driven, Switched off. */
+  lenses: LibraryLens[];
+  /** the lens in force, or a section key when one section is shown alone */
+  active: string;
+  onLens: (key: string) => void;
+  sections: LibrarySection[];
+  /** every automation on this side, before any lens or filter */
+  total: number;
+  /** how many the lens holds before the text and type filters */
+  lensTotal: number;
   filtering: boolean;
   search: AutomationsSearch;
   setSearch: (patch: Partial<AutomationsSearch>) => void;
   filterOptions: { triggers: string[]; actions: string[] };
-  progressFor: (id: number) => import('../-automations.progress').AutomationRunState | undefined;
+  progressFor: (id: number) => AutomationRunState | undefined;
   cardDragProps: (a: Automation) => Record<string, unknown>;
   isCardDragging: (id: number) => boolean;
-  /** Present only when browsing a user group. */
-  groupActions?: LibraryGroupActions;
+  /** Bulk toggle, rename and delete for a user group. */
+  groupActionsFor: (groupName: string) => LibraryGroupActions;
+  dnd: SectionDnd;
   onNew: () => void;
   onClearFilters: () => void;
 }
 
-const COLLECTION_ICONS: Record<string, string> = {
-  all: '▦',
-  attention: '⚠',
-  scheduled: '◷',
-  events: '⚡',
-  off: '○',
-  operations: '⚡',
-  maintenance: '🛠',
-  system: '⚙',
-  ungrouped: '◇',
-  group: '📁',
+const SECTION_NOTES: Record<string, string> = {
+  operations: 'The pipeline: wishlist, watchlist, scans, database',
+  maintenance: 'Cleanup, backups and the Tools jobs on a timer',
+  ungrouped: 'Ones you built, not filed into a group',
 };
 
-function EmptyState({
+const EMPTY_LENS: Record<string, { title: string; text: string }> = {
+  attention: {
+    title: 'Nothing needs attention',
+    text: 'Every automation that is on ran as configured.',
+  },
+  off: { title: 'Nothing switched off', text: 'Every automation is on.' },
+  scheduled: { title: 'No scheduled automations', text: 'Ones on a timer show here.' },
+  events: {
+    title: 'No event-driven automations',
+    text: 'Ones that wait for something to happen show here.',
+  },
+};
+
+function SectionHead({
   def,
-  filtering,
-  onClearFilters,
-  onNew,
+  count,
+  open,
+  onToggle,
+  actions,
 }: {
   def: CollectionDef;
-  filtering: boolean;
-  onClearFilters: () => void;
-  onNew: () => void;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  actions?: LibraryGroupActions;
 }) {
-  // A fresh install lands here: the only thing on the page is the invitation.
-  if (def.key === 'all' && !filtering) {
-    return (
-      <div className="automx-empty">
-        <div className="automx-empty-icon">⚡</div>
-        <div className="automx-empty-title">No automations yet</div>
-        <div className="automx-empty-text">
-          Automations watch for things happening and do the tedious work for you — retrying
-          downloads, scanning for new releases, tidying the library.
-        </div>
-        <button type="button" className="automx-new-btn automx-new-btn-lg" onClick={onNew}>
-          + New Automation
-        </button>
-      </div>
-    );
-  }
-  if (filtering) {
-    return (
-      <div className="automx-empty automx-empty-small">
-        <div className="automx-empty-title">No matches</div>
-        <div className="automx-empty-text">Nothing in here matches those filters.</div>
-        <button type="button" className="automx-text-btn" onClick={onClearFilters}>
-          Clear filters
-        </button>
-      </div>
-    );
-  }
-  const copy: Record<string, { title: string; text: string }> = {
-    attention: {
-      title: 'Nothing needs attention',
-      text: 'Every automation is running as configured. Enjoy the quiet.',
-    },
-    off: {
-      title: 'Nothing switched off',
-      text: 'Every automation is armed.',
-    },
-    scheduled: {
-      title: 'No scheduled automations',
-      text: 'Timer-driven automations will appear here.',
-    },
-    events: {
-      title: 'No event-driven automations',
-      text: 'Automations that listen for events will appear here.',
-    },
-    operations: {
-      title: 'No operational automations',
-      text: 'Core pipeline automations will appear here.',
-    },
-    maintenance: {
-      title: 'No maintenance automations',
-      text: 'Housekeeping, cleanup, and tool automations will appear here.',
-    },
-  };
+  const [renaming, setRenaming] = useState<string | null>(null);
   const groupName = collectionGroupName(def.key);
-  if (groupName !== null) {
-    return (
-      <div className="automx-empty automx-empty-small">
-        <div className="automx-empty-title">This group is empty</div>
-        <div className="automx-empty-text">
-          Drag cards here from another collection, or use the 📁 button on a card.
-        </div>
-      </div>
-    );
-  }
-  const c = copy[def.key] ?? { title: 'Nothing here yet', text: '' };
+  const system = def.key === 'operations' || def.key === 'maintenance';
+  const note =
+    SECTION_NOTES[def.key] ?? (groupName !== null ? 'A group of yours' : def.description);
+
+  const commitRename = () => {
+    setRenaming((draft) => {
+      if (draft === null) return null;
+      const next = draft.trim();
+      if (next && groupName && next !== groupName) actions?.onRename(next);
+      return null;
+    });
+  };
+
   return (
-    <div className="automx-empty automx-empty-small">
-      <div className="automx-empty-title">{c.title}</div>
-      {c.text ? <div className="automx-empty-text">{c.text}</div> : null}
+    <div className="automx-sec-head">
+      {renaming === null ? (
+        <button type="button" className="automx-sec-toggle" aria-expanded={open} onClick={onToggle}>
+          <h3>{def.label}</h3>
+          <span className="automx-sec-note">
+            {count} · {note}
+          </span>
+        </button>
+      ) : (
+        <input
+          className="automx-rename-input"
+          aria-label={`Rename group ${groupName ?? ''}`}
+          value={renaming}
+          autoFocus
+          onChange={(e) => setRenaming(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitRename();
+            }
+            if (e.key === 'Escape') setRenaming(null);
+          }}
+          onBlur={commitRename}
+        />
+      )}
+      <span className="automx-sec-side">
+        {system ? <span className="automx-chip">System</span> : null}
+        {actions && open ? (
+          <>
+            <button
+              type="button"
+              className="automx-cap"
+              title={actions.allEnabled ? 'Disable all' : 'Enable all'}
+              onClick={actions.onBulkToggle}
+            >
+              {actions.allEnabled ? 'Disable all' : 'Enable all'}
+            </button>
+            <button
+              type="button"
+              className="automx-cap"
+              title="Rename group"
+              onClick={() => setRenaming(groupName ?? '')}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              className="automx-cap automx-cap-danger"
+              title="Delete group"
+              onClick={actions.onDeleteGroup}
+            >
+              Delete
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          className="automx-icon-btn automx-chevron"
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${def.label}`}
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        </button>
+      </span>
     </div>
   );
 }
 
 /**
- * One collection, browsed: header, filter bar, card grid.
+ * Every automation, as sections of rows.
  *
- * This is what the old page's sections became — instead of every family
- * stacked in one scroll, the sidebar picks the family and this shows it.
- * Everything the old section headers did (counts, bulk toggle, rename,
- * delete group) moved into this header when a group is being browsed.
+ * The lenses across the top (All, Needs attention, Scheduled, Event-driven,
+ * Switched off) cut across the sections. Maintenance starts folded under All:
+ * it is fifty rows that mirror the Tools page jobs, and it would bury the
+ * twenty a person came for. Any lens or search unfolds it.
  */
 export function AutomationsLibrary({
-  def,
-  members,
-  visible,
+  lenses,
+  active,
+  onLens,
+  sections,
+  total,
+  lensTotal,
   filtering,
   search,
   setSearch,
@@ -150,143 +205,174 @@ export function AutomationsLibrary({
   progressFor,
   cardDragProps,
   isCardDragging,
-  groupActions,
+  groupActionsFor,
+  dnd,
   onNew,
   onClearFilters,
   ...cardHandlers
 }: Props) {
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const groupName = collectionGroupName(def.key);
-  const icon = def.kind === 'group' ? COLLECTION_ICONS.group : (COLLECTION_ICONS[def.key] ?? '◇');
+  // sections the user folded or unfolded by hand; the rest follow the default
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
+  const [openId, setOpenId] = useState<number | null>(null);
 
-  const commitRename = () => {
-    setRenaming((draft) => {
-      if (draft === null) return null;
-      const next = draft.trim();
-      if (next && groupName && next !== groupName) groupActions?.onRename(next);
-      return null;
-    });
-  };
+  const plain = active === 'all' && !filtering;
+  const isOpen = (key: string) => folded[key] ?? !(plain && key === 'maintenance');
+  const shown = sections.reduce((n, s) => n + s.rows.length, 0);
+
+  // A fresh install: the only thing on the page is the invitation.
+  if (total === 0) {
+    return (
+      <div className="automx-empty">
+        <div className="automx-empty-title">No automations yet</div>
+        <div className="automx-empty-text">
+          Automations watch for things happening and do the tedious work for you: retrying
+          downloads, scanning for new releases, tidying the library.
+        </div>
+        <button type="button" className="automx-cap automx-cap-primary" onClick={onNew}>
+          New automation
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="automx-library">
-      <div className="automx-library-head">
-        <span className="automx-library-icon" aria-hidden="true">
-          {icon}
-        </span>
-        <div className="automx-library-titles">
-          {renaming === null ? (
-            <h2 className="automx-library-title">{def.label}</h2>
-          ) : (
-            <input
-              className="automx-rename-input"
-              aria-label={`Rename group ${groupName ?? ''}`}
-              value={renaming}
-              autoFocus
-              onChange={(e) => setRenaming(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  commitRename();
-                }
-                if (e.key === 'Escape') setRenaming(null);
-              }}
-              onBlur={commitRename}
-            />
-          )}
-          <p className="automx-library-sub">
-            {def.description} · {members.length}{' '}
-            {members.length === 1 ? 'automation' : 'automations'}
-          </p>
+      <div className="automx-bar">
+        <div className="automx-lenses" role="group" aria-label="Show">
+          {lenses.map((lens) => (
+            <button
+              key={lens.key}
+              type="button"
+              className={`automx-cap automx-lens${lens.key === 'attention' && lens.count > 0 ? ' alert' : ''}`}
+              aria-pressed={active === lens.key}
+              onClick={() => onLens(lens.key)}
+            >
+              {lens.label} <small>{lens.count}</small>
+            </button>
+          ))}
         </div>
-        {groupActions ? (
-          <div className="automx-library-actions">
-            <button
-              type="button"
-              className="automx-chip-btn"
-              title={groupActions.allEnabled ? 'Disable all' : 'Enable all'}
-              onClick={groupActions.onBulkToggle}
-            >
-              {groupActions.allEnabled ? '⏸ Disable all' : '▶ Enable all'}
-            </button>
-            <button
-              type="button"
-              className="automx-chip-btn"
-              title="Rename group"
-              onClick={() => setRenaming(groupName ?? '')}
-            >
-              ✏️ Rename
-            </button>
-            <button
-              type="button"
-              className="automx-chip-btn automx-chip-danger"
-              title="Delete group"
-              onClick={groupActions.onDeleteGroup}
-            >
-              🗑 Delete
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {members.length >= AUTO_FILTER_BAR_MIN ? (
-        <div className="automx-filter-bar">
+        {/* one group, so a narrow bar moves the search and its two filters to
+            the next line together instead of orphaning the last one */}
+        <div className="automx-filters">
           <input
-            type="text"
-            className="automx-filter-search"
-            placeholder="Filter automations…"
-            aria-label="Filter automations"
+            type="search"
+            className="automx-search"
+            placeholder="Search automations"
+            aria-label="Search automations"
             value={search.q}
             onChange={(e) => setSearch({ q: e.target.value })}
           />
-          <select
-            className="automx-filter-select"
-            aria-label="Filter by trigger"
-            value={search.trigger}
-            onChange={(e) => setSearch({ trigger: e.target.value })}
-          >
-            <option value="">All Triggers</option>
-            {filterOptions.triggers.map((t) => (
-              <option key={t} value={t}>
-                {formatTrigger(t, {}, cardHandlers.blockLabel)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="automx-filter-select"
-            aria-label="Filter by action"
-            value={search.action}
-            onChange={(e) => setSearch({ action: e.target.value })}
-          >
-            <option value="">All Actions</option>
-            {filterOptions.actions.map((t) => (
-              <option key={t} value={t}>
-                {formatAction(t, cardHandlers.blockLabel)}
-              </option>
-            ))}
-          </select>
-          <span className="automx-filter-count">
-            {filtering ? `${visible.length} of ${members.length}` : ''}
-          </span>
+          {lensTotal >= AUTO_FILTER_BAR_MIN ? (
+            <>
+              <select
+                className="automx-select"
+                aria-label="Filter by trigger"
+                value={search.trigger}
+                onChange={(e) => setSearch({ trigger: e.target.value })}
+              >
+                <option value="">All Triggers</option>
+                {filterOptions.triggers.map((t) => (
+                  <option key={t} value={t}>
+                    {formatTrigger(t, {}, cardHandlers.blockLabel)}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="automx-select"
+                aria-label="Filter by action"
+                value={search.action}
+                onChange={(e) => setSearch({ action: e.target.value })}
+              >
+                <option value="">All Actions</option>
+                {filterOptions.actions.map((t) => (
+                  <option key={t} value={t}>
+                    {formatAction(t, cardHandlers.blockLabel)}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
+          {filtering ? (
+            <span className="automx-filter-count">
+              {shown} of {lensTotal}
+            </span>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
-      {visible.length > 0 ? (
-        <div className="automations-grid">
-          {visible.map((a) => (
-            <AutomationCard
-              key={a.id}
-              automation={a}
-              progress={progressFor(a.id)}
-              dragProps={cardDragProps(a)}
-              isDragging={isCardDragging(a.id)}
-              {...cardHandlers}
-            />
-          ))}
+      {shown === 0 && filtering ? (
+        <div className="automx-empty automx-empty-small">
+          <div className="automx-empty-title">No matches</div>
+          <div className="automx-empty-text">Nothing in here matches those filters.</div>
+          <button type="button" className="automx-cap" onClick={onClearFilters}>
+            Clear filters
+          </button>
+        </div>
+      ) : shown === 0 && EMPTY_LENS[active] ? (
+        <div className="automx-empty automx-empty-small">
+          <div className="automx-empty-title">{EMPTY_LENS[active].title}</div>
+          <div className="automx-empty-text">{EMPTY_LENS[active].text}</div>
         </div>
       ) : (
-        <EmptyState def={def} filtering={filtering} onClearFilters={onClearFilters} onNew={onNew} />
+        sections.map(({ def, rows }) => {
+          const groupName = collectionGroupName(def.key);
+          const system = def.key === 'operations' || def.key === 'maintenance';
+          const droppable = groupName !== null || def.key === 'ungrouped';
+          // an empty section only shows when nothing is narrowing the list:
+          // the unfiled one, as the place to start
+          if (rows.length === 0 && !(plain && def.key === 'ungrouped')) return null;
+          const open = isOpen(def.key);
+          const toggle = () => setFolded((f) => ({ ...f, [def.key]: !open }));
+          const zone = droppable
+            ? dnd.zoneProps(def.key, groupName, {
+                onExpand: () => setFolded((f) => ({ ...f, [def.key]: false })),
+              })
+            : {};
+          return (
+            <section
+              key={def.key}
+              className={`automx-sec${open ? ' open' : ''}${
+                droppable && dnd.overKey === def.key ? ' automx-drop-target' : ''
+              }${system && dnd.dragging ? ' automx-drop-off' : ''}`}
+              data-section={def.key}
+              aria-label={def.label}
+              {...zone}
+            >
+              <SectionHead
+                def={def}
+                count={rows.length}
+                open={open}
+                onToggle={toggle}
+                actions={groupName !== null ? groupActionsFor(groupName) : undefined}
+              />
+              {open ? (
+                <div className="automx-sec-body">
+                  {rows.length === 0 ? (
+                    <div className="automx-empty automx-empty-small">
+                      <div className="automx-empty-title">Nothing here yet</div>
+                      <div className="automx-empty-text">
+                        New automation builds one. Drag a row onto a group to file it.
+                      </div>
+                    </div>
+                  ) : (
+                    rows.map((a) => (
+                      <AutomationCard
+                        key={a.id}
+                        automation={a}
+                        progress={progressFor(a.id)}
+                        dragProps={cardDragProps(a)}
+                        isDragging={isCardDragging(a.id)}
+                        open={openId === a.id}
+                        onOpenChange={(next) => setOpenId(next ? a.id : null)}
+                        {...cardHandlers}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </section>
+          );
+        })
       )}
     </div>
   );

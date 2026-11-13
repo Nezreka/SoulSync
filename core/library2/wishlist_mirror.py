@@ -442,11 +442,15 @@ def mirror_projected_tracks_wishlist(
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
                                 track_ids: Optional[List[int]] = None,
-                                quality_profile: Optional[Dict[str, Any]] = None) -> List[int]:
+                                quality_profile: Optional[Dict[str, Any]] = None,
+                                definite_only: bool = False) -> List[int]:
     """Wanted tracks with files whose profile permits upgrades -- or, given
     ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
     ``quality_profile`` judges every track against that one profile instead
     of its own (Enhance Quality's "upgrade to").
+    ``definite_only`` leaves out the files whose quality could not be read:
+    nothing downloaded can be shown to be better than a file that cannot be
+    measured, so the unattended pass does not try (#2060).
     The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     import json
@@ -528,9 +532,17 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
             raise LookupError("Effective quality profile not found")
         return profiles_by_id[pid]
 
+    # #2046: a reviewed album with upgrades locked keeps the files it has.
+    # only the unattended pass: Enhance Quality on chosen tracks is a person
+    from core.library2 import locks
+    held = locks.lock_map(conn) if track_ids is None else {}
+
     candidates = set()
     for row in rows:
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
+            continue
+        if held and row["album_id"] is not None and "upgrades" in held.get(
+                ("album", int(row["album_id"])), ()):
             continue
         try:
             profile = _profile_for(row)
@@ -549,7 +561,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
             verdict = evaluate_file(primaries.get(int(row["id"])), targets, policy, cutoff)
         except Exception:  # noqa: BLE001 - let the payload's own check decide
             verdict = {"upgrade_candidate": None}
-        if verdict.get("upgrade_candidate") is not False:
+        candidate = verdict.get("upgrade_candidate")
+        if candidate is True or (candidate is None and not definite_only):
             candidates.add(int(row["id"]))
     return sorted(candidates)
 

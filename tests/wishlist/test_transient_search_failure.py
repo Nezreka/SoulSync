@@ -40,7 +40,7 @@ def test_transient_scoped_search_failure_is_not_added_to_wishlist(monkeypatch):
         download_batches[batch_id] = {
             "queue": [task_id],
             "playlist_id": "library_v2_search",
-            "playlist_name": "Library v2 Automatic Search",
+            "playlist_name": "Library Automatic Search",
             "permanently_failed_tracks": [failed],
             "cancelled_tracks": set(),
             "profile_id": 1,

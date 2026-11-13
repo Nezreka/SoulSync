@@ -42,6 +42,8 @@ export interface ImportCardProps {
   loadPreview?: () => Promise<PreviewTrack[]>;
   /** imported: its server copy in the server editor */
   onEdit?: () => Promise<unknown>;
+  /** not imported, but already looked after ("Auto-Sync, every 8h") */
+  note?: string;
 }
 
 function actionLabel(status: ImportStatus): string {
@@ -70,6 +72,7 @@ export function ImportCard({
   copying = false,
   loadPreview,
   onEdit,
+  note,
 }: ImportCardProps) {
   const [previewing, setPreviewing] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -152,6 +155,7 @@ export function ImportCard({
           {meta}
         </span>
         {imported ? <span className={styles.inTag}>In SoulSync</span> : null}
+        {!imported && note ? <span className={styles.note}>{note}</span> : null}
       </span>
       <span className={styles.actions}>
         {imported && onEdit ? (

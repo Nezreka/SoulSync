@@ -96,6 +96,14 @@ def _retryable_sql(retry_statuses: tuple) -> str:
 _PHASES = ("new", "retry")
 
 
+def _unlocked(entity_type: str, alias: str) -> str:
+    """#2046: a reviewed and locked album or artist is not enrichment's to
+    look at. left out of the queue, the counts and the progress bar alike, so
+    a worker neither asks a provider about it nor waits on it forever."""
+    from core.library2.locks import unlocked_sql
+    return unlocked_sql(entity_type, alias, "metadata")
+
+
 def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
                  require_provider_id: bool = False,
                  service: str = "spotify", phase: str = "new") -> str:
@@ -115,7 +123,8 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
     # tables, and without this every worker enriched those too — work legacy
     # never did, re-asked every retry window, and counted into the denominator.
     owned = (f"AND {owned_sql(entity_type, 'e', scope=ANY_OWNER)} "
-             f"AND {worker_credit_ready_sql(entity_type)}")
+             f"AND {worker_credit_ready_sql(entity_type)} "
+             f"AND {_unlocked(entity_type, 'e')}")
     if phase == "new":
         return f"""
             {_sources(service)[entity_type]}
@@ -397,7 +406,8 @@ def _compute_progress(conn) -> Dict[str, Dict[str, Any]]:
     for entity_type in ENTITY_ORDER:
         table = _TABLES[entity_type]
         owned = (f"{owned_sql(entity_type, 'e', scope=ANY_OWNER)} "
-                 f"AND {worker_credit_ready_sql(entity_type)}")
+                 f"AND {worker_credit_ready_sql(entity_type)} "
+                 f"AND {_unlocked(entity_type, 'e')}")
         total = conn.execute(f"SELECT COUNT(*) FROM {table} e WHERE {owned}").fetchone()[0]
         processed = {
             str(row[0]).strip().lower(): int(row[1] or 0)
@@ -562,12 +572,14 @@ def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
                AND a.service = :service AND a.status = 'matched'
          WHERE COALESCE({parent_id_sql}, '') <> ''
            AND {worker_credit_ready_sql(spec['parent_type'], 'p')}
+           AND {_unlocked(spec['parent_type'], 'p')}
            AND EXISTS (
                SELECT 1 FROM {spec["table"]} c
                  LEFT JOIN lib2_provider_attempts ca
                         ON ca.entity_type = :child_type AND ca.entity_id = c.id
                        AND ca.service = :service
                 WHERE {child_link} AND ca.entity_id IS NULL
+                  AND {_unlocked(child, "c")}
                   AND {owned_sql(child, "c", scope=ANY_OWNER)})
          ORDER BY p.id LIMIT 1
         """,
@@ -649,6 +661,7 @@ def pending_children(conn, service: str, parent_type: str, parent_id: Any, *,
                 AND a.service = :service
          WHERE {spec["parent_join"]} AND a.entity_id IS NULL
            AND {worker_credit_ready_sql(child)}
+           AND {_unlocked(child, "e")}
            AND {owned_sql(child, "e", scope=ANY_OWNER)}
          ORDER BY e.id
         """,

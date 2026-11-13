@@ -283,7 +283,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                  letter: str = "all", watchlist_filter: str = "all",
                  source_filter: str = "", quality_filter: str = "",
                  profile_id: int = 1,
-                 include_upgradable: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+                 include_upgradable: bool = False,
+                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """Library-v2 display adapter over the shared artist page reader.
 
     include_upgradable adds each card's "could be better" count, judged by
@@ -294,7 +295,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         conn, search=search, sort=sort, monitored=monitored, page=page,
         limit=limit, include_size=include_size, letter=letter,
         watchlist_filter=watchlist_filter, source_filter=source_filter,
-        quality_filter=quality_filter, profile_id=profile_id)
+        quality_filter=quality_filter, profile_id=profile_id,
+        review_filter=review_filter)
     projected = project_metadata_many(
         conn,
         entity_type="artist",
@@ -1057,6 +1059,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
+               al.musicbrainz_release_group_id, al.release_group_types,
+               al.secondary_types,
                al.external_ids, al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
@@ -1145,6 +1149,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "spotify_id": r["spotify_id"],
             # the release card's "view on musicbrainz" link
             "musicbrainz_id": r["musicbrainz_id"],
+            # #2055: what kind of release it is (live, soundtrack, ...), None
+            # when nobody has said: the page then goes by the title
+            "release_types": _release_types(r),
             # a release you don't have opens dev's download modal from its
             # provider id, the way the provider page did
             "provider_ids": _album_provider_ids(r),
@@ -1174,6 +1181,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             eps.append(entry)
         else:
             albums.append(entry)
+
+    # a release held as two rows (a stray track filed as its own album, a
+    # provider entry beside the owned copy) is one release on the page
+    from core.library2.release_display import stamp_display_groups
+    stamp_display_groups(albums + eps + singles,
+                         {int(r["id"]): r for r in album_rows})
 
     def _in_library(entries):
         return sum(1 for e in entries
@@ -1221,7 +1234,10 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             (canonical_id,)).fetchone() is not None,
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
-        "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
+        # a provider entry standing behind an owned copy is not a release to discover
+        "discography_count": sum(
+            1 for e in albums + eps + singles
+            if e["origin"] == "discography" and e["release_lead_id"] == e["id"]),
         # when the provider discography was last walked: the page re-checks a
         # stale one for new releases on open
         "discography_synced_at": a["discography_synced_at"] if "discography_synced_at" in a.keys() else None,
@@ -1230,6 +1246,21 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
+
+
+def _release_types(row) -> Optional[List[str]]:
+    """What kind of release an album is (#2055): the types it was filed with
+    when it has any, else its MusicBrainz release group's. None is "nobody
+    has said", an empty list is a plain studio release."""
+    from core.library2.release_group_types import stored_types
+    try:
+        filed = json.loads(row["secondary_types"] or "[]")
+    except (TypeError, ValueError):
+        filed = []
+    filed = [str(v).strip().lower() for v in filed if v] if isinstance(filed, list) else []
+    if filed:
+        return filed
+    return stored_types(row["release_group_types"], row["musicbrainz_release_group_id"])
 
 
 def _album_provider_ids(row) -> Dict[str, str]:

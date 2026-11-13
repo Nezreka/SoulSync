@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { automationCardRows, triggerLabel } from './-dash.automations';
+import { automationCardRows, groupUpNextMarks, justRan, triggerLabel } from './-dash.automations';
 import { parseDbUtc } from './-dash.autosync';
 
 const NOW = Date.parse('2026-08-11T12:00:00Z');
@@ -120,7 +120,9 @@ describe('automationCardRows', () => {
     ]);
     const [backup, wishlist, paused] = out;
     expect(wishlist.nextRun).toBe('in 2h');
-    expect(wishlist.lastRun).toEqual({ ago: '4h ago', ok: true, error: null });
+    expect(wishlist.lastRun).toMatchObject({ ago: '4h ago', ok: true, error: null });
+    // what the run did, in words, for the Just ran list
+    expect(wishlist.lastRun?.said).toBe('Completed');
     expect(wishlist.runCount).toBe(42);
     // showAutomationHistory's third argument travels on the row.
     expect(wishlist.actionType).toBe('process_wishlist');
@@ -147,5 +149,74 @@ describe('automationCardRows', () => {
 
   it('survives an empty list', () => {
     expect(automationCardRows([], NOW)).toEqual([]);
+  });
+});
+
+describe('the Up next line and Just ran', () => {
+  const mark = (id: number, at: number, running = false) => ({
+    id,
+    name: `run ${id}`,
+    at,
+    running,
+    count: 1,
+    names: [`run ${id}`],
+    ids: [id],
+  });
+
+  it('draws runs that land together as one mark with a count', () => {
+    const grouped = groupUpNextMarks([mark(1, 10), mark(2, 11), mark(3, 12.2), mark(4, 40)]);
+    expect(grouped.map((m) => [m.id, m.count])).toEqual([
+      [1, 3],
+      [4, 1],
+    ]);
+    expect(grouped[0].names).toEqual(['run 1', 'run 2', 'run 3']);
+    expect(grouped[0].ids).toEqual([1, 2, 3]);
+  });
+
+  it('never folds a running mark into another', () => {
+    const grouped = groupUpNextMarks([mark(1, 0, true), mark(2, 0.5), mark(3, 1)]);
+    expect(grouped.map((m) => [m.id, m.count, m.running])).toEqual([
+      [1, 1, true],
+      [2, 2, false],
+    ]);
+  });
+
+  it('says what the last run did, newest first, and leaves out a run in flight', () => {
+    const now = Date.parse('2026-11-12T12:00:00Z');
+    const rows = automationCardRows(
+      [
+        {
+          id: 1,
+          name: 'Movies',
+          enabled: 1,
+          action_type: 'video_process_movie_wishlist',
+          last_run: '2026-11-12 11:50:00',
+          last_result: { status: 'completed', searched: 4, grabbed: 1 },
+        },
+        {
+          id: 2,
+          name: 'Fresh',
+          enabled: 1,
+          action_type: 'video_extto_fresh_refresh',
+          last_run: '2026-11-12 11:58:00',
+          last_error: 'the board did not answer',
+        },
+        { id: 3, name: 'Never ran', enabled: 1, action_type: 'video_rss_sync' },
+        {
+          id: 4,
+          name: 'Busy',
+          enabled: 1,
+          action_type: 'video_rss_sync',
+          last_run: '2026-11-12 11:59:00',
+        },
+      ],
+      now,
+      { '4': { status: 'running', phase: 'Reading feeds', progress: 30 } },
+      'video',
+    );
+    const ran = justRan(rows);
+    expect(ran.map((r) => r.name)).toEqual(['Fresh', 'Movies']);
+    expect(ran[0].lastRun?.said).toBe('Failed: the board did not answer');
+    expect(ran[1].lastRun?.said).toBe('Searched 4 movies, grabbed 1');
   });
 });

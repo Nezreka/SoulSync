@@ -444,7 +444,7 @@ def set_library_v2_match(
         f"SELECT id, external_ids FROM {table} WHERE id=?", (int(entity_id),)
     ).fetchone()
     if row is None:
-        raise LookupError(f"Library v2 {canonical} {entity_id} not found")
+        raise LookupError(f"Library {canonical} {entity_id} not found")
 
     ids = parse_external_ids(row["external_ids"])
     previous = str(ids.get(service) or "").strip()
@@ -542,7 +542,7 @@ def set_library_v2_match(
                 actor=actor,
             )
         except Exception as exc:  # provenance is supplemental to the native id
-            logger.debug("could not record Library-v2 match provenance: %s", exc)
+            logger.debug("could not record Library match provenance: %s", exc)
     else:
         try:
             conn.execute(
@@ -551,7 +551,7 @@ def set_library_v2_match(
                 (provenance_type, str(entity_id), service),
             )
         except Exception as exc:  # older databases may not have provenance yet
-            logger.debug("could not clear Library-v2 match provenance: %s", exc)
+            logger.debug("could not clear Library match provenance: %s", exc)
 
 
 __all__ = [
@@ -618,7 +618,7 @@ def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str
                              (int(watchlist_row_id),)).fetchone()
     if not artist or not watchlist or str(artist["name"] or "").casefold() \
             != str(watchlist["artist_name"] or "").casefold():
-        raise WatchlistMismatch("Watchlist artist does not match this Library v2 artist")
+        raise WatchlistMismatch("Watchlist artist does not match this Library artist")
     if column not in {row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")}:
         raise ValueError(f"Watchlist column {column!r} is unavailable")
     conn.execute(f"UPDATE watchlist_artists SET {column}=? WHERE id=?",

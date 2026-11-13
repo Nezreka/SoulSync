@@ -20,6 +20,8 @@
  * entries anchor to it, and pages-extra.js documents it as React-owned DOM.
  */
 
+import type { CSSProperties } from 'react';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncSeamState } from '../-dash.autosync';
@@ -744,6 +746,8 @@ export function syncHealth(rows: SyncBandRow[]): {
   total: number;
   pct: number;
   short: number;
+  /** playlists with every track in the library */
+  complete: number;
 } | null {
   const known = rows.filter((r) => r.coverage && r.coverage.total > 0);
   if (!known.length) return null;
@@ -754,10 +758,39 @@ export function syncHealth(rows: SyncBandRow[]): {
     total,
     pct: Math.floor((inLibrary / total) * 100),
     short: known.filter((r) => missingOf(r) > 0).length,
+    complete: known.filter((r) => missingOf(r) === 0).length,
   };
 }
 
+/** how many playlists the board's rail lists before See all */
+export const RAIL_ROWS = 5;
+
 export type RailSort = 'missing' | 'recent' | 'next' | 'name';
+
+/** The row actions as drawn icons: the ▶ ⟳ ⤓ glyphs they replace came out of
+ *  whatever font had them, at three different weights. */
+function RailIcon({ name }: { name: 'play' | 'sync' | 'download' }) {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+      {name === 'play' ? (
+        <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+      ) : (
+        <path
+          d={
+            name === 'sync'
+              ? 'M20 5v5h-5M4 19v-5h5M19.2 10A7.5 7.5 0 0 0 6 7.5L4 10m.8 4A7.5 7.5 0 0 0 18 16.5l2-2.5'
+              : 'M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19.5h14'
+          }
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
+}
 
 export const RAIL_SORTS: { id: RailSort; label: string }[] = [
   { id: 'missing', label: 'Most missing' },
@@ -781,6 +814,8 @@ export function railRows(
   showAll: boolean,
   sort: RailSort = 'missing',
   isLive: (row: SyncBandRow) => boolean = () => false,
+  /** how many the collapsed rail lists */
+  limit = 3,
 ): SyncBandRow[] {
   const ranked = [...rows];
   if (sort === 'missing') ranked.sort((a, b) => missingOf(b) - missingOf(a));
@@ -791,7 +826,7 @@ export function railRows(
   if (showAll) return [...live, ...rest];
   const fill = (sort === 'missing' ? rest.filter((r) => missingOf(r) > 0) : rest).slice(
     0,
-    Math.max(0, 3 - live.length),
+    Math.max(0, limit - live.length),
   );
   return [...live, ...fill];
 }
@@ -842,8 +877,12 @@ export function SyncRail() {
   const [sort, setSort] = useRailSort();
   const loaded = seamPhase !== 'loading' || entries !== null;
   const health = syncHealth(rows);
-  const shown = railRows(rows, showAll, sort, (row) =>
-    Boolean(row.schedule?.running ?? liveForRow(row)),
+  const shown = railRows(
+    rows,
+    showAll,
+    sort,
+    (row) => Boolean(row.schedule?.running ?? liveForRow(row)),
+    RAIL_ROWS,
   );
   const rest = rows.length - shown.length;
 
@@ -866,39 +905,51 @@ export function SyncRail() {
         <>
           {health ? (
             <div className="dash-sync-health">
-              <div className="dash-sync-health-line">
-                <span className="dash-sync-pct">{health.pct}%</span>
-                <span className="dash-sync-of">
-                  of {health.total.toLocaleString()} playlist tracks in your library
-                </span>
-              </div>
               <div
-                className="dash-sync-bar"
+                className="dash-sync-ring"
                 role="progressbar"
                 aria-label="Playlist tracks in your library"
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={health.pct}
+                style={{ '--pct': `${health.pct}%` } as CSSProperties}
               >
-                <span style={{ width: `${health.pct}%` }}></span>
+                <span className="dash-sync-pct">{health.pct}%</span>
+              </div>
+              <div className="dash-sync-say">
+                <p className="dash-sync-of">
+                  <b>
+                    {health.inLibrary.toLocaleString()} of {health.total.toLocaleString()}
+                  </b>
+                  playlist tracks are in your library, across {rows.length} playlist
+                  {rows.length === 1 ? '' : 's'}
+                </p>
+                {/* how the playlists themselves stand: whole, or short of tracks */}
+                <div className="dash-sync-mix" aria-hidden="true">
+                  <i className="dash-sync-mix-whole" style={{ flexGrow: health.complete }} />
+                  <i className="dash-sync-mix-short" style={{ flexGrow: health.short }} />
+                </div>
+                <p className="dash-sync-mixkey">
+                  <span className="dash-sync-mixkey-whole">{health.complete} complete</span>
+                  {health.short > 0 ? (
+                    <span className="dash-sync-mixkey-short">{health.short} missing tracks</span>
+                  ) : null}
+                </p>
               </div>
             </div>
           ) : null}
-          <div className="dash-sync-sortbar">
-            <label className="dash-side-sort">
-              <span>Sort</span>
-              <select
-                value={sort}
-                aria-label="Sort playlists"
-                onChange={(e) => setSort(e.target.value as RailSort)}
+          <div className="dash-sync-sortbar" role="group" aria-label="Sort playlists">
+            {RAIL_SORTS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className="dash-sync-sort"
+                aria-pressed={sort === s.id}
+                onClick={() => setSort(s.id)}
               >
-                {RAIL_SORTS.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {s.label}
+              </button>
+            ))}
           </div>
           <div className="dash-sync-rows">
             {shown.map((row) => {
@@ -931,18 +982,48 @@ export function SyncRail() {
                   }
                 >
                   <RowArt row={row} />
-                  <span className="dash-sync-name" title={row.name}>
-                    {row.name}
-                  </span>
-                  {live ? (
-                    <span className="dash-sync-live">
-                      {live.progress > 0 ? `${live.progress}%` : 'syncing'}
+                  <span className="dash-sync-text">
+                    <span className="dash-sync-name" title={row.name}>
+                      {row.name}
                     </span>
-                  ) : missing > 0 ? (
-                    <span className="dash-sync-missing">{missing} missing</span>
-                  ) : (
-                    <span className="dash-sync-done">all in</span>
-                  )}
+                    <span className="dash-sync-sub">
+                      {live ? (
+                        <span className="dash-sync-live">
+                          {live.progress > 0 ? `${live.progress}%` : 'syncing'}
+                        </span>
+                      ) : missing > 0 ? (
+                        <span className="dash-sync-missing">{missing} missing</span>
+                      ) : (
+                        <span className="dash-sync-done">all in</span>
+                      )}
+                      {!live && row.schedule?.enabled && row.schedule.nextRun ? (
+                        <span className="dash-sync-next">
+                          {row.schedule.nextRun === 'due now'
+                            ? 'syncs now'
+                            : `syncs ${row.schedule.nextRun}`}
+                        </span>
+                      ) : null}
+                    </span>
+                    {/* how much of this playlist is in the library */}
+                    {row.coverage && row.coverage.total > 0 ? (
+                      <span
+                        className="dash-sync-cover"
+                        title={`${row.coverage.inLibrary.toLocaleString()} of ${row.coverage.total.toLocaleString()} in your library`}
+                      >
+                        <i>
+                          <u
+                            style={{
+                              width: `${Math.min(100, Math.round((row.coverage.inLibrary / row.coverage.total) * 100))}%`,
+                            }}
+                          />
+                        </i>
+                        <em>
+                          {row.coverage.inLibrary.toLocaleString()} of{' '}
+                          {row.coverage.total.toLocaleString()}
+                        </em>
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="dash-sync-actions" onClick={(e) => e.stopPropagation()}>
                     {row.last?.id !== undefined ? (
                       <button
@@ -952,7 +1033,7 @@ export function SyncRail() {
                         aria-label={`Listen to ${row.name}`}
                         onClick={() => void listen(row.last!.id!, row.name)}
                       >
-                        ▶
+                        <RailIcon name="play" />
                       </button>
                     ) : null}
                     {row.schedule || row.mirrorId != null ? (
@@ -965,7 +1046,7 @@ export function SyncRail() {
                           aria-label={`Sync ${row.name} without adding missing tracks to the wishlist`}
                           onClick={() => void runNow(row, true)}
                         >
-                          ⟳
+                          <RailIcon name="sync" />
                         </button>
                         <button
                           type="button"
@@ -975,7 +1056,7 @@ export function SyncRail() {
                           aria-label={`Sync ${row.name} and download missing tracks`}
                           onClick={() => void runNow(row, false)}
                         >
-                          ⤓
+                          <RailIcon name="download" />
                         </button>
                       </>
                     ) : (
@@ -987,7 +1068,7 @@ export function SyncRail() {
                         aria-label={`Sync ${row.name} now`}
                         onClick={() => void syncAgain(row)}
                       >
-                        ⟳
+                        <RailIcon name="sync" />
                       </button>
                     )}
                   </span>

@@ -44,7 +44,11 @@ import {
   compareServerLabel,
   compareSourceIcon,
   compareSourceLabel,
+  compareSharedLabel,
+  compareSharedMark,
+  compareSharedText,
   compareStats,
+  sharedServerRows,
   fetchComparePlaylist,
   fetchMirroredMatches,
   fetchMirroredPlaylistById,
@@ -291,6 +295,64 @@ describe('fetchMirroredPlaylistById (237-239)', () => {
 });
 
 /* ── The compare editor's core ────────────────────────────────────────────── */
+
+describe('sharedServerRows: two source tracks, one song on the server (#2059)', () => {
+  const row = (position: number, serverId: string | null, status = 'matched'): CompareTrack => ({
+    match_status: status,
+    source_track: { position, name: `Song ${position}` },
+    server_track: serverId === null ? null : { id: serverId, title: 'Song' },
+  });
+
+  it('names, for each shared row, the other source tracks on the same server track', () => {
+    const shared = sharedServerRows([row(1, 'a'), row(2, 'b'), row(3, 'a'), row(4, 'c')]);
+    expect([...shared.entries()]).toEqual([
+      [0, [3]],
+      [2, [1]],
+    ]);
+  });
+
+  it('is empty when every source track has a server track of its own', () => {
+    expect(sharedServerRows([row(1, 'a'), row(2, 'b')]).size).toBe(0);
+  });
+
+  it('only pairs matched rows: an extra with the same id is not a source track', () => {
+    const extra: CompareTrack = {
+      match_status: 'extra',
+      source_track: null,
+      server_track: { id: 'a' },
+    };
+    expect(sharedServerRows([row(1, 'a'), extra, row(3, null, 'missing')]).size).toBe(0);
+  });
+
+  it('never groups rows on a missing id', () => {
+    const noId: CompareTrack = { match_status: 'matched', source_track: {}, server_track: {} };
+    expect(sharedServerRows([noId, noId]).size).toBe(0);
+  });
+
+  it('numbers a row with no stored position by its place in the list', () => {
+    const bare = (id: string): CompareTrack => ({
+      match_status: 'matched',
+      source_track: { name: 'x' },
+      server_track: { id },
+    });
+    expect(sharedServerRows([bare('a'), bare('b'), bare('a')]).get(0)).toEqual([3]);
+  });
+
+  it('says what the mark, the pill and the footer say', () => {
+    expect(compareSharedMark([12])).toBe('Same song as #12');
+    expect(compareSharedMark([12, 40])).toBe('Same song as #12, #40');
+    expect(compareSharedLabel(2)).toBe('Same song (2)');
+    const one = sharedServerRows([row(1, 'a'), row(2, 'a')]);
+    expect(compareSharedText(one)).toBe(
+      '2 source tracks are one song on the server, so it holds 1 fewer',
+    );
+    const two = sharedServerRows([row(1, 'a'), row(2, 'a'), row(3, 'b'), row(4, 'b'), row(5, 'b')]);
+    expect(compareSharedText(two)).toBe(
+      '5 source tracks are 2 songs on the server, so it holds 3 fewer',
+    );
+    expect(compareSharedText(new Map())).toBe('');
+  });
+});
 
 const T = (status: string, extra: Partial<CompareTrack> = {}): CompareTrack => ({
   match_status: status,

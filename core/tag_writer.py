@@ -163,6 +163,83 @@ def write_tag_fields(file_path: str, fields: Dict[str, Any], *, cover_data=None)
         return {'success': False, 'error': str(exc)}
 
 
+def _clear_tag_field(audio, field: str) -> bool:
+    """Remove one field from the tags. False when this writer has no clean way."""
+    is_id3, is_mp4 = isinstance(audio.tags, ID3), isinstance(audio, MP4)
+
+    def drop(id3, vorbis, mp4):
+        if is_id3:
+            audio.tags.delall(id3)
+        else:
+            for key in ([mp4] if is_mp4 else vorbis):
+                if key in audio:
+                    del audio[key]
+
+    if field in _TEXT_TAGS:
+        id3, vorbis, mp4 = _TEXT_TAGS[field]
+        drop(id3, [vorbis], mp4)
+        return True
+    for kind, number_key, total_key in (('track', 'track_number', 'total_tracks'), ('disc', 'disc_number', 'total_discs')):
+        frame, atom = ('TRCK', 'trkn') if kind == 'track' else ('TPOS', 'disk')
+        if field == number_key:
+            drop(frame, [kind + 'number', kind + 'total', 'total' + kind + 's'], atom)
+            return True
+        if field == total_key:
+            number, _ = read_number_pair(audio, kind)
+            drop(frame, [kind + 'number', kind + 'total', 'total' + kind + 's'], atom)
+            if number:
+                if is_id3:
+                    audio.tags.add((TRCK if kind == 'track' else TPOS)(encoding=3, text=[str(number)]))
+                elif is_mp4:
+                    audio[atom] = [(number, 0)]
+                else:
+                    audio[kind + 'number'] = [str(number)]
+            return True
+    return False
+
+
+def restore_tag_fields(file_path: str, before: Dict[str, Any]) -> Dict[str, Any]:
+    """Put earlier values back into a file: the undo of a tag write.
+
+    A field that had a value gets it back. A field that was empty is removed
+    again, where this writer knows the frame; one it cannot remove cleanly
+    (a source id, a mood) is left alone and named in ``kept``.
+    """
+    try:
+        if os.path.splitext(file_path)[1].lower() not in SUPPORTED_EXTENSIONS:
+            return {'success': False, 'error': 'Unsupported format'}
+        audio = MutagenFile(file_path)
+        if audio is None or audio.tags is None:
+            return {'success': False, 'error': 'Could not open file with Mutagen'}
+        restored, kept, values = [], [], {}
+        for key, value in before.items():
+            field = _FIELD_ALIASES.get(key, key)
+            if value not in (None, ''):
+                values[field] = value
+            elif _clear_tag_field(audio, field):
+                restored.append(key)
+            else:
+                kept.append(key)
+        # a total goes back beside its number, so both are parsed as numbers
+        for key in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
+            if key in values:
+                number = _parse_track_num(str(values[key]).split('/')[0])
+                if number is None:
+                    kept.append(key)
+                    del values[key]
+                else:
+                    values[key] = number
+        restored.extend(set_tag_fields(audio, values))
+        if not restored:
+            return {'success': True, 'restored_fields': [], 'kept_fields': kept}
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        if not save_audio_file(audio, get_mutagen_symbols()):
+            return {'success': False, 'error': 'Atomic save aborted by the audio integrity check — tags not restored'}
+        return {'success': True, 'restored_fields': restored, 'kept_fields': kept}
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)}
+
+
 def read_number_pair(audio, kind='track') -> Tuple[Optional[int], Optional[int]]:
     """Shared ID3/Vorbis/Opus/MP4 reader, including separate Vorbis totals."""
     tags = getattr(audio, 'tags', None)
@@ -446,6 +523,41 @@ def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
     return db_val
 
 
+def keeps_various_album_artist(file_val: Any, db_album_artist: Any, db_track_artist: Any) -> bool:
+    """the file calls the album various artists and this track is by someone
+    other than the library's album artist: the file is right, keep it.
+
+    a library can file a compilation under a folder name ("Official
+    Soundtrack", "Playlists"), and a re-tag wrote that name over 1,600 files'
+    Various Artists. a one-artist album mis-tagged as various still gets
+    corrected, its tracks are by the album artist."""
+    try:
+        from core.imports.compilation import is_various_artists_name
+        if not file_val or not db_album_artist or not is_various_artists_name(str(file_val)):
+            return False
+        if is_various_artists_name(str(db_album_artist)):
+            return False
+        performers = _artist_name_set(db_track_artist)
+        return bool(performers) and not (_artist_name_set(db_album_artist) & performers)
+    except Exception:  # noqa: BLE001 - a compare helper never breaks a write
+        return False
+
+
+def total_is_settled(key: str, actual: Any, expected: Any, db_data: Dict[str, Any]) -> bool:
+    """a track or disc total that differs from the library's and is still fine.
+
+    a multi-disc file may count the whole album (32) where the library counts
+    the disc (16), both are in use and neither is wrong. a one-disc release
+    with no disc total has nothing missing. 165k findings on one library were
+    the second kind."""
+    if key == 'total_tracks':
+        whole = db_data.get('album_track_total')
+        return bool(actual and whole and actual == whole)
+    if key == 'total_discs':
+        return not actual and expected == 1
+    return False
+
+
 def _normalize_date_str(s: str) -> str:
     """Normalize date/time strings (strip 'T', 'Z', seconds, offsets, and a
     no-information midnight time-of-day) to compare values.
@@ -617,7 +729,9 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # replaces the file's own (same hold-back, same preview).
         protected = False
         if changed and (guard_placeholder_overwrite(db_val, file_val) is None
-                        or (db_key == 'genres' and file_str and db_data.get('genres_from_artist'))):
+                        or (db_key == 'genres' and file_str and db_data.get('genres_from_artist'))
+                        or (file_key == 'album_artist' and keeps_various_album_artist(
+                            file_val, db_val, db_data.get('track_artist')))):
             changed = False
             protected = True
 
@@ -636,7 +750,8 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # A missing total is filled too, but only beside a number to write it with.
         diffs.append({'field': label, 'file_key': key, 'file_value': str(actual or ''), 'db_value': str(expected or ''),
                       'changed': bool(expected and actual != expected
-                                      and (actual or file_tags.get(number) or db_data.get(number)))})
+                                      and (actual or file_tags.get(number) or db_data.get(number))
+                                      and not total_is_settled(key, actual, expected, db_data))})
 
     if db_data.get('known_source_ids'):
         from core.metadata.source import known_source_id_tags
@@ -745,6 +860,8 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             artist = guard_placeholder_overwrite(artist, _current.get('artist'))
             album = guard_placeholder_overwrite(album, _current.get('album'))
             album_artist = guard_placeholder_overwrite(album_artist, _current.get('album_artist'))
+            if keeps_various_album_artist(_current.get('album_artist'), album_artist, artist):
+                album_artist = None
 
         # Prefer the full release_date (e.g. 2023-09-01) when the DB has one;
         # fall back to the year-only int. _date_to_write() then writes the full
@@ -755,6 +872,10 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         total_tracks = db_data.get('track_count')
         disc_num = db_data.get('disc_number')
         bpm = db_data.get('bpm')
+        # a file that counts the whole album keeps its total (total_is_settled)
+        if not _current.get('error') and total_is_settled(
+                'total_tracks', _current.get('total_tracks'), total_tracks, db_data):
+            total_tracks = _current.get('total_tracks')
 
         # Genre: list → comma string
         genre_str = None

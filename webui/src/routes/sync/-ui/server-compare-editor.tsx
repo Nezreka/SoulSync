@@ -45,6 +45,10 @@ import {
   compareFilterLabel,
   compareFooterText,
   compareMetaText,
+  compareSharedLabel,
+  compareSharedMark,
+  compareSharedText,
+  sharedServerRows,
   compareMissingHint,
   compareServerIcon,
   compareServerLabel,
@@ -68,7 +72,8 @@ import { ServerOrderModal } from './server-order-modal';
 import { ServerSearchOverlay } from './server-search-overlay';
 
 const FILTERS = ['all', 'matched', 'missing', 'extra'] as const;
-type CompareFilter = (typeof FILTERS)[number];
+/** 'shared' is offered only when two source tracks are one song on the server */
+type CompareFilter = (typeof FILTERS)[number] | 'shared';
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
 
@@ -143,11 +148,14 @@ export function ServerRow({
   onRemove,
   onFindAndAdd,
   presync = false,
+  sharedWith,
 }: {
   track: CompareTrack;
   index: number;
   hidden: boolean;
   highlighted: boolean;
+  /** the other source tracks matched to this same server track (#2059) */
+  sharedWith?: readonly number[];
   onSelect: () => void;
   onSwap: (index: number) => void;
   onUnmatch: (index: number) => void;
@@ -230,6 +238,14 @@ export function ServerRow({
         <div className="server-track-title">{svr.title}</div>
         <div className="server-track-artist">{svr.artist || ''}</div>
       </div>
+      {sharedWith?.length ? (
+        <span
+          className="server-track-shared"
+          title="More than one source track is matched to this song, so it is in the playlist once. Swap one of them for a different version if they should be two."
+        >
+          {compareSharedMark(sharedWith)}
+        </span>
+      ) : null}
       {badge && (
         <span className={`server-track-conf ${badge.className}`} title="Title similarity">
           {badge.percent}%
@@ -745,7 +761,11 @@ export function ServerCompareEditor({
    * two columns are paired by index, so removing a row from one side would
    * slide the other side out of alignment.
    */
-  const isHidden = (track: CompareTrack) => filter !== 'all' && track.match_status !== filter;
+  const shared = sharedServerRows(tracks);
+  // the pill is gone once nothing is shared any more: fall back to everything
+  const shown: CompareFilter = filter === 'shared' && shared.size === 0 ? 'all' : filter;
+  const isHidden = (track: CompareTrack, index: number) =>
+    shown === 'shared' ? !shared.has(index) : shown !== 'all' && track.match_status !== shown;
 
   return (
     <div id="server-editor">
@@ -841,13 +861,24 @@ export function ServerCompareEditor({
           <button
             type="button"
             key={f}
-            className={`discog-filter${filter === f ? ' active' : ''}`}
+            className={`discog-filter${shown === f ? ' active' : ''}`}
             data-filter={f}
             onClick={() => setFilter(f)}
           >
             {compareFilterLabel(f, stats)}
           </button>
         ))}
+        {shared.size > 0 ? (
+          <button
+            type="button"
+            className={`discog-filter${shown === 'shared' ? ' active' : ''}`}
+            data-filter="shared"
+            title="Source tracks matched to the same song on the server"
+            onClick={() => setFilter('shared')}
+          >
+            {compareSharedLabel(shared.size)}
+          </button>
+        ) : null}
         {data?.can_tag ? (
           <button
             type="button"
@@ -944,7 +975,7 @@ export function ServerCompareEditor({
                   key={index}
                   track={track}
                   index={index}
-                  hidden={isHidden(track)}
+                  hidden={isHidden(track, index)}
                   highlighted={highlighted === index}
                   onSelect={() => selectPair(index, 'source')}
                 />
@@ -998,8 +1029,9 @@ export function ServerCompareEditor({
                   key={index}
                   track={track}
                   index={index}
-                  hidden={isHidden(track)}
+                  hidden={isHidden(track, index)}
                   highlighted={highlighted === index}
+                  sharedWith={shared.get(index)}
                   onSelect={() => selectPair(index, 'server')}
                   onSwap={(i) => openSearch(i, 'replace')}
                   onUnmatch={(i) => void unmatchTrack(i)}
@@ -1025,6 +1057,7 @@ export function ServerCompareEditor({
 
       <div className="server-editor-footer" id="server-editor-footer">
         {compareFooterText(stats)}
+        {shared.size > 0 ? ` · ${compareSharedText(shared)}` : ''}
       </div>
 
       {showOrder && (

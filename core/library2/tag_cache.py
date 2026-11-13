@@ -288,7 +288,7 @@ def precache_tag_cache(database, config_manager, *, progress=None) -> Dict[str, 
         logger.debug("tag cache precache error: %s", e)
     if progress:
         progress("tags", total, total)
-    logger.info("Library v2 tag-cache precache: %s", counts)
+    logger.info("Library tag-cache precache: %s", counts)
     return counts
 
 

@@ -29,6 +29,8 @@ import {
   videoHeroNumbers,
   watchedPct,
   weekLine,
+  weekCardStart,
+  weekDays,
   weekSummary,
 } from './-vdash.model';
 
@@ -251,5 +253,84 @@ describe('metadata coverage', () => {
       ['tvdb-shows', 100],
     ]);
     expect(coverageRings({ movies: { total: 0 } })).toEqual([]);
+  });
+});
+
+describe('the week card, day by day', () => {
+  const TODAY = '2026-11-12';
+  const aired = (
+    show: number,
+    air_date: string,
+    acq: CalendarEpisode['acq'],
+    over: Partial<CalendarEpisode> = {},
+  ): CalendarEpisode => ({
+    id: `${show}-${air_date}-${Math.random()}`,
+    show_id: show,
+    show_tmdb_id: show,
+    show_title: `Show ${show}`,
+    season_number: 1,
+    episode_number: 1,
+    title: null,
+    overview: null,
+    air_date,
+    has_file: acq === 'owned',
+    monitored: true,
+    show_has_poster: true,
+    acq,
+    needs_action: false,
+    ...over,
+  });
+
+  it('is the last seven days, oldest first, today last', () => {
+    const days = weekDays([], TODAY);
+    expect(days.map((d) => d.date)).toEqual([
+      '2026-11-06',
+      '2026-11-07',
+      '2026-11-08',
+      '2026-11-09',
+      '2026-11-10',
+      '2026-11-11',
+      '2026-11-12',
+    ]);
+    expect(days.map((d) => d.label)).toEqual(['Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Today']);
+    expect(days[6].today).toBe(true);
+    expect(weekCardStart(TODAY)).toBe('2026-11-06');
+  });
+
+  it('counts each day by what you have, what is on its way and what is not coming', () => {
+    const day = weekDays(
+      [
+        aired(1, '2026-11-10', 'owned'),
+        aired(2, '2026-11-10', 'wanted'),
+        aired(3, '2026-11-10', 'downloading'),
+        aired(4, '2026-11-10', 'missing'),
+        aired(5, '2026-11-10', 'failed'),
+        // not on the card: before the week, and not aired yet
+        aired(6, '2026-11-05', 'owned'),
+        aired(7, '2026-11-12', 'unaired'),
+      ],
+      TODAY,
+    )[4];
+    expect([day.aired, day.owned, day.wanted, day.missing]).toEqual([5, 1, 2, 2]);
+  });
+
+  it('draws a show once a day, three posters at most, and counts the rest', () => {
+    const eps = [1, 1, 2, 3, 4, 5].map((show) => aired(show, '2026-11-11', 'owned'));
+    const day = weekDays(eps, TODAY)[5];
+    expect(day.aired).toBe(6);
+    expect(day.posters.map((p) => p.title)).toEqual(['Show 1', 'Show 2', 'Show 3']);
+    expect(day.more).toBe(2);
+    expect(day.posters[0].src).toContain('/api/video/poster/show/1?w=185');
+  });
+
+  it('uses the art it is given for a show that is not in the library, or none', () => {
+    const day = weekDays(
+      [
+        aired(9, TODAY, 'missing', { not_in_library: true, poster_url: 'https://img/p.jpg' }),
+        aired(10, TODAY, 'missing', { show_has_poster: false }),
+      ],
+      TODAY,
+    )[6];
+    expect(day.posters.map((p) => p.src)).toEqual(['https://img/p.jpg', null]);
   });
 });

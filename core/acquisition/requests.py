@@ -280,7 +280,7 @@ def create_request(
     ensure_acquisition_requests_schema(conn)
     profile_id = _positive_int(profile_id, "profile_id")
     if profile_id != ADMIN_PROFILE_ID:
-        raise ValueError("Library v2 acquisition requests are admin-profile only")
+        raise ValueError("Library acquisition requests are admin-profile only")
     entity_id = _positive_int(entity_id, "entity_id")
     quality_profile_id = _positive_int(quality_profile_id, "quality_profile_id")
     scope = _required_choice(scope, "scope", SCOPES)

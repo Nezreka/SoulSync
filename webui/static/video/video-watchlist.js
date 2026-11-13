@@ -13,6 +13,8 @@
     var PAGE_ID = 'video-watchlist';
     var LIMIT = 60;
     var state = { loaded: false, tab: 'show', search: '', sort: 'default', page: 1,
+                  // shows only: all | missing | complete | unowned (the chips)
+                  filter: 'all', facets: null,
                   counts: { show: 0, person: 0, studio: 0 }, channelCount: 0 };
     var searchTimer = null;
 
@@ -71,13 +73,15 @@
     }
     function wlBtn(opts) { return (window.VideoWatchlist) ? VideoWatchlist.btn(opts) : ''; }
 
+    // A pill only for the exception. Nearly every show here is airing (the
+    // list is your follows plus every airing show you own), so an Airing pill
+    // on each poster said nothing: ended and not-yet-started are the news.
     function statusPill(status) {
         var s = String(status == null ? '' : status).trim().toLowerCase();
         if (!s) return '';
         if (['ended', 'canceled', 'cancelled', 'completed'].indexOf(s) >= 0)
             return '<span class="vwlp-pill vwlp-pill--ended">Ended</span>';
-        if (s.indexOf('return') >= 0 || s === 'continuing')
-            return '<span class="vwlp-pill vwlp-pill--airing">Airing</span>';
+        if (s.indexOf('return') >= 0 || s === 'continuing') return '';
         if (s === 'upcoming' || s.indexOf('production') >= 0 || s.indexOf('planned') >= 0 || s === 'pilot')
             return '<span class="vwlp-pill vwlp-pill--soon">Upcoming</span>';
         return '<span class="vwlp-pill">' + esc(status) + '</span>';
@@ -106,6 +110,72 @@
         return url;
     }
 
+    // What a show card says under its name. The count is what you have against
+    // what has aired and is monitored (the api's episode_count), so a gap is a
+    // real gap: it gets the warning colour and a bar on the poster. A show
+    // with nothing missing just says how much there is.
+    function num(n) { return Number(n || 0).toLocaleString(); }
+
+    function showProgress(it) {
+        if (it.library_id == null)
+            return { meta: '<span class="vwlp-card-meta">Not in library</span>', bar: '' };
+        var total = it.episode_count || 0, owned = it.owned_count || 0;
+        if (!total) return { meta: '<span class="vwlp-card-meta">No episodes yet</span>', bar: '' };
+        var gap = Math.max(0, total - owned);
+        if (!gap) {
+            return { meta: '<span class="vwlp-card-meta">' + num(total) + ' episode' + (total === 1 ? '' : 's') + '</span>',
+                     bar: '' };
+        }
+        var pct = Math.max(4, Math.round((owned / total) * 100));
+        return {
+            meta: '<span class="vwlp-card-meta"><b>' + num(gap) + ' missing</b> &middot; ' + num(owned) + ' of ' + num(total) + '</span>',
+            bar: '<span class="vwlp-card-bar" aria-hidden="true"><i style="width:' + pct + '%"></i></span>'
+        };
+    }
+
+    // The line under the title: what this tab holds, and for shows how far
+    // behind the library is.
+    function updateSub() {
+        var el = $('[data-vwlp-sub]'); if (!el) return;
+        var f = state.facets;
+        if (state.tab === 'show') {
+            if (!f || !f.all) { el.textContent = 'Shows you follow, and every airing show you own'; return; }
+            var head = num(f.all) + ' show' + (f.all === 1 ? '' : 's');
+            el.textContent = f.missing
+                ? head + ' \u00b7 ' + num(f.missing_episodes) + ' aired episode' + (f.missing_episodes === 1 ? '' : 's') +
+                  ' missing across ' + num(f.missing) + ' of them'
+                : head + ' \u00b7 nothing aired is missing';
+        } else if (state.tab === 'person') {
+            el.textContent = 'People you follow. Their films you do not own go on the wishlist';
+        } else if (state.tab === 'studio') {
+            el.textContent = 'Studios you follow. Their films you do not own go on the wishlist';
+        } else {
+            el.textContent = 'Channels and playlists you follow. New uploads go on the wishlist';
+        }
+    }
+
+    function setFacets(facets) {
+        state.facets = facets || null;
+        var keys = ['all', 'missing', 'complete', 'unowned'];
+        for (var i = 0; i < keys.length; i++) {
+            var n = $('[data-vwlp-facet="' + keys[i] + '"]');
+            if (n) n.textContent = facets ? num(facets[keys[i]]) : 0;
+        }
+        updateSub();
+    }
+
+    function setFilter(filter) {
+        if (['all', 'missing', 'complete', 'unowned'].indexOf(filter) === -1) filter = 'all';
+        state.filter = filter; state.page = 1;
+        var chips = document.querySelectorAll('[data-vwlp-filter]');
+        for (var i = 0; i < chips.length; i++) {
+            var on = chips[i].getAttribute('data-vwlp-filter') === filter;
+            chips[i].classList.toggle('vwlp-chip--on', on);
+            chips[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        load();
+    }
+
     function cardHTML(it, kind) {
         // SPA open target: library shows open by library id ('library' source);
         // people + un-owned shows open by tmdb id ('tmdb').
@@ -123,8 +193,8 @@
                 source: it.library_id ? 'library' : 'tmdb' })
             : wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title, poster: it.poster_url, libraryId: it.library_id });
         var pill = kind === 'show' ? statusPill(it.status) : '';
-        var meta = (kind === 'show' && it.episode_count)
-            ? '<span class="vwlp-card-meta">' + (it.owned_count || 0) + '/' + it.episode_count + ' eps</span>' : '';
+        var prog = kind === 'show' ? showProgress(it) : { meta: '', bar: '' };
+        var meta = prog.meta;
         // People get a settings cog (like followed channels) to set their back-catalog window.
         var cog = kind === 'person'
             ? '<button type="button" data-vwlp-psettings="' + it.tmdb_id + '" data-title="' + esc(it.title) + '" ' +
@@ -135,7 +205,7 @@
             : '';
         return '<a class="vwlp-card' + (kind === 'person' ? ' vwlp-card--person' : '') + '" href="' + href + '" ' +
             'data-vwlp-open="' + kind + '" data-vwlp-source="' + source + '" data-vwlp-openid="' + esc(openId) + '">' +
-            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + pill + cog + btn + '</div>' +
+            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + pill + cog + btn + prog.bar + '</div>' +
             '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span>' + meta + '</div></a>';
     }
@@ -179,6 +249,9 @@
         var et = $('[data-vwlp-empty-title]');
         if (et && total === 0) {
             et.textContent = state.search ? 'No matches'
+                : (state.tab === 'show' && state.filter === 'missing') ? 'Nothing aired is missing'
+                : (state.tab === 'show' && state.filter === 'complete') ? 'No show is fully up to date yet'
+                : (state.tab === 'show' && state.filter === 'unowned') ? 'Every show you follow is in your library'
                 : state.tab === 'show' ? 'No shows on your watchlist yet'
                 : state.tab === 'person' ? 'No people on your watchlist yet'
                 : state.tab === 'studio' ? 'No studios followed yet — follow one from its studio page'
@@ -217,9 +290,14 @@
                 var all = ((d && d.channels) || []).concat((d && d.playlists) || []);   // channels + playlists
                 state.channelCount = all.length;
                 var cc = $('[data-vwlp-count-channel]'); if (cc) cc.textContent = all.length;
-                render(all);
+                // the search box filters this tab too (it used to do nothing here)
+                var q = state.search.toLowerCase();
+                var shown = q ? all.filter(function (it) {
+                    return String(it.title || '').toLowerCase().indexOf(q) !== -1;
+                }) : all;
+                render(shown);
                 updatePagination(null);
-                updateEmpty(all.length);
+                updateEmpty(shown.length);
             })
             .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updateEmpty(0); });
     }
@@ -230,12 +308,14 @@
         var ld = $('[data-vwlp-loading]'); if (ld) ld.classList.remove('hidden');
         var params = new URLSearchParams({
             kind: state.tab, search: state.search, sort: state.sort, page: state.page, limit: LIMIT });
+        if (state.tab === 'show' && state.filter !== 'all') params.set('filter', state.filter);
         fetch('/api/video/watchlist?' + params.toString(), { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (ld) ld.classList.add('hidden');
                 if (!d || !d.success) { render([]); updatePagination(null); updateEmpty(0); return; }
                 setCounts(d.counts);
+                if (state.tab === 'show') setFacets(d.facets);
                 var p = d.pagination || { page: 1, total_pages: 1, total_count: (d.items || []).length };
                 state.page = p.page;
                 render(d.items || []);
@@ -257,6 +337,16 @@
         // studio-family picker is studio-specific
         var fam = document.querySelector('[data-vwlp-families]');
         if (fam) fam.hidden = tab !== 'studio';
+        // the chips and the Most missing sort are about episodes: shows only
+        var chips = document.querySelector('[data-vwlp-chips]');
+        if (chips) chips.hidden = tab !== 'show';
+        var sortSel = document.querySelector('[data-vwlp-sort]');
+        var missOpt = document.querySelector('[data-vwlp-sort-shows]');
+        if (missOpt) missOpt.hidden = missOpt.disabled = tab !== 'show';
+        if (sortSel && tab !== 'show' && state.sort === 'missing') { state.sort = 'default'; sortSel.value = 'default'; }
+        // channels are one unsorted, unpaged list: the sort does nothing there
+        if (sortSel) sortSel.hidden = tab === 'channel';
+        updateSub();
         load();
     }
 
@@ -470,6 +560,11 @@
 
         var grid = $('[data-vwlp-grid]');
         if (grid) grid.addEventListener('click', onGridClick);
+
+        var chips = document.querySelectorAll('[data-vwlp-filter]');
+        for (var c = 0; c < chips.length; c++) (function (b) {
+            b.addEventListener('click', function () { setFilter(b.getAttribute('data-vwlp-filter')); });
+        })(chips[c]);
 
         var search = $('[data-vwlp-search]');
         if (search) search.addEventListener('input', function () {

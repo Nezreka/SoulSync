@@ -2,8 +2,9 @@
 create/edit its own automations without hijacking the music page's builder.
 
 These pin the wiring contract that makes that work:
-- the video automations subpage hosts its OWN builder DOM (vauto- prefixed ids)
-  + a "New Automation" button, swapping list/builder like the music page;
+- the video automations subpage hosts its OWN builder DOM (vauto- prefixed ids);
+  the list beside it is the React page now (/automations?media=video), which
+  shows this subpage for the length of an edit;
 - the shared builder (stats-automations.js) is context-aware: a video context
   points at the video ids + the video-scoped blocks endpoint + owned_by='video',
   and the card cog routes to the video builder when the video side is active;
@@ -22,15 +23,23 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
 _STATS = (_ROOT / "webui" / "static" / "stats-automations.js").read_text(encoding="utf-8")
-_VAUTO = (_ROOT / "webui" / "static" / "video" / "video-automations.js").read_text(encoding="utf-8")
+_VSIDE = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+_VCSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+_INIT = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
+_REACT = _ROOT / "webui" / "src" / "routes" / "automations"
+_BUILDER_TS = (_REACT / "-automations.builder.ts").read_text(encoding="utf-8")
+_HELPERS_TS = (_REACT / "-automations.helpers.ts").read_text(encoding="utf-8")
 
 
 # --- the video subpage builder DOM ----------------------------------------
 
-def test_video_subpage_has_new_automation_button():
-    # Header button + empty-state button both open the VIDEO builder.
-    assert _INDEX.count('onclick="showVideoAutomationBuilder()"') >= 1
-    assert 'auto-new-btn' in _INDEX
+def test_video_subpage_holds_only_the_builder():
+    # the vanilla list (header, stats, cards, empty state) is the React page
+    # now. what stays is the builder, and the node it swaps itself with.
+    sub = _INDEX.split('data-video-subpage="video-automations"', 1)[1].split('</section>', 1)[0]
+    assert 'id="vauto-builder-view"' in sub
+    assert 'data-vauto-list' not in sub and 'data-vauto-stats' not in sub
+    assert 'showVideoAutomationBuilder()' not in sub
 
 
 def test_video_subpage_has_list_and_builder_views():
@@ -98,17 +107,44 @@ def test_generic_config_renderer_is_video_gated():
     assert 'if (_autoBuilderCtx.ownedBy) {' not in _STATS
 
 
-def test_video_page_exposes_reload_hook():
-    assert 'window._reloadVideoAutomations = load' in _VAUTO
+# --- the page is the React automations page on ?media=video ----------------
+
+def test_video_automations_are_handed_off_to_the_react_route():
+    assert "'video-automations': 1" in _VSIDE              # HANDED_OFF: no url re-assert
+    assert "function gotoUnifiedAutomations" in _VSIDE
+    assert "if (pageId === 'video-automations') { gotoUnifiedAutomations(mode); return; }" in _VSIDE
+    assert "wsr.navigateToPage('automations', { query: { media: 'video' }" in _VSIDE
+    # a reload or Back onto /automations?media=video stays on the video side
+    assert "if (path === '/automations') return media === 'video' ? 'video-automations' : null;" in _VSIDE
 
 
-# --- the System list is shown in a logical pipeline order -----------------
+def test_video_automations_stay_admin_only():
+    # the sidebar entry is admin-only, and so is the url
+    assert "automations: { media: ['video'], videoPage: 'video-automations', adminOnly: true }" in _INIT
+    assert "if (view.adminOnly) return" in _INIT
 
-def test_video_automations_poll_does_not_rebuild_when_unchanged():
-    # regression: the 8s poll used to replaceChild the whole section every time → blink +
-    # wiped live progress. It must skip the rebuild when nothing structural changed.
-    assert 'if (sig === _lastSig) return;' in _VAUTO
-    assert 'var sig = JSON.stringify(' in _VAUTO
+
+def test_the_builder_takes_the_screen_back_from_the_react_page():
+    # the React root shows for the page, except while the builder is open: the
+    # React page puts vauto-building on the body and the video host shows again
+    assert ('body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) '
+            '#webui-react-root') in _VCSS
+    assert ('body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) '
+            '#video-page-host') in _VCSS
+    assert "VIDEO_BUILDING_CLASS = 'vauto-building'" in _BUILDER_TS
+    # a builder left open by leaving mid-edit must not greet the next visit
+    assert "document.body.classList.remove('vauto-building');" in _VSIDE
+
+
+def test_a_save_or_a_deploy_tells_the_react_page():
+    # the list is React's; the vanilla builder and hub only announce a change
+    assert _STATS.count("new CustomEvent('soulsync:automations-changed')") >= 2
+    page = (_REACT / "-ui" / "automations-page.tsx").read_text(encoding="utf-8")
+    assert "'soulsync:automations-changed'" in page
+
+
+def test_the_video_side_shows_only_video_owned_rows():
+    assert "return automations.filter((a) => a.owned_by === 'video');" in _HELPERS_TS
 
 
 def test_every_video_automation_has_a_friendly_label_and_icon():
@@ -131,13 +167,3 @@ def test_hourly_db_update_is_a_scheduled_safety_net():
     assert row["action_config"]["mode"] == "incremental"     # cheap read, not a deep scan
 
 
-def test_video_system_automations_are_sorted_by_pipeline_order():
-    # The API returns newest-created-first (jumbled); the page re-sorts by an
-    # explicit order so it reads scans → processors → library → maintenance.
-    assert "sortSystem(mine.filter(function (a) { return a.is_system; }))" in _VAUTO
-    assert '_SYS_ORDER' in _VAUTO
-    # the order must put the watchlist SCANS before the wishlist PROCESSORS
-    scan = _VAUTO.index("'video_scan_watchlist_people'")
-    proc = _VAUTO.index("'video_process_movie_wishlist'")
-    maint = _VAUTO.index("'video_backup_database'")
-    assert scan < proc < maint

@@ -366,7 +366,7 @@
     var VIDEO_WISHLIST_TABS = { movies: 1, tv: 1, youtube: 1 };
     // video pages that are really a React route on a video tab: navigate()
     // hands them off, so their /video-<page> url never stays in the bar.
-    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1 };
+    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1, 'video-automations': 1 };
     function lastVideoWishlistTab() {
         try {
             var t = sessionStorage.getItem('soulsync.videoWishlistTab');
@@ -389,6 +389,9 @@
         // /dashboard?media=video is the video dashboard (the music dashboard's
         // layout on video's data)
         if (path === '/dashboard') return media === 'video' ? 'video-dashboard' : null;
+        // /automations?media=video is the video side's automations (the music
+        // automations page on the rows the engine tags owned_by 'video')
+        if (path === '/automations') return media === 'video' ? 'video-automations' : null;
         if (path !== '/wishlist') return null;
         if (!VIDEO_WISHLIST_TABS[media]) return null;
         try { sessionStorage.setItem('soulsync.videoWishlistTab', media); } catch (e2) { /* ignore */ }
@@ -480,6 +483,33 @@
         catch (e2) { window.location.href = '/dashboard?media=video'; }
     }
 
+    // the video automations are the React /automations page on ?media=video:
+    // the same hand-off as the dashboard. the builder is still the shared
+    // vanilla one, in this shell's own automations subpage: the React page
+    // puts vauto-building on the body while it is open (see video-side.css).
+    function gotoUnifiedAutomations(mode) {
+        _backStack = [];
+        setActiveNav('video-automations');
+        document.body.setAttribute('data-video-page', 'video-automations');
+        // a builder left open by leaving the page mid-edit must not greet the
+        // next visit in place of the list
+        document.body.classList.remove('vauto-building');
+        var replace = mode === 'replace' || mode === 'restore';
+        // a reload or Back already on /automations: the React route has the
+        // url, with its view and filters. re-navigating would drop them.
+        var here = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/\/+$/, '');
+        if (mode === 'restore' && here === '/automations') return;
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('automations', { query: { media: 'video' }, replace: replace });
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        try { window.location.assign('/automations?media=video'); }
+        catch (e2) { window.location.href = '/automations?media=video'; }
+    }
+
     // a React page on its video view (/tools?media=video, /active-downloads?media=video...)
     function onSharedVideoUrl() {
         var path = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/\/+$/, '');
@@ -503,6 +533,7 @@
         if (pageId === 'video-tools') { gotoUnifiedTools(mode, job); return; }
         if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }
         if (pageId === 'video-dashboard') { gotoUnifiedDashboard(mode); return; }
+        if (pageId === 'video-automations') { gotoUnifiedAutomations(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

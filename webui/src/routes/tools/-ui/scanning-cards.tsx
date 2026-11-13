@@ -176,6 +176,8 @@ export function DbUpdaterCard() {
   return (
     <ToolCard
       id="db-updater-card"
+      icon="database"
+      feature
       title={serverName ? `${serverName} Database Updater` : 'Database Updater'}
       helpTool="db-updater"
       info={
@@ -215,7 +217,7 @@ export function DbUpdaterCard() {
         {
           label: 'Size:',
           valueId: 'db-stat-size',
-          value: `${(stats?.database_size_mb ?? 0).toFixed(2)} MB`,
+          value: formatDatabaseSize(stats?.database_size_mb ?? 0),
         },
       ]}
       controls={
@@ -248,6 +250,13 @@ export function DbUpdaterCard() {
       }
     />
   );
+}
+
+/** "10749.96 MB" is a number to decode. past a gigabyte it is said in GB, and
+ *  a megabyte count needs no decimals. */
+export function formatDatabaseSize(megabytes: number): string {
+  if (megabytes >= 1024) return `${(megabytes / 1024).toFixed(1)} GB`;
+  return `${Math.round(megabytes)} MB`;
 }
 
 // ── Import IDs from File Tags ────────────────────────────────────────────────
@@ -340,6 +349,7 @@ export function ReconcileIdsCard() {
   return (
     <ToolCard
       id="reconcile-ids-card"
+      icon="tags"
       title="Import IDs from File Tags"
       helpTool="reconcile-ids"
       info={
@@ -466,6 +476,7 @@ export function DuplicateCleanerCard() {
   return (
     <ToolCard
       id="duplicate-cleaner-card"
+      icon="copies"
       title="Duplicate Cleaner"
       helpTool="duplicate-cleaner"
       info="Detect and remove duplicate tracks in output folder"

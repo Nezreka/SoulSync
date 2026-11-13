@@ -246,8 +246,7 @@ export function AutoSyncModal({
    * data had arrived. This is the accurate one; the state-specific message
    * belongs in the body, where it already is.
    */
-  const BLURB =
-    'Schedule mirrored playlists through the same playlist-pipeline engine used by Automations.';
+  const BLURB = 'Keep playlists in your library on a schedule: each one syncs as often as you say.';
 
   // 594: a click on the overlay itself — never on the modal — closes it.
   const overlay = (children: React.ReactNode) => (
@@ -288,7 +287,7 @@ export function AutoSyncModal({
 
   if (loadError) {
     return overlay(
-      <div className="auto-sync-modal">
+      <div className="auto-sync-modal asx">
         {header(BLURB)}
         <div className="auto-sync-error">
           <p>{loadError}</p>
@@ -343,7 +342,7 @@ export function AutoSyncModal({
 
   return overlay(
     <div
-      className={`auto-sync-modal${dragging ? ' is-dragging' : ''}`}
+      className={`auto-sync-modal asx${dragging ? ' is-dragging' : ''}`}
       onDragStart={() => setDragging(true)}
       onDragEnd={() => setDragging(false)}
       onDrop={() => setDragging(false)}

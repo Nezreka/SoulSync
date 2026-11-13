@@ -208,6 +208,28 @@ def _is_pre_feat_fix_miss(cached: Dict[str, Any], title: str) -> bool:
     return not (isinstance(metadata, dict) and metadata.get('feat_retry'))
 
 
+def _release_miss_metadata(title: str, artist_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """what a negative RELEASE row stores: the feat. marker, and one saying
+    the title-alone search already ran (#2071)."""
+    metadata = dict(_feat_miss_metadata(title) or {})
+    if artist_name:
+        metadata['title_alone'] = 1
+    return metadata or None
+
+
+def _is_pre_title_alone_miss(cached: Dict[str, Any], artist_name: Optional[str]) -> bool:
+    """true for a release miss that found nothing at all under an artist and
+    was written before the title-alone search existed (#2071). it only
+    proves the artist-scoped search was empty, so it is asked once more
+    instead of waiting out the 30 day negative ttl."""
+    if cached.get('musicbrainz_id') or not artist_name:
+        return False
+    if int(cached.get('confidence') or 0) > 0:
+        return False
+    metadata = cached.get('metadata')
+    return not (isinstance(metadata, dict) and metadata.get('title_alone'))
+
+
 class MusicBrainzService:
     """Service layer for MusicBrainz integration with caching and matching logic"""
     
@@ -654,6 +676,50 @@ class MusicBrainzService:
             return featured_match, featured_confidence
         return best_match, best_confidence
 
+    #: MusicBrainz's own "Various Artists" artist
+    VARIOUS_ARTISTS_MBID = '89ad4ac3-39f7-470e-963a-56509c546377'
+    #: what a title-alone match is worth: over the gate, under an artist match
+    TITLE_ALONE_CONFIDENCE = 75
+    #: a title this short is shared by too many releases to stand alone
+    TITLE_ALONE_MIN_WORDS = 3
+
+    @staticmethod
+    def _title_words(title: str) -> list:
+        import re
+        import unicodedata
+        text = unicodedata.normalize('NFKC', str(title or '')).casefold()
+        return [part for part in re.split(r'\W+', text) if part]
+
+    def _match_release_by_title_alone(self, album_name: str) -> Optional[Dict[str, Any]]:
+        """The release a title names with no artist to help, or None.
+
+        Only for when the artist-scoped search came back empty. The title has
+        to be the same words, long enough to be its own, and the answer has to
+        be either a Various Artists release or the one release group
+        MusicBrainz knows under that title. Anything else stays unmatched: a
+        wrong MBID here feeds cover art and tags with nothing downstream to
+        catch it.
+        """
+        wanted = self._title_words(album_name)
+        if len(wanted) < self.TITLE_ALONE_MIN_WORDS:
+            return None
+        results = self.mb_client.search_release(
+            album_name, None, limit=8, strict=False, raise_on_error=True)
+        exact = [result for result in results or []
+                 if self._title_words(result.get('title', '')) == wanted]
+        if not exact:
+            return None
+        for result in exact:
+            credits = result.get('artist-credit') or []
+            if any(isinstance(credit, dict)
+                   and (credit.get('artist') or {}).get('id') == self.VARIOUS_ARTISTS_MBID
+                   for credit in credits):
+                return result
+        groups = {self.release_group_of(result) for result in exact}
+        if len(groups) == 1 and None not in groups:
+            return exact[0]
+        return None
+
     def match_release(self, album_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Match a release (album) by name to MusicBrainz
@@ -665,7 +731,8 @@ class MusicBrainzService:
         """
         # Check cache first
         cached = self._check_cache('release', album_name, artist_name)
-        if cached and not _is_pre_feat_fix_miss(cached, album_name):
+        if (cached and not _is_pre_feat_fix_miss(cached, album_name)
+                and not _is_pre_title_alone_miss(cached, artist_name)):
             logger.debug(f"Cache hit for release '{album_name}'")
             return {
                 'mbid': cached['musicbrainz_id'],
@@ -712,10 +779,21 @@ class MusicBrainzService:
                         if alt_confidence > best_confidence:
                             best_match, best_confidence = alt_match, alt_confidence
 
+            # #2071: the artist on the album can be the wrong one (a box set
+            # filed under its first composer, where MusicBrainz says Various
+            # Artists), and then the artist-scoped search finds nothing at
+            # all. ask again by title alone, and take only an answer the
+            # title pins down by itself.
+            if not results and artist_name:
+                by_title = self._match_release_by_title_alone(album_name)
+                if by_title is not None:
+                    best_match, best_confidence = by_title, self.TITLE_ALONE_CONFIDENCE
+                    results = [by_title]
+
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
                 self._save_to_cache('release', album_name, artist_name, None,
-                                    _feat_miss_metadata(album_name), 0)
+                                    _release_miss_metadata(album_name, artist_name), 0)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -738,7 +816,8 @@ class MusicBrainzService:
             else:
                 logger.info(f"Low confidence match for release '{album_name}' (best: {best_confidence})")
                 self._save_to_cache('release', album_name, artist_name, None,
-                                    _feat_miss_metadata(album_name), best_confidence)
+                                    _release_miss_metadata(album_name, artist_name),
+                                    best_confidence)
                 return None
                 
         except Exception as e:
@@ -2012,8 +2091,38 @@ class MusicBrainzService:
         """One MusicBrainz lookup: the release group a release belongs to.
         None when MusicBrainz has no answer (unknown release or an outage —
         the caller retries later either way)."""
+        return self.lookup_release_group_and_types(release_mbid)[0]
+
+    def lookup_release_group_and_types(self, release_mbid: str):
+        """The same lookup, with the group's secondary types (live,
+        soundtrack, ...) it answers in passing: ``(group id, types)``. Types
+        are None when the answer does not carry them."""
+        from core.library2.release_group_types import group_types
         data = self.mb_client.get_release(release_mbid, includes=['release-groups'])
-        return self.release_group_of(data)
+        group = data.get('release-group') if isinstance(data, dict) else None
+        return self.release_group_of(data), group_types(group)
+
+    def lookup_release_group_types(self, release_group_mbid: str):
+        """One lookup: a release group's secondary types, None when
+        MusicBrainz has no answer."""
+        from core.library2.release_group_types import group_types
+        return group_types(self.mb_client.get_release_group(release_group_mbid))
+
+    def update_album_release_group_types(self, album_id: int, release_group_mbid: str, types) -> None:
+        """Keep what kind of release the album's group is (#2055)."""
+        from core.library2.release_group_types import stamp
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            if stamp(conn, album_id, release_group_mbid, types):
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error storing release group types for album {album_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
 
     def update_album_release_group(self, album_id: int, release_group_mbid: Optional[str]):
         """Store an album's release group (None = looked up, no answer) and

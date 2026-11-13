@@ -1483,7 +1483,9 @@ def fingerprint_files(runtime: ImportRouteRuntime, file_paths: list,
             client = client_factory()
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": f"AcoustID is not available: {exc}"}, 503
-        available, reason = client.is_available()
+        # a button someone pressed: the download verification setting is not
+        # about this (#2042)
+        available, reason = getattr(client, 'can_fingerprint', client.is_available)()
         if not available:
             return {"success": False, "error": reason or "AcoustID is not set up", "code": "acoustid_unavailable"}, 503
 
@@ -1535,6 +1537,12 @@ def album_preview(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         data = data or {}
         album = data.get("album") or {}
         matches = data.get("matches") or []
+        # #2068: the album's explicit flag over every matched track, so $explicit
+        # in a folder is the same for the whole album
+        from core.imports.paths import album_explicit_flag
+        if album:
+            album = {**album, "explicit": album_explicit_flag(
+                album, [m.get("track") or {} for m in matches if isinstance(m, dict)])}
         source = str(album.get("source") or data.get("source") or "").strip().lower()
         if not album or not matches:
             return {"success": False, "error": "album and matches are required"}, 400
@@ -1629,6 +1637,12 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         data = data or {}
         album = data.get("album", {})
         matches = data.get("matches", [])
+        # #2068: the album's explicit flag over every matched track, so $explicit
+        # in a folder is the same for the whole album
+        from core.imports.paths import album_explicit_flag
+        if album:
+            album = {**album, "explicit": album_explicit_flag(
+                album, [m.get("track") or {} for m in matches if isinstance(m, dict)])}
 
         if not album or not matches:
             return {"success": False, "error": "Missing album or matches data"}, 400

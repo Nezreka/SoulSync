@@ -15,6 +15,8 @@ import {
   parsePlayedAt,
   statDelta,
   visibleStatsEnrichmentServices,
+  periodSentence,
+  statsRangePhrase,
 } from './-stats.helpers';
 import { statsSearchSchema } from './-stats.types';
 
@@ -188,5 +190,57 @@ describe('the listening clock helpers', () => {
     expect(formatPeakSlot(null, 21)).toBeNull();
     expect(formatPeakSlot(3, null)).toBeNull();
     expect(formatPeakSlot(9, 1)).toBeNull();
+  });
+});
+
+describe('periodSentence', () => {
+  const text = (...args: Parameters<typeof periodSentence>) =>
+    periodSentence(...args)
+      .map((part) => part.text)
+      .join('');
+  const overview = { unique_tracks: 884, unique_artists: 499, total_time_ms: 236_390_441 };
+
+  it('says how wide, what, when and how often', () => {
+    expect(
+      text('30d', overview, {
+        topGenre: 'Electronic',
+        peak: { weekday: 6, hour: 12 },
+        activeDays: 29,
+      }),
+    ).toBe(
+      'You played 884 songs by 499 artists for 65h 39m. Mostly Electronic, most often on Sat around 12pm, and 29 of the 30 days had music in them.',
+    );
+  });
+
+  it('weights the figures, not the words between them', () => {
+    const strong = periodSentence('30d', overview, { topGenre: 'Electronic' })
+      .filter((part) => part.strong)
+      .map((part) => part.text);
+    expect(strong).toEqual(['884 songs', '499 artists', '65h 39m', 'Electronic']);
+  });
+
+  it('leaves out what it does not know instead of saying zero', () => {
+    expect(text('30d', { unique_tracks: 1, unique_artists: 1 })).toBe(
+      'You played 1 song by 1 artist.',
+    );
+    expect(text('30d', overview, { peak: { weekday: null, hour: null } })).toBe(
+      'You played 884 songs by 499 artists for 65h 39m.',
+    );
+    expect(text('30d', {})).toBe('');
+  });
+
+  it('only counts days on the ranges that are a count of days', () => {
+    expect(text('12m', overview, { activeDays: 200 })).not.toMatch(/days had music/);
+    expect(text('all', overview, { activeDays: 200 })).not.toMatch(/days had music/);
+    // a streak counted over a longer window never claims more days than the range has
+    expect(text('7d', overview, { activeDays: 29 })).toMatch(/7 of the 7 days/);
+  });
+});
+
+describe('statsRangePhrase', () => {
+  it('ends a sentence for every range', () => {
+    expect(statsRangePhrase('7d')).toBe('in the last 7 days');
+    expect(statsRangePhrase('12m')).toBe('in the last 12 months');
+    expect(statsRangePhrase('all')).toBe('all time');
   });
 });

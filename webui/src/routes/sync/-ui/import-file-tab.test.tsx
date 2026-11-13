@@ -249,6 +249,22 @@ describe('ImportFileTab — M3U', () => {
     expect(document.querySelector('#import-file-text-format')).toBeNull();
     expect(document.querySelector('#import-file-column-mapping')).toBeNull();
   });
+
+  it('reads an iTunes m3u as Title - Artist, and the order can be turned round', async () => {
+    stubFetch();
+    render(<ImportFileTab onImported={() => undefined} />);
+    dropFile(
+      'itunes.m3u',
+      '#EXTM3U\n#EXTINF:468,Hyperbola - Rishi K.\n/Music/Rishi K_/Hyperbola/01 Hyperbola.mp3\n',
+    );
+    await waitFor(() => expect(screen.getByText('itunes.m3u')).toBeInTheDocument());
+    const order = document.querySelector('#import-file-m3u-order') as HTMLSelectElement;
+    expect(order.value).toBe('title-artist');
+    expect(previewRows()).toEqual([['1', 'Hyperbola', 'Rishi K.', '']]);
+
+    fireEvent.change(order, { target: { value: 'artist-title' } });
+    expect(previewRows()).toEqual([['1', 'Rishi K.', 'Hyperbola', '']]);
+  });
 });
 
 describe('ImportFileTab — submit', () => {

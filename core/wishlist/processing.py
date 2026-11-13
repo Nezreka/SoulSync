@@ -455,7 +455,7 @@ def start_direct_track_download_batch(
         with runtime.tasks_lock:
             runtime.download_batches[batch_id] = make_wishlist_batch_row(
                 playlist_id="library_v2_search",
-                playlist_name="Library v2 Automatic Search",
+                playlist_name="Library Automatic Search",
                 track_count=0,
                 max_concurrent=runtime.get_batch_max_concurrent(),
                 profile_id=runtime.profile_id,
@@ -488,7 +488,7 @@ def _prepare_and_run_direct_track_batch(
         direct_tracks, duplicates = sanitize_and_dedupe_wishlist_tracks(tracks)
         if duplicates:
             runtime.logger.info(
-                f"[Library-v2 Search] Removed {duplicates} duplicate transient payload(s)"
+                f"[Library Search] Removed {duplicates} duplicate transient payload(s)"
             )
         for index, track in enumerate(direct_tracks):
             track['_original_index'] = index
@@ -1078,9 +1078,16 @@ def remove_tracks_already_in_library(
 
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
 
+    # #2060: a wish for a BETTER copy is about a track that has its file.
+    # Owning it is the premise, not a reason to drop the wish: this sweep took
+    # every upgrade out again before it was tried, so none ever happened.
+    upgrade_wishes = _live_upgrade_wishes(music_database, cleanup_tracks, logger)
+
     cleanup_removed = 0
     for profile_id, track in cleanup_tracks:
         if skip_track_fn and skip_track_fn(track):
+            continue
+        if id(track) in upgrade_wishes:
             continue
         # this runs as a background job, so "already in the library" has to be
         # asked through the wishlist owner's library, not the job's (#1199): an
@@ -1095,6 +1102,43 @@ def remove_tracks_already_in_library(
             reset_library_scope(_scope_token)
         cleanup_removed += removed_here
     return cleanup_removed
+
+
+def _live_upgrade_wishes(music_database, cleanup_tracks, logger) -> set:
+    """``id()`` of the rows that ask for a better copy of a track whose file is
+    still below its quality profile. A row whose track has since been upgraded
+    (or whose profile no longer asks for more) is an ordinary owned track
+    again and is swept like any other. Empty on any error: the sweep then
+    behaves as it always did."""
+    try:
+        from core.library2.upgrade_attempts import is_upgrade_wish
+        from core.library2.wishlist_mirror import upgrade_candidate_track_ids
+        from core.library_scope import (
+            library_scope_for_profile, reset_library_scope, set_library_scope,
+        )
+        by_profile: dict = {}
+        for profile_id, track in cleanup_tracks:
+            track_id = is_upgrade_wish(track.get('source_info'))
+            if track_id:
+                by_profile.setdefault(profile_id, []).append((track_id, track))
+        live: set = set()
+        for profile_id, wishes in by_profile.items():
+            token = set_library_scope(library_scope_for_profile(profile_id))
+            try:
+                conn = music_database._get_connection()
+                try:
+                    still = set(upgrade_candidate_track_ids(
+                        conn, profile_id=profile_id,
+                        track_ids=sorted({track_id for track_id, _track in wishes})))
+                finally:
+                    conn.close()
+            finally:
+                reset_library_scope(token)
+            live.update(id(track) for track_id, track in wishes if track_id in still)
+        return live
+    except Exception as exc:  # noqa: BLE001 - the sweep must still run
+        logger.debug("upgrade-wish check skipped: %s", exc)
+        return set()
 
 
 def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, active_server, *, logger, log_prefix) -> int:

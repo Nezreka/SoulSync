@@ -209,8 +209,13 @@ def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
     best = _best(files)
     for f in files:
         f["best"] = best is not None and f["id"] == best["id"]
+    cutoff = _profile(db, detail.get("quality_profile_id"))["profile"].get("cutoff_resolution")
+    for f in files:
+        f["below_cutoff"] = bool(cutoff) and resolution_rank(f.get("resolution")) < resolution_rank(cutoff)
+    _attach_sources(db, "movie", ident.get("tmdb_id"), files)
     return {
         "kind": "movie", "id": movie_id, "title": ident.get("title"), "year": ident.get("year"),
+        "extra_copies": _extras([files]),
         "identity": _identity(db, "movie", movie_id),
         "summary": {"files": len(files), "size_bytes": sum(f["size_bytes"] for f in files),
                     "watched": bool(detail.get("watched")), "play_count": detail.get("play_count"),
@@ -222,6 +227,44 @@ def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
         "files": files,
         "recycle": _recycle_on(db),
     }
+
+
+def _basename(path: Any) -> str:
+    return os.path.basename(str(path or "").replace("\\", "/")).lower()
+
+
+def _attach_sources(db, kind: str, tmdb_id, files: List[dict]) -> None:
+    """say where each file came from: the download that landed it, matched by
+    file name. a file SoulSync didn't download has no source and says nothing."""
+    if not files or not tmdb_id:
+        return
+    try:
+        grabs = db.library_title_grabs(kind, tmdb_id)
+    except Exception:   # noqa: BLE001 - provenance is a nicety, never a blocker
+        logger.debug("title grabs failed for %s %s", kind, tmdb_id, exc_info=True)
+        return
+    by_name: Dict[str, dict] = {}
+    for g in grabs:   # newest first: the first one seen per name is the latest
+        by_name.setdefault(_basename(g.get("dest_path")), g)
+    for f in files:
+        g = by_name.get(_basename(f.get("path") or f.get("filename")))
+        if g:
+            f["source"] = {"release": g.get("release_title"), "via": g.get("source"),
+                           "indexer": g.get("username"), "at": g.get("completed_at")}
+
+
+def _extras(groups: Iterable[List[dict]]) -> Dict[str, int]:
+    """the copies beyond the best one of each movie or episode: how many
+    titles have any, how many files that is, and the space they hold."""
+    titles = files = size = 0
+    for group in groups:
+        if len(group) < 2:
+            continue
+        best = _best(group)
+        titles += 1
+        files += len(group) - 1
+        size += sum((f.get("size_bytes") or 0) for f in group if f is not best)
+    return {"titles": titles, "files": files, "size_bytes": size}
 
 
 def _copies(files: List[dict]) -> Dict[str, Any]:
@@ -248,11 +291,40 @@ def _show_folders(paths: List[str]) -> List[Dict[str, Any]]:
     for p in paths:
         if not p:
             continue
-        d = os.path.dirname(p.replace("\\", "/"))
-        if _SEASON_DIR.search(os.path.basename(d) or ""):
-            d = os.path.dirname(d)
+        d = show_folder_of(p)
         counts[d] = counts.get(d, 0) + 1
     return [{"path": k, "files": v} for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+
+
+def show_folder_of(path: Any) -> str:
+    """the show folder a file sits in (server view): its own folder, or the
+    one above a season folder. the key ``_show_folders`` groups by."""
+    d = os.path.dirname(str(path or "").replace("\\", "/"))
+    if _SEASON_DIR.search(os.path.basename(d) or ""):
+        return os.path.dirname(d)
+    # a release folder left inside a season folder ("Season 2/Show.S02E10-GRP/
+    # file.mkv") is still that show's folder, not a sixth place it lives
+    up = os.path.dirname(d)
+    if _SEASON_DIR.search(os.path.basename(up) or ""):
+        return os.path.dirname(up)
+    return d
+
+
+def _folder_rows(files: List[dict]) -> List[Dict[str, Any]]:
+    """``_show_folders`` with what a person picks a folder by: the drive it is
+    on, its own name, and how much it holds. the fullest one is the main."""
+    sizes: Dict[str, int] = {}
+    for f in files:
+        if f.get("path"):
+            key = show_folder_of(f["path"])
+            sizes[key] = sizes.get(key, 0) + (f.get("size_bytes") or 0)
+    rows = _show_folders([f["path"] for f in files if f.get("path")])
+    for i, row in enumerate(rows):
+        row["size_bytes"] = sizes.get(row["path"], 0)
+        row["root"] = mount_root(row["path"])
+        row["name"] = os.path.basename(row["path"].rstrip("/")) or row["path"]
+        row["main"] = i == 0
+    return rows
 
 
 def show_library(db, show_id: int, *, season: Optional[int] = None,
@@ -294,7 +366,10 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
         s["size_bytes"] += sum(f["size_bytes"] for f in files)
         s["_files"].extend(files)
         s["monitored"] = bool(ep.get("season_monitored", 1))
+        s["id"] = ep.get("season_id")
+        s["has_poster"] = bool(ep.get("season_has_poster"))
         s["episodes"].append({
+            "has_still": bool(ep.get("has_still")), "runtime_minutes": ep.get("runtime_minutes"),
             "id": ep["id"], "episode_number": ep.get("episode_number"), "title": ep.get("title"),
             "air_date": ep.get("air_date"), "has_file": bool(ep.get("has_file")),
             "monitored": bool(ep.get("monitored", 1)), "watched": (ep.get("play_count") or 0) > 0,
@@ -314,6 +389,12 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
         f["below_cutoff"] = bool(cutoff) and resolution_rank(f.get("resolution")) < resolution_rank(cutoff)
     for s_ in season_list:
         s_["below_cutoff"] = sum(1 for e in s_["episodes"] for f in e["files"] if f.get("below_cutoff"))
+        s_["extra_copies"] = _extras(e["files"] for e in s_["episodes"])
+        for e in s_["episodes"]:
+            top = _best(e["files"])
+            for f in e["files"]:
+                f["best"] = len(e["files"]) > 1 and f is top
+    _attach_sources(db, "show", ident.get("tmdb_id"), all_files)
     real_seasons = [s for s in season_list if s["season_number"] != 0]
     return {
         "kind": "show", "id": show_id, "title": ident.get("title"), "year": ident.get("year"),
@@ -328,17 +409,19 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
             "size_bytes": sum(f["size_bytes"] for f in all_files),
             "res_mix": _res_mix(all_files),
             "roots": _copies(all_files)["roots"],
-            "folders": _show_folders([f["path"] for f in all_files]),
+            "folders": _folder_rows(all_files),
+            "seasons": len(real_seasons),
             "watched_episodes": detail_meta.get("watched_episodes") or 0,
             "series_type": detail_meta.get("series_type"),
             "monitored": bool(detail_meta.get("monitored", 1)),
         },
         "quality": dict(_quality_block(db, detail_meta.get("quality_profile_id"), best),
                         below_cutoff=sum(1 for f in all_files if f.get("below_cutoff"))),
+        "extra_copies": _extras(files_by_ep.values()),
         "seasons": season_list,
         "detail_season": season,
         "recycle": _recycle_on(db),
     }
 
 
-__all__ = ["light_file", "movie_library", "show_library"]
+__all__ = ["light_file", "movie_library", "show_library", "show_folder_of"]

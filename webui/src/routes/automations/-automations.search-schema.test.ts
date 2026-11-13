@@ -47,3 +47,23 @@ describe('automations search schema legacy health param', () => {
     expect('health' in parsed).toBe(false);
   });
 });
+
+describe('automations search schema media', () => {
+  it('reads media=video as the video side', () => {
+    expect(automationsSearchSchema.parse({ media: 'video' }).media).toBe('video');
+  });
+
+  it('reads anything else as the music side, without a media key in the url', () => {
+    expect(automationsSearchSchema.parse({ media: 'tv' }).media).toBeUndefined();
+    expect(automationsSearchSchema.parse({}).media).toBeUndefined();
+    expect(automationsSearchSchema.parse({ media: ['video'] }).media).toBeUndefined();
+  });
+
+  it('keeps the side beside a legacy health link', () => {
+    expect(automationsSearchSchema.parse({ media: 'video', health: 'off' })).toMatchObject({
+      media: 'video',
+      view: 'library',
+      nav: 'off',
+    });
+  });
+});

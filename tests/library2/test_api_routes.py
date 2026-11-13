@@ -84,6 +84,11 @@ def api(tmp_path, monkeypatch):
     conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
+    # an install upgraded from before the cutover: its (empty) older tables
+    # are still there. a fresh install has none, and the import route answers
+    # nothing_to_import for it (#2062, tested below with them dropped)
+    for legacy in ("artists", "albums", "tracks"):
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {legacy}(id INTEGER PRIMARY KEY, name TEXT)")
 
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
@@ -4611,6 +4616,76 @@ def test_import_runs_when_the_state_says_done_but_the_catalogue_is_empty(
         time.sleep(0.01)
 
 
+def _drop_older_library(db):
+    conn = db._get_connection()
+    for legacy in ("artists", "albums", "tracks"):
+        conn.execute(f"DROP TABLE IF EXISTS {legacy}")
+    conn.commit()
+    conn.close()
+
+
+def test_a_fresh_install_has_nothing_to_import_and_is_not_marked_failed(api, monkeypatch):
+    """#2062: a new install has no older library. Import library started the
+    legacy import anyway, it failed on the missing tables ("legacy table is
+    missing required columns: id, name"), and the failed row made the page say
+    the upgrade had failed and everything was paused."""
+    from api import library_v2 as api_module
+    from core.library2 import bootstrap as lib2_bootstrap, importer
+
+    client, db, _ids = api
+    _drop_older_library(db)
+    ran = []
+    monkeypatch.setattr(importer, "import_legacy_library",
+                        lambda *_a, **_k: ran.append(1) or {})
+    api_module._import_state.update(running=False, stage=None, current=0, total=0,
+                                    stats=None, error=None, finished_at=None)
+
+    response = client.post("/api/library/v2/import", json={})
+
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "nothing_to_import"
+    assert not ran
+    assert lib2_bootstrap.get_state(db).get("status") != "failed"
+    status = client.get("/api/library/v2/import/status").get_json()
+    assert status["has_legacy_source"] is False and status["running"] is False
+    # reset and force have nothing to read either
+    assert client.post("/api/library/v2/import",
+                       json={"reset": True}).get_json()["code"] == "nothing_to_import"
+    assert client.post("/api/library/v2/import",
+                       json={"force": True}).get_json()["code"] == "nothing_to_import"
+
+
+def test_a_failure_an_earlier_build_left_on_a_fresh_install_is_cleared(api):
+    from core.library2 import bootstrap as lib2_bootstrap
+
+    client, db, _ids = api
+    _drop_older_library(db)
+    owner = lib2_bootstrap.try_claim(db)
+    assert lib2_bootstrap.mark_failed(
+        db, owner, "legacy table is missing required columns: id, name")
+    assert lib2_bootstrap.get_state(db)["status"] == "failed"
+
+    status = client.get("/api/library/v2/import/status").get_json()
+
+    assert status["bootstrap"]["status"] == "waiting_for_source"
+    assert not status["bootstrap"].get("last_error")
+
+
+def test_a_real_upgrade_failure_is_not_cleared(api):
+    from core.library2 import bootstrap as lib2_bootstrap
+
+    client, db, _ids = api          # the older tables are there
+    owner = lib2_bootstrap.try_claim(db)
+    lib2_bootstrap.mark_failed(db, owner, "disk full")
+
+    status = client.get("/api/library/v2/import/status").get_json()
+
+    assert status["has_legacy_source"] is True
+    assert status["bootstrap"]["status"] == "failed"
+    assert status["bootstrap"]["last_error"] == "disk full"
+    assert lib2_bootstrap.settle_failed_without_source(db) is False
+
+
 def test_the_repeat_run_refusal_is_machine_readable(api):
     """The message names ``force`` as the way through, so the Import tile has to
     be able to tell THIS refusal from every other failure to offer it. Matching
@@ -5010,3 +5085,41 @@ def test_reset_rearms_the_one_time_upgrade_carries(api):
                         "legacy_issue_ids_v1", "legacy_genre_locks_v1"}
     assert not tables & {"_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
                          "_lib2_member_watchlists_carried"}
+
+
+# ── #2070: use the files' own tags ───────────────────────────────────────────
+
+def test_use_file_tags_previews_then_applies_over_http(api, monkeypatch):
+    client, db, ids = api
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(?, '/m/tagged.flac', 'flac')",
+                 (ids["album_track"],))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda p: p)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda path: {
+        "title": "Tagged Title", "album": None, "year": "2016", "track_number": "9",
+        "disc_number": None, "genre": None})
+
+    preview = client.get(f"/api/library/v2/tracks/{ids['album_track']}/use-file-tags").get_json()
+
+    assert preview["success"] is True
+    changes = {c["field"]: c["file"] for c in preview["tracks"][0]["changes"]}
+    assert changes["title"] == "Tagged Title" and changes["track_number"] == 9
+    assert preview["counts"]["moves"] == 0
+
+    applied = client.post(f"/api/library/v2/tracks/{ids['album_track']}/use-file-tags").get_json()
+
+    assert applied["success"] is True and applied["tracks_changed"] == 1
+    from core.library2.metadata_overrides import get_field_overrides
+    conn = db._get_connection()
+    saved = get_field_overrides(conn, entity_type="track", entity_id=ids["album_track"])
+    conn.close()
+    assert saved["title"].value == "Tagged Title" and saved["track_number"].value == 9
+
+
+def test_use_file_tags_answers_404_for_something_that_is_not_there(api):
+    client, _db, _ids = api
+    assert client.get("/api/library/v2/albums/999999/use-file-tags").status_code == 404
+    assert client.post("/api/library/v2/artists/999999/use-file-tags").status_code == 404
+    assert client.get("/api/library/v2/playlists/1/use-file-tags").status_code in (400, 404)

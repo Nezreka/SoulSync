@@ -3,10 +3,13 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AutomationActivity,
   AutomationBlocks,
+  AutomationHistoryResponse,
   AutomationsListResponse,
   AutomationsMasterState,
   AutomationsProgressResponse,
+  AutomationsSide,
 } from './-automations.types';
 
 export const AUTOMATIONS_QUERY_KEY = ['automations'] as const;
@@ -46,6 +49,37 @@ export function automationsProgressQueryOptions() {
   return queryOptions({
     queryKey: [...AUTOMATIONS_QUERY_KEY, 'progress'] as const,
     queryFn: () => readJson<AutomationsProgressResponse>(apiClient.get('automations/progress')),
+  });
+}
+
+/**
+ * The last 24 hours by automation and the last week by day. Keyed by profile
+ * for the same reason the list is. Refetched on every visit: it is a clock.
+ */
+export function automationsActivityQueryOptions(
+  profileId: number,
+  side: AutomationsSide = 'music',
+) {
+  return queryOptions({
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'activity', profileId, side] as const,
+    queryFn: () =>
+      readJson<AutomationActivity>(
+        apiClient.get('automations/activity', side === 'video' ? { searchParams: { side } } : {}),
+      ),
+    refetchOnMount: 'always',
+    staleTime: 30_000,
+  });
+}
+
+/** The last few runs of one automation, for its opened row. */
+export function automationRunsQueryOptions(id: number, limit = 5) {
+  return queryOptions({
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'runs', id, limit] as const,
+    queryFn: () =>
+      readJson<AutomationHistoryResponse>(
+        apiClient.get(`automations/${id}/history`, { searchParams: { limit, offset: 0 } }),
+      ),
+    staleTime: 15_000,
   });
 }
 
@@ -186,13 +220,17 @@ export async function regroupAutomations(ids: number[], groupName: string | null
  * Block definitions — the builder's palette, and the label source for any
  * trigger/action type not in the static maps.
  *
- * Scoped to 'music' server-side, so the video-only types never appear here.
+ * Scoped per side server-side: the music list never carries a video-only
+ * type, and the video side reads its own list from the video api.
  * Long-lived: these change only when the app ships new block types.
  */
-export function automationBlocksQueryOptions() {
+export function automationBlocksQueryOptions(side: AutomationsSide = 'music') {
   return queryOptions({
-    queryKey: [...AUTOMATIONS_QUERY_KEY, 'blocks'] as const,
-    queryFn: () => readJson<AutomationBlocks>(apiClient.get('automations/blocks')),
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'blocks', side] as const,
+    queryFn: () =>
+      readJson<AutomationBlocks>(
+        apiClient.get(side === 'video' ? 'video/automations/blocks' : 'automations/blocks'),
+      ),
     staleTime: Infinity,
   });
 }

@@ -31,7 +31,7 @@ class LibraryV2UpgradeIntent:
 
     def __post_init__(self) -> None:
         if self._seal is not _SEAL or self.track_id <= 0:
-            raise ValueError("invalid Library-v2 upgrade intent")
+            raise ValueError("invalid Library upgrade intent")
 
 
 def issue_upgrade_intent(track_id: Any, *, origin: str) -> LibraryV2UpgradeIntent:

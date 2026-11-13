@@ -242,7 +242,7 @@ def test_destination_on_disk_without_library_registration_is_failed(
 
     def _inner(*_args, **_kwargs):
         context['_final_processed_path'] = str(destination)
-        context['_context_failure_msg'] = 'Library v2 registration failed'
+        context['_context_failure_msg'] = 'Library registration failed'
 
     with patch.object(import_pipeline, 'post_process_matched_download', _inner):
         import_pipeline.post_process_matched_download_with_verification(
@@ -250,7 +250,7 @@ def test_destination_on_disk_without_library_registration_is_failed(
         )
 
     assert runtime_state.download_tasks['t7']['status'] == 'failed'
-    assert 'Library v2' in runtime_state.download_tasks['t7']['error_message']
+    assert 'Library' in runtime_state.download_tasks['t7']['error_message']
     assert completion_calls == [('b7', 't7', False)]
 
 

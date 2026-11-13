@@ -903,7 +903,7 @@ def test_required_library_registration_fails_before_completion_callbacks(monkeyp
         lambda _context: completed.append("grab"),
     )
 
-    with pytest.raises(RuntimeError, match="Library v2 could not register"):
+    with pytest.raises(RuntimeError, match="Library could not register"):
         side_effects.record_download_provenance(
             {"_final_processed_path": "/library/song.flac"},
             require_library=True,

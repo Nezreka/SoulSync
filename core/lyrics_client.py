@@ -471,6 +471,13 @@ class LyricsClient:
         if not self.api:
             logger.debug("LRClib API not available - skipping lyrics")
             return False, 'LRCLib API not available'
+        # #2046: lyrics are a write into a reviewed album's folder and files
+        try:
+            from core.library2 import locks
+            if locks.blocks_file(audio_file_path, "tags", "Lyrics"):
+                return False, 'This album is locked'
+        except Exception as e:  # noqa: BLE001 - a lock check never fails lyrics
+            logger.debug("lock check skipped: %s", e)
 
         try:
             # Generate LRC file path (same name as audio file, .lrc extension)

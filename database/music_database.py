@@ -22,6 +22,9 @@ from core.library2.sql_util import owned_sql as _owned_sql
 
 logger = get_logger("music_database")
 
+# how long a run stays in automation_run_history however often it runs
+AUTOMATION_HISTORY_DAYS = 7
+
 # A file row confirmed at a configured path. Missing/deleted rows remain as
 # history (ADR-03), but are not ownership evidence.
 # the most ids a fold_index match is put back through sql as; a needle that
@@ -210,7 +213,8 @@ _EXPORT_ARTIST_COLUMNS = (
 _EXPORT_ALBUM_COLUMNS = (
     'id', 'soul_id', 'soul_id_legacy', 'title', 'year', 'release_date', 'track_count',
     'record_type', 'label', 'genres', 'updated_at',
-    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'musicbrainz_release_id', 'musicbrainz_release_group_id',
+    'spotify_album_id', 'itunes_album_id',
     'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
     'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
     'canonical_source', 'canonical_album_id', 'canonical_score',
@@ -218,7 +222,7 @@ _EXPORT_ALBUM_COLUMNS = (
 )
 
 _EXPORT_TRACK_COLUMNS = (
-    'id', 'soul_id', 'soul_id_legacy', 'album_soul_id', 'album_soul_id_legacy', 'title', 'track_number', 'disc_number',
+    'id', 'soul_id', 'soul_id_legacy', 'album_soul_id', 'album_soul_id_legacy', 'album_real_soul_id', 'title', 'track_number', 'disc_number',
     'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
     'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
     'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
@@ -279,6 +283,7 @@ _EXPORT_ALBUM_PROJECTION = (
     ('canonical_album_id', 't.canonical_album_id', 'canonical_album_id'),
     ('canonical_score', 't.canonical_score', 'canonical_score'),
     ('musicbrainz_release_id', 't.musicbrainz_id', 'musicbrainz_id'),
+    ('musicbrainz_release_group_id', 't.musicbrainz_release_group_id', 'musicbrainz_release_group_id'),
     ('spotify_album_id', 't.spotify_id', 'spotify_id'),
     ('itunes_album_id', _export_json_id('itunes'), 'external_ids'),
     ('deezer_id', _export_json_id('deezer'), 'external_ids'),
@@ -297,6 +302,13 @@ _EXPORT_TRACK_PROJECTION = (
     ('soul_id_legacy', 't.soul_id_legacy', 'soul_id_legacy'),
     ('album_soul_id', 't.album_soul_id', 'album_soul_id'),
     ('album_soul_id_legacy', 't.album_soul_id_legacy', 'album_soul_id_legacy'),
+    # The album's own soul_id (kind "album"), carried for the depot's
+    # §2.4 export bit: a track's exported year is its album's, so the
+    # mark lookup needs the id the album's marks are keyed by. This is
+    # NOT album_soul_id — that one is kind "album_track" (artist +
+    # album + title), minted per track. The serializer's allowlist
+    # keeps this off the wire, like id.
+    ('album_real_soul_id', 'al.soul_id', 'soul_id'),
     ('title', 't.title', 'title'),
     ('track_number', 't.track_number', 'track_number'),
     ('disc_number', 't.disc_number', 'disc_number'),
@@ -1754,6 +1766,8 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_automation_id ON automation_run_history(automation_id)")
+            # the automations page's Activity view reads a window of days
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_started_at ON automation_run_history(started_at)")
 
             # Playlist pipeline run history table
             cursor.execute("""
@@ -2199,7 +2213,7 @@ class MusicDatabase:
                 ensure_library_v2_schema(conn, run_backfills=False)
                 self._record_migration(cursor, 'library_v2_schema')
             except Exception as lib2_err:
-                logger.error(f"Library v2 schema init failed: {lib2_err}")
+                logger.error(f"Library schema init failed: {lib2_err}")
                 raise
 
             # Durable acquisition root + persistent external-client correlation
@@ -2771,12 +2785,12 @@ class MusicDatabase:
         The per-worker ``get_stats().progress`` lumps matched + not_found into a
         single 'processed' count; this splits them so the modal can show the
         real match rate. Raises ``UnmatchedQueryError`` on bad input."""
-        from core.enrichment.unmatched import unmatched_snapshot
+        from core.enrichment.unmatched import enrichment_counts
 
-        # the same kept pass as the unmatched list (review 5 R5-D-1)
-        snapshot = unmatched_snapshot(self._get_connection, self.database_path,
-                                      service, entity_type)
-        return dict(snapshot['counts'])
+        # the owned list every worker shares, and one read of the attempts
+        # that tallies all of them: no snapshot is built to draw a number
+        return enrichment_counts(self._get_connection, self.database_path,
+                                 service, entity_type)
 
     def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
         """Re-queue item(s) for a source by clearing match_status back to NULL.
@@ -2855,7 +2869,7 @@ class MusicDatabase:
                         "(SELECT id FROM temp.lib2_reset_failed WHERE NOT carrier)",
                         (f"lib2_{entity_type}", service))
                 except sqlite3.OperationalError as exc:  # older databases may not have provenance yet
-                    logger.debug("could not clear Library-v2 match provenance: %s", exc)
+                    logger.debug("could not clear Library match provenance: %s", exc)
             # still not_found: a pair the worker settled since the read stays
             cursor.execute(
                 "DELETE FROM lib2_provider_attempts WHERE entity_type=? AND service=? "
@@ -8859,6 +8873,25 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_type_status "
                 "ON repair_findings (finding_type, status)")
+            # the Tools page asks for three things on every load: counts by
+            # type, status and severity, which job feeds each type, and how
+            # many open rows would overwrite a hand-set value. the first two
+            # read severity, job_id and created_at off the table rows, the
+            # third parsed every open row's details, so each was a full scan
+            # of a table that is mostly json. 197k findings took 15 seconds.
+            # one index answers the first two with no row read, the partial
+            # one holds only the rows the third counts. the tab badge counts
+            # open rows by job, type and severity: same scan, its own index
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_inbox "
+                "ON repair_findings (finding_type, status, severity, job_id, created_at)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_open_counts "
+                "ON repair_findings (status, job_id, finding_type, severity)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_manual_conflict "
+                "ON repair_findings (finding_type) WHERE status = 'pending' "
+                "AND json_extract(details_json, '$.has_manual_conflict') = 1")
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
 
@@ -17352,6 +17385,29 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error reading notification history: %s", e)
             return []
+
+    def get_notification_counts(self, profile_id: int = 1, search: str = None) -> Dict[str, int]:
+        """How many journaled notifications a profile has of each type, for the
+        History filter chips. The search narrows it, the type filter does not:
+        a chip says what picking it would show."""
+        counts = {kind: 0 for kind in self._NOTIFICATION_TYPES}
+        try:
+            q = "SELECT type, COUNT(*) FROM notification_history WHERE profile_id = ?"
+            args: list = [int(profile_id)]
+            if search:
+                q += " AND message LIKE ? ESCAPE '\\'"
+                escaped = str(search).replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+                args.append(f"%{escaped}%")
+            q += " GROUP BY type"
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(q, args)
+                for kind, n in cursor.fetchall():
+                    if kind in counts:
+                        counts[kind] = int(n or 0)
+        except Exception as e:
+            logger.error("Error counting notification history: %s", e)
+        return counts
 
     def clear_notification_history(self, profile_id: int = 1) -> int:
         """Drop a profile's journaled notifications. Returns rows removed."""
@@ -27691,7 +27747,12 @@ class MusicDatabase:
     def insert_automation_run_history(self, automation_id, started_at, finished_at,
                                        duration_seconds, status, summary=None,
                                        result_json=None, log_lines=None):
-        """Insert a run history entry and enforce 100-row retention cap per automation."""
+        """Insert a run history entry, then trim that automation's history.
+
+        Kept: its newest 100 runs, and every run from the last week. The cap
+        alone left a five minute automation with eight hours of history, so a
+        chart of the last few days showed it running less the further back
+        it looked."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -27701,15 +27762,19 @@ class MusicDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (automation_id, started_at, finished_at, duration_seconds,
                       status, summary, result_json, log_lines))
-                # Retention: keep only the newest 100 rows per automation
+                from datetime import timedelta
+                week_ago = (datetime.now(timezone.utc)
+                            - timedelta(days=AUTOMATION_HISTORY_DAYS)).isoformat()
                 cursor.execute("""
                     DELETE FROM automation_run_history
-                    WHERE automation_id = ? AND id NOT IN (
+                    WHERE automation_id = ?
+                      AND (started_at IS NULL OR started_at < ?)
+                      AND id NOT IN (
                         SELECT id FROM automation_run_history
                         WHERE automation_id = ?
                         ORDER BY id DESC LIMIT 100
                     )
-                """, (automation_id, automation_id))
+                """, (automation_id, week_ago, automation_id))
                 conn.commit()
                 return True
         except Exception as e:
@@ -27739,6 +27804,72 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting automation run history for {automation_id}: {e}")
             return {'history': [], 'total': 0}
+
+    def get_automation_activity(self, since, days_since):
+        """What every automation did lately, for the page's Activity view.
+
+        ``since`` and ``days_since`` are utc iso stamps, the way started_at is
+        stored. Returns ``(recent, days)``: one row per automation that ran
+        since ``since`` (runs, failed, skipped, average seconds, last start,
+        the newest failure's summary), and one row per automation, local day
+        and status since ``days_since``."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT automation_id, COUNT(*) AS runs,
+                           SUM(status = 'error') AS failed,
+                           SUM(status = 'skipped') AS skipped,
+                           AVG(duration_seconds) AS avg_seconds,
+                           MAX(started_at) AS last_started
+                    FROM automation_run_history
+                    WHERE started_at >= ?
+                    GROUP BY automation_id
+                """, (since,))
+                recent = {int(r[0]): {'automation_id': int(r[0]), 'runs': int(r[1] or 0),
+                                      'failed': int(r[2] or 0), 'skipped': int(r[3] or 0),
+                                      'avg_seconds': float(r[4] or 0), 'last_started': r[5],
+                                      'last_error': None, 'last_failed_at': None}
+                          for r in cursor.fetchall()}
+                failing = [aid for aid, row in recent.items() if row['failed']]
+                for aid in failing:
+                    cursor.execute("""
+                        SELECT summary, started_at FROM automation_run_history
+                        WHERE automation_id = ? AND status = 'error' AND started_at >= ?
+                        ORDER BY started_at DESC, id DESC LIMIT 1
+                    """, (aid, since))
+                    hit = cursor.fetchone()
+                    if hit:
+                        recent[aid]['last_error'], recent[aid]['last_failed_at'] = hit[0], hit[1]
+                cursor.execute("""
+                    SELECT automation_id, date(started_at, 'localtime') AS day, status, COUNT(*)
+                    FROM automation_run_history
+                    WHERE started_at >= ?
+                    GROUP BY automation_id, day, status
+                """, (days_since,))
+                days = [(int(r[0]), r[1], r[2], int(r[3])) for r in cursor.fetchall() if r[1]]
+                return list(recent.values()), days
+        except Exception as e:
+            logger.error(f"Error reading automation activity: {e}")
+            return [], []
+
+    def get_mirrored_playlist_art(self, playlist_ids):
+        """name and cover of each mirrored playlist id, for the automations
+        that sync one. ``{id: {name, image_url, cover_tiles}}``."""
+        ids = sorted({int(i) for i in playlist_ids or ()})
+        if not ids:
+            return {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, COALESCE(NULLIF(custom_name, ''), name), image_url, cover_tiles "
+                    f"FROM mirrored_playlists WHERE id IN ({','.join('?' for _ in ids)})", ids)
+                return {int(r[0]): {'id': int(r[0]), 'name': r[1], 'image_url': r[2] or '',
+                                    'cover_tiles': r[3] or ''} for r in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error reading playlist art for automations: {e}")
+            return {}
 
     def clear_automation_run_history(self, automation_id=None):
         """Clear run history for a specific automation or all automations."""

@@ -163,6 +163,20 @@ def apply_art_to_album_files(
     paths = [p for p in (file_paths or []) if p]
     if not symbols:
         return result
+    # #2046: a reviewed album with its artwork locked takes no cover from a
+    # job, in the files or beside them
+    try:
+        from core.library2 import locks
+        open_paths = [p for p in paths if not locks.blocks_file(p, "artwork", "Cover art")]
+    except Exception as exc:  # noqa: BLE001 - a lock check never fails an apply
+        logger.debug("lock check skipped: %s", exc)
+        open_paths = paths
+    if len(open_paths) != len(paths):
+        result["skipped"] += len(paths) - len(open_paths)
+        result["locked"] = len(paths) - len(open_paths)
+        paths = open_paths
+        if not paths:
+            return result
 
     for fp in paths:
         if not config.get('metadata_enhancement.embed_album_art', True):

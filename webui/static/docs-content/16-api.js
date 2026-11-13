@@ -4739,6 +4739,7 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \\
 | POST | \`/api/automations/{automation_id}/toggle\` | Enable/disable one automation | session |
 | POST | \`/api/automations/{automation_id}/run\` | Run an automation right now | session (profile-scoped) |
 | GET | \`/api/automations/progress\` | Live progress of running automations | session |
+| GET | \`/api/automations/activity\` | The last 24 hours by automation and the last 7 days by local day. \`?side=video\` for the video side. Returns \`{recent, days, totals}\` | session |
 | GET | \`/api/automations/{automation_id}/history\` | Run history — \`?limit=50&offset=0\` | session |
 | GET | \`/api/scripts\` | Scripts available to the run-script action | session |
 | GET | \`/api/automations/blocks\` | Trigger/action/notification block catalog | session |

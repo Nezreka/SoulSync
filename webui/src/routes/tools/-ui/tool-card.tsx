@@ -25,24 +25,130 @@ import type { ReactNode } from 'react';
 export interface ToolCardStat {
   label: string;
   value: ReactNode;
-  /**
-   * Goes on the `.stat-item-value` span ITSELF, exactly as in the markup — not
-   * on a nested node. The vanilla progress handlers look these up by id and the
-   * class is on the same element, so splitting them apart would leave anything
-   * that touches the element's class or style writing to the wrong node.
-   */
   valueId?: string;
-  /** Only the discovery pool's "Failed" counter carries its own colours. */
   valueStyle?: React.CSSProperties;
 }
 
+/** the picture on a tool's tile. a name, so a card says what it is and the
+ *  drawing lives in one place. */
+export type ToolIcon =
+  | 'database'
+  | 'tags'
+  | 'copies'
+  | 'server'
+  | 'sparkle'
+  | 'review'
+  | 'link'
+  | 'backup'
+  | 'transfer'
+  | 'cache'
+  | 'block'
+  | 'film'
+  | 'image'
+  | 'grid'
+  | 'rename'
+  | 'tool';
+
+const ICON_PATHS: Record<ToolIcon, ReactNode> = {
+  database: (
+    <>
+      <ellipse cx="12" cy="6" rx="7" ry="3" />
+      <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+    </>
+  ),
+  tags: (
+    <>
+      <path d="M3 12V4h8l10 10-8 8z" />
+      <circle cx="7.5" cy="8.5" r="1.2" />
+    </>
+  ),
+  copies: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  server: (
+    <>
+      <rect x="3" y="4" width="18" height="7" rx="2" />
+      <rect x="3" y="13" width="18" height="7" rx="2" />
+      <path d="M7 7.5h.01M7 16.5h.01" />
+    </>
+  ),
+  sparkle: (
+    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" />
+  ),
+  review: (
+    <>
+      <path d="M4 6h10M4 12h7M4 18h6" />
+      <path d="M14.5 16.5l2.5 2.5 4.5-5" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </>
+  ),
+  backup: (
+    <>
+      <path d="M12 3l8 3v6c0 4.4-3.2 8-8 9-4.8-1-8-4.6-8-9V6z" />
+      <path d="M9 12l2.2 2.2L15.5 10" />
+    </>
+  ),
+  transfer: <path d="M4 8h13m0 0l-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0l3.5-3.5M7 16l3.5 3.5" />,
+  cache: (
+    <>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5M3 17.5l9 5 9-5" opacity="0.55" />
+    </>
+  ),
+  block: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M5.7 5.7l12.6 12.6" />
+    </>
+  ),
+  film: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="M21 16l-5-5-8 8" />
+    </>
+  ),
+  grid: (
+    <>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    </>
+  ),
+  rename: (
+    <>
+      <path d="M4 7V5h10v2M9 5v14M7 19h4" />
+      <path d="M16 12h5M18.5 9.5v10" />
+    </>
+  ),
+  tool: (
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z" />
+  ),
+};
+
 export interface ToolCardProps {
-  /** Kept verbatim — helper.js anchors on these. */
   id: string;
   title: string;
-  /** `data-tool` for the `?` button. Omit for the four cards that have none. */
+  /** the tile's picture */
+  icon?: ToolIcon;
+  /** the one tool the section leads with: full width, bigger numbers */
+  feature?: boolean;
   helpTool?: string;
-  /** The description paragraph. Some cards add extra classes to it. */
   info?: ReactNode;
   infoClassName?: string;
   stats?: ToolCardStat[];
@@ -52,21 +158,32 @@ export interface ToolCardProps {
   progress?: ReactNode;
   children?: ReactNode;
   hidden?: boolean;
-  /**
-   * What KIND of thing this is.
-   *
-   * Eleven cards with identical chrome read as filler, because they were not
-   * eleven of the same thing: five of them just open a modal, four are
-   * long-running operations with progress, two are one-shot server actions.
-   * A modal-opener given the Database Updater's footprint is what made the
-   * whole strip look undifferentiated.
-   */
   variant?: 'operation' | 'launcher';
 }
 
+/** a stat whose value is words ("Never", "Wishlist / Sync"), not a number:
+ *  it reads at text size, where a number gets to be big */
+function isWordy(value: ReactNode): boolean {
+  if (typeof value === 'number') return false;
+  if (typeof value !== 'string') return false;
+  return !/^[\d.,]+(\s?(KB|MB|GB|TB|%))?$/i.test(value.trim());
+}
+
+/**
+ * One tool, as a card with the same anatomy every time: a picture and what
+ * it is, the numbers that say where it stands, and at the bottom what it is
+ * doing now beside the button that starts it.
+ *
+ * The cards used to be a title, a paragraph, a box of label:value pairs and a
+ * button, all the same size, so the page read as a form. The numbers lead
+ * now, a tool that is running shows it in place, and nothing sits in a box
+ * inside a box.
+ */
 export function ToolCard({
   id,
   title,
+  icon = 'tool',
+  feature = false,
   helpTool,
   info,
   infoClassName,
@@ -81,49 +198,73 @@ export function ToolCard({
 }: ToolCardProps) {
   return (
     <div
-      className={`tool-card${variant === 'launcher' ? ' tool-card--launcher' : ''}`}
+      className={`tool-card${variant === 'launcher' ? ' tool-card--launcher' : ''}${
+        feature ? ' tool-card--feature' : ''
+      }`}
       id={id}
-      // The vanilla hides the Plex-only cards with an inline style rather than a
-      // class, and `checkAndShowMediaScanForPlex` sets display:flex to show them
-      // again — so the shown state is flex, not block.
+      // the Plex-only cards are hidden with an inline style, the way the
+      // vanilla did; shown is whatever the stylesheet says a card is
       style={hidden ? { display: 'none' } : undefined}
     >
-      <div className="tool-card-header">
-        <h4 className="tool-card-title">{title}</h4>
-        {helpTool ? (
-          <button
-            type="button"
-            className="tool-help-button"
-            data-tool={helpTool}
-            title="Learn more about this tool"
-            onClick={(event) => {
-              event.stopPropagation();
-              window.openToolHelpModal?.(helpTool);
-            }}
+      <div className="tool-card-top">
+        <span className="tool-card-icon" aria-hidden="true">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
-            ?
-          </button>
-        ) : null}
+            {ICON_PATHS[icon]}
+          </svg>
+        </span>
+        <div className="tool-card-heading">
+          <div className="tool-card-header">
+            <h4 className="tool-card-title">{title}</h4>
+            {helpTool ? (
+              <button
+                type="button"
+                className="tool-help-button"
+                data-tool={helpTool}
+                title="Learn more about this tool"
+                aria-label={`Learn more about ${title}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  window.openToolHelpModal?.(helpTool);
+                }}
+              >
+                ?
+              </button>
+            ) : null}
+          </div>
+          {info ? <p className={infoClassName || 'tool-card-info'}>{info}</p> : null}
+        </div>
       </div>
-
-      {info ? <p className={infoClassName || 'tool-card-info'}>{info}</p> : null}
 
       {stats?.length ? (
         <div className={statsClassName || 'tool-card-stats'} id={statsId}>
           {stats.map((stat) => (
-            <div className="stat-item" key={stat.label}>
-              <span className="stat-item-label">{stat.label}</span>
+            <div className={`stat-item${isWordy(stat.value) ? ' wordy' : ''}`} key={stat.label}>
               <span className="stat-item-value" id={stat.valueId} style={stat.valueStyle}>
                 {stat.value}
               </span>
+              <span className="stat-item-label">{stat.label.replace(/:\s*$/, '')}</span>
             </div>
           ))}
         </div>
       ) : null}
 
-      {controls ? <div className="tool-card-controls">{controls}</div> : null}
-      {progress ? <div className="tool-card-progress-section">{progress}</div> : null}
       {children}
+
+      {controls || progress ? (
+        <div className="tool-card-bottom">
+          {progress ? <div className="tool-card-progress-section">{progress}</div> : null}
+          {controls ? <div className="tool-card-controls">{controls}</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -157,12 +298,13 @@ export function ToolProgress({
 }: ToolProgressProps) {
   return (
     <>
-      <p className="progress-phase-label" id={phaseId}>
+      {/* a long phase line is cut to fit; its full text is the tooltip */}
+      <p className="progress-phase-label" id={phaseId} title={phase}>
         {phase}
       </p>
       <div className="progress-bar-container">
         <div
-          className="progress-bar-fill"
+          className={`progress-bar-fill${percent > 0 ? (percent >= 100 ? ' is-done' : '') : ' is-empty'}`}
           id={barId}
           style={{ width: `${percent}%`, backgroundColor: barColor }}
         />
@@ -191,17 +333,14 @@ export interface ToolsSectionProps {
  * The class and the title node are unchanged so the existing style.css and
  * mobile.css rules keep applying; the container chrome is additive.
  */
-export function ToolsSection({ title, blurb, glow, children }: ToolsSectionProps) {
+export function ToolsSection({ title, blurb, children }: ToolsSectionProps) {
   return (
-    <div
-      className="tools-section tools-container"
-      style={glow ? ({ ['--tile-glow' as string]: glow } as React.CSSProperties) : undefined}
-    >
-      <div className="tools-container-head">
+    <section className="tools-section">
+      <div className="tools-section-head">
         <h3 className="tools-section-title">{title}</h3>
-        {blurb ? <span className="tools-container-blurb">{blurb}</span> : null}
+        {blurb ? <span className="tools-section-blurb">{blurb}</span> : null}
       </div>
       <div className="tools-grid">{children}</div>
-    </div>
+    </section>
   );
 }

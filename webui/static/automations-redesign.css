@@ -190,20 +190,6 @@
    Scoped to .automation-card because this sheet loads after style.css for the
    whole app — a bare class here is a global rule, which is exactly what
    test_every_rule_is_scoped_to_automations_surfaces exists to stop. */
-.automation-card .auto-meta-fail {
-    color: #ff8a80;
-    font-weight: 600;
-    /* min() so a long error actually truncates inside a narrow meta line:
-       with white-space:nowrap the shrink-to-fit minimum is the full text,
-       and a bare 34ch cap lets the span overflow its container and sit on
-       top of the card's action buttons. */
-    max-width: min(34ch, 100%);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: inline-block;
-    vertical-align: bottom;
-}
 .automation-card.disabled { opacity: .62; }
 .automation-card.disabled:hover { opacity: .85; }
 .automation-card.dragging { opacity: .4; transform: scale(.98); }
@@ -357,136 +343,26 @@
    Same chassis as the maintenance job tiles on the tools page: an edge that
    doubles as the progress bar, a head, the flow, one schedule line, and a foot
    pairing the leftover facts with the controls. */
-.automation-card.automation-tile {
-    display: block;
-    padding: 13px 15px 12px 18px;
-}
 
 /* the progress bar. Idles as a family-tinted hairline across the full width
    (--tile-glow comes from the enclosing section; the fallback keeps a card
    rendered outside one from losing its edge), fills left-to-right while the
    automation runs. */
-.automation-card.automation-tile .auto-tile-edge {
-    position: absolute; left: 0; top: 0; height: 2px; width: 100%;
-    background: linear-gradient(90deg,
-        rgba(var(--tile-glow, var(--accent-rgb)), 0.30), rgba(var(--tile-glow, var(--accent-rgb)), 0));
-    transition: width var(--dur-slowest) ease, background var(--dur-slow) ease, box-shadow var(--dur-slow) ease;
-    pointer-events: none;
-}
-.automation-card.automation-tile .auto-tile-edge.running {
-    height: 3px;
-    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), rgb(var(--accent-light-rgb)));
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.6);
-}
-.automation-card.automation-tile.errored .auto-tile-edge {
-    background: linear-gradient(90deg, rgba(244, 67, 54, 0.55), rgba(244, 67, 54, 0));
-}
 /* Its time has come round and the scheduler has not reached it yet — worth a
    glance, not an alarm. */
-.automation-card.automation-tile.sched-due .auto-tile-edge {
-    background: linear-gradient(90deg, rgba(var(--success-strong-rgb), 0.5), rgba(var(--success-strong-rgb), 0));
-}
 
 /* head — dot, name, and the run count as a link to the history */
-.automation-card.automation-tile .auto-tile-head {
-    display: flex; align-items: center; gap: 9px; min-width: 0;
-    /* own row in the wrapping card: keeps the run-count badge inside the
-       card on narrow screens instead of clipping at the card edge */
-    flex: 1 1 100%;
-}
-.automation-card.automation-tile .automation-status { margin-top: 0; }
-.automation-card.automation-tile .automation-name {
-    flex: 1; min-width: 0; margin-bottom: 0; font-size: 14px;
-}
-.automation-card.automation-tile .auto-tile-badge {
-    flex-shrink: 0; border: none; cursor: pointer; font-family: inherit;
-    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill);
-    background: rgba(255,255,255,0.055); color: var(--white-a50);
-    font-variant-numeric: tabular-nums;
-    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
-}
-.automation-card.automation-tile .auto-tile-badge:hover {
-    background: rgba(var(--accent-rgb), 0.18); color: rgb(var(--accent-light-rgb));
-}
-
-.automation-card.automation-tile .automation-flow { margin: 10px 0 0; }
 
 /* the trigger chip, made editable in place — a chip that can be changed says
    so, without turning into a button that shouts */
-.automation-card.automation-tile .auto-flow-editable {
-    font-family: inherit; cursor: pointer;
-    border: 1px dashed rgba(var(--accent-rgb), 0.35);
-    padding: 2px 8px;
-    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
-}
-.automation-card.automation-tile .auto-flow-editable:hover {
-    background: rgba(var(--accent-rgb), 0.16);
-    border-color: rgba(var(--accent-rgb), 0.6);
-}
-.automation-card.automation-tile .auto-cadence-edit {
-    display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap;
-}
-.automation-card.automation-tile .auto-cadence-edit input,
-.automation-card.automation-tile .auto-cadence-edit select {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a12);
-    border-radius: 7px; color: #fff;
-    font-family: inherit; font-size: 11px; padding: 3px 6px;
-}
-.automation-card.automation-tile .auto-cadence-edit input[type="number"] { width: 52px; }
-.automation-card.automation-tile .auto-cadence-edit select option { background: var(--bg-raised); }
-.automation-card.automation-tile .auto-cadence-save,
-.automation-card.automation-tile .auto-cadence-cancel {
-    border: none; border-radius: 7px; cursor: pointer;
-    font-family: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px;
-    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
-}
-.automation-card.automation-tile .auto-cadence-save {
-    background: rgba(var(--accent-rgb), 0.28); color: rgb(var(--accent-light-rgb));
-}
-.automation-card.automation-tile .auto-cadence-save:hover { background: rgba(var(--accent-rgb), 0.42); }
-.automation-card.automation-tile .auto-cadence-save:disabled { opacity: .5; cursor: default; }
-.automation-card.automation-tile .auto-cadence-cancel {
-    background: transparent; color: var(--white-a40);
-}
-.automation-card.automation-tile .auto-cadence-cancel:hover { color: #fff; }
 
 /* the schedule line — one state, one colour. This is the question the card is
    asked most, so it gets its own row instead of being the third of six
    fragments in a grey list. */
-.automation-card.automation-tile .auto-tile-schedule {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    margin-top: 9px;
-}
-.automation-card.automation-tile .auto-tile-next {
-    font-size: 11.5px; font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: var(--white-a40);
-}
-.automation-card.automation-tile .auto-tile-next.waiting { color: rgba(var(--accent-light-rgb), 0.9); }
-.automation-card.automation-tile .auto-tile-next.due { color: rgb(134, 239, 172); }
-.automation-card.automation-tile .auto-tile-next.running { color: rgb(var(--accent-light-rgb)); }
-.automation-card.automation-tile .auto-tile-next.paused { color: var(--warning-strong); }
-.automation-card.automation-tile .auto-tile-next.listening { color: rgba(134, 239, 172, 0.7); }
-.automation-card.automation-tile .auto-tile-next.off { color: var(--white-a25); }
-.automation-card.automation-tile .auto-tile-next.unscheduled {
-    color: var(--white-a30); font-style: italic; font-weight: 500;
-}
 
 /* foot — what happened last time, and the controls */
-.automation-card.automation-tile .auto-tile-foot {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    margin-top: 10px; padding-top: 9px;
-    border-top: 1px solid var(--white-a05);
-}
-.automation-card.automation-tile .automation-meta { flex: 1; min-width: 0; line-height: 1.55; }
 /* The foot is a designated control strip, not a hover surface — the toggle in
    it is a state readout as much as a control, so it must not be half-faded. */
-.automation-card.automation-tile .automation-actions { opacity: 1; flex-shrink: 0; }
-.automation-card.automation-tile .auto-tile-sep {
-    width: 1px; height: 16px; margin: 0 2px;
-    background: var(--white-a10); flex-shrink: 0;
-}
 
 /* ── Live progress panel (appended by JS as the card's last child) ──────── */
 .automation-card .automation-output {
@@ -548,40 +424,6 @@
     -webkit-mask-image: linear-gradient(180deg, transparent, #000 12px);
 }
 .automation-card .auto-progress-log:empty { display: none; }
-
-/* ── Empty state ────────────────────────────────────────────────────────── */
-.automations-empty {
-    text-align: center; padding: 70px 20px;
-}
-.automations-empty .automations-empty-icon {
-    width: 76px; height: 76px; margin: 0 auto 18px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 34px; border-radius: 24px;
-    background: radial-gradient(circle at 30% 25%, rgba(var(--accent-rgb), 0.25), rgba(var(--accent-rgb), 0.06));
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 0 40px -8px rgba(var(--accent-rgb), 0.35);
-}
-.automations-empty .automations-empty-title {
-    font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 7px;
-}
-.automations-empty .automations-empty-text {
-    font-size: 13px; color: var(--white-a45); margin-bottom: 22px;
-    max-width: 380px; margin-left: auto; margin-right: auto; line-height: 1.6;
-}
-
-/* "+ New Automation" — the page's primary action */
-.automations-list-view .auto-new-btn, .automations-empty .auto-new-btn {
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
-    border: 1px solid rgba(var(--accent-light-rgb), 0.4);
-    color: #fff; font-weight: 650; font-size: 13px; font-family: inherit;
-    padding: 10px 18px; border-radius: 11px; cursor: pointer;
-    box-shadow: 0 4px 18px -4px rgba(var(--accent-rgb), 0.5);
-    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
-}
-.automations-list-view .auto-new-btn:hover, .automations-empty .auto-new-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 26px -4px rgba(var(--accent-rgb), 0.6);
-}
 
 /* ── Automation Hub (templates / recipes / guides) ──────────────────────── */
 .automations-section .auto-hub-tabs {

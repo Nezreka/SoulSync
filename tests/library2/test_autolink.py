@@ -1542,3 +1542,56 @@ def test_provider_artist_id_lookup_seeks_its_index_not_a_like_scan(imported_conn
         "EXPLAIN QUERY PLAN " + lookup.replace("'67890'", "?"), ("67890",)))
     assert "idx_lib2_artists_ext_deezer" in plan, plan
     assert "SCAN lib2_artists" not in plan
+
+
+# --- #2058: a new album is born with the cover its download came with --------
+
+
+def _album_image(conn, file_id):
+    return conn.execute(
+        "SELECT al.image_url FROM lib2_track_files tf JOIN lib2_tracks t ON t.id=tf.track_id "
+        "JOIN lib2_albums al ON al.id=t.album_id WHERE tf.id=?", (file_id,)).fetchone()[0]
+
+
+def _context_with_cover(**album):
+    ctx = _context()
+    ctx["track_info"]["album"].update(album)
+    return ctx
+
+
+def test_new_album_takes_the_cover_its_download_came_with(lib2_enabled, imported_conn):
+    file_id = A.link_download_into_library_v2(_context_with_cover(
+        images=[{"url": "/api/library/v2/artwork/album/7"},
+                {"url": "https://i.scdn.co/image/scorpion"}]))
+    # the relative SoulSync link is skipped: it means nothing stored in a row
+    assert _album_image(imported_conn, file_id) == "https://i.scdn.co/image/scorpion"
+
+
+def test_context_level_album_cover_wins_over_the_track_payload(lib2_enabled, imported_conn):
+    ctx = _context_with_cover(image_url="https://i.scdn.co/image/track-side")
+    ctx["spotify_album"] = {"name": "Scorpion", "image_url": "https://i.scdn.co/image/album-side"}
+    file_id = A.link_download_into_library_v2(ctx)
+    assert _album_image(imported_conn, file_id) == "https://i.scdn.co/image/album-side"
+
+
+def test_a_cover_already_on_the_album_is_kept(lib2_enabled, imported_conn):
+    first = A.link_download_into_library_v2(_context_with_cover(image_url="https://i.scdn.co/image/first"))
+    ctx = _context_with_cover(image_url="https://i.scdn.co/image/second")
+    ctx["_final_processed_path"] = "/music/Drake/Scorpion/02 Elevate.flac"
+    ctx["track_info"].update(name="Elevate", track_number=2, id="sp-track-elevate")
+    ctx["_embedded_id_tags"] = {"SPOTIFY_TRACK_ID": "sp-track-elevate"}
+    A.link_download_into_library_v2(ctx)
+    assert _album_image(imported_conn, first) == "https://i.scdn.co/image/first"
+
+
+def test_a_locked_album_cover_is_not_filled(lib2_enabled, imported_conn):
+    first = A.link_download_into_library_v2(_context())
+    imported_conn.execute("UPDATE lib2_albums SET art_locked=1")
+    imported_conn.commit()
+    A.link_download_into_library_v2(_context_with_cover(image_url="https://i.scdn.co/image/later"))
+    assert not _album_image(imported_conn, first)
+
+
+def test_a_download_with_no_cover_leaves_the_album_without_one(lib2_enabled, imported_conn):
+    file_id = A.link_download_into_library_v2(_context_with_cover(image_url="/relative/only.jpg"))
+    assert not _album_image(imported_conn, file_id)

@@ -227,7 +227,7 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
             with _artwork_cache_lock:
                 _artwork_cache_state["stats"] = stats
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Library v2 background artwork cache failed: %s", exc)
+            logger.warning("Library background artwork cache failed: %s", exc)
             with _artwork_cache_lock:
                 _artwork_cache_state["error"] = str(exc)
         finally:
@@ -240,7 +240,7 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
     try:
         threading.Thread(target=carrying_scope(_run), name="lib2-artwork-cache", daemon=True).start()
     except Exception as exc:  # noqa: BLE001 - optional presentation worker
-        logger.warning("Could not start Library v2 artwork cache worker: %s", exc)
+        logger.warning("Could not start Library artwork cache worker: %s", exc)
         with _artwork_cache_lock:
             _artwork_cache_state.update(
                 running=False,
@@ -324,7 +324,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             return bool(profile_page_allowed_getter("library"))
         except Exception as exc:  # noqa: BLE001 - fail closed on auth lookup errors
-            logger.warning("Library v2 profile permission lookup failed: %s", exc)
+            logger.warning("Library profile permission lookup failed: %s", exc)
             return False
 
     def _guard():
@@ -356,7 +356,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _named_row_hidden()
             if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
                 return None
-            return _fail("Library v2 changes require the admin profile", 403)
+            return _fail("Library changes require the admin profile", 403)
         # E-06: for a profile, another library's row does not exist -- its
         # page, its tags, its history alike
         return _named_row_hidden()
@@ -543,7 +543,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return int(profile_id_getter()) if profile_id_getter else 1
         except Exception as exc:  # noqa: BLE001
             # G03-7: an unreadable profile is nobody, never the admin
-            logger.warning("Library v2: could not read the calling profile: %s", exc)
+            logger.warning("Library: could not read the calling profile: %s", exc)
             return 0
 
     def _intent_profile() -> int:
@@ -1776,7 +1776,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                             letter=(request.args.get("letter") or "all").lower(),
                                             source_filter=request.args.get("source", ""),
                                             quality_filter=quality if quality == "upgradable" else "",
-                                            include_upgradable="upgradable" in include)
+                                            include_upgradable="upgradable" in include,
+                                            # #2046: reviewed | unreviewed
+                                            review_filter=request.args.get("review", ""))
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -3059,7 +3061,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # HTML 500, which the client renders as an unexplained "API error"
             # for an operation that is simply worth retrying.
             conn.rollback()
-            logger.warning("Library v2 album art apply hit a locked database: %s", exc)
+            logger.warning("Library album art apply hit a locked database: %s", exc)
             return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
@@ -3094,18 +3096,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         try:
                             def _progress(_stage, current, total):
                                 _job_registry.update(job_id, current=current, total=total)
-                            stats = retag.write_tags(db, track_ids, embed_cover=True,
-                                                     force_cover=True, progress=_progress)
+                            # the cover only: without options this took the
+                            # Write Tags path and rewrote every text tag of
+                            # every track for a cover pick
+                            stats = retag.write_tags(
+                                db, track_ids, embed_cover=True, progress=_progress,
+                                options={'fields': ['cover_art'], 'cover_art': 'replace'})
                             _job_registry.update(job_id, result=stats)
                         except Exception as e:  # noqa: BLE001
-                            logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)
+                            logger.error("Library cover-embed retag failed: %s", e, exc_info=True)
                             _job_registry.update(job_id, error=str(e))
                         finally:
                             _job_registry.finish(job_id)
 
                     threading.Thread(target=carrying_scope(_run), name="lib2-cover-embed", daemon=True).start()
         except Exception as e:  # noqa: BLE001
-            logger.error("Library v2 cover-embed scheduling failed: %s", e, exc_info=True)
+            logger.error("Library cover-embed scheduling failed: %s", e, exc_info=True)
             embed_error = str(e)
 
         payload = {
@@ -3223,7 +3229,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except sqlite3.OperationalError as exc:
             # dd28-03: see the matching handler on the album art route.
             conn.rollback()
-            logger.warning("Library v2 artist art apply hit a locked database: %s", exc)
+            logger.warning("Library artist art apply hit a locked database: %s", exc)
             return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
@@ -3929,7 +3935,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "truncated": report.get("truncated"),
                 })
             except Exception as exc:  # noqa: BLE001
-                logger.error("Library-v2 integrity report failed: %s", exc)
+                logger.error("Library integrity report failed: %s", exc)
                 with _integrity_lock:
                     _integrity_state["error"] = (job_id, str(exc))
                 _job_registry.update(job_id, error=str(exc))
@@ -4701,6 +4707,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # whole queue first, so behind a backlog the delete hung
         from core.library2.mirror_outbox import drain
         drain(db, ids=outbox_ids)
+        # a removed copy's row is not a missing track (#1985)
+        try:
+            from core.library2.dedup_repair import fold_fileless_twins
+            with closing(db._get_connection()) as conn:
+                if fold_fileless_twins(conn, ids):
+                    conn.commit()
+        except Exception as exc:  # noqa: BLE001 - the removal itself is done
+            logger.warning("leftover track rows not folded after a removal: %s", exc)
 
     @_route(
         "/api/library/v2/<entity>/<int:eid>/file-remove",
@@ -5202,6 +5216,184 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             history = scoped_history(conn, scope="track", entity_id=track_id, limit=limit)
         return jsonify({"success": True, "history": history})
 
+    # ── #2046: reviewed and locked ───────────────────────────────────────────
+
+    def _lock_state(conn, entity_type, entity_id):
+        """Everything the padlock's sheet shows for one album or artist."""
+        from core.library2 import locks
+
+        table = "lib2_albums" if entity_type == "album" else "lib2_artists"
+        columns = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
+        wanted = [c for c in ("art_locked", "genres_locked", "canonical_locked") if c in columns]
+        row = conn.execute(
+            f"SELECT id{''.join(', ' + c for c in wanted)} FROM {table} WHERE id=?",
+            (int(entity_id),)).fetchone()
+        if row is None:
+            return None
+        state = locks.get_lock(conn, entity_type, entity_id) or locks.unlocked_state(
+            entity_type, entity_id)
+        # the single-field locks that were here before the padlock, on the same sheet
+        state["field_locks"] = {
+            "artwork": bool(row["art_locked"]) if "art_locked" in wanted else False,
+            "genres": bool(row["genres_locked"]) if "genres_locked" in wanted else False,
+            "edition": bool(row["canonical_locked"]) if "canonical_locked" in wanted else False,
+        }
+        state["scope_options"] = [{"scope": scope, "label": locks.SCOPE_LABELS[scope]}
+                                  for scope in locks.SCOPES]
+        state["skips"] = locks.skips(conn, entity_type, entity_id) if state["locked"] else []
+        state["can_lock"] = _is_admin()
+        if entity_type == "artist":
+            state["review"] = locks.artist_review_counts(conn, entity_id)
+        return state
+
+    def _lock_changed():
+        """A lock or unlock changes what the enrichment queue may offer."""
+        try:
+            from core.library2.worker_queue import invalidate_pending_cache
+            invalidate_pending_cache()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("enrichment queue not refreshed after a lock change: %s", exc)
+
+    def _lock_route(entity_type, entity_id):
+        from core.library2 import locks
+
+        if request.method == "GET":
+            with closing(_conn()) as conn:
+                state = _lock_state(conn, entity_type, entity_id)
+            if state is None:
+                return _fail(f"{entity_type.title()} not found", 404)
+            return jsonify({"success": True, "lock": state})
+        if not _is_admin():
+            return _fail("Locking needs the admin profile", 403)
+        with closing(_conn()) as conn:
+            try:
+                if request.method == "DELETE":
+                    if conn.execute(
+                            f"SELECT 1 FROM lib2_{entity_type}s WHERE id=?",
+                            (int(entity_id),)).fetchone() is None:
+                        return _fail(f"{entity_type.title()} not found", 404)
+                    locks.clear_lock(conn, entity_type, entity_id)
+                else:
+                    body = request.get_json(silent=True) or {}
+                    scopes = body.get("scopes")
+                    if scopes is not None and not isinstance(scopes, list):
+                        return _fail("scopes must be a list")
+                    locks.set_lock(conn, entity_type, entity_id, scopes,
+                                   profile_id=_profile(),
+                                   review=body.get("review") is not False)
+                    if entity_type == "artist" and body.get("albums") is True:
+                        # "and all current albums": the ones with files, as they
+                        # stand today. a later release starts open
+                        album_ids = [r[0] for r in conn.execute(
+                            "SELECT al.id FROM lib2_albums al WHERE al.primary_artist_id=? "
+                            "AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
+                            "ON f.track_id=t.id WHERE t.album_id=al.id "
+                            "AND COALESCE(f.file_state,'active')='active')",
+                            (int(entity_id),))]
+                        locks.set_many(conn, "album", album_ids, scopes, profile_id=_profile())
+                conn.commit()
+            except locks.LockError as exc:
+                conn.rollback()
+                missing = "not found" in str(exc)
+                return _fail(str(exc), 404 if missing else 400)
+            state = _lock_state(conn, entity_type, entity_id)
+        _lock_changed()
+        return jsonify({"success": True, "lock": state})
+
+    @_route("/api/library/v2/albums/<int:album_id>/lock", methods=["GET", "PUT", "DELETE"])
+    def lib2_album_lock(album_id):
+        """The album's lock: read it, set it (``{"scopes": [...]}``, every
+        scope when left out; ``"review": false`` changes the switches without
+        counting as a new review), or remove it. Changing it is admin only."""
+        return _lock_route("album", album_id)
+
+    @_route("/api/library/v2/artists/<int:artist_id>/lock", methods=["GET", "PUT", "DELETE"])
+    def lib2_artist_lock(artist_id):
+        """The artist's lock. ``"albums": true`` on PUT also locks every album
+        of theirs that has files today."""
+        return _lock_route("artist", artist_id)
+
+    @_route("/api/library/v2/artists/<int:artist_id>/review")
+    def lib2_artist_review(artist_id):
+        """Which of an artist's albums are reviewed, and the next one that is not."""
+        from core.library2 import locks
+
+        with closing(_conn()) as conn:
+            if conn.execute("SELECT 1 FROM lib2_artists WHERE id=?",
+                            (artist_id,)).fetchone() is None:
+                return _fail("Artist not found", 404)
+            rows = conn.execute(
+                """SELECT al.id, lk.locked_at, lk.snapshot
+                     FROM lib2_albums al
+                     LEFT JOIN lib2_entity_locks lk
+                            ON lk.entity_type='album' AND lk.entity_id=al.id
+                    WHERE al.primary_artist_id=?
+                      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                   ON f.track_id=t.id WHERE t.album_id=al.id
+                                     AND COALESCE(f.file_state,'active')='active')
+                    ORDER BY COALESCE(al.release_date, CAST(al.year AS TEXT), ''), al.id""",
+                (artist_id,)).fetchall()
+            reviewed, changed, open_ids = [], [], []
+            for row in rows:
+                if row["locked_at"] is None:
+                    open_ids.append(int(row["id"]))
+                    continue
+                reviewed.append(int(row["id"]))
+                if row["snapshot"] and locks.album_fingerprint(conn, row["id"]) != row["snapshot"]:
+                    changed.append(int(row["id"]))
+        try:
+            after = int(request.args.get("after") or 0)
+        except (TypeError, ValueError):
+            after = 0
+        # the next one after the album being looked at, wrapping to the first
+        following = [album_id for album_id in open_ids if album_id != after]
+        if after in [int(r["id"]) for r in rows]:
+            order = [int(r["id"]) for r in rows]
+            later = [a for a in order[order.index(after) + 1:] if a in open_ids]
+            following = later + [a for a in following if a not in later]
+        return jsonify({
+            "success": True, "albums": len(rows), "reviewed": len(reviewed),
+            "reviewed_album_ids": reviewed, "changed_album_ids": changed,
+            "next_album_id": following[0] if following else None,
+        })
+
+    @_route("/api/library/v2/locks", methods=["GET", "POST"])
+    def lib2_locks():
+        """GET: every locked album and artist id (for marks on cards).
+        POST ``{"entity_type", "ids", "locked", "scopes"}``: lock or unlock a
+        selection. Admin only."""
+        from core.library2 import locks
+
+        if request.method == "GET":
+            with closing(_conn()) as conn:
+                held = locks.lock_map(conn)
+            return jsonify({
+                "success": True,
+                "albums": sorted(i for (kind, i) in held if kind == "album"),
+                "artists": sorted(i for (kind, i) in held if kind == "artist"),
+            })
+        if not _is_admin():
+            return _fail("Locking needs the admin profile", 403)
+        body = request.get_json(silent=True) or {}
+        entity_type = str(body.get("entity_type") or "album")
+        ids = body.get("ids")
+        if entity_type not in locks.ENTITY_TYPES:
+            return _fail("entity_type must be album or artist")
+        if not isinstance(ids, list) or not ids or len(ids) > 5000:
+            return _fail("ids must be a list of 1 to 5000 ids")
+        scopes = body.get("scopes")
+        with closing(_conn()) as conn:
+            try:
+                done = locks.set_many(conn, entity_type, ids, scopes,
+                                      locked=body.get("locked") is not False,
+                                      profile_id=_profile())
+                conn.commit()
+            except locks.LockError as exc:
+                conn.rollback()
+                return _fail(str(exc))
+        _lock_changed()
+        return jsonify({"success": True, "updated": done})
+
     @_route("/api/library/v2/albums/<int:album_id>/history")
     def lib2_album_history(album_id):
         """Merged history for this album/EP/single (§52.9 album branch): grabs,
@@ -5546,6 +5738,45 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "server_type": server_tag_sync.active_server_type(),
         })
 
+    # -- #2070: the other direction, the Library takes what the files say -----
+
+    def _tags_to_library_ids(entity, eid):
+        from core.library2 import retag
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            table = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}[entity]
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
+                return db, None
+            if entity == "tracks":
+                return db, [int(eid)]
+            return db, (retag.album_track_ids(conn, eid) if entity == "albums"
+                        else retag.artist_track_ids(conn, eid))
+
+    @_route("/api/library/v2/<entity>/<int:eid>/use-file-tags")
+    def lib2_use_file_tags_preview(entity, eid):
+        """What using the files' own tags would change for a track, an album
+        or an artist: fields, album renames and moves. Changes nothing."""
+        if entity not in ("artists", "albums", "tracks"):
+            return _fail("Unsupported entity")
+        from core.library2 import tags_to_library
+        db, track_ids = _tags_to_library_ids(entity, eid)
+        if track_ids is None:
+            return _fail("Not found", 404)
+        return jsonify({"success": True, **tags_to_library.plan(db, track_ids)})
+
+    @_route("/api/library/v2/<entity>/<int:eid>/use-file-tags", methods=["POST"])
+    def lib2_use_file_tags_apply(entity, eid):
+        """Save what the files say as manual edits, and move the tracks whose
+        tag names another album. The plan is worked out again here."""
+        if entity not in ("artists", "albums", "tracks"):
+            return _fail("Unsupported entity")
+        from core.library2 import tags_to_library
+        db, track_ids = _tags_to_library_ids(entity, eid)
+        if track_ids is None:
+            return _fail("Not found", 404)
+        result = tags_to_library.apply(db, track_ids, profile_id=_profile())
+        return jsonify({"success": True, **result})
+
     @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).
@@ -5644,7 +5875,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         db, [t for t in track_ids if t not in failed])
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 retag failed: %s", e, exc_info=True)
+                logger.error("Library retag failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
             finally:
                 _job_registry.finish(job_id)
@@ -5742,7 +5973,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 stats["enriched_from"] = enriched_from
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 fill-tag-gaps failed: %s", e, exc_info=True)
+                logger.error("Library fill-tag-gaps failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
             finally:
                 _job_registry.finish(job_id)
@@ -5840,7 +6071,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "Library v2 refresh failed (%s %s): %s",
+                    "Library refresh failed (%s %s): %s",
                     entity, eid, exc, exc_info=True,
                 )
                 _job_registry.update(job_id, error=str(exc))
@@ -5944,6 +6175,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # state offers, and would be told forever to send a flag that tile
             # cannot send. An empty catalogue has nothing stale to protect, so
             # it is never the case this guard is for.
+            # #2062: an install created since the cutover has no older library
+            # at all. The Library page's empty state used to offer this import
+            # anyway, the importer failed on the missing tables, and the failed
+            # row made the page say the upgrade had failed and everything was
+            # paused. Nothing to read is an answer, not an error: say so, and
+            # leave the persisted state alone (correcting it if an earlier
+            # build already wrote the failure).
+            if not lib2_bootstrap.legacy_source_present(get_database()):
+                lib2_bootstrap.settle_failed_without_source(get_database())
+                return jsonify({
+                    "success": False,
+                    "code": "nothing_to_import",
+                    "error": ("This install has no older SoulSync library to "
+                              "import. Add music from Search, or bring in files "
+                              "you already have from the Import page."),
+                }), 409
             if not (reset or force):
                 database = get_database()
                 state = lib2_bootstrap.get_state(database)
@@ -6041,10 +6288,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     try:
                         lib2_bootstrap.run_deferred_backfills(get_database())
                     except Exception as conv_err:  # noqa: BLE001 - retries next start
-                        logger.warning("Library v2 convergence after import failed: %s", conv_err)
+                        logger.warning("Library convergence after import failed: %s", conv_err)
                 threading.Thread(target=_converge, name="lib2-converge", daemon=True).start()
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 import failed: %s", e, exc_info=True)
+                logger.error("Library import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
                 try:
                     lib2_bootstrap.mark_failed(get_database(), bootstrap_owner, str(e))
@@ -6154,7 +6401,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             lib2_bootstrap.mark_failed(get_database(), owner_token, str(exc))
-            logger.error("Library v2 reset failed: %s", exc, exc_info=True)
+            logger.error("Library reset failed: %s", exc, exc_info=True)
             return _fail(str(exc), 500)
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
@@ -6163,12 +6410,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         _reset_artwork_cache_state()
         _import_state.update(running=False, stage=None, current=0, total=0,
                              stats=None, error=None, finished_at=None)
-        logger.warning("Library v2 catalogue reset: %s", cleared or "already empty")
+        logger.warning("Library catalogue reset: %s", cleared or "already empty")
         return jsonify({
             "success": True,
             "cleared": cleared,
             "message": (
-                "Library v2 is empty and the automatic migration is re-armed. "
+                "The Library is empty and the automatic migration is re-armed. "
                 "Restart the server to watch it run."
             ),
         })
@@ -6178,11 +6425,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # "bootstrap" is the persisted state (core/library2/bootstrap.py) — unlike
         # _import_state (this process, this click) it also reflects an automatic
         # background import that this request didn't itself trigger.
+        database = get_database()
+        # #2062: a fresh install has no older library, so the page offers no
+        # import there, and a failure an earlier build left behind is cleared
+        has_legacy = lib2_bootstrap.legacy_source_present(database)
+        bootstrap_state = lib2_bootstrap.get_state(database)
+        # only on the failure itself: this is polled every second, and the
+        # correction is a write
+        if not has_legacy and bootstrap_state.get("status") == "failed":
+            lib2_bootstrap.settle_failed_without_source(database)
+            bootstrap_state = lib2_bootstrap.get_state(database)
         return jsonify({
             "success": True,
+            "has_legacy_source": has_legacy,
             **_import_state,
             "artwork_cache": _artwork_cache_snapshot(),
-            "bootstrap": lib2_bootstrap.get_state(get_database()),
+            "bootstrap": bootstrap_state,
             "preparation": _preparation_snapshot(),
         })
 
@@ -6190,7 +6448,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.post_import import preparation_state
         return preparation_state()
 
-    logger.info("Library v2 routes registered (/api/library/v2/*)")
+    logger.info("Library routes registered (/api/library/v2/*)")
 
 
 __all__ = ["register_library_v2_routes", "start_artwork_precache"]

@@ -95,7 +95,7 @@ def _warn_missing_entry(entry: str, manifest: dict, manifest_path: Any) -> None:
     if not manifest:
         logger.error(
             "WebUI bundle manifest missing or empty at %s -- the React UI "
-            "(Library v2 and everything on it) will NOT load. In a container "
+            "(the Library and everything on it) will NOT load. In a container "
             "this means the webui-builder stage output did not reach the image; "
             "locally, run `cd webui && npm run build`.", path)
     else:

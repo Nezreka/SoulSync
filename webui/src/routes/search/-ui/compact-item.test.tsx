@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ArtistFace, CoverCard, TrackRow } from './compact-item';
+import { ArtistFace, CoverCard, SourceMarks, TrackRow } from './compact-item';
 
 afterEach(cleanup);
 
@@ -115,5 +115,36 @@ describe('TrackRow', () => {
     });
     expect(onOpen).toHaveBeenCalledOnce();
     expect(onPlay).not.toHaveBeenCalled();
+  });
+});
+
+describe('SourceMarks (#2051)', () => {
+  it('says where a result came from, the source it opens from first', () => {
+    render(<SourceMarks sources={['deezer', 'spotify', 'musicbrainz']} />);
+    const marks = screen.getByRole('img', {
+      name: 'From Deezer. Also on Spotify, MusicBrainz',
+    });
+    expect(
+      [...marks.querySelectorAll('[data-source]')].map((m) => m.getAttribute('data-source')),
+    ).toEqual(['deezer', 'spotify', 'musicbrainz']);
+  });
+
+  it('a result from one source says just that, and a single source says nothing', () => {
+    const { unmount } = render(<SourceMarks sources={['amazon']} />);
+    // amazon has no logo file: its initial stands in
+    expect(screen.getByRole('img', { name: 'From Amazon Music' }).textContent).toBe('A');
+    unmount();
+    const { container } = render(<SourceMarks />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('rides on an album card without becoming its action', () => {
+    const onOpen = vi.fn();
+    render(
+      <CoverCard name="Kid A" sub="Radiohead" onOpen={onOpen} sources={['spotify', 'deezer']} />,
+    );
+    expect(screen.getByRole('img', { name: 'From Spotify. Also on Deezer' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Kid A' }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

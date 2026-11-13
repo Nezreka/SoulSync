@@ -186,7 +186,7 @@ def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> D
             "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
         ).fetchone()
         if artist is None:
-            raise ValueError("Library v2 artist not found")
+            raise ValueError("Library artist not found")
         from core.library2.artist_aliases import resolve_alias_group
         group = resolve_alias_group(conn, artist_id)
         marks = ",".join("?" for _ in group)
@@ -444,6 +444,10 @@ class JobContext:
     # honor it; scheduled runs never carry one.
     scope: Optional[Dict[str, Any]] = None
 
+    # True when a person started this run (Run Now, a Run a check playbook),
+    # False for the schedule. a job can do by hand what it won't do on its own.
+    manual: bool = False
+
     # API clients (may be None if unavailable)
     spotify_client: Any = None
     itunes_client: Any = None
@@ -541,6 +545,9 @@ class RepairJob(ABC):
     # exhaustive manifest so a newly registered job cannot silently omit it.
     data_basis: str = ''
     library_v2_effects: frozenset[str] = frozenset()
+    # #2046: what a reviewed and locked album means to this job. Assigned by
+    # the registry from JOB_LOCK_SCOPE, which every job has to be in.
+    lock_scope: str = 'report'
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}

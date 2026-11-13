@@ -1205,6 +1205,20 @@ const HELPER_CONTENT = {
         description: 'All your automations — system and custom. Each card shows the trigger → action → then flow, run status, and controls.',
         docsId: 'auto-overview'
     },
+    '.automx-new-btn': {
+        title: 'New Automation',
+        description: 'Open the visual builder to create a new automation. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN).',
+        docsId: 'auto-builder'
+    },
+    '.automx-master': {
+        title: 'Automations Master Switch',
+        description: 'Pauses every scheduled and event run on this side. Each automation keeps its own switch, and Run now still works while paused.',
+        docsId: 'auto-overview'
+    },
+    '.automx-search': {
+        title: 'Search Automations',
+        description: 'Filter the list by name, trigger or action.',
+    },
     '.auto-new-btn': {
         title: 'New Automation',
         description: 'Open the visual builder to create a new automation. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN).',
@@ -1574,7 +1588,7 @@ const HELPER_CONTENT = {
         description: 'Manually sync listening data from your media server. Pulls the latest play history, scrobbles, and library changes.',
     },
     '#stats-overview': {
-        title: 'Overview Cards',
+        title: 'The numbers',
         description: 'Key metrics at a glance: Total Plays, Listening Time, unique Artists, Albums, and Tracks played in the selected time range.',
     },
     '#stats-timeline-chart': {
@@ -1582,8 +1596,8 @@ const HELPER_CONTENT = {
         description: 'Chart showing your listening activity over time. Each bar represents plays in that time period. Helps visualize listening patterns and trends.',
     },
     '#stats-genre-chart': {
-        title: 'Genre Breakdown',
-        description: 'Pie/donut chart showing the genre distribution of your listening. Based on genre tags from your library\'s metadata enrichment.',
+        title: 'Most played genres',
+        description: 'The genres you played most in this range, under the bars comparing what you own with what you play. Based on genre tags from your library\'s metadata enrichment.',
     },
     '#stats-recent-plays': {
         title: 'Recently Played',
@@ -2345,17 +2359,20 @@ const HELPER_TOURS = {
         description: 'Create automated workflows with triggers and actions.',
         icon: '🤖',
         steps: [
-            // List view (visible on load)
-            { page: 'automations', selector: '#automations-list-view', title: 'Automations Overview', description: 'All your automations live here, organized into System (built-in), Custom groups, and My Automations. Each card shows its WHEN trigger, DO action, and THEN notifications.' },
-            { page: 'automations', selector: '#automations-stats', title: 'Stats Bar', description: 'Quick counts of total automations, how many are active, paused, and custom. Also shows system automations running background tasks like enrichment and watchlist scanning.' },
-            { page: 'automations', selector: '.auto-new-btn', title: 'Create New Automation', description: 'Opens the visual builder. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN). Triggers include schedules, events (download complete, new release), and signals from other automations.' },
+            // the page is React (webui/src/routes/automations): these anchor to
+            // what it renders. the old #automations-list-view / .auto-new-btn
+            // anchors pointed at markup that no longer exists.
+            { page: 'automations', selector: '.automx-pills', title: 'Four Places', description: 'Overview shows the next 24 hours, what is up next, what needs attention and what ran last. All automations is every one of them in sections. Activity is the last day and week of runs. Guides holds ready-made pipelines and recipes.' },
+            { page: 'automations', selector: '.automx-head-sub', title: 'At a Glance', description: 'How many automations are on, how many are off, when the next one runs, and how many need attention.' },
+            { page: 'automations', selector: '.automx-master', title: 'The Master Switch', description: 'Pauses every scheduled and event run on this side at once. Each automation keeps its own switch, and Run now still works while paused.' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'Create New Automation', description: 'Opens the visual builder. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN). Triggers include schedules, events (download complete, new release), and signals from other automations.' },
 
             // Builder (describe since it requires clicking)
-            { page: 'automations', selector: '.auto-new-btn', title: 'The Builder', description: 'The builder has a sidebar with draggable blocks and a canvas. Drag a WHEN block (e.g., "Every 6 hours"), a DO block (e.g., "Run Watchlist Scan"), and optionally a THEN block (e.g., "Send Discord notification").' },
-            { page: 'automations', selector: '.auto-new-btn', title: 'Signals & Chains', description: 'Advanced: automations can fire "signals" that trigger other automations, creating chains. Example: Watchlist scan → fires "new_release" signal → Download automation picks it up. Max chain depth is 5.' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'The Builder', description: 'The builder has a sidebar with draggable blocks and a canvas. Drag a WHEN block (e.g., "Every 6 hours"), a DO block (e.g., "Run Watchlist Scan"), and optionally a THEN block (e.g., "Send Discord notification").' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'Signals & Chains', description: 'Advanced: automations can fire "signals" that trigger other automations, creating chains. Example: Watchlist scan → fires "new_release" signal → Download automation picks it up. Max chain depth is 5.' },
 
-            // Hub section
-            { page: 'automations', selector: '#auto-section-hub', title: 'Automation Hub', description: 'Pre-built templates, pipeline recipes, quick-start guides, and reference docs. Browse Pipelines for ready-made multi-step workflows, or check Recipes for common automation patterns. Great starting point! 🎉' },
+            // the Guides pill (the hub lives behind it)
+            { page: 'automations', selector: '.automx-pills', title: 'Guides', description: 'The Guides pill holds pre-built pipelines, single recipes, quick-start guides and reference docs. Browse Pipelines for ready-made multi-step workflows, or Singles for common patterns. Great starting point! 🎉' },
         ]
     },
     'library': {
@@ -2422,7 +2439,7 @@ const HELPER_TOURS = {
 
             // Charts (left column)
             { page: 'stats', selector: '#stats-timeline-chart', title: 'Listening Activity', description: 'A timeline chart showing your listening pattern over time. Spot trends — are you listening more on weekends? Did you binge a new album last week?' },
-            { page: 'stats', selector: '#stats-genre-chart', title: 'Genre Breakdown', description: 'Pie chart showing which genres you listen to most. The legend shows exact percentages. Useful for understanding your taste profile.' },
+            { page: 'stats', selector: '#stats-genre-chart', title: 'Most played genres', description: 'The genres you listen to most, with exact percentages, under the bars comparing what you own with what you play.' },
             { page: 'stats', selector: '#stats-recent-plays', title: 'Recently Played', description: 'A live feed of your most recent plays with timestamps, artist, and album info.' },
 
             // Rankings (right column)
@@ -3440,23 +3457,25 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.6.4': [
-        { date: 'November 2026 · 3.6.4' },
-        { title: 'Your own video libraries', desc: 'Make your own movie and TV libraries and pick what goes in each by hand, by rules or by default. Each library has its own quality profile, download sources in order, client category, Prowlarr indexers and automatic search and upgrades, and the same movie can sit in two libraries as two copies. Movies, Wanted and Downloads get a library filter (thanks SeadogsBooty, #2029).' },
-        { title: 'One release ranking', desc: 'Releases are ranked one way everywhere: quality, then custom formats, then tie-breaks. Every search result says why it ranked where it did, and a preferred size setting breaks ties toward the size you want (thanks SeadogsBooty, #2033).' },
-        { title: 'NZB files, not links', desc: 'SABnzbd and NZBGet get the NZB file itself instead of a Prowlarr link, so the client never needs to reach Prowlarr (thanks SeadogsBooty, #2030).' },
-        { title: 'Delete a show or movie for good', desc: 'Admins can delete a whole show or movie from its More menu. Follows, wishlist rows, downloads, requests and repair findings are cleared for every profile so nothing grabs it again, the folder goes to the recycle bin as one entry you can restore, and torrents still seeding stay in your client (thanks PapaBearDoes, #2020).' },
-        { title: 'The right show', desc: 'A grab checks the release is the show you wanted, so Grab season stops taking episodes of a similar series, and the search tries the show\'s English and original names (thanks SeadogsBooty and Thibs, #2027, #2021). A cropped Blu-ray reads as 1080p (thanks Thibs, #2025).' },
-        { title: 'Specials and languages', desc: 'A Monitor Specials setting, specials can be hidden on a show page and left out of a whole-show grab, and search results can be filtered by language.' },
-        { title: 'Own libraries on Navidrome', desc: 'Own-library profiles work on Navidrome 0.58+ through its multi-library support (thanks mirlooun, #2031).', page: 'settings' },
-        { title: 'Redesigned Playlists and Watchlist', desc: 'The Playlists page is built around the covers with one main button and one filter row, and the Watchlist page says where each artist stands and what it found.', page: 'sync' },
-        { title: 'Rotating playlists', desc: 'Turn on Rotating in a playlist\'s Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval unless you turn dry run off (#2039).', page: 'sync' },
-        { title: 'Discography uses the artist\'s profile', desc: 'Download Discography uses the quality profile on the artist\'s watchlist rules, with track, album and artist profiles in the library counting first (thanks Foxxify, #2022).', page: 'library' },
-        { title: 'More', desc: 'Follow a YouTube channel without downloading its new uploads (thanks JuanVqz, #2008), per-artist cleanup checks in Library Health (thanks QT3496, #2004), M3U export for mirrored playlists (thanks TaunGadd), the quarantine badge and length check (thanks lozog, #2001), and empty Plex artist bios filled (thanks Eric-sson, #1993).' },
-        { title: 'Library v2, reviewed five times', desc: 'Everything Library v2 touched was reviewed end to end five times, and every finding was fixed with a test: the 3.6.1 upgrade brings everything over, household members and own libraries stay separate, tags, artwork, repair jobs and downloads behave, and album folders never land at the library root (thanks SeadogsBooty, #2023).', page: 'library' },
-        { title: 'Faster', desc: 'The library pages read their page off indexes, whole-library reports answer from their last result, the integrity report runs as a job, cache health opens in under a second, and startup skips scans it ran every time.' },
-        { title: 'Fixes', desc: 'Release counts stay "X of all" (thanks QT3496, #2012), reorganize keeps the explicit flag (#2009), SoulSync shows up as one Navidrome player (thanks cremonies, #2005), liked music imports with cookies again (thanks jdfrye2, #2013), a scan is no longer flagged as stuck while an own library is still scanning (thanks QT3496, #2036), the Sources tab shows video and audiobook sources as in use (#2026), and video fixes from PapaBearDoes (#2015, #2017, #2018, #2019).' },
-        { title: 'Earlier versions', desc: '3.6.3 was a hot fix for the Library page on big libraries, and 3.6.2 brought Library v2, built by @nick2000713.' },
+    '3.6.5': [
+        { date: 'November 2026 · 3.6.5' },
+        { title: 'Both dashboards, rebuilt', desc: 'Music and video open on a hero with the worker orbs, then the system as a board: your week, the watchlist and wishlist counts with what is in them, playlist sync and what runs next. Hover a point on the Up next line for the whole run, and the orbs answer a hover at once.', page: 'dashboard' },
+        { title: 'The bell, rebuilt', desc: 'Notes stay new until you close the panel and survive a reload. Filters have names and counts, running jobs are rows, a note can be dismissed, toasts stack with the time left, and History is grouped by day.' },
+        { title: 'New installs', desc: 'Pressing Import library on a new install no longer fails with a library upgrade that was never needed (#2062).', page: 'library' },
+        { title: 'Artist Merge Review', desc: 'Two different bands could be merged for sharing one catalogue id. Merges need real evidence now, every merge is written down and can be undone, doubtful pairs are asked about, and artists merged by mistake are found and split (thanks SeadogsBooty, #2073).', page: 'tools' },
+        { title: 'Tools, redone', desc: 'One page with four pills, artwork leading every finding, findings in plain words with before and after, and re-tag keeps history and can undo.', page: 'tools' },
+        { title: 'Use File Tags', desc: 'The Library takes its titles, numbers, year, genre and album from your files, with a preview: on one album or artist, or as a job for the whole library (thanks wolf39us, #2070, #2074).', page: 'tools' },
+        { title: 'Compilation songs to original albums', desc: 'A job that finds where each song on a best-of first came out and files it under that album once approved, so a player that filters by album year gets it right. Off by default (thanks wolf39us, #2077).', page: 'tools' },
+        { title: 'Review lock', desc: 'A padlock on an album or artist keeps what you reviewed: enrichment, repairs and re-matching leave it alone (#2046).', page: 'library' },
+        { title: 'Upgrades that work', desc: 'Automatic quality upgrades run a few at a time with a growing wait, and a song you already have is no longer put back on the wishlist every hour (#2060).', page: 'library' },
+        { title: 'Artist page sections', desc: 'Live albums, compilations, soundtracks, remixes, demos and spoken word get their own sections (#2055), and one release is one album however many servers listed it (#1985).', page: 'library' },
+        { title: 'Faster Manage Workers', desc: 'The numbers for every worker come from one pass instead of one per worker, and the window opens and switches without waiting.', page: 'dashboard' },
+        { title: 'Search all sources', desc: 'Search every source at once, with the same release shown once (#2051).', page: 'search' },
+        { title: 'Playlists', desc: 'ListenBrainz Daily Jams is one rolling playlist like Weekly Jams (thanks mpaugam, #2076), rotating playlists can let go of songs you played (#2047), and two source tracks that are one song are marked (#2059).', page: 'sync' },
+        { title: 'Redesigned pages', desc: 'Automations and Stats are redone, the Auto-Sync manager is drawn around covers, and View Settings and Artist Settings show every option as the thing it controls.', page: 'automations' },
+        { title: 'Video', desc: 'Movie and show pages are one page with files as cards. Video automations, watchlist, search and discover are redrawn. Two shows with one name never share a folder or a download status (thanks SeadogsBooty, #2052, #2075).' },
+        { title: 'Fixes', desc: 'Album Tag Consistency finds a compilation split into one album per artist (thanks Storm, #2072), the MusicBrainz worker finds releases the artist search misses (#2071), $explicit works on downloads and imports (#2068), Prowlarr search pacing is a setting (#2061), and fixes for Tidal, Deezer, Soulseek and torrents (#2063 to #2069).' },
+        { title: 'Earlier versions', desc: '3.6.4 brought your own video libraries, one release ranking, own libraries on Navidrome and five full reviews of the new Library. 3.6.2 brought the new Library, built by @nick2000713.' },
     ],
 };
 
@@ -3486,23 +3505,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.6.4: your own video libraries',
-        description: 'Video libraries with their own sources and profiles, one release ranking, delete a show or movie for good, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of everything Library v2 touched.',
+        title: '3.6.5: the dashboards, the bell and safe merges',
+        description: 'Both dashboards rebuilt, the notification bell, Tools, Automations and Stats redone, video pages as one page, a review lock, artist merges that are recorded and can be undone, and a new install that no longer trips on a library upgrade.',
         features: [
-            'Your own movie and TV libraries, each with its own quality profile, download sources, client category, Prowlarr indexers and automatic search, and the same movie in two libraries as two copies (thanks SeadogsBooty, #2029).',
-            'One release ranking (quality, then custom formats, then tie-breaks), with why on every search result and a preferred size setting (thanks SeadogsBooty, #2033).',
-            'Delete a show or movie and it stays deleted: nothing grabs it again, and the folder goes to the recycle bin as one entry (thanks PapaBearDoes, #2020).',
-            'SABnzbd and NZBGet get the NZB file itself (#2030), a grab checks it has the right show and searches its English and original names (thanks SeadogsBooty and Thibs, #2027, #2021), and a cropped Blu-ray reads as 1080p (#2025).',
-            'Own-library profiles on Navidrome 0.58+ (thanks mirlooun, #2031).',
-            'Every profile can hide what it doesn\'t use, and the Playlists and Watchlist pages are redesigned.',
-            'Rotating playlists: a song a playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).',
-            'Download Discography uses the artist\'s quality profile (thanks Foxxify, #2022), YouTube channels can be followed without downloading (thanks JuanVqz), and Library Health has per-artist checks (thanks QT3496).',
-            'Library v2 reviewed end to end five times, every finding fixed with a test, and the library pages, reports and startup much faster on big libraries.',
+            'Music and video dashboards rebuilt: a hero with the worker orbs, then your week, your counts, playlist sync and what runs next as a board.',
+            'The bell rebuilt: notes stay new until you close the panel, it survives a reload, toasts stack, and History is grouped by day.',
+            'A new install is no longer sent into a library upgrade it never needed (#2062).',
+            'Artist Merge Review: merges need real evidence, every merge can be undone, and artists merged by mistake are found and split (thanks SeadogsBooty, #2073).',
+            'Use File Tags for one album or the whole library, and Compilation Songs to Original Albums (thanks wolf39us, #2070, #2074, #2077).',
+            'Review lock on albums and artists (#2046), automatic upgrades that work (#2060), and artist page sections for live, compilations, soundtracks and remixes (#2055).',
+            'The Tools, Automations and Stats pages redesigned, and Manage Workers much faster.',
+            'Search all sources at once (#2051), and ListenBrainz Daily Jams as a rolling playlist (thanks mpaugam, #2076).',
+            'Movie and show pages as one page, and same-named shows never share a folder or a download status (thanks SeadogsBooty, #2052, #2075).',
         ],
     },
     {
-        title: 'Earlier in 3.6.3',
-        description: 'A hot fix for the Library page timing out on big libraries, failed downloads replaced by the next release automatically, manual search filters, AniList anime seasons and faster post-download scans.',
+        title: 'Earlier in 3.6.4',
+        description: 'Your own video libraries with their own sources and profiles, one release ranking, delete a show or movie for good, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of the new Library.',
         features: [],
     },
 ];

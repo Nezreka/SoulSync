@@ -262,6 +262,9 @@ def build_album_import_context(
         # it. Empty for non-MusicBrainz sources — same graceful-absent
         # pattern as the album-level disambiguation below.
         "disambiguation": str(track.get("disambiguation") or "").strip(),
+        # #2068: $explicit / $contentrating in the filename. dropped here, the
+        # token had nothing to read on any manual import
+        "explicit": track.get("explicit"),
     }
 
     normalized_album = {
@@ -278,6 +281,9 @@ def build_album_import_context(
         "image_url": str(album.get("image_url") or track_album_image or "").strip(),
         "images": album.get("images") or ([] if not track_album_image else [{"url": track_album_image}]),
         "source": source,
+        # #2068: the album's flag, for $explicit in a folder. the caller works
+        # it out over every track of the album (album_explicit_flag)
+        "explicit": album.get("explicit"),
     }
     for key in ("format", "country", "status", "label", "disambiguation", "release_group_id", "musicbrainz_release_id"):
         value = str(album.get(key) or "").strip()

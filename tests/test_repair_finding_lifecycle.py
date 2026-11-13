@@ -578,3 +578,30 @@ def test_a_dismissal_fingerprinted_the_old_way_still_holds(worker, tmp_path):
                             (json.dumps(details),))
     worker.db._conn.commit()
     assert _file_finding(worker, song) is False
+
+
+# --- #2005: the unreachable-library question, through the real fix path ------
+
+def _ask_unreachable(worker):
+    assert worker._create_finding(
+        job_id='dead_file_cleaner', finding_type='library_unreachable', severity='warning',
+        entity_type='library', entity_id='unreachable', file_path=None,
+        title="30 of 30 files can't be reached", description='x',
+        details={'outage': {'unreachable': 30, 'checked': 30}}) is True
+    return worker.db._get_connection().execute(
+        "SELECT id FROM repair_findings WHERE finding_type='library_unreachable'").fetchone()[0]
+
+
+def test_the_unreachable_question_is_asked_once_and_closed_by_a_run_that_saw_the_library(worker):
+    finding_id = _ask_unreachable(worker)
+    # a second stopped run with other counts refreshes the same row
+    assert worker._create_finding(
+        job_id='dead_file_cleaner', finding_type='library_unreachable', severity='warning',
+        entity_type='library', entity_id='unreachable', file_path=None,
+        title="31 of 31 files can't be reached", description='x',
+        details={'outage': {'unreachable': 31, 'checked': 31}}) is False
+    conn = worker.db._get_connection()
+    assert conn.execute("SELECT COUNT(*) FROM repair_findings").fetchone()[0] == 1
+    assert worker.retire_unreachable_finding() == 1
+    assert conn.execute("SELECT status, user_action FROM repair_findings WHERE id=?",
+                        (finding_id,)).fetchone() == ('resolved', 'obsolete')

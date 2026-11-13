@@ -408,6 +408,37 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
     return album_id
 
 
+def _download_album_image(*albums: Any) -> Optional[str]:
+    """The cover the download itself came with, as a link anyone can load."""
+    from core.metadata.artwork import usable_remote_image_url
+    for album in albums:
+        if not isinstance(album, dict):
+            continue
+        images = album.get("images") if isinstance(album.get("images"), (list, tuple)) else []
+        for candidate in (album.get("image_url"), *(
+                entry.get("url") if isinstance(entry, dict) else entry for entry in images)):
+            url = usable_remote_image_url(candidate if isinstance(candidate, str) else None)
+            if url:
+                return url
+    return None
+
+
+def _adopt_album_image(conn, album_id: Optional[int], image_url: Optional[str]) -> None:
+    """An album with no picture takes the one its download was matched with.
+
+    The album row was made without one and left for enrichment to fill, so the
+    tag check that runs right after the import saw "artwork_database: missing"
+    and filed a re-tag finding for every track of every new album (#2058).
+    A picture already there, or one the user locked, is left alone.
+    """
+    if not album_id or not image_url:
+        return
+    conn.execute(
+        "UPDATE lib2_albums SET image_url=?, updated_at=CURRENT_TIMESTAMP "
+        "WHERE id=? AND COALESCE(image_url,'')='' AND COALESCE(art_locked,0)=0",
+        (image_url, int(album_id)))
+
+
 def _adopt_release_mbid(conn, album_id: int, release_mbid: str) -> None:
     """Record the file's release id on an album that has none, never
     overwriting one (the same column the embedded-tag reconcile fills)."""
@@ -959,6 +990,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                         "WHERE id=?", (artist_name, track_id))
 
             if not fallback:
+                _adopt_album_image(conn, album_id, _download_album_image(canonical_album, album_raw))
                 # how this download filed the release, for a later reorganize
                 from core.library2.reorganize_plan import record_filed_release
                 record_filed_release(conn, album_id, context)
@@ -1073,7 +1105,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                         " WHERE id=?", (file_id,))
                     set_file_state(conn, int(file_id), "active")
                     logger.info(
-                        "Library v2: reactivated file row %s for re-imported "
+                        "Library: reactivated file row %s for re-imported "
                         "path %s (was %s)",
                         file_id, file_path, existing["file_state"])
             else:
@@ -1167,11 +1199,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             _warm_new_artwork(db, conn, album_id)
             from core.library2.validation import refresh_imported_metadata
             context['_metadata_status'] = refresh_imported_metadata(db, [file_path, *(context.get('_companion_file_paths') or [])])
-            logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
+            logger.info("Library auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)
             return file_id
     except Exception as e:  # noqa: BLE001
-        logger.debug("library v2 autolink failed: %s", e)
+        logger.debug("library autolink failed: %s", e)
         if raise_on_error:
             raise
         return None

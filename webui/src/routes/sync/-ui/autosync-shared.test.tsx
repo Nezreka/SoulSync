@@ -10,6 +10,7 @@ import type { MirroredRow } from '../-sync.autosync';
 import type { AutoSyncCardActions, AutoSyncSidebarBadge } from './autosync-shared';
 
 import {
+  AutoSyncCover,
   AutoSyncBoardIntro,
   AutoSyncLane,
   AutoSyncPickMenu,
@@ -518,5 +519,28 @@ describe('tap-to-schedule (NEW — no vanilla counterpart)', () => {
     renderMenu({ onClose });
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('covers lead the cards (Nov 2026 redraw)', () => {
+  it('shows the playlist cover, and its initial when there is none or it fails', () => {
+    const { container, rerender } = render(
+      <AutoSyncCover playlist={{ id: 1, name: 'Road Trip', image_url: '/covers/1.jpg' }} />,
+    );
+    const img = container.querySelector<HTMLImageElement>('.asx-cover img')!;
+    expect(img.getAttribute('src')).toBe('/covers/1.jpg');
+    // the whole card is the drag handle: the picture must not start a drag of its own
+    expect(img.getAttribute('draggable')).toBe('false');
+    // decoration: the name beside it is what a reader hears
+    expect(container.querySelector('.asx-cover')!.getAttribute('aria-hidden')).toBe('true');
+
+    fireEvent.error(img);
+    expect(container.querySelector('.asx-cover img')).toBeNull();
+    expect(container.querySelector('.asx-cover-glyph')!.textContent).toBe('R');
+
+    rerender(<AutoSyncCover playlist={{ id: 2, name: '  daily mix' }} />);
+    expect(container.querySelector('.asx-cover-glyph')!.textContent).toBe('D');
+    rerender(<AutoSyncCover playlist={{ id: 3 }} />);
+    expect(container.querySelector('.asx-cover-glyph')!.textContent).toBe('?');
   });
 });

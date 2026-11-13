@@ -194,3 +194,108 @@ describe('filters', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 });
+
+describe('the page answers before it lists', () => {
+  const figures = (container: HTMLElement) =>
+    [...container.querySelectorAll('.repair-runs-figure')].map(
+      (node) =>
+        `${node.querySelector('.repair-runs-figure-value')?.textContent} ${node
+          .querySelector('.repair-runs-figure-label')
+          ?.textContent?.replace(/ in the last.*/, '')}`,
+    );
+
+  it('adds the runs up: how many, how many failed, found, fixed, time spent', () => {
+    const { container } = renderHistory([
+      run({ id: 1, findings_created: 5, auto_fixed: 2, duration_seconds: 60 }),
+      run({ id: 2, status: 'failed', error_text: 'boom', duration_seconds: 30 }),
+    ]);
+    expect(figures(container)).toEqual([
+      '2 runs',
+      '1 failed',
+      '5 findings raised',
+      '2 fixed automatically',
+      '1m 30s spent working',
+    ]);
+  });
+
+  it('the totals follow the filter', () => {
+    const { container } = renderHistory([
+      run({ id: 1, findings_created: 5 }),
+      run({ id: 2, job_id: 'beta', display_name: 'Beta', findings_created: 7 }),
+    ]);
+    fireEvent.click(chip(container, 'Beta'));
+    expect(figures(container)[2]).toBe('7 findings raised');
+  });
+
+  it('draws one bar per day for two weeks', () => {
+    const { container } = renderHistory([run()]);
+    expect(container.querySelectorAll('.repair-runs-daybar')).toHaveLength(14);
+    expect(container.querySelectorAll('.repair-runs-daybar-fill')).toHaveLength(1);
+  });
+
+  it('shows nothing above an empty history', () => {
+    const { container } = renderHistory([]);
+    expect(container.querySelector('.repair-runs-overview')).toBeNull();
+  });
+});
+
+describe('a run row', () => {
+  it('has the same columns every time, with a dash for a zero', () => {
+    const { container } = renderHistory([run({ findings_created: 3, auto_fixed: 0 })]);
+    const cells = [...container.querySelectorAll('.repair-run-head .repair-run-cell')].map(
+      (node) => node.textContent,
+    );
+    expect(cells).toEqual(['12.3s', '1,234', '3', '–']);
+  });
+
+  it('says why it failed on the row, until the row is open', () => {
+    const { container } = renderHistory([
+      run({ status: 'failed', error_text: 'AcoustID API key missing\nTraceback' }),
+    ]);
+    expect(container.querySelector('.repair-run-reason')?.textContent).toBe(
+      'AcoustID API key missing',
+    );
+    fireEvent.click(container.querySelector('.repair-run-head') as Element);
+    // the opened row shows the whole error, once
+    expect(container.querySelector('.repair-run-reason')).toBeNull();
+    expect(container.querySelector('.repair-run-error-text')?.textContent).toContain('Traceback');
+  });
+
+  it('names a run by the job list when the run only recorded its id', () => {
+    const onShowFindings = vi.fn();
+    const { container } = render(
+      <RunHistory
+        runs={[run({ display_name: 'orphan_file_detector' })]}
+        error={false}
+        onShowFindings={onShowFindings}
+        onRefresh={vi.fn()}
+        jobNames={{ orphan_file_detector: 'Orphan File Detector' }}
+      />,
+    );
+    expect(container.querySelector('.repair-run-name-text')?.textContent).toBe(
+      'Orphan File Detector',
+    );
+  });
+});
+
+describe('by job', () => {
+  it('folds the runs per job, and a job row opens its runs', () => {
+    const { container } = renderHistory([
+      run({ id: 1, findings_created: 4 }),
+      run({ id: 2, status: 'failed' }),
+      run({ id: 3, job_id: 'beta', display_name: 'Beta' }),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'By job' }));
+    const rows = [...container.querySelectorAll('.repair-runs-job')];
+    expect(rows).toHaveLength(2);
+    const orphan = rows.find((row) => row.textContent?.includes('Orphan File Detector'));
+    // runs 2, failed 1, found 4
+    expect([...(orphan as Element).children].slice(2, 4).map((cell) => cell.textContent)).toEqual([
+      '2',
+      '1',
+    ]);
+    fireEvent.click(orphan as Element);
+    expect(container.querySelectorAll('.repair-run')).toHaveLength(2);
+    expect(chip(container, 'Orphan File Detector').className).toContain('active');
+  });
+});

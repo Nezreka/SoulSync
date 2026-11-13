@@ -449,6 +449,66 @@ describe('automatic migration of an upgrading installation', () => {
     expect(await screen.findByText('Your library is empty')).toBeInTheDocument();
   });
 
+  it('gives a new install the real ways in, not an import with nothing to read', async () => {
+    // #2062: "Import library" on a fresh install started the old-library
+    // migration, which failed on its missing tables and told the user that
+    // downloads, sync and automations were paused.
+    const navigateToPage = vi.fn();
+    window.navigateToPage = navigateToPage;
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          ...importState({
+            running: false,
+            stage: null,
+            bootstrap: bootstrapState({ status: 'waiting_for_source', stage: null }),
+          }),
+          has_legacy_source: false,
+        }),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LibraryEmptyState pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Search' }));
+    expect(navigateToPage).toHaveBeenCalledWith('search');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Import' }));
+    expect(navigateToPage).toHaveBeenCalledWith('import');
+    expect(screen.getByText('Your library is empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import library' })).not.toBeInTheDocument();
+    delete window.navigateToPage;
+  });
+
+  it('still offers the import to an install that has an older library', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          ...importState({
+            running: false,
+            stage: null,
+            bootstrap: bootstrapState({ status: 'waiting_for_source', stage: null }),
+          }),
+          has_legacy_source: true,
+        }),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LibraryEmptyState pollIntervalMs={20} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Import library' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Search' })).not.toBeInTheDocument();
+  });
+
   it('offers the force the refusal names when a repeat run is declined', async () => {
     // The endpoint declines a re-run over a converged library and tells the
     // user to "send force". Nothing in the UI could send it, and the button is

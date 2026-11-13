@@ -240,6 +240,48 @@ def legacy_user_state_waiting(database: Any) -> bool:
                    for table in ("wishlist_tracks", "watchlist_artists"))
 
 
+def legacy_source_present(database: Any) -> bool:
+    """Does this install have an older library to import at all?
+
+    An install created since the catalogue cutover has no ``artists`` /
+    ``albums`` / ``tracks`` tables, under either their own names or the names a
+    finished upgrade renames them to. There is nothing for the importer to
+    read there, and its column check fails on the first table (#2062).
+    """
+    from core.library2.source_snapshot import SOURCE_TABLES, source_table
+    with closing(database._get_connection()) as conn:
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    return any(source_table(tables, table) for table in SOURCE_TABLES)
+
+
+def settle_failed_without_source(database: Any) -> bool:
+    """Clear a failed upgrade on an install that never had one to run.
+
+    Pressing Import library on a fresh install used to start the legacy import,
+    which failed on the missing tables and left ``failed`` behind: the Library
+    page then said the upgrade had failed and everything was paused. Nothing
+    was (the migration gate reads the tables, not this row), but the row is
+    wrong and it is what the banner shows. True when a row was corrected.
+    """
+    if legacy_source_present(database):
+        return False
+    with closing(database._get_connection()) as conn:
+        try:
+            now = _now_iso()
+            cursor = conn.execute(
+                "UPDATE lib2_bootstrap_state SET status='waiting_for_source', "
+                "finished_at=?, owner_token=NULL, last_error=NULL "
+                "WHERE id=1 AND status='failed'", (now,))
+            conn.commit()
+        except sqlite3.OperationalError:  # never bootstrapped: nothing to correct
+            return False
+    if cursor.rowcount:
+        logger.info("Library bootstrap: cleared a failed upgrade on an install "
+                    "with no older library to import")
+    return cursor.rowcount > 0
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -452,7 +494,7 @@ def reclaim_abandoned_claim(database: Any, *, process_started_at: float) -> bool
         released = cursor.rowcount > 0
         conn.commit()
         if released:
-            logger.info("Released a Library v2 migration claim left by a previous process")
+            logger.info("Released a Library migration claim left by a previous process")
         return released
     except sqlite3.OperationalError as exc:
         logger.debug("lib2 bootstrap reclaim skipped: %s", exc)
@@ -645,7 +687,7 @@ def _checkpoint_wal(database: Any, mode: Optional[str] = None) -> None:
     try:
         pages = checkpoint_wal(conn, mode or CHECKPOINT_TRUNCATE)
         if pages:
-            logger.info("Library v2 migration checkpointed %d WAL pages", pages)
+            logger.info("Library migration checkpointed %d WAL pages", pages)
     finally:
         conn.close()
 
@@ -747,6 +789,82 @@ def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
     return stats
 
 
+def _fold_server_twins_once(database: Any, conn: Any, *,
+                            should_stop: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+    """#1985: the same release listed by several media servers, folded once
+    per finished import for installs that imported before the fold existed.
+    commits artist by artist; a stopped run is not marked and picks up on the
+    next start."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    key = f"{state.get('finished_at') or ''}|server-twins"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (key,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import fold_server_twins
+    stats = fold_server_twins(conn, commit=conn.commit, should_stop=should_stop)
+    if should_stop and should_stop():
+        conn.commit()
+        return stats
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (key, int(stats.get("server_twins_folded") or 0)))
+    conn.commit()
+    if stats.get("server_twin_albums_folded"):
+        # wishlist un-mirrors the album folds queued
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-fold outbox drain failed: %s", exc)
+    return stats
+
+
+def _fold_artist_twins_once(database: Any, conn: Any, *,
+                            should_stop: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+    """an artist two servers listed, kept as two rows because one lesser
+    catalogue id disagreed: every release showed twice on the artist page,
+    once owned and once as 0 of 14. merged once per finished import, then the
+    releases the merge brought together fold like any other server twin."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    key = f"{state.get('finished_at') or ''}|artist-twins"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (key,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import (
+        _fold_albums_within_artist, fold_server_twins, merge_artist_twins)
+    stats: Dict[str, int] = {"artists_merged": 0, "alias_linked": 0,
+                             "albums_folded": 0, "album_review": 0}
+    touched = merge_artist_twins(conn, stats)
+    conn.commit()
+    stats.update(fold_server_twins(conn, commit=conn.commit, should_stop=should_stop))
+    if should_stop and should_stop():
+        conn.commit()
+        return stats
+    cursor = conn.cursor()
+    for artist_id in sorted(touched):
+        _fold_albums_within_artist(conn, cursor, artist_id, stats)
+        conn.commit()
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (key, int(stats.get("artists_merged") or 0)))
+    conn.commit()
+    if stats.get("server_twin_albums_folded") or stats.get("albums_folded"):
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-merge outbox drain failed: %s", exc)
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -766,7 +884,7 @@ def run_deferred_backfills(database: Any, *,
     from core.library2.schema import run_library_v2_backfills
     from core.library2.wal import PeriodicCheckpointer
 
-    ticker = _ProgressTicker("Library v2 convergence").start()
+    ticker = _ProgressTicker("Library convergence").start()
     conn = database._get_connection()
     # iss32-M02: on an interrupted migration these passes write as much as the
     # import itself, so the enrichment workers have to stand aside for them
@@ -782,6 +900,11 @@ def run_deferred_backfills(database: Any, *,
             )
             # Installs migrated before one-file-one-track also converge here.
             stats["shared_files"] = _fold_shared_files_once(database, conn)
+            conn.commit()
+            stats["server_twins"] = _fold_server_twins_once(
+                database, conn, should_stop=should_stop)
+            stats["artist_twins"] = _fold_artist_twins_once(
+                database, conn, should_stop=should_stop)
             # guests an older twin merge dropped from the kept album, once
             # (review 5 W2-WE-1)
             try:
@@ -812,8 +935,9 @@ def run_deferred_backfills(database: Any, *,
     # once per media server becomes one release (proven pairs only)
     from core.library2.catalogue_duplicates import merge_import_twins
     stats["import_twins"] = merge_import_twins(database)["merged"]
+    stats["scan_findings_closed"] = _settle_scan_findings_once(database, should_stop)
     if any(stats.values()):
-        logger.info("Library v2 convergence complete: %s", stats)
+        logger.info("Library convergence complete: %s", stats)
     # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
     # then waits for every reader to finish, and on a busy server that held up
     # every writer, and through the connection pool every request, for half
@@ -823,6 +947,30 @@ def run_deferred_backfills(database: Any, *,
     from core.library2.wal import CHECKPOINT_PASSIVE
     _checkpoint_wal(database, CHECKPOINT_PASSIVE)
     return stats
+
+
+def _settle_scan_findings_once(database: Any, should_stop: Any = None) -> int:
+    """close the tag-scan findings that are no longer issues, once (the
+    one-disc "total_discs: missing" pile). a stopped pass runs again next
+    start, it only marks itself done when it reached the end"""
+    from core.library2.schema import _done_once, _mark_done
+    name = "retag_scan_findings_settled_v1"
+    try:
+        with closing(database._get_connection()) as conn:
+            if _done_once(conn.cursor(), name):
+                return 0
+        from core.library2.validation import settle_scan_findings
+        stats = settle_scan_findings(database, should_stop=should_stop)
+        if not (should_stop and should_stop()):
+            with closing(database._get_connection()) as conn:
+                _mark_done(conn.cursor(), name)
+                conn.commit()
+        if stats["closed"] or stats["updated"]:
+            logger.info("tag-scan findings re-checked: %s", stats)
+        return stats["closed"]
+    except Exception as exc:  # noqa: BLE001 - tidying findings never fails a start
+        logger.warning("tag-scan findings not re-checked: %s", exc)
+        return 0
 
 
 def should_stop_autostart(result: Dict[str, Any]) -> bool:
@@ -905,19 +1053,19 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     if (not resume and not source_row_count(current_watermark)
             and not legacy_user_state_waiting(database)):
         mark_waiting_for_source(database, owner_token, watermark=current_watermark)
-        logger.info("Library v2 bootstrap: no legacy catalogue to import")
+        logger.info("Library bootstrap: no legacy catalogue to import")
         return {"skipped": "empty_source"}
 
     if resume:
-        logger.info("Library v2 bootstrap import resuming at %s row %s",
+        logger.info("Library bootstrap import resuming at %s row %s",
                     resume.stage, resume.rowid)
     else:
-        logger.info("Library v2 bootstrap import starting")
+        logger.info("Library bootstrap import starting")
     last_beat = {"t": 0.0}
     # iss32-M01: the log ticker sees EVERY progress call, including the ones
     # the heartbeat throttle below drops — throttling exists to spare the
     # database a write, not to keep the operator in the dark.
-    ticker = _ProgressTicker("Library v2 bootstrap import").start()
+    ticker = _ProgressTicker("Library bootstrap import").start()
 
     def _progress(stage, current, total, *, connection=None, rowid=None, run_id=None):
         ticker.update(stage, current, total)
@@ -953,7 +1101,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             stats = _import_legacy_library(database, profile_id=profile_id,
                                            progress=_progress, resume=resume)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Library v2 bootstrap import failed: %s", exc, exc_info=True)
+            logger.error("Library bootstrap import failed: %s", exc, exc_info=True)
             mark_failed(database, owner_token, str(exc))
             return {"success": False, "error": str(exc)}
 
@@ -966,7 +1114,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 from core.maintenance.dedupe_source_ids import repair_imported_state
                 repair_imported_state(database)
             except Exception as exc:  # noqa: BLE001
-                logger.error("Library v2 post-import repair failed: %s", exc, exc_info=True)
+                logger.error("Library post-import repair failed: %s", exc, exc_info=True)
 
         if post_import is not None:
             try:
@@ -976,7 +1124,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 if isinstance(exc, ArtistPreparationError):
                     mark_failed(database, owner_token, str(exc))
                     return {"success": False, "error": str(exc)}
-                logger.warning("Library v2 post-import precache failed: %s", exc)
+                logger.warning("Library post-import precache failed: %s", exc)
     finally:
         keepalive.stop()
         ticker.stop()
@@ -993,7 +1141,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     # last legacy row immediately before the upgrade barrier took effect.
     if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
-    logger.info("Library v2 bootstrap import completed: %s", stats)
+    logger.info("Library bootstrap import completed: %s", stats)
     # straight after the import: the 3.6.1 carries first (they find rows by
     # legacy id, and the twin merge deletes the duplicate rows holding some)
     carry_conn = database._get_connection()

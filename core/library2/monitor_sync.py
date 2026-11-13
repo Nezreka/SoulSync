@@ -546,7 +546,7 @@ def _descriptor_lib2_track_ids(
             matched.add(int(candidates[0]["id"]))
         elif len(candidates) > 1:
             logger.warning(
-                "Wishlist removal identity %r matched %d Library-v2 tracks; "
+                "Wishlist removal identity %r matched %d Library tracks; "
                 "skipping ambiguous provider fallback", raw_key, len(candidates),
             )
     return sorted(matched)
@@ -1146,15 +1146,23 @@ def reconcile_track_wishlist(
     batch: int = 200,
     should_stop: Optional[Callable[[], bool]] = None,
     progress: Optional[Callable[[int, int], None]] = None,
+    upgrades_per_run: int = 0,
+    upgrade_retry_days: float = 7,
 ) -> Dict[str, int]:
     """Re-assert the authoritative wanted projection into the Wishlist (§69.1).
 
     Recomputes the full projection, then mirrors two sets through the same
     outbox path the toggles use:
 
-    * every currently-``wanted`` track — re-adds any wanted+missing track whose
-      Wishlist entry was downloaded/cleared/aged away (the reported gap: a
-      monitored missing track that never re-enters the Wishlist);
+    * every currently-``wanted`` track with no file — re-adds any wanted+missing
+      track whose Wishlist entry was downloaded/cleared/aged away (the reported
+      gap: a monitored missing track that never re-enters the Wishlist). A
+      track that has a file is not re-added by this rule, however far below
+      its quality target the file is (#2060);
+    * up to ``upgrades_per_run`` owned tracks below their quality target that
+      are due another try (``core.library2.upgrade_attempts``): each attempt
+      is remembered, the wait doubles while nothing better turns up, and an
+      attempt that found nothing in its window is withdrawn again;
     * every existing lib2 track currently in the Wishlist that is no longer
       wanted — prunes stale entries (the "und umgekehrt" half).
 
@@ -1171,12 +1179,11 @@ def reconcile_track_wishlist(
     Wishlist row costs a search, a wrongly pruned one costs the download.
     """
     from core.library2.wanted import recompute_wanted, wanted_track_ids
-    from core.library2.wishlist_mirror import (
-        mirror_projected_tracks_wishlist, upgrade_candidate_track_ids,
-    )
+    from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
-             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0, 'intent_failed': 0}
+             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0, 'intent_failed': 0,
+             "upgrades_queued": 0, "upgrades_waiting": 0, "upgrades_withdrawn": 0}
     try:
         from core.library2.bootstrap import bootstrap_is_active
         pruning_allowed = not bootstrap_is_active(db)
@@ -1235,7 +1242,7 @@ def reconcile_track_wishlist(
         else:
             prune = []
             logger.info(
-                "wishlist reconcile (profile %s): pruning skipped, a Library v2 "
+                "wishlist reconcile (profile %s): pruning skipped, a Library "
                 "bootstrap is running and the wanted projection is incomplete",
                 profile_id,
             )
@@ -1258,13 +1265,49 @@ def reconcile_track_wishlist(
         # A wanted track that has its file and is no upgrade candidate is
         # simply owned; mirroring it only to learn that cost ~66 s per hourly
         # run on a 200k-track library.
-        # Profile edits change which copy of a multi-file track is primary,
-        # and the upgrade verdict below reads the primary.
+        # Profile edits change which copy of a multi-file track is primary.
         from core.library2.track_files import rank_files_by_profile
         rank_files_by_profile(conn)
-        queueable = _tracks_without_file(conn, wanted) | set(
-            upgrade_candidate_track_ids(conn, profile_id=profile_id))
+        # #2060: a track with NO file is put back whenever it is wanted. One
+        # that HAS a file below its quality target used to be put back the
+        # same way, every hour, and the wishlist's own "already in your
+        # library" sweep took each one straight out again before it was ever
+        # tried: with a source that can only deliver below the target (a 128k
+        # fallback under a 320k profile), every song just downloaded came
+        # back on the Wishlist each hour and no upgrade ever came of it.
+        queueable = _tracks_without_file(conn, wanted)
         adds = [t for t in wanted if t not in wishlisted_set and t in queueable]
+        # Upgrades are asked for a few at a time and remembered, so a track is
+        # tried again only after a wait that grows while nothing better turns
+        # up, and a try that found nothing steps aside (upgrade_attempts).
+        upgrades: List[int] = []
+        if upgrades_per_run > 0:
+            from core.library2 import upgrade_attempts
+            from core.library2.wishlist_mirror import upgrade_candidate_track_ids
+            expired = upgrade_attempts.expired_wishes(
+                conn, shared_intent_profiles(conn, profile_id))
+            for start in range(0, len(expired), 500):
+                chunk = expired[start:start + 500]
+                conn.execute(
+                    f"DELETE FROM wishlist_tracks WHERE id IN ({','.join('?' for _ in chunk)})",
+                    chunk)
+            stats["upgrades_withdrawn"] = len(expired)
+            if expired:
+                logger.info(
+                    "wishlist reconcile: %d upgrade search(es) found nothing better "
+                    "in %dh and step aside until their next turn",
+                    len(expired), upgrade_attempts.WINDOW_HOURS)
+            below_target = [
+                t for t in upgrade_candidate_track_ids(
+                    conn, profile_id=profile_id, definite_only=True)
+                if t not in wishlisted_set]
+            upgrades = upgrade_attempts.due_tracks(
+                conn, below_target, retry_days=upgrade_retry_days,
+                limit=int(upgrades_per_run))
+            upgrade_attempts.stamp_tracks(conn, upgrades)
+            conn.commit()
+            stats["upgrades_queued"] = len(upgrades)
+            stats["upgrades_waiting"] = len(below_target) - len(upgrades)
         refresh = [t for t in wanted if t in wishlisted_set and t in changed_set]
         stats["added"] = len(adds)
         stats["refreshed"] = len(refresh)
@@ -1276,7 +1319,7 @@ def reconcile_track_wishlist(
             logger.info("wishlist reconcile: pruning %d no-longer-wanted track(s): %s",
                         len(prune), prune[:50])
 
-        target = sorted(set(adds) | set(prune) | set(refresh))
+        target = sorted(set(adds) | set(prune) | set(refresh) | set(upgrades))
         total = len(target)
         for start in range(0, total, max(1, batch)):
             if should_stop and should_stop():
@@ -1289,9 +1332,11 @@ def reconcile_track_wishlist(
                 progress(stats["scanned"], total)
         logger.info(
             "wishlist reconcile (profile %s): %d wanted, %d wishlisted, "
-            "%d added, %d pruned, %d refreshed, %d mirror ops",
+            "%d added, %d pruned, %d refreshed, %d upgrade(s) asked for "
+            "(%d more below their profile wait their turn), %d mirror ops",
             profile_id, stats["wanted"], stats["wishlisted"], stats["added"],
-            stats["pruned"], stats["refreshed"], stats["mirrored"],
+            stats["pruned"], stats["refreshed"], stats["upgrades_queued"],
+            stats["upgrades_waiting"], stats["mirrored"],
         )
         return stats
 
@@ -1403,7 +1448,7 @@ def carry_member_watchlists(conn: Any) -> Dict[str, int]:
         conn.execute(f"CREATE TABLE {_MEMBER_WATCHLISTS_MARKER} (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         conn.commit()
         if stats["artists"]:
-            logger.info("household watchlists carried into Library v2: %s", stats)
+            logger.info("household watchlists carried into the Library: %s", stats)
     except Exception as exc:  # noqa: BLE001 - a watch badge is never a blocker
         logger.warning("household watchlists not carried: %s", exc)
         try:

@@ -102,7 +102,7 @@ def carry_legacy_artist_credits(conn: Any) -> Dict[str, int]:
         conn.execute(f"CREATE TABLE {_MARKER} (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         conn.commit()
         if any(stats.values()):
-            logger.info("3.6.1 artist credits carried into Library v2: %s", stats)
+            logger.info("3.6.1 artist credits carried into the Library: %s", stats)
     except Exception as exc:  # noqa: BLE001 - a credit is decoration, never a blocker
         logger.warning("3.6.1 artist credits not carried: %s", exc)
         try:

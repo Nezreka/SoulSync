@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -396,6 +396,76 @@ describe('the dropdown state machine', () => {
     await screen.findByText('Searching Spotify…', undefined, { timeout: 3000 });
     await waitFor(() => expect(visibleBody()).toBe('loading'));
     act(() => settle?.());
+  });
+
+  it('#2051: All sources asks them all, shows each release once, and opens it where it came from', async () => {
+    const asked: string[] = [];
+    let detailUrl = '';
+    let settleMb: (() => void) | null = null;
+    server.use(
+      http.get('/api/settings/config-status', () =>
+        HttpResponse.json({
+          spotify: { configured: true },
+          itunes: { configured: true },
+          deezer: { configured: true },
+          soulseek: { configured: true },
+        }),
+      ),
+      http.post('/api/enhanced-search', async ({ request }) => {
+        const { source } = (await request.json()) as { source: string };
+        asked.push(source);
+        const kidA = (id: string) => ({
+          spotify_albums: [{ id, name: 'Kid A', artist: 'Radiohead', album_type: 'album', source }],
+        });
+        if (source === 'deezer') return HttpResponse.json(kidA('dz-1'));
+        if (source === 'itunes') return HttpResponse.json(kidA('it-1'));
+        if (source === 'spotify') return HttpResponse.json({ spotify_albums: [] });
+        if (source === 'musicbrainz') {
+          return new Promise<Response>((resolve) => {
+            settleMb = () => resolve(HttpResponse.json({ spotify_albums: [] }));
+          });
+        }
+        return HttpResponse.json({});
+      }),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+      http.get('/api/spotify/album/:id', ({ request }) => {
+        detailUrl = new URL(request.url).pathname + new URL(request.url).search;
+        return HttpResponse.json({ tracks: [] });
+      }),
+    );
+
+    renderRoute('/search');
+    await settled();
+    fireEvent.click(screen.getByRole('button', { name: /Search with/ }));
+    fireEvent.click(document.querySelector('[role="menuitemradio"][data-source="all"]')!);
+    type('radiohead');
+
+    await waitFor(() => expect(visibleBody()).toBe('results'), { timeout: 3000 });
+    // every source was asked once, each as itself
+    expect([...asked].sort()).toEqual(['amazon', 'deezer', 'itunes', 'musicbrainz', 'spotify']);
+    // two sources returned Kid A: one card, saying both, led by the picker's order
+    const cards = [...document.querySelectorAll('[role="button"][aria-label="Kid A"]')];
+    expect(cards).toHaveLength(1);
+    expect(
+      screen.getByRole('img', { name: 'From Apple Music. Also on Deezer' }),
+    ).toBeInTheDocument();
+    // one source is still out: the page says which, and is already usable
+    const status = document.getElementById('enh-unified-status')!;
+    expect(status.textContent).toContain('4 of 5 sources answered');
+    expect(status.textContent).toContain('Still searching MusicBrainz');
+
+    fireEvent.click(cards[0]);
+    // the card's own source, not "all": an id only means anything where it came from
+    await waitFor(() => expect(detailUrl).toContain('/api/spotify/album/it-1'));
+    expect(detailUrl).toContain('source=itunes');
+
+    act(() => settleMb?.());
+    await waitFor(() =>
+      expect(document.getElementById('enh-unified-status')!.textContent).toBe(
+        'From 5 sources. The same release from several shows once.',
+      ),
+    );
   });
 
   it('shows the results body once they land', async () => {

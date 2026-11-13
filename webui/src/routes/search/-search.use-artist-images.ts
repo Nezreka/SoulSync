@@ -77,7 +77,9 @@ export function useArtistImages(
       for (const artist of pending) {
         if (!live) return;
         const id = String(artist.id ?? '');
-        const url = await fetchArtistImage(id, activeSource, artist.name ?? '');
+        // "All sources" has no image of its own to ask for: each artist is
+        // looked up on the source it came from
+        const url = await fetchArtistImage(id, artist.source || activeSource, artist.name ?? '');
         if (!live) return;
         if (!url) continue;
         setResolved((prev) => ({ ...prev, [id]: url }));

@@ -56,6 +56,7 @@ import {
   fetchRepairFindings,
   fixFinding,
   reopenFinding,
+  undoFinding,
   reopenFindingsBulk,
   startBulkFix,
   stopBulkFix,
@@ -68,7 +69,6 @@ import {
   findingFilePath,
   findingRedownloadTrackId,
   findingRowFixLabel,
-  findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
   findingsBulkBarState,
@@ -79,13 +79,16 @@ import {
   REPAIR_DEFAULT_PAGE_SIZE,
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
-import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { describeFinding, readApplied, tagChangeLabel } from '../-tools.finding-copy';
+import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
+import { FindingArt } from './finding-art';
 import { FindingDetail } from './finding-detail';
 import {
   ReidentifyFindingModal,
+  needsReidentify,
   TYPE_ACOUSTID,
   TYPE_BACKFILL,
   TYPE_DEAD,
@@ -434,7 +437,10 @@ export function FindingsSurface({
     // Nothing is open and nothing is being searched: the inbox IS the view,
     // and fetching 30 rows nobody asked to see was most of what made the old
     // page slow to arrive.
-    if (!searching && !openType) {
+    // the flat list is the one view that asks for every finding at once. it
+    // sat on "Loading findings..." for good, because this early return only
+    // knew about a search and an opened type.
+    if (!searching && !openType && viewMode !== 'table') {
       setItems(null);
       setTotal(0);
       return;
@@ -473,6 +479,7 @@ export function FindingsSurface({
     severityFilter,
     sort,
     statusFilter,
+    viewMode,
   ]);
 
   const refreshAll = useCallback(() => {
@@ -704,6 +711,44 @@ export function FindingsSurface({
     );
     refreshAll();
   }, [refreshAll, undo]);
+
+  /** Take back a fix: the old tag values go into the file again. It asks
+   *  first, with every value it will write, because it changes the file. */
+  const undoOne = useCallback(
+    async (finding: RepairFinding) => {
+      const applied = readApplied(finding.details);
+      if (!applied) return;
+      const lines = applied.files.flatMap((file) =>
+        file.fields.map(
+          (field) =>
+            `${tagChangeLabel(field)}: ${field.after || 'empty'} → ${field.before || 'empty'}`,
+        ),
+      );
+      const cover = applied.files.some((file) => file.cover);
+      const confirmed = await window.showConfirmDialog?.({
+        title: 'Undo these tag changes?',
+        message:
+          `The old values are written back into the file and this finding reopens.\n\n${lines.join('\n')}` +
+          (cover ? '\n\nThe cover that was embedded stays. The old picture was not kept.' : ''),
+        confirmText: 'Undo changes',
+        cancelText: 'Cancel',
+      });
+      if (!confirmed) return;
+      const result = await undoFinding(finding.id);
+      if (!result.success) {
+        toast(result.error || 'Could not undo that', 'error');
+        return;
+      }
+      toast(
+        result.kept?.length
+          ? `Old tags are back. ${result.kept.join(', ')} had no value before and stayed.`
+          : 'Old tags are back in the file',
+        'success',
+      );
+      refreshAll();
+    },
+    [refreshAll],
+  );
 
   /** The undo half of dismiss. Dismiss suppresses that finding forever, which
    *  is only safe to offer freely because this exists. */
@@ -1230,12 +1275,14 @@ export function FindingsSurface({
   /** Every safe type in one run. The backend drops destructive types itself
    *  (`safe_only`), so this cannot become "fix everything" through drift. */
   const fixAllSafe = useCallback(async () => {
+    // the question names every kind of finding in the run and what a tag fix
+    // writes: one yes here can reach tens of thousands of files
+    const plan = fixAllSafePlan(groups, typeInfo, video);
     const confirmed = await window.showConfirmDialog?.({
-      title: 'Fix all safe findings',
-      message: video
-        ? `Apply the default fix to all ${safeCount.toLocaleString()} findings that only change SoulSync's own data? Nothing on disk is touched and nothing is downloaded; those findings are skipped.`
-        : `Apply the default fix to all ${safeCount.toLocaleString()} findings that only write metadata? Nothing is deleted or moved — anything that touches a file on disk is skipped.`,
-      confirmText: 'Fix all safe',
+      title: 'Fix all safe findings?',
+      message: plan.message,
+      confirmText: plan.confirmText,
+      cancelText: 'Not now',
       destructive: false,
     });
     if (!confirmed) return;
@@ -1253,7 +1300,7 @@ export function FindingsSurface({
     } catch {
       toast('Error starting bulk fix', 'error');
     }
-  }, [safeCount, video, watchBulkFixRun]);
+  }, [groups, typeInfo, video, watchBulkFixRun]);
 
   /** `clearRepairFindings` — deletes rows outright, filter-scoped. */
   const clearAll = useCallback(async () => {
@@ -1405,6 +1452,8 @@ export function FindingsSurface({
     if (openType && !shown.some((group) => group.finding_type === openType)) setOpenType('');
   }, [openType, shown]);
 
+  /** one type is open in the inbox: the surface shows that type alone */
+  const focused = Boolean(openType) && !searching && viewMode === 'inbox';
   const bar = findingsBulkBarState(selected.size, items?.length || 0, total);
   const pagination = findingsPagination(total, serverPage, pageSize);
   const runningJobs = jobs.filter((job) => job.is_running).length;
@@ -1660,6 +1709,8 @@ export function FindingsSurface({
                   onFix={fixOne}
                   onDismiss={dismissOne}
                   onReopen={reopenOne}
+                  onUndo={(target) => void undoOne(target)}
+                  onReidentify={setReidentifyingFinding}
                   onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
@@ -1727,24 +1778,28 @@ export function FindingsSurface({
   );
 
   return (
-    <div className="repair-findings-surface" ref={surfaceRef}>
-      <HealthHero
-        groups={groups}
-        typeInfo={typeInfo}
-        trackCount={trackCount}
-        sizeLabel={sizeLabel}
-        loading={!groupsLoaded}
-        runs={runs}
-        runningJobs={runningJobs}
-        safeCount={safeCount}
-        onFixAllSafe={() => void fixAllSafe()}
-        fixAllBusy={Boolean(bulkRun?.running)}
-        onPickType={pickType}
-      />
+    <div className={`repair-findings-surface${focused ? ' focused' : ''}`} ref={surfaceRef}>
+      {/* one type is open: the page is that type now, and the library's
+          health is a click back. kept mounted so its numbers don't reload. */}
+      <div className="repair-findings-overview" hidden={focused}>
+        <HealthHero
+          groups={groups}
+          typeInfo={typeInfo}
+          trackCount={trackCount}
+          sizeLabel={sizeLabel}
+          loading={!groupsLoaded}
+          runs={runs}
+          runningJobs={runningJobs}
+          safeCount={safeCount}
+          onFixAllSafe={() => void fixAllSafe()}
+          fixAllBusy={Boolean(bulkRun?.running)}
+          onPickType={pickType}
+        />
+      </div>
 
       {bulkRunBar}
 
-      {cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (
+      {!focused && cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (
         <div className="repair-cache-health">
           {/* The modal stays vanilla: `openCacheHealthModal` is reached from
               the Metadata Cache card too, and it opens onward into the
@@ -1760,44 +1815,6 @@ export function FindingsSurface({
           </div>
         </div>
       ) : null}
-
-      <div className="repair-findings-header-row">
-        <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
-          {/* issue types first: it's the view that holds every finding */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'inbox'}
-            className={`repair-view-mode-tab${viewMode === 'inbox' ? ' active' : ''}`}
-            onClick={() => changeViewMode('inbox')}
-          >
-            <span className="repair-view-mode-icon">📂</span>
-            <span>Issue Types</span>
-          </button>
-          {video ? null : (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'albums'}
-              className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
-              onClick={() => changeViewMode('albums')}
-            >
-              <span className="repair-view-mode-icon">💿</span>
-              <span>Albums & Releases</span>
-            </button>
-          )}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'table'}
-            className={`repair-view-mode-tab${viewMode === 'table' ? ' active' : ''}`}
-            onClick={() => changeViewMode('table')}
-          >
-            <span className="repair-view-mode-icon">📋</span>
-            <span>Flat List</span>
-          </button>
-        </div>
-      </div>
 
       {/* The section anchor lands here rather than on the inbox: the toolbar
           is always present, and the inbox is not (a search replaces it). */}
@@ -1835,6 +1852,43 @@ export function FindingsSurface({
             setPage(0);
           }}
         />
+
+        {/* inside one type the question is how to group ITS rows (the List /
+            Albums / Artists switch below), not which view of everything */}
+        {focused ? null : (
+          <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
+            {/* issue types first: it's the view that holds every finding */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'inbox'}
+              className={`repair-view-mode-tab${viewMode === 'inbox' ? ' active' : ''}`}
+              onClick={() => changeViewMode('inbox')}
+            >
+              Issue types
+            </button>
+            {video ? null : (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'albums'}
+                className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
+                onClick={() => changeViewMode('albums')}
+              >
+                Albums
+              </button>
+            )}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'table'}
+              className={`repair-view-mode-tab${viewMode === 'table' ? ' active' : ''}`}
+              onClick={() => changeViewMode('table')}
+            >
+              Flat list
+            </button>
+          </div>
+        )}
 
         <div className="repair-findings-filters">
           <select
@@ -1954,13 +2008,48 @@ export function FindingsSurface({
         </FindingsInbox>
       )}
 
+      {/* the same findings by the record they are on. a shelf, not the whole
+          grid: the Albums view is one click away and holds the rest. the
+          section only shows once there is an album to show. */}
+      {viewMode === 'inbox' && !searching && !focused && !video ? (
+        <section className="repair-shelf">
+          <div className="tools-section-head">
+            <h3 className="tools-section-title">Albums with findings</h3>
+            <span className="tools-section-blurb">Open one to work on it track by track.</span>
+            <button
+              type="button"
+              className="repair-shelf-all"
+              onClick={() => changeViewMode('albums')}
+            >
+              See all
+            </button>
+          </div>
+          <FindingsAlbumGrid
+            shelf
+            groupBy="album"
+            jobId={jobFilter || undefined}
+            status={statusFilter || undefined}
+            refreshToken={refreshToken}
+            onOpen={(group) => {
+              setSelectedAlbum(group);
+              changeViewMode('albums');
+            }}
+          />
+        </section>
+      ) : null}
+
       {prompts.promptNode}
 
       {reidentifyingFinding ? (
         <ReidentifyFindingModal
           finding={reidentifyingFinding}
           onApplied={async () => {
-            await dismissOne(reidentifyingFinding.id);
+            // a suspect-album finding is settled by the re-identify. a re-tag
+            // finding is not: the track is re-filed and the next scan closes
+            // it, and a dismiss would silence that file for good
+            if (reidentifyingFinding.finding_type !== TYPE_RETAG) {
+              await dismissOne(reidentifyingFinding.id);
+            }
           }}
           onClose={() => {
             setReidentifyingFinding(null);
@@ -2082,6 +2171,8 @@ function FindingCard({
   onReopen,
   onKeepDuplicate,
   onApplyCoverArt,
+  onUndo,
+  onReidentify,
   onInspectRedownload,
 }: {
   finding: RepairFinding;
@@ -2103,6 +2194,8 @@ function FindingCard({
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onUndo: (finding: RepairFinding) => void;
+  onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
 }) {
   const details = finding.details || {};
@@ -2110,10 +2203,13 @@ function FindingCard({
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
   const typeLabel = info?.label || findingTypeLabel(finding.finding_type);
   const age = formatCacheAge(finding.created_at);
+  const copy = describeFinding(finding, fixLabel);
 
   return (
     <div
-      className={`repair-finding-card ${finding.severity}${active ? ' kb-active' : ''}`}
+      className={`repair-finding-card ${finding.severity}${active ? ' kb-active' : ''}${
+        expanded ? ' expanded' : ''
+      }`}
       data-id={finding.id}
       data-job-id={finding.job_id}
       data-mass-orphan={String(Boolean(details.mass_orphan))}
@@ -2127,37 +2223,39 @@ function FindingCard({
             onChange={(event) => onToggleSelect(finding.id, event.target.checked)}
           />
         </div>
+        <FindingArt
+          album={finding.album_thumb_url}
+          artist={finding.artist_thumb_url}
+          file={finding.entity_type === 'file' || finding.entity_type === 'folder'}
+        />
         <div className="repair-finding-content">
           <div className="repair-finding-title">
-            <span className="repair-finding-icon">{findingSeverityIcon(finding.severity)}</span>
-            {finding.title}
+            {finding.severity === 'info' ? null : (
+              <span
+                className={`repair-finding-icon ${finding.severity}`}
+                title={finding.severity}
+              />
+            )}
+            <span className="repair-finding-name">{copy.title}</span>
             <span className="repair-finding-type-badge">{typeLabel}</span>
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
+            {finding.locked && finding.status === 'pending' ? (
+              <span
+                className="repair-finding-status-badge locked"
+                title={`This ${finding.locked.entity_type} is reviewed and locked. Fix all leaves it alone. The button on this row still works.`}
+              >
+                Locked
+              </span>
+            ) : null}
           </div>
-          <div className="repair-finding-desc">{finding.description || ''}</div>
-          {filePath ? <div className="repair-finding-path">{filePath}</div> : null}
-          <div className="repair-finding-meta">
-            {/* The display name the filter dropdown uses — a row showing the
-                raw snake_case id meant the same job went by two different
-                names on one screen. The entity id is for us, not the user:
-                it lives in the tooltip now. */}
-            <span
-              title={
-                finding.entity_id
-                  ? `${finding.entity_type || 'item'} ${finding.entity_id}`
-                  : undefined
-              }
-            >
-              {jobLabel(finding.job_id)}
-            </span>
-            <span>&middot;</span>
-            <span>
-              {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
-            </span>
-          </div>
+          {copy.sub ? <div className="repair-finding-sub">{copy.sub}</div> : null}
         </div>
+        {/* what is wrong, as a sentence, in the middle of the row where a wide
+            screen used to leave a gap */}
+        <div className="repair-finding-desc">{copy.problem}</div>
+        <span className="repair-finding-age">{age === '—' ? '' : age === 'now' ? 'now' : age}</span>
         {/* This wrapper swallows clicks so the row toggle doesn't undo them. */}
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
           {finding.status === 'pending' ? (
@@ -2192,7 +2290,18 @@ function FindingCard({
                 aria-label={`Dismiss ${finding.title}`}
                 onClick={() => void onDismiss(finding.id)}
               >
-                &times;
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
               </button>
             </>
           ) : (
@@ -2222,25 +2331,39 @@ function FindingCard({
               onToggleDetail(finding.id);
             }}
           >
-            &#9660;
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
           </button>
         </div>
       </div>
       {finding.last_error ? (
-        <div className="repair-finding-error-banner" onClick={(event) => event.stopPropagation()}>
-          <div className="repair-finding-error-header">
-            <span className="repair-finding-error-icon">⚠️</span>
-            <span className="repair-finding-error-title">Resolution Attempt Failed</span>
-          </div>
-          <div className="repair-finding-error-text">{finding.last_error}</div>
-          <button
-            type="button"
-            className="repair-finding-error-retry"
-            disabled={fixing}
-            onClick={() => void onFix(finding)}
-          >
-            Retry Fix
-          </button>
+        // the row's own fix button is the way to try again; a second button
+        // here said the same thing in different words
+        <div className="repair-finding-error-banner" role="note">
+          <span className="repair-finding-error-title">Last try failed</span>
+          <span className="repair-finding-error-text">{finding.last_error}</span>
+          {/* an error that says "use Re-identify" opens it right here. it used
+              to send you to a menu on another page (#2043) */}
+          {needsReidentify(finding) ? (
+            <button
+              type="button"
+              className="repair-finding-btn undo"
+              onClick={() => onReidentify(finding)}
+            >
+              Re-identify…
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div
@@ -2252,6 +2375,9 @@ function FindingCard({
               full 20-branch detail tree and fetch its album/artist art, hidden
               behind max-height:0 — so a 100-row page rendered 100 invisible
               panels and hammered the thumbnail endpoints for them. */}
+          {expanded && copy.fix && finding.status === 'pending' ? (
+            <p className="repair-finding-fixline">{copy.fix}</p>
+          ) : null}
           {expanded ? (
             video ? (
               <VideoFindingDetail
@@ -2263,8 +2389,33 @@ function FindingCard({
                 finding={finding}
                 onKeepDuplicate={onKeepDuplicate}
                 onApplyCoverArt={onApplyCoverArt}
+                onUndo={onUndo}
               />
             )
+          ) : null}
+          {expanded ? (
+            <div className="repair-finding-foot">
+              {filePath ? <div className="repair-finding-path">{filePath}</div> : null}
+              <div className="repair-finding-meta">
+                {/* The display name the filter dropdown uses — a row showing the
+                    raw snake_case id meant the same job went by two different
+                    names on one screen. The entity id is for us, not the user:
+                    it lives in the tooltip now. */}
+                <span
+                  title={
+                    finding.entity_id
+                      ? `${finding.entity_type || 'item'} ${finding.entity_id}`
+                      : undefined
+                  }
+                >
+                  {jobLabel(finding.job_id)}
+                </span>
+                <span>&middot;</span>
+                <span>
+                  {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
+                </span>
+              </div>
+            </div>
           ) : null}
         </div>
       </div>

@@ -4,8 +4,8 @@
  * count tiles.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { type CSSProperties, useState } from 'react';
 
 import { useFeatureOn } from '@/platform/features';
 
@@ -13,8 +13,8 @@ import type { CalendarPayload } from '../../calendar/-calendar.types';
 
 import { CALENDAR_QUERY_KEY, wishlistMissing } from '../../calendar/-calendar.api';
 import { timeAgo } from '../../calendar/-calendar.model';
-import { StatePill } from '../../calendar/-ui/state-pill';
-import { weekLine, weekSummary } from './-vdash.model';
+import { tilePostersQuery } from './-vdash.api';
+import { type WeekDay, weekCardStart, weekDays, weekLine, weekSummary } from './-vdash.model';
 import { goVideo } from './video-bands';
 import styles from './video-dashboard.module.css';
 
@@ -34,14 +34,25 @@ export function WeekCard({
   // calendar switched off (#1909): the week still counts, no link to it
   const calendarOn = useFeatureOn('video_calendar');
   if (!data) return null;
-  const w = weekSummary(data.episodes, today);
+  // the card is the last seven days: its number, its days and its button all
+  // count the same episodes (the read behind it reaches a day further back)
+  const first = weekCardStart(today);
+  const inWeek = data.episodes.filter((e) => e.air_date >= first);
+  const w = weekSummary(inWeek, today);
+  const days = weekDays(inWeek, today);
+  const wanted = days.reduce((n, day) => n + day.wanted, 0);
   const airing = data.automations?.airing ?? null;
   const ran = timeAgo(airing?.last_run ?? null, Date.now());
 
   const wishMissing = async () => {
     setBusy(true);
     try {
-      const r = await wishlistMissing({ start, end: today, scope: 'watchlist', specials: false });
+      const r = await wishlistMissing({
+        start: first > start ? first : start,
+        end: today,
+        scope: 'watchlist',
+        specials: false,
+      });
       if (!r.success) throw new Error(r.error || 'failed');
       window.showToast?.(
         r.added
@@ -73,59 +84,114 @@ export function WeekCard({
         ) : null}
       </header>
       <div className={styles.week}>
-        <div className={styles.weekFigure}>
+        <div className={styles.weekTop}>
           <span className={styles.weekNum}>
             {w.owned}
             <small>/{w.aired}</small>
           </span>
-          <span className={styles.weekCaption}>aired episodes in your library</span>
+          {/* said once: the sentence is the number's caption */}
+          <p className={styles.weekLine}>{weekLine(w)}</p>
+          {w.aired ? (
+            <div className={styles.weekLegend}>
+              <span data-state="owned">{w.owned} in library</span>
+              {wanted ? <span data-state="wanted">{wanted} on the way</span> : null}
+              {w.missing ? <span data-state="missing">{w.missing} missing</span> : null}
+            </div>
+          ) : null}
         </div>
-        {w.aired ? (
-          <div className={styles.meter} role="img" aria-label={weekLine(w)}>
-            {w.segments.map((sg) => (
-              <i key={sg.state} data-state={sg.state} style={{ flexGrow: sg.count }} />
-            ))}
-          </div>
-        ) : null}
-        <p className={styles.weekLine}>{weekLine(w)}</p>
-        {w.segments.length > 1 ? (
-          <div className={styles.weekLegend}>
-            {w.segments.map((sg) => (
-              <StatePill
-                key={sg.state}
-                state={sg.state}
-                label={`${sg.count} ${stateWord(sg.state)}`}
-              />
-            ))}
-          </div>
-        ) : null}
-        <p className={styles.weekMeta}>
-          {w.upcoming ? `${w.upcoming} more airing in the next 7 days. ` : ''}
-          {airing && !airing.enabled
-            ? 'Auto-wishlist is off.'
-            : ran
-              ? `Auto-wishlist ran ${ran}.`
-              : ''}
-        </p>
-        {w.missing > 0 && canDownload ? (
-          <button
-            type="button"
-            className={styles.weekAction}
-            disabled={busy}
-            onClick={() => void wishMissing()}
-          >
-            {busy ? 'Adding…' : `Wishlist ${w.missing} missing`}
-          </button>
-        ) : null}
+        <div className={styles.days}>
+          {days.map((day) => (
+            <WeekDayCell key={day.date} day={day} canOpen={calendarOn} />
+          ))}
+        </div>
+        <div className={styles.weekFoot}>
+          <p className={styles.weekMeta}>
+            {w.upcoming ? `${w.upcoming} more airing in the next 7 days. ` : ''}
+            {airing && !airing.enabled
+              ? 'Auto-wishlist is off.'
+              : ran
+                ? `Auto-wishlist ran ${ran}.`
+                : ''}
+          </p>
+          {w.missing > 0 && canDownload ? (
+            <button
+              type="button"
+              className={styles.weekAction}
+              disabled={busy}
+              onClick={() => void wishMissing()}
+            >
+              {busy ? 'Adding…' : `Wishlist ${w.missing} missing`}
+            </button>
+          ) : null}
+        </div>
       </div>
     </article>
   );
 }
 
-function stateWord(state: string): string {
-  if (state === 'owned') return 'in';
-  if (state === 'ignored') return 'skipped';
-  return state;
+/** One day: the shows that aired, how much of the day you have, in words. */
+function WeekDayCell({ day, canOpen }: { day: WeekDay; canOpen: boolean }) {
+  const body = (
+    <>
+      <span className={styles.dayName}>
+        {day.label} <small>{day.dayOfMonth}</small>
+      </span>
+      <span className={styles.dayPosters}>
+        {day.posters.map((poster) =>
+          poster.src ? (
+            <img
+              key={poster.key}
+              src={poster.src}
+              alt=""
+              title={poster.title}
+              loading="lazy"
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          ) : (
+            <i key={poster.key} title={poster.title}>
+              {poster.title.charAt(0).toUpperCase()}
+            </i>
+          ),
+        )}
+        {day.more ? <em>+{day.more}</em> : null}
+      </span>
+      <span className={styles.dayBar} aria-hidden="true">
+        {day.owned ? <u data-state="owned" style={{ flexGrow: day.owned }} /> : null}
+        {day.wanted ? <u data-state="wanted" style={{ flexGrow: day.wanted }} /> : null}
+        {day.missing ? <u data-state="missing" style={{ flexGrow: day.missing }} /> : null}
+      </span>
+      <span className={styles.daySay}>
+        {day.aired ? (
+          <>
+            <b>{day.owned}</b> of {day.aired}
+          </>
+        ) : (
+          'Nothing aired'
+        )}
+      </span>
+      <span className={styles.dayMiss}>{day.missing ? `${day.missing} missing` : ''}</span>
+    </>
+  );
+  const className = day.today ? `${styles.day} ${styles.dayToday}` : styles.day;
+  const label = `${day.label} ${day.dayOfMonth}: ${
+    day.aired ? `${day.owned} of ${day.aired} in your library` : 'nothing aired'
+  }${day.missing ? `, ${day.missing} missing` : ''}`;
+  return canOpen ? (
+    <button
+      type="button"
+      className={className}
+      aria-label={label}
+      onClick={() => window.videoOpenCalendar?.({ date: day.date })}
+    >
+      {body}
+    </button>
+  ) : (
+    <div className={className} aria-label={label}>
+      {body}
+    </div>
+  );
 }
 
 /** watchlist and wishlist always; issues and findings only when something
@@ -141,35 +207,127 @@ export function CountTiles({
   issues: number;
   findings: number;
 }) {
-  const tile = (key: string, page: string, count: number, label: string, attention = false) => (
+  // what the two counts are counts OF: a hand of posters, as the music
+  // dashboard's tiles carry faces and sleeves
+  const facts = useQuery(tilePostersQuery()).data;
+  const watch = facts?.watchlist.counts ?? {};
+  const wish = facts?.wishlist.counts ?? {};
+  const art = (pictures: string[] | undefined) => (
+    <span
+      className="room-tile-art room-tile-art--sleeves room-tile-art--posters"
+      aria-hidden="true"
+    >
+      {(pictures ?? []).map((src, n) => (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          loading="lazy"
+          style={{ '--n': n } as CSSProperties}
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ))}
+    </span>
+  );
+  /** what the count is made of: one line a part, drawn to scale */
+  const split = (parts: [number | undefined, string, string][], note?: string) => {
+    const shown = parts.filter(([n]) => (n ?? 0) > 0) as [number, string, string][];
+    const total = shown.reduce((sum, [n]) => sum + n, 0);
+    if (!shown.length) return null;
+    return (
+      <span className={styles.split}>
+        {shown.map(([n, one, many]) => (
+          <span className={styles.splitRow} key={many}>
+            <b>{n.toLocaleString()}</b>
+            <span>{n === 1 ? one : many}</span>
+            <i aria-hidden="true">
+              <u style={{ width: `${Math.max(3, Math.round((n / total) * 100))}%` }} />
+            </i>
+          </span>
+        ))}
+        {note ? <span className={styles.splitNote}>{note}</span> : null}
+      </span>
+    );
+  };
+  const tile = (
+    key: string,
+    page: string,
+    count: number,
+    label: string,
+    pictures: string[] | undefined,
+    parts: ReturnType<typeof split>,
+  ) => (
     <button
       key={key}
       type="button"
-      className={`header-button dash-tile ${styles.tile}${attention ? ` ${styles.tileAttention}` : ''}`}
+      className={`header-button dash-tile ${styles.tile}`}
       onClick={() => goVideo(page)}
     >
-      <span className={`hero-btn-badge ${styles.tileBadge}${count > 0 ? ' has-items' : ''}`}>
-        {count}
+      <span className={styles.tileLead}>
+        {art(pictures)}
+        <span className={count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}>
+          {count.toLocaleString()}
+        </span>
+        <span className="hero-btn-label">{label}</span>
       </span>
-      <span className={`hero-btn-label ${styles.tileLabel}`}>{label}</span>
+      {parts}
     </button>
   );
+  /** issues and findings: a line each, only when there is something to look at */
+  const alert = (key: string, page: string, count: number, label: string) => (
+    <button key={key} type="button" className={styles.tileAlert} onClick={() => goVideo(page)}>
+      <b>{count.toLocaleString()}</b>
+      <span>{label}</span>
+    </button>
+  );
+  const wishShows = wish.show ?? 0;
   return (
     <div className={`header-quick-nav dash-tiles ${styles.tiles}`} data-rail="tiles">
-      {tile('watchlist', 'video-watchlist', watchlist ?? 0, 'On your watchlist')}
-      {tile('wishlist', 'video-wishlist', wishlist ?? 0, 'On your wishlist')}
-      {issues > 0
-        ? tile('issues', 'video-issues', issues, issues === 1 ? 'Open issue' : 'Open issues', true)
-        : null}
-      {findings > 0
-        ? tile(
-            'findings',
-            'video-tools',
-            findings,
-            findings === 1 ? 'Finding to review' : 'Findings to review',
-            true,
-          )
-        : null}
+      {tile(
+        'watchlist',
+        'video-watchlist',
+        watchlist ?? 0,
+        'On your watchlist',
+        facts?.watchlist.posters,
+        split([
+          [watch.show, 'show', 'shows'],
+          [watch.person, 'person', 'people'],
+          [watch.studio, 'studio', 'studios'],
+        ]),
+      )}
+      {tile(
+        'wishlist',
+        'video-wishlist',
+        wishlist ?? 0,
+        'On your wishlist',
+        facts?.wishlist.posters,
+        split(
+          [
+            [wish.movie, 'movie', 'movies'],
+            [wish.episode, 'episode', 'episodes'],
+          ],
+          wish.episode && wishShows
+            ? `across ${wishShows.toLocaleString()} ${wishShows === 1 ? 'show' : 'shows'}`
+            : undefined,
+        ),
+      )}
+      {issues > 0 || findings > 0 ? (
+        <span className={styles.tileAlerts}>
+          {issues > 0
+            ? alert('issues', 'video-issues', issues, issues === 1 ? 'Open issue' : 'Open issues')
+            : null}
+          {findings > 0
+            ? alert(
+                'findings',
+                'video-tools',
+                findings,
+                findings === 1 ? 'Finding to review' : 'Findings to review',
+              )
+            : null}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -222,6 +222,55 @@ describe('ServerCompareEditor', () => {
     expect((serverRows[1] as HTMLElement).style.display).toBe('');
   });
 
+  it('marks two source tracks that are one song on the server, and can show only those (#2059)', async () => {
+    payload = {
+      success: true,
+      server_type: 'navidrome',
+      server_track_count: 2,
+      source_track_count: 3,
+      tracks: [
+        TRACKS[0],
+        {
+          match_status: 'matched',
+          source_track: { position: 2, name: 'Money Trees', artist: 'Kendrick' },
+          server_track: { id: 's2', title: 'Money Trees', artist: 'Kendrick' },
+        },
+        {
+          match_status: 'matched',
+          source_track: { position: 3, name: 'Alright (Single)', artist: 'Kendrick' },
+          server_track: { id: 's1', title: 'Alright', artist: 'Kendrick' },
+        },
+      ],
+    };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Same song (2)')).toBeInTheDocument());
+    const serverRows = document.querySelectorAll('#server-col-server-scroll .server-track-item');
+    expect(serverRows[0].querySelector('.server-track-shared')?.textContent).toBe(
+      'Same song as #3',
+    );
+    expect(serverRows[1].querySelector('.server-track-shared')).toBeNull();
+    expect(serverRows[2].querySelector('.server-track-shared')?.textContent).toBe(
+      'Same song as #1',
+    );
+    expect(document.querySelector('#server-editor-footer')?.textContent).toBe(
+      '3/3 matched · 2 source tracks are one song on the server, so it holds 1 fewer',
+    );
+
+    fireEvent.click(screen.getByText('Same song (2)'));
+    const sourceRows = document.querySelectorAll('#server-col-source-scroll .server-track-item');
+    expect((sourceRows[0] as HTMLElement).style.display).toBe('');
+    expect((sourceRows[1] as HTMLElement).style.display).toBe('none');
+    expect((sourceRows[2] as HTMLElement).style.display).toBe('');
+    expect((serverRows[1] as HTMLElement).style.display).toBe('none');
+  });
+
+  it('offers no "Same song" pill when nothing is shared', async () => {
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('All (3)')).toBeInTheDocument());
+    expect(document.querySelector('[data-filter="shared"]')).toBeNull();
+    expect(document.querySelector('.server-track-shared')).toBeNull();
+  });
+
   it('paints the stats, the pills and the footer from one count (356-382)', async () => {
     renderEditor();
     await waitFor(() => expect(screen.getByText('Matched')).toBeInTheDocument());

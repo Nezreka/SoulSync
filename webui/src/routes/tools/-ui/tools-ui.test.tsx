@@ -90,9 +90,10 @@ describe('ToolCard chrome', () => {
         ]}
       />,
     );
-    expect(screen.getByText('Artists:')).toBeTruthy();
+    // the label loses its colon: the number leads and the word sits under it
+    expect(screen.getByText('Artists')).toBeTruthy();
     expect(screen.getByText('12')).toBeTruthy();
-    expect(screen.getByText('Albums:')).toBeTruthy();
+    expect(screen.getByText('Albums')).toBeTruthy();
   });
 
   it('hides with an inline display:none, the way the Plex-only cards do', () => {
@@ -221,14 +222,14 @@ describe('DiscoveryPoolCard', () => {
     expect(container.querySelector('#discovery-pool-failed-count')?.textContent).toBe('—');
   });
 
-  it('keeps the failed counter’s red pill styling', async () => {
+  it('the failed counter turns red only when something failed', async () => {
     render(<DiscoveryPoolCard />);
     // The id sits ON the .stat-item-value span, exactly as in the markup — not
     // on a nested node — so the styling and the id are the same element.
     const failed = document.querySelector('#discovery-pool-failed-count') as HTMLElement;
     expect(failed.classList.contains('stat-item-value')).toBe(true);
-    expect(failed.style.color).toBe('rgb(239, 68, 68)');
-    expect(failed.style.backgroundColor).toBe('rgba(239, 68, 68, 0.15)');
+    // nothing loaded yet: a dash, and no alarm colour around it
+    expect(failed.style.color).toBe('');
     await flush();
   });
 });
@@ -305,13 +306,11 @@ describe('ToolsPage shell', () => {
 
   it('renders the header copy verbatim', async () => {
     render(<ToolsPage />);
-    expect(screen.getByText('Tools & Operations')).toBeTruthy();
-    // The subtitle now also says what this page ISN'T, because Issues and
-    // Library Maintenance read as duplicates of each other otherwise (#1210).
-    expect(
-      screen.getByText(/Automated scans, database management, metadata, backups/),
-    ).toBeTruthy();
-    expect(screen.getByText(/hand-reported\s+problems live on the Issues page/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Tools' })).toBeTruthy();
+    // The subtitle also says what this page ISN'T, because Issues and
+    // library maintenance read as duplicates of each other otherwise (#1210).
+    expect(screen.getByText(/Library maintenance, scans and backups/)).toBeTruthy();
+    expect(screen.getByText(/Hand-reported\s+problems live on the Issues page/)).toBeTruthy();
     await flush();
   });
 

@@ -54,7 +54,7 @@ class LibraryReorganizeJob(RepairJob):
     display_name = "Library Reorganize"
     description = "Reviews or queues files whose paths do not match the organization template"
     help_text = (
-        "Scans Library-v2 albums that own files and computes their destination "
+        "Scans Library albums that own files and computes their destination "
         "with the same planner and queue as interactive Reorganize. Dry run is "
         "enabled by default and creates review findings; live mode queues albums.\n\n"
         "Placed albums stay put until naming settings, a manual pin or manual metadata "
@@ -112,7 +112,11 @@ class LibraryReorganizeJob(RepairJob):
                     )
                     ORDER BY al.id"""
             ).fetchall()
-            albums = [dict(row) for row in rows]
+            # #2046: a reviewed and locked album is not previewed, reported
+            # or moved by this job
+            from core.library2 import locks
+            albums = [dict(row) for row in rows
+                      if not locks.blocks("album", row["id"], "files", "Reorganize", conn=conn)]
             if allowed is None:
                 return albums
             if not allowed:

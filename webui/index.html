@@ -1045,11 +1045,11 @@
                      linking to the owned library detail or the TMDB-backed detail.
                      Reuses the library card classes. Built by video/video-search.js. -->
                 <section class="video-subpage" data-video-subpage="video-search" hidden>
-                    <div class="vsr-page">
+                    <div class="vsr-page vsr2">
                         <div class="vsr-hero">
                             <div class="vsr-hero-glow" aria-hidden="true"></div>
                             <h1 class="vsr-hero-title">Search</h1>
-                            <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
+                            <p class="vsr-hero-sub">Find a title, search your indexers for a release, or see what is new</p>
                             <div class="vsr-tabs" role="tablist" aria-label="Search mode">
                                 <!-- named for what each searches (#1909). "enhanced" and
                                      "basic" said nothing about that; data-vsr-tab keeps the
@@ -1067,7 +1067,11 @@
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
                                 <div class="vsr-searchbar">
-                                    <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
+                                    <svg class="vsr-search-ic" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                        stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                        <circle cx="11" cy="11" r="7" />
+                                        <path d="M21 21l-4.3-4.3" />
+                                    </svg>
                                     <input type="text" class="vsr-input" data-video-search-input
                                         placeholder="Search movies, shows, people&hellip;" autocomplete="off"
                                         spellcheck="false">
@@ -1077,7 +1081,11 @@
                             <div class="vsr-panel" data-vsr-panel="basic" id="vsr-basic-panel" role="tabpanel" hidden>
                                 <form class="vsr-basic" data-vsr-basic-form>
                                     <div class="vsr-basic-main">
-                                        <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
+                                        <svg class="vsr-search-ic" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                        stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                        <circle cx="11" cy="11" r="7" />
+                                        <path d="M21 21l-4.3-4.3" />
+                                    </svg>
                                         <input type="text" class="vsr-basic-input" data-vsr-basic-query
                                             placeholder="Search release titles, hashes, trackers, RSS feeds&hellip;"
                                             autocomplete="off" spellcheck="false">
@@ -1124,7 +1132,7 @@
                                 <div class="vsr-state-ic">&#127902;</div>
                                 <div class="vsr-state-title">Search SoulSync</div>
                                 <div class="vsr-state-sub">Find any movie, show or person. Owned titles open your
-                                    library detail; the rest open a live preview &mdash; no external links.</div>
+                                    library detail; the rest open a live preview. No external links.</div>
                             </div>
                             <div class="vsr-state hidden" data-video-search-empty>
                                 <div class="vsr-state-ic">&#129300;</div>
@@ -1139,7 +1147,7 @@
                      a filter bar that flips into a paged grid. Built by
                      video/video-discover.js, styled by .vdsc-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-discover" hidden>
-                    <div class="vdsc-page" data-vdsc-page>
+                    <div class="vdsc-page vdsc2" data-vdsc-page>
                         <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
 
@@ -1350,13 +1358,13 @@
                      a tab switcher. Built by video/video-watchlist.js, styled by
                      .vwlp-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-watchlist" hidden>
-                    <div class="vwlp-page">
+                    <div class="vwlp-page vwl2">
                         <div class="vwlp-head">
                             <div class="vwlp-head-glow" aria-hidden="true"></div>
                             <div class="vwlp-head-row">
                                 <div class="vwlp-head-titles">
                                     <h1 class="vwlp-title">Watchlist</h1>
-                                    <p class="vwlp-sub" data-vwlp-sub>Shows and people you follow</p>
+                                    <p class="vwlp-sub" data-vwlp-sub>Shows, people, studios and channels you follow</p>
                                 </div>
                                 <div class="vwlp-tabs" role="tablist">
                                     <button class="vwlp-tab vwlp-tab--on" type="button" role="tab" data-vwlp-tab="show">
@@ -1375,6 +1383,20 @@
                             </div>
                         </div>
                         <div class="vwlp-toolbar">
+                            <!-- shows only: which of them still lack an aired episode -->
+                            <div class="vwlp-chips" role="group" aria-label="Show" data-vwlp-chips>
+                                <button class="vwlp-chip vwlp-chip--on" type="button" data-vwlp-filter="all"
+                                    aria-pressed="true">All <small data-vwlp-facet="all">0</small></button>
+                                <button class="vwlp-chip vwlp-chip--alert" type="button" data-vwlp-filter="missing"
+                                    aria-pressed="false">Missing episodes <small
+                                        data-vwlp-facet="missing">0</small></button>
+                                <button class="vwlp-chip" type="button" data-vwlp-filter="complete"
+                                    aria-pressed="false">Up to date <small
+                                        data-vwlp-facet="complete">0</small></button>
+                                <button class="vwlp-chip" type="button" data-vwlp-filter="unowned"
+                                    aria-pressed="false">Not in library <small
+                                        data-vwlp-facet="unowned">0</small></button>
+                            </div>
                             <div class="vwlp-search">
                                 <svg class="vwlp-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none"
                                     stroke="currentColor" stroke-width="2">
@@ -1385,9 +1407,9 @@
                                     placeholder="Search watchlist&hellip;" autocomplete="off" spellcheck="false">
                             </div>
                             <select class="vwlp-sort" data-vwlp-sort aria-label="Sort">
-                                <option value="default">Default</option>
-                                <option value="title">A&ndash;Z</option>
+                                <option value="default">A&ndash;Z</option>
                                 <option value="added">Recently added</option>
+                                <option value="missing" data-vwlp-sort-shows>Most missing</option>
                             </select>
                             <button class="vwlp-import-btn" type="button" data-vwlp-import hidden
                                 title="Import a ytdl-sub / Kometa subscriptions file">
@@ -1473,41 +1495,14 @@
                         </div>
                     </div>
                 </section>
-                <!-- Automations page — the SAME app-wide system automations as music
-                     (minus Refresh Beatport Cache + user/playlist ones). Reuses the
-                     music .automation-* card look; built by video/video-automations.js. -->
+                <!-- Automations: the page itself is the React /automations route on
+                     ?media=video (video-side.js hands off to it). What stays here is the
+                     shared vanilla builder: the React page shows this subpage for the
+                     length of an edit and takes the screen back when it closes. -->
                 <section class="video-subpage" data-video-subpage="video-automations" hidden>
-                    <!-- List view (swaps with the builder view below, exactly like the
-                         music page does inside #automations-page). -->
-                    <div class="automations-list-view" id="vauto-list-view">
-                        <div class="page-shell automations-container">
-                            <div class="dashboard-header">
-                                <div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                                <div class="header-text">
-                                    <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon"
-                                            alt=""><span>Automations</span></h2>
-                                    <p class="header-subtitle">Video tasks that keep your movie &amp; TV library fresh —
-                                        separate from the music side</p>
-                                </div>
-                                <div class="header-spacer"></div>
-                                <div class="header-actions">
-                                    <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New
-                                        Automation</button>
-                                </div>
-                            </div>
-                            <div class="automations-stats" data-vauto-stats></div>
-                            <div class="automations-list" data-vauto-list></div>
-                            <div class="automations-empty" data-vauto-empty style="display:none;">
-                                <div class="automations-empty-icon">&#9889;</div>
-                                <div class="automations-empty-title">No video automations yet</div>
-                                <div class="automations-empty-text">The video side has its own automations (library
-                                    scan, cleanup, wishlist…) — separate from the music ones. Create your first one.
-                                </div>
-                                <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New
-                                    Automation</button>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- the builder swaps itself with this on open and close. the list it
+                         used to hold is the React page now, so it stays empty. -->
+                    <div class="automations-list-view" id="vauto-list-view"></div>
 
                     <!-- Builder view — mirrors the music builder markup with vauto- prefixed
                          ids so the SAME shared builder functions (showAutomationBuilder core,
@@ -1551,23 +1546,28 @@
                             <div class="vd-bb-content">
                                 <img class="vd-cover" data-vd-cover alt="" hidden />
                                 <div class="vd-copy">
+                                    <!-- Read top to bottom: what it is, the facts, the story,
+                                         what you can do, then what others think of it. -->
                                     <img class="vd-logo" data-vd-logo alt="" hidden />
                                     <h1 class="vd-title" data-vd-title>—</h1>
                                     <div class="vd-tagline" data-vd-tagline hidden></div>
                                     <div class="vd-meta" data-vd-meta></div>
-                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-genres" data-vd-genres></div>
                                     <div class="vd-next-ep" data-vd-next-ep hidden></div>
+                                    <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <!-- the library line: the React island portals it here on a library show -->
+                                    <div class="vd-libline" data-vd-libline></div>
+                                    <div class="vd-kudos">
+                                        <div class="vd-ratings" data-vd-ratings hidden></div>
+                                        <div class="vd-awards" data-vd-awards hidden></div>
+                                    </div>
+                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-essentials" data-vd-essentials hidden></div>
+                                    <div class="vd-health" data-vd-health hidden></div>
+                                    <div class="vd-subs" data-vd-subs hidden></div>
                                     <!-- External-source links reuse the artist-hero-badge style. -->
                                     <div class="artist-hero-badges vd-links" data-vd-links></div>
-                                    <div class="vd-ratings" data-vd-ratings hidden></div>
-                                    <div class="vd-awards" data-vd-awards hidden></div>
-                                    <p class="vd-overview" data-vd-overview></p>
-                                    <div class="vd-essentials" data-vd-essentials hidden></div>
-                                    <!-- Action buttons reuse the exact artist-detail button styles. -->
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
-                                    <div class="vd-health" data-vd-health hidden></div>
-                                    <div class="vd-genres" data-vd-genres></div>
-                                    <div class="vd-subs" data-vd-subs hidden></div>
                                 </div>
                             </div>
                             <!-- offscreen poster, only used to sample the accent color -->
@@ -1584,25 +1584,15 @@
                             </div>
                         </div>
                         <div class="vd-body">
-                            <!-- Two tabs on a library title: the page as you know it, and Your library
-                                 (files, quality, match, monitoring) — a React island,
-                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
-                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Episodes</button>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
-                            </div>
-                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
+                            <!-- the library island (React, webui/src/features/video-library): what needs
+                                 attention, and a movie's files. shown on a title you own -->
+                            <div class="vd-library-panel" data-vd-library-panel role="region" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
                             <div class="vd-acq-section" data-vd-acq-section hidden>
                                 <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
-                            </div>
-                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitle languages</h2>
-                                <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-ep-toolbar">
                                 <h2 class="vd-ep-heading">Episodes</h2>
@@ -1624,7 +1614,16 @@
                                 <span>Fetching the full episode list from TMDB&hellip; missing episodes will fill in
                                     shortly.</span>
                             </div>
+                            <!-- the bar for the episodes ticked in the list below (React) -->
+                            <div class="vd-libselect" data-vd-libselect></div>
                             <div class="vd-episodes" data-vd-episodes></div>
+                            <!-- where the show lives on disk (React) -->
+                            <div class="vd-libfoot" data-vd-libfoot></div>
+                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
+                                <div class="vd-subcfg" data-vd-subcfg></div>
+                            </div>
                             <!-- YouTube channel playlists (channel source only) — video-detail.js. -->
                             <div class="vd-yt-pl-section" data-vd-yt-pl-section hidden>
                                 <h2 class="vd-section-h">Playlists</h2>
@@ -1693,16 +1692,21 @@
                                     <h1 class="vd-title" data-vd-title>—</h1>
                                     <div class="vd-tagline" data-vd-tagline hidden></div>
                                     <div class="vd-meta" data-vd-meta></div>
-                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
-                                    <div class="artist-hero-badges vd-links" data-vd-links></div>
-                                    <div class="vd-ratings" data-vd-ratings hidden></div>
-                                    <div class="vd-awards" data-vd-awards hidden></div>
-                                    <p class="vd-overview" data-vd-overview></p>
-                                    <div class="vd-essentials" data-vd-essentials hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
-                                    <div class="vd-health" data-vd-health hidden></div>
                                     <div class="vd-genres" data-vd-genres></div>
+                                    <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <!-- the library line (copies, quality, match): the React island
+                                         portals it here on a library movie, so the page needs no second tab -->
+                                    <div class="vd-libline" data-vd-libline></div>
+                                    <div class="vd-kudos">
+                                        <div class="vd-ratings" data-vd-ratings hidden></div>
+                                        <div class="vd-awards" data-vd-awards hidden></div>
+                                    </div>
+                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-essentials" data-vd-essentials hidden></div>
+                                    <div class="vd-health" data-vd-health hidden></div>
                                     <div class="vd-subs" data-vd-subs hidden></div>
+                                    <div class="artist-hero-badges vd-links" data-vd-links></div>
                                 </div>
                             </div>
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
@@ -1718,14 +1722,9 @@
                             </div>
                         </div>
                         <div class="vd-body">
-                            <!-- Two tabs on a library title: the page as you know it, and Your library
-                                 (files, quality, match, monitoring) — a React island,
-                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
-                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Overview</button>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
-                            </div>
-                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
+                            <!-- the library island (React, webui/src/features/video-library): what needs
+                                 attention, and a movie's files. shown on a title you own -->
+                            <div class="vd-library-panel" data-vd-library-panel role="region" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2832,7 +2831,9 @@
                                                     <div
                                                         style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
                                                         Verifies downloaded audio matches expected track using
-                                                        fingerprints
+                                                        fingerprints. Turning it off only stops the check on new
+                                                        downloads: the AcoustID Scanner in Tools still scans when
+                                                        you run it yourself.
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
@@ -4759,6 +4760,31 @@
                                                                 search every enabled indexer. Restrict when you have a
                                                                 private tracker you want to prioritise or a noisy public
                                                                 one to exclude.
+                                                            </div>
+                                                        </div>
+                                                        <!-- #2061: the pacing was always there (core/prowlarr_throttle.py),
+                                                             with no way to turn it down for a strict tracker -->
+                                                        <div class="form-group">
+                                                            <label>Seconds between searches:</label>
+                                                            <input type="number" id="prowlarr-search-min-gap" min="0"
+                                                                max="600" step="0.5" placeholder="2">
+                                                            <div class="setting-help-text">
+                                                                The shortest wait between two searches sent to Prowlarr,
+                                                                music and video together. Default 2. Raise it if a
+                                                                tracker answers 429 Too Many Requests or Prowlarr marks
+                                                                an indexer unhealthy: a tracker that asks for 11 seconds
+                                                                wants 12 or more here. 0 turns the wait off.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Searches per minute, at most:</label>
+                                                            <input type="number" id="prowlarr-max-searches-per-minute"
+                                                                min="0" max="600" step="1" placeholder="20">
+                                                            <div class="setting-help-text">
+                                                                A ceiling on top of the wait above, so a long wishlist
+                                                                run cannot keep up a fast pace for hours. Default 20.
+                                                                0 turns the ceiling off. A manual search waits its turn
+                                                                behind background searches.
                                                             </div>
                                                         </div>
                                                         <div class="form-group">
@@ -6753,7 +6779,11 @@
                                                         <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
-                                                        <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
+                                                        <code>$discnum</code> (1), <code>$cdnum</code> (CD01):
+                                                        these three only appear on a multi-disc album, so a
+                                                        single-disc album isn't stamped 01- on every file.
+                                                        <code>$discalways</code> (01) and
+                                                        <code>$discnumalways</code> (1) appear on every album,
                                                         <code>$year</code>, <code>$quality</code> (filename only),
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder
@@ -12733,7 +12763,8 @@
         </svg>
         <span class="activity-float-badge" id="activity-float-badge" style="display:none">0</span>
     </button>
-    <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications">
+    <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications"
+        aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -12806,7 +12837,6 @@
          used by the detail page's inline acquisition buttons -->
     <script src="{{ url_for('static', filename='video/video-grab.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
-    <script src="{{ url_for('static', filename='video/video-automations.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->

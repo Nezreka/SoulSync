@@ -1640,9 +1640,20 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
 
 
+            # #2068: $explicit in an album folder reads the ALBUM's flag, and most
+            # sources only flag tracks. Work it out once over every track of the
+            # album (owned ones included), so the folder is the same for all.
+            batch_album_explicit = None
+            if batch_is_album and batch_album_context:
+                from core.imports.paths import album_explicit_flag
+                batch_album_explicit = album_explicit_flag(
+                    batch_album_context, [r.get('track') or {} for r in analysis_results])
+
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
+                if batch_album_explicit is not None:
+                    track_info['_album_explicit'] = batch_album_explicit
 
                 # Add explicit album context to track_info for artist album downloads
                 if batch_is_album and batch_album_context and batch_artist_context:
@@ -1731,6 +1742,10 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             'album_type_locked': bool(shared_album.get('album_type_locked') or s_album.get('album_type_locked')),
                             'images': shared_album.get('images') or s_album.get('images', []),
                             'artists': shared_album.get('artists') or s_album.get('artists', []),
+                            # #2068: the album's own explicit flag when the wish carries one
+                            'explicit': (shared_album.get('explicit')
+                                         if shared_album.get('explicit') is not None
+                                         else s_album.get('explicit')),
                         }
 
                         track_info['_explicit_album_context'] = album_ctx

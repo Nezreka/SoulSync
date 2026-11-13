@@ -44,6 +44,8 @@ function childCount(ep: Record<string, unknown>): number {
     var selectedSeason = 1;
     var data = { source: 'library', kind: 'show' };
     var currentSource = 'library';
+    var libData = null; var libEps = {};
+    ${extractFunction('libEp', JS)}
     window.VideoGrab = {};
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval

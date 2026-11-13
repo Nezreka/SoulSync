@@ -307,6 +307,25 @@ export async function fetchFindingTypes(): Promise<FindingTypeInfo[]> {
   }
 }
 
+export interface UndoFindingResult {
+  success: boolean;
+  error?: string;
+  /** tags that were empty before and could not be removed again */
+  kept?: string[];
+  /** a cover the fix embedded is still in the file */
+  cover_left?: boolean;
+}
+
+/** Put back the tags a fix changed. The finding reopens. */
+export async function undoFinding(id: number): Promise<UndoFindingResult> {
+  try {
+    const response = await postJson(repairUrl(`/findings/${id}/undo`));
+    return (await response.json()) as UndoFindingResult;
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Could not undo that' };
+  }
+}
+
 /** The undo half of dismiss — dismiss is permanent by design, which is only
  *  safe to offer freely if it can be taken back. */
 export async function reopenFinding(id: number): Promise<boolean> {

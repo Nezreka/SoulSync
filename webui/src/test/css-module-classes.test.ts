@@ -37,12 +37,6 @@ const DYNAMIC: Record<string, { classes: string[]; reason: string }[]> = {
       reason: "status-notice.tsx: styles[tone], tone is 'busy' | 'ok' | 'err'",
     },
   ],
-  'src/routes/stats/-ui/stats-page.module.css': [
-    {
-      classes: ['statsCardDelta_*'],
-      reason: 'stats-page.tsx: styles[`statsCardDelta_${direction}`]',
-    },
-  ],
   'src/routes/stats/-ui/year-story.module.css': [
     { classes: ['glyph_*'], reason: 'year-story.tsx: styles[`glyph_${key}`]' },
   ],

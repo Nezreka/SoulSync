@@ -19,7 +19,16 @@ React the moment something happens — a download finishes, a new release is fou
 Fire custom signals from one automation and listen for them in another to build multi-step pipelines.
 :::
 
-Each automation card shows its trigger and action at a glance, the last run time and result, a countdown to the next scheduled run, and a **Run Now** button for instant execution. Cards for currently-running automations glow so you can spot activity.
+The page has four places, as pills under the title:
+
+- **Overview** opens on the next 24 hours: each dot is a run, in lanes for the pipeline, your own automations and housekeeping. Under it: what runs next, what needs attention, the playlists that sync on a timer (with their covers), and what ran last
+- **All automations** lists every one as a row, in sections: Operations, your groups, My Automations, Maintenance. A row shows what it does in words (*Every day → Scan Watchlist*), what the last run did, and when it runs next, with a switch and **Run now**. Click a row to open it: its When, Do and Then, what the last run counted, its last runs, and **Edit**, **Run history**, **Duplicate**, **Move to group** and **Delete**. The chips across the top narrow the list: Needs attention, Scheduled, Event-driven, Switched off
+- **Activity** shows the last 24 hours by automation, trouble first, over a week of runs by day. A row opens that automation's run history
+- **Guides** holds the Automation Hub
+
+**Needs attention** counts the last day, not only the last run. An automation that failed most of its runs and then worked once still shows there, with what went wrong.
+
+Run history keeps an automation's last 100 runs and everything from the last 7 days.
 
 SoulSync ships with [system automations](#auto-system) that handle routine maintenance out of the box — you can tune them, but you never have to build the basics yourself.
 

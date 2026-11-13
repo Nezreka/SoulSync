@@ -44,14 +44,59 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'navigateToPage');
 });
 
-async function mount(compact: boolean) {
+async function mount(compact: boolean, timeline = false) {
   let view!: ReturnType<typeof render>;
   await act(async () => {
-    view = render(<AutomationsCard compact={compact} />);
+    view = render(<AutomationsCard compact={compact} timeline={timeline} />);
   });
   await vi.waitFor(() => expect(view.container.querySelector('.dash-autom-row')).not.toBeNull());
   return view;
 }
+
+describe('Up next on the board (the timeline)', () => {
+  it('draws the next hour as a line and lists five, not three', async () => {
+    const soon = new Date(Date.now() + 15 * 60000).toISOString().slice(0, 19).replace('T', ' ');
+    const later = new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+    const rows = [...ROWS, { ...ROWS[0], id: 6, name: 'Sixth' }].map((row, i) => ({
+      ...row,
+      next_run: i === 0 ? soon : i === 1 ? later : null,
+    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: async () => (String(url).endsWith('/progress') ? {} : rows),
+        }),
+      ),
+    );
+    const view = await mount(true, true);
+    expect(view.container.querySelectorAll('.dash-autom-row')).toHaveLength(5);
+    expect(view.container.querySelector('.dash-side-more')!.textContent).toContain('6');
+    // only the run inside the hour is on the line; three hours out is in the list
+    const marks = view.container.querySelectorAll<HTMLElement>('.dash-autom-lane .dash-autom-mark');
+    expect(marks).toHaveLength(1);
+    const stop = marks[0].closest<HTMLElement>('.dash-autom-stop')!;
+    expect(parseFloat(stop.style.left)).toBeGreaterThan(20);
+    expect(parseFloat(stop.style.left)).toBeLessThan(30);
+    // the point carries a card that says what the run is
+    const card = stop.querySelector('.dash-autom-pop')!;
+    expect(card.querySelector('.dash-autom-pop-name')!.textContent).toBe('Clean Downloads');
+    expect(card.textContent).toContain('Runs at');
+    expect(card.textContent).toContain('Schedule');
+    expect(card.textContent).toContain('Last run');
+    expect(card.textContent).toContain('Runs so far');
+    expect(
+      Array.from(view.container.querySelectorAll('.dash-autom-tick')).map((t) => t.textContent),
+    ).toEqual(['now', '30m', '1h']);
+  });
+
+  it('the narrow rail (the video dashboard) keeps three rows and no line', async () => {
+    const view = await mount(true);
+    expect(view.container.querySelectorAll('.dash-autom-row')).toHaveLength(3);
+    expect(view.container.querySelector('.dash-autom-lane')).toBeNull();
+  });
+});
 
 describe('Up next', () => {
   it('shows the next three, titled for the rail, without the quick switches', async () => {

@@ -1062,13 +1062,13 @@ class AutomationEngine:
         """Skip scheduled slots while a Library-v2 migration holds the writer."""
         if not self._migration_paused:
             self._migration_paused = True
-            logger.info("AutomationEngine paused — Library v2 migration in progress")
+            logger.info("AutomationEngine paused — Library migration in progress")
 
     def resume_after_migration(self):
         """Undo :meth:`pause_for_migration`. Idempotent."""
         if self._migration_paused:
             self._migration_paused = False
-            logger.info("AutomationEngine resumed — Library v2 migration finished")
+            logger.info("AutomationEngine resumed — Library migration finished")
 
     @property
     def migration_paused(self):
@@ -1455,9 +1455,9 @@ class AutomationEngine:
             # writer. Running here would only produce "database is locked" and
             # a failed run in the history.
             if self._migration_paused:
-                logger.info(f"Automation '{auto.get('name')}' skipped — Library v2 migration in progress")
+                logger.info(f"Automation '{auto.get('name')}' skipped — Library migration in progress")
                 self._finish_run(auto, automation_id,
-                                 {'status': 'skipped', 'reason': 'Library v2 migration in progress'},
+                                 {'status': 'skipped', 'reason': 'Library migration in progress'},
                                  error=None)
                 return
 

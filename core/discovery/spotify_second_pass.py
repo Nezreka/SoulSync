@@ -142,6 +142,26 @@ def _isrc_of(raw: Dict[str, Any]) -> str:
     return clean_isrc(((raw.get("external_ids") or {}).get("isrc")))
 
 
+def _on_album(primary_client: Any, candidate: Any, album: str) -> Optional[Any]:
+    """the candidate filed under ``album``, or None when it isn't on it.
+
+    most sources name the one album a track is on. a musicbrainz recording is
+    on many releases and its Track names only one of them, so comparing that
+    one name threw away recordings that are on spotify's album as well
+    (#2067). a source that can re-file a track says so with track_on_album."""
+    if albums_agree(getattr(candidate, "album", ""), album):
+        return candidate
+    refile = getattr(primary_client, "track_on_album", None)
+    if not callable(refile):
+        return None
+    try:
+        return refile(candidate, album, albums_agree)
+    except Exception as e:  # noqa: BLE001 - a candidate we can't re-file just isn't backed
+        logger.debug("second pass: could not check %r against album %r: %s",
+                     getattr(candidate, "name", "?"), album, e)
+        return None
+
+
 def _corroborated(
     raw: Dict[str, Any],
     title: str,
@@ -175,12 +195,14 @@ def _corroborated(
                 seen.add(key)
                 results.append(r)
 
-    backed = [
-        r for r in results
-        if albums_agree(getattr(r, "album", ""), sp_album)
-        and int(getattr(r, "duration_ms", 0) or 0)
-        and abs(int(getattr(r, "duration_ms", 0) or 0) - sp_duration) <= DURATION_TOLERANCE_MS
-    ]
+    backed = []
+    for r in results:
+        length = int(getattr(r, "duration_ms", 0) or 0)
+        if not length or abs(length - sp_duration) > DURATION_TOLERANCE_MS:
+            continue
+        on_album = _on_album(primary_client, r, sp_album)
+        if on_album is not None:
+            backed.append(on_album)
     if not backed:
         return None
     match, confidence, _ = score_candidates(title, artist, sp_duration, backed)
@@ -239,6 +261,9 @@ def spotify_second_pass(
             hit = isrc_match(isrc, source, False, fallback_client=primary_client,
                              artists=_artist_names(raw.get("artists")))
             if hit is not None:
+                # the same recording, under the album spotify files it on when
+                # the source can say it is on that one too
+                hit = _on_album(primary_client, hit, (raw.get("album") or {}).get("name") or "") or hit
                 logger.info("second pass: '%s' by %s matched on %s by isrc %s",
                             title, artist, source, isrc)
                 return SecondPassMatch(track=hit, provider=source, confidence=1.0, how="isrc")

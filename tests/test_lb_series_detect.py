@@ -87,3 +87,60 @@ class TestSyntheticIdHelpers:
         assert is_series_synthetic_id("") is False
         assert is_series_synthetic_id("lb_") is False  # not a real series
         assert is_series_synthetic_id("lb_random_thing") is False
+
+
+class TestDailyJams:
+    """#2076: Daily Jams gets a new MBID every day and yesterday's is deleted,
+    so it has to be one rolling mirror like the weekly ones."""
+
+    @pytest.mark.parametrize("user", ["SomeUser", "some_user", "Some User", "Doe, John"])
+    def test_a_day_collapses_into_the_users_rolling_series(self, user):
+        m = detect_series(f"Daily Jams for {user}, 2026-11-13 Fri")
+        assert m is not None
+        assert m.series_id == f"lb_daily_jams_{user}"
+        assert m.canonical_name == "ListenBrainz Daily Jams"
+        assert m.source_for_mirror == "listenbrainz"
+        assert m.title_pattern == f"Daily Jams for {user}, %"
+
+    @pytest.mark.parametrize("title", [
+        "Daily Jams for SomeUser",                    # no date
+        "Daily Jams for SomeUser, 2026-1-3 Fri",      # not a date
+        "My Daily Jams for SomeUser, 2026-11-13 Fri",
+        "ListenBrainz Daily Jams",                    # the rolling mirror's own name
+    ])
+    def test_anything_else_is_left_alone(self, title):
+        assert detect_series(title) is None
+
+    def test_the_weekly_series_are_not_caught_by_it(self):
+        assert detect_series("Weekly Jams for Nezreka, week of 2026-05-25 Mon").series_id \
+            == "lb_weekly_jams_Nezreka"
+
+    def test_its_synthetic_id_is_recognised(self):
+        assert "lb_daily_jams_" in list_series_synthetic_ids()
+        assert is_series_synthetic_id("lb_daily_jams_SomeUser")
+
+    def test_the_newest_day_is_the_one_a_refresh_reads(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE p(title TEXT, last_updated TEXT)")
+        conn.executemany("INSERT INTO p VALUES(?,?)", [
+            ("Daily Jams for U, 2026-11-11 Wed", "2026-11-13"),   # older day, touched later
+            ("Daily Jams for U, 2026-11-13 Fri", "2026-11-12"),
+            ("Daily Jams for U, 2026-11-12 Thu", "2026-11-12"),
+            ("Weekly Jams for U, week of 2026-11-09 Mon", "2026-11-13"),
+        ])
+        pattern = detect_series("Daily Jams for U, 2026-11-13 Fri").title_pattern
+        row = conn.execute("SELECT title FROM p WHERE title LIKE ? "
+                           "ORDER BY title DESC, last_updated DESC LIMIT 1", (pattern,)).fetchone()
+        assert row[0] == "Daily Jams for U, 2026-11-13 Fri"
+
+    def test_the_sweeper_takes_a_days_mirror_and_leaves_the_rolling_one(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE m(name TEXT)")
+        conn.executemany("INSERT INTO m VALUES(?)", [
+            ("Daily Jams for U, 2026-11-13 Fri",), ("ListenBrainz Daily Jams",),
+            ("Daily Jams for the road",)])
+        hit = [r[0] for r in conn.execute(
+            "SELECT name FROM m WHERE name LIKE 'Daily Jams for %, ____-__-__%'")]
+        assert hit == ["Daily Jams for U, 2026-11-13 Fri"]

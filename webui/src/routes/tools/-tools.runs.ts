@@ -219,3 +219,175 @@ export function runCounters(run: RepairJobRun): Array<{ label: string; value: st
   rows.push({ label: 'Took', value: formatDuration(run.duration_seconds) });
   return rows;
 }
+
+// ── The history page's numbers ───────────────────────────────────────────────
+
+export interface RunTotals {
+  runs: number;
+  failed: number;
+  /** runs that changed or flagged something */
+  busy: number;
+  checked: number;
+  found: number;
+  fixed: number;
+  seconds: number;
+  /** the oldest run counted, as a db timestamp, for "since ..." */
+  since: string | null;
+}
+
+/** What the listed runs add up to. The history used to be a list you had to
+ *  read to learn anything; these are the answers it was being read for. */
+export function runTotals(runs: readonly RepairJobRun[]): RunTotals {
+  const totals: RunTotals = {
+    runs: 0,
+    failed: 0,
+    busy: 0,
+    checked: 0,
+    found: 0,
+    fixed: 0,
+    seconds: 0,
+    since: null,
+  };
+  for (const run of runs) {
+    const outcome = runOutcome(run);
+    if (outcome === 'running') continue;
+    totals.runs += 1;
+    if (outcome === 'failed') totals.failed += 1;
+    if (outcome === 'success') totals.busy += 1;
+    totals.checked += run.items_scanned || 0;
+    totals.found += run.findings_created || 0;
+    totals.fixed += run.auto_fixed || 0;
+    totals.seconds += run.duration_seconds || 0;
+    if (run.started_at && (!totals.since || String(run.started_at) < String(totals.since))) {
+      totals.since = run.started_at;
+    }
+  }
+  return totals;
+}
+
+export interface RunDayBar {
+  key: string;
+  label: string;
+  ok: number;
+  failed: number;
+}
+
+/** One bar per calendar day, oldest first, for the last `days` days. A day
+ *  with no runs is still a bar (an empty one): the gap is information. */
+export function runDayBars(
+  runs: readonly RepairJobRun[],
+  days = 14,
+  now: number = Date.now(),
+): RunDayBar[] {
+  const bars: RunDayBar[] = [];
+  const index = new Map<string, RunDayBar>();
+  const start = new Date(now);
+  start.setHours(12, 0, 0, 0);
+  for (let back = days - 1; back >= 0; back -= 1) {
+    const stamp = start.getTime() - back * 86400000;
+    const key = dayKey(stamp);
+    const bar = {
+      key,
+      label: new Date(stamp).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      ok: 0,
+      failed: 0,
+    };
+    index.set(key, bar);
+    bars.push(bar);
+  }
+  for (const run of runs) {
+    const stamp = run.started_at ? parseDbTimestamp(run.started_at) : Number.NaN;
+    if (Number.isNaN(stamp)) continue;
+    const bar = index.get(dayKey(stamp));
+    if (!bar) continue;
+    const outcome = runOutcome(run);
+    if (outcome === 'running') continue;
+    if (outcome === 'failed') bar.failed += 1;
+    else bar.ok += 1;
+  }
+  return bars;
+}
+
+export interface RunJobSummary {
+  jobId: string;
+  label: string;
+  runs: number;
+  failed: number;
+  found: number;
+  fixed: number;
+  /** mean length of the runs that recorded one */
+  averageSeconds: number;
+  /** the newest run: its outcome and when it started */
+  lastOutcome: RunOutcome;
+  lastStarted: string | null;
+}
+
+/** The same runs folded per job, the job that ran most recently first. */
+export function runJobSummaries(runs: readonly RepairJobRun[]): RunJobSummary[] {
+  const byJob = new Map<string, RunJobSummary & { timed: number; seconds: number }>();
+  for (const run of runs) {
+    const jobId = run.job_id || '';
+    if (!jobId) continue;
+    let entry = byJob.get(jobId);
+    if (!entry) {
+      entry = {
+        jobId,
+        label: run.display_name || jobId.replace(/_/g, ' '),
+        runs: 0,
+        failed: 0,
+        found: 0,
+        fixed: 0,
+        averageSeconds: 0,
+        lastOutcome: runOutcome(run),
+        lastStarted: run.started_at || null,
+        timed: 0,
+        seconds: 0,
+      };
+      byJob.set(jobId, entry);
+    }
+    const outcome = runOutcome(run);
+    entry.runs += 1;
+    if (outcome === 'failed') entry.failed += 1;
+    entry.found += run.findings_created || 0;
+    entry.fixed += run.auto_fixed || 0;
+    if ((run.duration_seconds || 0) > 0) {
+      entry.timed += 1;
+      entry.seconds += run.duration_seconds || 0;
+    }
+    if (String(run.started_at || '') > String(entry.lastStarted || '')) {
+      entry.lastStarted = run.started_at || null;
+      entry.lastOutcome = outcome;
+    }
+  }
+  return [...byJob.values()]
+    .map(({ timed, seconds, ...entry }) => ({
+      ...entry,
+      averageSeconds: timed ? seconds / timed : 0,
+    }))
+    .sort((a, b) => String(b.lastStarted || '').localeCompare(String(a.lastStarted || '')));
+}
+
+/** Why a run did not finish cleanly, as one line for its row. */
+export function runReason(run: RepairJobRun): string {
+  const outcome = runOutcome(run);
+  if (outcome !== 'failed' && outcome !== 'stopped') return '';
+  const first = String(run.error_text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (first) return first;
+  const errors = run.errors || 0;
+  if (errors > 0) return `${errors.toLocaleString()} error${errors === 1 ? '' : 's'} along the way`;
+  return outcome === 'stopped' ? 'Stopped before the end' : 'No reason was recorded';
+}
+
+/** A long stretch of time in the two biggest units: "3h 12m", "45s". */
+export function formatSpan(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds || 0));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}m ${total % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}

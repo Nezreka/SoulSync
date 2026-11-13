@@ -291,6 +291,16 @@ def test_a_played_song_is_kept(db, plays):
     assert _scan(db)[1] == []
 
 
+@pytest.mark.parametrize("plays", [2, 9, None])
+def test_a_played_song_goes_when_plays_are_told_not_to_keep(db, plays):
+    """#2047"""
+    _mirror(db, titles=("Stay",), rotating=True)
+    _download(db, "Loved", plays=plays)
+    _res, findings = _scan(db, {"rotating_keep_played": False})
+    assert _titles(findings) == ["Loved"]
+    assert "plays do not keep a rotating song" in findings[0]["description"]
+
+
 def test_an_unknown_play_count_is_kept(db):
     _mirror(db, titles=("Stay",), rotating=True)
     _download(db, "Orphan", plays=None)

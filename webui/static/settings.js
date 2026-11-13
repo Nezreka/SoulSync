@@ -571,7 +571,7 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistcomposite', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistcomposite', '$artistclash'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$discalways', '$discnumalways', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistcomposite', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistcomposite', '$artistclash'],
         single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistcomposite', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistcomposite', '$artistclash'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
@@ -3522,6 +3522,11 @@ async function loadSettingsData() {
         if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
         if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
         if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
+        // #2061: the pacing knobs. ?? not ||: 0 is a real choice (off)
+        const _prowGap = document.getElementById('prowlarr-search-min-gap');
+        const _prowCap = document.getElementById('prowlarr-max-searches-per-minute');
+        if (_prowGap) _prowGap.value = settings.prowlarr?.search_min_gap_seconds ?? 2;
+        if (_prowCap) _prowCap.value = settings.prowlarr?.max_searches_per_minute ?? 20;
         const _tcType = document.getElementById('torrent-client-type');
         const _tcUrl = document.getElementById('torrent-client-url');
         const _tcUser = document.getElementById('torrent-client-username');
@@ -7060,6 +7065,8 @@ async function saveSettings(quiet = false) {
             url: _cfgStr('prowlarr-url'),
             api_key: _cfgStr('prowlarr-api-key'),
             indexer_ids: _cfgStr('prowlarr-indexer-ids'),
+            search_min_gap_seconds: _cfgFloat('prowlarr-search-min-gap', 2),
+            max_searches_per_minute: _cfgInt('prowlarr-max-searches-per-minute', 20),
         },
         torrent_client: {
             type: _cfgStr('torrent-client-type', { fallback: 'qbittorrent' }),

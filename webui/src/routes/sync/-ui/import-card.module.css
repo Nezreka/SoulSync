@@ -129,6 +129,17 @@
   font-weight: 600;
 }
 
+.note {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgb(var(--accent-light-rgb));
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .inTag::before {
   margin-right: 5px;
   content: '✓';

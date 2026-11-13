@@ -459,7 +459,7 @@ def _counting(db, monkeypatch):
             self._conn = conn
 
         def execute(self, sql, *args):
-            if 'lib2_provider_attempts' in sql:
+            if 'lib2_provider_attempts' in sql or 'owned_f' in sql:
                 seen.append(sql)
             return self._conn.execute(sql, *args)
 
@@ -471,7 +471,7 @@ def _counting(db, monkeypatch):
                     self._cur = outer._conn.cursor()
 
                 def execute(self, sql, *args):
-                    if 'lib2_provider_attempts' in sql:
+                    if 'lib2_provider_attempts' in sql or 'owned_f' in sql:
                         seen.append(sql)
                     return self._cur.execute(sql, *args)
 
@@ -492,7 +492,48 @@ def test_the_modal_reads_the_universe_once(db, monkeypatch):
     db.get_enrichment_unmatched('spotify', 'track', status='unmatched', limit=1, offset=0)
     db.get_enrichment_unmatched('spotify', 'track', status='unmatched', limit=1, offset=1)
     db.get_enrichment_unmatched('spotify', 'track', status='not_found', query='believ')
-    assert len(seen) == 1, seen
+    # the owned check (a file per track) is the slow part: once. the attempts
+    # are read once for the numbers and once for this worker's list
+    owned = [sql for sql in seen if 'owned_f' in sql]
+    assert len(owned) == 1, seen
+    assert len(seen) == 3, seen
+
+
+def test_every_worker_shares_the_owned_pass(db, monkeypatch):
+    """the Manage Workers window draws three numbers per worker for seventeen
+    workers. working out what is owned took a minute per worker and type on a
+    big library, and it is the same answer for all of them."""
+    seen = _counting(db, monkeypatch)
+    first = db.get_enrichment_breakdown('spotify', 'track')
+    for service in ('musicbrainz', 'deezer', 'lastfm', 'itunes'):
+        db.get_enrichment_breakdown(service, 'track')
+        db.get_enrichment_unmatched(service, 'track', status='unmatched', limit=5)
+    owned = [sql for sql in seen if 'owned_f' in sql]
+    assert len(owned) == 1, owned
+    # one read tallies every worker; each worker's list is one read of its own attempts
+    tallies = [sql for sql in seen if 'SELECT entity_id, service, status' in sql]
+    assert len(tallies) == 1
+    assert first['total'] == db.get_enrichment_breakdown('deezer', 'track')['total']
+
+
+def test_the_numbers_are_the_snapshots_numbers(db):
+    from core.enrichment import unmatched as um
+    for service in ('spotify', 'musicbrainz', 'similar_artists'):
+        for entity in um.supported_entity_types(service):
+            snapshot = um.unmatched_snapshot(db._get_connection, db.database_path, service, entity)
+            assert db.get_enrichment_breakdown(service, entity) == snapshot['counts'], (service, entity)
+
+
+def test_a_match_keeps_the_owned_list_and_a_refresh_drops_it(db, monkeypatch):
+    from core.enrichment import unmatched as um
+    seen = _counting(db, monkeypatch)
+    db.get_enrichment_breakdown('spotify', 'track')
+    um.invalidate_unmatched_snapshots()
+    db.get_enrichment_breakdown('spotify', 'track')
+    assert len([sql for sql in seen if 'owned_f' in sql]) == 1
+    um.invalidate_unmatched_snapshots(universe=True)
+    db.get_enrichment_breakdown('spotify', 'track')
+    assert len([sql for sql in seen if 'owned_f' in sql]) == 2
 
 
 def test_a_reset_shows_up_at_once(db):

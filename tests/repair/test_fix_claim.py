@@ -113,3 +113,31 @@ def test_an_abandoned_claim_expires(tmp_path: Path):
 
     worker._execute_fix = lambda *a, **k: {"success": False, "error": "ran anyway"}
     assert worker.fix_finding(finding_id)["error"] == "ran anyway"
+
+
+def test_answering_the_unreachable_library_question_runs_the_confirm(tmp_path: Path, monkeypatch):
+    """#2005: the one finding a stopped Dead File Cleaner run files goes
+    through the same claim and fix path as any other."""
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker.transfer_folder, worker._config_manager = db, str(tmp_path), None
+    assert worker._create_finding(
+        job_id="dead_file_cleaner", finding_type="library_unreachable", severity="warning",
+        entity_type="library", entity_id="unreachable", file_path=None,
+        title="30 of 30 files can't be reached", description="x",
+        details={"outage": {"unreachable": 30, "checked": 30}}) is True
+    with closing(db._get_connection()) as conn:
+        finding_id = conn.execute("SELECT id FROM repair_findings").fetchone()[0]
+    calls = []
+    monkeypatch.setattr(
+        "core.repair_jobs.dead_file_cleaner.confirm_unreachable_gone",
+        lambda database, config, create: calls.append(database) or {
+            "success": True, "action": "confirmed_missing", "message": "30 files marked missing."})
+
+    result = worker.fix_finding(finding_id, explicit=True)
+
+    assert result.get("success") is True, result
+    assert calls == [db]
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT status FROM repair_findings WHERE id=?",
+                            (finding_id,)).fetchone()[0] == "resolved"

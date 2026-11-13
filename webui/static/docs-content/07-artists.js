@@ -24,6 +24,7 @@ The artist detail page shows a full discography organized by category:
 - Each release card shows cover art, title, year, track count, and a **completion percentage** — how many tracks you already own
 - Filter by category, content type (live / compilations / featured), or status (owned / missing)
 - Click any release to open the download modal with track selection
+- **+ Other sources** adds the releases your other metadata sources list that this page does not: it asks every source the artist is matched on (Spotify, Deezer, Apple Music, MusicBrainz) and compares against what the page already shows, so nothing is listed twice. Each added release carries a badge for the source it came from and opens and downloads from there. While it is on, releases you don't own also show which source lists them
 
 At the top, **View on** buttons link to the artist on each matched external service (Spotify, Apple Music, MusicBrainz, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz). **Service badges** on artist cards also indicate which services have matched this artist.
 

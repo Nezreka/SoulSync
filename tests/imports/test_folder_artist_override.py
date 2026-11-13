@@ -156,3 +156,55 @@ def test_singular_release_type_folder_keeps_a_matching_identified_artist():
         identified_artist="A Skylit Drive",
         enabled=True,
     ) is None
+
+
+# --- #2045: a folder soulsync named itself is not another artist ------------
+
+REPORTED = "$uicideboy$ (American hip-hop duo)/Album/$uicideboy$ - Long Term Effects of SUFFERING (2021)"
+
+
+def test_a_disambiguation_on_the_folder_is_not_a_new_artist():
+    """$albumartist ($albumartistdisambiguation) named the folder, the folder
+    came back through staging, and the Album Artist tag became
+    "$uicideboy$ (American hip-hop duo)". plex could not match it."""
+    assert resolve_folder_artist(REPORTED, "$uicideboy$", enabled=True) is None
+    assert resolve_folder_artist("Air [FR]/Moon Safari", "Air", enabled=True) is None
+    assert resolve_folder_artist("Nirvana (UK) [rock]/Album/Songlife", "nirvana", enabled=True) is None
+
+
+def test_the_filesystem_safe_name_is_the_same_artist():
+    assert resolve_folder_artist("AC_DC/Back in Black", "AC/DC", enabled=True) is None
+    assert resolve_folder_artist("Panic! at the Disco/Pray", "Panic! at the Disco.", enabled=True) is None
+
+
+def test_a_name_the_template_renders_is_the_same_artist():
+    assert resolve_folder_artist("Air - FR/Moon Safari", "Air", enabled=True) == "Air - FR"
+    assert resolve_folder_artist("Air - FR/Moon Safari", "Air", enabled=True,
+                                 same_as={"Air - FR"}) is None
+
+
+def test_a_different_artist_still_overrides():
+    # the folder really does say someone else
+    assert resolve_folder_artist("Nirvana UK/Songlife", "Nirvana", enabled=True) == "Nirvana UK"
+    assert resolve_folder_artist("Airbourne (AU)/Runnin Wild", "Air", enabled=True) == "Airbourne (AU)"
+    assert resolve_folder_artist("(American hip-hop duo)/Album", "", enabled=True) == "(American hip-hop duo)"
+
+
+def test_artist_folder_names_reads_the_users_templates(monkeypatch):
+    from core.imports import artist_facts as facts_module
+    from core.imports.paths import artist_folder_names, preview_settings
+
+    monkeypatch.setattr(facts_module, "artist_facts",
+                        lambda name, **_kw: {"disambiguation": "American hip-hop duo", "country": "US"})
+    templates = {
+        "album_path": "$albumartist ($albumartistdisambiguation)/$albumtype/$albumartist - $album ($year)/$disc-$track - $title",
+        "single_path": "${albumartist} - $albumartistcountry/$title/$title",
+        "playlist_path": "$playlist/$artist - $title",
+    }
+    with preview_settings({"file_organization.templates": templates}):
+        names = artist_folder_names("$uicideboy$")
+    assert names == {"$uicideboy$", "$uicideboy$ (American hip-hop duo)", "$uicideboy$ - US"}
+    with preview_settings({"file_organization.templates": templates}):
+        assert resolve_folder_artist("$uicideboy$ - US/Album/x", "$uicideboy$", True,
+                                     same_as=artist_folder_names("$uicideboy$")) is None
+    assert artist_folder_names("") == set()

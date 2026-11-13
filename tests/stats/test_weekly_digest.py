@@ -36,6 +36,8 @@ def _at(days_ago, hour=12):
 
 def test_empty_db_returns_zero_shape(db):
     digest = queries.get_weekly_digest(db)
+    assert digest['previous_time_ms'] == 0
+    assert digest['on_repeat'] == []
     assert digest['tracks_played'] == 0
     assert digest['time_ms'] == 0
     assert digest['top_artist'] is None
@@ -261,3 +263,77 @@ def test_no_digest_query_scans_listening_history(db, monkeypatch):
     for sql, plan in plans:
         assert not any(step.startswith('SCAN lh') or step.startswith('SCAN o') for step in plan), (sql, plan)
         assert not any(step == 'SCAN listening_history' for step in plan), (sql, plan)
+
+
+# --- the dashboard shows the top artist's picture ---------------------------
+
+
+def test_the_top_artist_comes_with_the_librarys_picture_of_them(db):
+    """looked up while the connection is still open: asked after the close
+    it silently found nothing, and the dashboard chip stayed bare"""
+    _seed_play(db, "Song", "WHO SHOT SCOTT", _at(1))
+    with db._get_connection() as conn:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Who Shot Scott', '/library/metadata/1/thumb')"
+        ).lastrowid
+        conn.commit()
+    out = queries.get_weekly_digest(db, profile_id=1)
+    assert out["top_artist"] == "WHO SHOT SCOTT"
+    assert out["top_artist_image"] == f"/api/library/v2/artwork/artist/{artist_id}"
+
+
+def test_no_picture_when_the_library_has_none_for_the_top_artist(db):
+    _seed_play(db, "Song", "Nobody Known", _at(1))
+    assert queries.get_weekly_digest(db, profile_id=1)["top_artist_image"] is None
+    # in the library, but with no picture of its own
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_artists(name) VALUES('Nobody Known')")
+        conn.commit()
+    assert queries.get_weekly_digest(db, profile_id=1)["top_artist_image"] is None
+
+
+def _seed_album_play(db, title, artist, album, played_at, duration_ms=180_000):
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO listening_history (title, artist, album, played_at, duration_ms, profile_id) "
+            "VALUES (?, ?, ?, ?, ?, 1)", (title, artist, album, played_at, duration_ms))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_each_day_says_its_plays_and_the_album_it_was_mostly(db):
+    for n in range(3):
+        _seed_album_play(db, f'A{n}', 'Tame Impala', 'Currents', _at(1, hour=10 + n))
+    _seed_album_play(db, 'B', 'Tame Impala', 'Lonerism', _at(1, hour=15))
+    _seed_album_play(db, 'C', 'Other', 'currents', _at(2))
+    digest = queries.get_weekly_digest(db)
+    by_date = {day['date']: day for day in digest['daily']}
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    assert by_date[yesterday]['tracks'] == 4
+    assert by_date[yesterday]['album'] == 'Currents'
+    # nothing in the catalogue to draw: the cover is simply absent
+    assert by_date[yesterday]['cover'] is None
+    quiet = [day for day in digest['daily'] if day['hours'] == 0]
+    assert quiet and all(day['tracks'] == 0 and day['album'] is None for day in quiet)
+
+
+def test_on_repeat_is_the_three_albums_played_most(db):
+    for album, plays in (('One', 5), ('Two', 3), ('Three', 2), ('Four', 1)):
+        for n in range(plays):
+            _seed_album_play(db, f'{album}{n}', 'Artist', album, _at(1, hour=1 + n))
+    _seed_play(db, 'No album', 'Artist', _at(1))
+    digest = queries.get_weekly_digest(db)
+    assert [(a['name'], a['play_count']) for a in digest['on_repeat']] == [
+        ('One', 5), ('Two', 3), ('Three', 2)]
+    assert digest['on_repeat'][0]['artist'] == 'Artist'
+
+
+def test_last_week_is_the_seven_days_before_this_one(db):
+    _seed_play(db, 'Now', 'A', _at(1), duration_ms=600_000)
+    _seed_play(db, 'Before', 'A', _at(9), duration_ms=1_200_000)
+    _seed_play(db, 'Long ago', 'A', _at(20), duration_ms=9_000_000)
+    digest = queries.get_weekly_digest(db)
+    assert digest['time_ms'] == 600_000
+    assert digest['previous_time_ms'] == 1_200_000

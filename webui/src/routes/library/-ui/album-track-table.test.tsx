@@ -871,7 +871,18 @@ describe('library v2 album track table', () => {
     expect(within(dialog).getByText('Quality column')).toBeInTheDocument();
     expect(within(dialog).getByText('Track editor')).toBeInTheDocument();
     expect(within(dialog).getByText('Match providers')).toBeInTheDocument();
-    expect(within(dialog).getByText('Check')).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox', { name: 'Check' })).toBeInTheDocument();
+    // the table as these settings make it: the visible columns, in order
+    const preview = within(dialog).getByLabelText('How the track table looks with these settings');
+    const heads = Array.from(preview.querySelectorAll('th'), (th) => th.textContent ?? '');
+    expect(heads[0]).toBe('Title');
+    expect(heads).toContain('Quality');
+    // the artist page's settings sit behind their own pill
+    expect(within(dialog).queryByText('Artist toolbar')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('tab', { name: /Artist page/ }));
+    expect(within(dialog).getByText('Artist toolbar')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Visible columns')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('tab', { name: /Track table/ }));
     expect(within(dialog).getByRole('checkbox', { name: /Title/ })).toBeChecked();
     expect(within(dialog).getByRole('checkbox', { name: /Title/ })).toBeDisabled();
     expect(within(dialog).getByLabelText('Drag to reorder Title')).toBeInTheDocument();

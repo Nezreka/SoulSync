@@ -678,7 +678,8 @@ def test_feat_release_miss_is_cached_with_the_marker(service):
 
     assert service.match_release(FEAT_TITLE, "Clean Bandit") is None
     service._save_to_cache.assert_called_once_with(
-        "release", FEAT_TITLE, "Clean Bandit", None, {"feat_retry": 1}, 0)
+        "release", FEAT_TITLE, "Clean Bandit", None,
+        {"feat_retry": 1, "title_alone": 1}, 0)
 
 
 # --- the source metadata isrc -------------------------------------------------

@@ -1,8 +1,8 @@
 """identify a track by its isrc instead of searching for it.
 
 an isrc names one recording. beatport hands one over with every track, and
-spotify (``isrc:`` search) and deezer (``/track/isrc:<code>``) can look it up
-directly, so the exact recording comes back: the extended mix stays the
+spotify (``isrc:`` search), deezer (``/track/isrc:<code>``) and musicbrainz
+(``/isrc/<code>``) can look it up directly, so the exact recording comes back: the extended mix stays the
 extended mix instead of whatever version a title search ranks first.
 
 isrcs do get reused and mis-assigned now and then, so a hit only counts when
@@ -84,6 +84,13 @@ def _deezer_isrc(client: Any, code: str) -> Optional[Any]:
     return DeezerTrack.from_deezer_track(raw)
 
 
+def _musicbrainz_isrc(client: Any, code: str, artists: Iterable[Any]) -> Optional[Any]:
+    # #2067: musicbrainz has an exact lookup by isrc too. the client picks the
+    # recording whose artist agrees when several share the code.
+    lookup = getattr(client, 'track_by_isrc', None)
+    return lookup(code, artists=artists) if callable(lookup) else None
+
+
 def isrc_match(
     isrc: Any,
     discovery_source: str,
@@ -102,6 +109,8 @@ def isrc_match(
             track = _spotify_isrc(spotify_client, code)
         elif source == 'deezer' and not use_spotify:
             track = _deezer_isrc(fallback_client, code)
+        elif source == 'musicbrainz' and not use_spotify:
+            track = _musicbrainz_isrc(fallback_client, code, artists)
         else:
             return None
     except Exception as e:  # noqa: BLE001 - a failed lookup just means search

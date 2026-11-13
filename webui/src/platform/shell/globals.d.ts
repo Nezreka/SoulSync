@@ -83,6 +83,8 @@ declare global {
      * hands the shell over for the edit instead — see -automations.builder.ts.
      */
     showAutomationBuilder?: (automationId?: number) => void;
+    /** the same builder on the video side's blocks, saving `owned_by: 'video'` */
+    showVideoAutomationBuilder?: (automationId?: number) => void;
     /**
      * Closes the shared builder. Wrapped by the React automations page so it
      * can reclaim the shell — every exit path (Back, Cancel, Save) calls it.
@@ -645,7 +647,7 @@ declare global {
     /** video-poster-modal.js: the poster manager (search, then pick art). */
     VideoPoster?: { openSearch?: () => void };
     /** video-overlay-editor.js / video-collection-editor.js: the two studios. */
-    VideoOverlayEditor?: { open?: () => void };
+    VideoOverlayEditor?: { open?: () => void; openSettings?: () => void };
     VideoCollectionEditor?: { open?: () => void };
     /** video-worker-orbs.js: re-anchor to the video dashboard's orb stage. */
     videoWorkerOrbs?: { refresh: () => void; onStatus: (id: string, data: unknown) => void };

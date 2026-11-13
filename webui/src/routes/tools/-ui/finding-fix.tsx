@@ -27,6 +27,7 @@ function toast(message: string, type = 'info') {
  *  by TYPE now, not by job — a job can emit more than one type. */
 export const TYPE_ORPHAN = 'orphan_file';
 export const TYPE_DEAD = 'dead_file';
+export const TYPE_UNREACHABLE = 'library_unreachable';
 export const TYPE_ACOUSTID = 'acoustid_mismatch';
 export const TYPE_RETAG = 'library_retag';
 export const TYPE_BACKFILL = 'missing_discography_track';
@@ -127,6 +128,22 @@ export function useFindingFix({
         if (type === TYPE_DEAD) {
           fixAction = await prompts.promptDeadFile();
           if (!fixAction) return;
+        }
+        if (type === TYPE_UNREACHABLE) {
+          // the one answer the outage guards can't work out for themselves
+          const outage = (finding.details?.outage || {}) as { unreachable?: number };
+          const count = Number(outage.unreachable) || 0;
+          const confirmed = await window.showConfirmDialog?.({
+            title: 'Are these files really gone?',
+            message:
+              `${count ? `${count.toLocaleString()} files` : 'The files'} that can't be reached are marked missing and listed under Dead Files, where you download them again or remove them.\n\n` +
+              'With "Re-download files deleted outside SoulSync" on, monitored tracks go back to the Wishlist.\n\n' +
+              'If a drive is disconnected or a path mapping changed, cancel and fix that. Nothing is lost by waiting.',
+            confirmText: 'They are gone',
+            cancelText: 'Cancel',
+            destructive: true,
+          });
+          if (!confirmed) return;
         }
         if (type === TYPE_ACOUSTID) {
           // an ambiguous finding carries its candidate recordings - hand them to
@@ -246,6 +263,17 @@ export function useFindingFix({
   );
 }
 
+/** an error that tells you to use Re-identify, on a finding that names a
+ *  track: the modal can be opened from the finding itself */
+export function needsReidentify(finding: RepairFinding): boolean {
+  return (
+    finding.status === 'pending' &&
+    finding.entity_type === 'track' &&
+    finding.entity_id != null &&
+    /re-identify/i.test(finding.last_error || '')
+  );
+}
+
 /** The re-identify modal for a suspect_album_tag track finding. Applying it
  *  settles the finding, so it is dismissed. */
 export function ReidentifyFindingModal({
@@ -258,13 +286,15 @@ export function ReidentifyFindingModal({
   onClose: () => void;
 }) {
   const d = (finding.details as Record<string, any>) || {};
+  // a re-tag finding keeps its names on the library's side of the comparison
+  const ref = (d.validation?.reference as Record<string, any>) || {};
   return (
     <ReidentifyModal
       trackId={finding.entity_id}
-      trackTitle={String(d.track_title || finding.title || '')}
-      artistName={String(d.artist_name || '')}
-      albumTitle={String(d.album_title || '')}
-      imageUrl={String(d.album_thumb_url || '')}
+      trackTitle={String(d.track_title || ref.title || d.title || finding.title || '')}
+      artistName={String(d.artist_name || ref.artist_name || d.artist || '')}
+      albumTitle={String(d.album_title || ref.album_title || d.album || '')}
+      imageUrl={String(d.album_thumb_url || finding.album_thumb_url || '')}
       initialQuery={String(d.reidentify_query || '')}
       onApplied={onApplied}
       onClose={onClose}

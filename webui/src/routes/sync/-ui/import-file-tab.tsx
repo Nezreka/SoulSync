@@ -75,6 +75,8 @@ interface ParsedFile {
   /** string[][] for csv, string[] for text, ImportTrack[] for m3u. */
   rows: string[][] | string[] | ImportTrack[];
   m3uPlaylistName: string;
+  /** the m3u as read, kept so its lines can be read the other way round */
+  m3uText?: string;
 }
 
 /** A row counts toward the import when either name field survived (309). */
@@ -86,6 +88,8 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
   const [columnMap, setColumnMap] = useState<Record<number, ImportColumnRole>>({});
   const [textOrder, setTextOrder] = useState<TextOrder>('artist-title');
+  // how an m3u's "A - B" lines read: worked out from the file, the user can turn it
+  const [m3uOrder, setM3uOrder] = useState<TextOrder>('artist-title');
   const [textSeparator, setTextSeparator] = useState(' - ');
   const [playlistName, setPlaylistName] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -119,14 +123,16 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
       // _importFileParseAndPreview (199-228): the per-type parse.
       let next: ParsedFile;
       if (fileType === 'm3u') {
-        const { tracks, playlistName: m3uName } = importFileParseM3u(rawText);
+        const { tracks, playlistName: m3uName, order } = importFileParseM3u(rawText);
         next = {
           fileName: file.name,
           fileType,
           headers: [],
           rows: tracks,
           m3uPlaylistName: m3uName || '',
+          m3uText: rawText,
         };
+        setM3uOrder(order);
         setColumnMap({});
       } else if (fileType === 'text') {
         next = {
@@ -159,7 +165,7 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
   const tracks: ImportTrack[] = !parsed
     ? []
     : parsed.fileType === 'm3u'
-      ? (parsed.rows as ImportTrack[]).map((t) => ({
+      ? importFileParseM3u(parsed.m3uText ?? '', m3uOrder).tracks.map((t) => ({
           track_name: t.track_name || '',
           artist_name: t.artist_name || '',
           album_name: t.album_name || '',
@@ -291,7 +297,8 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
               <span className="import-file-hint-label">M3U / M3U8</span>
               <span className="import-file-hint-text">
                 Standard playlist files. Artist, title and duration are read automatically from
-                #EXTINF lines (or the file name for simple playlists).
+                #EXTINF lines (or the file name for simple playlists), in either order: iTunes
+                writes Title - Artist.
               </span>
             </div>
             <div className="import-file-hint">
@@ -348,6 +355,22 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
                 <option value=" — "> — </option>
                 <option value="|">|</option>
                 <option value="/"> / </option>
+              </select>
+            </div>
+          )}
+
+          {parsed.fileType === 'm3u' && (
+            <div id="import-file-m3u-format" className="import-file-format-bar">
+              <span className="import-file-format-label">Lines read as:</span>
+              <select
+                id="import-file-m3u-order"
+                className="import-file-select"
+                title="Worked out from the file paths. Turn it round if Track and Artist are swapped below."
+                value={m3uOrder}
+                onChange={(e) => setM3uOrder(e.target.value as TextOrder)}
+              >
+                <option value="artist-title">Artist - Title</option>
+                <option value="title-artist">Title - Artist (iTunes)</option>
               </select>
             </div>
           )}

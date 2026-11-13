@@ -65,41 +65,59 @@ export function VideoDashboardPage({
   const recent = stats.data?.recent;
 
   return (
-    <div className="page-shell dashboard-container" id="dashboard-page" data-media="video">
+    <div
+      className="page-shell dashboard-container dash-room"
+      id="dashboard-page"
+      data-media="video"
+    >
       <VideoHero
         numbers={videoHeroNumbers(stats.data)}
         onNumber={() => goVideo('video-library')}
         library={<VideoLibraryStrip stats={stats.data} scan={scan.data} isAdmin={isAdmin} />}
       />
-      <div className="dash-layout">
-        <div className="dash-main">
-          {week.data?.episodes.length ? (
-            <div className={styles.next}>
-              <CalendarHero
-                episodes={week.data.episodes.filter((e) => e.air_date >= today)}
-                today={today}
-                now={Date.now()}
-                currentWeek
-                autoOn={autoOn}
-                onOpen={(ep) => window.videoOpenCalendar?.({ date: ep.air_date, ep: ep.id })}
-              />
-            </div>
-          ) : null}
-          <ContinueBand />
-          <RecentBand items={recent} />
-          {isAdmin ? <StudiosBand recent={recent} /> : null}
-        </div>
-        <aside className="dash-side" aria-label="Your system">
+      {/* What you came to watch, first thing under the hero and the full
+          width of the page: what airs next, then where you left off. */}
+      <div className="room-top">
+        {week.data?.episodes.length ? (
+          <div className={styles.next}>
+            <CalendarHero
+              episodes={week.data.episodes.filter((e) => e.air_date >= today)}
+              today={today}
+              now={Date.now()}
+              currentWeek
+              autoOn={autoOn}
+              onOpen={(ep) => window.videoOpenCalendar?.({ date: ep.air_date, ep: ep.id })}
+            />
+          </div>
+        ) : null}
+        <ContinueBand />
+      </div>
+      {/* The system as a board, the way the music dashboard has it: the week
+          beside the counts, what runs next beside what is downloading. A card
+          with nothing to say renders nothing and the grid closes up. */}
+      {/* the wrap is what the board measures itself against: the week takes
+          two thirds beside the counts once there is room for both */}
+      <div className="video-board-wrap">
+        <section className="room-board" aria-label="Your system">
           <WeekCard data={week.data} today={today} start={start} canDownload={canDownload} />
-          <DownloadsBand />
-          <AutomationsCard compact side="video" />
           <CountTiles
             watchlist={stats.data?.watchlist ?? null}
             wishlist={stats.data?.wishlist ?? null}
             issues={issues.data ?? 0}
             findings={findings.data ?? 0}
           />
-        </aside>
+          {/* what is downloading right now is the news, so it comes first;
+            both take the whole row (see the video board rules in
+            dashboard-premier.css) */}
+          <DownloadsBand />
+          <AutomationsCard compact timeline side="video" />
+          {/* the two studios stand beside Up next, one over the other, once
+              the board is wide enough; under it before that */}
+          {isAdmin ? <StudiosBand recent={recent} /> : null}
+        </section>
+      </div>
+      <div className="room-shelves">
+        <RecentBand items={recent} />
       </div>
       <footer className="dash-footer">
         <QuickSettings />

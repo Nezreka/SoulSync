@@ -757,10 +757,17 @@ class VideoDatabase:
     def _get_connection(self) -> sqlite3.Connection:
         """A fresh connection with the standard pragmas applied."""
         conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA busy_timeout = 30000")  # 30s
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 30000")  # 30s
+        except Exception:
+            # a file sqlite cannot read fails here, on the first pragma. the
+            # handle must not outlive the error: Windows will not rename a
+            # file something still holds open
+            conn.close()
+            raise
         return conn
 
     def connect(self) -> sqlite3.Connection:
@@ -770,6 +777,40 @@ class VideoDatabase:
         close happen automatically.
         """
         return self._get_connection()
+
+    def _open_or_set_aside(self) -> sqlite3.Connection:
+        """The first connection of a start. A file that is not a database is
+        moved aside and a new one is started in its place.
+
+        The video database opens while the server module loads, so a file
+        sqlite cannot read stopped the whole app on "Preparing your library",
+        music included, for someone who had never added a video. Nothing is
+        deleted: the unreadable file keeps its bytes under a new name, with
+        its -wal and -shm, and the log says where.
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            conn.execute("PRAGMA schema_version").fetchone()
+            return conn
+        except sqlite3.DatabaseError as error:
+            message = str(error).lower()
+            if "not a database" not in message and "malformed" not in message:
+                raise
+            if conn is not None:
+                conn.close()
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            aside = self.database_path.with_name(f"{self.database_path.name}.unreadable-{stamp}")
+            for suffix in ("", "-wal", "-shm"):
+                source = Path(str(self.database_path) + suffix)
+                if source.exists():
+                    source.rename(Path(str(aside) + suffix))
+            logger.error(
+                "The video database at %s could not be read (%s). It was moved to %s and a new, "
+                "empty one was started so SoulSync can run. Music is not affected. To get the "
+                "video library back, restore a backup in Settings or put a good copy at the "
+                "original path and restart.", self.database_path, error, aside)
+            return self._get_connection()
 
     # ── init ────────────────────────────────────────────────────────────────
     def _initialize_once(self) -> None:
@@ -790,7 +831,7 @@ class VideoDatabase:
         except Exception:   # noqa: BLE001 - a restore hiccup must never block startup
             logger.exception("staged video restore failed; continuing with the current DB")
         schema = _SCHEMA_FILE.read_text(encoding="utf-8")
-        conn = self._get_connection()
+        conn = self._open_or_set_aside()
         try:
             prev_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             conn.executescript(schema)
@@ -8411,6 +8452,51 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def same_titled_show_files(self, title, *, exclude_tmdb_id=None) -> list:
+        """One stored episode path per season of every OTHER owned show with
+        this title: [{"tmdb_id", "path"}]. Two shows can share a name (The
+        Office 2005 and 2001), and the importer has to know when the folder a
+        title renders to is already another show's (#2052)."""
+        title = str(title or "").strip()
+        if not title:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT s.tmdb_id, MIN(f.relative_path) AS path FROM media_files f "
+                "JOIN episodes e ON e.id = f.episode_id "
+                "JOIN shows s ON s.id = e.show_id "
+                "WHERE LOWER(s.title) = LOWER(?) AND COALESCE(s.tmdb_id, 0) <> ? "
+                "AND e.has_file=1 AND f.relative_path<>'' "
+                "GROUP BY s.id, e.season_number",
+                (title, int(exclude_tmdb_id or 0))).fetchall()
+            return [{"tmdb_id": r["tmdb_id"], "path": r["path"]} for r in rows]
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+        finally:
+            conn.close()
+
+    def show_download_placements(self, title) -> list:
+        """Where finished episode downloads of any show with this title were
+        placed: the download rows, newest first. They say which folder a show
+        lives in before the media server has scanned it in (#2052)."""
+        title = str(title or "").strip()
+        if not title:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, kind, title, media_id, media_source, dest_path, search_ctx, status "
+                "FROM video_downloads WHERE LOWER(title) = LOWER(?) "
+                "AND kind NOT IN ('movie', 'youtube') AND status = 'completed' "
+                "AND COALESCE(dest_path, '') <> '' ORDER BY id DESC LIMIT 400",
+                (title,)).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def video_show_episode_file_path(self, tmdb_id=None, *, season=None):
         """The server-reported path (+ size, + its season) of ANY owned episode
         of a show: {"path", "size_bytes", "season_number"} or None. A new episode
@@ -9000,7 +9086,11 @@ class VideoDatabase:
             return [dict(r) for r in conn.execute(
                 "SELECT e.id, e.season_number, e.episode_number, e.title, e.air_date, "
                 f"e.has_file, e.monitored, {pc} AS play_count, {vo} AS view_offset_ms, "
-                "e.runtime_minutes, COALESCE(se.monitored, 1) AS season_monitored "
+                "e.runtime_minutes, COALESCE(se.monitored, 1) AS season_monitored, "
+                # the tab's pictures: an episode's still and its season's poster
+                "(e.still_url IS NOT NULL AND e.still_url <> '') AS has_still, "
+                "se.id AS season_id, "
+                "(se.poster_url IS NOT NULL AND se.poster_url <> '') AS season_has_poster "
                 f"FROM episodes e LEFT JOIN seasons se ON se.id = e.season_id{join} "
                 "WHERE e.show_id = ? ORDER BY e.season_number, e.episode_number", (show_id,))]
         except sqlite3.Error:
@@ -9038,6 +9128,61 @@ class VideoDatabase:
             if row["file_id"] == file_id:
                 return row
         return None
+
+    def library_move_file(self, file_id, episode_id) -> dict | None:
+        """hand one stored file to another episode of the SAME show: the fix
+        for a file filed under the wrong episode. both episodes' has_file
+        follow. returns {from_episode, to_episode, show_id}, or None when the
+        file is a movie's, either episode is unknown, or they are different
+        shows (a file never changes show here; that is Fix match)."""
+        try:
+            file_id, episode_id = int(file_id), int(episode_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            f = conn.execute("SELECT episode_id FROM media_files WHERE id = ?", (file_id,)).fetchone()
+            if not f or f["episode_id"] is None:
+                return None
+            old = conn.execute("SELECT id, show_id FROM episodes WHERE id = ?", (f["episode_id"],)).fetchone()
+            new = conn.execute("SELECT id, show_id FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+            if not old or not new or old["show_id"] != new["show_id"]:
+                return None
+            if old["id"] != new["id"]:
+                conn.execute("UPDATE media_files SET episode_id = ? WHERE id = ?", (new["id"], file_id))
+                conn.execute("UPDATE episodes SET has_file = 1 WHERE id = ?", (new["id"],))
+                left = conn.execute("SELECT COUNT(*) AS n FROM media_files WHERE episode_id = ?",
+                                    (old["id"],)).fetchone()["n"]
+                if not left:
+                    conn.execute("UPDATE episodes SET has_file = 0 WHERE id = ?", (old["id"],))
+                conn.commit()
+            return {"from_episode": old["id"], "to_episode": new["id"], "show_id": new["show_id"]}
+        except sqlite3.Error:
+            logger.exception("library_move_file failed for %s -> %s", file_id, episode_id)
+            return None
+        finally:
+            conn.close()
+
+    def library_title_grabs(self, kind: str, tmdb_id) -> list:
+        """the downloads that landed for one title, newest first: where each
+        file on the library tab came from. ``kind`` is movie|show; a show's
+        rows are its episodes' and its season packs'. [] for a title with no
+        tmdb id or no history."""
+        if not tmdb_id:
+            return []
+        types = ("movie",) if kind == "movie" else ("episode", "show")
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT season_number, episode_number, release_title, source, username, "
+                "dest_path, quality_label, completed_at FROM video_download_history "
+                "WHERE media_source = 'tmdb' AND media_id = ? AND outcome = 'completed' "
+                "AND dest_path IS NOT NULL AND media_type IN (%s) ORDER BY id DESC LIMIT 2000"
+                % ",".join("?" * len(types)), (str(tmdb_id), *types))]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
 
     def library_drop_file(self, file_id) -> dict | None:
         """forget one stored file after it was deleted from disk, and flip its
@@ -9928,23 +10073,60 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # The watchlist page's show chips. A show is `unowned` when it is not in
+    # the library at all, `missing` when it is and an aired, monitored episode
+    # has no file, `complete` otherwise (episode_count is already "what you
+    # have plus what you still want", see _SHOW_EPS_WANTED).
+    WATCHLIST_SHOW_FILTERS = ("missing", "complete", "unowned")
+
+    @staticmethod
+    def _watchlist_show_gap(item: dict) -> int:
+        """How many wanted episodes a followed show still lacks."""
+        return max(0, int(item.get("episode_count") or 0) - int(item.get("owned_count") or 0))
+
+    @classmethod
+    def _watchlist_show_state(cls, item: dict) -> str:
+        if item.get("library_id") is None:
+            return "unowned"
+        return "missing" if cls._watchlist_show_gap(item) else "complete"
+
     def query_watchlist(self, kind: str, *, search=None, sort="default", page=1, limit=60,
-                        server_source=None, profile_id: int = 1) -> dict:
+                        server_source=None, profile_id: int = 1, show_filter=None) -> dict:
         """One searched/sorted/paged slice of the effective watchlist for a kind —
         mirrors query_library's {items, pagination} shape so the page can paginate
         like the library. The effective list is bounded (follows + airing library
-        shows), so it's computed then filtered/sorted/sliced rather than via SQL."""
+        shows), so it's computed then filtered/sorted/sliced rather than via SQL.
+
+        Shows also answer ``facets``: how many are missing episodes, complete and
+        not in the library, over the whole list (not the search), for the page's
+        chips. ``show_filter`` narrows to one of WATCHLIST_SHOW_FILTERS; anything
+        else is every show."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(200, int(limit or 60)))
         except (TypeError, ValueError):
             page, limit = 1, 60
         items = self.list_watchlist(kind, server_source=server_source, profile_id=profile_id) if kind in ("show", "person", "studio") else []
+        facets = None
+        if kind == "show":
+            facets = {"all": len(items), "missing": 0, "complete": 0, "unowned": 0,
+                      "missing_episodes": 0}
+            for it in items:
+                facets[self._watchlist_show_state(it)] += 1
+                if it.get("library_id") is not None:
+                    facets["missing_episodes"] += self._watchlist_show_gap(it)
+            if show_filter in self.WATCHLIST_SHOW_FILTERS:
+                items = [it for it in items if self._watchlist_show_state(it) == show_filter]
         s = (search or "").strip().lower()
         if s:
             items = [it for it in items if s in (it.get("title") or "").lower()]
         if sort == "added":   # opt-in: explicit follows (have a date) newest-first
             items.sort(key=lambda it: (it.get("date_added") or ""), reverse=True)
+        elif sort == "missing" and kind == "show":
+            # the furthest behind first; ties (and everything complete) by name
+            items.sort(key=lambda it: (
+                -(self._watchlist_show_gap(it) if it.get("library_id") is not None else 0),
+                (it.get("sort_title") or it.get("title") or "").strip().lower()))
         else:   # "default" / "title": alphabetical by name — a manual follow is no more
                 # special than an auto-added airing show, so they sort together A–Z.
                 # .strip() guards against dirty titles (e.g. a leading space from the
@@ -9954,9 +10136,12 @@ class VideoDatabase:
         total_pages = max(1, (total + limit - 1) // limit)
         page = min(page, total_pages)
         start = (page - 1) * limit
-        return {"items": items[start:start + limit], "pagination": {
+        out = {"items": items[start:start + limit], "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+        if facets is not None:
+            out["facets"] = facets
+        return out
 
     # ── Wishlist (curated 'get this': movies + episodes) ──────────────────────
     # Atomic units are movies and episodes. Adding a whole show/season expands

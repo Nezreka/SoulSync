@@ -130,7 +130,73 @@ def _check_update_cycle(
 def list_automations(database, profile_id: int) -> list[dict]:
     """All automations for the profile, with JSON columns parsed."""
     automations = database.get_automations(profile_id)
-    return [_hydrate_automation(a) for a in automations]
+    return _attach_playlists([_hydrate_automation(a) for a in automations], database)
+
+
+def _playlist_id(auto: dict) -> Optional[int]:
+    if auto.get('action_type') != 'playlist_pipeline':
+        return None
+    raw = str((auto.get('action_config') or {}).get('playlist_id') or '').strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _attach_playlists(automations: list[dict], database) -> list[dict]:
+    """``playlist`` (name + cover) on each automation that syncs one playlist,
+    so the page can show the playlist instead of a clock."""
+    wanted = {pid for pid in map(_playlist_id, automations) if pid is not None}
+    reader = getattr(database, 'get_mirrored_playlist_art', None)
+    if not wanted or reader is None:
+        return automations
+    try:
+        art = reader(wanted) or {}
+    except Exception as exc:  # noqa: BLE001 - art is decoration, the list is not
+        logger.debug("automation playlist art not attached: %s", exc)
+        return automations
+    for auto in automations:
+        hit = art.get(_playlist_id(auto))
+        if hit:
+            auto['playlist'] = hit
+    return automations
+
+
+def _is_video(auto: dict) -> bool:
+    return auto.get('owned_by') == 'video' or str(auto.get('action_type') or '').startswith('video_')
+
+
+ACTIVITY_DAYS = 7
+
+
+def get_activity(database, profile_id: int, *, side: str = 'music', now=None) -> dict:
+    """The last 24 hours by automation, and the last week by day.
+
+    Scoped the way the list is: this profile's automations and the system
+    ones, on one side of the app. ``recent`` leads with trouble."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    mine = {int(a['id']): a for a in database.get_automations(profile_id)
+            if _is_video(a) == (side == 'video')}
+    recent, day_rows = database.get_automation_activity(
+        (now - timedelta(hours=24)).isoformat(),
+        (now - timedelta(days=ACTIVITY_DAYS)).isoformat())
+    out = []
+    for row in recent:
+        auto = mine.get(row['automation_id'])
+        if auto is None:
+            continue
+        out.append({**row, 'name': auto.get('name') or '', 'action_type': auto.get('action_type'),
+                    'avg_seconds': round(row['avg_seconds'], 1)})
+    out.sort(key=lambda r: (-r['failed'], -r['runs'], r['name'].lower()))
+    days: dict = {}
+    for automation_id, day, status, count in day_rows:
+        if automation_id not in mine:
+            continue
+        bucket = days.setdefault(day, {'day': day, 'completed': 0, 'failed': 0, 'skipped': 0})
+        key = 'failed' if status == 'error' else 'skipped' if status == 'skipped' else 'completed'
+        bucket[key] += count
+    totals = {'runs': sum(r['runs'] for r in out), 'failed': sum(r['failed'] for r in out),
+              'skipped': sum(r['skipped'] for r in out)}
+    return {'recent': out, 'days': [days[d] for d in sorted(days)], 'totals': totals,
+            'window_hours': 24, 'history_days': ACTIVITY_DAYS}
 
 
 def get_automation(database, automation_id: int) -> Optional[dict]:

@@ -182,7 +182,7 @@ def backfill_stable_ids(cursor, *, connection=None, batch_size: int = 500,
             progress("stable_ids", filled, 0)
 
     if filled:
-        logger.info("Backfilled %d Library-v2 stable_ids", filled)
+        logger.info("Backfilled %d Library stable_ids", filled)
     return filled
 
 

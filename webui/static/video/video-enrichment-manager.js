@@ -51,7 +51,11 @@
         open: false, selected: 'tmdb', statuses: {}, breakdown: null,
         unmatched: null, kind: 'movie', page: 0, pageSize: 50,
         statusFilter: 'unmatched', search: '', priority: '', pollTimer: null, searchTimer: null,
+        // what was last seen of each worker, so coming back to one shows it at
+        // once while the fresh copy is fetched: { [id]: { breakdown, unmatched, kind } }
+        kept: {}, loadToken: 0,
     };
+    function keptFor(id) { return state.kept[id] || (state.kept[id] = {}); }
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -147,18 +151,28 @@
     }
     function loadBreakdown(id) {
         return getJSON('/api/video/enrichment/' + id + '/breakdown').then(function (d) {
-            state.breakdown = d ? d.breakdown : null;
+            // a failed refresh keeps the numbers that were showing
+            if (d && d.breakdown) keptFor(id).breakdown = d.breakdown;
+            if (state.selected === id) state.breakdown = (d && d.breakdown) || keptFor(id).breakdown || null;
         });
     }
     function loadUnmatched() {
         var id = state.selected;
+        var token = ++state.loadToken;
+        var kind = state.kind, filter = state.statusFilter, search = state.search, page = state.page;
         var params = new URLSearchParams({
-            kind: state.kind, status: state.statusFilter,
-            limit: String(state.pageSize), offset: String(state.page * state.pageSize),
+            kind: kind, status: filter,
+            limit: String(state.pageSize), offset: String(page * state.pageSize),
         });
-        if (state.search) params.set('q', state.search);
+        if (search) params.set('q', search);
         return getJSON('/api/video/enrichment/' + id + '/unmatched?' + params).then(function (d) {
+            // an answer for a view you have since left is not drawn over the one you are on
+            if (token !== state.loadToken || state.selected !== id) return false;
             state.unmatched = d || { total: 0, items: [] };
+            if (d && !search && page === 0 && filter === 'unmatched') {
+                keptFor(id).unmatched = d; keptFor(id).kind = kind;
+            }
+            return true;
         });
     }
     function loadPriority() {
@@ -169,6 +183,22 @@
     }
 
     // ── render ─────────────────────────────────────────────────────────────────
+    // One row brought up to date where it stands. Rebuilding the whole rail on
+    // every three-second poll swapped the button out from under the pointer:
+    // a click that landed mid-rebuild was lost, and hover flickered.
+    function updateRailRow(id) {
+        var rail = byId('vem-rail');
+        var row = rail && rail.querySelector('[data-em-select="' + id + '"]');
+        if (!row) return;
+        var s = state.statuses[id], info = statusInfo(s), pct = overallPct(s);
+        var dot = row.querySelector('.em-dot');
+        if (dot) { dot.className = 'em-dot em-dot--' + info.cls; dot.title = info.label; }
+        var sub = row.querySelector('.em-worker-sub');
+        if (sub) sub.textContent = railSub(s, id);
+        var fill = row.querySelector('.em-rail-cov-fill');
+        if (fill && pct != null) fill.style.width = pct + '%';
+        else if (!fill && pct != null) renderRail();   // the bar did not exist yet
+    }
     function renderRail() {
         var rail = byId('vem-rail');
         if (!rail) return;
@@ -395,11 +425,20 @@
 
     // ── selection / actions ────────────────────────────────────────────────────
     function selectWorker(id) {
-        state.selected = id; state.breakdown = null; state.unmatched = null;
+        var kept = keptFor(id);
+        state.selected = id;
+        state.breakdown = kept.breakdown || null;
+        state.unmatched = kept.unmatched || null;
         state.kind = defaultKind(id); state.page = 0; state.search = '';
+        if (kept.kind) state.kind = kept.kind;   // the view you left this worker on
+        state.statusFilter = 'unmatched';
         renderRail(); renderPanel();
         if (id === 'youtube') return;   // date worker has no breakdown/unmatched
-        Promise.all([loadBreakdown(id), loadUnmatched()]).then(function () { renderPanel(); });
+        // each part is drawn when its own answer lands. they used to be awaited
+        // together, so the numbers sat behind the list, and a click on another
+        // worker while they were out was drawn over when they came in
+        loadBreakdown(id).then(function () { if (state.selected === id && state.open) renderCards(); });
+        loadUnmatched().then(function (mine) { if (mine && state.open) { renderControls(); renderList(); } });
     }
     function switchKind(kind) {
         // A coverage card just SWITCHES THE VIEW to that kind — it must NOT change
@@ -559,19 +598,25 @@
         }
         document.body.classList.add('em-scroll-lock');
         state.open = true;
+        // drawn now from what is already known; the fresh statuses land on the
+        // rows when they arrive. it used to wait for them with an empty window
+        renderRail();
+        loadPriority();
+        selectWorker(state.selected);
         refreshAll().then(function () {
+            if (!state.open) return;
             renderRail();
-            loadPriority();
-            selectWorker(state.selected);
+            if (state.selected === 'youtube') renderPanel(); else renderHeader();
         });
         if (state.pollTimer) clearInterval(state.pollTimer);
         state.pollTimer = setInterval(function () {
             if (!state.open) return;
-            getJSON('/api/video/enrichment/' + state.selected + '/status').then(function (d) {
-                if (d) {
+            var asked = state.selected;
+            getJSON('/api/video/enrichment/' + asked + '/status').then(function (d) {
+                if (d && asked === state.selected) {
                     state.statuses[state.selected] = d;
                     if (state.selected === 'youtube') renderPanel(); else renderHeader();
-                    renderRail();
+                    updateRailRow(asked);
                 }
             });
         }, 3000);

@@ -327,7 +327,7 @@ class ListenBrainzManager:
             self._cache_tracks(playlist_id, playlist_mbid, tracks, cursor)
 
         # Ensure a rolling-series mirror row exists for known LB series
-        # (Weekly Jams / Weekly Exploration / Top Discoveries / Top
+        # (Daily Jams / Weekly Jams / Weekly Exploration / Top Discoveries / Top
         # Missed Recordings). The Auto-Sync sidebar then surfaces the
         # rolling entry as schedulable even before the user has
         # explicitly discovered any per-period card — first scheduled
@@ -532,6 +532,9 @@ class ListenBrainzManager:
         per_period_title_patterns = [
             ('listenbrainz', 'Weekly Jams for %, week of %'),
             ('listenbrainz', 'Weekly Exploration for %, week of %'),
+            # a day's own mirror (#2076): the date is spelled out so the rolling
+            # mirror's name, "ListenBrainz Daily Jams", is never a match
+            ('listenbrainz', 'Daily Jams for %, ____-__-__%'),
             ('listenbrainz', 'Top Discoveries of % for %'),
             ('listenbrainz', 'Top Missed Recordings of % for %'),
         ]

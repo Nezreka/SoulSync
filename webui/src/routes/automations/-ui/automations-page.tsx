@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { Automation, AutomationsSearch } from '../-automations.types';
+import type { Automation, AutomationsSearch, AutomationsSide } from '../-automations.types';
 
 import {
   AUTOMATIONS_QUERY_KEY,
+  automationsActivityQueryOptions,
   automationsListQueryOptions,
   automationBlocksQueryOptions,
   automationsMasterQueryOptions,
@@ -23,27 +24,42 @@ import {
 } from '../-automations.api';
 import { useVanillaBuilder } from '../-automations.builder';
 import { useAutomationDnd } from '../-automations.dnd';
-import { blockLabelLookup, formatAction, formatTrigger } from '../-automations.format';
 import {
-  buildCollections,
+  blockLabelLookup,
+  displayName,
+  formatAction,
+  formatTrigger,
+  timeUntil,
+} from '../-automations.format';
+import {
+  attentionItems,
   collectionAutomations,
-  collectionGroupName,
   filterAutomations,
   filterOptions,
-  forMusicSide,
+  forSide,
+  librarySections,
   readAutomationsList,
+  upcomingRuns,
 } from '../-automations.helpers';
-import { useAutomationProgress } from '../-automations.progress';
+import { useAutomationProgress, useSecondTick } from '../-automations.progress';
 import { Route } from '../route';
 import { AutomationHub } from './automation-hub';
-import { AutomationsLibrary, type LibraryGroupActions } from './automations-library';
+import { AutomationsActivity } from './automations-activity';
+import {
+  type LibraryGroupActions,
+  type LibraryLens,
+  AutomationsLibrary,
+} from './automations-library';
 import { AutomationsOverview } from './automations-overview';
-import { AutomationsSidebar } from './automations-sidebar';
 import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
 import { GroupDropdown } from './group-dropdown';
 
-export function AutomationsPage() {
-  useReactPageShell('automations');
+/**
+ * One page for both sides. `side` picks whose automations it shows and whose
+ * master switch it flips; the video side reaches it on /automations?media=video.
+ */
+export function AutomationsPage({ side = 'music' }: { side?: AutomationsSide }) {
+  useReactPageShell('automations', side === 'video' ? '?media=video' : undefined);
 
   const { profileId } = useProfile();
   const search = Route.useSearch();
@@ -51,6 +67,9 @@ export function AutomationsPage() {
 
   const queryClient = useQueryClient();
   const listQuery = useQuery(automationsListQueryOptions(profileId));
+  // What every automation did in the last day. The overview's Needs attention
+  // reads it too: `last_error` alone forgets a failure after one clean run.
+  const activityQuery = useQuery(automationsActivityQueryOptions(profileId, side));
   const masterQuery = useQuery(automationsMasterQueryOptions());
   // Live run state, merged from the socket mirror. Not query-cached: it is a
   // stream of transient frames, not a resource with a canonical server copy.
@@ -61,16 +80,24 @@ export function AutomationsPage() {
   // did the same catch-up fetch right after painting.
   // Labels for trigger/action types the static maps do not cover. Cached
   // indefinitely — block definitions only change when the app ships new ones.
-  const blocksQuery = useQuery(automationBlocksQueryOptions());
+  const blocksQuery = useQuery(automationBlocksQueryOptions(side));
   const blockLabel = useMemo(() => blockLabelLookup(blocksQuery.data), [blocksQuery.data]);
 
   const progressSeed = useQuery(automationsProgressQueryOptions());
   const progress = useAutomationProgress(progressSeed.data);
-  // The builder stays in vanilla and is shared with the video page; this hands
-  // the shell over for the edit and takes it back on close.
-  const openBuilder = useVanillaBuilder(() => void refresh());
+  // The builder stays in vanilla and is shared by both sides; this hands the
+  // shell over for the edit and takes it back on close.
+  const openBuilder = useVanillaBuilder(() => void refresh(), side);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
+
+  // The Guides tab is vanilla markup, and deploying a pipeline from it creates
+  // rows behind this page's back. It says so with this event.
+  useEffect(() => {
+    const changed = () => void queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
+    document.addEventListener('soulsync:automations-changed', changed);
+    return () => document.removeEventListener('soulsync:automations-changed', changed);
+  }, [queryClient]);
   const fail = (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error');
 
   const toggle = useMutation({
@@ -122,10 +149,10 @@ export function AutomationsPage() {
   });
 
   const master = useMutation({
-    mutationFn: (enabled: boolean) => setAutomationsMaster('music', enabled),
+    mutationFn: (enabled: boolean) => setAutomationsMaster(side, enabled),
     onSuccess: async (_v, enabled) => {
       window.showToast?.(
-        `Music automations ${enabled ? 'resumed' : 'paused'}`,
+        `${side === 'video' ? 'Video' : 'Music'} automations ${enabled ? 'resumed' : 'paused'}`,
         enabled ? 'success' : 'info',
       );
       await refresh();
@@ -180,65 +207,82 @@ export function AutomationsPage() {
     onError: fail,
   });
 
-  // Dragging a card onto a sidebar group reuses the same single-row PUT the
-  // card's 📁 dropdown issues, so both paths land on one endpoint.
+  // Dragging a row onto a group section reuses the same single-row PUT the
+  // row's "Move to group" issues, so both paths land on one endpoint.
   const dnd = useAutomationDnd((dragged, toGroup) =>
     assign.mutate({ id: dragged.id, group: toGroup }),
   );
 
   // Both sides share ONE endpoint; only owned_by separates them.
   const automations = useMemo(
-    () => forMusicSide(readAutomationsList(listQuery.data)),
-    [listQuery.data],
+    () => forSide(readAutomationsList(listQuery.data), side),
+    [listQuery.data, side],
   );
+  const recent = useMemo(() => activityQuery.data?.recent ?? [], [activityQuery.data]);
 
   const setSearch = (patch: Partial<AutomationsSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
 
   // ── Navigation ─────────────────────────────────────────────────────
   //
-  // The page is two views: the overview dashboard and the library. Inside the
-  // library the sidebar picks one collection; the main pane shows only that
-  // collection. Changing collections resets the text/trigger/action filters —
-  // carrying a query into a different collection is never what was meant.
+  // Four places: the overview, every automation, what they did, the guides.
+  // Inside the list, `nav` is a lens across the sections (all, attention,
+  // scheduled, events, off) or, from an older link, one section on its own.
 
-  const collections = useMemo(() => buildCollections(automations), [automations]);
-  const collectionKeys = useMemo(() => new Set(collections.map((c) => c.key)), [collections]);
+  const sections = useMemo(() => librarySections(automations), [automations]);
+  const sectionKeys = useMemo(() => new Set(sections.map((c) => c.key)), [sections]);
 
-  // A search only exists inside the library: a bare ?q= URL (old bookmark, or
-  // a shared link) lands there too, on All, rather than on an overview that
-  // would silently swallow the query.
+  // A search only exists inside the list: a bare ?q= URL (old bookmark, or a
+  // shared link) lands there too, rather than on an overview that would
+  // silently swallow the query.
   const searchActive = Boolean(search.q || search.trigger || search.action);
-  // A fresh install has no overview to show — the "No automations yet" state
-  // lives in the library, so the sidebar and the content agree on All rather
-  // than the sidebar saying Overview while the content shows a collection.
-  const inLibrary = search.view === 'library' || searchActive || automations.length === 0;
-
-  const navKey = inLibrary && collectionKeys.has(search.nav) ? search.nav : 'all';
+  // A fresh install has no overview to show: the "No automations yet" state
+  // lives in the list.
+  const noneYet = automations.length === 0;
   // The guides are reference material for existing automations; a fresh
   // install sees the empty state alone, not the empty state plus docs.
-  const showGuides = automations.length > 0;
-  const activeNav = inLibrary && navKey === 'guides' && !showGuides ? 'all' : navKey;
+  const showGuides = !noneYet;
+  const wantsGuides = search.view === 'library' && search.nav === 'guides' && !searchActive;
+  const place: 'overview' | 'all' | 'activity' | 'guides' =
+    wantsGuides && showGuides
+      ? 'guides'
+      : search.view === 'activity' && !searchActive && !noneYet
+        ? 'activity'
+        : search.view === 'library' || searchActive || noneYet
+          ? 'all'
+          : 'overview';
 
-  // Leaving the library leaves the search behind with it — otherwise the
-  // searchActive half of inLibrary would trap the overview out of reach.
-  const goOverview = () => setSearch({ view: 'overview', q: '', trigger: '', action: '' });
-  const goCollection = (nav: string) =>
-    setSearch({ view: 'library', nav, q: '', trigger: '', action: '' });
-  const onSidebarSearch = (q: string) =>
-    setSearch({ view: 'library', nav: 'all', q, trigger: '', action: '' });
+  const LENS_KEYS = ['all', 'attention', 'scheduled', 'events', 'off'];
+  // `system` was one section once; it reads as everything now, which shows both
+  const activeNav =
+    place === 'all' && (LENS_KEYS.includes(search.nav) || sectionKeys.has(search.nav))
+      ? search.nav
+      : 'all';
+
+  // Leaving the list leaves the search behind with it: otherwise the
+  // searchActive half of `place` would trap the other pills out of reach.
+  const cleared = { q: '', trigger: '', action: '' };
+  const goOverview = () => setSearch({ view: 'overview', nav: 'all', ...cleared });
+  const goLens = (nav: string) => setSearch({ view: 'library', nav, ...cleared });
+  const goActivity = () => setSearch({ view: 'activity', nav: 'all', ...cleared });
+  const goGuides = () => setSearch({ view: 'library', nav: 'guides', ...cleared });
   const onFind = (name: string) => setSearch({ view: 'library', nav: 'all', q: name });
 
-  // The collection's members, then the filter-bar controls narrowing them.
-  // The filter dropdowns list the collection's own types — "All Triggers"
-  // inside Scheduled should not offer event triggers that cannot match.
-  const members = useMemo(
-    () => collectionAutomations(automations, activeNav),
-    [automations, activeNav],
+  const attention = useMemo(
+    () => attentionItems(automations, recent).map((item) => item.automation),
+    [automations, recent],
   );
 
-  // The vanilla filter matched the rendered label text, so the same formatters
-  // that build the card must produce the strings the filter searches.
+  // What the lens holds, before the text and type filters. Needs attention is
+  // not `collectionAutomations('attention')`: that one only knows the last run.
+  const lensMembers = useCallback(
+    (key: string) => (key === 'attention' ? attention : collectionAutomations(automations, key)),
+    [attention, automations],
+  );
+  const members = useMemo(() => lensMembers(activeNav), [lensMembers, activeNav]);
+
+  // The filter matches the rendered label text, so the same formatters that
+  // build the row must produce the strings the filter searches.
   const labelFor = useCallback(
     (a: Automation) => ({
       trigger: formatTrigger(a.trigger_type, a.trigger_config, blockLabel),
@@ -253,6 +297,41 @@ export function AutomationsPage() {
   );
   const filtering = Boolean(search.q || search.trigger || search.action);
 
+  const lenses: LibraryLens[] = [
+    { key: 'all', label: 'All', count: automations.length },
+    { key: 'attention', label: 'Needs attention', count: attention.length },
+    { key: 'scheduled', label: 'Scheduled', count: lensMembers('scheduled').length },
+    { key: 'events', label: 'Event-driven', count: lensMembers('events').length },
+    { key: 'off', label: 'Switched off', count: lensMembers('off').length },
+  ];
+
+  const librarySectionRows = useMemo(() => {
+    const shown = new Set(visible.map((a) => a.id));
+    // an older link to one section shows that section alone
+    const only = sectionKeys.has(activeNav) ? activeNav : null;
+    // on before off, then by the name the row shows
+    const inOrder = (rows: Automation[]) =>
+      [...rows].sort(
+        (a, b) =>
+          Number(b.enabled === true || b.enabled === 1) -
+            Number(a.enabled === true || a.enabled === 1) ||
+          displayName(a).localeCompare(displayName(b)),
+      );
+    return sections
+      .filter((def) => only === null || def.key === only)
+      .map((def) => ({
+        def,
+        rows: inOrder(collectionAutomations(automations, def.key)).filter(
+          (a) => only !== null || shown.has(a.id),
+        ),
+      }))
+      .map((section) =>
+        only === null
+          ? section
+          : { ...section, rows: filterAutomations(section.rows, search, labelFor) },
+      );
+  }, [sections, sectionKeys, activeNav, visible, automations, search, labelFor]);
+
   const [groupMenu, setGroupMenu] = useState<{
     id: number;
     current: string | null;
@@ -260,7 +339,10 @@ export function AutomationsPage() {
   } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
 
-  const masterOn = masterQuery.data?.music !== false;
+  // music runs unless someone paused it; video starts paused (most installs
+  // predate it), so it is on only once the engine says so
+  const masterOn =
+    side === 'video' ? masterQuery.data?.video === true : masterQuery.data?.music !== false;
 
   const idsInGroup = (name: string) =>
     collectionAutomations(automations, `group:${name}`).map((a) => a.id);
@@ -274,43 +356,42 @@ export function AutomationsPage() {
       regroup.mutate({
         ids,
         group: null,
-        toast: `Dissolved group "${name}" — {n} automations moved to My Automations`,
+        toast: `Dissolved group "${name}". {n} automations moved to My Automations`,
       });
     } else {
       deleteGroupAll.mutate(ids);
     }
   };
 
-  const groupName = collectionGroupName(activeNav);
-  const groupMembers = groupName !== null ? members : [];
-  const groupAllEnabled =
-    groupMembers.length > 0 && groupMembers.every((a) => a.enabled === true || a.enabled === 1);
-  const groupActions: LibraryGroupActions | undefined =
-    groupName !== null
-      ? {
-          allEnabled: groupAllEnabled,
-          onBulkToggle: () =>
-            bulkToggle.mutate({
-              ids: groupMembers.map((a) => a.id),
-              enabled: !groupAllEnabled,
-            }),
-          onRename: (next: string) =>
-            regroup.mutate({
-              ids: groupMembers.map((a) => a.id),
-              group: next,
-              toast: `Renamed to "${next}"`,
-            }),
-          onDeleteGroup: () => {
-            const count = groupMembers.length;
-            // Nothing to decide about an empty group; just refresh it away.
-            if (count === 0) return void refresh();
-            setDeletingGroup({ name: groupName, count });
-          },
-        }
-      : undefined;
+  const groupActionsFor = (name: string): LibraryGroupActions => {
+    const groupMembers = collectionAutomations(automations, `group:${name}`);
+    const allEnabled =
+      groupMembers.length > 0 && groupMembers.every((a) => a.enabled === true || a.enabled === 1);
+    return {
+      allEnabled,
+      onBulkToggle: () =>
+        bulkToggle.mutate({ ids: groupMembers.map((a) => a.id), enabled: !allEnabled }),
+      onRename: (next: string) =>
+        regroup.mutate({
+          ids: groupMembers.map((a) => a.id),
+          group: next,
+          toast: `Renamed to "${next}"`,
+        }),
+      onDeleteGroup: () => {
+        const count = groupMembers.length;
+        // Nothing to decide about an empty group; just refresh it away.
+        if (count === 0) return void refresh();
+        setDeletingGroup({ name, count });
+      },
+    };
+  };
+
+  const showHistory = (a: Automation) =>
+    // Body-attached modal, so unlike the builder it needs no shell handoff.
+    window.showAutomationHistory?.(a.id, a.name, a.action_type ?? '');
 
   const cardHandlers = {
-    // Every card needs to know the side is paused, or it goes on advertising
+    // Every row needs to know the side is paused, or it goes on advertising
     // countdowns and "Listening" for runs the engine is skipping.
     paused: !masterOn,
     onToggle: (a: Automation) => toggle.mutate(a),
@@ -318,11 +399,9 @@ export function AutomationsPage() {
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
     onEdit: (a: Automation) => openBuilder(a.id),
-    // The cadence control on the card face edits the server's copy directly.
+    // The When block on an opened row edits the server's copy directly.
     onRefresh: () => void refresh(),
-    // Body-attached modal, so unlike the builder it needs no shell handoff.
-    onShowHistory: (a: Automation) =>
-      window.showAutomationHistory?.(a.id, a.name, a.action_type ?? ''),
+    onShowHistory: showHistory,
     progressFor: (id: number) => progress[id],
     blockLabel,
     onAssignGroup: (a: Automation, event: React.MouseEvent) => {
@@ -338,66 +417,109 @@ export function AutomationsPage() {
   const cardDragProps = (a: Automation) =>
     dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1);
 
+  const pills: { key: typeof place; label: string; count?: number; go: () => void }[] = [
+    { key: 'overview', label: 'Overview', go: goOverview },
+    { key: 'all', label: 'All automations', count: automations.length, go: () => goLens('all') },
+    { key: 'activity', label: 'Activity', go: goActivity },
+    ...(showGuides ? [{ key: 'guides' as const, label: 'Guides', go: goGuides }] : []),
+  ];
+
+  const armed = automations.filter((a) => a.enabled === true || a.enabled === 1).length;
+
   return (
     <div className="page-shell automx">
-      <AutomationsSidebar
-        collections={collections}
-        automations={automations}
-        active={inLibrary ? activeNav : 'overview'}
-        onOverview={goOverview}
-        onSelect={goCollection}
-        query={inLibrary ? search.q : ''}
-        onQuery={onSidebarSearch}
-        masterOn={masterOn}
-        masterPending={master.isPending}
-        onMasterToggle={() => master.mutate(!masterOn)}
-        onNew={() => openBuilder()}
-        showGuides={showGuides}
-        dnd={{ zoneProps: dnd.zoneProps, overKey: dnd.overKey, dragging: dnd.dragging }}
-      />
+      <div className="automx-page">
+        <header className="automx-head">
+          <div className="automx-head-main">
+            <h1>Automations</h1>
+            <HeadStatus
+              automations={automations}
+              armed={armed}
+              paused={!masterOn}
+              attention={attention.length}
+            />
+          </div>
+          <div className="automx-head-acts">
+            <button
+              type="button"
+              className={`automx-cap automx-master${masterOn ? ' on' : ''}`}
+              disabled={master.isPending}
+              aria-pressed={masterOn}
+              onClick={() => master.mutate(!masterOn)}
+              title={
+                masterOn
+                  ? 'Automations are live. Click to pause every scheduled and event run on this side. Individual switches keep their state, and manual Run still works.'
+                  : 'Automations are paused: nothing runs on a schedule or event. Individual switches keep their state, and manual Run still works.'
+              }
+            >
+              <span className="automx-master-sw" aria-hidden="true" />
+              <span className="automx-master-label">{masterOn ? 'Automations on' : 'Paused'}</span>
+            </button>
+            <button
+              type="button"
+              className="automx-cap automx-cap-primary automx-new-btn"
+              onClick={() => openBuilder()}
+            >
+              New automation
+            </button>
+          </div>
+        </header>
 
-      <main className="automx-main">
-        {/* Keyed so the view crossfades on every navigation, not just the
+        <PillBar pills={pills} active={place} />
+
+        {/* Keyed so the view settles in on every navigation, not just the
             first paint. */}
-        <div className="automx-view" key={inLibrary ? `library:${activeNav}` : 'overview'}>
-          {!inLibrary ? (
+        <div className="automx-view" key={place}>
+          {place === 'overview' ? (
             <AutomationsOverview
               automations={automations}
               paused={!masterOn}
               blockLabel={blockLabel}
+              recent={recent}
               onRun={(a) => run.mutate(a)}
               onEdit={(a) => openBuilder(a.id)}
-              onReviewAttention={() => goCollection('attention')}
+              onReviewAttention={() => goLens('attention')}
               onFind={onFind}
               onResume={() => master.mutate(true)}
             />
-          ) : activeNav === 'guides' ? (
+          ) : place === 'guides' ? (
             <div className="automx-guides">
               <AutomationHub />
             </div>
+          ) : place === 'activity' ? (
+            <AutomationsActivity
+              activity={activityQuery.data}
+              loading={activityQuery.isPending}
+              automations={automations}
+              onShowHistory={showHistory}
+            />
           ) : (
             <AutomationsLibrary
-              def={collections.find((c) => c.key === activeNav) ?? collections[0]}
-              members={members}
-              visible={visible}
+              lenses={lenses}
+              active={activeNav}
+              onLens={goLens}
+              sections={librarySectionRows}
+              total={automations.length}
+              lensTotal={members.length}
               filtering={filtering}
               search={search}
               setSearch={setSearch}
               filterOptions={options}
               cardDragProps={cardDragProps}
               isCardDragging={dnd.isDraggingCard}
-              groupActions={groupActions}
+              groupActionsFor={groupActionsFor}
+              dnd={{ zoneProps: dnd.zoneProps, overKey: dnd.overKey, dragging: dnd.dragging }}
               onNew={() => openBuilder()}
-              onClearFilters={() => setSearch({ q: '', trigger: '', action: '' })}
+              onClearFilters={() => setSearch(cleared)}
               {...cardHandlers}
             />
           )}
         </div>
-      </main>
+      </div>
 
       {groupMenu ? (
         <GroupDropdown
-          groups={collections.filter((c) => c.kind === 'group').map((c) => c.groupName as string)}
+          groups={sections.filter((c) => c.kind === 'group').map((c) => c.groupName as string)}
           currentGroup={groupMenu.current}
           anchor={groupMenu.anchor}
           onClose={() => setGroupMenu(null)}
@@ -416,6 +538,80 @@ export function AutomationsPage() {
           onCancel={() => setDeletingGroup(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The line under the title: how many are on, and when the next one runs. Its
+ * own component so the page does not re-render every second for a countdown.
+ */
+function HeadStatus({
+  automations,
+  armed,
+  paused,
+  attention,
+}: {
+  automations: Automation[];
+  armed: number;
+  paused: boolean;
+  attention: number;
+}) {
+  useSecondTick();
+  const next = upcomingRuns(automations, paused)[0];
+  const off = automations.length - armed;
+  if (automations.length === 0) return <p className="automx-head-sub">Nothing set up yet</p>;
+  return (
+    <p className="automx-head-sub">
+      {armed} on{off ? ` · ${off} off` : ''}
+      {paused ? (
+        ' · paused'
+      ) : next?.next_run ? (
+        <>
+          {' · next run '}
+          <i>{timeUntil(next.next_run)}</i>
+        </>
+      ) : null}
+      {attention ? (
+        <b>{` · ${attention} ${attention === 1 ? 'needs' : 'need'} attention`}</b>
+      ) : null}
+    </p>
+  );
+}
+
+/** The four places, with a pill that slides under the one in view. */
+function PillBar<K extends string>({
+  pills,
+  active,
+}: {
+  pills: { key: K; label: string; count?: number; go: () => void }[];
+  active: K;
+}) {
+  const bar = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const host = bar.current;
+    const tab = host?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!host || !tab) return;
+    host.style.setProperty('--automx-pill-x', `${tab.offsetLeft}px`);
+    host.style.setProperty('--automx-pill-w', `${tab.offsetWidth}px`);
+  }, [active, pills.length]);
+
+  return (
+    <div className="automx-pills" role="tablist" aria-label="Automations" ref={bar}>
+      <span className="automx-pill-ink" aria-hidden="true" />
+      {pills.map((pill) => (
+        <button
+          key={pill.key}
+          type="button"
+          role="tab"
+          className="automx-pill"
+          aria-selected={pill.key === active}
+          onClick={pill.go}
+        >
+          {pill.label}
+          {pill.count !== undefined ? <small>{pill.count}</small> : null}
+        </button>
+      ))}
     </div>
   );
 }

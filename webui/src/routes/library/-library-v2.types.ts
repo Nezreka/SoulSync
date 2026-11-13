@@ -49,6 +49,8 @@ const libraryV2SearchObject = z.object({
     .catch(false),
   /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
   quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
+  /** #2046: artists whose albums are all reviewed and locked, or not yet */
+  review: z.enum(['', 'reviewed', 'unreviewed']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),
@@ -270,6 +272,9 @@ export interface LibraryV2AlbumSummary {
   spotify_id: string | null;
   /** the release card's musicbrainz link. */
   musicbrainz_id?: string | null;
+  /** #2055: what kind of release it is ('live', 'soundtrack', ...). An array,
+   *  even an empty one, is known; null means nobody has said yet. */
+  release_types?: string[] | null;
   /** the release's ids by provider: a release you don't have opens the
    *  download modal from the one matching the artist's source */
   provider_ids?: Record<string, string>;
@@ -284,6 +289,11 @@ export interface LibraryV2AlbumSummary {
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
   user_overrides: Record<string, unknown>;
+  /** the row that stands for this release on the artist page: itself, unless
+   *  the catalogue holds the release more than once (see -library-v2.releases) */
+  release_lead_id?: number;
+  /** how many rows of this release have files */
+  release_copies?: number;
 }
 
 export interface LibraryV2ArtistDetail {
@@ -684,6 +694,10 @@ export interface LibraryV2QualityProfile {
 }
 
 export interface LibraryV2ImportState {
+  /** False on an install created since the catalogue cutover: there is no
+   * older library to import, so the page offers no import (#2062). Absent
+   * from an older server, which reads as "may have one". */
+  has_legacy_source?: boolean;
   running: boolean;
   stage: string | null;
   current: number;

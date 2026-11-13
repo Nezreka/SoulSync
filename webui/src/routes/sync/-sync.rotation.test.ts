@@ -97,6 +97,13 @@ describe('rotationConfirmMessage', () => {
     expect(text).toMatch(/Dry run is on/);
   });
 
+  it('does not promise to keep played songs when plays are set not to (#2047)', () => {
+    const text = rotationConfirmMessage('Mix', { ...base, keep_played: false });
+    expect(text).toMatch(/favourited, rated or still have in another playlist is kept/);
+    expect(text).toMatch(/Played songs are not/);
+    expect(text).not.toMatch(/you played, favourited/);
+  });
+
   it('says the cleaner gets turned on, only when it is off', () => {
     expect(rotationConfirmMessage('Mix', { ...base, cleaner_enabled: false })).toMatch(
       /turns on the Expired Download Cleaner/,

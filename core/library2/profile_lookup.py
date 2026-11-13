@@ -143,7 +143,7 @@ def effective_quality_profile(conn, entity: str, entity_id: int) -> Dict[str, An
             "artist", row["artist_id"], row["artist_profile"], row["artist_explicit"]
         ),)
     else:
-        raise ValueError("Unknown Library-v2 profile entity")
+        raise ValueError("Unknown Library profile entity")
 
     return resolve_profile_cascade(levels, default_quality_profile_id(conn))
 
@@ -162,7 +162,7 @@ def assign_quality_profile(
     tables = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
     table = tables.get(normalized or "")
     if table is None:
-        raise ValueError("Unknown Library-v2 profile entity")
+        raise ValueError("Unknown Library profile entity")
 
     exists = conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (int(entity_id),)).fetchone()
     if exists is None:

@@ -1,7 +1,7 @@
 """ListenBrainz series detection for rolling mirrored playlists.
 
 ListenBrainz publishes a few playlist families that get a brand new
-MBID every period (week or year) — e.g. "Weekly Jams for Nezreka,
+MBID every period (day, week or year) — e.g. "Weekly Jams for Nezreka,
 week of 2026-05-25 Mon" gets a fresh row each Monday, the previous
 Monday's row rotates out of the cache after ~25 weeks. Auto-syncing
 the per-period MBID is useless because the underlying ListenBrainz
@@ -53,6 +53,18 @@ _SERIES_PATTERNS = [
         "canonical_name": "ListenBrainz Weekly Exploration",
         "source": "listenbrainz",
         "like_format": "Weekly Exploration for {user}, week of %",
+    },
+    {
+        # #2076: a new playlist and a new MBID every day, and yesterday's is
+        # deleted when today's is made, so a mirror of one day points at
+        # nothing by the next run. the date is part of the match: a username
+        # may hold a comma, and "Daily Jams for X" with no date is not ours
+        "regex": re.compile(r"^Daily Jams for (?P<user>.+?), \d{4}-\d{2}-\d{2}\b"),
+        "series_format": "lb_daily_jams_{user}",
+        "canonical_name": "ListenBrainz Daily Jams",
+        "source": "listenbrainz",
+        # the ISO date sorts as text, so the newest title is the newest day
+        "like_format": "Daily Jams for {user}, %",
     },
     {
         "regex": re.compile(r"^Top Discoveries of (?P<year>\d{4}) for (?P<user>.+)$"),

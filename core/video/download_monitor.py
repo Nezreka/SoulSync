@@ -417,10 +417,13 @@ def _make_organizer(db):
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
         dl = _with_episode_title(db, dl)
+        owned_dir = _owned_library_dir(db, dl, settings)
+        ids = template_ids(db, dl, settings)
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, library_dir=_owned_library_dir(db, dl, settings),
+                           settings=settings, library_dir=owned_dir,
                            expected_duration_sec=_expected_duration_sec(db, dl),
-                           ids=template_ids(db, dl, settings))
+                           ids=ids,
+                           series_name=_series_name(db, dl, settings, ids, owned_dir))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -1337,6 +1340,25 @@ def _wishlist_scope(db, dl, kind, tmdb_id) -> dict:
     the title's own when the title has a copy wanted elsewhere. {} (every
     row, as before) otherwise and for episodes."""
     return _copy_scope(db, dl, kind, tmdb_id)
+
+
+def _series_name(db, dl, settings, ids, owned_dir):
+    """What a show the library does not own yet is filed as, when the folder
+    its title renders to is already another show's (#2052). None = the title."""
+    if owned_dir:
+        return None
+    try:
+        from core.video.show_folder import series_folder_name
+        kind, tmdb_id, _sn, _en, ctx = _wishlist_ids(db, dl)
+        if kind != "episode":
+            return None
+        return series_folder_name(
+            db, settings, tmdb_id=tmdb_id, title=ctx.get("title") or dl.get("title"),
+            year=ctx.get("year") or (ids or {}).get("year") or dl.get("year"),
+            root=dl.get("target_dir"), tmdb_of=lambda row: _wishlist_ids(db, row)[1])
+    except Exception:   # noqa: BLE001 - naming help must never block an import
+        logger.debug("series folder check failed", exc_info=True)
+        return None
 
 
 def _owned_library_dir(db, dl, settings=None):

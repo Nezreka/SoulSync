@@ -28,6 +28,13 @@ import type { HeaderPill, HeaderPillId } from '../-dash.header';
 import { useDashboardHeader } from '../-dash.header';
 import { countBusyWorkers, greetingForHour, heroNumbers } from '../-dash.hello';
 import { lastDbStats, subscribeDbStats } from '../-dash.library';
+import {
+  loadTilePictures,
+  type TilePicture,
+  useHeroArt,
+  useTileFacts,
+  useTilePictures,
+} from '../-dash.room';
 
 interface OrbChrome {
   id: HeaderPillId;
@@ -558,7 +565,11 @@ function HeroIntro({ library }: { library?: ReactNode }) {
           {profileName ? (
             <>
               <span className="hello-greet-lead">{lead}, </span>
-              <span className="hello-greet-name">
+              {/* --name-len sizes the name to fit a phone on one line */}
+              <span
+                className="hello-greet-name"
+                style={{ '--name-len': profileName.length + (question ? 1 : 0) } as CSSProperties}
+              >
                 {profileName}
                 {question ? '?' : null}
               </span>
@@ -637,6 +648,15 @@ function OrbStage({ header }: { header: DashboardHeaderState }) {
 
 type DashboardHeaderState = ReturnType<typeof useDashboardHeader>;
 
+/** The hero is lit by the last song played: its cover, blurred, behind the
+ *  greeting. Nothing until there is one, and the stylesheet drops it under
+ *  Reduce effects and Max performance. Decorative, so hidden from readers. */
+function HeroBackdrop() {
+  const art = useHeroArt();
+  if (!art) return null;
+  return <img className="room-backdrop" src={art} alt="" aria-hidden="true" />;
+}
+
 /** The hero. The page owns the header hook (its counts also feed the rail's
  * watchlist/wishlist tiles), so this is a view over that state. */
 export function DashboardHeaderView({
@@ -648,6 +668,7 @@ export function DashboardHeaderView({
 }) {
   return (
     <div className="dashboard-header dash-hero">
+      <HeroBackdrop />
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
@@ -663,6 +684,88 @@ export function DashboardHeader({ library }: { library?: ReactNode }) {
   return <DashboardHeaderView header={header} library={library} />;
 }
 
+/** A few of what a count tile counts: round faces for watched artists,
+ *  square sleeves for wished songs. Decorative: the count beside it is the
+ *  information. The slot stays when there are none, so the two tiles keep
+ *  the same height. */
+function TilePictures({ kind, pictures }: { kind: 'faces' | 'sleeves'; pictures: TilePicture[] }) {
+  return (
+    <span className={`room-tile-art room-tile-art--${kind}`} aria-hidden="true">
+      {pictures.map((picture, n) => (
+        <img
+          key={picture.image_url}
+          src={picture.image_url}
+          alt=""
+          loading="lazy"
+          style={{ '--n': n } as CSSProperties}
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** What a count is made of: a line per part that is not zero. */
+function TileFactRows({ rows }: { rows: Array<[number, string]> }) {
+  const shown = rows.filter(([n]) => n > 0);
+  if (!shown.length) return null;
+  return (
+    <span className="dash-tile-facts">
+      {shown.map(([n, label]) => (
+        <span className="dash-tile-fact" key={label}>
+          <b>{n.toLocaleString()}</b>
+          {label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** The newest thing a tile counts, with its cover. */
+function TileNewest({
+  lead,
+  title,
+  rest,
+  image,
+}: {
+  lead: string;
+  title: string;
+  rest: string;
+  image: string | null;
+}) {
+  return (
+    <span className="dash-tile-newest">
+      {image ? (
+        <img
+          src={image}
+          alt=""
+          loading="lazy"
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ) : null}
+      <span>
+        {lead} <b>{title}</b>
+        {rest}
+      </span>
+    </span>
+  );
+}
+
+/** "Nov 9" for a release date; nothing when it will not parse. */
+function shortDate(iso: string): string {
+  const day = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  return Number.isNaN(day.getTime())
+    ? ''
+    : day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const things = (n: number, one: string, many: string) =>
+  `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
 /** Watchlist + wishlist, as two quiet count tiles in the rail. The ids,
  * handlers and badges are the old header quick-nav's (the tour anchors
  * #watchlist-button, the wishlist keeps init.js's in-flight fast path). */
@@ -675,6 +778,18 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
         ? 'header-button wishlist-button wishlist-inactive dash-tile'
         : 'header-button wishlist-button wishlist-active dash-tile';
 
+  const faces = useTilePictures('faces');
+  const sleeves = useTilePictures('sleeves');
+  const facts = useTileFacts();
+  const newestRelease = facts.watchlist.newest;
+  const newestWish = facts.wishlist.newest;
+  const releaseDay = newestRelease ? shortDate(newestRelease.date) : '';
+  // asked for on mount, and again when either count moves: a new watch or
+  // wish is a new picture
+  useEffect(() => {
+    void loadTilePictures();
+  }, [watchlist.count, wishlistCount]);
+
   return (
     <div className="header-quick-nav dash-tiles">
       <button
@@ -683,15 +798,38 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
         title={watchlist.title}
         onClick={() => void window.navigateToPage?.('watchlist')}
       >
-        <span
-          className={watchlist.count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}
-          id="watchlist-badge"
-        >
-          {watchlist.count}
+        <span className="dash-tile-lead">
+          <TilePictures kind="faces" pictures={faces} />
+          <span
+            className={watchlist.count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}
+            id="watchlist-badge"
+          >
+            {watchlist.count}
+          </span>
+          <span className="hero-btn-label">Artists watched</span>
+          {watchlist.countdown ? (
+            <span className="dash-tile-sub">next scan in {watchlist.countdown}</span>
+          ) : null}
         </span>
-        <span className="hero-btn-label">Artists watched</span>
-        {watchlist.countdown ? (
-          <span className="dash-tile-sub">next scan in {watchlist.countdown}</span>
+        <TileFactRows
+          rows={[
+            [facts.watchlist.releasedMonth, 'released something this month'],
+            [
+              facts.watchlist.releasesMonth,
+              facts.watchlist.releasesMonth === 1
+                ? 'new release this month'
+                : 'new releases this month',
+            ],
+            [facts.watchlist.addedWeek, 'added to the watchlist this week'],
+          ]}
+        />
+        {newestRelease ? (
+          <TileNewest
+            lead="Newest release:"
+            title={newestRelease.album}
+            rest={`${newestRelease.artist ? ` by ${newestRelease.artist}` : ''}${releaseDay ? `, ${releaseDay}` : ''}`}
+            image={newestRelease.image_url}
+          />
         ) : null}
       </button>
       <button
@@ -705,15 +843,49 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
           else void window.navigateToPage?.('wishlist');
         }}
       >
-        <span
-          className={
-            wishlistCount && wishlistCount > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'
-          }
-          id="wishlist-badge"
-        >
-          {wishlistCount ?? 0}
+        <span className="dash-tile-lead">
+          <TilePictures kind="sleeves" pictures={sleeves} />
+          <span
+            className={
+              wishlistCount && wishlistCount > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'
+            }
+            id="wishlist-badge"
+          >
+            {wishlistCount ?? 0}
+          </span>
+          <span className="hero-btn-label">On your wishlist</span>
+          {wishlistCount && facts.wishlist.albums > 0 ? (
+            <span className="dash-tile-from">
+              from {things(facts.wishlist.albums, 'release', 'releases')}
+              {facts.wishlist.artists > 0
+                ? ` by ${things(facts.wishlist.artists, 'artist', 'artists')}`
+                : ''}
+            </span>
+          ) : null}
         </span>
-        <span className="hero-btn-label">On your wishlist</span>
+        {wishlistCount ? (
+          <TileFactRows
+            rows={[
+              [
+                facts.wishlist.kinds.album,
+                facts.wishlist.kinds.album === 1 ? 'album track' : 'album tracks',
+              ],
+              [
+                facts.wishlist.kinds.single,
+                facts.wishlist.kinds.single === 1 ? 'single' : 'singles',
+              ],
+              [facts.wishlist.kinds.ep, facts.wishlist.kinds.ep === 1 ? 'from an EP' : 'from EPs'],
+            ]}
+          />
+        ) : null}
+        {wishlistCount && newestWish ? (
+          <TileNewest
+            lead="Newest wish:"
+            title={newestWish.name}
+            rest={newestWish.artist ? ` by ${newestWish.artist}` : ''}
+            image={newestWish.image_url}
+          />
+        ) : null}
       </button>
     </div>
   );

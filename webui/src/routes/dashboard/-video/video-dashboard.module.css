@@ -95,9 +95,11 @@
   overflow: hidden;
   min-height: 210px;
   padding: 0;
-  border: 1px solid var(--white-a08);
+  border: 1px solid var(--white-a10);
   border-radius: var(--radius-xl);
-  background: var(--black-a30);
+  /* the same surface the board's cards sit on. black on a near-black page
+     made the two studios the one part of the dashboard you could miss */
+  background: var(--white-a03);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -120,8 +122,8 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: radial-gradient(110% 130% at 100% 0%, rgba(var(--studio-rgb), 0.22), transparent 62%);
-  opacity: 0.6;
+  background: radial-gradient(110% 130% at 100% 0%, rgba(var(--studio-rgb), 0.3), transparent 62%);
+  opacity: 0.85;
   transition: opacity var(--studio-dur) var(--studio-ease);
   content: '';
 }
@@ -498,93 +500,236 @@
 /* ── this week (rail) ───────────────────────────────────────────────────── */
 .week {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.weekFigure {
+.weekTop {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 18px;
 }
 
 .weekNum {
   color: var(--text-bright);
-  font-size: 34px;
+  font-size: 44px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  line-height: 1;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
 }
 
 .weekNum small {
   color: var(--white-a40);
   font-size: 20px;
   font-weight: 700;
-}
-
-.weekCaption {
-  color: var(--white-a50);
-  font-size: 12px;
-}
-
-.meter {
-  display: flex;
-  gap: 2px;
-  height: 8px;
-  overflow: hidden;
-  border-radius: var(--radius-xs);
-  background: var(--white-a05);
-}
-
-.meter i {
-  display: block;
-  flex-basis: 0;
-  background: var(--white-a30);
-}
-
-.meter i[data-state='owned'] {
-  background: var(--success);
-}
-
-.meter i:is([data-state='downloading'], [data-state='queued']) {
-  background: var(--info);
-}
-
-.meter i[data-state='wanted'] {
-  background: var(--wanted);
-}
-
-.meter i[data-state='failed'] {
-  background: var(--danger-light);
-}
-
-.meter i[data-state='missing'] {
-  background: var(--warning);
-}
-
-.meter i[data-state='unmatched'] {
-  background: var(--danger-soft);
+  letter-spacing: -0.02em;
 }
 
 .weekLine {
   margin: 0;
-  color: var(--white-a80);
-  font-size: 13px;
-  line-height: 1.45;
+  padding-bottom: 4px;
+  color: var(--white-a60);
+  font-size: 13.5px;
 }
 
 .weekLegend {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 14px;
+  gap: 4px 14px;
+  margin-left: auto;
+  padding-bottom: 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.weekLegend span::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: var(--radius-circle);
+  background: currentColor;
+  content: '';
+}
+
+.weekLegend [data-state='owned'],
+.dayBar [data-state='owned'] {
+  --state: var(--success);
+}
+
+.weekLegend [data-state='wanted'],
+.dayBar [data-state='wanted'] {
+  --state: var(--wanted);
+}
+
+.weekLegend [data-state='missing'],
+.dayBar [data-state='missing'] {
+  --state: var(--warning);
+}
+
+.weekLegend span {
+  color: var(--state);
+}
+
+/* seven days, each the width it is given: the posters and the type are sized
+   off the cell (cqw), so nothing is cut off in a narrow one */
+.days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--white-a03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  container-type: inline-size;
+}
+
+button.day {
+  cursor: pointer;
+  transition: background var(--dur-quick) ease;
+}
+
+button.day:hover {
+  background: var(--white-a06);
+}
+
+button.day:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.7);
+  outline-offset: 2px;
+}
+
+.dayToday {
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+
+.dayName {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--white-a60);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dayName small {
+  color: var(--white-a40);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* three posters overlap to fill the cell's width exactly: 3 x 38 - 2 x 7 = 100 */
+.dayPosters {
+  position: relative;
+  display: flex;
+  min-height: 57cqw;
+}
+
+.dayPosters img,
+.dayPosters i {
+  flex: 0 0 38cqw;
+  width: 38cqw;
+  aspect-ratio: 2 / 3;
+  margin-right: -7cqw;
+  border-radius: 6px;
+  background: var(--white-a08);
+  box-shadow: 0 6px 14px var(--black-a45);
+  object-fit: cover;
+}
+
+.dayPosters i {
+  display: grid;
+  place-items: center;
+  color: var(--white-a40);
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dayPosters em {
+  position: absolute;
+  right: 0;
+  bottom: 4px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--black-a65);
+  color: var(--text-bright);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.dayBar {
+  display: flex;
+  overflow: hidden;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--white-a08);
+}
+
+.dayBar u {
+  display: block;
+  flex-basis: 0;
+  background: var(--state);
+}
+
+.daySay {
+  overflow: hidden;
+  color: var(--white-a50);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daySay b {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+/* keeps its line when nothing is missing, so the seven cells stay level */
+.dayMiss {
+  min-height: 15px;
+  margin-top: -4px;
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.weekFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: auto;
 }
 
 .weekMeta {
   margin: 0;
-  color: var(--white-a45);
-  font-size: 12px;
-  line-height: 1.45;
+  color: var(--white-a40);
+  font-size: 12.5px;
 }
 
 .weekMeta:empty {
@@ -592,7 +737,7 @@
 }
 
 .weekAction {
-  align-self: flex-start;
+  flex: none;
   padding: 8px 16px;
   border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: var(--radius-pill);
@@ -614,9 +759,199 @@
   cursor: default;
 }
 
-/* an issues or findings tile only exists when something needs a human */
-.tileAttention {
-  border-color: rgba(var(--warning-rgb), 0.35);
+/* ── the two counts: what each is made of ── */
+.tileLead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 14px;
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: 38px auto minmax(24px, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--white-a60);
+  font-size: 12.5px;
+}
+
+.splitRow b {
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.splitRow i {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--white-a08);
+}
+
+.splitRow u {
+  display: block;
+  height: 100%;
+  background: rgba(var(--accent-rgb), 0.75);
+}
+
+.splitNote {
+  padding-left: 46px;
+  color: var(--white-a40);
+  font-size: 12px;
+}
+
+/* issues and findings: a line each, only when something needs a human */
+.tileAlerts {
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  border-top: 1px solid var(--white-a08);
+}
+
+.tileAlert {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 20px;
+  border: 0;
+  background: none;
+  color: var(--white-a60);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-quick) ease;
+}
+
+.tileAlert + .tileAlert {
+  border-left: 1px solid var(--white-a08);
+}
+
+.tileAlert:hover {
+  background: var(--white-a05);
+}
+
+.tileAlert b {
+  color: var(--warning);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+/* a narrow card (the column beside the week, or a phone): the two counts one
+   over the other, each with its number on the left and its parts on the right.
+   the card is the container (dashboard-premier.css), so this follows the room
+   it is given, not the screen */
+@container (max-width: 640px) {
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 22px;
+    width: 100%;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile + .tile {
+    border-top: 1px solid var(--white-a08);
+    border-left: 0;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    padding-block: 14px;
+  }
+
+  /* a smaller hand of posters: the number is beside its parts here, and
+     the card should be no taller than the week next to it */
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile.tile :global(.room-tile-art) {
+    --room-pic: 30px;
+    margin-bottom: 8px;
+  }
+
+  /* no posters yet: the slot gives its height back */
+  .tile :global(.room-tile-art):empty {
+    display: none;
+  }
+
+  .tileLead {
+    flex: 0 0 46%;
+  }
+
+  .split {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  .splitNote {
+    padding-left: 0;
+  }
+}
+
+/* the same layout in the column beside the week, however wide the screen
+   makes that column: stacked counts are always a number beside its parts,
+   never a tall tile with the parts under it */
+@container video-board (min-width: 1180px) {
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 22px;
+    width: 100%;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile + .tile {
+    border-top: 1px solid var(--white-a08);
+    border-left: 0;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    padding-block: 14px;
+  }
+
+  /* a smaller hand of posters: the number is beside its parts here, and
+     the card should be no taller than the week next to it */
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile.tile :global(.room-tile-art) {
+    --room-pic: 30px;
+    margin-bottom: 8px;
+  }
+
+  /* no posters yet: the slot gives its height back */
+  .tile :global(.room-tile-art):empty {
+    display: none;
+  }
+
+  .tileLead {
+    flex: 0 0 46%;
+  }
+
+  .split {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  .splitNote {
+    padding-left: 0;
+  }
+
+  .split {
+    max-width: 460px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -629,32 +964,53 @@
   }
 }
 
-/* phone: two to four counts side by side, not a full-width card each. the
-   music rules this beats sit at (1,3,0) (#dashboard-page .dash-tiles
-   .dash-tile.header-button), so each selector starts with the same id and
-   doubles a class to outrank them */
+/* beside Up next the two studios are one over the other, sharing the height.
+   the band is the container (dashboard-premier.css) */
+@container studios-band (max-width: 760px) {
+  .studios {
+    flex: 1;
+    grid-auto-rows: minmax(190px, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rings {
+    display: none;
+  }
+}
+
+/* phone: the week in two rows of days, four then three, with today twice as
+   wide so the second row is full. its posters are sized to half the cell, so
+   they match the ones beside it */
 @media (max-width: 460px) {
-  :global(#dashboard-page) .tiles.tiles[data-rail] {
-    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-    gap: 10px;
+  .days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
-    min-height: 0;
-    padding: 12px;
+  .dayToday {
+    grid-column: span 2;
   }
 
-  :global(#dashboard-page) .tiles[data-rail] .tileBadge.tileBadge {
-    font-size: 26px;
+  .dayToday .dayPosters {
+    min-height: 27cqw;
   }
 
-  /* a third of a phone is too narrow for "on your watchlist" on one line */
-  :global(#dashboard-page) .tiles[data-rail] .tileLabel.tileLabel {
-    overflow: visible;
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    line-height: 1.35;
-    text-overflow: clip;
-    white-space: normal;
+  .dayToday .dayPosters img,
+  .dayToday .dayPosters i {
+    flex-basis: 18cqw;
+    width: 18cqw;
+    margin-right: -3.3cqw;
+  }
+
+  .dayToday .dayPosters em {
+    right: auto;
+    left: 34cqw;
+  }
+
+  .weekLegend {
+    margin-left: 0;
+  }
+
+  .weekNum {
+    font-size: 36px;
   }
 }

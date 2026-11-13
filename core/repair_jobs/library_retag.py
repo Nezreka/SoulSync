@@ -81,7 +81,7 @@ class LibraryRetagJob(RepairJob):
     display_name = "Library Re-tag"
     description = "Finds files whose embedded tags are behind the library's metadata"
     help_text = (
-        "Compares the tags written in each audio file against what Library v2 "
+        "Compares the tags written in each audio file against what the Library "
         "holds for that track, and reports every field that differs.\n\n"
         "By default the scan creates findings. Auto apply must be explicitly enabled. "
         "Applying a finding writes the library's values "

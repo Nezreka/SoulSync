@@ -303,6 +303,46 @@ describe('SoulsyncDiscoveryTab', () => {
     expect(screen.queryByText(/daily_mix · 1/)).toBeNull();
   });
 
+  it('a playlist Auto-Sync already keeps up says so, though it was never imported', async () => {
+    responder = (url) => {
+      if (url.includes('/kinds')) return { success: true, kinds: [] };
+      if (url.includes('/api/automations'))
+        return [
+          {
+            id: 80,
+            enabled: 1,
+            action_type: 'personalized_pipeline',
+            action_config: { kinds: [{ kind: 'daily_mix', variant: '1' }], refresh_first: true },
+            trigger_type: 'schedule',
+            trigger_config: { interval: 8, unit: 'hours' },
+          },
+          {
+            id: 81,
+            enabled: 0,
+            action_type: 'personalized_pipeline',
+            action_config: { kinds: [{ kind: 'daily_mix', variant: '2' }] },
+            trigger_type: 'schedule',
+            trigger_config: { interval: 8, unit: 'hours' },
+          },
+        ];
+      return {
+        success: true,
+        playlists: [
+          { kind: 'daily_mix', variant: '1', name: 'Daily Mix 1', track_count: 40 },
+          { kind: 'daily_mix', variant: '2', name: 'Daily Mix 2', track_count: 40 },
+        ],
+      };
+    };
+    stubFetch();
+    renderTab(<SoulsyncDiscoveryTab />);
+    await waitFor(() => expect(screen.getByText('Auto-Sync, every 8h')).toBeInTheDocument());
+    const scheduled = document.getElementById('soulsync-discovery-sync-card-ssd_daily_mix_1');
+    expect(scheduled?.textContent).toContain('Auto-Sync, every 8h');
+    // a switched-off schedule keeps nothing up
+    const idle = document.getElementById('soulsync-discovery-sync-card-ssd_daily_mix_2');
+    expect(idle?.textContent).not.toContain('Auto-Sync');
+  });
+
   it('import: generator POST → mirror POST with inline matches → land, card shows its count', async () => {
     responder = (url) => {
       if (url.includes('/kinds')) return { success: true, kinds: [] };

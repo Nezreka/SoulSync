@@ -124,7 +124,7 @@ If ListenBrainz is configured in Settings, **+ Add playlist** opens a ListenBrai
 - **Collaborative** — playlists shared with you by other users
 - **Created For You** — auto-generated playlists based on your listening history
 
-Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A weekly series (Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any week files it under the series, and refreshing it picks up the newest week. **Last.fm Radio** works the same way.
+Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A rolling series (Daily Jams, Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any day or week files it under the series, and refreshing it picks up the newest one. **Last.fm Radio** works the same way.
 
 ListenBrainz tracks are matched against Spotify/iTunes using a **4-strategy search**: direct match, swapped artist/title, album-based lookup, and extended fuzzy search. Discovered tracks sync to your library like any other playlist.
 `
@@ -173,7 +173,7 @@ Opening a chart, top 10 or release list imports it into SoulSync and lands you o
 Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**, or your playlists from a **NewPipe backup**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
 
 - **CSV/TSV** — auto-detects columns; map Artist, Title, and Album from dropdowns
-- **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export
+- **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Players disagree on the order of an \`#EXTINF\` line: most write Artist - Title, iTunes writes Title - Artist. SoulSync works out which from the file paths and shows it above the preview as **Lines read as**, where you can turn it round. Round-trips with SoulSync's own M3U export
 - **Text files** — one track per line; choose Artist–Title or Title–Artist order and separator (dash, tab, pipe, etc.)
 - **NewPipe backup** — the ZIP from NewPipe's *Settings → Backup and restore → Export* (or the \`newpipe.db\` inside it). Every local playlist is listed; tick the ones you want and each becomes its own mirrored playlist. Importing a newer backup later **updates** those mirrors instead of adding copies. Bookmarked YouTube playlists are only a link in the backup, so add those from the YouTube tab
 - Preview parsed tracks before importing
@@ -212,7 +212,7 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 
 ## Server playlists
 
-The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export.
+The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export. When two source tracks match the same song in your library (a playlist that lists a song twice, or its album and single cuts), the server holds it once, so its count is lower than the source's with nothing missing: those rows are marked **Same song as #N**, and the **Same song** pill shows only them.
 
 On Plex, an admin also gets **Tag in Plex**: it adds a mood (the playlist's name, or one you type) to every song on the playlist, in Plex only, never in your files. Then make a Plex smart playlist on *Mood is <tag>* and add rules on top, like dropping songs rated under three stars and adding ones rated three and up.
 
@@ -240,6 +240,7 @@ Some playlists change on their own: a weekly chart, a discovery mix, a Beatport 
 - If SoulSync can't tell (the play count is unknown, the playlist's track list is empty), the song is kept
 - The Settings row shows what it will do before you turn it on: how many downloaded songs have left, how many will be removed, and why the rest stay
 - It runs through the **Expired Download Cleaner** on the Tools page, which turns on with the first rotating playlist. **Dry run** is on by default, so removals show up as findings for you to approve. Turn dry run off there to have files deleted automatically
+- **Rotating keep played** in the cleaner's settings decides whether listening keeps a song. It is on by default. Turn it off and a song that left the playlist is removed however often you played it. Favourites, ratings and other playlists still keep it
 - **Rotating playlist wait** in the cleaner's settings is how long a song must be gone before it is removed. The default is one day, so a sync that came back short can't cost you files
 - Works on mirrored playlists and on **My Playlists**, where removing a song by hand counts as leaving. Request lists and Liked Songs can't be rotating
 - Use **Reconcile** or **Replace** sync mode with Rotating. **Append only** keeps every song in the server playlist, and a song in a server playlist is kept while curation signals are on

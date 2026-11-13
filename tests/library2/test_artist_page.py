@@ -160,3 +160,53 @@ def test_appears_on_never_loads_the_artists_own_releases(tmp_path, monkeypatch):
                             lambda c, album_id, *a, **k: loaded.append(album_id) or real(c, album_id, *a, **k))
         result = artist_page.appears_on_payload(conn, host)
     assert result['albums'] == [] and loaded == []
+
+
+def test_a_release_held_three_ways_is_one_release_on_the_page(tmp_path):
+    # bbno$ on the live library: a stray track filed as its own album, the
+    # complete album, and the provider's entry for it. three rows, one album
+    from core.library2.queries import get_artist
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    group = 'e9c40725-3fc7-4ae1-a112-4f0ca7a64a7b'
+    with db._get_connection() as conn:
+        aid = lib2_seed.artist(conn, 'bbno$')
+
+        def album(expected, origin='library', monitored=0):
+            album_id = conn.execute(
+                "INSERT INTO lib2_albums(primary_artist_id, title, album_type, year, origin, "
+                "monitored, expected_track_count, musicbrainz_release_group_id) "
+                "VALUES(?, 'bbno$', 'album', 2025, ?, ?, ?, ?)",
+                (aid, origin, monitored, expected, group)).lastrowid
+            conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+                         "VALUES(?,?, 'primary')", (album_id, aid))
+            return album_id
+
+        def song(album_id, number):
+            track_id = conn.execute(
+                "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?,?,?)",
+                (album_id, f'song {number}', number)).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                         (track_id, f'/m/{album_id}/{number}.flac'))
+
+        stray, full, entry = album(22), album(3), album(3, origin='discography', monitored=1)
+        song(stray, 2)
+        for number in (1, 2, 3):
+            song(full, number)
+        lib2_seed.track(conn, 'bbno$', 'eat ya veggies', 'edamame')
+        missing = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type, year, origin) "
+            "VALUES(?, 'recess', 'album', 2019, 'discography')", (aid,)).lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) "
+                     "VALUES(?,?, 'primary')", (missing, aid))
+        conn.commit()
+        result = get_artist(conn, aid)
+
+    by_id = {a['id']: a for a in result['albums']}
+    # every row is still there: My Library shows each owned copy
+    assert {stray, full, entry, missing} <= set(by_id)
+    for album_id in (stray, full, entry):
+        assert by_id[album_id]['release_lead_id'] == full
+        assert by_id[album_id]['release_copies'] == 2
+    assert by_id[missing]['release_lead_id'] == missing
+    # the entry behind the owned copies is not a release left to discover
+    assert result['discography_count'] == 1

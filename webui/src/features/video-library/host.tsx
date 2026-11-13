@@ -9,11 +9,20 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import type { TitleKind } from './types';
 
-import { LibraryTab } from './library-tab';
+import { EpisodeFiles } from './episode-files';
+import { LibraryTab, type PageSlots } from './library-tab';
 
 export interface VideoLibraryTabApi {
-  mount: (el: HTMLElement, opts: { kind: TitleKind; id: number }) => void;
+  mount: (
+    el: HTMLElement,
+    opts: { kind: TitleKind; id: number; heroSlot?: HTMLElement | null; slots?: PageSlots | null },
+  ) => void;
   unmount: (el: HTMLElement) => void;
+  /** one episode's file cards, into the page's own episode list */
+  mountEpisode: (
+    el: HTMLElement,
+    opts: { showId: number; season: number; episodeId: number },
+  ) => void;
 }
 
 declare global {
@@ -25,14 +34,38 @@ declare global {
 const roots = new WeakMap<HTMLElement, Root>();
 
 export const videoLibraryTab: VideoLibraryTabApi = {
-  mount(el, { kind, id }) {
+  mountEpisode(el, { showId, season, episodeId }) {
+    if (!el || ![showId, season, episodeId].every((n) => Number.isFinite(Number(n)))) return;
+    let root = roots.get(el);
+    if (!root) {
+      root = createRoot(el);
+      roots.set(el, root);
+    }
+    root.render(
+      <EpisodeFiles
+        key={`${showId}:${season}:${episodeId}`}
+        showId={Number(showId)}
+        season={Number(season)}
+        episodeId={Number(episodeId)}
+      />,
+    );
+  },
+  mount(el, { kind, id, heroSlot, slots }) {
     if (!el || (kind !== 'movie' && kind !== 'show') || !Number.isFinite(Number(id))) return;
     let root = roots.get(el);
     if (!root) {
       root = createRoot(el);
       roots.set(el, root);
     }
-    root.render(<LibraryTab key={`${kind}:${id}`} kind={kind} id={Number(id)} />);
+    root.render(
+      <LibraryTab
+        key={`${kind}:${id}`}
+        kind={kind}
+        id={Number(id)}
+        heroSlot={heroSlot ?? null}
+        slots={slots ?? null}
+      />,
+    );
   },
   unmount(el) {
     const root = roots.get(el);

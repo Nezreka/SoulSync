@@ -180,6 +180,8 @@ export function VideoLibraryScanCard() {
   return (
     <ToolCard
       id="video-library-scan-card"
+      icon="film"
+      feature
       title={server ? `${server} Library Scan` : 'Library Scan'}
       helpTool="video-scan"
       info={`Last full scan: ${lastScan}`}
@@ -310,6 +312,7 @@ export function VideoServerScanCard() {
   return (
     <ToolCard
       id="video-server-scan-card"
+      icon="server"
       title={server ? `${server} Server Scan` : 'Server Scan'}
       helpTool="video-server-scan"
       info="Tell the media server to scan its folders for newly-downloaded movies and episodes, then a Library Scan pulls them into SoulSync."
@@ -406,6 +409,7 @@ export function VideoBackupsCard() {
   return (
     <ToolCard
       id="video-backups-card"
+      icon="backup"
       title="Backups"
       helpTool="video-backups"
       info="Verified snapshots of the video database (wishlist, watchlist, history, settings). The nightly automation keeps a rolling set. Restore stages a swap for the next restart, and your current database is set aside, never deleted."
@@ -539,6 +543,7 @@ export function VideoMassRenameCard() {
   return (
     <ToolCard
       id="video-rename-card"
+      icon="rename"
       title="Mass Rename"
       helpTool="video-rename"
       info="Re-render every file name to your current naming templates (Settings → Organization). Preview first: nothing moves until you apply. Subtitles and sidecars travel with their file, and the server re-adopts the names on its next scan."
@@ -620,6 +625,7 @@ export function VideoStudioCards() {
     <>
       <ToolCard
         id="video-overlay-studio-card"
+        icon="image"
         title="Overlay Studio"
         helpTool="video-overlay-studio"
         variant="launcher"
@@ -632,6 +638,7 @@ export function VideoStudioCards() {
       />
       <ToolCard
         id="video-collection-studio-card"
+        icon="grid"
         title="Collection Studio"
         helpTool="video-collection-studio"
         variant="launcher"

@@ -82,6 +82,8 @@ class AcoustIDScannerJob(RepairJob):
         '• Delete — remove the wrong file entirely\n\n'
         'The job processes tracks in batches with checkpointing so it resumes '
         'where it left off across runs. Requires an AcoustID API key (Settings).\n\n'
+        'With Enable Download Verification turned off in Settings, the scheduled run is '
+        'skipped. Run Now still scans, so you can check your library when you choose.\n\n'
         'Settings:\n'
         '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0–1.0)\n'
         '- Title Similarity: How closely the identified title must match\n'
@@ -133,7 +135,26 @@ class AcoustIDScannerJob(RepairJob):
         # integration, a missing key or no chromaprint is a property of the RUN,
         # not a verdict about a file, so it belongs here, once, as a refusal to
         # start.
-        probe_available = getattr(acoustid_client, 'is_available', None)
+        #
+        # "Enable Download Verification" is about new downloads. It used to
+        # gate this job too, so turning it off made the scan impossible, which
+        # is the opposite of what someone who wants to check on their own time
+        # asked for (#2042). A run started by hand scans whatever the setting
+        # says. The schedule still follows it: nobody who turned verification
+        # off should find their library being fingerprinted every night.
+        manual = bool(getattr(context, 'manual', False))
+        verifying = getattr(acoustid_client, 'enabled', True)
+        if not manual and verifying is False:
+            logger.info("AcoustID scheduled scan skipped: download verification is off")
+            if context.report_progress:
+                context.report_progress(
+                    log_line='Not scanned: download verification is off in Settings. '
+                             'Run this job by hand to scan anyway.',
+                    log_type='info')
+            return result
+        probe_available = getattr(acoustid_client, 'can_fingerprint', None) if manual else None
+        if not callable(probe_available):
+            probe_available = getattr(acoustid_client, 'is_available', None)
         if callable(probe_available):
             try:
                 available, reason = probe_available()
@@ -444,6 +465,8 @@ class AcoustIDScannerJob(RepairJob):
             verdict, message = verifier.verify_audio_file(
                 fpath, expected['title'], expected_artist, probe,
                 min_score=fp_threshold,
+                # a run started by hand scans with verification off (#2042)
+                require_enabled=not bool(getattr(context, 'manual', False)),
             )
         except Exception as e:
             logger.debug("Fingerprint failed for %s: %s", fname, e)

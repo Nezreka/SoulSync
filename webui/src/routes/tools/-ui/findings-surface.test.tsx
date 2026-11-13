@@ -267,6 +267,63 @@ describe('the health hero', () => {
     expect(bodyOf('/bulk-fix-start')).toEqual({ safe_only: true });
   });
 
+  it('asks first, naming every kind it will fix and what a tag fix writes', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'library_retag', pending: 1200 }),
+          group({ finding_type: 'missing_cover_art', pending: 10 }),
+          group({ finding_type: 'orphan_file', pending: 5 }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'library_retag',
+            label: 'Library Re-tag',
+            verb: 'Apply Tags',
+            destructive: false,
+          }),
+          typeInfo({
+            type: 'missing_cover_art',
+            label: 'Missing Cover Art',
+            verb: 'Apply Art',
+            destructive: false,
+          }),
+          typeInfo({ type: 'orphan_file', label: 'Orphan Files', destructive: true }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 1210 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-health-fix-safe') as HTMLElement);
+    await flush();
+    const asked = confirmSpy.mock.calls.at(-1)?.[0];
+    expect(asked.title).toBe('Fix all safe findings?');
+    expect(asked.confirmText).toBe('Fix 1,210');
+    expect(asked.message).toContain('1,200  Library Re-tag (Apply Tags)');
+    expect(asked.message).toContain('10  Missing Cover Art (Apply Art)');
+    expect(asked.message).not.toContain('Orphan Files');
+    expect(asked.message).toContain("writes into each file's tags");
+  });
+
+  it('a no sends nothing', async () => {
+    confirmSpy.mockResolvedValue(false);
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'missing_cover_art', pending: 10 })] },
+      [TYPES]: { types: [typeInfo({ type: 'missing_cover_art', destructive: false })] },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-health-fix-safe') as HTMLElement);
+    await flush();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/bulk-fix-start'))).toBe(
+      false,
+    );
+  });
+
   it('disables Fix all safe when nothing is safe to fix', async () => {
     routes({
       [COUNTS]: { pending: 3 },
@@ -383,7 +440,7 @@ describe('cache health', () => {
 // ── The inbox ────────────────────────────────────────────────────────────────
 
 describe('the findings inbox', () => {
-  it('orders worst-first, with destructive types last inside a severity band', async () => {
+  it('orders worst-first: the section with the worst finding, then worst inside it', async () => {
     routes({
       [GROUPS]: {
         groups: [
@@ -408,9 +465,10 @@ describe('the findings inbox', () => {
     const order = [...document.querySelectorAll('.repair-inbox-group')].map((node) =>
       node.getAttribute('data-finding-type'),
     );
-    // metadata_gap (2 rows) beats orphan_file (9) inside the warning band
-    // because orphan_file moves files — the safe decision comes first.
-    expect(order).toEqual(['corrupt_audio', 'metadata_gap', 'orphan_file', 'missing_cover_art']);
+    // the section holding the broken file leads, then the safe one. inside
+    // a section it is worst first, which puts metadata_gap (warning) ahead
+    // of missing_cover_art (info).
+    expect(order).toEqual(['corrupt_audio', 'orphan_file', 'metadata_gap', 'missing_cover_art']);
   });
 
   it('shows the blurb and the served verb, and no fix button for an unfixable type', async () => {
@@ -1037,6 +1095,10 @@ describe('the finding list', () => {
     await flush();
 
     expect(document.querySelector('.repair-finding-type-badge')?.textContent).toBe('Orphan');
+    // the path, which job found it and when all wait in the opened row
+    expect(document.querySelector('.repair-finding-path')).toBeNull();
+    expect(document.querySelector('.repair-finding-meta')).toBeNull();
+    fireEvent.click(document.querySelector('.repair-finding-main') as Element);
     expect(document.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
     const meta = document.querySelector('.repair-finding-meta')?.textContent || '';
     // The job's DISPLAY name, matching the filter dropdown and the
@@ -2186,7 +2248,134 @@ function gridPairs(root: HTMLElement): Array<[string, string]> {
   return keys.map((key, index) => [key.textContent || '', values[index]?.textContent || '']);
 }
 
+/** the tag change table, as [tag, before, after] */
+function changeRows(root: HTMLElement): Array<[string, string, string]> {
+  return [...root.querySelectorAll('.tag-changes-row')].map((row) => [
+    row.querySelector('.tag-changes-tag')?.textContent || '',
+    row.querySelector('.tag-changes-before')?.textContent || '',
+    row.querySelector('.tag-changes-after')?.textContent || '',
+  ]);
+}
+
 describe('the detail renderer', () => {
+  it('a re-tag finding shows the tag in the file beside the one it would write', async () => {
+    const detail = await openDetail({
+      finding_type: 'library_retag',
+      details: {
+        validation: {
+          checks: {
+            year: 'mismatch',
+            total_discs: 'missing',
+            title: 'correct',
+            edition: 'unknown',
+          },
+          reference: { title: 'Song', artist_name: 'Band', album_title: 'LP' },
+        },
+      },
+      preview: [
+        { key: 'year', label: 'Year', before: '1999', after: '2026' },
+        { key: 'total_discs', label: 'Disc total', before: '', after: '2' },
+      ],
+    });
+    expect(changeRows(detail)).toEqual([
+      ['Year', '1999', '2026'],
+      ['Disc total', 'Empty', '2'],
+    ]);
+    // the table said the two flagged tags; the grid keeps only the rest
+    expect(gridPairs(detail)).toEqual([
+      ['Matching', 'Title'],
+      ['Could not check', 'Edition'],
+    ]);
+    // and the row itself names the change, not just the tag
+    expect(document.querySelector('.repair-finding-card')?.textContent).toContain(
+      'Year: 1999 → 2026',
+    );
+  });
+
+  it('a fixed re-tag finding shows what changed and undoes it after asking', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 1,
+          finding_type: 'library_retag',
+          status: 'resolved',
+          details: {
+            applied: {
+              at: '2026-11-10T10:00:00+00:00',
+              changes: [
+                {
+                  file_id: 4,
+                  path: '/m/a.flac',
+                  cover: 'added',
+                  fields: [{ key: 'genre', label: 'Genre', before: 'Dance', after: 'House' }],
+                },
+              ],
+            },
+          },
+        }),
+      ]),
+      '/api/repair/findings/1/undo': { success: true, kept: [] },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
+    const detail = document.querySelector('.repair-finding-detail-inner') as HTMLElement;
+    expect(changeRows(detail)).toEqual([['Genre', 'Dance', 'House']]);
+    expect(detail.textContent).toContain("The library's cover was embedded");
+
+    fireEvent.click(within(detail).getByText('Undo changes'));
+    await flush();
+    // it asks with the value going back, and says the cover stays
+    const asked = confirmSpy.mock.calls.at(-1)?.[0] as { message: string };
+    expect(asked.message).toContain('Genre: House → Dance');
+    expect(asked.message).toContain('cover that was embedded stays');
+    const undone = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.endsWith('/findings/1/undo'));
+    expect(undone).toHaveLength(1);
+  });
+
+  it('an error that says to use Re-identify opens it from the finding itself', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 1,
+          finding_type: 'library_retag',
+          entity_type: 'track',
+          entity_id: 'lib2:7',
+          last_error:
+            'More than one edition of this release is on record. Pick the release this track is from with Re-identify, then apply again.',
+        }),
+        finding({
+          id: 2,
+          finding_type: 'library_retag',
+          entity_type: 'track',
+          entity_id: 'lib2:8',
+          last_error: 'No source had this track',
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+    const cards = [...document.querySelectorAll('.repair-finding-card')] as HTMLElement[];
+    // the fix it names is right there, not on another page (#2043)
+    expect(within(cards[0]).getByRole('button', { name: 'Re-identify…' })).toBeTruthy();
+    // an error about something else gets no such button
+    expect(within(cards[1]).queryByRole('button', { name: 'Re-identify…' })).toBeNull();
+  });
+
+  it('an open finding offers no undo', async () => {
+    const detail = await openDetail({
+      finding_type: 'library_retag',
+      details: {
+        applied: {
+          changes: [{ path: '/m/a.flac', fields: [{ key: 'genre', before: 'a', after: 'b' }] }],
+        },
+      },
+    });
+    expect(within(detail).queryByText('Undo changes')).toBeNull();
+  });
+
   it('genre_cleanup spells out what stays and what goes', async () => {
     const detail = await openDetail({
       finding_type: 'genre_cleanup',
@@ -2255,7 +2444,7 @@ describe('the detail renderer', () => {
       },
     });
 
-    expect(gridPairs(detail)).toContainEqual(['New artist tag', 'A; B']);
+    expect(changeRows(detail)).toContainEqual(['Artist', 'A, B', 'A; B']);
     const chip = within(detail).getByTitle("Open A's page");
     fireEvent.click(chip);
     await flush();
@@ -2272,7 +2461,7 @@ describe('the detail renderer', () => {
       ['Folder', '/music/a'],
       ['Format', 'FLAC'],
       ['File Size', '2.0 MB'],
-      ['Full Path', '/music/a/b.flac'],
+      // the full path is under the panel already, once
     ]);
   });
 
@@ -2300,7 +2489,24 @@ describe('the detail renderer', () => {
     expect(bands[0]).toContain('good');
     expect(bands[1]).toContain('warn');
     expect(bands[2]).toContain('bad');
-    expect(gridPairs(detail)).toContainEqual(['Expected Title', '-']);
+    // no names on either side: no empty table
+    expect(detail.querySelector('.tag-changes')).toBeNull();
+  });
+
+  it('acoustid_mismatch puts the tagged name beside the one the audio matches', async () => {
+    const detail = await openDetail({
+      finding_type: 'acoustid_mismatch',
+      details: {
+        expected_title: 'Tagged',
+        expected_artist: 'Them',
+        acoustid_title: 'Real',
+        acoustid_artist: 'Us',
+      },
+    });
+    expect(changeRows(detail)).toEqual([
+      ['Title', 'Tagged', 'Real'],
+      ['Artist', 'Them', 'Us'],
+    ]);
   });
 
   it('fake_lossless draws the spectrum bar, and omits it without both numbers', async () => {
@@ -2466,7 +2672,7 @@ describe('the detail renderer', () => {
       '9 of 12 tracks (75%)',
     );
     expect(detail.textContent).toContain('#4 Gone');
-    expect(detail.textContent).toContain('Duration: 210s');
+    expect(detail.textContent).toContain('3:30');
   });
 
   it('missing_cover_art offers a separate apply per image', async () => {
@@ -2528,7 +2734,7 @@ describe('the detail renderer', () => {
       finding_type: 'track_number_mismatch',
       details: { current_track_num: 0, correct_track_num: 1, changes: ['track 0 → 1'] },
     });
-    expect(gridPairs(detail)).toContainEqual(['Current Track #', '0']);
+    expect(changeRows(detail)).toEqual([['Track number', '0', '1']]);
     expect(detail.textContent).toContain('track 0 → 1');
   });
 
@@ -2560,8 +2766,10 @@ describe('the detail renderer', () => {
       finding_type: 'metadata_gap',
       details: { artist: 'Band', found_fields: { genre: 'rock', year: 1994 } },
     });
-    expect(gridPairs(detail)).toContainEqual(['Found: genre', 'rock']);
-    expect(gridPairs(detail)).toContainEqual(['Found: year', '1994']);
+    expect(changeRows(detail)).toEqual([
+      ['Genre', 'Empty', 'rock'],
+      ['Year', 'Empty', '1994'],
+    ]);
   });
 
   it('an unknown type dumps its scalar keys and skips objects and thumb urls', async () => {
@@ -2569,10 +2777,7 @@ describe('the detail renderer', () => {
       finding_type: 'something_new',
       details: { odd_key: 'value', nested: { a: 1 }, album_thumb_url: 'http://x' },
     });
-    expect(gridPairs(detail)).toEqual([
-      ['Odd Key', 'value'],
-      ['File', '/music/a/b.flac'],
-    ]);
+    expect(gridPairs(detail)).toEqual([['Odd Key', 'value']]);
   });
 
   it('an unknown type with nothing to show says so', async () => {
@@ -2799,5 +3004,127 @@ describe('switching library in the header (third #1062 review G16-4)', () => {
     });
     await flush();
     expect(albumCalls()).toBeGreaterThan(before);
+  });
+});
+
+// ── Pictures and the tag-scan row ────────────────────────────────────────────
+
+describe('a finding row shows what it is about', () => {
+  it('draws the cover the server sent, and the track a tag-scan finding names', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          finding_type: 'library_retag',
+          title: 'Metadata issues',
+          description: 'genre: mismatch',
+          album_thumb_url: '/art/remixes.jpg',
+          details: {
+            validation: {
+              reference: {
+                title: 'Wolves',
+                artist_name: 'Crystal Castles',
+                album_title: 'Wolves EP',
+              },
+              checks: { genre: 'mismatch', title: 'correct' },
+            },
+          },
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art img')?.getAttribute('src')).toBe('/art/remixes.jpg');
+    expect(card.querySelector('.repair-finding-name')?.textContent).toBe('Wolves');
+    expect(card.querySelector('.repair-finding-sub')?.textContent).toBe(
+      'Crystal Castles · Wolves EP',
+    );
+    // what is wrong, as a sentence, not "genre: mismatch"
+    expect(card.querySelector('.repair-finding-desc')?.textContent).toBe(
+      'Genre in the file does not match the library.',
+    );
+    // what the button will do is said once the row is open
+    expect(card.querySelector('.repair-finding-fixline')).toBeNull();
+    fireEvent.click(card.querySelector('.repair-finding-main') as Element);
+    expect(card.querySelector('.repair-finding-fixline')?.textContent).toBe(
+      "Apply Tags writes the library's genre into the file. Nothing else in it changes.",
+    );
+    expect(card.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
+  });
+
+  it('a finding with no picture keeps the box', async () => {
+    routes({ [FINDINGS]: page([finding({ entity_type: 'file' })]) });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art.empty')).not.toBeNull();
+    expect(card.querySelector('.repair-art img')).toBeNull();
+  });
+});
+
+describe('one type open is the whole view', () => {
+  it('puts the library health away and brings it back with All findings', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 3 })] },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+    const overview = document.querySelector('.repair-findings-overview') as HTMLElement;
+    expect(overview.hidden).toBe(false);
+    expect(screen.getByRole('tab', { name: 'Flat list' })).not.toBeNull();
+
+    fireEvent.click(document.querySelector('.repair-inbox-head') as Element);
+    await flush();
+    expect(overview.hidden).toBe(true);
+    // which view of everything is not a question inside one type
+    expect(screen.queryByRole('tab', { name: 'Flat list' })).toBeNull();
+    expect(document.querySelector('.repair-findings-surface')?.classList.contains('focused')).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'All findings' }));
+    await flush();
+    expect(overview.hidden).toBe(false);
+    expect(document.querySelector('.repair-inbox-group.open')).toBeNull();
+  });
+});
+
+describe('the flat list', () => {
+  it('loads every finding without a search or an opened type', async () => {
+    // it sat on "Loading findings..." for good: the loader only ran for a
+    // search or an opened type
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 1 })] },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+    expect(document.querySelector('.repair-finding-card')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Flat list' }));
+    await waitFor(() => expect(document.querySelector('.repair-finding-card')).not.toBeNull());
+    expect(screen.queryByText('Loading findings...')).toBeNull();
+    const asked = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes(`${FINDINGS}?`));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.at(-1)).not.toContain('finding_type=');
+  });
+});
+
+describe('a fix that failed says so once', () => {
+  it('shows the reason under the row, with no second button for the same fix', async () => {
+    routes({ [FINDINGS]: page([finding({ last_error: 'No source had this track' })]) });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-finding-error-banner')?.textContent).toBe(
+      'Last try failedNo source had this track',
+    );
+    // the row's own fix button is the way to try again
+    expect(card.querySelectorAll('.repair-finding-btn.fix').length).toBe(1);
+    expect(within(card).queryByText(/Retry/)).toBeNull();
   });
 });

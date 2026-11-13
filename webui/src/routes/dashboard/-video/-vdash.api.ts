@@ -56,6 +56,56 @@ export function downloadsQuery() {
   });
 }
 
+/** a small poster: the proxy takes ?w=, a tmdb url has its size in the path */
+function tilePoster(url: string): string {
+  if (url.includes('/api/video/poster/')) return `${url}${url.includes('?') ? '&' : '?'}w=185`;
+  if (url.includes('image.tmdb.org')) return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w185/');
+  return url;
+}
+
+/** What a count is made of: its posters and its parts. */
+export interface TileFacts {
+  posters: string[];
+  /** watchlist: show / person / studio. wishlist: movie / episode / show */
+  counts: Record<string, number>;
+}
+
+/** What the two count tiles are made of: the newest shows on the watchlist
+ * and the newest movies on the wishlist as posters, and how each total splits
+ * (both lists answer their counts with any page). Extra, so a failed read is
+ * an empty answer and the tiles show their numbers alone. */
+export function tilePostersQuery() {
+  const posters = async (path: string): Promise<TileFacts> => {
+    try {
+      const data = await readJson<{
+        items?: { poster_url?: string | null }[];
+        counts?: Record<string, number>;
+      }>(apiClient.get(path, { searchParams: { sort: 'added', limit: 12 } }));
+      return {
+        posters: (data.items ?? [])
+          .map((item) => item.poster_url)
+          .filter((url): url is string => typeof url === 'string' && url.length > 0)
+          .slice(0, 5)
+          .map(tilePoster),
+        counts: data.counts ?? {},
+      };
+    } catch {
+      return { posters: [], counts: {} };
+    }
+  };
+  return queryOptions({
+    queryKey: [...VDASH_KEY, 'tile-posters'] as const,
+    queryFn: async () => {
+      const [watchlist, wishlist] = await Promise.all([
+        posters('video/watchlist?kind=show'),
+        posters('video/wishlist?kind=movie'),
+      ]);
+      return { watchlist, wishlist };
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function scanQuery() {
   return queryOptions({
     queryKey: [...VDASH_KEY, 'scan'] as const,

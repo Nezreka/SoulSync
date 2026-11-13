@@ -1064,3 +1064,181 @@ def test_a_wishlist_removal_never_reads_the_whole_catalogue(imported_conn):
     flat = [" ".join(q.split()) for q in seen]
     whole = [q for q in flat if "FROM lib2_tracks t JOIN lib2_albums" in q and "WHERE" not in q.upper()]
     assert whole == []
+
+
+# --- #2060: automatic upgrades, a few at a time and remembered ----------------
+
+
+def _below_target_library(conn):
+    """a 128k file under a 320k profile, and a wanted track with no file"""
+    profile_id = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy, fallback_enabled) "
+        "VALUES('MP3 320', '[{\"label\":\"MP3 320\",\"format\":\"mp3\",\"min_bitrate\":320}]', "
+        "'acceptable', 1)"
+    ).lastrowid
+    artist = _add_artist(conn, "Real McCoy", spotify_id="rm-a")
+    owned = _add_track(conn, artist, "Another Night", monitored=1,
+                       with_file=True, spotify_id="owned-128")
+    missing = _add_track(conn, artist, "Run Away", monitored=1,
+                         with_file=False, spotify_id="missing-sp")
+    conn.execute("UPDATE lib2_track_files SET format='mp3', bitrate=128 WHERE track_id=?", (owned,))
+    conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+        "WHERE id IN (?, ?)", (profile_id, owned, missing))
+    recompute_wanted(conn, track_ids=[owned, missing])
+    conn.commit()
+    return owned, missing
+
+
+def test_an_owned_track_below_its_target_is_never_readded_with_upgrades_off(imported_conn):
+    """the reported loop: every song just downloaded at 128k came back on the
+    wishlist each hour, was swept as already owned, and came back again"""
+    from core.library2.wishlist_mirror import upgrade_candidate_track_ids
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    # the premise: the profile does still count the 128k file as upgradable
+    assert owned in upgrade_candidate_track_ids(conn, profile_id=1, definite_only=True)
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1)
+
+    assert "owned-128" not in db.added
+    assert "missing-sp" in db.added   # the one with no file still comes back
+    assert stats["added"] == 1 and stats["upgrades_queued"] == 0
+
+
+def test_an_upgrade_is_asked_for_once_and_then_waits_its_turn(imported_conn):
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    first = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert first["upgrades_queued"] == 1 and db.added.count("owned-128") == 1
+
+    # the next hour, with the wish gone again (tried, nothing better): no loop
+    second = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert second["upgrades_queued"] == 0 and db.added.count("owned-128") == 1
+    assert second["upgrades_waiting"] == 1
+
+    # eight days on it is due again, and the wait after that is twice as long
+    conn.execute(
+        "UPDATE lib2_tracks SET upgrade_attempt=json_set(upgrade_attempt, '$.at', "
+        "datetime('now', '-8 days')) WHERE id=?", (owned,))
+    conn.commit()
+    third = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert third["upgrades_queued"] == 1 and db.added.count("owned-128") == 2
+    conn.execute(
+        "UPDATE lib2_tracks SET upgrade_attempt=json_set(upgrade_attempt, '$.at', "
+        "datetime('now', '-8 days')) WHERE id=?", (owned,))
+    conn.commit()
+    fourth = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert fourth["upgrades_queued"] == 0 and db.added.count("owned-128") == 2
+
+
+def test_upgrades_are_asked_for_a_few_at_a_time(imported_conn):
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    artist = conn.execute("SELECT id FROM lib2_artists WHERE name='Real McCoy'").fetchone()[0]
+    profile_id = conn.execute("SELECT quality_profile_id FROM lib2_tracks WHERE id=?",
+                              (owned,)).fetchone()[0]
+    more = [_add_track(conn, artist, f"Song {n}", monitored=1, with_file=True,
+                       spotify_id=f"more-{n}") for n in range(4)]
+    marks = ",".join("?" for _ in more)
+    conn.execute(f"UPDATE lib2_track_files SET format='mp3', bitrate=128 WHERE track_id IN ({marks})", more)
+    conn.execute(
+        f"UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+        f"WHERE id IN ({marks})", (profile_id, *more))
+    recompute_wanted(conn, track_ids=more)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    stats = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=2)
+    assert stats["upgrades_queued"] == 2 and stats["upgrades_waiting"] == 3
+    again = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=2)
+    # the next two, not the same two
+    assert again["upgrades_queued"] == 2
+    asked = [a for a in db.added if a == "owned-128" or str(a).startswith("more-")]
+    assert len(asked) == len(set(asked)) == 4
+
+
+def test_a_file_whose_quality_cannot_be_read_is_not_asked_for_unattended(imported_conn):
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    conn.execute("UPDATE lib2_track_files SET format=NULL, bitrate=NULL WHERE track_id=?", (owned,))
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert stats["upgrades_queued"] == 0 and "owned-128" not in db.added
+
+
+def _wishlist_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS wishlist_tracks(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, spotify_track_id TEXT,
+               source_type TEXT, source_info TEXT, profile_id INTEGER,
+               quality_profile_id INTEGER,
+               date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+
+def test_an_upgrade_search_that_found_nothing_steps_aside(imported_conn):
+    import json as _json
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    # the wish the attempt made, still on the list a day later, and one a
+    # person asked for (Enhance Quality) long after that attempt
+    _wishlist_table(conn)
+    info = _json.dumps({"source": "library_v2", "lib2_track_id": owned, "upgrade_check": True})
+    conn.execute(
+        "UPDATE lib2_tracks SET upgrade_attempt=json_set(upgrade_attempt, '$.at', "
+        "datetime('now', '-1 day')) WHERE id=?", (owned,))
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, profile_id, date_added) "
+        "VALUES('owned-128', 'album', ?, 1, datetime('now', '-1 day'))", (info,))
+    conn.commit()
+    stats = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert stats["upgrades_withdrawn"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM wishlist_tracks").fetchone()[0] == 0
+
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, source_type, source_info, profile_id) "
+        "VALUES('owned-128', 'album', ?, 1)", (info,))
+    conn.commit()
+    stats = reconcile_track_wishlist(db, profile_id=1, upgrades_per_run=5)
+    assert stats["upgrades_withdrawn"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM wishlist_tracks").fetchone()[0] == 1
+
+
+def test_the_owned_sweep_leaves_a_live_upgrade_wish_alone(imported_conn, monkeypatch):
+    """it removed every upgrade wish as "already in your library" before the
+    wish was tried: owning the file is the premise of the wish"""
+    from types import SimpleNamespace
+    from core.wishlist import library_match, processing
+    conn = imported_conn
+    owned, _missing = _below_target_library(conn)
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    upgrade = {"name": "Another Night", "artists": [{"name": "Real McCoy"}],
+               "spotify_track_id": "owned-128",
+               "source_info": {"source": "library_v2", "lib2_track_id": owned, "upgrade_check": True}}
+    plain = {"name": "Another Night", "artists": [{"name": "Real McCoy"}],
+             "spotify_track_id": "plain-1", "source_info": {"source": "playlist"}}
+    removed = []
+    service = SimpleNamespace(
+        get_wishlist_tracks_for_download=lambda profile_id: [upgrade, plain],
+        mark_track_download_result=lambda track_id, **kw: removed.append(track_id) or True)
+    monkeypatch.setattr(library_match, "find_owned_match",
+                        lambda *a, **k: (SimpleNamespace(file_path="/m/x.mp3"), 1.0, "Real McCoy"))
+    monkeypatch.setattr("core.library.manual_library_match.get_match_for_track",
+                        lambda *a, **k: None)
+    profiles = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
+
+    assert processing.remove_tracks_already_in_library(service, profiles, db, "plex") == 1
+    assert removed == ["plain-1"]
+
+    # once the file meets the profile the wish is an owned track like any other
+    conn.execute("UPDATE lib2_track_files SET bitrate=320 WHERE track_id=?", (owned,))
+    conn.commit()
+    removed.clear()
+    assert processing.remove_tracks_already_in_library(service, profiles, db, "plex") == 2
+    assert sorted(removed) == ["owned-128", "plain-1"]

@@ -51,7 +51,7 @@ _ALLOWED_WINDOW = {
     "window.VideoLibraryTab", "window.SoulSyncVideoDetail",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",
-    "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",
+    "window._vdpgAnyActive", "window._reduceEffectsActive",
     # standard DOM / browser APIs
     "window.location", "window.history", "window.matchMedia", "window.addEventListener",
     "window.removeEventListener", "window.innerWidth", "window.confirm",

@@ -164,7 +164,9 @@ describe('Library V2 artist detail — All Releases views', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
     fireEvent.click(screen.getByRole('button', { name: 'View Settings…' }));
-    // the dialog is the whole View Settings: give it time under a loaded run
+    // the dialog is the whole View Settings: give it time under a loaded run.
+    // the artist page's part is behind its pill
+    fireEvent.click(await screen.findByRole('tab', { name: /Artist page/ }, { timeout: 5000 }));
     const history = await screen.findByRole('checkbox', { name: 'History' }, { timeout: 5000 });
     expect(history).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Refresh & Scan' })).toBeChecked();
@@ -486,6 +488,68 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(albumsStats()).toBe('0/4'), { timeout: 10_000 });
   }, 30_000);
 
+  it('#2050: other sources are worked out against what this page lists, and never repeat it', async () => {
+    let asked = '';
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            // known on MusicBrainz only: there was no "+ Other sources" at all
+            provider_ids: { musicbrainz: 'mb-1' },
+            albums: [
+              album({
+                id: 1,
+                title: 'Dummy',
+                year: 1994,
+                release_date: '1994-08-22',
+                provider_ids: { deezer: 'dz-dummy' },
+              }),
+            ],
+            singles: [album(OWNED_SINGLE)],
+          }),
+        }),
+      ),
+      http.get('/api/artist/mb-1/discography/gap-fill', ({ request }) => {
+        asked = new URL(request.url).search;
+        return HttpResponse.json({
+          success: true,
+          gaps: {
+            albums: [
+              // already on the page under another year form: not added again
+              { id: 'dz-x', name: 'Dummy', album_type: 'album', release_date: '1994' },
+              {
+                id: 'dz-b',
+                name: 'Third',
+                album_type: 'album',
+                release_date: '2008',
+                gap_source: 'deezer',
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const { container } = renderArtist('/library?artist=1&header=rich&releases=all');
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Other sources/ }, { timeout: 10_000 }),
+    );
+    await screen.findByText('Third', undefined, { timeout: 10_000 });
+    // the page names its artist, so the server diffs against the catalogue
+    expect(asked).toContain('library_artist=1');
+    const names = [...container.querySelectorAll('.album-card-name')].map((n) => n.textContent);
+    expect(names.filter((n) => n === 'Dummy')).toHaveLength(1);
+    // every release you don't own says where it is listed, by its real name
+    const badges = [...container.querySelectorAll('.gapfill-source-badge')].map((b) => [
+      b.textContent,
+      b.getAttribute('title'),
+    ]);
+    expect(badges).toEqual([
+      ['Deezer', 'Listed on Deezer'],
+      ['Deezer', 'Only listed on Deezer: opens and downloads from there'],
+    ]);
+  }, 30_000);
+
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     inLibrary();
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
@@ -604,6 +668,64 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.getByText('Dummy')).toBeInTheDocument();
   });
 
+  it('gives a live record a section of its own, in cards and in the table (#2055)', async () => {
+    renderArtist('/library?artist=1&releases=all&releaseView=cards');
+    await waitFor(() =>
+      expect(document.querySelectorAll('.discography-section').length).toBeGreaterThan(0),
+    );
+    const sections = () =>
+      [...document.querySelectorAll('.discography-section')].map((section) => [
+        section.querySelector('h3')?.textContent,
+        section.querySelectorAll('.release-card').length,
+      ]);
+    await waitFor(() =>
+      expect(sections()).toEqual([
+        ['Albums', 1],
+        ['Live', 1],
+      ]),
+    );
+    // the pill is the section, with its count beside the name
+    const pill = screen.getByRole('button', { name: 'Live' });
+    expect(pill.querySelector('.filter-count')?.textContent).toBe('1');
+    // a kind this artist has nothing of gets no pill
+    expect(screen.queryByRole('button', { name: 'Soundtracks' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Table View' }));
+    await waitFor(() => expect(document.querySelector('.discography-section')).toBeNull());
+    const live = await screen.findByRole('heading', { name: /^Live/ });
+    expect(live.closest('section')?.textContent).toContain('Roseland NYC Live');
+    expect(
+      screen.getByRole('heading', { name: /^Albums/ }).closest('section')?.textContent,
+    ).not.toContain('Roseland NYC Live');
+  });
+
+  it('keeps a release known to be a studio album in Albums, whatever its title says', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [
+              album({ id: 1, title: 'Dummy' }),
+              // its release group was looked up: no secondary types
+              album({ id: 2, title: 'Roseland NYC Live', release_types: [] }),
+              album({ id: 3, title: 'Plain Name', release_types: ['soundtrack'] }),
+            ],
+            album_count: 3,
+            discography_count: 3,
+          }),
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const albums = await screen.findByRole('heading', { name: /^Albums/ });
+    expect(albums.closest('section')?.textContent).toContain('Roseland NYC Live');
+    expect(screen.queryByRole('heading', { name: /^Live/ })).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: /^Soundtracks/ }).closest('section')?.textContent,
+    ).toContain('Plain Name');
+  });
+
   it('uses single-click for inline expansion and double-click for album detail', async () => {
     server.use(
       http.get('/api/library/v2/albums/:id', ({ params }) => {
@@ -718,6 +840,44 @@ describe('Library V2 artist detail — All Releases views', () => {
   /** "Missing" is monitored+absent now (§44/LV2-CNT-01) — so a release the
    *  user unmonitored down to nothing can reach 0 present AND 0 missing at
    *  once. That is not completion; it means nothing was ever asked for. */
+  it('a release held three ways is one card in Discovery, and every owned copy in My Library', async () => {
+    // bbno$ on the live library: a stray track filed as its own album, the
+    // complete album, and the provider's entry for it
+    const same = { title: 'bbno$', release_lead_id: 12, release_copies: 2 };
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [
+              album({ id: 11, ...same, origin: 'library', track_count: 22, tracks_present: 1 }),
+              album({ id: 12, ...same, origin: 'library', track_count: 21, tracks_present: 21 }),
+              album({ id: 13, ...same, monitored: true, track_count: 21 }),
+              album({ id: 14, title: 'recess', release_lead_id: 14, release_copies: 0 }),
+            ],
+          }),
+        }),
+      ),
+    );
+
+    const view = renderArtist('/library?artist=1&releases=all&releaseView=cards');
+    await screen.findByText('recess');
+    const names = () =>
+      [...document.querySelectorAll('.album-card-name')].map((n) => n.textContent ?? '');
+    expect(names().filter((n) => n.startsWith('bbno$'))).toHaveLength(1);
+    expect(screen.getByText('21/21')).toBeInTheDocument();
+    expect(screen.queryByText('1/22')).toBeNull();
+    expect(screen.queryByText('0/21')).toBeNull();
+    expect(screen.getByText('2001 · 2 copies')).toBeInTheDocument();
+    view.unmount();
+
+    renderArtist('/library?artist=1');
+    await screen.findByText('21/21');
+    // what is on disk: both copies, and not the entry standing behind them
+    expect(screen.getByText('1/22')).toBeInTheDocument();
+    expect(screen.queryByText('0/21')).toBeNull();
+  });
+
   it('does not call an empty, nothing-wanted release "complete"', async () => {
     server.use(
       http.get('/api/library/v2/artists/1', () =>

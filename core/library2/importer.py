@@ -1469,7 +1469,7 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
     ).fetchone()
     if stale >= _RECONCILE_GUARD_MIN_STALE and stale > observed:
         logger.warning(
-            "Library v2 import: skipped removing %s tracks the source no longer "
+            "Library import: skipped removing %s tracks the source no longer "
             "lists; it only listed %s. The source looks incomplete.", stale, observed)
         stats["reconcile_skipped"] = int(stale)
         return stats
@@ -1624,7 +1624,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                             else int(profile_id))
     if effective_profile_id != ADMIN_PROFILE_ID:
         raise ValueError(
-            f"Library v2 import is admin-only (ADR-01): got profile_id={profile_id}, "
+            f"Library import is admin-only (ADR-01): got profile_id={profile_id}, "
             f"expected {ADMIN_PROFILE_ID}")
     profile_id = effective_profile_id
     stats = {
@@ -2723,7 +2723,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             stats.setdefault("wanted", wanted_stats)
         conn.commit()
         checkpoint(FINALIZE_STAGE, _FINALIZE_STEPS, _FINALIZE_STEPS)
-        logger.info("Library v2 import complete: %s", stats)
+        logger.info("Library import complete: %s", stats)
     # §62.6 Stufe 4: heal artist/album twins that pre-fix imports left behind
     # (own connection, after the import transaction closed). Cheap when clean;
     # best-effort — a repair failure must never fail the import that just
@@ -3430,7 +3430,7 @@ def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str,
                             else int(profile_id))
     if effective_profile_id != ADMIN_PROFILE_ID:
         raise ValueError(
-            f"Library v2 legacy scope is admin-only: got profile_id={profile_id}, "
+            f"Library legacy scope is admin-only: got profile_id={profile_id}, "
             f"expected {ADMIN_PROFILE_ID}")
     # The shared library carries the intent of every profile without a library
     # of its own; an own library's lists are imported under its own profile.

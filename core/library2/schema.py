@@ -35,6 +35,8 @@ from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
 
+from core.library2.locks import DDL as _LOCK_DDL
+
 logger = get_logger("database.library2_schema")
 
 
@@ -417,6 +419,8 @@ _ALL_DDL = (
     LIB2_FILE_ORIGINS_DDL,
     LIB2_MANUAL_SKIPS_DDL,
     LIB2_MIRROR_OUTBOX_DDL,
+    # #2046: reviewed and locked albums / artists (core/library2/locks.py)
+    *_LOCK_DDL,
 )
 
 
@@ -671,6 +675,15 @@ _ADDED_COLUMNS = (
     # belongs to (upstream 9c06ffd5b); paces its retries to retry_days.
     ("lib2_albums", "musicbrainz_release_group_attempted",
      "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_attempted TIMESTAMP"),
+    # The release group's secondary types (Live, Soundtrack, ...) with the
+    # group they were read from, for the artist page's sections (#2055).
+    # Not secondary_types, which path templates read: see release_group_types.
+    ("lib2_albums", "release_group_types",
+     "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
+    # The last automatic upgrade attempt for a track (#2060): when, how many
+    # in a row found nothing, and against which file. See upgrade_attempts.
+    ("lib2_tracks", "upgrade_attempt",
+     "ALTER TABLE lib2_tracks ADD COLUMN upgrade_attempt TEXT"),
     # The MusicBrainz recording comment ("acoustic", "live") that tells two
     # versions of a song apart (upstream 5170059ed / #1536). It belongs to one
     # recording: trg_lib2_tracks_recording_comment clears it whenever
@@ -927,7 +940,7 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
         "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
     ).fetchone()
     if default_row is None:
-        raise RuntimeError("Library v2 requires at least one quality profile")
+        raise RuntimeError("The Library requires at least one quality profile")
     default_id = int(default_row[0])
     # the repoint below finds nothing once converged: the insert triggers
     # default new rows and a referenced profile can't be deleted
@@ -1137,7 +1150,7 @@ def _migrate_artist_monitored_default(cursor: Any) -> None:
             "ALTER TABLE lib2_artists RENAME COLUMN monitored_v2 TO monitored"
         )
         cursor.execute(f"RELEASE {savepoint}")
-        logger.info("Migrated Library-v2 artist monitored default from 1 to 0")
+        logger.info("Migrated Library artist monitored default from 1 to 0")
     except Exception:
         cursor.execute(f"ROLLBACK TO {savepoint}")
         cursor.execute(f"RELEASE {savepoint}")
@@ -1552,7 +1565,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         from core.library2.identity_history import ensure_external_id_history_schema
         backfilled = ensure_external_id_history_schema(cursor)
         if backfilled:
-            logger.info("Backfilled %d Library-v2 external identifier events", backfilled)
+            logger.info("Backfilled %d Library external identifier events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("external-id-history migration failed (will retry next start): %s", e)
     # Merge/move/link history (Roadmap 4): relationship triggers capture the
@@ -1561,7 +1574,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         from core.library2.entity_history import ensure_entity_history_schema
         backfilled = ensure_entity_history_schema(cursor)
         if backfilled:
-            logger.info("Backfilled %d Library-v2 entity relationship events", backfilled)
+            logger.info("Backfilled %d Library entity relationship events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("entity-history migration failed (will retry next start): %s", e)
     # ADR-06 field-level user overrides stay separate from provider/import
@@ -1659,7 +1672,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     ensure_unmatched_match_schema(cursor)
     if run_backfills:
         run_library_v2_backfills(connection)
-    logger.debug("Library v2 schema ensured")
+    logger.debug("Library schema ensured")
 
 
 def run_library_v2_backfills(connection: Any, *, commit: bool = False,
@@ -1704,7 +1717,7 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             filled = _backfill_artist_name_keys(cursor)
             stats["artist_name_keys"] = filled
             if filled:
-                logger.info("Backfilled %d Library-v2 artist name keys", filled)
+                logger.info("Backfilled %d Library artist name keys", filled)
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("artist name_key backfill failed (will retry next start): %s", e)
