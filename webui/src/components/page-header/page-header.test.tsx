@@ -27,7 +27,11 @@ describe('the page frame', () => {
         />
       </PageFrame>,
     );
-    expect(screen.getByTestId('frame').className).toBe('pgf-page');
+    // the panel carries the page's own id; the measured column sits inside it
+    const panel = screen.getByTestId('frame');
+    expect(panel.className).toBe('page-shell pgf-shell');
+    expect(panel.id).toBe('p');
+    expect(panel.firstElementChild!.className).toBe('pgf-page');
     const title = screen.getByRole('heading', { level: 1, name: 'Downloads' });
     expect(title.className).toBe('pgf-title');
     expect(document.querySelector('.pgf-status')!.textContent).toBe('5 downloading');
@@ -105,6 +109,7 @@ describe('the page frame', () => {
 
   it('has a rule for every class it emits, at the numbers that were agreed', () => {
     for (const cls of [
+      '.page-shell.pgf-shell',
       '.pgf-page',
       '.pgf-head',
       '.pgf-head-main',

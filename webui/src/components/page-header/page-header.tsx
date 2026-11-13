@@ -16,7 +16,14 @@ import clsx from 'clsx';
  * inside the frame and is none of its business.
  */
 
-/** The page: 1440px at most, centred, the same padding everywhere. */
+/**
+ * The page: the floating panel every page sits in, and inside it a column
+ * 1440px at most, centred, with the same padding everywhere.
+ *
+ * `id`, `className` and data attributes go on the panel, where the old pages
+ * had theirs. A page that cannot use this component writes
+ * `page-shell pgf-shell` on its panel and `pgf-page` on the column.
+ */
 export function PageFrame({
   children,
   className,
@@ -28,8 +35,8 @@ export function PageFrame({
   id?: string;
 } & Record<`data-${string}`, string | undefined>) {
   return (
-    <div className={clsx('pgf-page', className)} id={id} {...rest}>
-      {children}
+    <div className={clsx('page-shell pgf-shell', className)} id={id} {...rest}>
+      <div className="pgf-page">{children}</div>
     </div>
   );
 }

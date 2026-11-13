@@ -53831,8 +53831,6 @@ body.max-performance #page-particles-canvas {
     /* outer gutter comes from .page (40px) — consistent with the other
        full-width exception pages (library, etc.). wide: the group grid
        below spends the horizontal room a 1100px column left empty. */
-    max-width: 1720px;
-    margin: 0 auto;
 }
 
 .adl-main {
@@ -76092,6 +76090,10 @@ body.src-modal-open { overflow: hidden; }
    page itself (the wishlist's nebula, the library grid) sits inside the frame
    and is not its business.
    ================================================================================== */
+/* the floating panel is part of the frame; the column inside does the padding */
+.page-shell.pgf-shell {
+    padding: 0;
+}
 .pgf-page {
     display: flex;
     flex-direction: column;
