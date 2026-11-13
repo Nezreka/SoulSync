@@ -4757,7 +4757,7 @@ class RepairWorker:
             'success': True,
             'action': 'removed' if fix_action == 'remove' else 'redownload',
             'message': (
-                f'Removed missing file reference for "{title}"'
+                f'"{title}" is out of your library. Nothing will be downloaded.'
                 if fix_action == 'remove'
                 else f'Queued "{title}" for re-download'
             ),
@@ -4769,8 +4769,8 @@ class RepairWorker:
             payload['repair_intent'] = 'remove'
         else:
             payload['message'] = (
-                f'Removed missing file reference for "{title}" — the track '
-                f'keeps its other file and stays monitored'
+                f'The missing copy of "{title}" is gone from your library. '
+                f'The track keeps its other file.'
             )
         return payload
 

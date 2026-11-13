@@ -178,8 +178,8 @@ function DeadFilePrompt({ resolve }: { resolve: (value: DeadFileFixAction | null
   return (
     <PromptOverlay
       maxWidth={420}
-      title="Dead File Action"
-      body="This track's file no longer exists on disk. Choose how to handle it."
+      title="This file is gone"
+      body="The library lists this track, but its file is no longer on disk. Download a fresh copy, or take the track out of your library."
       cancelId="_dead-cancel"
       onCancel={() => resolve(null)}
     >
@@ -193,7 +193,7 @@ function DeadFilePrompt({ resolve }: { resolve: (value: DeadFileFixAction | null
           Re-download
         </button>
         <button id="_dead-remove" type="button" style={RED} onClick={() => resolve('remove')}>
-          Remove from DB
+          Remove from library
         </button>
       </div>
     </PromptOverlay>

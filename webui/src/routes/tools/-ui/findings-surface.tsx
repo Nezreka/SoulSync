@@ -2297,6 +2297,20 @@ function FindingCard({
                   {fixing ? '...' : fixLabel}
                 </button>
               ) : null}
+              {/* #2086: a file moved away on purpose has nothing to download.
+                  the row's one button opened the re-download picker, so
+                  taking the track out was only reachable through Fix Selected */}
+              {!video && fixLabel && finding.finding_type === TYPE_DEAD ? (
+                <button
+                  className="repair-finding-btn alt"
+                  type="button"
+                  title="Take this track out of your library. Nothing is downloaded."
+                  disabled={fixing}
+                  onClick={() => void onFix(finding, 'remove')}
+                >
+                  Remove
+                </button>
+              ) : null}
               <button
                 className="repair-finding-btn dismiss"
                 type="button"

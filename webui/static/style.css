@@ -73241,6 +73241,7 @@ body.src-modal-open { overflow: hidden; }
 /* shared buttons */
 #tools-page .repair-inbox-btn,
 #tools-page .repair-finding-btn.fix,
+#tools-page .repair-finding-btn.alt,
 #tools-page .repair-finding-btn.undo,
 #tools-page .repair-finding-btn.reopen,
 #tools-page .operations-pillar-scan-btn,
@@ -73279,8 +73280,10 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .media-scan-btn:hover { background: var(--white-a16); }
 #tools-page button:disabled { opacity: 0.45; cursor: default; }
 /* a fix that touches files says so by its colour, not by a louder shape */
-#tools-page .repair-inbox-btn.ghost { background: none; color: var(--text-2); padding: 0 10px; }
-#tools-page .repair-inbox-btn.ghost:hover { color: var(--text-1); background: var(--white-a08); }
+#tools-page .repair-inbox-btn.ghost,
+#tools-page .repair-finding-btn.alt { background: none; color: var(--text-2); padding: 0 10px; }
+#tools-page .repair-inbox-btn.ghost:hover,
+#tools-page .repair-finding-btn.alt:hover { color: var(--text-1); background: var(--white-a08); }
 
 /* round icon buttons */
 #tools-page .repair-inbox-expand,
@@ -73806,6 +73809,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-age { width: 44px; flex: none; text-align: right; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 #tools-page .repair-finding-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 #tools-page .repair-finding-actions .repair-finding-btn.fix,
+#tools-page .repair-finding-actions .repair-finding-btn.alt,
 #tools-page .repair-finding-actions .repair-finding-btn.reopen { margin-right: 6px; }
 #tools-page .repair-finding-detail { display: none; }
 #tools-page .repair-finding-detail.open { display: block; max-height: none; overflow: visible; }
