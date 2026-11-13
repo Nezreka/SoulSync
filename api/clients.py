@@ -98,6 +98,17 @@ def _known(kind):
 def create_blueprint() -> Blueprint:
     bp = Blueprint('clients', __name__)
 
+
+    @bp.before_request
+    def _admin_manages_this():
+        """The download clients' queues is the admin's to change (Nov 13 2026). Reading stays open: the
+        pages that show it are not admin pages."""
+        from flask import jsonify as _jsonify, request as _request
+        from core.profile_context import is_admin_request
+        if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not is_admin_request():
+            return _jsonify({"success": False, "error": "Admin access required"}), 403
+        return None
+
     # ── torrent ───────────────────────────────────────────────────────────
 
     @bp.route('/api/clients/torrent', methods=['GET'])

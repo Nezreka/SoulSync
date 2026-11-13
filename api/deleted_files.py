@@ -41,6 +41,17 @@ def _keep_days() -> float:
 def create_blueprint() -> Blueprint:
     bp = Blueprint('deleted_files', __name__)
 
+
+    @bp.before_request
+    def _admin_manages_this():
+        """Restoring and purging deleted files is the admin's to change (Nov 13 2026). Reading stays open: the
+        pages that show it are not admin pages."""
+        from flask import jsonify as _jsonify, request as _request
+        from core.profile_context import is_admin_request
+        if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not is_admin_request():
+            return _jsonify({"success": False, "error": "Admin access required"}), 403
+        return None
+
     @bp.route('/api/deleted-files', methods=['GET'])
     def list_deleted_files():
         try:

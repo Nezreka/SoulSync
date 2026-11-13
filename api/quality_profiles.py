@@ -20,6 +20,17 @@ logger = get_logger("api.quality_profiles")
 
 bp = Blueprint("quality_profiles", __name__)
 
+
+@bp.before_request
+def _admin_manages_this():
+    """A quality profile is the admin's to change (Nov 13 2026). Reading stays open: the
+    pages that show it are not admin pages."""
+    from flask import jsonify as _jsonify, request as _request
+    from core.profile_context import is_admin_request
+    if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not is_admin_request():
+        return _jsonify({"success": False, "error": "Admin access required"}), 403
+    return None
+
 # Injected by configure() at boot.
 get_database = None
 add_activity_item = None

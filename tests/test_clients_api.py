@@ -465,9 +465,10 @@ def test_a_matched_soulseek_transfer_is_labelled_by_its_id_or_filename(monkeypat
     ('/api/clients/torrent/add', {'url': 'magnet:?xt=urn:btih:abc'}),
     ('/api/clients/usenet/add', {'url': 'https://indexer/x.nzb'}),
 ])
-def test_a_profile_with_downloads_off_cannot_paste_a_link(monkeypatch, route, payload):
-    """nov 13 2026 review: these two start a download and never asked whether
-    the profile may. every other way to start one does."""
+def test_only_an_admin_can_paste_a_link(monkeypatch, route, payload):
+    """nov 13 2026 review: these two start a download and never asked who was
+    calling. the clients tab is the admin's now, and the download permission
+    is still asked underneath it."""
     class _Adder(_FakeTorrent):
         async def add_torrent(self, url, category=None):
             self.calls.append(('add', url, category))
@@ -483,11 +484,16 @@ def test_a_profile_with_downloads_off_cannot_paste_a_link(monkeypatch, route, pa
     import database.music_database as mdb
     monkeypatch.setattr(profile_context, 'get_current_profile_id', lambda: 4)
     monkeypatch.setattr(mdb, 'get_database', lambda: type('D', (), {
-        'get_profile': lambda self, pid: {'id': pid, 'can_download': False}})())
+        'get_profile': lambda self, pid: {'id': pid, 'can_download': True, 'is_admin': False}})())
     r = c.post(route, json=payload)
-    assert r.status_code == 403
+    assert r.status_code == 403 and r.get_json()['error'] == 'Admin access required'
     assert adder.calls == []
-    # the same profile, allowed
+    # a second admin whose downloads are turned off is refused by that
     monkeypatch.setattr(mdb, 'get_database', lambda: type('D', (), {
-        'get_profile': lambda self, pid: {'id': pid, 'can_download': True}})())
+        'get_profile': lambda self, pid: {'id': pid, 'can_download': False, 'is_admin': True}})())
+    r = c.post(route, json=payload)
+    assert r.status_code == 403 and 'Downloads are disabled' in r.get_json()['error']
+    assert adder.calls == []
+    monkeypatch.setattr(mdb, 'get_database', lambda: type('D', (), {
+        'get_profile': lambda self, pid: {'id': pid, 'can_download': True, 'is_admin': True}})())
     assert c.post(route, json=payload).get_json()['success'] is True

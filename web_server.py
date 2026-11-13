@@ -8337,6 +8337,7 @@ from core.downloads import cancel as _downloads_cancel
 
 
 @app.route('/api/downloads/cancel', methods=['POST'])
+@admin_only
 def cancel_download():
     """Cancel a specific download transfer, matching GUI functionality."""
     data = request.get_json()
@@ -8360,6 +8361,7 @@ def cancel_download():
 
 
 @app.route('/api/downloads/cancel-all', methods=['POST'])
+@admin_only
 def cancel_all_downloads():
     """Cancel all active downloads from slskd, then clear completed ones."""
     try:
@@ -8375,6 +8377,7 @@ def cancel_all_downloads():
 
 
 @app.route('/api/downloads/clear-finished', methods=['POST'])
+@admin_only
 def clear_finished_downloads():
     """Clear all terminal (completed, cancelled, failed) downloads from slskd."""
     try:
@@ -8573,6 +8576,7 @@ def get_task_candidates(task_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/downloads/task/<task_id>/download-candidate', methods=['POST'])
+@admin_only
 def download_selected_candidate(task_id):
     """Restart a not_found/failed task by downloading a user-selected candidate."""
     dl_err = check_download_permission()
@@ -8789,6 +8793,7 @@ def _resolve_link_track_query(source: str, entity_id: str, kind: str = 'track',
 
 
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
+@admin_only
 def manual_search_for_task(task_id):
     """Run a user-driven search against one (or all) configured download
     sources and stream candidate results as NDJSON — one JSON object per
@@ -9035,6 +9040,7 @@ def get_scan_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/clear-all', methods=['POST'])
+@admin_only
 def clear_all_searches():
     """
     Clear all searches from slskd search history.
@@ -9093,6 +9099,7 @@ def get_download_origins():
 
 
 @app.route('/api/download-origins/delete', methods=['POST'])
+@admin_only
 def delete_download_origins():
     """Delete origin-history entries; optionally (default) also delete the
     files on disk and their library track rows."""
@@ -11445,6 +11452,7 @@ def redownload_start(track_id):
 # download or a wishlist item instead of a library track.
 
 @app.route('/api/downloads/task/<task_id>/inspect', methods=['POST'])
+@admin_only
 def inspect_task_sources(task_id):
     """Every source's hits for a download task's track, with the verdicts.
     A pick goes back through /download-candidate."""
@@ -16265,6 +16273,7 @@ def get_batch_history():
 
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
+@admin_only
 def clear_completed_downloads():
     """Clear finished rows from the Downloads page.
 
@@ -16308,6 +16317,7 @@ _REMOVE_REFUSALS = {
 
 
 @app.route('/api/downloads/remove', methods=['POST'])
+@admin_only
 def remove_download_from_list():
     """Take one failed / not-found / cancelled row off the Downloads page.
 
@@ -16329,6 +16339,7 @@ def remove_download_from_list():
 
 
 @app.route('/api/downloads/task/download-next', methods=['POST'])
+@admin_only
 def prioritize_download_task_next():
     """Move one queued task to the next unstarted slot in its batch."""
     data = request.get_json(silent=True) or {}
@@ -16356,6 +16367,7 @@ def prioritize_download_task_next():
 
 
 @app.route('/api/downloads/batch/download-next', methods=['POST'])
+@admin_only
 def prioritize_download_batch_next():
     """Run a batch next after already-active workers elsewhere drain."""
     data = request.get_json(silent=True) or {}
@@ -16380,6 +16392,7 @@ def prioritize_download_batch_next():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/downloads/cancel_task', methods=['POST'])
+@admin_only
 def cancel_download_task():
     """
     Cancels a single, specific download task.
@@ -16662,6 +16675,7 @@ def _atomic_cancel_task(playlist_id, track_index):
         return False, f"Internal error: {str(e)}", None
 
 @app.route('/api/downloads/cancel_task_v2', methods=['POST'])
+@admin_only
 def cancel_task_v2():
     """
     NEW ATOMIC CANCEL SYSTEM V2
@@ -16880,6 +16894,7 @@ def _cancel_one_batch(batch_id):
 
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
+@admin_only
 def cancel_batch(batch_id):
     """
     Cancels an entire batch - useful for cancelling during analysis phase
