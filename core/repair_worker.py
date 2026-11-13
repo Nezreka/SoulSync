@@ -159,6 +159,8 @@ FINDING_TYPE_META = {
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
     'album_tag_inconsistency':  {'label': 'Album Tag Drift', 'verb': 'Unify Tags'},
+    'compilation_track_origin': {'label': 'Compilation Songs', 'verb': 'Move to Original Albums',
+                                 'confirm': 'The listed songs are retagged and filed under their original albums. The compilation keeps the rest, or goes if nothing is left.'},
     'file_tags_differ':         {'label': 'File Tags Differ', 'verb': 'Use File Tags',
                                  'confirm': 'The Library takes these values from the files, as manual edits. No file is changed.'},
     'incomplete_album':         {'label': 'Incomplete Albums', 'verb': 'Fill Album'},
@@ -239,6 +241,7 @@ JOB_CATEGORIES = {
     'track_number_repair': 'Tags & metadata',
     'album_tag_consistency': 'Tags & metadata',
     'use_file_tags': 'Tags & metadata',
+    'compilation_origins': 'Tags & metadata',
     'library_retag': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
@@ -3712,6 +3715,7 @@ class RepairWorker:
             'metadata_gap': self._fix_metadata_gap,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
             'file_tags_differ': self._fix_file_tags_differ,
+            'compilation_track_origin': self._fix_compilation_track_origin,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
@@ -6869,6 +6873,112 @@ class RepairWorker:
         test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
         from core.repair_jobs.unknown_artist_recovery import move_refiled_track
         return move_refiled_track(self, track_id, config_manager=self._config_manager)
+
+    def _fix_compilation_track_origin(self, entity_type, entity_id, file_path, details):
+        """Retag a compilation's songs as their original albums' and move them
+        there in the Library (#2077). Each song is checked again first: still
+        on the reviewed album, its file still where it was, not hand-tagged."""
+        album_id = _lib2_id(entity_id)
+        moves = (details or {}).get('moves') or []
+        if album_id is None or not moves:
+            return {'success': False, 'error': 'No songs to move in finding'}
+        from core.library2 import tags_to_library
+        from core.library2.retag import repair_field_protection
+        from core.tag_writer import write_tag_fields
+
+        moved_ids, skipped, errors = [], 0, 0
+        for move in moves:
+            to = move.get('to') or {}
+            track_id = _lib2_id(move.get('track_id'))
+            track_file = move.get('file_path') or ''
+            if track_id is None or not track_file or not to.get('album_title'):
+                skipped += 1
+                continue
+            conn = self.db._get_connection()
+            try:
+                member = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()
+            finally:
+                conn.close()
+            if member is None or member[0] != album_id:
+                skipped += 1   # moved or removed since the scan
+                continue
+            fields = {
+                'album': to['album_title'], 'album_artist': to.get('album_artist') or None,
+                'year': to.get('date') or to.get('year'),
+                'track_number': to.get('track_number'), 'disc_number': to.get('disc_number'),
+                'total_tracks': to.get('total_tracks'), 'total_discs': to.get('total_discs'),
+                'musicbrainz_albumid': to.get('release_id'),
+                'musicbrainz_releasegroupid': to.get('release_group_id'),
+            }
+            fields = {k: v for k, v in fields.items() if v not in (None, '')}
+            allowed = repair_field_protection(self.db, track_file, fields,
+                                              track_id=track_id, file_id=move.get('file_id'))
+            # the album tag is the move: without it nothing else is written either
+            if 'album' not in allowed:
+                skipped += 1
+                continue
+            download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder,
+                                          config_manager=self._config_manager)
+            if not resolved:
+                from core.library2.paths import resolve_lib2_path
+                resolved = resolve_lib2_path(track_file, config_manager=self._config_manager)
+            if not resolved and os.path.isfile(track_file):
+                resolved = track_file
+            if not resolved or not os.path.exists(resolved):
+                skipped += 1
+                continue
+            try:
+                saved = write_tag_fields(resolved, allowed)
+                if not saved.get('success'):
+                    raise ValueError(saved.get('error') or 'Tag save failed')
+                moved_ids.append(track_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error moving %s to its original album: %s", resolved, exc)
+                errors += 1
+
+        done = {}
+        if moved_ids:
+            # the Library follows the tags just written: the same move Use file tags makes
+            done = tags_to_library.apply(
+                self.db, moved_ids, profile_id=int((details or {}).get('library_owner_id') or 1))
+            # an album made by that move was typed after the one the track
+            # left, a compilation. it is what MusicBrainz says it is, and it
+            # takes the release id the files now carry
+            conn = self.db._get_connection()
+            try:
+                for moved in moves:
+                    to = moved.get('to') or {}
+                    if (_lib2_id(moved.get('track_id')) not in moved_ids
+                            or to.get('kind') not in ('album', 'ep', 'single')):
+                        continue
+                    # where the file is now: the move may have re-homed it onto another track row
+                    row = conn.execute(
+                        'SELECT t.album_id FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id '
+                        'WHERE f.id=?', (moved.get('file_id') or 0,)).fetchone()
+                    if row is None or row[0] == album_id:
+                        continue
+                    conn.execute(
+                        "UPDATE lib2_albums SET album_type=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE id=? AND album_type='compilation'", (to['kind'], row[0]))
+                    if to.get('release_id'):
+                        conn.execute(
+                            "UPDATE lib2_albums SET musicbrainz_id=? "
+                            "WHERE id=? AND COALESCE(musicbrainz_id,'')=''", (to['release_id'], row[0]))
+                conn.commit()
+            finally:
+                conn.close()
+        failed = len(done.get('failed') or []) + errors
+        if failed:
+            return {'success': False, 'retryable': True,
+                    'error': f'{failed} song(s) could not be moved; {int(done.get("moved") or 0)} moved'}
+        if not moved_ids:
+            return {'success': True, 'action': 'nothing_to_change',
+                    'message': 'None of the songs could be moved: they changed since the scan, or are hand-tagged'}
+        message = f"{int(done.get('moved') or 0)} song(s) filed under their original albums"
+        if skipped:
+            message += f', {skipped} left where they were'
+        return {'success': True, 'action': 'moved_to_original_albums', 'message': message}
 
     def _fix_file_tags_differ(self, entity_type, entity_id, file_path, details):
         """The Library takes what the album's files say (#2074): the album

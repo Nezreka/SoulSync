@@ -102,6 +102,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   album_mbid_mismatch: 'Album MusicBrainz IDs disagree with the tags on disk.',
   album_tag_inconsistency: 'Tracks in one album carrying conflicting album tags.',
   file_tags_differ: 'Albums whose files say something the Library does not.',
+  compilation_track_origin: 'Greatest hits songs that can go back to their original albums.',
   incomplete_album: 'Albums missing tracks you do not own yet.',
   path_mismatch: 'Files stored outside your file-organization template.',
   missing_lossy_copy: 'Lossless tracks with no lossy copy for portable use.',

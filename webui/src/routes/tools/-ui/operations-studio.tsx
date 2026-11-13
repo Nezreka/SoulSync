@@ -88,6 +88,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     jobIds: [
       'album_tag_consistency',
       'use_file_tags',
+      'compilation_origins',
       'album_release_year_repair',
       'comma_artist_splitter',
       'genre_cleanup',
@@ -103,6 +104,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     findingTypes: [
       'album_tag_inconsistency',
       'file_tags_differ',
+      'compilation_track_origin',
       'album_release_year_mismatch',
       'comma_artist_split',
       'genre_cleanup',

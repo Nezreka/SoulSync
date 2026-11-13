@@ -32,6 +32,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'lossy_converter': 'lib2',
     'album_tag_consistency': 'lib2',
     'use_file_tags': 'lib2',
+    'compilation_origins': 'lib2',
     'live_commentary_cleaner': 'lib2',
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
@@ -106,6 +107,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
     # reads tags, and an approved finding saves them as manual edits. no file is written
     'use_file_tags': frozenset({'observe', 'metadata'}),
+    # an approved finding retags the files and moves the tracks in the library
+    'compilation_origins': frozenset({'observe', 'metadata', 'tags'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
@@ -176,6 +179,8 @@ JOB_LOCK_SCOPE: dict[str, str] = {
     'bpm_backfill': 'tags',
     'cache_evictor': 'none',
     'comma_artist_splitter': 'tags',
+    # it rewrites album tags, which a reviewed album keeps
+    'compilation_origins': 'tags',
     'dead_file_cleaner': 'report',
     'empty_folder_cleaner': 'none',
     'expired_download_cleaner': 'none',
@@ -363,6 +368,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.use_file_tags',
+    'core.repair_jobs.compilation_origins',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
