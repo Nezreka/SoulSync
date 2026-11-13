@@ -215,6 +215,13 @@ def _json_file_links(conn):
     while the pending set is the same (count and newest id) and for at most a
     minute. a file id kept as a json string counts too, as it did when this was
     compared against the integer column.
+
+    a finding that closed since the map was built does not throw it away: its
+    id stays in the map and the readers ask for ``status='pending'`` rows by
+    id, so it is simply not found. only a new finding (a newer id) or more
+    pending rows than before (one put back) means the map is missing something.
+    without that, a bulk fix closing one finding per file rebuilt the whole
+    map per file, the same quadratic pass the inserts used to cause.
     """
     db_file = conn.execute("PRAGMA database_list").fetchone()[2]
     count, newest = conn.execute(
@@ -222,7 +229,10 @@ def _json_file_links(conn):
         "(SELECT MAX(id) FROM repair_findings)").fetchone()
     key = (db_file, count, newest)
     now = time.monotonic()
-    if _JSON_LINKS['key'] == key and now - _JSON_LINKS['at'] < _JSON_LINKS_TTL:
+    cached = _JSON_LINKS['key']
+    if (cached is not None and cached[0] == db_file and cached[2] == newest
+            and (count or 0) <= (cached[1] or 0) and now - _JSON_LINKS['at'] < _JSON_LINKS_TTL):
+        _JSON_LINKS['key'] = key
         return _JSON_LINKS['links']
     links = {}
     for finding_id, lv2, val in conn.execute(
@@ -258,7 +268,9 @@ def _note_own_finding(conn, finding_id, file_id):
             "(SELECT MAX(id) FROM repair_findings WHERE id < ?)", (int(finding_id),)).fetchone()
     except Exception:  # noqa: BLE001 - an unreadable connection keeps the old key
         return
-    if (count, newest) != (live_count - 1, before):
+    # fewer pending than the map saw is fine: findings closed since, see
+    # _json_file_links. more, or another id in between, and the map is stale
+    if newest != before or (live_count - 1) > (count or 0):
         return
     _JSON_LINKS['links'].setdefault(str(file_id).strip(), set()).add(int(finding_id))
     _JSON_LINKS['key'] = (db_file, live_count, int(finding_id))
