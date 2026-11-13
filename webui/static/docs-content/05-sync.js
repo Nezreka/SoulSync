@@ -124,7 +124,7 @@ If ListenBrainz is configured in Settings, **+ Add playlist** opens a ListenBrai
 - **Collaborative** — playlists shared with you by other users
 - **Created For You** — auto-generated playlists based on your listening history
 
-Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A weekly series (Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any week files it under the series, and refreshing it picks up the newest week. **Last.fm Radio** works the same way.
+Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A rolling series (Daily Jams, Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any day or week files it under the series, and refreshing it picks up the newest one. **Last.fm Radio** works the same way.
 
 ListenBrainz tracks are matched against Spotify/iTunes using a **4-strategy search**: direct match, swapped artist/title, album-based lookup, and extended fuzzy search. Discovered tracks sync to your library like any other playlist.
 `
