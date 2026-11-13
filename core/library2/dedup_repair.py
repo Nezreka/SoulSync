@@ -225,9 +225,18 @@ def _survivor_key(member: Any) -> tuple:
     )
 
 
-def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
-    """Re-home everything hanging off the duplicate, merge ids, delete it."""
+def _merge_artist(cursor: Any, survivor: Any, duplicate: Any, reason: str = "") -> None:
+    """Re-home everything hanging off the duplicate, merge ids, delete it.
+
+    What it moves is read first and filed after (core.library2.artist_merges),
+    so the merge can be looked at later and undone (#2073)."""
+    from core.library2 import artist_merges
     survivor_id, duplicate_id = int(survivor["id"]), int(duplicate["id"])
+    try:
+        before = artist_merges.snapshot_before(cursor.connection, survivor_id, duplicate_id)
+    except Exception as exc:  # noqa: BLE001 - the journal is never why a merge fails
+        logger.debug("artist merge snapshot skipped: %s", exc)
+        before = None
 
     merged = _stored_ids(survivor)
     for source, value in _stored_ids(duplicate).items():
@@ -289,6 +298,8 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
     except Exception as exc:  # noqa: BLE001 - no findings table yet
         logger.debug("artist merge: findings not re-pointed: %s", exc)
     cursor.execute("DELETE FROM lib2_artists WHERE id=?", (duplicate_id,))
+    if before is not None:
+        artist_merges.record(cursor.connection, survivor, duplicate, before, reason)
 
 
 def _album_rows_for_artist(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
@@ -1092,6 +1103,7 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
     """Fold artist rows that are one artist, by name and then by catalogue id;
     alias-link the same-named ones that are not. Returns the kept artists that
     took something in."""
+    from core.library2.artist_merges import kept_apart, note_doubt
     cursor = conn.cursor()
     rows = conn.execute(
         "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
@@ -1129,7 +1141,9 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
         for duplicate in members[1:]:
             if _reviewed(conn, "artist", survivor["id"], duplicate["id"]):
                 continue
-            _merge_artist(cursor, survivor, duplicate)
+            if kept_apart(conn, survivor["id"], duplicate["id"]):
+                continue    # a person, or an undo, said these are two artists
+            _merge_artist(cursor, survivor, duplicate, "same name")
             stats["artists_merged"] += 1
             logger.info(
                 "Merged duplicate artist %s into %s (%r)",
@@ -1174,16 +1188,20 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
         for duplicate in active_members[1:]:
             if _reviewed(conn, "artist", survivor["id"], duplicate["id"]):
                 continue
+            if kept_apart(conn, survivor["id"], duplicate["id"]):
+                continue
             evidence = _catalog_twin_evidence(conn, survivor, duplicate)
             if evidence is None:
                 stats["artists_left_apart"] = int(stats.get("artists_left_apart") or 0) + 1
+                # a person can still say they are one: Artist Merge Review asks
+                note_doubt(conn, survivor["id"], duplicate["id"], source, value)
                 logger.info(
                     "Left apart: artists %s %r and %s %r share %s=%s and "
                     "nothing else says they are one artist",
                     duplicate["id"], duplicate["name"], survivor["id"],
                     survivor["name"], source, value)
                 continue
-            _merge_artist(cursor, survivor, duplicate)
+            _merge_artist(cursor, survivor, duplicate, f"shared {source} id, {evidence}")
             merged_here = True
             stats["artists_merged"] += 1
             logger.info(

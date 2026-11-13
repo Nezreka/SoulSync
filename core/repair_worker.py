@@ -159,6 +159,12 @@ FINDING_TYPE_META = {
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
     'album_tag_inconsistency':  {'label': 'Album Tag Drift', 'verb': 'Unify Tags'},
+    'artist_merge_made':        {'label': 'Merged Automatically', 'verb': 'Undo Merge',
+                                 'confirm': 'The merged artist comes back with its albums, credits and ids, and the two are never merged again.'},
+    'artist_merge_doubt':       {'label': 'Same Artist?', 'verb': 'Merge Artists',
+                                 'confirm': 'The two become one artist. The merge is recorded and can be undone from Artist Merge Review.'},
+    'artist_merged_by_mistake': {'label': 'Merged by Mistake', 'verb': 'Split Artists',
+                                 'confirm': 'The listed albums move to an artist of the other name. Nothing on disk is touched.'},
     'compilation_track_origin': {'label': 'Compilation Songs', 'verb': 'Move to Original Albums',
                                  'confirm': 'The listed songs are retagged and filed under their original albums. The compilation keeps the rest, or goes if nothing is left.'},
     'file_tags_differ':         {'label': 'File Tags Differ', 'verb': 'Use File Tags',
@@ -242,6 +248,7 @@ JOB_CATEGORIES = {
     'album_tag_consistency': 'Tags & metadata',
     'use_file_tags': 'Tags & metadata',
     'compilation_origins': 'Tags & metadata',
+    'artist_merge_review': 'Tags & metadata',
     'library_retag': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
@@ -3716,6 +3723,9 @@ class RepairWorker:
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
             'file_tags_differ': self._fix_file_tags_differ,
             'compilation_track_origin': self._fix_compilation_track_origin,
+            'artist_merge_made': self._fix_artist_merge_made,
+            'artist_merge_doubt': self._fix_artist_merge_doubt,
+            'artist_merged_by_mistake': self._fix_artist_merged_by_mistake,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
@@ -6873,6 +6883,76 @@ class RepairWorker:
         test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
         from core.repair_jobs.unknown_artist_recovery import move_refiled_track
         return move_refiled_track(self, track_id, config_manager=self._config_manager)
+
+    def _artist_merge_change(self, change):
+        """Run one change to who is who on a single connection, committed whole."""
+        from core.library2.artist_merges import MergeUndoError
+        conn = self.db._get_connection()
+        try:
+            out = change(conn)
+            conn.commit()
+            try:
+                from core.enrichment.unmatched import invalidate_unmatched_snapshots
+                invalidate_unmatched_snapshots(universe=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("unmatched snapshots not dropped after an artist change: %s", exc)
+            return out
+        except MergeUndoError as exc:
+            conn.rollback()
+            return {'success': False, 'error': str(exc)}
+        finally:
+            conn.close()
+
+    def _fix_artist_merge_made(self, entity_type, entity_id, file_path, details):
+        """Undo a merge the duplicate repair made (#2073)."""
+        merge_id = (details or {}).get('merge_id')
+        if not merge_id:
+            return {'success': False, 'error': 'No merge in finding'}
+
+        def change(conn):
+            from core.library2 import artist_merges
+            done = artist_merges.undo(conn, int(merge_id))
+            return {'success': True, 'action': 'merge_undone',
+                    'message': f"{done['name']} is its own artist again, with {done['albums']} album(s) back"}
+        return self._artist_merge_change(change)
+
+    def _fix_artist_merge_doubt(self, entity_type, entity_id, file_path, details):
+        """Merge a pair the repair left for a person to decide (#2073)."""
+        ids = [int(i) for i in (details or {}).get('artist_ids') or []]
+        if len(ids) != 2:
+            return {'success': False, 'error': 'No pair in finding'}
+
+        def change(conn):
+            from core.library2 import dedup_repair
+            from core.library2.artist_merges import MergeUndoError
+            rows = [conn.execute(
+                "SELECT id, name, spotify_id, musicbrainz_id, external_ids, image_url, "
+                "canonical_artist_id FROM lib2_artists WHERE id=?", (i,)).fetchone() for i in ids]
+            if any(row is None for row in rows):
+                raise MergeUndoError('One of the two artists no longer exists')
+            # the one with more albums keeps its name and page
+            count = lambda row: conn.execute(  # noqa: E731
+                "SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id=?", (row['id'],)).fetchone()[0]
+            survivor, duplicate = sorted(rows, key=lambda row: (-count(row), row['id']))
+            dedup_repair._merge_artist(conn.cursor(), survivor, duplicate, 'by hand')
+            return {'success': True, 'action': 'artists_merged',
+                    'message': f"{duplicate['name']} merged into {survivor['name']}"}
+        return self._artist_merge_change(change)
+
+    def _fix_artist_merged_by_mistake(self, entity_type, entity_id, file_path, details):
+        """Give the albums of a wrongly merged artist back to an artist of
+        their own name (#2073): the repair for a merge nothing recorded."""
+        details = details or {}
+        artist_id = _lib2_id(entity_id) or details.get('artist_id')
+        if not artist_id or not details.get('other_name') or not details.get('album_ids'):
+            return {'success': False, 'error': 'No albums to move in finding'}
+
+        def change(conn):
+            from core.library2 import artist_merges
+            done = artist_merges.split(conn, int(artist_id), details['other_name'], details['album_ids'])
+            return {'success': True, 'action': 'artists_split',
+                    'message': f"{done['albums']} album(s) moved to {done['name']}"}
+        return self._artist_merge_change(change)
 
     def _fix_compilation_track_origin(self, entity_type, entity_id, file_path, details):
         """Retag a compilation's songs as their original albums' and move them

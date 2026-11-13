@@ -33,6 +33,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'album_tag_consistency': 'lib2',
     'use_file_tags': 'lib2',
     'compilation_origins': 'lib2',
+    'artist_merge_review': 'lib2',
     'live_commentary_cleaner': 'lib2',
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
@@ -109,6 +110,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'use_file_tags': frozenset({'observe', 'metadata'}),
     # an approved finding retags the files and moves the tracks in the library
     'compilation_origins': frozenset({'observe', 'metadata', 'tags'}),
+    # reads folders and tags; an approved finding moves albums between artist rows
+    'artist_merge_review': frozenset({'observe', 'metadata'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
@@ -174,6 +177,8 @@ JOB_LOCK_SCOPE: dict[str, str] = {
     'album_edition_review': 'match',
     'album_release_year_repair': 'tags',
     'album_tag_consistency': 'tags',
+    # whose albums are whose: a reviewed artist keeps what it holds
+    'artist_merge_review': 'match',
     'artist_nfo_backfill': 'files',
     'audio_corruption_detector': 'report',
     'bpm_backfill': 'tags',
@@ -369,6 +374,7 @@ _JOB_MODULES = [
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.use_file_tags',
     'core.repair_jobs.compilation_origins',
+    'core.repair_jobs.artist_merge_review',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
