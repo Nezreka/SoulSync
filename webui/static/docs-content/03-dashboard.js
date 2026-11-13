@@ -163,9 +163,11 @@ From an artist or album page, **Write Tags** previews the same diff. With Plex o
 
 - **Album**: year, release date and genre, taken from what most of the album's files say.
 - **Track**: title, track number and disc number.
-- **Which album a track is on**: a track whose tag names another album moves to that album under the same artist, and the album is created if the Library does not have it. When every file of an album names the same other title, the album is renamed instead.
+- **Which album a track is on**: a track whose tag names another album moves to that album under the same artist, and the album is created if the Library does not have it. When every file of an album names the same other title, the album is renamed instead, unless the artist already has an album of that name: then the tracks move onto it.
 
 Everything is saved as your own edits, so a metadata refresh does not put the old values back. An empty tag never blanks a value. Artist names are left alone, and the preview lists where a file's artist differs. Files stay where they are on disk; run Rename / Organize afterwards to refile them.
+
+Values taken from file tags stay until you let go of them. The window counts them and has a **Release** link for that album or artist, and the Library's **More** menu has **Release file tag values** for the whole library. Releasing puts each field back to what your metadata sources say, so enrichment and repairs can change it again. Edits you typed in yourself stay, and no file is changed. You can run Use File Tags again at any time, for example after editing tags outside SoulSync.
 
 ![Retag tool interface](dash-retag.jpg)
 
@@ -243,7 +245,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your output folder not tracked in the database |
-| Dead File Cleaner | Removes database entries pointing to files that no longer exist. When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
+| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |

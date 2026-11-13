@@ -18,7 +18,11 @@ from core.metadata.common import (
     get_image_dimensions,
     get_mutagen_symbols,
 )
+from utils.http_identity import APP_USER_AGENT
 from utils.logging_config import get_logger as _create_logger
+
+# image hosts refuse the bare library client name (#2079)
+_IMAGE_FETCH_HEADERS = {"Accept": "image/*", "User-Agent": APP_USER_AGENT}
 
 __all__ = [
     "embed_album_art_metadata",
@@ -610,7 +614,9 @@ def _fetch_art_bytes(art_url: str):
     last_err = None
     for i, candidate in enumerate(attempts):
         try:
-            with urllib.request.urlopen(candidate, timeout=10) as response:
+            # a named client: Discogs' image host refuses "Python-urllib" (#2079)
+            req = urllib.request.Request(candidate, headers=_IMAGE_FETCH_HEADERS)
+            with urllib.request.urlopen(req, timeout=10) as response:
                 return response.read(), (response.info().get_content_type() or "image/jpeg")
         except Exception as fetch_err:
             last_err = fetch_err
@@ -710,7 +716,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
-                req = urllib.request.Request(caa_url, headers={"Accept": "image/*"})
+                req = urllib.request.Request(caa_url, headers=_IMAGE_FETCH_HEADERS)
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                     mime_type = response.info().get_content_type() or "image/jpeg"
@@ -884,7 +890,7 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None, 
             try:
                 # 1200px CDN thumbnail, not the flaky bare /front original.
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front-1200"
-                req = urllib.request.Request(caa_url, headers={"Accept": "image/*"})
+                req = urllib.request.Request(caa_url, headers=_IMAGE_FETCH_HEADERS)
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                 if not image_data or len(image_data) <= 1000:

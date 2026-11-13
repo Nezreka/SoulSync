@@ -4550,9 +4550,12 @@ class RepairWorker:
             from core.library2.discography import approve_release
             # a back catalogue finding names the library that holds the
             # artist (#1504); a new-release finding is the admin's as before
+            # the Fix click is a person asking for this release: its own kind
+            # (a live album) and the edition preference do not keep it out (#2082)
             mirrored = approve_release(
                 self.db, self._config_manager, int(album_id),
                 profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
+                requested=True,
             )
         except LookupError as exc:
             return {'success': False, 'error': str(exc)}
@@ -4757,7 +4760,7 @@ class RepairWorker:
             'success': True,
             'action': 'removed' if fix_action == 'remove' else 'redownload',
             'message': (
-                f'Removed missing file reference for "{title}"'
+                f'"{title}" is out of your library. Nothing will be downloaded.'
                 if fix_action == 'remove'
                 else f'Queued "{title}" for re-download'
             ),
@@ -4769,8 +4772,8 @@ class RepairWorker:
             payload['repair_intent'] = 'remove'
         else:
             payload['message'] = (
-                f'Removed missing file reference for "{title}" — the track '
-                f'keeps its other file and stays monitored'
+                f'The missing copy of "{title}" is gone from your library. '
+                f'The track keeps its other file.'
             )
         return payload
 
@@ -7070,8 +7073,11 @@ class RepairWorker:
                 'musicbrainz_releasegroupid': to.get('release_group_id'),
             }
             fields = {k: v for k, v in fields.items() if v not in (None, '')}
+            # the Library takes the file's tags again below, so a value it took
+            # from a file tag earlier (Use File Tags) is not in the way (#2084)
             allowed = repair_field_protection(self.db, track_file, fields,
-                                              track_id=track_id, file_id=move.get('file_id'))
+                                              track_id=track_id, file_id=move.get('file_id'),
+                                              follows_file_tags=True)
             # the album tag is the move: without it nothing else is written either
             if 'album' not in allowed:
                 skipped += 1
@@ -7098,9 +7104,14 @@ class RepairWorker:
 
         done = {}
         if moved_ids:
-            # the Library follows the tags just written: the same move Use file tags makes
+            self._undo_compilation_rename(album_id, moves)
+            # the Library follows the tags just written: the same move Use file
+            # tags makes. never a rename: with one song of the compilation in
+            # the library, "every file names another album" renamed the whole
+            # compilation and filed nothing (#2084)
             done = tags_to_library.apply(
-                self.db, moved_ids, profile_id=int((details or {}).get('library_owner_id') or 1))
+                self.db, moved_ids, profile_id=int((details or {}).get('library_owner_id') or 1),
+                allow_rename=False)
             # an album made by that move was typed after the one the track
             # left, a compilation. it is what MusicBrainz says it is, and it
             # takes the release id the files now carry
@@ -7138,6 +7149,30 @@ class RepairWorker:
         if skipped:
             message += f', {skipped} left where they were'
         return {'success': True, 'action': 'moved_to_original_albums', 'message': message}
+
+    def _undo_compilation_rename(self, album_id, moves):
+        """A compilation that an earlier run renamed to one of its songs'
+        original albums (#2084) gets its own title back, or the move below
+        sees a song that is already "on" the album it is going to."""
+        from core.library2.importer import release_title_key
+        from core.library2.metadata_overrides import get_field_overrides
+        from core.library2.tags_to_library import FILE_TAGS_REASON
+        targets = {release_title_key((m.get('to') or {}).get('album_title') or '') for m in moves}
+        conn = self.db._get_connection()
+        try:
+            held = get_field_overrides(conn, entity_type='release_group', entity_id=int(album_id)).get('title')
+            if (held is None or (getattr(held, 'reason', None) or '') != FILE_TAGS_REASON
+                    or release_title_key(str(getattr(held, 'value', '') or '')) not in targets):
+                return
+            conn.execute(
+                "DELETE FROM lib2_metadata_overrides WHERE entity_type='release_group' "
+                "AND entity_id=? AND field_name='title'", (int(album_id),))
+            conn.commit()
+            logger.info("compilation %s: title taken from a song's file tag put back", album_id)
+        except Exception as exc:  # noqa: BLE001 - the move still runs; it reports what it could not do
+            logger.warning("compilation %s: renamed title not put back: %s", album_id, exc)
+        finally:
+            conn.close()
 
     def _fix_file_tags_differ(self, entity_type, entity_id, file_path, details):
         """The Library takes what the album's files say (#2074): the album

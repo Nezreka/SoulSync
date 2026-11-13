@@ -112,6 +112,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             return _FakeResponse(b'big-cover', 'image/png')
 
@@ -130,6 +132,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             if url == upgraded:
                 raise Exception('403 Forbidden')
@@ -148,6 +152,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             raise Exception('network down')
 
@@ -174,6 +180,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             return _FakeResponse(b'native-3000px')
 
@@ -190,6 +198,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             if url.endswith('/front'):
                 raise Exception('503 archive.org is having a day')
@@ -209,6 +219,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             if url.endswith('/front') or url.endswith('-1200'):
                 raise Exception('refused')
@@ -232,6 +244,8 @@ class TestFetchArtBytes:
         calls = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             calls.append(url)
             if url.endswith('/front'):
                 raise Exception('archive.org down')
@@ -250,3 +264,20 @@ class TestFetchArtBytes:
             'https://coverartarchive.org/release/r1/front-1200',  # and falls back
             'https://coverartarchive.org/release/r2/front-1200',  # track 2 skips straight to CDN
         ]
+
+
+def test_the_tag_cover_fetch_names_soulsync(monkeypatch):
+    """#2079: Discogs' image host refuses "Python-urllib", so a Discogs cover
+    never reached the file's tags."""
+    from utils.http_identity import APP_USER_AGENT
+
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(req)
+        return _FakeResponse(b'cover', 'image/jpeg')
+
+    monkeypatch.setattr('core.metadata.artwork.urllib.request.urlopen', fake_urlopen)
+    data, _mime = _fetch_art_bytes('https://i.discogs.com/abc/rs:fit/x.jpeg')
+    assert data == b'cover'
+    assert seen[0].get_header('User-agent') == APP_USER_AGENT

@@ -70,7 +70,7 @@ def test_undiscovered_excludes_only_the_top_artists_owned_albums(db):
         conn.commit()
         keys = _owned_album_keys_for(conn, ["björk ", "Nobody"])
     # the listened name folds to the library's, past sqlite's ascii-only LOWER
-    assert keys == {("homogenic", "björk")}
+    assert keys == {"homogenic|||bjork"}
 
 
 def test_the_stray_test_indexes_are_dropped_on_start(tmp_path, monkeypatch):

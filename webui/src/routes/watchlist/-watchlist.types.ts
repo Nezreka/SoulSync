@@ -83,6 +83,9 @@ export interface WatchlistArtist {
   include_eps: boolean;
   include_singles: boolean;
   include_live: boolean;
+  /** #2082: live versions on releases that are not live albums. Absent on an
+   *  older server, where include_live covers both. */
+  include_live_tracks?: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;
@@ -163,7 +166,10 @@ export interface WatchlistGlobalConfig {
   include_albums: boolean;
   include_eps: boolean;
   include_singles: boolean;
+  /** Live albums: concert recordings and unplugged sets. */
   include_live: boolean;
+  /** #2082: live versions on other releases (a live bonus track). */
+  include_live_tracks: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;
@@ -236,7 +242,10 @@ export interface WatchlistArtistConfig {
   include_albums: boolean;
   include_eps: boolean;
   include_singles: boolean;
+  /** Live albums: concert recordings and unplugged sets. */
   include_live: boolean;
+  /** #2082: live versions on other releases (a live bonus track). */
+  include_live_tracks: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;

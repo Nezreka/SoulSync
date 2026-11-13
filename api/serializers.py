@@ -429,6 +429,10 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "include_eps": bool(d.get("include_eps", True)),
         "include_singles": bool(d.get("include_singles", True)),
         "include_live": bool(d.get("include_live", False)),
+        # #2082: never set = it follows include_live
+        "include_live_tracks": bool(d.get("include_live", False)
+                                    if d.get("include_live_tracks") is None
+                                    else d.get("include_live_tracks")),
         "include_remixes": bool(d.get("include_remixes", False)),
         "include_acoustic": bool(d.get("include_acoustic", False)),
         "include_compilations": bool(d.get("include_compilations", False)),

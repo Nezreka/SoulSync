@@ -513,6 +513,9 @@ class WatchlistArtist:
     include_acoustic: bool = False
     include_compilations: bool = False
     include_instrumentals: bool = False
+    # #2082: include_live is about live ALBUMS; this is a live version on any
+    # other release (a live bonus track). None = never set, follows include_live.
+    include_live_tracks: Optional[bool] = None
     # When False (default), the watchlist scan only wishlists tracks credited
     # to the monitored artist — tribute albums, soundtracks and compilations
     # no longer flood the wishlist with other artists' tracks. When True,
@@ -1658,6 +1661,8 @@ class MusicDatabase:
             self._add_watchlist_quality_profile_column(cursor)
             # #1822: defaults instead of a global override. same ordering rule.
             self._add_watchlist_follow_defaults_column(cursor)
+            # #2082: live tracks apart from live albums. same ordering rule.
+            self._add_watchlist_live_tracks_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -4396,6 +4401,25 @@ class MusicDatabase:
                                "their own rules", stamp_err)
         except Exception as e:
             logger.error(f"Error adding follow_defaults to watchlist_artists: {e}")
+
+    def _add_watchlist_live_tracks_column(self, cursor):
+        """Add include_live_tracks (#2082): a live version on a release that
+        is not a live album. include_live is about live albums from here on.
+
+        NULL, and nothing is stamped: a NULL reads as the artist's include_live
+        (core.watchlist_defaults.stored_rule), so every artist's scan applies
+        the rules it applied the day before. it becomes a rule of its own the
+        first time it is saved."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if not columns or 'include_live_tracks' in columns:
+                return
+            cursor.execute(
+                "ALTER TABLE watchlist_artists ADD COLUMN include_live_tracks INTEGER DEFAULT NULL")
+            logger.info("Added include_live_tracks column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding include_live_tracks to watchlist_artists: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -18911,7 +18935,8 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults',
+                                   'include_live_tracks']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -18948,6 +18973,12 @@ class MusicDatabase:
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
                     include_other_artists = bool(row['include_other_artists']) if 'include_other_artists' in existing_columns else False
+                    include_live_tracks = (
+                        bool(row['include_live_tracks'])
+                        if 'include_live_tracks' in existing_columns
+                        and row['include_live_tracks'] is not None
+                        else None
+                    )
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
@@ -18982,6 +19013,7 @@ class MusicDatabase:
                         include_compilations=include_compilations,
                         include_instrumentals=include_instrumentals,
                         include_other_artists=include_other_artists,
+                        include_live_tracks=include_live_tracks,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,

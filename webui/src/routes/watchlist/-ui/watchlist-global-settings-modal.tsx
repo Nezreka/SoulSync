@@ -20,6 +20,7 @@ const RELEASE_TYPE_KEYS = ['include_albums', 'include_eps', 'include_singles'] a
 
 const CONTENT_FILTER_KEYS = [
   'include_live',
+  'include_live_tracks',
   'include_remixes',
   'include_acoustic',
   'include_compilations',
@@ -39,10 +40,16 @@ const OPTION_COPY: Record<IncludeKey, { icon: string; title: string; description
     title: 'Singles',
     description: 'Single tracks and 2-3 track releases',
   },
+  // #2082: a live album and a live track are two rules
   include_live: {
     icon: '🎤',
-    title: 'Include Live Versions',
-    description: 'Live performances and concerts',
+    title: 'Include Live Albums',
+    description: 'Concert recordings and unplugged sets',
+  },
+  include_live_tracks: {
+    icon: '🎙️',
+    title: 'Include Live Tracks',
+    description: 'Live versions on other releases, like a live bonus track',
   },
   include_remixes: {
     icon: '🎧',
@@ -77,6 +84,7 @@ export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
   include_eps: true,
   include_singles: true,
   include_live: false,
+  include_live_tracks: false,
   include_remixes: false,
   include_acoustic: false,
   include_compilations: false,

@@ -1824,7 +1824,8 @@ body are touched** (\`api/watchlist.py:update_watchlist_filters\`).
 | include_albums | boolean | no | unchanged | Watch full albums. |
 | include_eps | boolean | no | unchanged | Watch EPs. |
 | include_singles | boolean | no | unchanged | Watch singles. |
-| include_live | boolean | no | unchanged | Watch live releases. |
+| include_live | boolean | no | unchanged | Watch live albums. |
+| include_live_tracks | boolean | no | unchanged | Watch live versions on other releases. Follows include_live until set once. |
 | include_remixes | boolean | no | unchanged | Watch remixes. |
 | include_acoustic | boolean | no | unchanged | Watch acoustic releases. |
 | include_compilations | boolean | no | unchanged | Watch compilations. |

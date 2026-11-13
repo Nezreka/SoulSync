@@ -6,6 +6,7 @@ import {
   includeEverythingChecked,
   setAllIncludes,
 } from './-ui/watchlist-global-settings-modal';
+import { withEditionDefaults } from './-watchlist.api';
 
 describe('globalConfigIsSavable', () => {
   it('always needs a release type: the defaults apply to every following artist (#1822)', () => {
@@ -28,6 +29,7 @@ describe('globalConfigIsSavable', () => {
       ...setAllIncludes(EMPTY_GLOBAL_CONFIG, false),
       global_override_enabled: true,
       include_live: true,
+      include_live_tracks: false,
       include_remixes: true,
       include_instrumentals: true,
     };
@@ -118,5 +120,29 @@ describe('#1450 withEditionDefaults', () => {
       edition_preference: 'bogus' as never,
     });
     expect(coerced.edition_preference).toBe('all');
+  });
+});
+
+describe('#2082 live albums and live tracks are two rules', () => {
+  it('"include everything" covers both, and clearing clears both', () => {
+    const on = setAllIncludes(EMPTY_GLOBAL_CONFIG, true);
+    expect(on.include_live).toBe(true);
+    expect(on.include_live_tracks).toBe(true);
+    expect(includeEverythingChecked({ ...on, include_live_tracks: false })).toBe(false);
+    expect(setAllIncludes(on, false).include_live_tracks).toBe(false);
+  });
+
+  it('an older server with one Live rule fills live tracks from it', () => {
+    const legacy = { ...EMPTY_GLOBAL_CONFIG, include_live: true } as Record<string, unknown>;
+    delete legacy.include_live_tracks;
+    expect(withEditionDefaults(legacy as never).include_live_tracks).toBe(true);
+    // a server that has the rule is believed
+    expect(
+      withEditionDefaults({
+        ...EMPTY_GLOBAL_CONFIG,
+        include_live: true,
+        include_live_tracks: false,
+      }).include_live_tracks,
+    ).toBe(false);
   });
 });

@@ -1257,6 +1257,39 @@ describe('per-finding actions', () => {
     expect(onStatusChanged).toHaveBeenCalled();
   });
 
+  it('lets a dead file be taken out of the library from its own row (#2086)', async () => {
+    // the row's one button opened the re-download picker, so removing the
+    // entry of a file moved away on purpose was only reachable in bulk
+    routes({
+      [FINDINGS]: page([
+        finding({ id: 3, job_id: 'dead_file_cleaner', finding_type: 'dead_file' }),
+        finding({ id: 4 }),
+      ]),
+      '/api/repair/findings/3/fix': { success: true, message: 'Out of your library' },
+    });
+    await renderList();
+    await flush();
+
+    const remove = document.querySelectorAll('.repair-finding-btn.alt');
+    // the dead file's row only: an orphan has no library entry to remove
+    expect(remove).toHaveLength(1);
+    expect(remove[0].textContent).toBe('Remove');
+    // a no leaves the row alone
+    confirmSpy.mockResolvedValueOnce(false);
+    fireEvent.click(remove[0] as HTMLElement);
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/3/fix'))).toBe(false);
+
+    confirmSpy.mockResolvedValueOnce(true);
+    fireEvent.click(remove[0] as HTMLElement);
+    await flush();
+
+    // one yes/no, not the re-download or remove question again
+    expect(document.getElementById('_dead-remove')).toBeNull();
+    expect(bodyOf('/3/fix')).toEqual({ fix_action: 'remove' });
+    expect(toastSpy).toHaveBeenCalledWith('Out of your library', 'success');
+  });
+
   it('offers a corrupt file with no track behind it a delete, not a re-download', async () => {
     // The corruption detector walks the library folders as well as the
     // catalogue. Those rows carry `entity_type: 'file'` and no id, had no
