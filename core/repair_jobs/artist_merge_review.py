@@ -174,4 +174,40 @@ class ArtistMergeReviewJob(RepairJob):
                           'album_titles': suspect['album_titles'], 'library_v2_native': True,
                           'library_v2': {'artist_id': suspect['artist_id'],
                                          'album_ids': suspect['album_ids']}})
+        if not context.check_stop():
+            self._close_settled(context, suspects)
         return result
+
+    def _close_settled(self, context: JobContext, suspects) -> int:
+        """Close the pending "Two artists in one" findings this pass no longer
+        makes: a pair it now reads as one artist written two ways, or albums
+        that have since been moved. Only after a pass that ran to its end."""
+        import json
+        from contextlib import closing
+
+        still = {(f"lib2:{s['artist_id']}", str(s['other_name'])) for s in suspects}
+        closed = 0
+        try:
+            with closing(context.db._get_connection()) as conn:
+                rows = conn.execute(
+                    "SELECT id, entity_id, details_json FROM repair_findings "
+                    "WHERE job_id=? AND finding_type='artist_merged_by_mistake' "
+                    "AND status='pending'", (self.job_id,)).fetchall()
+                for row in rows:
+                    try:
+                        other = str((json.loads(row[2] or '{}') or {}).get('other_name') or '')
+                    except (TypeError, ValueError):
+                        continue
+                    if (str(row[1]), other) in still:
+                        continue
+                    conn.execute(
+                        "UPDATE repair_findings SET status='resolved', user_action='obsolete', "
+                        "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (row[0],))
+                    closed += 1
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001 - a finding left open is not a failed scan
+            logger.debug("Artist Merge Review: settled findings not closed: %s", exc)
+        if closed:
+            logger.info("Artist Merge Review: %d finding(s) no longer apply and were closed", closed)
+        return closed
