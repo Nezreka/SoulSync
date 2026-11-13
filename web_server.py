@@ -24741,6 +24741,10 @@ def _emit_video_enrichment_status_loop():
     the access log). No-op until the video engine is actually running, so this
     never spins it up on the music side."""
     from core.video.enrichment.engine import peek_video_enrichment_engine
+    from core.enrichment.status_cache import WorkerStatsCache
+    # the beat stays at 2s; the COUNT(*)s behind each worker's numbers do not
+    # (twelve workers x four counts per kind every tick was 39% of a core)
+    stats_cache = WorkerStatsCache()
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         if not _has_connected_clients():
@@ -24753,7 +24757,7 @@ def _emit_video_enrichment_status_loop():
         # wiring here.
         for svc, w in (eng.workers or {}).items():
             try:
-                socketio.emit(f'enrichment:{svc}', w.get_stats())
+                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w))
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")
         # The YouTube date enricher is a standalone daemon (not an engine worker),
