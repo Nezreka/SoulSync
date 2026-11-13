@@ -1168,3 +1168,28 @@ CREATE TABLE IF NOT EXISTS video_watch_state (
     view_offset_ms INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (profile_id, kind, item_id)
 );
+
+-- ── file changes (the library manager's history and undo) ──
+-- one row per file a person renamed, moved, deleted or filed under another
+-- episode. enough is kept to put it back: where it was, where the recycle
+-- folder holds it, and the library row a delete dropped.
+CREATE TABLE IF NOT EXISTS video_file_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    action TEXT NOT NULL,            -- rename | move | delete | reassign
+    kind TEXT,                       -- movie | show
+    item_id INTEGER,                 -- movies.id | shows.id
+    title TEXT,
+    label TEXT,                      -- S01E02, or the file name
+    file_id INTEGER,
+    from_path TEXT,
+    to_path TEXT,
+    from_stored TEXT,                -- the server's view of from_path
+    trash_path TEXT,                 -- a delete: where the recycle folder holds it
+    from_episode_id INTEGER,
+    to_episode_id INTEGER,
+    snapshot TEXT,                   -- a delete: the media_files row, as json
+    batch TEXT,                      -- one bulk run, undone together
+    undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vfc_title ON video_file_changes(kind, item_id, id);

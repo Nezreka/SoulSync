@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 68   # v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 69   # v69: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -496,6 +496,10 @@ _COLUMN_MIGRATIONS = [
     # A locked field is owned by the user: scan upserts and enrichment skip it.
     ("movies", "locked_fields", "TEXT"),
     ("shows", "locked_fields", "TEXT"),
+    # the padlock: 1 = reviewed and locked. maintenance jobs, mass rename and
+    # automatic upgrades leave the title and its files alone.
+    ("movies", "hands_off", "INTEGER NOT NULL DEFAULT 0"),
+    ("shows", "hands_off", "INTEGER NOT NULL DEFAULT 0"),
     # 'Cleared' download-history rows: hidden from the History modal but KEPT —
     # YouTube completed rows are the ownership ledger (scan dedup, retention,
     # Channels tab); a user clear must never delete the facts.
@@ -7474,6 +7478,49 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def set_hands_off(self, kind: str, item_id: int, on: bool) -> bool:
+        """the padlock on a movie or show: automation leaves it and its files
+        alone. True when a row changed hands."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(f"UPDATE {table} SET hands_off=? WHERE id=?",
+                               (1 if on else 0, int(item_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def is_hands_off(self, kind: str, item_id) -> bool:
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or item_id is None:
+            return False
+        conn = self._get_connection()
+        try:
+            row = conn.execute(f"SELECT hands_off FROM {table} WHERE id=?",
+                               (int(item_id),)).fetchone()
+            return bool(row and row[0])
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
+    def hands_off_tmdb_ids(self) -> dict:
+        """{'movie': {tmdb ids}, 'show': {tmdb ids}} of the padlocked titles"""
+        out = {"movie": set(), "show": set()}
+        conn = self._get_connection()
+        try:
+            for kind, table in (("movie", "movies"), ("show", "shows")):
+                out[kind] = {int(r[0]) for r in conn.execute(
+                    f"SELECT tmdb_id FROM {table} WHERE hands_off=1 AND tmdb_id IS NOT NULL")}
+        except sqlite3.Error:
+            pass
+        finally:
+            conn.close()
+        return out
+
     def set_episode_monitored(self, show_tmdb_id, season_number, episode_number,
                               monitored: bool) -> int:
         """Flip 'monitored' on ONE episode, addressed the way the calendar knows
@@ -8412,12 +8459,14 @@ class VideoDatabase:
         try:
             movies = conn.execute(
                 "SELECT m.id, m.title, m.year FROM movies m "
-                "WHERE EXISTS (SELECT 1 FROM media_files f WHERE f.movie_id = m.id) "
+                "WHERE m.hands_off = 0 "
+                "AND EXISTS (SELECT 1 FROM media_files f WHERE f.movie_id = m.id) "
                 "ORDER BY m.title COLLATE NOCASE, m.id").fetchall()
             episodes = conn.execute(
                 "SELECT e.id, e.show_id, e.season_number, e.episode_number, "
                 "s.title AS show_title FROM episodes e JOIN shows s ON s.id = e.show_id "
-                "WHERE EXISTS (SELECT 1 FROM media_files f WHERE f.episode_id = e.id) "
+                "WHERE s.hands_off = 0 "
+                "AND EXISTS (SELECT 1 FROM media_files f WHERE f.episode_id = e.id) "
                 "ORDER BY s.title COLLATE NOCASE, e.show_id, e.season_number, "
                 "e.episode_number").fetchall()
         finally:
@@ -8652,7 +8701,8 @@ class VideoDatabase:
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec, f.audio_languages, f.subtitle_languages, f.audio_codec, f.release_source, f.runtime_seconds "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
-                "WHERE m.has_file=1 ORDER BY m.title COLLATE NOCASE, f.size_bytes DESC").fetchall()
+                "WHERE m.has_file=1 AND m.hands_off=0 "
+                "ORDER BY m.title COLLATE NOCASE, f.size_bytes DESC").fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -8675,7 +8725,7 @@ class VideoDatabase:
                 "f.video_codec, f.audio_languages, f.subtitle_languages, f.release_source "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
-                "WHERE e.has_file=1 "
+                "WHERE e.has_file=1 AND s.hands_off=0 "
                 "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number").fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -8697,7 +8747,7 @@ class VideoDatabase:
                 "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
-                "WHERE e.has_file=1 "
+                "WHERE e.has_file=1 AND s.hands_off=0 "
                 "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number, "
                 "f.size_bytes DESC").fetchall()
             return [dict(r) for r in rows]
@@ -8831,14 +8881,14 @@ class VideoDatabase:
         try:
             dup_rows = conn.execute(
                 "SELECT m.id, m.tmdb_id, m.title, m.year, m.server_source, m.path "
-                "FROM movies m WHERE m.has_file=1 AND m.tmdb_id IN ("
+                "FROM movies m WHERE m.has_file=1 AND m.hands_off=0 AND m.tmdb_id IN ("
                 "  SELECT tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL "
                 "  GROUP BY tmdb_id HAVING COUNT(*)>1) ORDER BY m.tmdb_id, m.id").fetchall()
             multi = conn.execute(
                 "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec FROM movies m JOIN media_files f ON f.movie_id=m.id "
-                "WHERE m.has_file=1 AND m.id IN ("
+                "WHERE m.has_file=1 AND m.hands_off=0 AND m.id IN ("
                 "  SELECT movie_id FROM media_files WHERE movie_id IS NOT NULL "
                 "  GROUP BY movie_id HAVING COUNT(*)>1) "
                 "ORDER BY m.id, f.size_bytes DESC").fetchall()
@@ -8850,7 +8900,9 @@ class VideoDatabase:
         by_movie: dict = {}
         for r in multi:
             by_movie.setdefault(r["movie_id"], []).append(dict(r))
-        return {"rows": list(by_tmdb.values()), "files": list(by_movie.values())}
+        # a padlocked twin leaves its pair as one row: not a pair any more
+        return {"rows": [g for g in by_tmdb.values() if len(g) > 1],
+                "files": list(by_movie.values())}
 
     def repair_duplicate_episodes(self) -> list:
         """Episodes holding 2+ video files, newest-largest first — the TV half of
@@ -8870,7 +8922,7 @@ class VideoDatabase:
                 "JOIN seasons se ON se.id = e.season_id "
                 "JOIN shows s ON s.id = se.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
-                "WHERE e.id IN ("
+                "WHERE s.hands_off = 0 AND e.id IN ("
                 "  SELECT episode_id FROM media_files WHERE episode_id IS NOT NULL "
                 "  GROUP BY episode_id HAVING COUNT(*)>1) "
                 "ORDER BY s.title, e.season_number, e.episode_number, f.size_bytes DESC"
@@ -8895,7 +8947,7 @@ class VideoDatabase:
                 "m.play_count, m.last_viewed_at, m.view_offset_ms, m.added_at, "
                 "f.relative_path, f.size_bytes "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
-                "WHERE m.has_file = 1 "
+                "WHERE m.has_file = 1 AND m.hands_off = 0 "
                 "AND f.id = (SELECT f2.id FROM media_files f2 WHERE f2.movie_id = m.id "
                 "            ORDER BY f2.size_bytes DESC LIMIT 1)")]
         finally:
@@ -9024,7 +9076,7 @@ class VideoDatabase:
                 "NULL AS episode_title, NULL AS series, "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
-                "WHERE m.has_file = 1")]
+                "WHERE m.has_file = 1 AND m.hands_off = 0")]
             eps = [dict(r) for r in conn.execute(
                 "SELECT 'episode' AS scope, e.id AS item_id, f.id AS file_id, "
                 "s.title AS title, "
@@ -9037,7 +9089,7 @@ class VideoDatabase:
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM episodes e JOIN shows s ON e.show_id = s.id "
                 "JOIN media_files f ON f.episode_id = e.id "
-                "WHERE e.has_file = 1")]
+                "WHERE e.has_file = 1 AND s.hands_off = 0")]
             return movies + eps
         finally:
             conn.close()

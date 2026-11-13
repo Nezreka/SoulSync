@@ -256,7 +256,7 @@ def _build_rows(db, kind: str, server_source, ids: Optional[List[int]] = None) -
         rows = conn.execute(
             f"WITH {ctes} SELECT t.id, t.title, t.sort_title, t.year, t.tmdb_id, t.monitored, "
             f"t.added_at, t.content_rating, t.runtime_minutes, t.rating, t.imdb_rating, "
-            f"t.poster_url, t.quality_profile_id, t.video_library_id, t.locked_fields, t.status, "
+            f"t.poster_url, t.quality_profile_id, t.video_library_id, t.locked_fields, t.hands_off, t.status, "
             f"{cols}{gjoin} AS genres, {cutoff} AS cutoff, f.* "
             f"FROM {tbl} t {joins}{where_sql}", params).fetchall()
     finally:
@@ -277,6 +277,7 @@ def _build_rows(db, kind: str, server_source, ids: Optional[List[int]] = None) -
             "quality_profile_id": r["quality_profile_id"],
             "video_library_id": r["video_library_id"],
             "locked_fields": _locked(r["locked_fields"]),
+            "locked": bool(r["hands_off"]),
             "status": r["status"], "watched": bool(r["plays"]),
             "genres": _uniq(r["genres"]),
             "below_cutoff": bool(cut and facts["file_count"] and 0 < judged < cut),
@@ -439,7 +440,7 @@ def _matches(row: Dict[str, Any], args: Dict[str, Any], watched: Optional[set]) 
     if monitored in ("1", "0") and bool(row["monitored"]) != (monitored == "1"):
         return False
     locked = str(args.get("locked") or "")
-    if locked in ("1", "0") and bool(row["locked_fields"]) != (locked == "1"):
+    if locked in ("1", "0") and bool(row.get("locked")) != (locked == "1"):
         return False
     res = str(args.get("resolution") or "").strip().lower()
     if res:

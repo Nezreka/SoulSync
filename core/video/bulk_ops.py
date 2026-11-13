@@ -47,7 +47,12 @@ _JOB = _channel.job
 
 ACTIONS = ("content_rating", "genre_add", "genre_remove", "monitored", "watched",
            "refresh_art", "quality_profile", "rename", "wish", "subtitles", "rematch",
-           "series_type", "delete", "lock")
+           "series_type", "delete", "lock", "move")
+
+# what a padlocked title sits out of when it is part of a larger selection.
+# the padlock means "leave this one and its files alone", and a sweep of 500
+# titles is exactly where one would be changed by accident.
+_LOCK_HOLDS = ("rename", "delete", "move", "rematch", "refresh_art")
 #: the ones that move or remove files: an admin's to run
 FILE_ACTIONS = ("rename", "delete")
 SERIES_TYPES = ("standard", "daily", "anime")
@@ -78,7 +83,8 @@ def _label(action: str, params: dict, kind: str, n: int) -> str:
         "rematch": "Identify again",
         "series_type": "Series type → " + str(params.get("value") or ""),
         "delete": "Delete",
-        "lock": ("Lock details" if params.get("value") else "Unlock details"),
+        "lock": ("Lock" if params.get("value") else "Unlock"),
+        "move": "Move to another library",
     }.get(action, action)
     return f"{what} · {n} {noun}"
 
@@ -108,6 +114,10 @@ def validate(kind: str, ids, action: str, params: dict):
             return "series type is a show's"
         if params.get("value") not in SERIES_TYPES:
             return "value must be one of " + ", ".join(SERIES_TYPES)
+    if action == "move":
+        lid = params.get("library_id")
+        if isinstance(lid, bool) or not isinstance(lid, int) or lid <= 0:
+            return "library_id must be a library's id"
     if action == "delete" and params.get("confirm") != len(ids):
         # the count typed back: a delete of N titles is confirmed as N
         return "confirm must be the number of titles being deleted"
@@ -117,6 +127,11 @@ def validate(kind: str, ids, action: str, params: dict):
 def _apply_one(db, kind: str, item_id: int, action: str, params: dict, source) -> dict:
     """One item, one action. Returns {ok[, pushed]} — exceptions count as failed."""
     from core.video import metadata as med
+    if (action in _LOCK_HOLDS or (action == "wish" and params.get("mode") == "upgrade")) \
+            and db.is_hands_off(kind, item_id):
+        return {"ok": True, "pushed": False, "held": True}
+    if action == "move":
+        return _move_title(db, kind, item_id, int(params["library_id"]))
     if action == "content_rating":
         return med.edit_item(db, kind, item_id,
                              {"content_rating": str(params["value"]).strip()}, source=source)
@@ -165,13 +180,17 @@ def _apply_one(db, kind: str, item_id: int, action: str, params: dict, source) -
 
 
 def _lock_title(db, kind: str, item_id: int, locked: bool, source) -> dict:
-    """lock every detail a person can edit, or hand them all back. a locked
-    field is the user's: scans and metadata refreshes leave it alone. handing
-    one back tells the server too, so its next scan sets the field again."""
+    """the padlock. locking keeps every detail a person can edit (scans and
+    metadata refreshes leave them alone) and takes the title out of what
+    automation touches: maintenance findings, mass rename, automatic
+    upgrades. unlocking hands it all back, and tells the server so its next
+    scan sets the fields again."""
     from core.video import metadata as med
     from database.video_database import _USER_EDITABLE
     fields = sorted(_USER_EDITABLE["movies" if kind == "movie" else "shows"])
     changed = 0
+    if not db.set_hands_off(kind, item_id, locked):
+        return {"ok": False, "reason": "not found"}
     if locked:
         for field in fields:
             if db.set_field_lock(kind, item_id, field, True) is None:
@@ -186,6 +205,105 @@ def _lock_title(db, kind: str, item_id: int, locked: bool, source) -> dict:
                 return {"ok": False, "reason": res.get("error")}
             changed += 1
     return {"ok": True, "pushed": False, "changed": changed}
+
+
+def _server_view(db, local: str) -> str:
+    """a local path as the media server writes it: the drive map read
+    backwards, else the path as it is"""
+    try:
+        from core.video import drive_map
+        p = local.replace("\\", "/")
+        best = None
+        for entry in drive_map.load(db):
+            loc = str(entry["local"]).replace("\\", "/").rstrip("/")
+            if (p == loc or p.startswith(loc + "/")) and (best is None or len(loc) > len(best[0])):
+                best = (loc, str(entry["server"]).rstrip("/\\"))
+        if best:
+            out = best[1] + p[len(best[0]):]
+            return out.replace("/", "\\") if "\\" in best[1] else out
+    except Exception:   # noqa: BLE001 - the next server scan re-adopts the truth
+        logger.debug("server view of %s not worked out", local, exc_info=True)
+    return local
+
+
+def move_plan(db, kind: str, item_id: int, library_id: int) -> dict:
+    """where every file of a title lands when it moves to another library:
+    the naming template's path under that library's folder. nothing here
+    touches the disk beyond looking. {moves: [{file_id, from, to}], skipped,
+    size_bytes, copy_bytes} or {error}."""
+    import os
+
+    from core.video import file_ops, libraries, organization
+    from core.video.library_actions import _same_drive
+    lib = libraries.get_library(db, library_id)
+    if not lib or lib["kind"] != kind:
+        return {"error": "No such library for this kind of title."}
+    root = libraries.folder_for(lib)
+    if not lib.get("usable") or not root:
+        return {"error": "That library has no folder set, or is turned off."}
+    settings = organization.load(db)
+    moves, skipped, size, cross = [], [], 0, 0
+    for row in db.library_title_files(kind, item_id):
+        name = os.path.basename(str(row.get("relative_path") or "").replace("\\", "/"))
+        real = file_ops._locate(db, row)
+        if not real:
+            skipped.append({"file_id": row["file_id"], "filename": name,
+                            "reason": "only your media server can see it"})
+            continue
+        fields = file_ops.naming_fields(row)
+        if organization.languages_unknown(row.get("scope"), fields, settings):
+            skipped.append({"file_id": row["file_id"], "filename": name,
+                            "reason": "not read yet, so its name isn't known"})
+            continue
+        fields["quality"] = file_ops.file_quality(fields.get("quality"), real)
+        want = organization.render_path(row.get("scope"), root, fields, settings,
+                                        os.path.splitext(real)[1])["path"]
+        if file_ops.same_path(real, want):
+            continue
+        if os.path.exists(want):
+            skipped.append({"file_id": row["file_id"], "filename": name,
+                            "reason": "a file with that name is already there"})
+            continue
+        n = int(row.get("size_bytes") or 0)
+        size += n
+        if not _same_drive(real, root):
+            cross += n
+        moves.append({"file_id": row["file_id"], "filename": name, "from": real, "to": want,
+                      "size_bytes": n})
+    return {"library": {"id": lib["id"], "name": lib["name"], "path": root}, "moves": moves,
+            "skipped": skipped, "files": len(moves), "size_bytes": size, "copy_bytes": cross}
+
+
+def _move_title(db, kind: str, item_id: int, library_id: int) -> dict:
+    """a title and its files to another library: each file to the template's
+    path under that library's folder, then the title is filed there so what
+    it downloads next lands beside them."""
+    from core.video import file_ops, libraries
+    plan = move_plan(db, kind, item_id, library_id)
+    if plan.get("error"):
+        return {"ok": False, "reason": plan["error"]}
+    moved = failed = 0
+    for mv in plan["moves"]:
+        try:
+            res = file_ops.move_into_place(db, mv["file_id"], mv["from"], mv["to"],
+                                           stored=_server_view(db, mv["to"])) or {}
+        except Exception:   # noqa: BLE001 - one file never stops the title
+            logger.exception("move to library failed for file %s", mv["file_id"])
+            res = {"success": False}
+        if res.get("success"):
+            moved += 1
+        else:
+            failed += 1
+    failed += len(plan["skipped"])
+    if not failed:
+        try:
+            ident = db.title_identity(kind, item_id) or {}
+            if ident.get("tmdb_id"):
+                libraries.assign_title(db, kind, ident["tmdb_id"], library_id)
+            libraries.attribute_files(db)
+        except Exception:   # noqa: BLE001 - the files are moved; the scan re-files the title
+            logger.exception("filing %s %s under library %s failed", kind, item_id, library_id)
+    return {"ok": failed == 0, "pushed": False, "changed": moved, "files_failed": failed}
 
 
 def _title_file_ids(db, kind: str, item_id: int) -> list:
@@ -326,23 +444,11 @@ def start_bulk(db, kind: str, ids: list, action: str, params: dict | None = None
         except Exception:   # noqa: BLE001 - edits still land locally
             logger.debug("bulk: no active video source", exc_info=True)
         touched: list = []
+        from core.video import file_history
         try:
-            _JOB.update(phase="running")
-            for item_id in ids:
-                try:
-                    res = _apply_one(db, kind, item_id, action, params, source) or {}
-                except Exception:   # noqa: BLE001 - one bad item never kills the batch
-                    logger.exception("bulk %s failed for %s %s", action, kind, item_id)
-                    res = {"ok": False}
-                _JOB["done"] += 1
-                _JOB["ok" if res.get("ok") else "failed"] += 1
-                if res.get("pushed"):
-                    _JOB["pushed"] += 1
-                _JOB["changed"] = int(_JOB.get("changed") or 0) + int(res.get("changed") or 0)
-                touched.append(item_id)
-                if len(touched) >= 25:
-                    _refresh_manager(db, kind, touched)
-                _channel.emit()
+            _JOB.update(phase="running", held=0, batch=None)
+            with file_history.batch() as batch_id:
+                _run_items(db, kind, ids, action, params, source, touched, batch_id)
             _refresh_manager(db, kind, touched)
             _JOB.update(phase="done")
         except Exception as e:   # noqa: BLE001 - surface the wreck, release the job
@@ -353,6 +459,28 @@ def start_bulk(db, kind: str, ids: list, action: str, params: dict | None = None
 
     threading.Thread(target=run, name="video-bulk-ops", daemon=True).start()
     return {"ok": True, "total": len(ids), "label": label}
+
+
+def _run_items(db, kind, ids, action, params, source, touched, batch_id) -> None:
+    if action in ("rename", "move"):
+        _JOB["batch"] = batch_id      # what Undo on the finished job reverses
+    for item_id in ids:
+        try:
+            res = _apply_one(db, kind, item_id, action, params, source) or {}
+        except Exception:   # noqa: BLE001 - one bad item never kills the batch
+            logger.exception("bulk %s failed for %s %s", action, kind, item_id)
+            res = {"ok": False}
+        if res.get("held"):
+            _JOB["held"] = int(_JOB.get("held") or 0) + 1
+        _JOB["done"] += 1
+        _JOB["ok" if res.get("ok") else "failed"] += 1
+        if res.get("pushed"):
+            _JOB["pushed"] += 1
+        _JOB["changed"] = int(_JOB.get("changed") or 0) + int(res.get("changed") or 0)
+        touched.append(item_id)
+        if len(touched) >= 25:
+            _refresh_manager(db, kind, touched)
+        _channel.emit()
 
 
 def _refresh_manager(db, kind: str, touched: list) -> None:

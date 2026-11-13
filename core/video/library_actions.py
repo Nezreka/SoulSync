@@ -109,22 +109,24 @@ def bulk(db, action: str, file_ids: List[Any]) -> Dict[str, Any]:
     op = _BULK.get(action)
     if op is None:
         return {"success": False, "error": "action must be rename or delete"}
+    from core.video import file_history
     done, unchanged, failed, errors = 0, 0, 0, []
-    for fid in file_ids:
-        try:
-            res = op(db, fid)
-        except Exception as exc:   # noqa: BLE001 - one bad file never stops the rest
-            logger.exception("bulk %s failed for file %s", action, fid)
-            res = {"success": False, "error": str(exc)}
-        if not res.get("success"):
-            failed += 1
-            errors.append({"file_id": fid, "error": res.get("error") or "Failed"})
-        elif res.get("action") == "unchanged":
-            unchanged += 1
-        else:
-            done += 1
+    with file_history.batch() as batch_id:
+        for fid in file_ids:
+            try:
+                res = op(db, fid)
+            except Exception as exc:   # noqa: BLE001 - one bad file never stops the rest
+                logger.exception("bulk %s failed for file %s", action, fid)
+                res = {"success": False, "error": str(exc)}
+            if not res.get("success"):
+                failed += 1
+                errors.append({"file_id": fid, "error": res.get("error") or "Failed"})
+            elif res.get("action") == "unchanged":
+                unchanged += 1
+            else:
+                done += 1
     return {"success": True, "action": action, "done": done, "unchanged": unchanged,
-            "failed": failed, "errors": errors[:20]}
+            "failed": failed, "errors": errors[:20], "batch": batch_id if done else None}
 
 
 # ── reassign ─────────────────────────────────────────────────────────────────
@@ -144,16 +146,128 @@ def reassign_file(db, file_id, episode_id) -> Dict[str, Any]:
         return {"success": True, "action": "unchanged", "renamed": False,
                 "message": "It's already filed under that episode"}
     renamed, note = False, ""
+    from core.video import file_history
     try:
-        res = file_ops.rename_to_template(db, file_id)
+        with file_history.quiet():   # one history row for the re-file, not two
+            res = file_ops.rename_to_template(db, file_id)
         renamed = bool(res.get("success")) and res.get("action") == "renamed"
         if not res.get("success"):
             note = res.get("error") or ""
     except Exception:   # noqa: BLE001 - the move itself is done; the name is the follow-up
         logger.exception("rename after reassign failed for file %s", file_id)
         note = "the rename failed"
+    file_history.record(db, "reassign", file_id=file_id, from_episode_id=moved["from_episode"],
+                        to_episode_id=moved["to_episode"])
     return {"success": True, "action": "reassigned", "renamed": renamed, "rename_note": note,
             **moved}
+
+
+# ── renumber ─────────────────────────────────────────────────────────────────
+
+def renumber_plan(db, show_id: int, file_ids: List[Any], season: Any, start_episode: Any) -> Dict[str, Any]:
+    """file a run of a show's files under consecutive episodes of one season.
+
+    the fix for a season numbered wrong on disk: absolute numbers on a show
+    the library splits into seasons, specials filed as episodes, a run that
+    is off by one. the chosen files keep their order; the first lands on
+    (season, start_episode), the next episode's files on the one after. two
+    copies of one episode stay together. season 0 is Specials.
+
+    {moves: [{file_id, filename, from, to, from_episode_id, to_episode_id}]}
+    or {error}. nothing is changed here."""
+    try:
+        season, start = int(season), int(start_episode)
+        wanted = {int(f) for f in file_ids or []}
+    except (TypeError, ValueError):
+        return {"error": "Pick the files, a season and the episode to start from."}
+    if season < 0 or start < 0 or not wanted:
+        return {"error": "Pick the files, a season and the episode to start from."}
+    rows = [r for r in db.library_title_files("show", show_id) if r["file_id"] in wanted]
+    if len(rows) != len(wanted):
+        return {"error": "Some of those files are not this show's any more. Reload and try again."}
+    rows.sort(key=lambda r: (r.get("season") or 0, r.get("episode") or 0, r["file_id"]))
+    conn = db._get_connection()
+    try:
+        have = {int(r["episode_number"]): int(r["id"]) for r in conn.execute(
+            "SELECT id, episode_number FROM episodes WHERE show_id = ? AND season_number = ?",
+            (int(show_id), season))}
+    finally:
+        conn.close()
+    moves, step, last = [], -1, None
+    for r in rows:
+        if r["item_id"] != last:
+            step, last = step + 1, r["item_id"]
+        number = start + step
+        target = have.get(number)
+        if target is None:
+            where = "Specials" if season == 0 else "Season %d" % season
+            return {"error": "%s has no episode %d in the library, so nothing can be filed there. "
+                             "Refresh the show's details if it should." % (where, number)}
+        if target == r["item_id"]:
+            continue
+        moves.append({"file_id": r["file_id"], "filename": _name(r), "from": _label(r),
+                      "to": "S%02dE%02d" % (season, number),
+                      "from_episode_id": r["item_id"], "to_episode_id": target})
+    return {"moves": moves, "files": len(moves), "season": season, "start_episode": start}
+
+
+def renumber(db, show_id: int, file_ids: List[Any], season: Any, start_episode: Any) -> Dict[str, Any]:
+    """do what renumber_plan lists: re-file every file first, then rename them,
+    so a run shifted by one never trips over the name its neighbour still has."""
+    from core.video import file_history
+    plan = renumber_plan(db, show_id, file_ids, season, start_episode)
+    if plan.get("error"):
+        return {"success": False, "error": plan["error"]}
+    moved = []
+    with file_history.batch() as batch_id:
+        for mv in plan["moves"]:
+            if db.library_move_file(mv["file_id"], mv["to_episode_id"]):
+                moved.append(mv)
+                file_history.record(db, "reassign", file_id=mv["file_id"],
+                                    from_episode_id=mv["from_episode_id"],
+                                    to_episode_id=mv["to_episode_id"])
+        pending, not_renamed = [m["file_id"] for m in moved], []
+        with file_history.quiet():
+            for _ in range(3):
+                not_renamed = []
+                for file_id in pending:
+                    try:
+                        res = file_ops.rename_to_template(db, file_id) or {}
+                    except Exception:   # noqa: BLE001 - the re-file is done; the name follows
+                        logger.exception("rename after renumber failed for file %s", file_id)
+                        res = {"success": False}
+                    if not res.get("success"):
+                        not_renamed.append(file_id)
+                if not not_renamed or len(not_renamed) == len(pending):
+                    break
+                pending = not_renamed
+    return {"success": True, "moved": len(moved), "not_renamed": len(not_renamed),
+            "batch": batch_id if moved else None}
+
+
+def show_episodes(db, show_id: int) -> Dict[str, Any]:
+    """a show's episodes by season with the files filed under each: what the
+    renumber editor lists. {seasons: [{season, episodes: [{id, episode, title,
+    air_date, files: [...]}]}]}"""
+    conn = db._get_connection()
+    try:
+        eps = conn.execute(
+            "SELECT id, season_number, episode_number, title, air_date FROM episodes "
+            "WHERE show_id = ? ORDER BY season_number, episode_number", (int(show_id),)).fetchall()
+    finally:
+        conn.close()
+    files: Dict[int, List[dict]] = {}
+    for r in db.library_title_files("show", show_id):
+        files.setdefault(r["item_id"], []).append({
+            "file_id": r["file_id"], "filename": _name(r), "size_bytes": r.get("size_bytes") or 0,
+            "resolution": r.get("resolution"), "quality": r.get("quality")})
+    seasons: Dict[int, dict] = {}
+    for e in eps:
+        s = seasons.setdefault(int(e["season_number"] or 0),
+                               {"season": int(e["season_number"] or 0), "episodes": []})
+        s["episodes"].append({"id": e["id"], "episode": e["episode_number"], "title": e["title"],
+                              "air_date": e["air_date"], "files": files.get(e["id"], [])})
+    return {"seasons": [seasons[k] for k in sorted(seasons, key=lambda n: (n == 0, n))]}
 
 
 # ── consolidate ──────────────────────────────────────────────────────────────
