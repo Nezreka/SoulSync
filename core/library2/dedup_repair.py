@@ -1031,6 +1031,63 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
                 stats["album_review"] += cursor.rowcount
 
 
+def _name_words(name: Any) -> List[str]:
+    return release_title_key(str(name or "")).split()
+
+
+def _is_name_fragment(first: Any, second: Any) -> bool:
+    """one name is the other with words cut off or left on: "Odetari w" beside
+    "Odetari". the same words with other punctuation is not a fragment."""
+    a, b = _name_words(first), _name_words(second)
+    if not a or not b or len(a) == len(b):
+        return False
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return long_[:len(short)] == short
+
+
+def _shares_strong_ids(first: Any, second: Any, needed: int = 2) -> bool:
+    a, b = _stored_ids(first), _stored_ids(second)
+    return sum(1 for source in _STRONG_ARTIST_SOURCES
+               if source in a and source in b
+               and _id_values(a[source]) & _id_values(b[source])) >= needed
+
+
+def _catalog_twin_evidence(conn: Any, survivor: Any, duplicate: Any) -> Optional[str]:
+    """why two rows with different names and one shared catalogue id are one
+    artist, or None when nothing says so (#2073).
+
+    the shared id alone is not it: enrichment stamps ids from a name search,
+    and two bands with near names end up holding the same one. Attack Attack!
+    (US) was folded into Attack! Attack! (Wales) on a deezer id, and twenty
+    albums changed hands. so the pair needs something more: a release they
+    both hold, a name that is a cut of the other, or two of the strong ids
+    agreeing. and two rows that each own files and hold no release in common
+    are two discographies, whatever the ids say.
+    """
+    # someone, or an earlier pass, already said these are one artist under
+    # two names (a translated name beside its romanised one)
+    roots = {int(row["canonical_artist_id"] if row["canonical_artist_id"] is not None
+                 else row["id"]) for row in (survivor, duplicate)}
+    if len(roots) == 1:
+        return "linked alias"
+    mine = _album_rows_for_artist(conn, int(survivor["id"]))
+    theirs = _album_rows_for_artist(conn, int(duplicate["id"]))
+    shared = any(
+        _same_album_title(a, b) and not _years_disagree(a, b)
+        for a in mine for b in theirs if a["id"] != b["id"])
+    if shared:
+        return "shared release"
+    both_own_files = (any(int(a.get("file_rows") or 0) > 0 for a in mine)
+                      and any(int(b.get("file_rows") or 0) > 0 for b in theirs))
+    if both_own_files:
+        return None
+    if _is_name_fragment(survivor["name"], duplicate["name"]):
+        return "name fragment"
+    if _shares_strong_ids(survivor, duplicate):
+        return "two catalogue ids"
+    return None
+
+
 def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
     """Fold artist rows that are one artist, by name and then by catalogue id;
     alias-link the same-named ones that are not. Returns the kept artists that
@@ -1113,18 +1170,30 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
             continue
         active_members.sort(key=_survivor_key, reverse=True)
         survivor = active_members[0]
+        merged_here = False
         for duplicate in active_members[1:]:
             if _reviewed(conn, "artist", survivor["id"], duplicate["id"]):
                 continue
+            evidence = _catalog_twin_evidence(conn, survivor, duplicate)
+            if evidence is None:
+                stats["artists_left_apart"] = int(stats.get("artists_left_apart") or 0) + 1
+                logger.info(
+                    "Left apart: artists %s %r and %s %r share %s=%s and "
+                    "nothing else says they are one artist",
+                    duplicate["id"], duplicate["name"], survivor["id"],
+                    survivor["name"], source, value)
+                continue
             _merge_artist(cursor, survivor, duplicate)
+            merged_here = True
             stats["artists_merged"] += 1
             logger.info(
                 "Merged catalog-identity artist %s into %s "
-                "(%s=%s, %r -> %r)",
-                duplicate["id"], survivor["id"], source, value,
+                "(%s=%s, %s, %r -> %r)",
+                duplicate["id"], survivor["id"], source, value, evidence,
                 duplicate["name"], survivor["name"],
             )
-        touched_artists.add(int(survivor["id"]))
+        if merged_here:
+            touched_artists.add(int(survivor["id"]))
     return touched_artists
 
 
