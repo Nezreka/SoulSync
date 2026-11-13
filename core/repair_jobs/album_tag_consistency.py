@@ -135,6 +135,38 @@ def _compatible_split(state, tags):
     return True
 
 
+VARIOUS_ARTISTS = 'Various Artists'
+_DISC_FOLDER = re.compile(r'^(cd|disc|disk)\s*\d+$', re.IGNORECASE)
+
+
+def release_folder(path):
+    """The folder a release lives in: a file's own, or the one above a disc folder."""
+    folder = os.path.dirname(str(path or '').replace('\\', '/').rstrip('/'))
+    if _DISC_FOLDER.match(os.path.basename(folder)):
+        folder = os.path.dirname(folder)
+    return folder
+
+
+def folder_split_album_artist(tags):
+    """The album artist a folder of same-titled files should share, or None.
+
+    A compilation ripped with no album artist tag lands on the server as one
+    album per track artist (#2072: Wipeout Pulse as sixteen one-track albums).
+    When most files already name one album artist, that is it. When nobody
+    agrees and three or more artists are in the folder, it is a compilation:
+    Various Artists. Two artists splitting a folder evenly is not enough to
+    say which.
+    """
+    named = [t['albumartist_tag'] for t in tags if t.get('albumartist_tag')]
+    if named:
+        value, count = Counter(named).most_common(1)[0]
+        if count * 2 > len(tags):
+            return value
+    seen = {(t.get('albumartist_tag') or t.get('artist_tag') or '').casefold() for t in tags}
+    seen.discard('')
+    return VARIOUS_ARTISTS if len(seen) >= 3 else None
+
+
 def _read_subject_tags(subjects, context):
     from core.library2.paths import resolve_lib2_path
     tags = []
@@ -151,6 +183,7 @@ def _read_subject_tags(subjects, context):
                     'track_title': subject.get('title'), 'file_path': raw, 'resolved_path': path,
                     'album_tag': _read_tag(audio, 'album'), 'albumartist_tag': _read_tag(audio, 'albumartist'),
                     'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
+                    'artist_tag': _read_tag(audio, 'artist'),
                     'rg_tag': _read_tag(audio, 'musicbrainz_releasegroupid'), 'date_tag': _read_tag(audio, 'date')})
         except Exception as exc:
             logger.debug('Unable to read consistency file %s: %s', raw, exc)
@@ -171,6 +204,8 @@ class AlbumTagConsistencyJob(RepairJob):
         'into multiple entries (e.g. "Simulation Theory" and "Simulation Theory (Super Deluxe)").\n\n'
         'The fix normalizes all tracks in the album to the most common (majority) value, '
         'then writes the corrected tags to the actual audio files.\n\n'
+        'A compilation with no album artist tag, filed as one album per track artist, '
+        'is reported too: one folder, one title, several album artists.\n\n'
         'Also reviews native album rows with the same artist and title that may '
         'have split on your server. Conflicting years, release identities, editions '
         'and library owners are kept separate. Apply only changes the listed files; '
@@ -227,6 +262,8 @@ class AlbumTagConsistencyJob(RepairJob):
             )
             if not context.check_stop():
                 self._scan_split_groups(context, result, subjects, check_album, check_artist, check_mbid)
+            if check_artist and not context.check_stop():
+                self._scan_folder_splits(context, result, subjects, check_album, check_mbid)
         return result
 
     def _scan_split_groups(self, context, result, subjects, check_album, check_artist, check_mbid):
@@ -280,6 +317,87 @@ class AlbumTagConsistencyJob(RepairJob):
                     result.findings_skipped_dedup += 1
         except Exception as exc:
             logger.warning('Native split album scan failed: %s', exc)
+            result.errors += 1
+
+    def _scan_folder_splits(self, context, result, subjects, check_album, check_mbid):
+        """One folder, one album title, several album artists (#2072).
+
+        The same-artist pass above cannot see these: a compilation with no
+        album artist tag is filed under each track's own artist, so no two of
+        its rows share an artist. What they share is the folder and the title.
+        """
+        try:
+            groups = {}
+            for subject in subjects:
+                folder = release_folder(subject.get('path'))
+                title = split_group_key('', subject.get('album_title'))[1]
+                if folder and title:
+                    key = (folder.casefold(), title, subject.get('owner_profile_id'))
+                    groups.setdefault(key, []).append(subject)
+            for members in groups.values():
+                if context.check_stop() or context.wait_if_paused():
+                    return
+                album_ids = sorted({s['album_id'] for s in members})
+                artists = {str(s.get('album_artist_name') or s.get('artist_name') or '').casefold()
+                           for s in members}
+                if len(album_ids) < 2 or len(artists) < 2:
+                    continue
+                tags = _read_subject_tags(members, context)
+                if len({t['album_id'] for t in tags}) < 2:
+                    continue
+                # positive signs of two releases sharing a folder keep them apart
+                years = {str(t['date_tag'])[:4] for t in tags
+                         if t.get('date_tag') and str(t['date_tag'])[:4].isdigit()}
+                if len(years) > 1 or len({t['rg_tag'] for t in tags if t.get('rg_tag')}) > 1:
+                    continue
+                result.scanned += 1
+                album_artist = folder_split_album_artist(tags)
+                if not album_artist or not context.create_finding:
+                    continue
+                outliers = [t for t in tags if (t.get('albumartist_tag') or '') != album_artist]
+                if not outliers:
+                    continue
+                variants = sorted({t.get('albumartist_tag') or MISSING for t in tags},
+                                  key=lambda v: (v == MISSING, v))
+                inconsistencies = [{'field': 'albumartist', 'canonical': album_artist,
+                                    'variants': variants, 'outlier_count': len(outliers)}]
+                inconsistencies += _detect_inconsistencies(tags, check_album, False, check_mbid)
+                with closing(context.db._get_connection()) as conn:
+                    state = split_catalogue_state(conn, album_ids)
+                album_title = members[0].get('album_title')
+                inserted = context.create_finding(
+                    job_id=self.job_id, finding_type='album_tag_inconsistency',
+                    severity='warning', entity_type='album', entity_id=f'lib2:{album_ids[0]}',
+                    file_path=None,
+                    title=f'Split by artist on your server: {album_title}',
+                    description=(
+                        f'{len(album_ids)} albums named "{album_title}" sit in one folder under '
+                        f'{len(artists)} different album artists. Unify Tags sets the album '
+                        f'artist to "{album_artist}" on every file so the server shows one album.'),
+                    details={'album_id': f'lib2:{album_ids[0]}', 'album_ids': album_ids,
+                        'server_split': True, 'folder_split': True,
+                        'split_catalogue_state': state, 'library_v2_native': True,
+                        'library_owner_id': members[0].get('owner_profile_id') or 1,
+                        'album_title': album_title, 'artist_name': album_artist,
+                        'inconsistencies': inconsistencies, 'track_count': len(tags),
+                        'tracks': [{'id': t['track_id'], 'track_id': t['track_id'],
+                            'file_id': t['file_id'], 'album_id': t['album_id'],
+                            'owner_profile_id': t['owner_profile_id'],
+                            'title': t['track_title'], 'file_path': t['file_path']} for t in tags],
+                        'library_v2': {'album_id': album_ids[0], 'album_ids': album_ids,
+                            'artist_id': members[0].get('artist_id'),
+                            'track_ids': sorted({s['track_id'] for s in members}),
+                            'file_ids': sorted({t['file_id'] for t in tags})}})
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Found: {album_title}, split across {len(artists)} album artists',
+                        log_type='warning')
+        except Exception as exc:
+            logger.warning('Folder split album scan failed: %s', exc)
             result.errors += 1
 
     def _scan_native_albums(self, context: JobContext, result: JobResult, file_subjects,
