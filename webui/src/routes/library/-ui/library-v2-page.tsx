@@ -281,7 +281,7 @@ import { ReviewLockButton } from './review-lock';
 import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
 import { UnmatchedReviewModal } from './unmatched-review-modal';
-import { UseFileTagsModal } from './use-file-tags-modal';
+import { releaseLibraryFileTagValues, UseFileTagsModal } from './use-file-tags-modal';
 import { WatchAllModal } from './watch-all-modal';
 
 // not the route module: it imports this page, and the cycle only held while nothing
@@ -14685,6 +14685,7 @@ export function LibraryMoreMenu() {
   // Watch All adds to the caller's own watchlist: anyone who may wish, not
   // only the admin (a household member watches in the shared library)
   const canWatch = useLibraryV2CanWish();
+  const moreQueryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
   const [watching, setWatching] = useState(false);
   const item = (key: string, name: string, desc: string) => (
@@ -14703,7 +14704,7 @@ export function LibraryMoreMenu() {
             type="button"
             className={`${styles.btnGhost} ${styles.automaticSearchButton} library-more-btn`}
             aria-label="More library actions"
-            title="Automatic Search, Watch All and Export"
+            title="Automatic Search, Watch All, Export and file tag values"
             {...props}
           >
             More
@@ -14749,6 +14750,18 @@ export function LibraryMoreMenu() {
             key: 'export',
             label: item('export', 'Export artists', 'Save your artist list as JSON, CSV or text.'),
             onSelect: () => setExporting(true),
+          },
+          {
+            // #2084: what Use File Tags saved is kept as edits, which keeps
+            // enrichment and repairs off those fields. this lets go of all of it
+            key: 'release-file-tags',
+            label: item(
+              'release-file-tags',
+              'Release file tag values',
+              'Let metadata sources and repairs update what Use File Tags saved.',
+            ),
+            disabled: !search.canWrite,
+            onSelect: () => void releaseLibraryFileTagValues(moreQueryClient),
           },
         ]}
       />

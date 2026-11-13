@@ -5781,6 +5781,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         result = tags_to_library.apply(db, track_ids, profile_id=_profile())
         return jsonify({"success": True, **result})
 
+    @_route("/api/library/v2/<entity>/<int:eid>/use-file-tags", methods=["DELETE"])
+    def lib2_use_file_tags_release(entity, eid):
+        """Let go of the values this track, album or artist took from file
+        tags (#2084). They go back to what the metadata sources say and are
+        free for enrichment and repairs again. Hand edits and files stay."""
+        if entity not in ("artists", "albums", "tracks"):
+            return _fail("Unsupported entity")
+        from core.library2 import tags_to_library
+        from core.library2.metadata_overrides import MetadataOverrideError
+        db, track_ids = _tags_to_library_ids(entity, eid)
+        if track_ids is None:
+            return _fail("Not found", 404)
+        try:
+            return jsonify({"success": True,
+                            **tags_to_library.release(db, track_ids, profile_id=_profile())})
+        except MetadataOverrideError as exc:
+            return _fail(str(exc), exc.status)
+
+    @_route("/api/library/v2/use-file-tags", methods=["GET", "DELETE"])
+    def lib2_use_file_tags_library():
+        """The whole Library's values taken from file tags: how many (GET),
+        or let go of every one of them (DELETE)."""
+        from core.library2 import tags_to_library
+        from core.library2.metadata_overrides import MetadataOverrideError
+        db = get_database()
+        if request.method == "GET":
+            with closing(db._get_connection()) as conn:
+                return jsonify({"success": True, "held": tags_to_library.held_values(conn)})
+        try:
+            return jsonify({"success": True,
+                            **tags_to_library.release(db, None, profile_id=_profile())})
+        except MetadataOverrideError as exc:
+            return _fail(str(exc), exc.status)
+
     @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).
