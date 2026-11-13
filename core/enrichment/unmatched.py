@@ -444,23 +444,145 @@ def build_snapshot_query(service: str, entity_type: str) -> Tuple[str, List]:
     return sql, [entity_type, service]
 
 
-def _compute_snapshot(connect: Callable[[], Any], service: str, entity_type: str) -> Dict[str, Any]:
-    sql, params = build_snapshot_query(service, entity_type)
+# ── what is owned is the same for every worker ──────────────────────────────
+#
+# the pass above still cost what it cost: musicbrainz tracks took a minute on
+# the live library, and so did deezer tracks, and so did every other worker's,
+# because each one worked out the owned library again before looking at its
+# own attempts. 85% of that minute is the owned check (a file per track, the
+# credit gate), and it does not depend on the worker at all. so it is done once
+# per entity type and kept for longer than a snapshot, and a worker's snapshot
+# is that list plus one read of its own attempts. the Manage Workers window
+# asked for three snapshots per worker to draw three numbers; the numbers for
+# every worker now come from one read of the attempts table.
+
+UNIVERSE_TTL = 600.0
+_universes: Dict[tuple, Dict[str, Any]] = {}
+_universe_builds: Dict[tuple, threading.Event] = {}
+_tallies: Dict[tuple, Dict[str, Any]] = {}
+_tally_builds: Dict[tuple, threading.Event] = {}
+
+
+def _universe_variant(service: str) -> str:
+    """similar artists enriches a narrower set (an artist with a provider id);
+    every other worker shares one."""
+    return 'similar_artists' if service == 'similar_artists' else ''
+
+
+def build_universe_query(service: str, entity_type: str) -> Tuple[str, List]:
+    """The ids of the rows a worker enriches. No attempts, and no names: this
+    is the part that is the same whoever asks, and ids alone come off the
+    indexes without opening a row."""
+    _validate(service, entity_type)
+    table = _ENTITY_TABLE[entity_type]['table']
+    return (f"SELECT e.id FROM {table} e "
+            f"WHERE {' AND '.join(_universe(service, entity_type))}"), []
+
+
+#: ids per display read (SQLite's default variable limit is 999)
+_DISPLAY_CHUNK = 900
+
+
+def _display_rows(conn: Any, entity_type: str, ids: List[Any]) -> Dict[Any, tuple]:
+    """name, artwork and parent for these rows only: the ones still unmatched,
+    which is what a list shows."""
+    table = _ENTITY_TABLE[entity_type]['table']
+    name, image, parent = _SNAPSHOT_DISPLAY[entity_type]
+    out: Dict[Any, tuple] = {}
+    for start in range(0, len(ids), _DISPLAY_CHUNK):
+        chunk = ids[start:start + _DISPLAY_CHUNK]
+        marks = ','.join('?' for _ in chunk)
+        for row in conn.execute(
+                f"SELECT e.id, {name}, {image}, {parent} FROM {table} e WHERE e.id IN ({marks})",
+                chunk):
+            out[row[0]] = (row[1], row[2], row[3])
+    return out
+
+
+def _kept(cache: Dict[tuple, Dict[str, Any]], builds: Dict[tuple, threading.Event],
+          key: tuple, ttl: float, build: Callable[[], Dict[str, Any]],
+          follow_generation: bool) -> Dict[str, Any]:
+    """One build at a time per key; a caller arriving mid-build waits for it."""
+    while True:
+        with _snapshot_lock:
+            kept = cache.get(key)
+            if kept is not None and time.monotonic() - kept['at'] < ttl:
+                return kept
+            building = builds.get(key)
+            if building is None:
+                building = threading.Event()
+                builds[key] = building
+                generation = _generation
+                break
+        building.wait(timeout=300)
+    try:
+        data = build()
+        data['at'] = time.monotonic()
+        with _snapshot_lock:
+            now = time.monotonic()
+            for stale in [k for k, v in cache.items() if now - v['at'] >= ttl]:
+                del cache[stale]
+            if not follow_generation or generation == _generation:
+                # an invalidation during the build means this pass may predate it
+                cache[key] = data
+        return data
+    finally:
+        with _snapshot_lock:
+            builds.pop(key, None)
+        building.set()
+
+
+def _compute_universe(connect: Callable[[], Any], service: str, entity_type: str) -> Dict[str, Any]:
+    sql, params = build_universe_query(service, entity_type)
     conn = connect()
     try:
         rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
-    counts = {'matched': 0, 'not_found': 0, 'pending': 0, 'total': 0}
+    ids = [r[0] for r in rows]
+    return {'ids': ids, 'members': frozenset(ids)}
+
+
+def owned_universe(connect: Callable[[], Any], db_key: Any, service: str,
+                   entity_type: str) -> Dict[str, Any]:
+    """The owned rows of one entity type, kept for UNIVERSE_TTL and shared by
+    every worker. Not dropped by a match or a reset: neither changes what is
+    owned."""
+    _validate(service, entity_type)
+    key = (str(db_key), entity_type, _universe_variant(service))
+    return _kept(_universes, _universe_builds, key, UNIVERSE_TTL,
+                 lambda: _compute_universe(connect, service, entity_type),
+                 follow_generation=False)
+
+
+def _compute_snapshot(connect: Callable[[], Any], service: str, entity_type: str,
+                      universe: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if universe is None:
+        universe = _compute_universe(connect, service, entity_type)
+    counts = {'matched': 0, 'not_found': 0, 'pending': 0, 'total': len(universe['ids'])}
+    open_rows = []
+    none = (None, None)
+    conn = connect()
+    try:
+        attempts = {entity_id: (status, attempted) for entity_id, status, attempted in conn.execute(
+            "SELECT entity_id, status, last_attempted_at FROM lib2_provider_attempts "
+            "WHERE entity_type=? AND service=?", (entity_type, service))}
+        for entity_id in universe['ids']:
+            status, attempted = attempts.get(entity_id, none)
+            if status == 'matched':
+                counts['matched'] += 1
+            elif status == 'not_found' or status is None:
+                counts['not_found' if status else 'pending'] += 1
+                open_rows.append((entity_id, status, attempted if status else None))
+        shown = _display_rows(conn, entity_type, [row[0] for row in open_rows])
+    finally:
+        conn.close()
+    blank = (None, None, None)
     items = []
-    for entity_id, status, name, image, parent, attempted in rows:
-        counts['total'] += 1
-        if status == 'matched':
-            counts['matched'] += 1
-        elif status == 'not_found' or status is None:
-            counts['not_found' if status else 'pending'] += 1
-            items.append({'id': entity_id, 'name': name, 'image_url': image,
-                          'parent': parent, 'status': status, 'last_attempted': attempted})
+    for entity_id, status, attempted in open_rows:
+        name, image, parent = shown.get(entity_id, blank)
+        items.append({'id': entity_id, 'name': name, 'image_url': image, 'parent': parent,
+                      'status': status, 'last_attempted': attempted})
     # ORDER BY name COLLATE NOCASE: NULL first, ties in row order
     items.sort(key=lambda i: (i['name'] is not None, _nocase(i['name'] or '')))
     return {'counts': counts, 'items': items}
@@ -472,41 +594,73 @@ def unmatched_snapshot(connect: Callable[[], Any], db_key: Any, service: str,
     time per library; a caller arriving mid-build waits for it."""
     _validate(service, entity_type)
     key = (str(db_key), service, entity_type)
-    while True:
-        with _snapshot_lock:
-            snap = _snapshots.get(key)
-            if snap is not None and time.monotonic() - snap['at'] < SNAPSHOT_TTL:
-                return snap
-            building = _snapshot_builds.get(key)
-            if building is None:
-                building = threading.Event()
-                _snapshot_builds[key] = building
-                generation = _generation
-                break
-        building.wait(timeout=300)
+
+    def build() -> Dict[str, Any]:
+        universe = owned_universe(connect, db_key, service, entity_type)
+        return _compute_snapshot(connect, service, entity_type, universe)
+
+    return _kept(_snapshots, _snapshot_builds, key, SNAPSHOT_TTL, build, follow_generation=True)
+
+
+def _compute_tallies(connect: Callable[[], Any], entity_type: str,
+                     universe: Dict[str, Any]) -> Dict[str, Any]:
+    """matched / not_found / any-status per worker, for owned rows only: one
+    read of the attempts of this entity type."""
+    members = universe['members']
+    tallies: Dict[str, List[int]] = {}
+    conn = connect()
     try:
-        data = _compute_snapshot(connect, service, entity_type)
-        data['at'] = time.monotonic()
-        with _snapshot_lock:
-            now = time.monotonic()
-            for stale in [k for k, v in _snapshots.items() if now - v['at'] >= SNAPSHOT_TTL]:
-                del _snapshots[stale]
-            if generation == _generation:
-                # an invalidation during the build means this pass may predate it
-                _snapshots[key] = data
-        return data
+        cursor = conn.execute(
+            "SELECT entity_id, service, status FROM lib2_provider_attempts WHERE entity_type=?",
+            (entity_type,))
+        while True:
+            batch = cursor.fetchmany(20000)
+            if not batch:
+                break
+            for entity_id, service, status in batch:
+                if entity_id not in members:
+                    continue
+                row = tallies.get(service)
+                if row is None:
+                    row = tallies[service] = [0, 0, 0]
+                row[2] += 1
+                if status == 'matched':
+                    row[0] += 1
+                elif status == 'not_found':
+                    row[1] += 1
     finally:
-        with _snapshot_lock:
-            _snapshot_builds.pop(key, None)
-        building.set()
+        conn.close()
+    return {'services': tallies, 'total': len(universe['ids'])}
 
 
-def invalidate_unmatched_snapshots() -> None:
-    """A manual match, clear or reset changed what is unmatched."""
+def enrichment_counts(connect: Callable[[], Any], db_key: Any, service: str,
+                      entity_type: str) -> Dict[str, int]:
+    """``{matched, not_found, pending, total}`` for one worker and entity type,
+    the same numbers a snapshot's counts hold, without building the snapshot:
+    the tallies for every worker come from one kept read."""
+    _validate(service, entity_type)
+    universe = owned_universe(connect, db_key, service, entity_type)
+    key = (str(db_key), entity_type, _universe_variant(service))
+    kept = _kept(_tallies, _tally_builds, key, SNAPSHOT_TTL,
+                 lambda: _compute_tallies(connect, entity_type, universe),
+                 follow_generation=True)
+    matched, not_found, seen = kept['services'].get(service, (0, 0, 0))
+    total = kept['total']
+    return {'matched': matched, 'not_found': not_found,
+            'pending': max(0, total - seen), 'total': total}
+
+
+def invalidate_unmatched_snapshots(universe: bool = False) -> None:
+    """A manual match, clear or reset changed what is unmatched. What is owned
+    did not change, so that list stays unless the caller says the library
+    itself moved (``universe=True``: a refresh asked for by hand)."""
     global _generation
     with _snapshot_lock:
         _generation += 1
         _snapshots.clear()
+        _tallies.clear()
+        if universe:
+            _universes.clear()
 
 
 def page_unmatched(snapshot: Dict[str, Any], status: str, query: Optional[str],
@@ -549,6 +703,9 @@ __all__ = [
     'build_breakdown_query',
     'build_snapshot_query',
     'unmatched_snapshot',
+    'owned_universe',
+    'enrichment_counts',
+    'build_universe_query',
     'invalidate_unmatched_snapshots',
     'page_unmatched',
     'validate_request',

@@ -2785,12 +2785,12 @@ class MusicDatabase:
         The per-worker ``get_stats().progress`` lumps matched + not_found into a
         single 'processed' count; this splits them so the modal can show the
         real match rate. Raises ``UnmatchedQueryError`` on bad input."""
-        from core.enrichment.unmatched import unmatched_snapshot
+        from core.enrichment.unmatched import enrichment_counts
 
-        # the same kept pass as the unmatched list (review 5 R5-D-1)
-        snapshot = unmatched_snapshot(self._get_connection, self.database_path,
-                                      service, entity_type)
-        return dict(snapshot['counts'])
+        # the owned list every worker shares, and one read of the attempts
+        # that tallies all of them: no snapshot is built to draw a number
+        return enrichment_counts(self._get_connection, self.database_path,
+                                 service, entity_type)
 
     def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
         """Re-queue item(s) for a source by clearing match_status back to NULL.

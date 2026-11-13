@@ -252,10 +252,21 @@ def create_blueprint() -> Blueprint:
             return jsonify({'error': 'database unavailable'}), 503
         try:
             db = _db_getter()
-            breakdown = {
-                entity: db.get_enrichment_breakdown(service_id, entity)
-                for entity in supported_entity_types(service_id)
-            }
+            if request.args.get('fresh'):
+                # the Refresh button: the library itself may have moved
+                from core.enrichment.unmatched import invalidate_unmatched_snapshots
+                invalidate_unmatched_snapshots(universe=True)
+            entities = list(supported_entity_types(service_id))
+            # artists, albums and tracks are read side by side: the first open
+            # waits for the slowest of them, not for all three in a row
+            if len(entities) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=len(entities)) as pool:
+                    counts = list(pool.map(
+                        lambda entity: db.get_enrichment_breakdown(service_id, entity), entities))
+            else:
+                counts = [db.get_enrichment_breakdown(service_id, entity) for entity in entities]
+            breakdown = dict(zip(entities, counts, strict=True))
             return jsonify({'service': service_id, 'breakdown': breakdown}), 200
         except UnmatchedQueryError as e:
             return jsonify({'error': str(e)}), 400
