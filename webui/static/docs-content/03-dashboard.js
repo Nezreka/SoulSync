@@ -298,6 +298,35 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
 `
         },
         {
+            id: 'dash-notifications',
+            title: 'Notifications',
+            lede: 'The bell in the corner: what just happened, what is running, and whether anything needs you.',
+            body: `
+## The bell
+
+The bell sits bottom right on every page. The red count is notes you have not seen; the small count under it is downloads in flight; a ring turns round it while a long job runs.
+
+## The panel
+
+- **Health** — a pill in the header counts what is down, what is a warning and what is fine. Click it for **System health**: one row per check, the worst first, with the facts of a healthy check as small labels.
+- **Filters** — **All**, **Problems**, **Warnings**, **Done** and **Info**, each with how many it holds. A kind with nothing in it is not offered.
+- **Running now** — a row for every long job (scans, automations, sync, imports, overlays) with its progress and a link to its page. Three show; the rest fold under "and N more running".
+- **New** — notes that arrived since you last closed the panel, marked with a dot. They stay new until you close it, then move under **Earlier today**, **Yesterday** or **Older**.
+- **A note** — a file path is cut to the file's name in the sentence, with the whole path on its own line and **Copy path**. Three or more notes in a row that say the same thing about different things fold into one with "and N more like this". Point at a note to dismiss it.
+- **Footer** — downloads in flight (click for the download manager), uptime and memory.
+
+**Escape** closes the panel. The panel is filled from the server's journal when a page loads, so a reload does not empty it; the bin in the header clears the panel only.
+
+## Toasts
+
+A note appears above the bell as it happens. Up to three stand at once, and the line along the bottom is the time left: it stops while you point at the toast. Problems stay about twice as long as good news. Click a toast to dismiss it.
+
+## History
+
+The clock button opens the journal the server keeps for your profile: search, the same filters with counts, days as headings, and **Load more**. The bin there clears the journal for good.
+`
+        },
+        {
             id: 'dash-stats-deep',
             title: 'Stats in Depth',
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',

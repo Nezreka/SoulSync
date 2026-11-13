@@ -17386,6 +17386,29 @@ class MusicDatabase:
             logger.error("Error reading notification history: %s", e)
             return []
 
+    def get_notification_counts(self, profile_id: int = 1, search: str = None) -> Dict[str, int]:
+        """How many journaled notifications a profile has of each type, for the
+        History filter chips. The search narrows it, the type filter does not:
+        a chip says what picking it would show."""
+        counts = {kind: 0 for kind in self._NOTIFICATION_TYPES}
+        try:
+            q = "SELECT type, COUNT(*) FROM notification_history WHERE profile_id = ?"
+            args: list = [int(profile_id)]
+            if search:
+                q += " AND message LIKE ? ESCAPE '\\'"
+                escaped = str(search).replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+                args.append(f"%{escaped}%")
+            q += " GROUP BY type"
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(q, args)
+                for kind, n in cursor.fetchall():
+                    if kind in counts:
+                        counts[kind] = int(n or 0)
+        except Exception as e:
+            logger.error("Error counting notification history: %s", e)
+        return counts
+
     def clear_notification_history(self, profile_id: int = 1) -> int:
         """Drop a profile's journaled notifications. Returns rows removed."""
         try:

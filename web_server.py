@@ -14787,14 +14787,20 @@ def notification_history():
     pid = get_current_profile_id()
     if request.method == 'DELETE':
         return jsonify({'success': True, 'removed': db.clear_notification_history(pid)})
+    type_filter = request.args.get('type')
+    search = request.args.get('q')
     rows = db.get_notification_history(
         pid,
-        type_filter=request.args.get('type'),
-        search=request.args.get('q'),
+        type_filter=type_filter,
+        search=search,
         limit=request.args.get('limit', default=100, type=int) or 100,
         offset=request.args.get('offset', default=0, type=int) or 0,
     )
-    return jsonify({'success': True, 'notifications': rows})
+    # how many of each kind match the search (the filter chips), and how many
+    # this request pages through ("Showing 100 of 1,204")
+    counts = db.get_notification_counts(pid, search=search)
+    total = counts.get(type_filter, 0) if type_filter in counts else sum(counts.values())
+    return jsonify({'success': True, 'notifications': rows, 'counts': counts, 'total': total})
 
 
 def _simple_monitor_task():
