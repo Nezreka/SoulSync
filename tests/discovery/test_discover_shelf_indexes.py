@@ -92,3 +92,49 @@ def test_the_stray_test_indexes_are_dropped_on_start(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert left == []
+
+
+def _shelf_pass_sql(extra_where=""):
+    """The candidate pass exactly as PersonalizedPlaylistsService._candidates sends it."""
+    from core.personalized_playlists import PersonalizedPlaylistsService as S
+
+    return (f"SELECT id, LOWER(artist_name) IN (?, ?) FROM discovery_pool "
+            f"{S._POOL_WHERE} {S._OWNED_CLAUSE} {extra_where}")
+
+
+@pytest.mark.parametrize("extra_where, extra", [
+    ("", ()),                                   # discovery shuffle
+    ("AND popularity >= ?", (60,)),             # popular picks
+    ("AND popularity < ?", (40,)),              # hidden gems
+])
+def test_the_drawn_shelves_pick_candidates_from_the_covering_index(db, extra_where, extra):
+    """nov 13 2026: this pass read every pool row in full (track json and all,
+    500 MB on a 233k-row pool) to get at seven small columns, ~2s a shelf."""
+    import random
+
+    from core.personalized_playlists import _ensure_owned_ids
+
+    with closing(db._get_connection()) as conn:
+        rng = random.Random(7)
+        conn.executemany(
+            "INSERT INTO discovery_pool(profile_id, source, artist_name, track_name, album_name, "
+            "popularity, spotify_track_id, deezer_track_id, track_data_json) VALUES(?,?,?,?,?,?,?,?,?)",
+            [(1 + n % 2, ("deezer", "spotify")[n % 3 == 0], f"artist {n % 400}", f"t{n}", f"al{n}",
+              rng.randrange(100), f"sp{n}" if n % 3 == 0 else None, f"dz{n}", "x" * 400)
+             for n in range(6000)])
+        conn.execute("ANALYZE")
+        _ensure_owned_ids(conn)
+        params = ("a", "b", "deezer", 1, 1) + extra
+        plan = _plan(conn, _shelf_pass_sql(extra_where), params)
+        rows = conn.execute(_shelf_pass_sql(extra_where), params).fetchall()
+    assert "COVERING INDEX idx_discovery_pool_shelf" in plan, plan
+    assert rows, "the query this plan is for found nothing"
+
+
+def test_the_shelf_index_is_built_once_and_survives_a_restart(tmp_path):
+    path = str(tmp_path / "again.db")
+    for _ in range(2):
+        db = MusicDatabase(path)
+        with closing(db._get_connection()) as conn:
+            sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='idx_discovery_pool_shelf'").fetchone()
+        assert sql and "profile_id, source, artist_name, popularity" in sql[0]

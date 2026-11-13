@@ -1627,6 +1627,7 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
             self._ensure_discovery_pool_decade_index(cursor)
+            self._ensure_discovery_pool_shelf_index(cursor)
             self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
@@ -5093,6 +5094,31 @@ class MusicDatabase:
             "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
             "ON metadata_match_provenance(origin, service)"
         )
+
+    def _ensure_discovery_pool_shelf_index(self, cursor):
+        """Discover's drawn shelves (popular picks, hidden gems, discovery
+        shuffle) pick their candidates in one pass over the pool.
+
+        that pass needs seven small columns and read every pool row in full to
+        get them, track json and all (500 MB for a 233k-row pool): about 2s a
+        shelf live, the whole cost of a shelf once the owned list was shared
+        (Nov 13 2026). this index holds exactly those columns, so the pass
+        never opens a row. measured on a copy of that pool: 0.76s to build
+        once, 10 MB, and the pass went from 0.41s to 0.05s. after the profile
+        migrations, which add profile_id."""
+        try:
+            had = cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' "
+                "AND name='idx_discovery_pool_shelf'").fetchone()
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_discovery_pool_shelf ON discovery_pool "
+                "(profile_id, source, artist_name, popularity, "
+                "spotify_track_id, itunes_track_id, deezer_track_id)")
+            if not had:
+                # tell the planner about it now, not at the next stats refresh
+                cursor.execute("ANALYZE idx_discovery_pool_shelf")
+        except Exception as e:  # noqa: BLE001 - an index is an assist, retried next start
+            logger.debug("discovery_pool shelf index skipped: %s", e)
 
     def _ensure_discovery_pool_decade_index(self, cursor):
         """Discover's decade shelves group the pool by its release year.
