@@ -7,10 +7,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px 32px 100px;
   box-sizing: border-box;
   color: #ffffff;
   position: relative;
@@ -131,6 +129,14 @@
   color: var(--white-a60);
 }
 
+/* the page name, then the search: closer together than the shelves below */
+.browseHead {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
 /* ── Search ─────────────────────────────────────────────────────────────── */
 
 .searchBar {
@@ -236,37 +242,9 @@
   cursor: default;
 }
 
+/* the modes are the frame's pills; they stay on one line beside the field */
 .searchModes {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: var(--radius-lg);
-  background: var(--white-a05);
-  border: 1px solid var(--white-a08);
-}
-
-.searchMode {
-  padding: 8px 15px;
-  border: none;
-  border-radius: 9px;
-  background: none;
-  color: var(--white-a55);
-  font-size: 12.5px;
-  font-weight: 580;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background var(--dur-fast) ease,
-    color var(--dur-fast) ease;
-}
-
-.searchMode:hover {
-  color: #fff;
-}
-
-.searchModeActive {
-  background: rgba(var(--accent-rgb), 0.9);
-  color: #fff;
+  flex-wrap: nowrap;
 }
 
 /* Below 360px the four modes total ~266px inside a ~246px bar (at 320px)
@@ -290,60 +268,6 @@
     flex-shrink: 0;
     white-space: nowrap;
   }
-}
-
-.browseTopRow {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.browseTopRow > *:first-child {
-  flex: 1 1 480px;
-  min-width: 0;
-}
-
-.wishlistLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  height: 48px;
-  padding: 0 18px;
-  border-radius: var(--radius-card);
-  border: 1px solid var(--white-a10);
-  background: var(--white-a05);
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 13.5px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease;
-}
-
-.wishlistLink:hover {
-  background: rgba(var(--accent-rgb), 0.16);
-  border-color: rgba(var(--accent-rgb), 0.45);
-  color: #ffffff;
-}
-
-.wishlistLink svg {
-  width: 17px;
-  height: 17px;
-}
-
-.wishlistLinkCount {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: rgba(var(--accent-rgb), 0.95);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── Genre nav ──────────────────────────────────────────────────────────── */
@@ -2588,9 +2512,6 @@
 }
 
 @media (max-width: 860px) {
-  .audiobooksContainer {
-    padding: 18px 18px 90px;
-  }
   .heroInner {
     flex-direction: column;
     align-items: flex-start;

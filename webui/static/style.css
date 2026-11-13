@@ -76162,6 +76162,8 @@ body.src-modal-open { overflow: hidden; }
     font: inherit;
     font-size: 13px;
     font-weight: 600;
+    /* some of these are links */
+    text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
     transition: background var(--dur-base) ease, opacity var(--dur-base) ease;
