@@ -34,7 +34,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import SafeFormatter as _SafeFormatter, app_log_path, get_logger, setup_logging
+from utils.logging_config import SafeFormatter as _SafeFormatter, app_log_path, get_logger, redact as _redact_log_line, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -4850,7 +4850,9 @@ def get_log_tail():
                         continue
                 if search and search not in stripped.lower():
                     continue
-                result_lines.append(stripped)
+                # lines written before the formatters blanked credentials are
+                # still on disk: never hand one to the page as it was
+                result_lines.append(_redact_log_line(stripped))
             # Trim to requested count after filtering
             result_lines = result_lines[-lines:]
         except Exception as e:

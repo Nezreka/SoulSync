@@ -92,3 +92,13 @@ def test_every_file_log_goes_through_the_redacting_formatter():
         source = (root / name).read_text(encoding="utf-8")
         assert "setFormatter(_logging.Formatter(" not in source, name
         assert "setFormatter(logging.Formatter(" not in source, name
+
+
+def test_the_log_viewer_blanks_lines_that_were_written_before_the_fix():
+    """keys already in app.log on disk are not shown, or copied, from Settings"""
+    import pathlib
+    source = (pathlib.Path(__file__).resolve().parent.parent / "web_server.py").read_text(encoding="utf-8")
+    start = source.index("def get_log_tail():")
+    body = source[start:source.index("\n@app.route", start)]
+    assert "result_lines.append(_redact_log_line(stripped))" in body
+    assert "result_lines.append(stripped)" not in body
