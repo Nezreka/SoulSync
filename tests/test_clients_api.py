@@ -459,3 +459,35 @@ def test_a_matched_soulseek_transfer_is_labelled_by_its_id_or_filename(monkeypat
     c = _client(monkeypatch, slskd=_Slskd(), known=known)
     items = c.get('/api/clients/slskd').get_json()['items']
     assert [i.get('soulsync', {}).get('title') for i in items] == ['Dune', 'In Rainbows']
+
+
+@pytest.mark.parametrize('route, payload', [
+    ('/api/clients/torrent/add', {'url': 'magnet:?xt=urn:btih:abc'}),
+    ('/api/clients/usenet/add', {'url': 'https://indexer/x.nzb'}),
+])
+def test_a_profile_with_downloads_off_cannot_paste_a_link(monkeypatch, route, payload):
+    """nov 13 2026 review: these two start a download and never asked whether
+    the profile may. every other way to start one does."""
+    class _Adder(_FakeTorrent):
+        async def add_torrent(self, url, category=None):
+            self.calls.append(('add', url, category))
+            return 'NEWHASH'
+
+        async def add_nzb(self, url, category=None):
+            self.calls.append(('add', url, category))
+            return 'NZO'
+
+    adder = _Adder()
+    c = _client(monkeypatch, torrent=adder, usenet=adder)
+    import core.profile_context as profile_context
+    import database.music_database as mdb
+    monkeypatch.setattr(profile_context, 'get_current_profile_id', lambda: 4)
+    monkeypatch.setattr(mdb, 'get_database', lambda: type('D', (), {
+        'get_profile': lambda self, pid: {'id': pid, 'can_download': False}})())
+    r = c.post(route, json=payload)
+    assert r.status_code == 403
+    assert adder.calls == []
+    # the same profile, allowed
+    monkeypatch.setattr(mdb, 'get_database', lambda: type('D', (), {
+        'get_profile': lambda self, pid: {'id': pid, 'can_download': True}})())
+    assert c.post(route, json=payload).get_json()['success'] is True

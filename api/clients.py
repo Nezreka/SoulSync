@@ -312,6 +312,12 @@ def create_blueprint() -> Blueprint:
     @bp.route('/api/clients/torrent/add', methods=['POST'])
     @_json_guard
     def torrent_add():
+        # a paste here starts a download: a profile with downloads turned
+        # off is refused, the same as on every other way to start one
+        from api.helpers import download_permission_error
+        denied = download_permission_error()
+        if denied:
+            return denied
         from core.torrent_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
         url = str(payload.get('url') or '').strip()
@@ -331,6 +337,12 @@ def create_blueprint() -> Blueprint:
     @bp.route('/api/clients/usenet/add', methods=['POST'])
     @_json_guard
     def usenet_add():
+        # a paste here starts a download: a profile with downloads turned
+        # off is refused, the same as on every other way to start one
+        from api.helpers import download_permission_error
+        denied = download_permission_error()
+        if denied:
+            return denied
         from core.usenet_clients import get_active_adapter
         payload = request.get_json(silent=True) or {}
         url = str(payload.get('url') or '').strip()
