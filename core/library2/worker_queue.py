@@ -305,6 +305,11 @@ def pending_count(conn, service: str, *,
         return _pending_count(conn, service, retry_after_days=retry_after_days,
                               entity_types=entity_types, retry_statuses=retry_statuses,
                               require_provider_id=require_provider_id)
+    if not require_provider_id and PROGRESS_SNAPSHOT_TTL > 0:
+        shared = _pending_from_snapshot(conn, service, retry_after_days,
+                                        entity_types, retry_statuses)
+        if shared is not None:
+            return shared
     key = (_db_file(conn), str(service).strip().lower(), int(retry_after_days),
            tuple(entity_types), tuple(retry_statuses), bool(require_provider_id))
     now = time.monotonic()
@@ -393,15 +398,48 @@ def _db_file(conn) -> str:
     return f"conn:{id(conn)}"
 
 
+# retry windows (days) the snapshot counts due failures for. a worker asking
+# with another window is counted the old way once and added for the next pass
+_snapshot_windows: set = {int(DEFAULT_RETRY_AFTER_DAYS)}
+_MAX_SNAPSHOT_WINDOWS = 6
+# the attempts table's own primary key index: (entity_type, entity_id, service)
+_ATTEMPTS_PK = "sqlite_autoindex_lib2_provider_attempts_1"
+
+
 def _compute_progress(conn) -> Dict[str, Dict[str, Any]]:
-    """{entity_type: {"total": n, "processed": {service: n}}} for every service.
+    """{entity_type: {"total": n, "processed": {service: n}, ...}} for every service.
 
     Both halves are scoped to the OWNED library, matching the universe the
     queue actually works on (`_pending_sql`). Counting every row in the table
     meant a library with any discography or wishlist rows had a denominator
     the worker would never reach, so the bar could not hit 100% however long
-    it ran. The owned set is built once per entity type (the IN subquery) and
-    the attempts are counted against it for all services at once."""
+    it ran.
+
+    One pass answers every service (Nov 13 2026). The owned check per row is
+    the cost, and it was paid per service: each running worker's pending
+    count was six catalogue passes of its own, 25s a service on a 319k-track
+    library, asked again every 30s by the status loop for as long as a tab
+    was open (86% of a core, measured). Here the owned ids are written down
+    once per entity type and every service is counted against them, so the
+    same pass also carries what `pending_count` needs: per service and status,
+    how many attempts and how many are past each retry window."""
+    if getattr(conn, "in_transaction", False):
+        # the fast pass keeps its ids in temp tables and commits when done;
+        # never on a connection that carries someone's open work
+        return _compute_progress_plain(conn)
+    try:
+        return _compute_progress_fast(conn)
+    except Exception:  # noqa: BLE001 - an odd schema or no temp space: the plain pass
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001, S110 - nothing open to roll back
+            pass
+        return _compute_progress_plain(conn)
+
+
+def _compute_progress_plain(conn) -> Dict[str, Dict[str, Any]]:
+    """The same totals with no temp tables; no per-status detail, so pending
+    counts fall back to their own queries."""
     out: Dict[str, Dict[str, Any]] = {}
     for entity_type in ENTITY_ORDER:
         table = _TABLES[entity_type]
@@ -421,21 +459,165 @@ def _compute_progress(conn) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+# worker_credit_ready_sql, with the unresolved artists looked up once and not
+# once per album and track (thirty LIKEs and eleven json reads each time)
+_READY_FROM_TEMP = {
+    "artist": "NOT EXISTS (SELECT 1 FROM temp.lib2_q_unresolved u WHERE u.id = e.id)",
+    "album": ("NOT EXISTS (SELECT 1 FROM temp.lib2_q_unresolved u "
+              "WHERE u.id = e.primary_artist_id)"),
+    "track": ("NOT EXISTS (SELECT 1 FROM lib2_albums al "
+              "JOIN temp.lib2_q_unresolved u ON u.id = al.primary_artist_id "
+              "WHERE al.id = e.album_id)"),
+}
+
+
+def _attempt_rows(conn, entity_type: str, windows: tuple, source: str, where: str):
+    due = "".join(
+        f", SUM(CASE WHEN a.last_attempted_at <= datetime('now', '-{int(days)} days') "
+        f"THEN 1 ELSE 0 END)" for days in windows)
+    return conn.execute(
+        f"SELECT a.service, a.status, COUNT(*){due} FROM {source} "
+        f"WHERE a.entity_type = :entity {where} GROUP BY a.service, a.status",
+        {"entity": entity_type}).fetchall()
+
+
+def _compute_progress_fast(conn) -> Dict[str, Dict[str, Any]]:
+    from core.library2.artist_credit_gate import unresolved_credit_sql
+
+    windows = tuple(sorted(_snapshot_windows))
+    out: Dict[str, Dict[str, Any]] = {}
+    temp_tables = ["lib2_q_unresolved"] + [f"lib2_q_{entity}" for entity in ENTITY_ORDER]
+    try:
+        for name in temp_tables:
+            conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
+            conn.execute(f"CREATE TEMP TABLE {name}(id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO temp.lib2_q_unresolved "
+                     f"SELECT a.id FROM lib2_artists a WHERE {unresolved_credit_sql('a')}")
+        for entity_type in ENTITY_ORDER:
+            table = _TABLES[entity_type]
+            ids = f"temp.lib2_q_{entity_type}"
+            conn.execute(
+                f"INSERT INTO {ids} SELECT e.id FROM {table} e "
+                f"WHERE {owned_sql(entity_type, 'e', scope=ANY_OWNER)} "
+                f"AND {_READY_FROM_TEMP[entity_type]} AND {_unlocked(entity_type, 'e')}")
+            total = int(conn.execute(f"SELECT COUNT(*) FROM {ids}").fetchone()[0] or 0)
+            rows_in_table = int(conn.execute(
+                f"SELECT COUNT(*) FROM {table}").fetchone()[0] or 0)
+            tally: Dict[tuple, list] = {}
+
+            def add(rows, sign, tally=tally):
+                for row in rows:
+                    key = (str(row[0]).strip().lower(), str(row[1]).strip().lower())
+                    have = tally.setdefault(key, [0] * (len(row) - 2))
+                    for index, value in enumerate(row[2:]):
+                        have[index] += sign * int(value or 0)
+
+            if total * 2 >= rows_in_table:
+                # most rows are owned: count every attempt off the due index
+                # (no table reads), then take away the few that are not ours.
+                # the primary key index names the entity, so only those few
+                # are read from the table
+                add(_attempt_rows(conn, entity_type, windows,
+                                  "lib2_provider_attempts a", ""), 1)
+                outside = f"AND a.entity_id NOT IN (SELECT id FROM {ids})"
+                try:
+                    rows = _attempt_rows(
+                        conn, entity_type, windows,
+                        f"lib2_provider_attempts a INDEXED BY {_ATTEMPTS_PK}", outside)
+                except Exception:  # noqa: BLE001 - no such index name: let the planner pick
+                    rows = _attempt_rows(conn, entity_type, windows,
+                                         "lib2_provider_attempts a", outside)
+                add(rows, -1)
+            else:
+                # most rows are a watched discography: walk only the owned ids
+                add(_attempt_rows(
+                    conn, entity_type, windows,
+                    f"{ids} q CROSS JOIN lib2_provider_attempts a",
+                    "AND a.entity_id = q.id"), 1)
+            processed: Dict[str, int] = {}
+            attempts: Dict[str, Dict[str, Any]] = {}
+            for (service, status), numbers in tally.items():
+                if numbers[0] <= 0:
+                    continue
+                processed[service] = processed.get(service, 0) + numbers[0]
+                attempts.setdefault(service, {})[status] = {
+                    "n": numbers[0],
+                    "due": {days: max(0, numbers[1 + index])
+                            for index, days in enumerate(windows)},
+                }
+            out[entity_type] = {"total": total, "processed": processed,
+                                "attempts": attempts, "windows": windows}
+    finally:
+        for name in temp_tables:
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
+            except Exception:  # noqa: BLE001, S110 - the pool clears temp objects anyway
+                pass
+        try:
+            conn.commit()
+        except Exception:  # noqa: BLE001, S110 - nothing was open
+            pass
+    return out
+
+
+def _pending_from_snapshot(conn, service: str, retry_after_days: int,
+                           entity_types: tuple, retry_statuses: tuple) -> Optional[int]:
+    """A pending count read off the shared snapshot, or None when it cannot
+    answer (a window it has not counted yet, or a plain-pass snapshot)."""
+    days = max(0, int(retry_after_days))
+    if days not in _snapshot_windows:
+        if len(_snapshot_windows) < _MAX_SNAPSHOT_WINDOWS:
+            _snapshot_windows.add(days)  # counted from the next pass on
+        return None
+    wanted = [str(status).strip().lower() for status in retry_statuses]
+    if any(status not in _STATUSES for status in wanted):
+        return None  # the plain query raises the same error it always did
+    try:
+        snapshot = _progress_snapshot(conn)
+    except Exception:  # noqa: BLE001 - count the plain way
+        return None
+    key = str(service).strip().lower()
+    pending = 0
+    for entity_type in entity_types:
+        entry = snapshot.get(entity_type) if isinstance(snapshot, dict) else None
+        if not entry or "attempts" not in entry or days not in entry.get("windows", ()):
+            return None
+        pending += max(0, int(entry["total"]) - int(entry["processed"].get(key, 0)))
+        by_status = entry["attempts"].get(key, {})
+        for status in set(wanted):
+            pending += int(by_status.get(status, {}).get("due", {}).get(days, 0))
+    return pending
+
+
 def _refresh_progress(key: str) -> None:
     try:
         from database.music_database import get_database
         conn = get_database()._get_connection()
+        began = time.monotonic()
         try:
             data = _compute_progress(conn)
         finally:
             conn.close()
         with _progress_lock:
-            _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
+            _progress_snapshots[key] = {"at": time.monotonic(), "data": data,
+                                        "refreshing": False,
+                                        "cost": time.monotonic() - began}
     except Exception:  # noqa: BLE001 - keep the last snapshot, try again later
         with _progress_lock:
             snap = _progress_snapshots.get(key)
             if snap:
                 snap["refreshing"] = False
+
+
+# a pass is never more than a tenth of the time between passes: a library
+# whose pass takes 30s is recounted every five minutes, not every two
+_SNAPSHOT_COST_FACTOR = 10.0
+_SNAPSHOT_TTL_MAX = 600.0
+
+
+def _snapshot_ttl(snap: Dict[str, Any]) -> float:
+    cost = float(snap.get("cost") or 0.0)
+    return max(PROGRESS_SNAPSHOT_TTL, min(_SNAPSHOT_TTL_MAX, cost * _SNAPSHOT_COST_FACTOR))
 
 
 def _progress_snapshot(conn) -> Dict[str, Dict[str, Any]]:
@@ -445,7 +627,7 @@ def _progress_snapshot(conn) -> Dict[str, Dict[str, Any]]:
     with _progress_lock:
         snap = _progress_snapshots.get(key)
         if snap and snap.get("data") is not None:
-            stale = time.monotonic() - snap["at"] >= PROGRESS_SNAPSHOT_TTL
+            stale = time.monotonic() - snap["at"] >= _snapshot_ttl(snap)
             if stale and not snap["refreshing"] and not key.startswith("conn:"):
                 snap["refreshing"] = True
                 threading.Thread(target=_refresh_progress, args=(key,), daemon=True,
@@ -467,9 +649,12 @@ def _progress_snapshot(conn) -> Dict[str, Dict[str, Any]]:
         return _compute_progress(conn)
     # first read for this library: compute it here, on the caller's connection
     try:
+        began = time.monotonic()
         data = _compute_progress(conn)
         with _progress_lock:
-            _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
+            _progress_snapshots[key] = {"at": time.monotonic(), "data": data,
+                                        "refreshing": False,
+                                        "cost": time.monotonic() - began}
         return data
     finally:
         if first is not None:
