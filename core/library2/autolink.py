@@ -807,7 +807,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             get_import_context_album,
             get_import_context_artist,
             get_import_source,
-            get_import_source_ids,
+            get_provider_source_ids,
         )
 
         raw_track_info = context.get("track_info")
@@ -817,7 +817,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             ti = {}
         canonical_album = get_import_context_album(context)
         canonical_artist = get_import_context_artist(context)
-        source_ids = get_import_source_ids(context)
+        source_ids = get_provider_source_ids(context)
 
         # A grab that started from Library v2 carries the server-resolved
         # entity (audit P1-16) — the file links to that exact row, no

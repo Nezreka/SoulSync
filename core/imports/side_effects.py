@@ -20,7 +20,7 @@ from core.imports.context import (
     get_import_original_search,
     get_import_search_result,
     get_import_source,
-    get_import_source_ids,
+    get_provider_source_ids,
     get_import_track_info,
     normalize_import_context,
     get_library_source_id_columns,
@@ -52,7 +52,7 @@ def _primary_track_artist_name(track_info: Dict[str, Any]) -> str:
 def _recording_identity(context: Dict[str, Any]) -> tuple[str | None, str | None]:
     """Return a recording MBID and its comment only when they belong together."""
     track_info = get_import_track_info(context) or get_import_search_result(context)
-    source_ids = get_import_source_ids(context)
+    source_ids = get_provider_source_ids(context)
     source_mbid = source_ids["track_id"] if get_import_source(context).lower() == "musicbrainz" else ""
     embedded_mbid = (context.get("_embedded_id_tags") or {}).get("MUSICBRAINZ_RECORDING_ID")
     candidate = embedded_mbid or track_info.get("musicbrainz_recording_id") or source_mbid
@@ -651,7 +651,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         track_info = get_import_track_info(context)
         original_search = get_import_original_search(context)
         source = get_import_source(context)
-        source_ids = get_import_source_ids(context)
+        source_ids = get_provider_source_ids(context)
         source_columns = get_library_source_id_columns(source)
 
         # #1567 (round 4): when metadata extraction distrusted the batch album

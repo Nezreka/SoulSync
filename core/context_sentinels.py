@@ -37,3 +37,29 @@ def is_context_sentinel(value: Any) -> bool:
         return True
     text = str(value).strip()
     return not text or text.lower() in CONTEXT_SENTINEL_IDS
+
+
+# ids the pipelines pass around that only they understand: the placeholders
+# above, the album and library stand-ins, and the name fallback
+_INTERNAL_IDS = CONTEXT_SENTINEL_IDS | {'library_v2', 'staging', 'wishlist_album'}
+_INTERNAL_ID_PREFIXES = ('lib2-album:', 'lib2-artist:', 'lib2-track:', '_name_')
+# a wishlist row is keyed "<track>::<album>" so one recording can be wanted
+# from two releases (core/wishlist/identity.py)
+_WISHLIST_KEY_SEPARATOR = '::'
+
+
+def provider_id(value: Any) -> str:
+    """``value`` as an id a metadata provider would recognise, or ''.
+
+    For anything that leaves the pipeline: a provider lookup, a tag written
+    into a file, a library id column. A wishlist download carries its row key
+    ("4348466402::1121691992") where the track id goes, and a download with no
+    artist match carries 'explicit_artist'. Both were written into files as
+    DEEZER_TRACK_ID and DEEZER_ARTIST_ID, and the track lookup by that id was
+    refused, so the file lost its other credited artists (Nov 13 2026).
+    """
+    text = str(value or '').strip().split(_WISHLIST_KEY_SEPARATOR, 1)[0].strip()
+    lowered = text.casefold()
+    if not text or lowered in _INTERNAL_IDS or lowered.startswith(_INTERNAL_ID_PREFIXES):
+        return ''
+    return text
