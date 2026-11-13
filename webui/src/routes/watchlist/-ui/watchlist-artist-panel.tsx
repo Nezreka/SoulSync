@@ -48,6 +48,7 @@ const RELEASE_TYPE_KEYS = ['include_albums', 'include_eps', 'include_singles'] a
 
 const CONTENT_FILTER_KEYS = [
   'include_live',
+  'include_live_tracks',
   'include_remixes',
   'include_acoustic',
   'include_compilations',
@@ -61,7 +62,11 @@ const OPTION_COPY: Record<IncludeKey, { title: string; description: string }> = 
   include_albums: { title: 'Albums', description: 'Full-length studio albums' },
   include_eps: { title: 'EPs', description: 'Extended plays (4-6 tracks)' },
   include_singles: { title: 'Singles', description: 'Single tracks and 2-3 track releases' },
-  include_live: { title: 'Live', description: 'Live performances and concerts' },
+  include_live: { title: 'Live albums', description: 'Concert recordings and unplugged sets' },
+  include_live_tracks: {
+    title: 'Live tracks',
+    description: 'Live versions on other releases, like a live bonus track',
+  },
   include_remixes: { title: 'Remixes', description: 'Remix versions and edits' },
   include_acoustic: { title: 'Acoustic', description: 'Acoustic and stripped versions' },
   include_compilations: { title: 'Compilations', description: 'Greatest hits and collections' },
@@ -182,6 +187,7 @@ function updateFromDraft(draft: WatchlistArtistConfig): WatchlistArtistConfigUpd
     include_eps: draft.include_eps,
     include_singles: draft.include_singles,
     include_live: draft.include_live,
+    include_live_tracks: draft.include_live_tracks ?? draft.include_live,
     include_remixes: draft.include_remixes,
     include_acoustic: draft.include_acoustic,
     include_compilations: draft.include_compilations,

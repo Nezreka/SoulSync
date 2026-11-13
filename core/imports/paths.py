@@ -1960,13 +1960,25 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 _single_album_artist = _first_name
                 _single_artists_list = _credit
 
+    # #2044: a release the source typed a single can hold several tracks (a
+    # 4-track maxi single). on a customized single template every one of them
+    # was numbered 01. a lone track with no release behind it is still 1
+    _single_track_number = _single_disc_number = _single_total_discs = 1
+    if _single_template_override:
+        _single_track_number = _coerce_int(album_info.get("track_number", 1), 1)
+        _single_disc_number = _coerce_int(album_info.get("disc_number", 1), 1)
+        _single_total_discs = max(
+            _single_disc_number,
+            _coerce_int((_album_ctx or {}).get("total_discs"), 1))
+
     template_context = {
         "artist": artist_name,
         "albumartist": _single_album_artist,
         "album": album_info.get("album_name", clean_track_name) if album_info else clean_track_name,
         "title": clean_track_name,
-        "track_number": 1,
-        "disc_number": 1,
+        "track_number": _single_track_number,
+        "disc_number": _single_disc_number,
+        "total_discs": _single_total_discs,
         "year": year,
         "quality": context.get("_audio_quality", ""),
         "albumtype": album_type_display,

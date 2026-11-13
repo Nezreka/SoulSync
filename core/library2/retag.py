@@ -175,8 +175,15 @@ def _lyrics_for_row(row):
     return (getattr(lyrics, 'synced_lyrics', None) or getattr(lyrics, 'plain_lyrics', None)) if lyrics else data.get('lyrics')
 
 
-def repair_field_protection(database, file_path, fields, *, track_id=None, file_id=None):
-    """Revalidate file ownership and manual fields immediately before a repair."""
+def repair_field_protection(database, file_path, fields, *, track_id=None, file_id=None,
+                            follows_file_tags=False):
+    """Revalidate file ownership and manual fields immediately before a repair.
+
+    ``follows_file_tags``: the caller writes the file and then has the Library
+    take the file's tags again (tags_to_library.apply). A value the Library
+    took from a file tag is then not something to protect: it follows the file
+    it came from (#2084). An edit typed in by hand still is.
+    """
     from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
     from core.library2.paths import resolve_lib2_path
     keys = hand_tagged_path_keys(database)
@@ -213,6 +220,10 @@ def repair_field_protection(database, file_path, fields, *, track_id=None, file_
         ):
             if entity_id:
                 overrides = get_field_overrides(conn, entity_type=entity, entity_id=int(entity_id))
+                if follows_file_tags:
+                    from core.library2.tags_to_library import FILE_TAGS_REASON
+                    overrides = {k: v for k, v in overrides.items()
+                                 if (getattr(v, 'reason', None) or '') != FILE_TAGS_REASON}
                 protected.update(mapping[k] for k in overrides if k in mapping)
         # Number/identity repairs cannot replace a pinned edition's reference.
         album = conn.execute('SELECT canonical_locked FROM lib2_albums WHERE id=?', (row['album_id'],)).fetchone()

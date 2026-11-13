@@ -52,6 +52,8 @@ export interface UseFileTagsPlan {
     moves: number;
     albums: number;
     unreadable: number;
+    /** values here the Library already took from file tags (#2084) */
+    held?: number;
   };
   truncated?: boolean;
 }
@@ -101,6 +103,46 @@ export function describeApplied(result: Applied): string {
   return parts.join(', ') + failed;
 }
 
+/** What Release does, for the confirm window. One wording for the album,
+ *  the artist and the whole Library. */
+export function releaseConfirmMessage(held: number, where: string): string {
+  return (
+    `${plural(held, 'value', 'values')} in ${where} ${held === 1 ? 'was' : 'were'} taken from file tags and ${held === 1 ? 'is' : 'are'} kept as your edits.\n\n` +
+    'Releasing them puts each one back to what your metadata sources say, and lets enrichment and repairs change it again. ' +
+    'Edits you typed in yourself stay, and no file is changed. You can take the file tags again at any time.'
+  );
+}
+
+/** Let go of every value the whole Library took from file tags (#2084):
+ *  the More menu's entry. Asks first, and says so when there are none. */
+export async function releaseLibraryFileTagValues(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  try {
+    const { held } = await readJson<{ held: number }>(apiClient.get('library/v2/use-file-tags'));
+    if (!held) {
+      window.showToast?.('Nothing in your library is held from file tags', 'info');
+      return;
+    }
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Release file tag values',
+      message: releaseConfirmMessage(held, 'your library'),
+      confirmText: 'Release',
+    });
+    if (!confirmed) return;
+    const done = await readJson<{ released: number }>(
+      apiClient.delete('library/v2/use-file-tags', { timeout: 120_000 }),
+    );
+    window.showToast?.(`${plural(done.released, 'value', 'values')} released`, 'success');
+    await invalidateLibraryV2(queryClient);
+  } catch (error) {
+    window.showToast?.(
+      `Could not release the file tag values: ${error instanceof Error ? error.message : 'unknown error'}`,
+      'error',
+    );
+  }
+}
+
 export function UseFileTagsModal({
   entity,
   id,
@@ -132,7 +174,27 @@ export function UseFileTagsModal({
       window.showToast?.(`Could not use the file tags: ${error.message}`, 'error'),
   });
 
+  const release = useMutation({
+    mutationFn: () => readJson<{ released: number }>(apiClient.delete(path, { timeout: 120_000 })),
+    onSuccess: async (result) => {
+      window.showToast?.(`${plural(result.released, 'value', 'values')} released`, 'success');
+      await invalidateLibraryV2(queryClient);
+      onClose();
+    },
+    onError: (error: Error) =>
+      window.showToast?.(`Could not release the file tag values: ${error.message}`, 'error'),
+  });
+  const askRelease = async (held: number) => {
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Release file tag values',
+      message: releaseConfirmMessage(held, title),
+      confirmText: 'Release',
+    });
+    if (confirmed) release.mutate();
+  };
+
   const plan = preview.data;
+  const held = plan?.counts.held ?? 0;
   const changedTracks = (plan?.tracks ?? []).filter((t) => t.changes.length && !t.move);
   const moves = (plan?.tracks ?? []).filter((t) => t.move);
   const notes = (plan?.tracks ?? []).filter((t) => t.notes.length);
@@ -263,6 +325,23 @@ export function UseFileTagsModal({
                 ))}
               </div>
             </section>
+          ) : null}
+
+          {held ? (
+            <p className={styles.held}>
+              {plural(held, 'value', 'values')} here {held === 1 ? 'was' : 'were'} already taken
+              from file tags. {held === 1 ? 'It stays' : 'They stay'} as your edits until you
+              release {held === 1 ? 'it' : 'them'}.{' '}
+              <button
+                type="button"
+                className={styles.heldAction}
+                data-requires-write=""
+                disabled={release.isPending || apply.isPending}
+                onClick={() => void askRelease(held)}
+              >
+                {release.isPending ? 'Releasing…' : 'Release'}
+              </button>
+            </p>
           ) : null}
 
           <div className={styles.foot}>

@@ -178,7 +178,7 @@ def test_a_long_list_of_releases_is_read_to_the_end():
 
 # ── the job and the approve step, on real files ──────────────────────────────
 
-def _library(imported_conn, legacy_db, tmp_path):
+def _library(imported_conn, legacy_db, tmp_path, only=None):
     conn = imported_conn
     artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Depeche Mode')").lastrowid
     album = conn.execute(
@@ -187,6 +187,8 @@ def _library(imported_conn, legacy_db, tmp_path):
     conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album, artist))
     subjects, paths = [], {}
     for number, title in enumerate(["Just Can't Get Enough", 'Enjoy the Silence (Single Mix)', 'Martyr'], 1):
+        if only and title not in only:
+            continue
         track = conn.execute(
             "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
             "VALUES(?,?,?,1,1)", (album, title, number)).lastrowid
@@ -289,3 +291,108 @@ def test_no_musicbrainz_is_an_error_not_a_silent_empty_scan(imported_conn, legac
     result = CompilationOriginsJob().scan(JobContext(db=lib['db'], config_manager=None,
                                                      transfer_folder=str(tmp_path)))
     assert result.errors == 1 and result.findings_created == 0
+
+
+# --- #2084 (wolf39us): "0 song(s) filed under their original albums" ---------
+
+JCGE = "Just Can't Get Enough"
+
+
+def _worker(lib, tmp_path):
+    worker = object.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = lib['db'], None, str(tmp_path)
+    return worker
+
+
+def _album_of(conn, title):
+    return conn.execute(
+        "SELECT a.title FROM lib2_tracks t JOIN lib2_albums a ON a.id = t.album_id "
+        "JOIN lib2_track_files f ON f.track_id = t.id WHERE t.title=?", (title,)).fetchone()[0]
+
+
+def test_the_only_song_of_a_compilation_moves_and_the_compilation_keeps_its_name(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    # one song of the compilation in the library: "every file names another
+    # album" read as a rename of the compilation, and nothing was filed
+    from core.library2.metadata_overrides import get_field_overrides
+
+    lib = _library(imported_conn, legacy_db, tmp_path, only={JCGE})
+    _, findings = _scan(lib, monkeypatch)
+    out = _worker(lib, tmp_path)._fix_compilation_track_origin(
+        'album', findings[0]['entity_id'], None, findings[0]['details'])
+
+    assert out['success'], out
+    assert out['message'].startswith('1 song(s) filed')
+    assert _album_of(lib['conn'], JCGE) == 'Speak & Spell'
+    assert get_field_overrides(lib['conn'], entity_type='release_group', entity_id=lib['album']) == {}
+    assert lib['conn'].execute("SELECT title FROM lib2_albums WHERE id=?",
+                               (lib['album'],)).fetchone()[0] == 'The Best Of'
+
+
+def test_values_taken_from_file_tags_do_not_stop_the_move(imported_conn, legacy_db, tmp_path, monkeypatch):
+    # Use File Tags ran on this album first: its year and the song's number
+    # are held as edits. the fix rewrites the file and the Library takes the
+    # file again, so they are not in the way
+    from core.library2.metadata_overrides import set_field_override
+
+    lib = _library(imported_conn, legacy_db, tmp_path)
+    track = next(s['track_id'] for s in lib['subjects'] if s['title'] == JCGE)
+    for entity, eid, field, value in (('release_group', lib['album'], 'year', 2006),
+                                      ('release_group', lib['album'], 'title', 'The Best Of'),
+                                      ('track', track, 'track_number', 1)):
+        set_field_override(lib['conn'], entity_type=entity, entity_id=eid, field_name=field,
+                           value=value, reason='file tags')
+    lib['conn'].commit()
+    _, findings = _scan(lib, monkeypatch)
+    out = _worker(lib, tmp_path)._fix_compilation_track_origin(
+        'album', findings[0]['entity_id'], None, findings[0]['details'])
+
+    assert out['success'], out
+    moved = FLAC(lib['paths'][JCGE])
+    assert moved['album'] == ['Speak & Spell'] and moved['date'] == ['1981-10-05']
+    assert moved['tracknumber'][0].split('/')[0] == '11'
+    assert _album_of(lib['conn'], JCGE) == 'Speak & Spell'
+
+
+def test_a_title_typed_in_by_hand_still_keeps_the_song_where_it_is(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    from core.library2.metadata_overrides import set_field_override
+
+    lib = _library(imported_conn, legacy_db, tmp_path, only={JCGE})
+    _, findings = _scan(lib, monkeypatch)
+    set_field_override(lib['conn'], entity_type='release_group', entity_id=lib['album'],
+                       field_name='title', value='The Best Of', reason=None)
+    lib['conn'].commit()
+    out = _worker(lib, tmp_path)._fix_compilation_track_origin(
+        'album', findings[0]['entity_id'], None, findings[0]['details'])
+
+    assert out['action'] == 'nothing_to_change'
+    assert FLAC(lib['paths'][JCGE])['album'] == ['The Best Of']
+
+
+def test_a_compilation_the_old_fix_renamed_is_put_right_on_the_next_run(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    # what the bug left behind: the file already says Speak & Spell, and the
+    # compilation carries that title as a value taken from the file
+    from core.library2.metadata_overrides import get_field_overrides, set_field_override
+
+    lib = _library(imported_conn, legacy_db, tmp_path, only={JCGE})
+    _, findings = _scan(lib, monkeypatch)
+    audio = FLAC(lib['paths'][JCGE])
+    audio['album'] = ['Speak & Spell']
+    audio.save()
+    set_field_override(lib['conn'], entity_type='release_group', entity_id=lib['album'],
+                       field_name='title', value='Speak & Spell', reason='file tags')
+    lib['conn'].commit()
+
+    out = _worker(lib, tmp_path)._fix_compilation_track_origin(
+        'album', findings[0]['entity_id'], None, findings[0]['details'])
+
+    assert out['success'], out
+    assert out['message'].startswith('1 song(s) filed')
+    assert 'title' not in get_field_overrides(lib['conn'], entity_type='release_group',
+                                              entity_id=lib['album'])
+    moved_to = lib['conn'].execute(
+        "SELECT a.id, a.title FROM lib2_tracks t JOIN lib2_albums a ON a.id = t.album_id "
+        "JOIN lib2_track_files f ON f.track_id = t.id WHERE t.title=?", (JCGE,)).fetchone()
+    assert moved_to[1] == 'Speak & Spell' and moved_to[0] != lib['album']

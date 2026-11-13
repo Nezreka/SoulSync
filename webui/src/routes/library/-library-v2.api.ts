@@ -887,6 +887,7 @@ export async function updateLibraryV2ArtistSettings(
     | 'include_eps'
     | 'include_singles'
     | 'include_live'
+    | 'include_live_tracks'
     | 'include_remixes'
     | 'include_acoustic'
     | 'include_compilations'
@@ -911,6 +912,7 @@ export async function updateLibraryV2ArtistSettings(
         include_eps: settings.include_eps,
         include_singles: settings.include_singles,
         include_live: settings.include_live,
+        include_live_tracks: settings.include_live_tracks,
         include_remixes: settings.include_remixes,
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,

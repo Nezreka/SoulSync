@@ -229,6 +229,7 @@ def get_watchlist_artists():
                 "include_eps": rules['include_eps'],
                 "include_singles": rules['include_singles'],
                 "include_live": rules['include_live'],
+                "include_live_tracks": rules['include_live_tracks'],
                 "include_remixes": rules['include_remixes'],
                 "include_acoustic": rules['include_acoustic'],
                 "include_compilations": rules['include_compilations'],
@@ -1620,7 +1621,7 @@ def watchlist_artist_config(artist_id):
                        lookback_days, discogs_artist_id, preferred_metadata_source,
                        amazon_artist_id, musicbrainz_artist_id, auto_download,
                        quality_profile_id, auto_download_pref, include_other_artists,
-                       follow_defaults
+                       follow_defaults, include_live_tracks
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1749,6 +1750,9 @@ def watchlist_artist_config(artist_id):
                 'include_eps': bool(result[1]),
                 'include_singles': bool(result[2]),
                 'include_live': bool(result[3]),
+                # #2082: never set = it follows the Live albums rule
+                'include_live_tracks': bool(result[25] if len(result) > 25 and result[25] is not None
+                                            else result[3]),
                 'include_remixes': bool(result[4]),
                 'include_acoustic': bool(result[5]),
                 'include_compilations': bool(result[6]),
@@ -1856,7 +1860,8 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles, include_live,
                        include_remixes, include_acoustic, include_compilations,
                        include_instrumentals, include_other_artists, lookback_days, preferred_metadata_source,
-                       auto_download, quality_profile_id, auto_download_pref, follow_defaults
+                       auto_download, quality_profile_id, auto_download_pref, follow_defaults,
+                       include_live_tracks
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1913,6 +1918,13 @@ def watchlist_artist_config(artist_id):
                 include_compilations = _field('include_compilations', False)
                 include_instrumentals = _field('include_instrumentals', False)
                 include_other_artists = _field('include_other_artists', False)
+                # #2082. None stays None: a client that never sends it keeps
+                # one Live switch for both, as before the split
+                include_live_tracks = _field('include_live_tracks', None)
+                if 'include_live' in data and 'include_live_tracks' not in data and was_following:
+                    # the follower's fill would pin it to the default. a client
+                    # that only sends Live means both
+                    include_live_tracks = None
             except _BadBool as bad:
                 conn.close()
                 return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
@@ -1929,6 +1941,8 @@ def watchlist_artist_config(artist_id):
                         ('include_live', False), ('include_remixes', False),
                         ('include_acoustic', False), ('include_compilations', False),
                         ('include_instrumentals', False), ('include_other_artists', False)))
+                include_live_tracks = (bool(old_row['include_live_tracks'])
+                                       if old_row['include_live_tracks'] is not None else None)
 
             if 'lookback_days' in data:
                 lookback_days = data.get('lookback_days')  # None = use global setting
@@ -2009,7 +2023,7 @@ def watchlist_artist_config(artist_id):
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, include_other_artists = ?, lookback_days = ?, preferred_metadata_source = ?,
                     auto_download = ?, auto_download_pref = ?, quality_profile_id = ?,
-                    follow_defaults = ?,
+                    follow_defaults = ?, include_live_tracks = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE profile_id = ? AND (
@@ -2019,7 +2033,9 @@ def watchlist_artist_config(artist_id):
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals), int(include_other_artists), lookback_days, preferred_metadata_source, int(auto_download),
-                  auto_download_pref, quality_profile_id, int(bool(follow_defaults)), lookback_changed, active_profile_id,
+                  auto_download_pref, quality_profile_id, int(bool(follow_defaults)),
+                  None if include_live_tracks is None else int(bool(include_live_tracks)),
+                  lookback_changed, active_profile_id,
                   artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
@@ -2039,6 +2055,8 @@ def watchlist_artist_config(artist_id):
                     'include_eps': include_eps,
                     'include_singles': include_singles,
                     'include_live': include_live,
+                    'include_live_tracks': bool(include_live if include_live_tracks is None
+                                                else include_live_tracks),
                     'include_remixes': include_remixes,
                     'include_acoustic': include_acoustic,
                     'include_compilations': include_compilations,
@@ -2179,6 +2197,10 @@ def watchlist_global_config():
                 'include_eps': config_manager.get('watchlist.global_include_eps', True),
                 'include_singles': config_manager.get('watchlist.global_include_singles', True),
                 'include_live': config_manager.get('watchlist.global_include_live', False),
+                # #2082: never saved = it follows the Live albums default
+                'include_live_tracks': bool(_unset_follows(
+                    config_manager.get('watchlist.global_include_live_tracks', None),
+                    config_manager.get('watchlist.global_include_live', False))),
                 'include_remixes': config_manager.get('watchlist.global_include_remixes', False),
                 'include_acoustic': config_manager.get('watchlist.global_include_acoustic', False),
                 'include_compilations': config_manager.get('watchlist.global_include_compilations', False),
@@ -2211,6 +2233,8 @@ def watchlist_global_config():
             include_eps = data.get('include_eps', True)
             include_singles = data.get('include_singles', True)
             include_live = data.get('include_live', False)
+            # #2082: a client that does not send it leaves it as it is
+            include_live_tracks = data.get('include_live_tracks', None)
             include_remixes = data.get('include_remixes', False)
             include_acoustic = data.get('include_acoustic', False)
             include_compilations = data.get('include_compilations', False)
@@ -2228,6 +2252,8 @@ def watchlist_global_config():
             config_manager.set('watchlist.global_include_eps', include_eps)
             config_manager.set('watchlist.global_include_singles', include_singles)
             config_manager.set('watchlist.global_include_live', include_live)
+            if include_live_tracks is not None:
+                config_manager.set('watchlist.global_include_live_tracks', bool(include_live_tracks))
             config_manager.set('watchlist.global_include_remixes', include_remixes)
             config_manager.set('watchlist.global_include_acoustic', include_acoustic)
             config_manager.set('watchlist.global_include_compilations', include_compilations)
@@ -2264,6 +2290,9 @@ def watchlist_global_config():
                     'include_eps': include_eps,
                     'include_singles': include_singles,
                     'include_live': include_live,
+                    'include_live_tracks': bool(_unset_follows(
+                        config_manager.get('watchlist.global_include_live_tracks', None),
+                        include_live)),
                     'include_remixes': include_remixes,
                     'include_acoustic': include_acoustic,
                     'include_compilations': include_compilations,
@@ -2280,6 +2309,11 @@ def watchlist_global_config():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+def _unset_follows(value, followed):
+    """a rule that was never saved takes the value of the rule it follows"""
+    return followed if value is None else value
+
 
 def _update_similar_artists_worker():
     """Background worker to update similar artists for all watchlist artists"""

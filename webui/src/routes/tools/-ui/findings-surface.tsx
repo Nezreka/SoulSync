@@ -2297,6 +2297,31 @@ function FindingCard({
                   {fixing ? '...' : fixLabel}
                 </button>
               ) : null}
+              {/* #2086: a file moved away on purpose has nothing to download.
+                  the row's one button opened the re-download picker, so
+                  taking the track out was only reachable through Fix Selected */}
+              {!video && fixLabel && finding.finding_type === TYPE_DEAD ? (
+                <button
+                  className="repair-finding-btn alt"
+                  type="button"
+                  title="Take this track out of your library. Nothing is downloaded."
+                  disabled={fixing}
+                  onClick={() => {
+                    // the row comes off the library for good, so it asks once
+                    void (async () => {
+                      const confirmed = await window.showConfirmDialog?.({
+                        title: 'Remove from library',
+                        message: `Take "${copy.title}" out of your library? Its file is already gone, and nothing is downloaded.`,
+                        confirmText: 'Remove',
+                        destructive: true,
+                      });
+                      if (confirmed) await onFix(finding, 'remove');
+                    })();
+                  }}
+                >
+                  Remove
+                </button>
+              ) : null}
               <button
                 className="repair-finding-btn dismiss"
                 type="button"
