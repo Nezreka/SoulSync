@@ -76079,3 +76079,245 @@ body.src-modal-open { overflow: hidden; }
         animation: none;
     }
 }
+
+/* ==================================================================================
+   THE PAGE FRAME (Nov 2026)
+   Every page but the dashboard is drawn in this: one width, one header, one row
+   of pills, one kind of section heading. Until now each page brought its own,
+   and no two agreed (titles from 22px to 34px, widths from 1440px to none).
+   The numbers are the ones Automations and Stats already shared.
+
+   React pages use the components in src/components/page-header, which emit
+   these classes; a vanilla page writes them into its own markup. What makes a
+   page itself (the wishlist's nebula, the library grid) sits inside the frame
+   and is not its business.
+   ================================================================================== */
+.pgf-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 1440px;
+    min-width: 0;
+    margin: 0 auto;
+    padding: 32px 36px 80px;
+    color: var(--text-1);
+    font-size: 14px;
+}
+/* the page name, where things stand in one line, and what you can do */
+.pgf-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 14px 20px;
+    min-width: 0;
+}
+.pgf-head-main {
+    flex: 1 1 260px;
+    min-width: 0;
+}
+.pgf-title {
+    margin: 0;
+    color: var(--text-1);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+}
+.pgf-status {
+    margin: 4px 0 0;
+    color: var(--white-a65);
+    font-size: 14px;
+    line-height: 1.4;
+}
+/* the numbers that matter are the white ones */
+.pgf-status :is(b, strong, i) {
+    color: var(--text-1);
+    font-style: normal;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.pgf-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+/* a quiet button; the one thing the page is for is the filled one */
+.pgf-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a10);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur-base) ease, opacity var(--dur-base) ease;
+}
+.pgf-btn:hover { background: var(--white-a16); }
+.pgf-btn:disabled { opacity: 0.5; cursor: default; }
+.pgf-btn--main {
+    background: var(--text-1);
+    color: var(--bg-primary);
+}
+.pgf-btn--main:hover { background: var(--white-a80); }
+.pgf-btn--icon {
+    width: 34px;
+    padding: 0;
+    color: var(--white-a70);
+}
+.pgf-btn svg {
+    flex: none;
+    width: 16px;
+    height: 16px;
+}
+/* the page's views, then finding and sorting, on one row */
+.pgf-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.pgf-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+.pgf-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+    color: var(--white-a70);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.pgf-pill:hover {
+    background: var(--white-a10);
+    color: var(--text-1);
+}
+.pgf-pill-count {
+    color: var(--white-a45);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.pgf-pill[aria-selected='true'],
+.pgf-pill[aria-pressed='true'],
+.pgf-pill.is-on {
+    background: var(--text-1);
+    color: var(--bg-primary);
+}
+.pgf-pill:is([aria-selected='true'], [aria-pressed='true'], .is-on) .pgf-pill-count {
+    color: inherit;
+    opacity: 0.6;
+}
+.pgf-bar-end {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-left: auto;
+}
+.pgf-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    width: 280px;
+    max-width: 100%;
+    height: 34px;
+    padding: 0 13px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+    color: var(--white-a45);
+    transition: background var(--dur-fast) ease;
+}
+.pgf-search:focus-within { background: var(--white-a10); }
+.pgf-search svg {
+    flex: none;
+    width: 16px;
+    height: 16px;
+}
+.pgf-search input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+}
+/* a group on the page: what it is, and how many or what about it */
+.pgf-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+.pgf-section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+}
+.pgf-section-title {
+    margin: 0;
+    color: var(--white-a50);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+.pgf-section-note {
+    margin-left: auto;
+    color: var(--white-a50);
+    font-size: 12.5px;
+}
+/* one surface, no borders inside borders */
+.pgf-card {
+    min-width: 0;
+    border-radius: var(--radius-xl);
+    background: var(--white-a03);
+}
+@media (max-width: 768px) {
+    .pgf-page {
+        gap: 16px;
+        padding: 18px 16px 64px;
+    }
+    .pgf-title { font-size: 24px; }
+    /* the pills scroll sideways; search takes a line of its own */
+    .pgf-pills {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .pgf-bar-end,
+    .pgf-search {
+        width: 100%;
+        margin-left: 0;
+    }
+}
