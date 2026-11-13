@@ -1045,3 +1045,37 @@ def test_a_stub_with_another_track_count_is_no_ones_twin(repair_db):
 
     assert stats["albums_folded"] == 0
     assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (stub,)).fetchone()
+
+
+def test_sanitize_repairs_a_wishlist_row_key_stored_as_the_track_id(repair_db):
+    """nov 13 2026, found on a real library: a wishlist download's row key
+    ("<track>::<album>") was stored in lib2_tracks.spotify_id. a deezer key
+    goes home to deezer, a spotify key keeps the spotify id."""
+    legacy_db, conn = repair_db
+    artist = _artist(conn, "Dove Cameron")
+    album = _album(conn, artist, "Silver Screen Baby")
+    rows = {}
+    for name, spotify_id, external in (
+            ("deezer key", "4386979091::1137050721", {"deezer": "4386979091", "tidal": "575382648"}),
+            ("spotify key", "6rqhFgbbKwnb9MLmUQDhG6::2noRn2Aes5aoNVsU6iWThc", {}),
+            ("untouched", "0VjIjW4GlUZAMYd2vXMi3b", {})):
+        rows[name] = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) VALUES(?,?,?,?)",
+            (album, name, spotify_id, json.dumps(external))).lastrowid
+    conn.commit()
+
+    repair_duplicate_artists(legacy_db)
+
+    def read(name):
+        row = conn.execute("SELECT spotify_id, external_ids FROM lib2_tracks WHERE id=?",
+                           (rows[name],)).fetchone()
+        return row["spotify_id"], json.loads(row["external_ids"] or "{}")
+
+    spotify_id, ids = read("deezer key")
+    assert spotify_id is None
+    assert ids["deezer"] == "4386979091" and ids["tidal"] == "575382648"
+    assert not any("::" in str(v) for v in ids.values())
+    assert read("spotify key")[0] == "6rqhFgbbKwnb9MLmUQDhG6"
+    assert read("untouched")[0] == "0VjIjW4GlUZAMYd2vXMi3b"
+    # and a second pass has nothing left to do
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE spotify_id LIKE '%::%'").fetchone()[0] == 0

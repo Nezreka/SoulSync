@@ -108,10 +108,26 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
         rows = conn.execute(
             f"SELECT id, spotify_id, external_ids FROM {lib2_table} "
             "WHERE spotify_id IS NOT NULL AND spotify_id != '' AND "
-            "(spotify_id NOT GLOB '*[^0-9 ]*' OR spotify_id GLOB '*-*-*-*-*')").fetchall()
+            "(spotify_id NOT GLOB '*[^0-9 ]*' OR spotify_id GLOB '*-*-*-*-*' "
+            " OR instr(spotify_id, '::') > 0)").fetchall()
         for row in rows:
-            value = str(row["spotify_id"]).strip()
+            stored = str(row["spotify_id"]).strip()
+            # a wishlist row key, "<track>::<album>", stored where the track
+            # id goes (imports wrote it until Nov 13 2026): the id is the
+            # part before the separator
+            value = stored.split("::", 1)[0].strip()
+            if stored != value and value and not looks_like_foreign_provider_id(value):
+                cursor.execute(
+                    f"UPDATE {lib2_table} SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?", (value, row["id"]))
+                fixed += 1
+                continue
             if not looks_like_foreign_provider_id(value):
+                if stored != value:  # nothing before the separator: not an id at all
+                    cursor.execute(
+                        f"UPDATE {lib2_table} SET spotify_id=NULL, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE id=?", (row["id"],))
+                    fixed += 1
                 continue
             try:
                 ids = json.loads(row["external_ids"] or "{}")
