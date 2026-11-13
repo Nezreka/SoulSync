@@ -954,8 +954,14 @@ def _settle_scan_findings_once(database: Any, should_stop: Any = None) -> int:
     one-disc "total_discs: missing" pile). a stopped pass runs again next
     start, it only marks itself done when it reached the end"""
     from core.library2.schema import _done_once, _mark_done
-    name = "retag_scan_findings_settled_v1"
+    # once per answer to "which differences are faults": the pass that closed
+    # the one-disc totals ran as v1; turning genre or year differences off (the
+    # default since Nov 2026) or back on changes what is still a finding
     try:
+        from core.library2.validation import quiet_differences
+        from core.metadata.common import get_config_manager
+        quiet = "".join(sorted(field[0] for field in quiet_differences(get_config_manager())))
+        name = f"retag_scan_findings_settled_v2_{quiet or 'none'}"
         with closing(database._get_connection()) as conn:
             if _done_once(conn.cursor(), name):
                 return 0

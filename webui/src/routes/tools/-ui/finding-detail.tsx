@@ -146,7 +146,15 @@ function retagCheckRows(
     if (status === 'correct') matching.push(label);
     else if (status === 'unknown') unchecked.push(label);
     else if (shown.has(key)) continue;
-    else if (status === 'mismatch' || status === 'missing') {
+    else if (status === 'differs') {
+      // a genre or a year the file has its own value for: shown, and left
+      // alone unless the Library Re-tag job is told to flag it
+      const library = retagLibraryValue(reference, key);
+      rows.push([
+        label,
+        `differs from the library${library ? `, which has ${library}` : ''}. Left as it is`,
+      ]);
+    } else if (status === 'mismatch' || status === 'missing') {
       const diff = retagDiffFor(d.diff, key);
       const library = retagLibraryValue(reference, key);
       const said = diff
@@ -860,6 +868,49 @@ function FindingDetailBody({
         d.validation && typeof d.validation === 'object' && 'checks' in d.validation
           ? d.validation.checks
           : null;
+      // a bulk run filled this file's blank tags and left the tags that differ:
+      // the finding is still open. what was filled, and the way back, sit
+      // above what is still to decide
+      const earlier = finding.status === 'pending' ? readApplied(d) : null;
+      if (earlier) {
+        const { applied: _shown, ...rest } = d;
+        return (
+          <>
+            <div className="tag-history">
+              <p className="repair-finding-fixline">
+                The blank tags in this file were filled{earlier.at ? ` ${timeAgo(earlier.at)}` : ''}
+                . What is left differs from the library and waits for you.
+              </p>
+              {earlier.files.map((file, index) => (
+                <Fragment key={`${file.path}-${index}`}>
+                  {earlier.files.length > 1 ? (
+                    <div className="repair-finding-path">{file.path}</div>
+                  ) : null}
+                  <TagChangeTable rows={file.fields} beforeLabel="Was" afterLabel="Now" />
+                </Fragment>
+              ))}
+              {onUndo ? (
+                <div className="tag-history-actions">
+                  <button
+                    className="repair-finding-btn undo"
+                    type="button"
+                    onClick={() => onUndo(finding)}
+                  >
+                    Undo the fill
+                  </button>
+                  <span className="tag-history-note">Takes the filled tags out again.</span>
+                </div>
+              ) : null}
+            </div>
+            <FindingDetailBody
+              finding={{ ...finding, details: rest }}
+              onKeepDuplicate={onKeepDuplicate}
+              onApplyCoverArt={onApplyCoverArt}
+              onUndo={onUndo}
+            />
+          </>
+        );
+      }
       // a fix that ran: every tag as it was and as it is now, and the way back
       const applied = finding.status !== 'pending' ? readApplied(d) : null;
       if (applied) {

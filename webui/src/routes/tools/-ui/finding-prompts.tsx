@@ -429,15 +429,49 @@ function BackfillPrompt({
  *  since fixed the catalogue too needs a way to say "the catalogue wins now".
  *  The count is what makes the choice informed rather than a coin toss. */
 function RetagPrompt({
+  bulk,
   count,
   manualCount,
   resolve,
 }: {
+  /** a whole group, not the one finding in front of the person */
+  bulk: boolean;
   count: number;
   manualCount: number;
   resolve: (value: RetagFixAction | null) => void;
 }) {
   const safeCount = Math.max(count - manualCount, 0);
+  if (bulk) {
+    // a bulk run fills and does not replace: the safe answer is the big one,
+    // and the one that throws tags away is a quiet link that asks again
+    return (
+      <PromptOverlay
+        maxWidth={480}
+        title={`Apply Tags (${count.toLocaleString()})`}
+        body="Fix All fills the tags that are blank in a file. A tag a file already has is left as it is, even where the library says something else: those findings stay open, and you apply or dismiss each one where both values are shown."
+        cancelId="_retag-cancel"
+        onCancel={() => resolve(null)}
+      >
+        <div style={ROW_WRAP}>
+          <button id="_retag-safe" type="button" style={GREEN} onClick={() => resolve('safe')}>
+            Fill blank tags
+          </button>
+          <button
+            id="_retag-replace"
+            type="button"
+            style={INDIGO_LIGHT}
+            onClick={() => resolve('replace_differences')}
+          >
+            Also replace tags that differ…
+          </button>
+        </div>
+        <div style={HINT}>
+          Every change is kept on its finding with the value before and after, and can be undone
+          there.
+        </div>
+      </PromptOverlay>
+    );
+  }
   return (
     <PromptOverlay
       maxWidth={480}
@@ -595,6 +629,7 @@ type PendingPrompt =
   | { kind: 'backfill'; count: number; resolve: (value: BackfillFixAction | null) => void }
   | {
       kind: 'retag';
+      bulk: boolean;
       count: number;
       manualCount: number;
       resolve: (value: RetagFixAction | null) => void;
@@ -607,7 +642,11 @@ export interface FindingPrompts {
   promptAcoustid: (candidates?: string[], count?: number) => Promise<string | null>;
   promptQuality: () => Promise<QualityFixAction | null>;
   promptBackfill: (count: number) => Promise<BackfillFixAction | null>;
-  promptRetag: (count: number, manualCount: number) => Promise<RetagFixAction | null>;
+  promptRetag: (
+    count: number,
+    manualCount: number,
+    bulk?: boolean,
+  ) => Promise<RetagFixAction | null>;
   promptWitnessMe: (count: number) => Promise<boolean>;
   /** Render this somewhere inside the findings tab. */
   promptNode: React.ReactNode;
@@ -658,9 +697,9 @@ export function useFindingPrompts(): FindingPrompts {
     [],
   );
   const promptRetag = useCallback(
-    (count: number, manualCount: number) =>
+    (count: number, manualCount: number, bulk = false) =>
       new Promise<RetagFixAction | null>((resolve) => {
-        setPending({ kind: 'retag', count, manualCount, resolve });
+        setPending({ kind: 'retag', bulk, count, manualCount, resolve });
       }),
     [],
   );
@@ -694,6 +733,7 @@ export function useFindingPrompts(): FindingPrompts {
   } else if (pending?.kind === 'retag') {
     promptNode = (
       <RetagPrompt
+        bulk={pending.bulk}
         count={pending.count}
         manualCount={pending.manualCount}
         resolve={(v) => settle(pending.resolve as never, v)}

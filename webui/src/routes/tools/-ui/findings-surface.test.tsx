@@ -2364,15 +2364,37 @@ describe('the detail renderer', () => {
     expect(within(cards[1]).queryByRole('button', { name: 'Re-identify…' })).toBeNull();
   });
 
-  it('an open finding offers no undo', async () => {
+  it('an open finding with nothing applied offers no undo', async () => {
+    const detail = await openDetail({
+      finding_type: 'library_retag',
+      details: { validation: { checks: { album: 'mismatch' } } },
+    });
+    expect(within(detail).queryByText('Undo changes')).toBeNull();
+    expect(within(detail).queryByText('Undo the fill')).toBeNull();
+  });
+
+  it('an open finding a bulk run filled shows the fill, and the way back', async () => {
+    // Fix All fills blank tags and leaves the tags that differ on the row
     const detail = await openDetail({
       finding_type: 'library_retag',
       details: {
+        validation: { checks: { album: 'mismatch', genre: 'correct' } },
         applied: {
-          changes: [{ path: '/m/a.flac', fields: [{ key: 'genre', before: 'a', after: 'b' }] }],
+          at: '2026-11-12T10:00:00+00:00',
+          changes: [
+            {
+              path: '/m/a.flac',
+              fields: [{ key: 'genre', label: 'Genre', before: '', after: 'Rock' }],
+            },
+          ],
         },
       },
     });
+    expect(detail.textContent).toContain('The blank tags in this file were filled');
+    expect(detail.textContent).toContain('waits for you');
+    // the fix that is still open is under it, not replaced by the history
+    expect(detail.textContent).toContain('differs from the library');
+    expect(within(detail).getByText('Undo the fill')).toBeInTheDocument();
     expect(within(detail).queryByText('Undo changes')).toBeNull();
   });
 

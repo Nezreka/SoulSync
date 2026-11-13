@@ -962,6 +962,7 @@ export function FindingsSurface({
     let fixed = 0;
     let failed = 0;
     let skipped = 0;
+    let partial = 0;
     let refused = 0;
     let otherArtistSkipped = 0;
     let lastError = '';
@@ -1018,6 +1019,8 @@ export function FindingsSurface({
         // (the background Fix All reports them in its run note).
         otherArtistSkipped += result.other_artist_skipped || 0;
         if (result.refused) refused++;
+        // blank tags filled, the tags that differ left on the row: still open
+        else if (result.partial) partial++;
         else if (result.success) fixed++;
         else if (result.skipped_by_design) skipped++;
         else {
@@ -1035,6 +1038,7 @@ export function FindingsSurface({
       lastError,
       skipped,
       otherArtistSkipped,
+      partial,
     );
     toast(message, type);
     if (refused) {
@@ -1133,8 +1137,18 @@ export function FindingsSurface({
         // Two requests wear one button: write the library's values, and write
         // them even over the fields this user edited by hand. The count comes
         // with the group so the choice is informed rather than a coin toss.
-        fixAction = await prompts.promptRetag(count, group.manual_conflicts || 0);
+        fixAction = await prompts.promptRetag(count, group.manual_conflicts || 0, true);
         if (!fixAction) return;
+        if (fixAction === 'replace_differences') {
+          // the one bulk answer that throws a file's own tag away: asked twice
+          const confirmed = await window.showConfirmDialog?.({
+            title: 'Replace tags that differ',
+            message: `Write the library's value over every tag that differs, in up to ${count.toLocaleString()} files? The file's own genre, year, artist or album is replaced wherever the library says something else, and the library is not always right. Each change is kept on its finding and can be undone there, one finding at a time.`,
+            confirmText: 'Replace them',
+            destructive: true,
+          });
+          if (!confirmed) return;
+        }
         // 'safe' IS the default the handler takes with no action at all;
         // sending it would only add a string nothing reads.
         if (fixAction === 'safe') fixAction = null;

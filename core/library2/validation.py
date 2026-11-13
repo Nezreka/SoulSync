@@ -133,6 +133,32 @@ def metadata_states(database, paths):
     return result
 
 
+#: where "the file says something else" is as often the file being right as
+#: the catalogue: a genre is taste ("Electro" against "Electronic"), a year is
+#: the pressing against the original release. On one library, replacing these
+#: with the catalogue's would have dropped a genre from 45,702 files and moved
+#: 13,143 to another year. They are compared and shown, but they are only
+#: filed as something to fix when the setting says so.
+OPINION_FIELDS = ('genre', 'year')
+
+
+def quiet_differences(config):
+    """The tags whose difference from the library is not a fault to fix.
+
+    ``repair.jobs.library_retag.settings``: ``flag_genre_differences`` and
+    ``flag_year_differences``, both off unless set. A tag that is BLANK in
+    the file is never quiet: filling it loses nothing.
+    """
+    try:
+        settings = config.get('repair.jobs.library_retag.settings', {}) or {}
+    except Exception:  # noqa: BLE001 - an unreadable setting keeps the quiet default
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    return frozenset(field for field in OPINION_FIELDS
+                     if settings.get(f'flag_{field}_differences') is not True)
+
+
 def validate_tags(conn, file_id, tags, config):
     from core.library2.retag import _track_rows, _db_data_for_row
     from core.tag_writer import build_tag_diff, total_is_settled
@@ -163,6 +189,10 @@ def validate_tags(conn, file_id, tags, config):
                        else ('correct' if actual else 'not_required') if total_is_settled(key, actual, expected, data)
                        else 'mismatch' if actual
                        else 'missing' if tags.get(number) or data.get(number) else 'unknown')
+    for key in quiet_differences(config):
+        if checks.get(key) == 'mismatch':
+            # seen and kept on the record, not something to fix
+            checks[key] = 'differs'
     checks.update(artwork_checks(rows[0]['album_image_url'], tags, config))
     checks['edition'] = data.get('edition_status', 'not_checked')
     return {'status': 'issues' if any(v in ('missing', 'mismatch') for v in checks.values())
@@ -473,7 +503,8 @@ def settle_scan_findings(database, config=None, *, should_stop=None, batch=200):
                     continue
                 new['source'] = old.get('source') or 'scan'
                 if ((old.get('checks') or {}).get('genre') == 'mismatch'
-                        and new['checks'].get('genre') == 'correct' and 'genre_count' not in snapshot):
+                        and new['checks'].get('genre') == 'correct' and 'genre_count' not in snapshot
+                        and 'genre' not in quiet_differences(config)):
                     # several genres in one value is a mismatch the cache
                     # cannot see (it keeps no value count): the next read decides
                     new['checks']['genre'] = 'mismatch'
@@ -537,7 +568,8 @@ def finding_verified(conn, finding, files):
                             for d in details.get('diff', []) if d.get('changed')]
             if not required:
                 return None
-            if any(checks.get(k) not in ('correct', 'not_required') for k in required):
+            # 'differs': a difference the settings say to leave alone
+            if any(checks.get(k) not in ('correct', 'not_required', 'differs') for k in required):
                 return False
         elif kind == 'missing_cover_art':
             if any(checks.get(k) not in ('correct', 'not_required') for k in ('artwork_database', 'cover', 'artwork_sidecar')):
