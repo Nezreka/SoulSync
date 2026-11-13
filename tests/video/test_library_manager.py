@@ -297,3 +297,40 @@ def test_delete_preview_adds_the_selection_up(db, monkeypatch):
         ids["Alien"], ids["Brazil"])).get_json()
     assert (out["titles"], out["files"], out["size_bytes"]) == (2, 4, 1000)
     assert out["blocked"] == [{"title": "T%d" % ids["Alien"], "reason": "seeding"}]
+
+
+def test_a_write_from_any_page_refreshes_that_titles_row(db, monkeypatch):
+    # the detail page's own monitor switch, edit and file actions change a
+    # title the manager has summed up: its row follows without a rebuild
+    database, ids = db
+    monkeypatch.setattr("core.video.sources.resolve_video_server", lambda: "plex")
+    monkeypatch.setattr("core.video.metadata._resolve_source", lambda source: None)
+    client = _client(database)
+    first = client.get("/api/video/manager/titles?kind=movies&search=alien").get_json()["items"][0]
+    assert first["year"] == 1979 and first["locked_fields"] == []
+
+    res = client.put("/api/video/detail/movie/%d/metadata" % ids["Alien"],
+                     json={"changes": {"year": 1980}})
+    assert res.status_code == 200, res.get_data(as_text=True)
+    after = client.get("/api/video/manager/titles?kind=movies&search=alien").get_json()["items"][0]
+    assert after["year"] == 1980 and after["locked_fields"] == ["year"]
+    # a read changes nothing, and a failed write refreshes nothing
+    calls = []
+    monkeypatch.setattr(lm, "refresh", lambda *a, **k: calls.append(a) or 0)
+    client.get("/api/video/detail/movie/%d" % ids["Alien"])
+    client.put("/api/video/detail/movie/%d/metadata" % ids["Alien"], json={"changes": {}})
+    assert calls == []
+
+
+def test_a_scan_forgets_the_summary(db, monkeypatch):
+    from core.video import scanner as sc
+    database, _ids = db
+    assert len(lm.titles(database, "movies", {})["items"]) == 5
+    forgotten = []
+    monkeypatch.setattr(lm, "forget", lambda *a: forgotten.append(1))
+    scan = sc.VideoLibraryScanner(database)
+
+    def no_server():
+        raise RuntimeError("no server")
+    scan._run(no_server, "full", "all")
+    assert forgotten, "a scan, even one that failed, drops the summed-up rows"

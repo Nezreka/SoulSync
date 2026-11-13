@@ -55,6 +55,55 @@ def _seed_folder_defaults(db):
         logger.debug("video folder defaults skipped: %s", exc)
 
 
+_TITLE_PATH = __import__("re").compile(
+    r"/(?:detail|title-delete|files/extra-copies)/(movie|show)/(\d+)")
+_SHOW_PATH = __import__("re").compile(r"/(?:files/consolidate|detail/show)/(\d+)")
+_FILE_PATH = __import__("re").compile(r"/files/(\d+)/")
+
+
+def _refresh_manager_for(request) -> None:
+    """which title a write was about, from its path or body, refreshed in the
+    library manager's summary. a write that names no title is left to the
+    summary's own rebuild."""
+    from core.video import library_manager
+    path = request.path or ""
+    if path.startswith("/api/video/bulk") or path.startswith("/api/video/manager"):
+        return                                   # the bulk job refreshes its own
+    db = get_video_db()
+    m = _TITLE_PATH.search(path)
+    if m:
+        library_manager.refresh(db, m.group(1), [int(m.group(2))])
+        return
+    m = _SHOW_PATH.search(path)
+    if m:
+        library_manager.refresh(db, "show", [int(m.group(1))])
+        return
+    m = _FILE_PATH.search(path)
+    if m:
+        conn = db._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT mf.movie_id, e.show_id FROM media_files mf "
+                "LEFT JOIN episodes e ON e.id = mf.episode_id WHERE mf.id=?",
+                (int(m.group(1)),)).fetchone()
+        finally:
+            conn.close()
+        if row and row[0]:
+            library_manager.refresh(db, "movie", [int(row[0])])
+        elif row and row[1]:
+            library_manager.refresh(db, "show", [int(row[1])])
+        else:
+            library_manager.forget(db)           # the file is gone: whose was it?
+        return
+    if path.endswith("/monitor") or path.endswith("/files/bulk"):
+        body = request.get_json(silent=True) or {}
+        kind, item_id = body.get("kind"), body.get("id") or body.get("library_id")
+        if kind in ("movie", "show") and isinstance(item_id, int):
+            library_manager.refresh(db, kind, [item_id])
+        elif path.endswith("/files/bulk"):
+            library_manager.forget(db)
+
+
 def create_video_blueprint() -> Blueprint:
     """Build the isolated /api/video blueprint with all video sub-routes."""
     bp = Blueprint("video_api", __name__)
@@ -183,6 +232,19 @@ def create_video_blueprint() -> Blueprint:
                 "/api/video/watchlist/remove", "/api/video/watchlist/person",
                 "/api/video/watchlist/studio", "/api/video/youtube/wishlist/remove"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
+
+    # the library manager keeps each title summed up in memory. a write to
+    # one title, from any page, refreshes that title's row right away; the
+    # rest wait for the next rebuild
+    @bp.after_request
+    def _keep_manager_current(response):
+        from flask import request
+        try:
+            if request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400:
+                _refresh_manager_for(request)
+        except Exception:   # noqa: BLE001 - never turn a good answer into an error
+            logger.debug("library manager refresh hook failed", exc_info=True)
+        return response
 
     from .dashboard import register_routes as reg_dashboard
     from .scan import register_routes as reg_scan
