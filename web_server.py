@@ -34,7 +34,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import app_log_path, get_logger, setup_logging
+from utils.logging_config import SafeFormatter as _SafeFormatter, app_log_path, get_logger, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -80,7 +80,7 @@ if not source_reuse_logger.handlers:
     _sr_handler = _logging_handlers.RotatingFileHandler(
         _log_dir / "source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
-    _sr_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _sr_handler.setFormatter(_SafeFormatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     source_reuse_logger.addHandler(_sr_handler)
     source_reuse_logger.propagate = False
 
@@ -91,7 +91,7 @@ if not pp_logger.handlers:
     _pp_handler = _logging_handlers.RotatingFileHandler(
         _log_dir / "post_processing.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
-    _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _pp_handler.setFormatter(_SafeFormatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
 from core.api_validation import parse_strict_bool, parse_strict_id, parse_strict_int
