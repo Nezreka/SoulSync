@@ -52,22 +52,8 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  padding-top: 8px;
 }
 
-.title {
-  margin: 0;
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.subtitle {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
 
 .libraryTarget {
   margin: 6px 0 0;
@@ -1379,10 +1365,6 @@
   .covers {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-  }
-
-  .title {
-    font-size: 26px;
   }
 
   .servedBy {

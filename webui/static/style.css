@@ -73081,15 +73081,12 @@ body.src-modal-open { overflow: hidden; }
     --tl-line: var(--white-a08);
     --tl-card: var(--white-a06);
     --tl-card-hover: var(--white-a09);
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    /* a page this dense needs a measure: past it, rows turn into a title on
-       the left, a button on the right and nothing in between */
-    max-width: 1440px;
-    margin: 20px auto;
-    padding: 32px 36px 48px;
     color: var(--text-1);
+}
+/* the panel, the measure and the padding are the page frame's (.pgf-page);
+   this page only asks for a little more air between its blocks */
+#tools-page > .pgf-page {
+    gap: 24px;
 }
 
 /* severity arrives as a bare class (error, warning, info). a global
@@ -73111,15 +73108,6 @@ body.src-modal-open { overflow: hidden; }
     flex-wrap: wrap;
 }
 #tools-page .tools-top-text { flex: 1 1 320px; min-width: 0; }
-#tools-page .tools-title {
-    margin: 0;
-    font-size: 34px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-    color: var(--text-1);
-}
-#tools-page .tools-sub { margin: 8px 0 0; font-size: 15px; color: var(--text-2); }
 #tools-page .tools-top-actions { display: flex; align-items: center; gap: 10px; }
 #tools-page .tools-locked-note {
     padding: 16px 20px;
@@ -75060,8 +75048,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .vbk-pending { padding: 10px 0; font-size: 14px; color: var(--text-3); }
 
 @media (max-width: 760px) {
-    #tools-page { padding: 24px 16px 40px; gap: 20px; }
-    #tools-page .tools-title { font-size: 28px; }
+    #tools-page > .pgf-page { gap: 20px; }
     #tools-page .repair-health { padding: 20px; }
     #tools-page .repair-health-actions { align-items: flex-start; }
     #tools-page .repair-inbox-head { flex-wrap: wrap; gap: 8px 14px; }
@@ -76102,6 +76089,10 @@ body.src-modal-open { overflow: hidden; }
     padding: 32px 36px 80px;
     color: var(--text-1);
     font-size: 14px;
+}
+/* a page that already spaces its own blocks keeps doing so */
+.pgf-page--plain {
+    display: block;
 }
 /* the page name, where things stand in one line, and what you can do */
 .pgf-head {

@@ -204,8 +204,10 @@ describe('the page root', () => {
   it('carries page-shell and the page id, as every flipped route does', () => {
     const { container } = renderShell();
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toBe('page-shell');
+    // the panel is the page frame's; the measured column sits inside it
+    expect(root.className).toBe('page-shell pgf-shell');
     expect(root.id).toBe('sync-page');
+    expect(root.firstElementChild?.className).toBe('pgf-page pgf-page--plain');
   });
 });
 

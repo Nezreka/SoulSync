@@ -436,131 +436,100 @@ export function WatchlistPage() {
   ];
 
   return (
-    <div className="page-shell">
-      <header className={home.top}>
-        <div className={home.topText}>
-          <h2 className={home.title}>Watchlist</h2>
-          {/* one line that says where things stand: what is watched, when the
+    <div className="page-shell pgf-shell">
+      <div className="pgf-page pgf-page--plain">
+        <header className={home.top}>
+          <div className={home.topText}>
+            <h1 className="pgf-title">Watchlist</h1>
+            {/* one line that says where things stand: what is watched, when the
               next scan runs, what the last one found */}
-          <p className={home.sub}>{headerCount}</p>
-        </div>
+            <p className="pgf-status">{headerCount}</p>
+          </div>
 
-        {/* #1822: one loud action. scan is why you come here; adding an artist
+          {/* #1822: one loud action. scan is why you come here; adding an artist
             is the other everyday job. everything monthly sits in Tools. */}
-        <div className={home.topActions}>
-          {/* Origins, History and Blocklist open modals owned by other vanilla
+          <div className={home.topActions}>
+            {/* Origins, History and Blocklist open modals owned by other vanilla
               files (origin-history.js, watchlist-history.js, blocklist.js) and
               shared with other pages, so they are invoked as globals. */}
-          <ActionMenu
-            className="wl-more-menu"
-            align="right"
-            items={[
-              {
-                key: 'similar',
-                label: toolLabel(
-                  similarRunning ? 'Updating similar artists…' : 'Update similar artists',
-                  'Refresh who sounds like the artists you watch.',
-                ),
-                disabled: similarRunning || startSimilar.isPending || isScanning,
-                onSelect: () => startSimilar.mutate(),
-              },
-              {
-                key: 'settings',
-                label: toolLabel(
-                  'Watchlist defaults',
-                  'The rules every artist follows by default.',
-                ),
-                onSelect: () => void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
-              },
-              {
-                key: 'origins',
-                label: toolLabel('Download origins', 'Every track your watchlist downloaded.'),
-                title: 'See every track your watchlist downloaded',
-                onSelect: () => window.openDownloadOriginsModal?.('watchlist'),
-              },
-              {
-                key: 'history',
-                label: toolLabel('Scan history', 'Past scans and what each added to the wishlist.'),
-                title: 'Every past scan and the tracks it added to the wishlist',
-                onSelect: () => window.openWatchlistHistoryModal?.(),
-              },
-              {
-                key: 'blocklist',
-                label: toolLabel('Blocklist', 'Artists, albums or tracks never to download.'),
-                title: 'Block artists, albums or tracks from ever being downloaded',
-                onSelect: () => window.openBlocklistModal?.('artist'),
-              },
-            ]}
-            trigger={(props) => (
-              <button
-                type="button"
-                className={home.tools}
-                title="Similar artists, defaults, origins, history, blocklist"
-                {...props}
-                ref={props.ref as (el: HTMLButtonElement | null) => void}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
+            <ActionMenu
+              className="wl-more-menu"
+              align="right"
+              items={[
+                {
+                  key: 'similar',
+                  label: toolLabel(
+                    similarRunning ? 'Updating similar artists…' : 'Update similar artists',
+                    'Refresh who sounds like the artists you watch.',
+                  ),
+                  disabled: similarRunning || startSimilar.isPending || isScanning,
+                  onSelect: () => startSimilar.mutate(),
+                },
+                {
+                  key: 'settings',
+                  label: toolLabel(
+                    'Watchlist defaults',
+                    'The rules every artist follows by default.',
+                  ),
+                  onSelect: () =>
+                    void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
+                },
+                {
+                  key: 'origins',
+                  label: toolLabel('Download origins', 'Every track your watchlist downloaded.'),
+                  title: 'See every track your watchlist downloaded',
+                  onSelect: () => window.openDownloadOriginsModal?.('watchlist'),
+                },
+                {
+                  key: 'history',
+                  label: toolLabel(
+                    'Scan history',
+                    'Past scans and what each added to the wishlist.',
+                  ),
+                  title: 'Every past scan and the tracks it added to the wishlist',
+                  onSelect: () => window.openWatchlistHistoryModal?.(),
+                },
+                {
+                  key: 'blocklist',
+                  label: toolLabel('Blocklist', 'Artists, albums or tracks never to download.'),
+                  title: 'Block artists, albums or tracks from ever being downloaded',
+                  onSelect: () => window.openBlocklistModal?.('artist'),
+                },
+              ]}
+              trigger={(props) => (
+                <button
+                  type="button"
+                  className={home.tools}
+                  title="Similar artists, defaults, origins, history, blocklist"
+                  {...props}
+                  ref={props.ref as (el: HTMLButtonElement | null) => void}
                 >
-                  <path d="M4 7h10" />
-                  <path d="M18 7h2" />
-                  <circle cx="16" cy="7" r="2" />
-                  <path d="M4 17h4" />
-                  <path d="M12 17h8" />
-                  <circle cx="10" cy="17" r="2" />
-                </svg>
-                Tools
-              </button>
-            )}
-          />
-          <button
-            type="button"
-            className={home.ghost}
-            aria-expanded={isAddArtistOpen}
-            onClick={() => setIsAddArtistOpen(true)}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.6"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-            Add artist
-          </button>
-          {isScanning ? (
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="18"
+                    height="18"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 7h10" />
+                    <path d="M18 7h2" />
+                    <circle cx="16" cy="7" r="2" />
+                    <path d="M4 17h4" />
+                    <path d="M12 17h8" />
+                    <circle cx="10" cy="17" r="2" />
+                  </svg>
+                  Tools
+                </button>
+              )}
+            />
             <button
               type="button"
               className={home.ghost}
-              disabled={cancelScan.isPending}
-              onClick={() => cancelScan.mutate()}
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                <rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor" />
-              </svg>
-              {cancelScan.isPending ? 'Stopping…' : 'Stop scan'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={home.cta}
-              // Also blocked while similar-artists runs: both drive the same worker.
-              disabled={startScan.isPending || similarRunning}
-              title="Check every watched artist for new releases"
-              onClick={() => startScan.mutate()}
+              aria-expanded={isAddArtistOpen}
+              onClick={() => setIsAddArtistOpen(true)}
             >
               <svg
                 width="16"
@@ -568,338 +537,375 @@ export function WatchlistPage() {
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="2.6"
                 strokeLinecap="round"
-                strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
-                <path d="M4 4v4h4" />
-                <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
-                <path d="M20 20v-4h-4" />
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
               </svg>
-              {startScan.isPending
-                ? 'Starting…'
-                : similarRunning
-                  ? 'Updating similar artists…'
-                  : 'Scan now'}
+              Add artist
             </button>
-          )}
-        </div>
-      </header>
-
-      {isAddArtistOpen ? (
-        <WatchlistAddArtistSheet
-          profileId={profileId}
-          onAddArtist={(artistId, artistName, source) =>
-            addArtist.mutate({ artistId, artistName, source })
-          }
-          adding={addArtist.isPending}
-          onClose={() => setIsAddArtistOpen(false)}
-        />
-      ) : null}
-
-      {/* the panel and the defaults modal still dress themselves from
-          watchlist-premier.css, which scopes its rules (and the drawer's
-          surface colour) under .watchlist-page-container. display: contents
-          keeps that scope without the old page box. */}
-      <div className={`watchlist-page-container ${home.legacyScope}`}>
-        {search.settings ? (
-          <WatchlistGlobalSettingsModal
-            profileId={profileId}
-            initialConfig={globalConfigQuery.data ?? null}
-            onClose={() => void navigate({ search: (prev) => ({ ...prev, settings: false }) })}
-          />
-        ) : null}
-
-        {panelArtistId ? (
-          <WatchlistArtistPanel
-            profileId={profileId}
-            artistId={panelArtistId}
-            initialTab={search.configId ? 'rules' : 'overview'}
-            onClose={() =>
-              void navigate({
-                search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
-              })
-            }
-          />
-        ) : null}
-      </div>
-
-      <div className={home.pills} role="tablist" aria-label="Watchlist sections">
-        {sectionTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={search.tab === tab.id}
-            className={`${home.pill}${search.tab === tab.id ? ` ${home.pillOn}` : ''}`}
-            onClick={() => setTab(tab.id)}
-          >
-            {tab.label}
-            {tab.count !== undefined ? <span className={home.pillCount}>{tab.count}</span> : null}
-          </button>
-        ))}
-      </div>
-
-      {/* live while a scan runs, on every section: a scan covers artists and
-          labels alike. where things stand belongs with the artists. */}
-      {isScanning || (search.tab === 'artists' && count > 0) ? (
-        <WatchlistScanDeck
-          frame={scanStatus ?? null}
-          lastRun={lastRunQuery.data ?? null}
-          nextScan={nextScan}
-          onOpenHistory={() => window.openWatchlistHistoryModal?.()}
-        />
-      ) : null}
-
-      {isLabelsTab ? (
-        <WatchlistLabelsTab profileId={profileId} />
-      ) : isPodcastsTab ? (
-        <div className={`watchlist-page-container ${home.legacyScope}`}>
-          <WatchlistPodcastsTab profileId={profileId} searchFilter={search.q} />
-        </div>
-      ) : isAudiobooksTab ? (
-        <div className={`watchlist-page-container ${home.legacyScope}`}>
-          <WatchlistAudiobooksTab searchFilter={search.q} />
-        </div>
-      ) : count === 0 ? (
-        <WatchlistEmptyState onAddArtist={() => setIsAddArtistOpen(true)} />
-      ) : (
-        <>
-          <WatchlistFoundShelf
-            releases={foundReleases}
-            onOpenArtist={openArtistByName}
-            onShowAll={() => window.openWatchlistHistoryModal?.()}
-          />
-          <WatchlistRecentReleasesShelf
-            releases={recentReleases}
-            loading={recentReleasesQuery.isLoading}
-            onOpenArtist={openArtistByName}
-          />
-
-          <section className={home.sect}>
-            <div className={home.sectHead}>
-              <div className={home.sectHeadText}>
-                <h3 className={home.sectTitle}>Your artists</h3>
-                <span className={home.sectCount}>
-                  {search.q.trim() || attentionFilter !== 'all'
-                    ? `${visibleArtists.length} of ${count}`
-                    : count}
-                </span>
-              </div>
-            </div>
-
-            <div className={home.bar2}>
-              <label className={home.search}>
+            {isScanning ? (
+              <button
+                type="button"
+                className={home.ghost}
+                disabled={cancelScan.isPending}
+                onClick={() => cancelScan.mutate()}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor" />
+                </svg>
+                {cancelScan.isPending ? 'Stopping…' : 'Stop scan'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={home.cta}
+                // Also blocked while similar-artists runs: both drive the same worker.
+                disabled={startScan.isPending || similarRunning}
+                title="Check every watched artist for new releases"
+                onClick={() => startScan.mutate()}
+              >
                 <svg
-                  width="18"
-                  height="18"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2.2"
+                  strokeWidth="2.5"
                   strokeLinecap="round"
+                  strokeLinejoin="round"
                   aria-hidden="true"
                 >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="M20 20l-3.6-3.6" />
+                  <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
+                  <path d="M4 4v4h4" />
+                  <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
+                  <path d="M20 20v-4h-4" />
                 </svg>
-                <input
-                  type="search"
-                  aria-label="Filter watchlist"
-                  placeholder="Find an artist"
-                  value={search.q}
-                  onChange={(event) =>
-                    void navigate({
-                      search: (prev) => ({ ...prev, q: event.target.value }),
-                      replace: true,
-                    })
-                  }
-                />
-              </label>
-              <div className={home.chips} role="group" aria-label="Show">
-                {showFilters
-                  // an empty filter is still offered while it is the one picked
-                  .filter(
-                    (filter) =>
-                      filter.id === 'all' || filter.count > 0 || attentionFilter === filter.id,
-                  )
-                  .map((filter) => (
-                    <button
-                      key={filter.id}
-                      type="button"
-                      aria-pressed={attentionFilter === filter.id}
-                      className={`${home.chip}${attentionFilter === filter.id ? ` ${home.chipOn}` : ''}`}
-                      onClick={() => setAttentionFilter(filter.id)}
-                    >
-                      {filter.label}
-                      {filter.id !== 'all' ? (
-                        <span className={home.chipCount}>{filter.count}</span>
-                      ) : null}
-                    </button>
-                  ))}
+                {startScan.isPending
+                  ? 'Starting…'
+                  : similarRunning
+                    ? 'Updating similar artists…'
+                    : 'Scan now'}
+              </button>
+            )}
+          </div>
+        </header>
+
+        {isAddArtistOpen ? (
+          <WatchlistAddArtistSheet
+            profileId={profileId}
+            onAddArtist={(artistId, artistName, source) =>
+              addArtist.mutate({ artistId, artistName, source })
+            }
+            adding={addArtist.isPending}
+            onClose={() => setIsAddArtistOpen(false)}
+          />
+        ) : null}
+
+        {/* the panel and the defaults modal still dress themselves from
+          watchlist-premier.css, which scopes its rules (and the drawer's
+          surface colour) under .watchlist-page-container. display: contents
+          keeps that scope without the old page box. */}
+        <div className={`watchlist-page-container ${home.legacyScope}`}>
+          {search.settings ? (
+            <WatchlistGlobalSettingsModal
+              profileId={profileId}
+              initialConfig={globalConfigQuery.data ?? null}
+              onClose={() => void navigate({ search: (prev) => ({ ...prev, settings: false }) })}
+            />
+          ) : null}
+
+          {panelArtistId ? (
+            <WatchlistArtistPanel
+              profileId={profileId}
+              artistId={panelArtistId}
+              initialTab={search.configId ? 'rules' : 'overview'}
+              onClose={() =>
+                void navigate({
+                  search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
+                })
+              }
+            />
+          ) : null}
+        </div>
+
+        <div className={home.pills} role="tablist" aria-label="Watchlist sections">
+          {sectionTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={search.tab === tab.id}
+              className={`${home.pill}${search.tab === tab.id ? ` ${home.pillOn}` : ''}`}
+              onClick={() => setTab(tab.id)}
+            >
+              {tab.label}
+              {tab.count !== undefined ? <span className={home.pillCount}>{tab.count}</span> : null}
+            </button>
+          ))}
+        </div>
+
+        {/* live while a scan runs, on every section: a scan covers artists and
+          labels alike. where things stand belongs with the artists. */}
+        {isScanning || (search.tab === 'artists' && count > 0) ? (
+          <WatchlistScanDeck
+            frame={scanStatus ?? null}
+            lastRun={lastRunQuery.data ?? null}
+            nextScan={nextScan}
+            onOpenHistory={() => window.openWatchlistHistoryModal?.()}
+          />
+        ) : null}
+
+        {isLabelsTab ? (
+          <WatchlistLabelsTab profileId={profileId} />
+        ) : isPodcastsTab ? (
+          <div className={`watchlist-page-container ${home.legacyScope}`}>
+            <WatchlistPodcastsTab profileId={profileId} searchFilter={search.q} />
+          </div>
+        ) : isAudiobooksTab ? (
+          <div className={`watchlist-page-container ${home.legacyScope}`}>
+            <WatchlistAudiobooksTab searchFilter={search.q} />
+          </div>
+        ) : count === 0 ? (
+          <WatchlistEmptyState onAddArtist={() => setIsAddArtistOpen(true)} />
+        ) : (
+          <>
+            <WatchlistFoundShelf
+              releases={foundReleases}
+              onOpenArtist={openArtistByName}
+              onShowAll={() => window.openWatchlistHistoryModal?.()}
+            />
+            <WatchlistRecentReleasesShelf
+              releases={recentReleases}
+              loading={recentReleasesQuery.isLoading}
+              onOpenArtist={openArtistByName}
+            />
+
+            <section className={home.sect}>
+              <div className={home.sectHead}>
+                <div className={home.sectHeadText}>
+                  <h3 className={home.sectTitle}>Your artists</h3>
+                  <span className={home.sectCount}>
+                    {search.q.trim() || attentionFilter !== 'all'
+                      ? `${visibleArtists.length} of ${count}`
+                      : count}
+                  </span>
+                </div>
               </div>
-              <span className={home.grow} />
-              <div className={`${home.anchor}${viewOpen ? ` ${home.anchorRaised}` : ''}`}>
-                <button
-                  type="button"
-                  className={home.txt}
-                  aria-haspopup="menu"
-                  aria-expanded={viewOpen}
-                  onClick={() => setViewOpen((v) => !v)}
-                >
-                  {SORT_LABELS[search.sort]}
+
+              <div className={home.bar2}>
+                <label className={home.search}>
                   <svg
-                    width="14"
-                    height="14"
+                    width="18"
+                    height="18"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2.4"
+                    strokeWidth="2.2"
                     strokeLinecap="round"
-                    strokeLinejoin="round"
                     aria-hidden="true"
                   >
-                    <path d="M6 9l6 6 6-6" />
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M20 20l-3.6-3.6" />
                   </svg>
-                </button>
-                {viewOpen ? (
-                  <>
-                    <button
-                      type="button"
-                      className={home.menuScrim}
-                      aria-label="Close menu"
-                      tabIndex={-1}
-                      onClick={() => setViewOpen(false)}
-                    />
-                    <div className={home.menu} role="menu">
-                      <div className={home.menuHead}>Sort by</div>
-                      {WATCHLIST_SORT_VALUES.map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={search.sort === value}
-                          className={`${home.menuItem}${search.sort === value ? ` ${home.menuItemOn}` : ''}`}
-                          onClick={() => {
-                            setViewOpen(false);
-                            void navigate({ search: (prev) => ({ ...prev, sort: value }) });
-                          }}
-                        >
-                          <span>{SORT_LABELS[value]}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              {picking ? (
-                <label className={home.txt}>
-                  <SelectAllCheckbox
-                    checked={selection.allSelected}
-                    indeterminate={selection.indeterminate}
-                    onChange={toggleSelectAll}
+                  <input
+                    type="search"
+                    aria-label="Filter watchlist"
+                    placeholder="Find an artist"
+                    value={search.q}
+                    onChange={(event) =>
+                      void navigate({
+                        search: (prev) => ({ ...prev, q: event.target.value }),
+                        replace: true,
+                      })
+                    }
                   />
-                  Select all
                 </label>
+                <div className={home.chips} role="group" aria-label="Show">
+                  {showFilters
+                    // an empty filter is still offered while it is the one picked
+                    .filter(
+                      (filter) =>
+                        filter.id === 'all' || filter.count > 0 || attentionFilter === filter.id,
+                    )
+                    .map((filter) => (
+                      <button
+                        key={filter.id}
+                        type="button"
+                        aria-pressed={attentionFilter === filter.id}
+                        className={`${home.chip}${attentionFilter === filter.id ? ` ${home.chipOn}` : ''}`}
+                        onClick={() => setAttentionFilter(filter.id)}
+                      >
+                        {filter.label}
+                        {filter.id !== 'all' ? (
+                          <span className={home.chipCount}>{filter.count}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                </div>
+                <span className={home.grow} />
+                <div className={`${home.anchor}${viewOpen ? ` ${home.anchorRaised}` : ''}`}>
+                  <button
+                    type="button"
+                    className={home.txt}
+                    aria-haspopup="menu"
+                    aria-expanded={viewOpen}
+                    onClick={() => setViewOpen((v) => !v)}
+                  >
+                    {SORT_LABELS[search.sort]}
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                  {viewOpen ? (
+                    <>
+                      <button
+                        type="button"
+                        className={home.menuScrim}
+                        aria-label="Close menu"
+                        tabIndex={-1}
+                        onClick={() => setViewOpen(false)}
+                      />
+                      <div className={home.menu} role="menu">
+                        <div className={home.menuHead}>Sort by</div>
+                        {WATCHLIST_SORT_VALUES.map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={search.sort === value}
+                            className={`${home.menuItem}${search.sort === value ? ` ${home.menuItemOn}` : ''}`}
+                            onClick={() => {
+                              setViewOpen(false);
+                              void navigate({ search: (prev) => ({ ...prev, sort: value }) });
+                            }}
+                          >
+                            <span>{SORT_LABELS[value]}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+                {picking ? (
+                  <label className={home.txt}>
+                    <SelectAllCheckbox
+                      checked={selection.allSelected}
+                      indeterminate={selection.indeterminate}
+                      onChange={toggleSelectAll}
+                    />
+                    Select all
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    className={home.txt}
+                    aria-label="Select artists"
+                    onClick={() => setPickMode(true)}
+                  >
+                    Select
+                  </button>
+                )}
+              </div>
+
+              {visibleArtists.length === 0 ? (
+                <div className={home.empty}>
+                  <p className={home.emptyText}>
+                    {search.q.trim()
+                      ? `No artist matches “${search.q.trim()}”.`
+                      : 'Nobody here right now.'}
+                  </p>
+                </div>
               ) : (
+                <div className={`wl-roster ${home.grid}${picking ? ` ${home.picking}` : ''}`}>
+                  {visibleArtists.map((artist) => {
+                    const artistId = primaryArtistId(artist);
+                    return (
+                      <WatchlistArtistCard
+                        key={artist.id}
+                        artist={artist}
+                        showAdded={search.sort === 'added-newest'}
+                        found={foundByArtist.get(artist.artist_name.toLowerCase())}
+                        selected={artistId !== null && selectedIds.has(artistId)}
+                        active={artistId !== null && artistId === panelArtistId}
+                        audiobook={audiobookArtists.has(artist.artist_name)}
+                        onToggleSelect={() => artistId && toggleArtist(artistId)}
+                        onOpenConfig={() =>
+                          artistId &&
+                          void navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              configId: artistId,
+                              detailId: undefined,
+                            }),
+                          })
+                        }
+                        onOpenDetail={() =>
+                          artistId &&
+                          void navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              detailId: artistId,
+                              configId: undefined,
+                            }),
+                          })
+                        }
+                        onRemove={() => {
+                          if (artistId) void onRemoveOne(artistId, artist.artist_name);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* the batch bar only once something is picked (#1909) */}
+            {picking ? (
+              <div className={home.selbar} role="toolbar" aria-label="Selected artists">
+                <b>{`${selection.selectedCount} selected`}</b>
                 <button
                   type="button"
-                  className={home.txt}
-                  aria-label="Select artists"
-                  onClick={() => setPickMode(true)}
+                  className={home.sb}
+                  onClick={() => toggleSelectAll(!selection.allSelected)}
                 >
-                  Select
+                  {selection.allSelected ? 'Clear visible' : 'Select all visible'}
                 </button>
-              )}
-            </div>
-
-            {visibleArtists.length === 0 ? (
-              <div className={home.empty}>
-                <p className={home.emptyText}>
-                  {search.q.trim()
-                    ? `No artist matches “${search.q.trim()}”.`
-                    : 'Nobody here right now.'}
-                </p>
+                <button
+                  type="button"
+                  className={`${home.sb} ${home.sbDanger}`}
+                  disabled={batchRemove.isPending || selection.selectedCount === 0}
+                  onClick={() => void onBatchRemove()}
+                >
+                  Remove Selected
+                </button>
+                <button
+                  type="button"
+                  className={home.sb}
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setPickMode(false);
+                  }}
+                >
+                  Done
+                </button>
               </div>
-            ) : (
-              <div className={`wl-roster ${home.grid}${picking ? ` ${home.picking}` : ''}`}>
-                {visibleArtists.map((artist) => {
-                  const artistId = primaryArtistId(artist);
-                  return (
-                    <WatchlistArtistCard
-                      key={artist.id}
-                      artist={artist}
-                      showAdded={search.sort === 'added-newest'}
-                      found={foundByArtist.get(artist.artist_name.toLowerCase())}
-                      selected={artistId !== null && selectedIds.has(artistId)}
-                      active={artistId !== null && artistId === panelArtistId}
-                      audiobook={audiobookArtists.has(artist.artist_name)}
-                      onToggleSelect={() => artistId && toggleArtist(artistId)}
-                      onOpenConfig={() =>
-                        artistId &&
-                        void navigate({
-                          search: (prev) => ({
-                            ...prev,
-                            configId: artistId,
-                            detailId: undefined,
-                          }),
-                        })
-                      }
-                      onOpenDetail={() =>
-                        artistId &&
-                        void navigate({
-                          search: (prev) => ({
-                            ...prev,
-                            detailId: artistId,
-                            configId: undefined,
-                          }),
-                        })
-                      }
-                      onRemove={() => {
-                        if (artistId) void onRemoveOne(artistId, artist.artist_name);
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* the batch bar only once something is picked (#1909) */}
-          {picking ? (
-            <div className={home.selbar} role="toolbar" aria-label="Selected artists">
-              <b>{`${selection.selectedCount} selected`}</b>
-              <button
-                type="button"
-                className={home.sb}
-                onClick={() => toggleSelectAll(!selection.allSelected)}
-              >
-                {selection.allSelected ? 'Clear visible' : 'Select all visible'}
-              </button>
-              <button
-                type="button"
-                className={`${home.sb} ${home.sbDanger}`}
-                disabled={batchRemove.isPending || selection.selectedCount === 0}
-                onClick={() => void onBatchRemove()}
-              >
-                Remove Selected
-              </button>
-              <button
-                type="button"
-                className={home.sb}
-                onClick={() => {
-                  setSelectedIds(new Set());
-                  setPickMode(false);
-                }}
-              >
-                Done
-              </button>
-            </div>
-          ) : null}
-        </>
-      )}
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }

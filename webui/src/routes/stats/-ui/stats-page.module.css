@@ -62,13 +62,6 @@
   min-width: 0;
 }
 
-.headMain h1 {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
 .headSub {
   margin: 2px 0 0;
   color: var(--white-a65);

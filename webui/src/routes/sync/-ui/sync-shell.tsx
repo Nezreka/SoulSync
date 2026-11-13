@@ -145,99 +145,69 @@ export function SyncShell({
   return (
     // `page-shell` plus the page id, matching the convention every flipped
     // route follows; the legacy chrome resolves a page by `${pageId}-page`.
-    <div className="page-shell" id="sync-page">
-      <div className={`pl-header ${styles.top}`}>
-        <div className={styles.topText}>
-          <h2 className={`pl-title ${styles.title}`}>
-            <span>Playlists</span>
-          </h2>
-          <p className={`pl-subtitle ${styles.sub}`}>
-            {sub ? (
-              <>
-                <span>
-                  <b>{sub.playlists}</b> mirrored
-                </span>
-                {sub.attention ? (
-                  <>
-                    <span className={styles.subDot} aria-hidden="true">
-                      ·
-                    </span>
-                    <span className={styles.subWarn}>{sub.attention}</span>
-                  </>
-                ) : null}
-                {sub.nextRun ? (
-                  <>
-                    <span className={styles.subDot} aria-hidden="true">
-                      ·
-                    </span>
-                    <span>{sub.nextRun}</span>
-                  </>
-                ) : null}
-                {sub.running ? (
-                  <>
-                    <span className={styles.subDot} aria-hidden="true">
-                      ·
-                    </span>
-                    <span className={styles.subLive}>
-                      <span className={styles.spin} aria-hidden="true" /> {sub.running}
-                    </span>
-                  </>
-                ) : null}
-              </>
-            ) : (
-              'Manage, mirror, and synchronize your playlists with your media server'
-            )}
-          </p>
-        </div>
-        <div className={`pl-header-actions ${styles.topActions}`}>
-          {/* the explorer is a view of these playlists, so it opens from here
+    <div className="page-shell pgf-shell" id="sync-page">
+      <div className="pgf-page pgf-page--plain">
+        <div className={`pl-header ${styles.top}`}>
+          <div className={styles.topText}>
+            <h1 className="pl-title pgf-title">
+              <span>Playlists</span>
+            </h1>
+            <p className={`pl-subtitle pgf-status ${styles.sub}`}>
+              {sub ? (
+                <>
+                  <span>
+                    <b>{sub.playlists}</b> mirrored
+                  </span>
+                  {sub.attention ? (
+                    <>
+                      <span className={styles.subDot} aria-hidden="true">
+                        ·
+                      </span>
+                      <span className={styles.subWarn}>{sub.attention}</span>
+                    </>
+                  ) : null}
+                  {sub.nextRun ? (
+                    <>
+                      <span className={styles.subDot} aria-hidden="true">
+                        ·
+                      </span>
+                      <span>{sub.nextRun}</span>
+                    </>
+                  ) : null}
+                  {sub.running ? (
+                    <>
+                      <span className={styles.subDot} aria-hidden="true">
+                        ·
+                      </span>
+                      <span className={styles.subLive}>
+                        <span className={styles.spin} aria-hidden="true" /> {sub.running}
+                      </span>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                'Manage, mirror, and synchronize your playlists with your media server'
+              )}
+            </p>
+          </div>
+          <div className={`pl-header-actions ${styles.topActions}`}>
+            {/* the explorer is a view of these playlists, so it opens from here
               and has no sidebar entry of its own. hidden with its feature
               switch, and for a profile that was not given the page */}
-          {explorerOn ? (
-            <a
-              href="/playlist-explorer"
-              onClick={(event) => {
-                // a plain click stays in the app; a modified one opens a tab
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-                if (!window.navigateToPage) return;
-                event.preventDefault();
-                void window.navigateToPage('playlist-explorer');
-              }}
-              className={`pl-explorer-btn ${styles.iconBtn}`}
-              aria-label="Playlist Explorer"
-              title="Playlist Explorer: see the albums and discographies behind a playlist"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="20"
-                height="20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="5" r="2.5" />
-                <path d="M12 7.5V12M12 12l-6.5 5M12 12l6.5 5M12 12v5" />
-                <circle cx="5" cy="19" r="2" />
-                <circle cx="12" cy="19" r="2" />
-                <circle cx="19" cy="19" r="2" />
-              </svg>
-            </a>
-          ) : null}
-          {/* everything else this page can do, behind one button (#1909).
-              same names as the windows they open, with a line each. */}
-          <ActionMenu
-            align="right"
-            className="sync-more-menu"
-            trigger={(props) => (
-              <button
-                type="button"
-                className={`pl-tools-btn ${styles.iconBtn}`}
-                aria-label="Playlist tools"
-                title="Scheduling, match review, activity and more"
-                {...props}
+            {explorerOn ? (
+              <a
+                href="/playlist-explorer"
+                onClick={(event) => {
+                  // a plain click stays in the app; a modified one opens a tab
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
+                    return;
+                  if (!window.navigateToPage) return;
+                  event.preventDefault();
+                  void window.navigateToPage('playlist-explorer');
+                }}
+                className={`pl-explorer-btn ${styles.iconBtn}`}
+                aria-label="Playlist Explorer"
+                title="Playlist Explorer: see the albums and discographies behind a playlist"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -245,119 +215,152 @@ export function SyncShell({
                   height="20"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="5" r="2.5" />
+                  <path d="M12 7.5V12M12 12l-6.5 5M12 12l6.5 5M12 12v5" />
+                  <circle cx="5" cy="19" r="2" />
+                  <circle cx="12" cy="19" r="2" />
+                  <circle cx="19" cy="19" r="2" />
+                </svg>
+              </a>
+            ) : null}
+            {/* everything else this page can do, behind one button (#1909).
+              same names as the windows they open, with a line each. */}
+            <ActionMenu
+              align="right"
+              className="sync-more-menu"
+              trigger={(props) => (
+                <button
+                  type="button"
+                  className={`pl-tools-btn ${styles.iconBtn}`}
+                  aria-label="Playlist tools"
+                  title="Scheduling, match review, activity and more"
+                  {...props}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="20"
+                    height="20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 7h10" />
+                    <path d="M18 7h2" />
+                    <circle cx="16" cy="7" r="2" />
+                    <path d="M4 17h4" />
+                    <path d="M12 17h8" />
+                    <circle cx="10" cy="17" r="2" />
+                  </svg>
+                </button>
+              )}
+              items={[
+                ...SYNC_HEADER_ACTIONS.map((action) => ({
+                  key: action.key,
+                  // the vanilla hook classes ride on the items, so nothing that
+                  // selects them loses them
+                  className: `sync-history-btn${action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''}`,
+                  title: action.title,
+                  label: (
+                    <span className={`sync-more-item ${styles.toolItem}`}>
+                      <span className={`sync-more-name ${styles.toolName}`}>{action.label}</span>
+                      <span className={`sync-more-desc ${styles.toolDesc}`}>{action.desc}</span>
+                    </span>
+                  ),
+                  onSelect: () => runHeaderAction(action.key, onAutoSync, onActivity),
+                })),
+                ...(onUpdateList
+                  ? [
+                      {
+                        key: 'update-list',
+                        className: 'sync-history-btn',
+                        title: 'Reload the playlist list',
+                        label: (
+                          <span className={`sync-more-item ${styles.toolItem}`}>
+                            <span className={`sync-more-name ${styles.toolName}`}>Update list</span>
+                            <span className={`sync-more-desc ${styles.toolDesc}`}>
+                              Reload the playlist list.
+                            </span>
+                          </span>
+                        ),
+                        onSelect: onUpdateList,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+            {onAddPlaylist && (
+              <button
+                type="button"
+                className={`pl-add-btn ${styles.cta}`}
+                title="Paste a link, pick a source, import a file, or start a new playlist"
+                onClick={() => onAddPlaylist()}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
                   strokeLinecap="round"
                   aria-hidden="true"
                 >
-                  <path d="M4 7h10" />
-                  <path d="M18 7h2" />
-                  <circle cx="16" cy="7" r="2" />
-                  <path d="M4 17h4" />
-                  <path d="M12 17h8" />
-                  <circle cx="10" cy="17" r="2" />
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
                 </svg>
+                Add playlist
               </button>
             )}
-            items={[
-              ...SYNC_HEADER_ACTIONS.map((action) => ({
-                key: action.key,
-                // the vanilla hook classes ride on the items, so nothing that
-                // selects them loses them
-                className: `sync-history-btn${action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''}`,
-                title: action.title,
-                label: (
-                  <span className={`sync-more-item ${styles.toolItem}`}>
-                    <span className={`sync-more-name ${styles.toolName}`}>{action.label}</span>
-                    <span className={`sync-more-desc ${styles.toolDesc}`}>{action.desc}</span>
-                  </span>
-                ),
-                onSelect: () => runHeaderAction(action.key, onAutoSync, onActivity),
-              })),
-              ...(onUpdateList
-                ? [
-                    {
-                      key: 'update-list',
-                      className: 'sync-history-btn',
-                      title: 'Reload the playlist list',
-                      label: (
-                        <span className={`sync-more-item ${styles.toolItem}`}>
-                          <span className={`sync-more-name ${styles.toolName}`}>Update list</span>
-                          <span className={`sync-more-desc ${styles.toolDesc}`}>
-                            Reload the playlist list.
-                          </span>
-                        </span>
-                      ),
-                      onSelect: onUpdateList,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-          {onAddPlaylist && (
-            <button
-              type="button"
-              className={`pl-add-btn ${styles.cta}`}
-              title="Paste a link, pick a source, import a file, or start a new playlist"
-              onClick={() => onAddPlaylist()}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.6"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-              Add playlist
-            </button>
-          )}
+          </div>
         </div>
-      </div>
 
-      {/* No framed panel inside the page: the artwork is the page. */}
-      <div>
+        {/* No framed panel inside the page: the artwork is the page. */}
         <div>
-          <div className={`pl-collections ${styles.pills}`} role="tablist">
-            {syncStripTabs().map((t) => (
-              <button
+          <div>
+            <div className={`pl-collections ${styles.pills}`} role="tablist">
+              {syncStripTabs().map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={shownCollection === t.id}
+                  className={`pl-collection ${styles.pill}${
+                    shownCollection === t.id ? ` active ${styles.pillOn}` : ''
+                  }`}
+                  data-tab={t.id}
+                  title={t.label}
+                  onClick={() => {
+                    open(t.id);
+                  }}
+                >
+                  <span className="pl-collection-label">{t.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {SYNC_TABS.filter((t) => isPrimarySyncTab(t.id)).map((t) => (
+              <div
                 key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={shownCollection === t.id}
-                className={`pl-collection ${styles.pill}${
-                  shownCollection === t.id ? ` active ${styles.pillOn}` : ''
-                }`}
-                data-tab={t.id}
-                title={t.label}
-                onClick={() => {
-                  open(t.id);
-                }}
+                className={`sync-tab-content${shownCollection === t.id ? ' active' : ''}`}
+                id={`${t.id}-tab-content`}
+                role="tabpanel"
               >
-                <span className="pl-collection-label">{t.label}</span>
-              </button>
+                {opened.has(t.id) ? panels[t.id] : null}
+              </div>
             ))}
           </div>
-
-          {SYNC_TABS.filter((t) => isPrimarySyncTab(t.id)).map((t) => (
-            <div
-              key={t.id}
-              className={`sync-tab-content${shownCollection === t.id ? ' active' : ''}`}
-              id={`${t.id}-tab-content`}
-              role="tabpanel"
-            >
-              {opened.has(t.id) ? panels[t.id] : null}
-            </div>
-          ))}
         </div>
-      </div>
 
-      {/* The source tabs, as panels over the page. Each stays mounted once
+        {/* The source tabs, as panels over the page. Each stays mounted once
           opened, so closing and reopening one finds what it had loaded. */}
+      </div>
       {panelOpen ? (
         <button
           type="button"

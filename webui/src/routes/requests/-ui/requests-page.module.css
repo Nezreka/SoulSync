@@ -1,10 +1,3 @@
-.page {
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 32px 24px 64px;
-  color: #fff;
-}
-
 .head {
   display: flex;
   align-items: flex-start;
@@ -17,19 +10,6 @@
   min-width: 0;
 }
 
-.title {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.subtitle {
-  margin: 6px 0 0;
-  font-size: 14px;
-  color: var(--white-a55);
-}
-
 /* a member's request limit, quiet under the subtitle */
 .quota {
   margin: 4px 0 0;
@@ -37,38 +17,9 @@
   color: rgba(255, 255, 255, 0.42);
 }
 
+/* the pills are the page frame's (.pgf-pill) */
 .tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   margin-bottom: 20px;
-}
-
-.tab {
-  padding: 7px 14px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--white-a08);
-  background: var(--white-a03);
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background var(--dur-fast),
-    color var(--dur-fast),
-    border-color var(--dur-fast);
-}
-
-.tab:hover {
-  background: var(--white-a07);
-  color: #fff;
-}
-
-.tabActive,
-.tabActive:hover {
-  background: var(--white-a12);
-  border-color: var(--white-a20);
-  color: #fff;
 }
 
 .list {
@@ -276,10 +227,6 @@
 }
 
 @media (max-width: 640px) {
-  .page {
-    padding: 22px 16px 48px;
-  }
-
   .row {
     flex-wrap: wrap;
   }

@@ -251,7 +251,7 @@ export function StatsPage() {
       <div id="stats-container" className={`pgf-page ${styles.page}`} data-testid="stats-page">
         <header className={styles.head}>
           <div className={styles.headMain}>
-            <h1>Stats</h1>
+            <h1 className="pgf-title">Stats</h1>
             <p className={styles.headSub}>
               {tab === 'library'
                 ? 'What is in your library today'
