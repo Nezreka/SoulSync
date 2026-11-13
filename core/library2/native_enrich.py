@@ -1399,9 +1399,15 @@ def _clear_borrowed_identity(conn, artist_id: int, namespace: str,
         assignments.append("spotify_id=NULL")
     elif namespace == "musicbrainz":
         assignments.append("musicbrainz_id=NULL")
-    else:
-        assignments.append("external_ids=json_remove(external_ids, ?)")
-        params.append(f"$.{namespace}")
+    # every namespace, the two with a column of their own included: the same id
+    # is also kept in external_ids, and the pass reads it from there when the
+    # column is empty. Clearing only the column left the artist holding the
+    # id, so it was "taken back" again on every start and never was (30 rows
+    # on one library, Nov 13 2026).
+    assignments.append(
+        "external_ids=CASE WHEN json_valid(external_ids) "
+        "THEN json_remove(external_ids, ?) ELSE external_ids END")
+    params.append(f"$.{namespace}")
     row = conn.execute(
         "SELECT image_url, genres, art_locked, genres_locked FROM lib2_artists WHERE id=?",
         (int(artist_id),),
