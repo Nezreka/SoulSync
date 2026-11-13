@@ -330,7 +330,7 @@ def rescan_files(
     stats = {
         "scanned": 0, "updated": 0, "missing": 0, "path_drift": 0,
         "path_repointed": 0, "missing_suspected": 0, "missing_confirmed": 0,
-        "recovered": 0,
+        "recovered": 0, "moved_records": 0,
     }
     with closing(database._get_connection()) as conn:
         # sqlite3.Row values remain tied to the result shape, so materialize
@@ -359,7 +359,8 @@ def rescan_files(
     logger.info(
         "Library file rescan: %(scanned)d probed, %(updated)d updated, "
         "%(missing)d paths absent, %(path_repointed)d repointed, "
-        "%(missing_confirmed)d confirmed missing, %(recovered)d recovered",
+        "%(missing_confirmed)d confirmed missing, %(recovered)d recovered, "
+        "%(moved_records)d old records of moved files settled",
         stats,
     )
     if presence and on_presence_change:
@@ -596,6 +597,20 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             "Library scan: %d of %d files unreachable at once - treating it as "
             "a storage outage, no file is marked missing", len(rows),
             stats["scanned"] + len(rows))
+    elif rows:
+        # a record of where a file used to be, when the same file is on disk
+        # under another record: settled now, not after the two-scan wait, and
+        # never handed on as "this song is gone" (core/library2/moved_file_records)
+        try:
+            from core.library2.moved_file_records import settle_absent_rows
+            settled = settle_absent_rows(database, rows)
+        except Exception as exc:  # noqa: BLE001 - the ordinary lifecycle still runs
+            logger.error("moved-file settle failed during rescan: %s", exc, exc_info=True)
+            settled = {}
+        if settled:
+            stats["moved_records"] = stats.get("moved_records", 0) + len(settled)
+            stats["missing"] += len(settled)
+            rows = [row for row in rows if int(row["id"]) not in settled]
     pending: list = []
     for row in rows:
         stats["missing"] += 1

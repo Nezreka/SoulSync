@@ -50,7 +50,7 @@ def _stats(**overrides):
     base = {
         "scanned": 0, "updated": 0, "missing": 0, "path_drift": 0,
         "path_repointed": 0, "missing_suspected": 0, "missing_confirmed": 0,
-        "recovered": 0,
+        "recovered": 0, "moved_records": 0,
     }
     base.update(overrides)
     return base
