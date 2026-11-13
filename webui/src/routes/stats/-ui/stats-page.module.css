@@ -8,15 +8,8 @@
    32px capsule or a plain link, the accent kept for the data itself.
    ========================================================================= */
 
+/* width, padding and the gap between blocks are the page frame's (.pgf-page) */
 .page {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 32px 36px 80px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  color: var(--text-1);
-  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -1267,10 +1260,6 @@
 }
 
 @media (max-width: 860px) {
-  .page {
-    padding: 24px 20px 72px;
-  }
-
   .hero {
     grid-template-columns: 1fr;
   }
@@ -1301,11 +1290,6 @@
 }
 
 @media (max-width: 580px) {
-  .page {
-    /* the shell's menu button sits over the top left corner */
-    padding: 60px 16px 72px;
-  }
-
   .subBar {
     align-items: flex-start;
     flex-direction: column;
@@ -1396,10 +1380,6 @@
 }
 
 @media (max-width: 380px) {
-  .page {
-    padding: 56px 12px 64px;
-  }
-
   .figure b {
     font-size: 24px;
   }

@@ -59,8 +59,9 @@ describe('stats page responsiveness', () => {
     expect(statsCss).toMatch(
       /@media \(max-width: 580px\)[\s\S]*?\.clockRow\s*\{[^}]*grid-template-columns:\s*24px\s+repeat\(24,\s*1fr\);/,
     );
-    // the page clears the shell's menu button
-    expect(statsCss).toMatch(/@media \(max-width: 580px\)[\s\S]*?\.page\s*\{[^}]*padding:\s*60px/);
+    // clearing the shell's menu button is the page frame's job now (the panel
+    // starts under it), so the page must not bring a padding of its own back
+    expect(statsCss).not.toMatch(/\.page\s*\{[^}]*padding:/);
   });
 
   it('keeps a shelf to one row until it is opened', () => {
