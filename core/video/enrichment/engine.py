@@ -1027,6 +1027,19 @@ class VideoEnrichmentEngine:
             split = self._cache_get(("anime_split", tv_id))
         except AttributeError:
             split = None
+        if split is None:
+            # the split lives in the cache with the detail. a season asked for
+            # after it expired (or from another worker) came back as TMDB's own
+            # season 2, which doesn't exist: a card with no episodes (Thibs'
+            # Frieren). building the detail again puts the split back
+            try:
+                self.tmdb_detail("show", tv_id)
+                split = self._cache_get(("anime_split", tv_id))
+                if split is None:
+                    # nothing to split: say so once, not on every season opened
+                    self._cache_put(("anime_split", tv_id), {"source": {}, "rows": []})
+            except Exception:   # noqa: BLE001 - then it is TMDB's own season, as before
+                split = None
         src = (split or {}).get("source", {}).get(int(season_number)) if split else None
         if src is not None:
             raw = self._tmdb_season_raw(tv_id, src)
