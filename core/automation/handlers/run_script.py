@@ -45,7 +45,14 @@ def auto_run_script(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, A
 
     # Security: block path traversal — script must resolve under
     # the scripts dir, no symlinks/.. tricks allowed out.
-    if not script_path.startswith(os.path.realpath(scripts_dir)):
+    # commonpath, not startswith: "/app/scripts_old/x.sh" starts with
+    # "/app/scripts" and is not inside it
+    scripts_root = os.path.realpath(scripts_dir)
+    try:
+        inside = os.path.commonpath([scripts_root, script_path]) == scripts_root
+    except ValueError:  # another drive
+        inside = False
+    if not inside or script_path == scripts_root:
         return {'status': 'error', 'error': 'Script path traversal blocked'}
 
     if not os.path.isfile(script_path):
