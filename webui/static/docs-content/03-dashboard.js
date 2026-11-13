@@ -248,7 +248,8 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
 | Library Reorganize | Restructures folders to match your path templates |
 | MBID Mismatch Detector | Verifies MusicBrainz IDs are still accurate |
-| Album Tag Consistency | Standardizes tags across all tracks in an album |
+| Album Tag Consistency | Standardizes tags across all tracks in an album, and reports a compilation split into one album per track artist |
+| Use File Tags | For tags you fixed outside SoulSync: finds every album whose files say something the Library does not (titles, track numbers, year, genre, which album a track is on) and, once approved, makes the Library follow the files. Off by default; nothing on disk is changed |
 | Cache Maintenance | Cleans expired metadata cache entries |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split |

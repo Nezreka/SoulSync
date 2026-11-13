@@ -87,6 +87,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'Splits combined artists, cleans genres, lines up track numbers and release years, and flags tracks filed under the wrong album.',
     jobIds: [
       'album_tag_consistency',
+      'use_file_tags',
       'album_release_year_repair',
       'comma_artist_splitter',
       'genre_cleanup',
@@ -101,6 +102,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     ],
     findingTypes: [
       'album_tag_inconsistency',
+      'file_tags_differ',
       'album_release_year_mismatch',
       'comma_artist_split',
       'genre_cleanup',

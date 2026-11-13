@@ -159,6 +159,8 @@ FINDING_TYPE_META = {
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
     'album_tag_inconsistency':  {'label': 'Album Tag Drift', 'verb': 'Unify Tags'},
+    'file_tags_differ':         {'label': 'File Tags Differ', 'verb': 'Use File Tags',
+                                 'confirm': 'The Library takes these values from the files, as manual edits. No file is changed.'},
     'incomplete_album':         {'label': 'Incomplete Albums', 'verb': 'Fill Album'},
     'path_mismatch':            {'label': 'Path Mismatch', 'verb': 'Reorganize'},
     'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
@@ -236,6 +238,7 @@ JOB_CATEGORIES = {
     'untagged_downloads': 'Tags & metadata',
     'track_number_repair': 'Tags & metadata',
     'album_tag_consistency': 'Tags & metadata',
+    'use_file_tags': 'Tags & metadata',
     'library_retag': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
@@ -3708,6 +3711,7 @@ class RepairWorker:
             'empty_folder': self._fix_empty_folder,
             'metadata_gap': self._fix_metadata_gap,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
+            'file_tags_differ': self._fix_file_tags_differ,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
@@ -6865,6 +6869,47 @@ class RepairWorker:
         test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
         from core.repair_jobs.unknown_artist_recovery import move_refiled_track
         return move_refiled_track(self, track_id, config_manager=self._config_manager)
+
+    def _fix_file_tags_differ(self, entity_type, entity_id, file_path, details):
+        """The Library takes what the album's files say (#2074): the album
+        menu's Use file tags, run from a finding. The plan is worked out again
+        from the files as they are now, not from what the scan saw. The job is
+        newer than the legacy ids, so there is no stale finding to turn away:
+        anything that is not a Library album is simply not an album."""
+        album_id = _lib2_id(entity_id)
+        if album_id is None:
+            return {'success': False, 'error': 'No album in finding'}
+        from core.library2 import retag, tags_to_library
+        conn = self.db._get_connection()
+        try:
+            track_ids = retag.album_track_ids(conn, album_id)
+        finally:
+            conn.close()
+        if track_ids is None:
+            return {'success': False, 'error': 'Album no longer exists'}
+        if not track_ids:
+            return {'success': True, 'action': 'nothing_to_change',
+                    'message': 'The album has no files left to read'}
+        done = tags_to_library.apply(
+            self.db, track_ids, profile_id=int((details or {}).get('library_owner_id') or 1))
+        failed = done.get('failed') or []
+        parts = []
+        if done.get('albums_renamed'):
+            parts.append('album renamed')
+        if done.get('albums_changed'):
+            parts.append('album details updated')
+        if done.get('tracks_changed'):
+            parts.append(f"{done['tracks_changed']} track(s) updated")
+        if done.get('moved'):
+            parts.append(f"{done['moved']} track(s) moved")
+        if failed:
+            return {'success': False, 'retryable': True,
+                    'error': f"{len(failed)} track(s) could not be changed"
+                             + (f" ({', '.join(parts)})" if parts else '')}
+        if not parts:
+            return {'success': True, 'action': 'already_matching',
+                    'message': 'The Library already says what the files say'}
+        return {'success': True, 'action': 'used_file_tags', 'message': ', '.join(parts).capitalize()}
 
     def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
         """Align album and track release years to canonical release dates and rename folder."""

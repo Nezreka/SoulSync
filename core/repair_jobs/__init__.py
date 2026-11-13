@@ -31,6 +31,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'fake_lossless_detector': 'lib2',
     'lossy_converter': 'lib2',
     'album_tag_consistency': 'lib2',
+    'use_file_tags': 'lib2',
     'live_commentary_cleaner': 'lib2',
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
@@ -103,6 +104,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'fake_lossless_detector': frozenset({'observe', 'delete', 'wanted'}),
     'lossy_converter': frozenset({'observe', 'new_file', 'tags'}),
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
+    # reads tags, and an approved finding saves them as manual edits. no file is written
+    'use_file_tags': frozenset({'observe', 'metadata'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
@@ -204,6 +207,8 @@ JOB_LOCK_SCOPE: dict[str, str] = {
     'suspect_album_tag_detector': 'match',
     'track_number_repair': 'tags',
     'unknown_artist_fixer': 'match',
+    # an approved finding saves metadata the files name. a reviewed album keeps its own
+    'use_file_tags': 'metadata',
     'untagged_downloads': 'tags',
 }
 # findings left by jobs that no longer run still have a fix
@@ -357,6 +362,7 @@ _JOB_MODULES = [
     'core.repair_jobs.fake_lossless_detector',
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
+    'core.repair_jobs.use_file_tags',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
