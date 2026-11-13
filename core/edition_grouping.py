@@ -186,6 +186,19 @@ def is_repressing(title: str) -> bool:
     return bool(plain) and edition_group_key(plain) != plain
 
 
+def _explicit_known_false(item) -> bool:
+    """The source said this edition is not explicit. A flag nobody filled in
+    (NULL) says nothing: an edition is not a clean copy for want of data."""
+    for k in ("explicit", "is_explicit"):
+        try:
+            v = item.get(k) if isinstance(item, dict) else getattr(item, k, None)
+        except Exception:
+            v = None
+        if v is not None:
+            return not v
+    return False
+
+
 def drop_clean_twins(releases):
     """The editions of one album without its clean copies (#2081).
 
@@ -204,7 +217,7 @@ def drop_clean_twins(releases):
         if is_clean_marked(_title(release)):
             if unmarked:
                 continue
-        elif not _is_explicit(release) and _track_count(release) in explicit_counts:
+        elif _explicit_known_false(release) and _track_count(release) in explicit_counts:
             continue
         kept.append(release)
     return kept or releases

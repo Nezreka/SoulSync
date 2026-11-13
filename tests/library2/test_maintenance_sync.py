@@ -1859,3 +1859,16 @@ def test_a_row_something_else_stands_on_is_left_alone(legacy_db, keep):
             "tracks": 0, "albums": 0}
         assert conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?",
                             (native["track_id"],)).fetchone()
+
+
+def test_a_dropped_rows_hand_edits_go_with_it(legacy_db):
+    from core.library2.metadata_overrides import get_field_overrides, set_field_override
+
+    native = _native_100(legacy_db, listed=False)
+    with closing(legacy_db._get_connection()) as conn:
+        set_field_override(conn, entity_type="track", entity_id=native["track_id"],
+                           field_name="title", value="Mine", reason=None)
+        conn.commit()
+    _remove_dead_file(legacy_db, native)
+    with closing(legacy_db._get_connection()) as conn:
+        assert get_field_overrides(conn, entity_type="track", entity_id=native["track_id"]) == {}

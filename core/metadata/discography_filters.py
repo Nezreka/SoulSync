@@ -187,7 +187,10 @@ def content_type_skip_reason(
             continue
         if requested:
             # the release's own kind is what was asked for
-            if not detect(album_name or '') and detect(track_name):
+            # the second call is the detector as it always ran, so its own
+            # exceptions (a remaster is not a remix) still hold
+            if (not detect(album_name or '') and detect(track_name)
+                    and detect(track_name, album_name)):
                 return reason
         elif detect(track_name, album_name):
             return reason

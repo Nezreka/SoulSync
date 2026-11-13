@@ -135,3 +135,10 @@ def test_unplugged_is_the_live_rules_word_not_the_acoustic_rules():
     assert content_type_skip_reason("Layla (Acoustic)", "Hits", rules) == "acoustic"
     # and unplugged with the live rules off is live, as it always was
     assert content_type_skip_reason("Nutshell", "MTV Unplugged", OFF) == "live"
+
+
+def test_asking_for_a_remastered_album_keeps_the_detectors_own_exceptions():
+    # a remaster is not a remix: the detector says so on the combined text,
+    # and the asked-for path has to go on saying it
+    assert content_type_skip_reason("Song (Remix)", "Hits (Remastered)", OFF) is None
+    assert content_type_skip_reason("Song (Remix)", "Hits (Remastered)", OFF, requested=True) is None

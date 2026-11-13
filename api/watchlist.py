@@ -205,11 +205,16 @@ def register_routes(bp):
                         updates = {**{k: v for k, v in default_values(config_manager).items()
                                       if k not in updates}, **updates}
                         updates["follow_defaults"] = False
+                        # a client that sets Live and has never heard of live
+                        # tracks means both, as it always did (#2082): NULL
+                        # follows include_live
+                        if "include_live" in body and "include_live_tracks" not in body:
+                            updates["include_live_tracks"] = None
 
                 # Build SET clause
                 set_parts = [f"{k} = ?" for k in updates]
                 values = [
-                    int(v) if key == "quality_profile_id" else int(bool(v))
+                    None if v is None else int(v) if key == "quality_profile_id" else int(bool(v))
                     for key, v in updates.items()
                 ]
 

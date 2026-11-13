@@ -1921,6 +1921,10 @@ def watchlist_artist_config(artist_id):
                 # #2082. None stays None: a client that never sends it keeps
                 # one Live switch for both, as before the split
                 include_live_tracks = _field('include_live_tracks', None)
+                if 'include_live' in data and 'include_live_tracks' not in data and was_following:
+                    # the follower's fill would pin it to the default. a client
+                    # that only sends Live means both
+                    include_live_tracks = None
             except _BadBool as bad:
                 conn.close()
                 return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400

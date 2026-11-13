@@ -353,8 +353,8 @@ export function defaultFutureReleases(filters: DiscogFilters): FutureReleases {
     include_eps: filters.ep,
     include_singles: filters.single,
     include_live: filters.live,
-    // the download filter is about live releases; a live bonus track is its own rule
-    include_live_tracks: false,
+    // one Live filter covered both before the split, so it seeds both
+    include_live_tracks: filters.live,
     include_remixes: false,
     include_acoustic: false,
     include_compilations: filters.compilations,

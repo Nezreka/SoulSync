@@ -194,6 +194,11 @@ def update_artist_settings(
     if following and not values.get("follow_defaults", not set(values) & set(rules)):
         values = {**{k: int(v) for k, v in rules.items() if k in columns},
                   **values, "follow_defaults": 0}
+        # a client that sets Live and not live tracks means both (#2082):
+        # NULL follows include_live
+        if ("include_live" in updates and "include_live_tracks" not in updates
+                and "include_live_tracks" in columns):
+            values["include_live_tracks"] = None
     if not values.get("follow_defaults", following) and not any(
         values.get(field, rules[field])
         for field in ("include_albums", "include_eps", "include_singles")

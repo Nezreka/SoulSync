@@ -615,6 +615,16 @@ def _record_events(
     return len(subjects)
 
 
+def _drop_overrides(conn: Any, entity_type: str, entity_id: int) -> None:
+    """A deleted row's hand edits go with it: ids are reused, and the next
+    row to get this one would inherit them."""
+    try:
+        conn.execute("DELETE FROM lib2_metadata_overrides WHERE entity_type=? AND entity_id=?",
+                     (entity_type, int(entity_id)))
+    except Exception as exc:  # noqa: BLE001 - the table is made on the first edit
+        logger.debug("overrides of %s %s not cleared: %s", entity_type, entity_id, exc)
+
+
 def drop_unlisted_leftovers(database: Any, conn: Any, track_ids) -> Dict[str, int]:
     """Take a removed track off an album no provider lists (#2086).
 
@@ -657,6 +667,7 @@ def drop_unlisted_leftovers(database: Any, conn: Any, track_ids) -> Dict[str, in
         album_id = int(row[0])
         conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (track_id,))
         _delete_track_row(conn, track_id)
+        _drop_overrides(conn, "track", track_id)
         stats["tracks"] += 1
         if conn.execute("SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1",
                         (album_id,)).fetchone():
@@ -666,6 +677,7 @@ def drop_unlisted_leftovers(database: Any, conn: Any, track_ids) -> Dict[str, in
             (album_id,))
         conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (album_id,))
         conn.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+        _drop_overrides(conn, "release_group", album_id)
         stats["albums"] += 1
         try:
             from core.library2.artwork import invalidate_artwork

@@ -2306,7 +2306,18 @@ function FindingCard({
                   type="button"
                   title="Take this track out of your library. Nothing is downloaded."
                   disabled={fixing}
-                  onClick={() => void onFix(finding, 'remove')}
+                  onClick={() => {
+                    // the row comes off the library for good, so it asks once
+                    void (async () => {
+                      const confirmed = await window.showConfirmDialog?.({
+                        title: 'Remove from library',
+                        message: `Take "${copy.title}" out of your library? Its file is already gone, and nothing is downloaded.`,
+                        confirmText: 'Remove',
+                        destructive: true,
+                      });
+                      if (confirmed) await onFix(finding, 'remove');
+                    })();
+                  }}
                 >
                   Remove
                 </button>

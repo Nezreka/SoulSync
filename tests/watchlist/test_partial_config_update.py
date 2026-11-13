@@ -367,3 +367,25 @@ def test_a_follower_shows_the_default_pair(client, monkeypatch):
     shown = test_client.get("/api/watchlist/artist/sp-1/config").get_json()["config"]
     assert shown["follow_defaults"] is True
     assert shown["include_live"] is True and shown["include_live_tracks"] is False
+
+
+def test_a_follower_given_live_by_a_client_that_knows_one_switch_gets_both(client):
+    # the fill from the defaults pinned live tracks to the default (off), so
+    # the same request that used to bring live bonus tracks stopped bringing them
+    test_client, db = client
+    response = test_client.post("/api/watchlist/artist/sp-1/config", json={"include_live": True})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert tuple(_live_tracks(db)) == (1, None)
+    assert response.get_json()["config"]["include_live_tracks"] is True
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT follow_defaults FROM watchlist_artists").fetchone()[0] == 0
+
+
+def test_a_follower_given_another_rule_starts_from_the_default_pair(client, monkeypatch):
+    test_client, db = client
+    values = {"watchlist.global_include_live": True, "watchlist.global_include_live_tracks": False}
+    real_get = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, "get",
+                        lambda key, default=None: values.get(key, real_get(key, default)))
+    test_client.post("/api/watchlist/artist/sp-1/config", json={"include_remixes": True})
+    assert tuple(_live_tracks(db)) == (1, 0)

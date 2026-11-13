@@ -217,7 +217,7 @@ def _annotate_gap_edition_preference(base, gaps):
     def _title(release):
         return str(release.get('name') or release.get('title') or '')
 
-    if preference == EDITION_PREFERENCE_ALL:
+    if preference == EDITION_PREFERENCE_ALL and not prefer_explicit:
         for bucket in ('albums', 'eps', 'singles'):
             for release in _bucket(gaps, bucket):
                 if isinstance(release, dict):

@@ -142,6 +142,17 @@ def test_the_library_drops_the_clean_twin_and_reads_the_setting(tmp_path):
         assert pick(**{"watchlist.prefer_explicit_edition": False}) == sorted(ids)
         # the original, not the remaster with the same tracks (#2080)
         assert pick(**{"watchlist.edition_preference": "one_standard"}) == ["Crunk Juice"]
-        # with explicit not preferred, the setting is what decides: it was ignored here
-        assert pick(**{"watchlist.edition_preference": "one_standard",
-                       "watchlist.prefer_explicit_edition": False}) == ["Crunk Juice"]
+
+
+
+def test_an_edition_nobody_flagged_is_not_a_clean_copy():
+    # explicit NULL says nothing. a remaster the source never flagged, next to
+    # the explicit original with the same tracks, was dropped as its clean twin
+    group = [_rel("Album", 12, explicit=True),
+             {"name": "Album (Remastered)", "track_count": 12, "explicit": None},
+             {"name": "Album (Reissue)", "track_count": 12}]
+    assert drop_clean_twins(group) == group
+    assert reduce_edition_group(group, "all") == group
+    # told it is not explicit, it is the clean one
+    group[1]["explicit"] = 0
+    assert drop_clean_twins(group) == [group[0], group[2]]

@@ -39,6 +39,22 @@ _EDITION_TAG = re.compile(
     re.IGNORECASE,
 )
 # "Kindred EP", "Kindred - EP", "Kindred (EP)", "Hello - Single"
+# a bracket that also names another recording is that recording, whatever
+# pressing word sits next to it: "(Live - Special Edition)", "(Extended Mixes)"
+_OTHER_RECORDING = re.compile(
+    r"\b(live|unplugged|remix(?:es|ed)?|mix(?:es)?|acoustic|instrumentals?|demos?|"
+    r"karaoke|sessions?|commentary)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_edition_tag(title: str) -> str:
+    found = _EDITION_TAG.search(title)
+    if not found or _OTHER_RECORDING.search(found.group(0)):
+        return title
+    return title[:found.start()] + title[found.end():]
+
+
 _FORMAT_TAG = re.compile(
     r"(?:\s*[-\u2013\u2014:]\s*(?:ep|single)|\s*[\[\(]\s*(?:ep|single)\s*[\]\)]|\s+ep)\s*$",
     re.IGNORECASE,
@@ -74,13 +90,13 @@ def album_presence_key(title: str, artist: str) -> str:
         if rest != base[len(artist):] and rest.strip():
             base = rest
     while True:  # "X (Deluxe) (2011 Remaster)", "X - EP (Remastered)"
-        stripped = _FORMAT_TAG.sub("", _EDITION_TAG.sub("", base))
+        stripped = _FORMAT_TAG.sub("", _strip_edition_tag(base))
         if stripped == base or not stripped.strip():
             break
         base = stripped
     key = presence_key(base, artist)
     if key.startswith("|||"):  # "!!!" and "..." fold to nothing: keep them literal
-        return f"{raw.lower()}|||{key[3:]}"
+        return f"{base.lower()}|||{key[3:]}"
     return key
 
 

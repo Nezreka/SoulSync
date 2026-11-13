@@ -1274,10 +1274,17 @@ describe('per-finding actions', () => {
     // the dead file's row only: an orphan has no library entry to remove
     expect(remove).toHaveLength(1);
     expect(remove[0].textContent).toBe('Remove');
+    // a no leaves the row alone
+    confirmSpy.mockResolvedValueOnce(false);
+    fireEvent.click(remove[0] as HTMLElement);
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/3/fix'))).toBe(false);
+
+    confirmSpy.mockResolvedValueOnce(true);
     fireEvent.click(remove[0] as HTMLElement);
     await flush();
 
-    // no dialog in between: the file is already gone
+    // one yes/no, not the re-download or remove question again
     expect(document.getElementById('_dead-remove')).toBeNull();
     expect(bodyOf('/3/fix')).toEqual({ fix_action: 'remove' });
     expect(toastSpy).toHaveBeenCalledWith('Out of your library', 'success');

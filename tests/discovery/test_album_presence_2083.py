@@ -119,3 +119,15 @@ def test_the_shelf_drops_owned_albums_and_lists_a_missing_one_once(db):
     cache._with_art = lambda cursor, rows, kind: rows
     albums = cache.get_undiscovered_albums(names, keys, source="spotify", limit=20)
     assert [a["name"] for a in albums] == ["Significant Other (Deluxe)", "Gold Cobra"]
+
+
+@pytest.mark.parametrize("other", [
+    "Mezzanine (Live - Special Edition)", "Mezzanine (Acoustic Edition)",
+    "Mezzanine (Extended Mixes)", "Mezzanine (Clean Bandit Remix)", "Mezzanine (Deluxe Demos)",
+])
+def test_a_pressing_word_next_to_another_recording_does_not_make_it_the_album(other):
+    assert album_presence_key(other, "Artist") != album_presence_key("Mezzanine", "Artist")
+
+
+def test_a_symbol_title_keys_the_same_with_its_pressing_tag():
+    assert album_presence_key("÷ (Deluxe)", "Ed") == album_presence_key("÷", "Ed")
