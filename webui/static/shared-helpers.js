@@ -2522,7 +2522,7 @@ async function openSearchDownloadModal(artistName) {
                     // Update avatar
                     const avatarContainer = modal.querySelector('.artist-download-modal-hero-avatar');
                     if (avatarContainer) {
-                        avatarContainer.innerHTML = `<img src="${data.image_url}" alt="${artistBubbleData.artist.name}" class="artist-download-modal-hero-image" loading="lazy">`;
+                        avatarContainer.innerHTML = `<img src="${escapeHtml(data.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`;
                     }
 
                     // Update artist object in memory
@@ -4385,7 +4385,7 @@ async function loadSimilarArtists(artistName) {
         container.innerHTML = `
             <div style="width: 100%; text-align: center; padding: 40px 20px; color: rgba(239, 68, 68, 0.7);">
                 <div style="font-size: 18px; margin-bottom: 8px;">⚠️</div>
-                <div style="font-size: 14px;">${error.message}</div>
+                <div style="font-size: 14px;">${escapeHtml(error.message)}</div>
             </div>
         `;
     } finally {

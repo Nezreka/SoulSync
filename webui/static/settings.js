@@ -8385,7 +8385,7 @@ async function loadProwlarrIndexers() {
         const resp = await fetch('/api/prowlarr/indexers');
         const data = await resp.json();
         if (!data.success) {
-            listEl.innerHTML = `<em style="color:#f44336;">${data.error || 'Prowlarr not configured.'}</em>`;
+            listEl.innerHTML = `<em style="color:#f44336;">${escapeHtml(data.error || 'Prowlarr not configured.')}</em>`;
             return;
         }
         if (!data.indexers || data.indexers.length === 0) {
@@ -8407,7 +8407,7 @@ async function loadProwlarrIndexers() {
         }).join('');
         listEl.innerHTML = rows;
     } catch (e) {
-        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${e.message}</em>`;
+        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${escapeHtml(e.message)}</em>`;
     }
 }
 

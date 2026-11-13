@@ -7060,7 +7060,7 @@ async function _gsLazyLoadArtistImages() {
             const data = await res.json();
             if (data.success && data.image_url) {
                 const artDiv = card.querySelector('.gsearch-item-art');
-                if (artDiv) artDiv.innerHTML = `<img src="${data.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">`;
+                if (artDiv) artDiv.innerHTML = `<img src="${escapeHtml(data.image_url)}" loading="lazy" onerror="this.parentElement.textContent='🎤'">`;
                 card.removeAttribute('data-needs-image');
             }
         } catch (e) { /* ignore */ }
