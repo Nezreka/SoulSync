@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -81,10 +83,13 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 26;
  * - Narrator lock toggles and series badges
  */
 export function WishlistAudiobooks({
+  mediaTabs,
   onClearAll,
   onSearchAlso,
   onQueryChange,
 }: {
+  /** the Music | Audiobooks switch, drawn in this list's header */
+  mediaTabs?: ReactNode;
   onClearAll?: () => void;
   /**
    * Reports the search box text, so the page can apply the same filter to the
@@ -234,18 +239,17 @@ export function WishlistAudiobooks({
   return (
     <div className={styles.panel}>
       {/* ── Hero — same wlp markup as the music tab ─────────────────────── */}
-      <header className="wlp-hero">
-        <div className="wlp-hero-top">
-          <div>
-            <div className="wlp-eyebrow">Audiobooks</div>
-            <h1 className="wlp-title">Wishlist</h1>
-            <p className="wlp-sub">
-              {backoffHours > 0
-                ? `Every book you're hunting down. The automation searches your indexers on a schedule — each title waits ${backoffHours} hours between attempts so indexers don't rate-limit you. Customise frequency anytime on the Automations page.`
-                : "Every book you're hunting down. The automation searches your indexers on a schedule, around the clock. Customise frequency anytime on the Automations page."}
-            </p>
-          </div>
-          <div className="wlp-nextrun">
+      <header className="pgf-head wlp-hero">
+        <div className="pgf-actions wlp-hero-side">
+          {mediaTabs}
+          <div
+            className="wlp-nextrun"
+            title={
+              backoffHours > 0
+                ? `The automation searches your indexers on a schedule. Each title waits ${backoffHours} hours between attempts so indexers don't rate-limit you. Customise frequency anytime on the Automations page.`
+                : 'The automation searches your indexers on a schedule, around the clock. Customise frequency anytime on the Automations page.'
+            }
+          >
             <div className="wlp-ring" aria-hidden="true">
               <svg viewBox="0 0 64 64">
                 <circle className="wlp-ring-bg" cx="32" cy="32" r="26" />
@@ -271,35 +275,39 @@ export function WishlistAudiobooks({
             </div>
           </div>
         </div>
-
-        {counts && counts.total > 0 && (
-          <div className="wlp-stats">
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{counts.total}</span>
-              <span className="wlp-stat-label">Wanted</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{counts.wanted ?? 0}</span>
-              <span className="wlp-stat-label">Looking</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">
-                {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
-              </span>
-              <span className="wlp-stat-label">In Flight</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{counts.done ?? 0}</span>
-              <span className="wlp-stat-label">In Library</span>
-            </div>
-            {failedCount > 0 && (
+        <div className="pgf-head-main">
+          <h1 className="pgf-title">Wishlist</h1>
+          {counts && counts.total > 0 ? (
+            <div className="pgf-status wlp-stats">
               <div className="wlp-stat">
-                <span className="wlp-stat-value wlp-stat-value--warn">{failedCount}</span>
-                <span className="wlp-stat-label">Not Found Yet</span>
+                <span className="wlp-stat-value">{counts.total}</span>
+                <span className="wlp-stat-label">Wanted</span>
               </div>
-            )}
-          </div>
-        )}
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">{counts.wanted ?? 0}</span>
+                <span className="wlp-stat-label">Looking</span>
+              </div>
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">
+                  {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
+                </span>
+                <span className="wlp-stat-label">In Flight</span>
+              </div>
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">{counts.done ?? 0}</span>
+                <span className="wlp-stat-label">In Library</span>
+              </div>
+              {failedCount > 0 && (
+                <div className="wlp-stat">
+                  <span className="wlp-stat-value wlp-stat-value--warn">{failedCount}</span>
+                  <span className="wlp-stat-label">Not Found Yet</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="pgf-status">Every book you&apos;re hunting down.</p>
+          )}
+        </div>
       </header>
 
       {failedCount > 0 && (
@@ -344,7 +352,52 @@ export function WishlistAudiobooks({
       {notice && <p className={styles.notice}>{notice}</p>}
 
       {/* ── Command bar — same wlp markup as the music tab ──────────────── */}
-      <div className="wlp-cmdbar">
+      <div className="pgf-bar wlp-cmdbar">
+        <div className="pgf-pills wlp-segmented" role="tablist" aria-label="View mode">
+          <button
+            type="button"
+            className="pgf-pill"
+            role="tab"
+            aria-selected={viewMode === 'grid'}
+            onClick={() => handleSetViewMode('grid')}
+            title="Poster Gallery View"
+          >
+            ⊞ Grid
+          </button>
+          <button
+            type="button"
+            className="pgf-pill"
+            role="tab"
+            aria-selected={viewMode === 'shelf'}
+            onClick={() => handleSetViewMode('shelf')}
+            title="Detailed Shelf View"
+          >
+            ☰ Shelf
+          </button>
+        </div>
+
+        {counts && counts.total > 0 && (
+          <nav aria-label="Filter by status" className={styles.chipNav}>
+            {FILTERS.map((entry) => {
+              const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
+              if (entry.key !== 'all' && total === 0) return null;
+              const isSelected = filter === entry.key;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className={`pgf-pill wlp-chip${isSelected ? ' active' : ''}`}
+                  onClick={() => setFilter(entry.key)}
+                >
+                  <span className={`${styles.filterDot} ${entry.dotClass || ''}`} />
+                  {entry.label}
+                  <span className="wlp-count">{total}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
+
         <div className={`wlp-search ${styles.cmdSearch}`}>
           <input
             type="text"
@@ -366,50 +419,6 @@ export function WishlistAudiobooks({
             </button>
           )}
         </div>
-
-        {counts && counts.total > 0 && (
-          <nav aria-label="Filter by status" className={styles.chipNav}>
-            {FILTERS.map((entry) => {
-              const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
-              if (entry.key !== 'all' && total === 0) return null;
-              const isSelected = filter === entry.key;
-              return (
-                <button
-                  key={entry.key}
-                  type="button"
-                  className={`wlp-chip${isSelected ? ' active' : ''}`}
-                  onClick={() => setFilter(entry.key)}
-                >
-                  <span className={`${styles.filterDot} ${entry.dotClass || ''}`} />
-                  {entry.label}
-                  <span className="wlp-count">{total}</span>
-                </button>
-              );
-            })}
-          </nav>
-        )}
-
-        <div className="wlp-segmented" role="tablist" aria-label="View mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'grid'}
-            onClick={() => handleSetViewMode('grid')}
-            title="Poster Gallery View"
-          >
-            ⊞ Grid
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'shelf'}
-            onClick={() => handleSetViewMode('shelf')}
-            title="Detailed Shelf View"
-          >
-            ☰ Shelf
-          </button>
-        </div>
-
         {onClearAll && (
           <button type="button" className="wlp-btn wlp-btn--danger" onClick={onClearAll}>
             Clear All

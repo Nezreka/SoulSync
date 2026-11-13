@@ -45,8 +45,6 @@ const TABS: { media: VideoMedia; label: string }[] = [
   { media: 'youtube', label: 'YouTube' },
 ];
 
-const EYEBROW: Record<VideoMedia, string> = { movies: 'Movies', tv: 'TV', youtube: 'YouTube' };
-
 interface Props {
   profileId: number;
   media: VideoMedia;
@@ -203,58 +201,56 @@ export function VideoWishlist({
 
   return (
     <>
-      <div className="wlp-media-tabs" role="tablist" aria-label="Video wishlist">
-        {TABS.map((t) => (
-          <button
-            key={t.media}
-            type="button"
-            role="tab"
-            aria-selected={media === t.media}
-            onClick={() => onMedia(t.media)}
-          >
-            {t.label}
-            <span className="wlp-tab-count">{tabCount[t.media]}</span>
-          </button>
-        ))}
-      </div>
-
-      <header className="wlp-hero">
-        <div className="wlp-hero-top">
-          <div>
-            <div className="wlp-eyebrow">{EYEBROW[media]}</div>
-            <h1 className="wlp-title">Wishlist</h1>
-            <p className="wlp-sub">
-              Everything you&apos;re hunting down. The automation searches this list every hour —
-              triage what&apos;s stuck, grab what you want now.
-            </p>
+      <header className="pgf-head wlp-hero">
+        <div className="pgf-actions wlp-hero-side">
+          <div className="wlp-media-tabs" role="tablist" aria-label="Video wishlist">
+            {TABS.map((t) => (
+              <button
+                key={t.media}
+                type="button"
+                role="tab"
+                aria-selected={media === t.media}
+                onClick={() => onMedia(t.media)}
+              >
+                {t.label}
+                <span className="wlp-tab-count">{tabCount[t.media]}</span>
+              </button>
+            ))}
           </div>
         </div>
-        {c && (c.total ?? 0) > 0 ? (
-          <div className="wlp-stats">
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{c.movie ?? 0}</span>
-              <span className="wlp-stat-label">Movies</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{c.show ?? 0}</span>
-              <span className="wlp-stat-label">Shows</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{c.episode ?? 0}</span>
-              <span className="wlp-stat-label">Episodes</span>
-            </div>
-            <div className="wlp-stat">
-              <span className="wlp-stat-value">{c.video ?? 0}</span>
-              <span className="wlp-stat-label">YouTube videos</span>
-            </div>
-            {stuckCount > 0 && (pagination?.total_pages ?? 1) <= 1 ? (
+        <div className="pgf-head-main">
+          <h1 className="pgf-title">Wishlist</h1>
+          {c && (c.total ?? 0) > 0 ? (
+            <div className="pgf-status wlp-stats">
               <div className="wlp-stat">
-                <span className="wlp-stat-value wlp-stat-value--warn">{stuckCount}</span>
-                <span className="wlp-stat-label">Stuck</span>
+                <span className="wlp-stat-value">{c.movie ?? 0}</span>
+                <span className="wlp-stat-label">Movies</span>
               </div>
-            ) : null}
-          </div>
-        ) : null}
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">{c.show ?? 0}</span>
+                <span className="wlp-stat-label">Shows</span>
+              </div>
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">{c.episode ?? 0}</span>
+                <span className="wlp-stat-label">Episodes</span>
+              </div>
+              <div className="wlp-stat">
+                <span className="wlp-stat-value">{c.video ?? 0}</span>
+                <span className="wlp-stat-label">YouTube videos</span>
+              </div>
+              {stuckCount > 0 && (pagination?.total_pages ?? 1) <= 1 ? (
+                <div className="wlp-stat">
+                  <span className="wlp-stat-value wlp-stat-value--warn">{stuckCount}</span>
+                  <span className="wlp-stat-label">Stuck</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="pgf-status">
+              Everything you&apos;re hunting down. The automation searches this list every hour.
+            </p>
+          )}
+        </div>
       </header>
 
       {stuckCount > 0 ? (
@@ -279,7 +275,19 @@ export function VideoWishlist({
         </div>
       ) : null}
 
-      <div className="wlp-cmdbar">
+      <div className="pgf-bar wlp-cmdbar">
+        {media !== 'youtube' ? (
+          <button
+            type="button"
+            className={`pgf-pill wlp-chip wlp-chip--warn${failingOn ? ' active' : ''}`}
+            title="Show only what keeps failing to download"
+            aria-pressed={failingOn}
+            onClick={() => onFailing(!failing)}
+          >
+            <span aria-hidden="true">⚠ </span>Failing
+            {failingCount > 0 && <span className="wlp-count">{failingCount}</span>}
+          </button>
+        ) : null}
         <div className="wlp-search">
           <input
             type="text"
@@ -289,18 +297,6 @@ export function VideoWishlist({
             onChange={(event) => onQuery(event.target.value)}
           />
         </div>
-        {media !== 'youtube' ? (
-          <button
-            type="button"
-            className={`wlp-chip wlp-chip--warn${failingOn ? ' active' : ''}`}
-            title="Show only what keeps failing to download"
-            aria-pressed={failingOn}
-            onClick={() => onFailing(!failing)}
-          >
-            <span aria-hidden="true">⚠ </span>Failing
-            {failingCount > 0 && <span className="wlp-count">{failingCount}</span>}
-          </button>
-        ) : null}
         {tabLibraries.length > 1 ? (
           <label className="wlp-sort">
             Library

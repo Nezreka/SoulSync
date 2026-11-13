@@ -1079,7 +1079,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                     const timerElement = document.getElementById('wishlist-next-auto-timer');
                     if (timerElement) {
                         const countdownText = formatCountdownTime(remainingSeconds);
-                        timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                        timerElement.textContent = `${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
                     }
                 }
             } else {
@@ -1114,7 +1114,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                         const timerElement = document.getElementById('wishlist-next-auto-timer');
                         if (timerElement) {
                             const countdownText = formatCountdownTime(remainingSeconds);
-                            timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                            timerElement.textContent = `${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
                         }
                     }
                 } catch (error) {
@@ -1127,7 +1127,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
         const timerElement = document.getElementById('wishlist-next-auto-timer');
         if (timerElement) {
             const countdownText = formatCountdownTime(remainingSeconds);
-            timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+            timerElement.textContent = `${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
         }
     }, 1000); // Update every second
 }
