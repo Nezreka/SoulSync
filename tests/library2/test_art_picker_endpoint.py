@@ -400,3 +400,104 @@ def test_a_picked_image_also_goes_to_the_server_and_the_folder(monkeypatch, api,
 
     assert pushed == [(ids[key], True)]
     assert body["server_updated"] is True
+
+
+@pytest.mark.parametrize("entity, key, table, entity_type", [
+    ("albums", "album", "lib2_albums", "release_group"),
+    ("artists", "artist", "lib2_artists", "artist"),
+])
+@pytest.mark.parametrize("token, expected_fragment", [
+    ("", "Discogs token"),
+    ("TOKEN123", "still valid"),
+])
+def test_apply_discogs_art_failure_names_discogs_and_pins_nothing(
+    monkeypatch, api, entity, key, table, entity_type, token, expected_fragment,
+):
+    """Issue #2079: a refused Discogs download used to surface as the generic
+    'Could not download or validate that image URL'. The error now says what
+    actually happened, and the failed pick still pins nothing."""
+    client, db, ids = api
+    monkeypatch.setattr("core.library2.artwork._download_remote_artwork", lambda url: None)
+    monkeypatch.setattr("core.library2.artwork._discogs_token", lambda: token)
+
+    resp = client.post(
+        f"/api/library/v2/{entity}/{ids[key]}/art",
+        json={"url": "https://i.discogs.com/abc/photo.jpeg"},
+    )
+
+    assert resp.status_code == 400
+    assert expected_fragment in resp.get_json()["error"]
+    with closing(db._get_connection()) as conn:
+        locked = conn.execute(
+            f"SELECT art_locked FROM {table} WHERE id=?", (ids[key],)
+        ).fetchone()[0]
+        override = conn.execute(
+            "SELECT 1 FROM lib2_metadata_overrides "
+            "WHERE entity_type=? AND entity_id=? AND field_name='image_url'",
+            (entity_type, ids[key]),
+        ).fetchone()
+    assert not locked
+    assert override is None
+
+
+@pytest.mark.parametrize("entity, key, table, entity_type", [
+    ("albums", "album", "lib2_albums", "release_group"),
+    ("artists", "artist", "lib2_artists", "artist"),
+])
+@pytest.mark.parametrize("mode", ["invalid", "write"])
+@pytest.mark.parametrize("token", ["", "TOKEN123"])
+def test_apply_discogs_art_non_download_failures_keep_the_generic_message(
+    monkeypatch, api, entity, key, table, entity_type, mode, token,
+):
+    """Issue #2079 revised plan: bytes that download but fail validation, and
+    a cache write that fails locally, are NOT Discogs download failures —
+    the error stays the generic string (no Discogs, no token advice) and
+    nothing is pinned, whatever the token state."""
+    client, db, ids = api
+    if mode == "invalid":
+        monkeypatch.setattr(
+            "core.library2.artwork._download_remote_artwork", lambda _url: b"not-an-image",
+        )
+    else:
+        monkeypatch.setattr(
+            "core.library2.artwork._download_remote_artwork", lambda _url: _png_bytes(),
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("os.replace", _boom)
+    monkeypatch.setattr("core.library2.artwork._discogs_token", lambda: token)
+
+    resp = client.post(
+        f"/api/library/v2/{entity}/{ids[key]}/art",
+        json={"url": "https://i.discogs.com/abc/photo.jpeg"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "Could not download or validate that image URL"
+    with closing(db._get_connection()) as conn:
+        locked = conn.execute(
+            f"SELECT art_locked FROM {table} WHERE id=?", (ids[key],)
+        ).fetchone()[0]
+        override = conn.execute(
+            "SELECT 1 FROM lib2_metadata_overrides "
+            "WHERE entity_type=? AND entity_id=? AND field_name='image_url'",
+            (entity_type, ids[key]),
+        ).fetchone()
+    assert not locked
+    assert override is None
+
+
+@pytest.mark.parametrize("entity, key", [("albums", "album"), ("artists", "artist")])
+def test_apply_non_discogs_download_failure_keeps_the_generic_message(monkeypatch, api, entity, key):
+    client, _db, ids = api
+    monkeypatch.setattr("core.library2.artwork._download_remote_artwork", lambda url: None)
+    monkeypatch.setattr("core.library2.artwork._discogs_token", lambda: "TOKEN123")
+
+    resp = client.post(
+        f"/api/library/v2/{entity}/{ids[key]}/art", json={"url": "https://example.com/dead.jpg"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "Could not download or validate that image URL"

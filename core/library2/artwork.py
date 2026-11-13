@@ -42,6 +42,32 @@ MAX_ARTWORK_PIXELS = 40_000_000
 MAX_ARTWORK_DIMENSION = 12_000
 MAX_ARTWORK_REDIRECTS = 4
 
+# Every other SoulSync client identifies itself; a bare python-requests
+# User-Agent is one Discogs' image CDN refuses outright, and Discogs API
+# community guidance says image loads need a User-Agent and Authorization
+# header. Keep this string in sync with the User-Agent DiscogsClient sends
+# (core/discogs_client.py, DiscogsClient.__init__).
+_ARTWORK_USER_AGENT = "SoulSync/2.2 +https://github.com/Nezreka/SoulSync"
+
+# The only hosts Discogs-specific headers may ever be sent to: the
+# configured token and the discogs.com Referer. Exact hostname matches
+# only — a lookalike or a subdomain gets nothing.
+_DISCOGS_IMAGE_HOSTS = frozenset({"i.discogs.com", "img.discogs.com"})
+
+# What a browser sends when discogs.com loads its own images. If Discogs'
+# CDN checks the Referer at all, the site origin is what it would check
+# for (the same reasoning core/image_cache.py documents for Deezer's CDN).
+_DISCOGS_IMAGE_REFERER = "https://www.discogs.com/"
+
+# Outcomes of a manual art pick (apply_manual_artwork_outcome). The routes
+# need the reason, not just success/failure: a Discogs-flavoured error is
+# only honest for a download failure, never for bytes that downloaded fine
+# but are not a usable image, or for a cache write that failed locally.
+MANUAL_ART_APPLIED = "applied"
+MANUAL_ART_DOWNLOAD_FAILED = "download"
+MANUAL_ART_INVALID_IMAGE = "invalid"
+MANUAL_ART_WRITE_FAILED = "write"
+
 
 # The import precache and the HTTP slow path may discover the same uncached
 # entity at the same time.  Keep one lock boundary in this module (rather than
@@ -264,6 +290,97 @@ def _public_remote_artwork_url(url: str) -> bool:
         return False
 
 
+def _discogs_token() -> str:
+    """The user's configured Discogs personal token, or "" when unset.
+
+    Read the same config key DiscogsClient reads, lazily — this module is
+    imported long before settings are ready, and the fetch path must never
+    fail because config did. A non-string or malformed value (a paste
+    accident with spaces or line breaks) counts as unset: interpolated
+    verbatim it would make requests reject the header and fail every
+    Discogs fetch outright, instead of merely going unauthenticated.
+    """
+    try:
+        from core.settings import config_manager
+
+        value = config_manager.get("discogs.token", "")
+    except Exception:  # noqa: BLE001 — no exc in the log: this holds a secret
+        logger.debug("discogs token read failed")
+        return ""
+    if not isinstance(value, str):
+        return ""
+    token = value.strip()
+    if not token or any(ord(ch) < 33 or ord(ch) > 126 for ch in token):
+        return ""
+    return token
+
+
+def _is_discogs_image_url(url: str) -> bool:
+    """True only for an https URL on an exact Discogs image host at the
+    default https port, with no userinfo — the one shape the Discogs token
+    may be attached to, and the one shape the Discogs failure messages
+    describe. (urlsplit lowercases the scheme itself; .port raises
+    ValueError for a non-numeric or out-of-range port, caught below.)"""
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        host = (parsed.hostname or "").lower()
+        if host.endswith("."):
+            host = host[:-1]
+        return (
+            parsed.scheme == "https"
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port in (None, 443)
+            and host in _DISCOGS_IMAGE_HOSTS
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _remote_artwork_headers(url: str) -> Dict[str, str]:
+    """Headers for one artwork fetch hop.
+
+    Always a SoulSync User-Agent. For an https URL on an exact Discogs
+    image host, the Discogs site Referer is attached (with or without a
+    token), and the Discogs token when one is configured — never for a
+    lookalike host, a subdomain, plain http, a userinfo URL, a non-default
+    port, or (because this is computed per hop inside the redirect walk) a
+    redirect that leaves Discogs.
+    """
+    headers = {"Accept": "image/*", "User-Agent": _ARTWORK_USER_AGENT}
+    if _is_discogs_image_url(url):
+        headers["Referer"] = _DISCOGS_IMAGE_REFERER
+        token = _discogs_token()
+        if token:
+            headers["Authorization"] = f"Discogs token={token}"
+    return headers
+
+
+def manual_artwork_failure_message(url: str, outcome: str) -> str:
+    """Why a manual art pick could not be applied, in user-facing words.
+
+    The Discogs wording is only for a Discogs DOWNLOAD failure — the one
+    case where the token advice can help. It says "could not download",
+    not "refused": a download also fails on timeouts, DNS errors and
+    oversize bodies. A pick whose bytes downloaded but failed validation,
+    or whose cache write failed locally, keeps the generic message in
+    every case — token advice cannot fix either.
+    """
+    if outcome == MANUAL_ART_DOWNLOAD_FAILED and _is_discogs_image_url(url):
+        if _discogs_token():
+            return (
+                "SoulSync could not download that image from Discogs. "
+                "Check that your Discogs token in Settings is still valid, "
+                "or pick another image."
+            )
+        return (
+            "SoulSync could not download that image from Discogs. "
+            "Add your Discogs token in Settings (or re-enter it if you "
+            "already did), or pick another image."
+        )
+    return "Could not download or validate that image URL"
+
+
 def _response_peer_is_public(response: Any) -> bool:
     """Reject a DNS-rebound connection when Requests exposes its peer socket."""
     from ipaddress import ip_address
@@ -300,7 +417,7 @@ def _download_remote_artwork(
                 timeout=(3.05, 15),
                 stream=True,
                 allow_redirects=False,
-                headers={"Accept": "image/*"},
+                headers=_remote_artwork_headers(current),
             )
             if not _response_peer_is_public(response):
                 return None
@@ -311,6 +428,13 @@ def _download_remote_artwork(
                 current = urljoin(current, location)
                 continue
             if response.status_code != 200:
+                # host + status only: the URL can carry a signature, and the
+                # request carried the Discogs token — neither is logged.
+                logger.debug(
+                    "remote artwork fetch refused: host=%s status=%s",
+                    urlsplit(current).hostname,
+                    response.status_code,
+                )
                 return None
             content_type = str(response.headers.get("Content-Type") or "").lower()
             if not content_type.startswith("image/"):
@@ -330,7 +454,13 @@ def _download_remote_artwork(
                     return None
             return bytes(body) if body else None
         except Exception as exc:  # noqa: BLE001
-            logger.debug("remote artwork fetch failed: %s", exc)
+            # Host + error type only: a requests exception string embeds the
+            # full URL, signature query included — that never goes in a log.
+            logger.debug(
+                "remote artwork fetch failed: host=%s error=%s",
+                urlsplit(current).hostname,
+                type(exc).__name__,
+            )
             return None
         finally:
             if response is not None:
@@ -1330,10 +1460,10 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
     return counts
 
 
-def apply_manual_artwork(
+def apply_manual_artwork_outcome(
     database, conn, kind: str, entity_id: int, url: str, *, profile_id: int = 1,
-) -> bool:
-    """Apply a user-picked cover (docs §49 art picker).
+) -> str:
+    """Apply a user-picked cover (docs §49 art picker), reporting the outcome.
 
     Downloads + validates ``url`` FIRST, then pins it as the entity's
     ``image_url`` metadata override (so a later "Refresh & Scan"/precache
@@ -1343,21 +1473,24 @@ def apply_manual_artwork(
     managed artwork cache file so it's visible immediately, without waiting
     for a background rebuild.
 
-    Returns False (no override set, no write) when the URL doesn't resolve
-    to a valid image — the caller surfaces that as a user-facing error.
+    Returns one of the ``MANUAL_ART_*`` constants. On a failure outcome the
+    pick has not landed: any override already written on the caller's
+    connection is the caller's to roll back (both art routes do), and the
+    caller surfaces the failure as a user-facing error whose wording
+    depends on which outcome it was.
     Raises :class:`~core.library2.metadata_overrides.MetadataOverrideError`
     when the entity itself doesn't exist (propagated from ``set_field_override``).
     """
     entity_type = _OVERRIDE_ENTITY_TYPE.get(kind)
     if entity_type is None:
-        return False
+        return MANUAL_ART_INVALID_IMAGE
 
     data = _download_remote_artwork(url)
     if not data:
-        return False
+        return MANUAL_ART_DOWNLOAD_FAILED
     variants = _normalize_jpeg_variants(data)
     if not variants:
-        return False
+        return MANUAL_ART_INVALID_IMAGE
     data, thumbnail = variants
 
     from core.library2.metadata_overrides import set_field_override
@@ -1393,14 +1526,30 @@ def apply_manual_artwork(
             _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
         except OSError as e:
             logger.debug("manual artwork write failed (%s %s): %s", kind, entity_id, e)
-            return False
+            return MANUAL_ART_WRITE_FAILED
     forget_artwork_versions(database, kind, entity_id)
-    return True
+    return MANUAL_ART_APPLIED
+
+
+def apply_manual_artwork(
+    database, conn, kind: str, entity_id: int, url: str, *, profile_id: int = 1,
+) -> bool:
+    """Bool-only twin of :func:`apply_manual_artwork_outcome`, kept for the
+    callers and tests that only ask whether the pick landed."""
+    return apply_manual_artwork_outcome(
+        database, conn, kind, entity_id, url, profile_id=profile_id,
+    ) == MANUAL_ART_APPLIED
 
 
 __all__ = [
     "build_artwork",
     "apply_manual_artwork",
+    "apply_manual_artwork_outcome",
+    "MANUAL_ART_APPLIED",
+    "MANUAL_ART_DOWNLOAD_FAILED",
+    "MANUAL_ART_INVALID_IMAGE",
+    "MANUAL_ART_WRITE_FAILED",
+    "manual_artwork_failure_message",
     "artwork_file",
     "artwork_build_states",
     "artwork_version",
