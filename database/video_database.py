@@ -9480,6 +9480,47 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def shelf_life_episode_shows(self, episode_ids) -> dict:
+        """{episode id: show id} for owned episodes among ``episode_ids`` --
+        how a play of one episode counts toward its show."""
+        ids = [int(i) for i in (episode_ids or [])]
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                q = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT id, show_id FROM episodes WHERE has_file = 1 AND id IN ({q})", chunk):
+                    out[int(r[0])] = int(r[1])
+            return out
+        finally:
+            conn.close()
+
+    def shelf_life_external_index(self) -> dict:
+        """how a play on a server the library wasn't scanned from finds its
+        rows: {'movie': {tmdb id: [movie ids]}, 'show': {('tmdb'|'tvdb', id):
+        [show ids]}, 'episode': {(show id, season, episode): episode id}}, for
+        owned movies and episodes only."""
+        out: dict = {"movie": {}, "show": {}, "episode": {}}
+        conn = self._get_connection()
+        try:
+            for mid, tmdb in conn.execute(
+                    "SELECT id, tmdb_id FROM movies WHERE has_file = 1 AND tmdb_id IS NOT NULL"):
+                out["movie"].setdefault(int(tmdb), []).append(int(mid))
+            for sid, tmdb, tvdb in conn.execute(
+                    "SELECT id, tmdb_id, tvdb_id FROM shows WHERE tmdb_id IS NOT NULL OR tvdb_id IS NOT NULL"):
+                if tmdb is not None:
+                    out["show"].setdefault(("tmdb", int(tmdb)), []).append(int(sid))
+                if tvdb is not None:
+                    out["show"].setdefault(("tvdb", int(tvdb)), []).append(int(sid))
+            for eid, sid, sn, en in conn.execute(
+                    "SELECT id, show_id, season_number, episode_number FROM episodes WHERE has_file = 1"):
+                out["episode"][(int(sid), int(sn), int(en))] = int(eid)
+            return out
+        finally:
+            conn.close()
+
     def shelf_life_requests(self) -> dict:
         """{(kind, tmdb_id): {profile_id, available_at}} -- the latest APPROVED
         movie or show request per title."""

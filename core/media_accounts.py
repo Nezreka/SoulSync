@@ -2,8 +2,9 @@
 music side.
 
 a profile linked to its own Plex account (Connect with Plex, or a linked Plex
-Home user) has that account's server token stored on its profile row. the
-video side reads it to keep each member's own watch state (#1941); it reaches
+Home user) has that account's server token stored on its profile row, and a
+profile set to its own Jellyfin user has that user's id. the video side reads
+them to keep each member's own watch state (#1941); it reaches
 it through here, the same way it reaches profiles through core.profile_context,
 so core/video never imports the music database itself.
 """
@@ -52,6 +53,29 @@ def plex_linked_profiles() -> List[Tuple[int, str]]:
             link = None
         if link and link.get("token"):
             out.append((int(pid), link["token"]))
+    return out
+
+
+def jellyfin_linked_profiles() -> List[Tuple[int, str]]:
+    """(profile id, jellyfin user id) for every profile set to its own
+    Jellyfin user. a profile whose setting can't be read is skipped."""
+    try:
+        db = _db()
+        profiles = db.get_all_profiles() or []
+    except Exception:   # noqa: BLE001
+        logger.debug("listing profiles failed", exc_info=True)
+        return []
+    out = []
+    for p in profiles:
+        pid = p.get("id")
+        if pid is None:
+            continue
+        try:
+            uid = (db.get_profile_server_library(int(pid)) or {}).get("jellyfin_user_id")
+        except Exception:   # noqa: BLE001
+            uid = None
+        if uid:
+            out.append((int(pid), str(uid)))
     return out
 
 

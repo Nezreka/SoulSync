@@ -9,10 +9,16 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from core.video import shelf_life as sl
+from core.video.repair import shelf_life as job_module
 from core.video.repair.worker import VideoRepairWorker
 from database.video_database import VideoDatabase
 
 GB = 1024 ** 3
+
+# the real reads, kept before the autouse fixture below stands them in
+_REAL_PLAY_LOG = job_module._play_log_watch
+_REAL_PLAYING_NOW = job_module._playing_now
 
 
 @pytest.fixture()
@@ -33,6 +39,17 @@ def _profiles(monkeypatch):
     monkeypatch.setattr(media_accounts, "plex_linked_profiles", lambda: [])
     monkeypatch.setattr(media_accounts, "profile_names", lambda: ({1: "Owner"}, "Owner"))
     monkeypatch.setattr(media_accounts, "admin_profile_ids", lambda: [1])
+    monkeypatch.setattr(media_accounts, "plex_link", lambda pid: None)
+    monkeypatch.setattr(media_accounts, "jellyfin_linked_profiles", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _server(monkeypatch):
+    """no play log and nothing playing unless a test sets some up; the real
+    reads use the shared main database and the media servers."""
+    from core.video.repair import shelf_life as job
+    monkeypatch.setattr(job, "_play_log_watch", lambda db: None)
+    monkeypatch.setattr(job, "_playing_now", lambda db: set())
 
 
 def _ago(days):
@@ -644,3 +661,277 @@ def test_the_detail_routes_are_admin_only(tmp_path):
         assert videoapi._video_db.shelf_life_keeps() == set()
     finally:
         videoapi._video_db = None
+
+
+# ── everyone on every server (soulsync's play log) and what's playing now ───
+@pytest.fixture()
+def play_log(monkeypatch, tmp_path):
+    """the real _play_log_watch over a temp play log. call it with plays (see
+    _p) and the server the library was scanned from."""
+    import sqlite3
+
+    from core.server_activity import store
+    from core.video import sources
+    path = str(tmp_path / "main.db")
+    monkeypatch.setattr(store, "_factory", lambda: sqlite3.connect(path))
+    monkeypatch.setattr(store, "_schema_ready", False)
+    monkeypatch.setattr(job_module, "_play_log_watch", _REAL_PLAY_LOG)
+
+    def use(plays, home="plex"):
+        monkeypatch.setattr(sources, "resolve_video_server", lambda db=None: home)
+        with sqlite3.connect(path) as conn:
+            store.ensure_schema(conn.cursor())
+            conn.execute("DELETE FROM server_plays")
+        store.apply_ops([("play", p) for p in plays])
+    return use
+
+
+def _p(server, user, kind, days, *, key=None, percent=100, pos=None, link=None, season=None, episode=None,
+       source="live"):
+    """one play in the log, as the recorder (or plex's history import) writes it."""
+    import time
+    import uuid
+    when = time.time() - days * 86400
+    play_key = uuid.uuid4().hex
+    return {"play_key": play_key, "group_key": play_key, "source": source, "server": server, "kind": kind,
+            "rating_key": key, "title": "t", "user": "u%s" % user, "user_id": str(user),
+            "season": season, "episode": episode, "started_at": when - 3600, "stopped_at": when,
+            "last_seen": when, "duration_ms": 3_600_000 if source == "live" else None,
+            "max_position_ms": (pos if pos is not None else 36 * (percent or 0) * 1000) if source == "live" else None,
+            "percent": percent if source == "live" else None, "played_ms": 0, "paused_ms": 0,
+            "buffering_ms": 0, "pause_count": 0, "buffer_count": 0, "remote": 0, "sent_kb": 0, "link": link}
+
+
+def _facts(db, kind):
+    return {r["id"]: f for r, f in job_module.gather(db, dict(job_module.ShelfLifeJob.default_settings))[kind]}
+
+
+def test_people_without_a_soulsync_profile_count_from_the_play_log(db, worker, play_log):
+    # nobody SoulSync knows watched it; three other accounts on the server did
+    mid = _movie(db, "Theirs", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    play_log([_p("plex", 7, "movie", 20, key="m-Theirs"), _p("plex", 8, "movie", 40, key="m-Theirs"),
+              _p("plex", 9, "movie", 60, key="m-Theirs"), _p("plex", 9, "movie", 300, key="m-Theirs"),
+              _p("plex", 9, "movie", 5, key="m-Gone")])                   # a movie the library doesn't hold
+    _run(worker)
+    w = _stored(db, "movie", [mid])[mid]
+    assert w["gate"] is None and w["score"] >= 30          # not flagged
+    assert any("watched by 3 people" in r["text"] for r in w["reasons"])
+    assert _pending(db) == []
+
+
+def test_a_linked_profile_is_one_person_in_the_log_too(db, play_log, monkeypatch):
+    from core import media_accounts
+    monkeypatch.setattr(media_accounts, "plex_linked_profiles", lambda: [(4, "tok")])
+    monkeypatch.setattr(media_accounts, "profile_names", lambda: ({1: "Owner", 4: "Z"}, "Owner"))
+    monkeypatch.setattr(media_accounts, "plex_link", lambda pid: {"id": "555", "title": "z", "token": "tok"})
+    mid = _movie(db, "Shared", tmdb=1, plays=1, last=_ago(10), imdb=7.0)
+    db.save_profile_watch_state(4, [("movie", mid, 2, _ago(8), 0)])
+    # the owner (account 1) and Z (555) are in the log as well: still two people
+    play_log([_p("plex", 1, "movie", 10, key="m-Shared"), _p("plex", 555, "movie", 8, key="m-Shared")])
+    assert _facts(db, "movie")[mid]["watch"]["watched"] == 2
+
+
+def test_a_show_is_counted_by_the_episodes_each_account_finished(db, play_log):
+    sid = _show(db, "Series", tmdb=10, owned=4, streaming="ok", count=5)
+    # account 7 finished all four (one twice), account 8 one and stopped early
+    # in another, both long ago; an episode the library doesn't own counts for nothing
+    plays = [_p("plex", 7, "episode", 200, key="Series-e%d" % i) for i in (1, 2, 3, 4, 4)]
+    plays += [_p("plex", 8, "episode", 200, key="Series-e1"), _p("plex", 8, "episode", 200, key="gone-e9"),
+              _p("plex", 8, "episode", 199, key="Series-e2", percent=40)]
+    play_log(plays)
+    f = _facts(db, "show")[sid]
+    assert f["watching"] is False and f["in_progress"] is False
+    # all of it for one, a quarter for the other: 1.25 people, 6 plays
+    assert f["watch"]["watched"] == 2 and f["watch"]["people"] == pytest.approx(1.25) and f["watch"]["plays"] == 6
+
+
+def test_a_show_someone_on_the_server_watched_lately_is_held(db, worker, play_log):
+    sid = _show(db, "Underway", tmdb=10, owned=4, streaming="ok", count=5)
+    play_log([_p("plex", 7, "episode", 5, key="Underway-e2")])
+    _run(worker)
+    assert _stored(db, "show", [sid])[sid]["gate"] == "watching"
+
+
+def test_unwatched_counts_only_from_where_the_log_starts(db, worker, play_log):
+    # in the library ~3 years; the log only reaches back 100 days
+    mid = _movie(db, "Old", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _movie(db, "Other", tmdb=2, imdb=7.0)
+    play_log([_p("plex", 7, "movie", 100, key="m-Other", source="plex_history"),
+              _p("plex", 7, "movie", 30, key="m-Other")])
+    _, text = sl.watch_signal(_facts(db, "movie")[mid], datetime.now())
+    assert text.startswith("no plays on record since ")
+    _run(worker)
+    # about 100 days unwatched, not 1000: watch is about 50 * 0.5 ** (100 / 365)
+    assert _stored(db, "movie", [mid])[mid]["signals"]["watch"] == pytest.approx(41.1, abs=0.5)
+
+
+def test_a_play_counts_as_watched_from_90_percent(db, play_log):
+    mid = _movie(db, "Most", tmdb=1, imdb=5.0)
+    play_log([_p("plex", 7, "movie", 300, key="m-Most", percent=89),
+              _p("plex", 8, "movie", 300, key="m-Most", percent=90),
+              _p("plex", 9, "movie", 300, key="m-Most", source="plex_history")])   # plex marked it played
+    f = _facts(db, "movie")[mid]
+    assert f["watch"]["watched"] == 2 and f["in_progress"] is False     # 89% 300 days ago holds nothing
+
+
+def test_a_movie_left_part_way_lately_is_held_until_its_finished(db, worker, play_log):
+    mid = _movie(db, "Halfway", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    play_log([_p("plex", 7, "movie", 10, key="m-Halfway", percent=7)])
+    f = _facts(db, "movie")[mid]
+    assert f["in_progress"] is True and f["watch"]["watched"] == 0      # held, not counted as watched
+    _run(worker)
+    assert _stored(db, "movie", [mid])[mid]["gate"] == "in_progress" and _pending(db) == []
+    # finished it a day later: watched, no longer part-way
+    play_log([_p("plex", 7, "movie", 10, key="m-Halfway", percent=7), _p("plex", 7, "movie", 9, key="m-Halfway")])
+    f = _facts(db, "movie")[mid]
+    assert f["in_progress"] is False and f["watch"]["watched"] == 1
+
+
+def test_an_episode_left_part_way_holds_the_show_until_its_finished(db, play_log):
+    sid = _show(db, "Series", tmdb=10, owned=4, streaming="ok", count=5)
+    play_log([_p("plex", 7, "episode", 120, key="Series-e1"),
+              _p("plex", 7, "episode", 5, key="Series-e2", percent=30)])
+    assert _facts(db, "show")[sid]["in_progress"] is True
+    play_log([_p("plex", 7, "episode", 120, key="Series-e1"),
+              _p("plex", 7, "episode", 5, key="Series-e2", percent=30),
+              _p("plex", 7, "episode", 200, key="Series-e3", percent=30),     # older, then finished below
+              _p("plex", 7, "episode", 4, key="Series-e2")])
+    f = _facts(db, "show")[sid]
+    assert f["in_progress"] is False and f["watch"]["people"] == pytest.approx(0.5)
+
+
+def test_jellyfin_plays_count_beside_a_plex_library(db, play_log):
+    # the library is plex's; jellyfin plays carry the library link the
+    # activity view resolved, or a tmdb id when it couldn't place the movie
+    mid = _movie(db, "Both", tmdb=1, imdb=5.0)
+    sid = _show(db, "Series", tmdb=10, owned=4)
+    play_log([_p("jellyfin", "aa-01", "movie", 20, key="jf-1", link={"kind": "movie", "id": mid, "source": "library"}),
+              _p("jellyfin", "bb", "movie", 25, key="jf-1", link={"kind": "movie", "id": 1, "source": "tmdb"}),
+              _p("jellyfin", "cc", "movie", 25, key="jf-9", link={"kind": "movie", "id": 99, "source": "tmdb"}),
+              _p("jellyfin", "aa01", "episode", 30, key="jf-e1", season=1, episode=1,
+                 link={"kind": "show", "id": sid, "source": "library", "season": 1, "episode": 1}),
+              _p("jellyfin", "bb", "episode", 30, key="jf-e2", season=1, episode=2,
+                 link={"kind": "show", "id": 10, "source": "tmdb", "season": 1, "episode": 2}),
+              _p("jellyfin", "bb", "episode", 30, key="jf-e9", season=1, episode=9,      # not owned
+                 link={"kind": "show", "id": sid, "source": "library", "season": 1, "episode": 9})])
+    assert _facts(db, "movie")[mid]["watch"]["watched"] == 2
+    # jellyfin user ids are one person with or without dashes
+    assert _facts(db, "show")[sid]["watch"]["people"] == pytest.approx(0.5)
+
+
+def test_a_jellyfin_library_reads_its_own_ids_and_plex_through_links(db, play_log):
+    # moved to jellyfin, plex still has viewers
+    mid = db.upsert_movie("jellyfin", {"server_id": "jf-1", "title": "Moved", "year": 2015, "tmdb_id": 1})
+    _sql(db, "UPDATE movies SET has_file=1, added_at=? WHERE id=?", (_ago(1000), mid))
+    play_log([_p("jellyfin", "aa", "movie", 20, key="jf-1"),
+              _p("plex", 9, "movie", 30, key="p-1", link={"kind": "movie", "id": 1, "source": "tmdb"}),
+              _p("plex", 8, "movie", 30, key="p-1", source="plex_history")],     # no link: can't be placed
+             home="jellyfin")
+    assert _facts(db, "movie")[mid]["watch"]["watched"] == 2
+
+
+def test_an_admin_set_to_their_own_jellyfin_user_is_the_owner(db, play_log, monkeypatch):
+    from core import media_accounts
+    monkeypatch.setattr(media_accounts, "jellyfin_linked_profiles", lambda: [(1, "SSO-ADMIN")])
+    mid = _movie(db, "Mine", tmdb=1, plays=1, last=_ago(10), imdb=7.0)
+    play_log([_p("plex", 1, "movie", 10, key="m-Mine"),
+              _p("jellyfin", "ssoadmin", "movie", 4, key="jf-1", link={"kind": "movie", "id": mid, "source": "library"})])
+    assert _facts(db, "movie")[mid]["watch"]["watched"] == 1         # one person, not two
+    monkeypatch.setattr(db, "shelf_life_requests", lambda: {("movie", 1): {"profile_id": 1, "available_at": _ago(200)}})
+    assert _facts(db, "movie")[mid]["request"]["requester_watched"] is True
+
+
+def test_the_video_jellyfin_user_is_the_owner(db, play_log):
+    mid = _movie(db, "Mine", tmdb=1, plays=1, last=_ago(10), imdb=7.0)
+    db.set_setting("video_jellyfin_user", "OWNER-JF")
+    play_log([_p("jellyfin", "ownerjf", "movie", 4, key="jf-1", link={"kind": "movie", "id": mid, "source": "library"})])
+    assert _facts(db, "movie")[mid]["watch"]["watched"] == 1
+
+
+def test_a_requester_watching_on_jellyfin_counts_as_having_watched(db, play_log, monkeypatch):
+    from core import media_accounts
+    monkeypatch.setattr(media_accounts, "jellyfin_linked_profiles", lambda: [(4, "ZZ")])
+    monkeypatch.setattr(media_accounts, "profile_names", lambda: ({1: "Owner", 4: "Z"}, "Owner"))
+    mid = _movie(db, "Asked", tmdb=1, imdb=7.0)
+    monkeypatch.setattr(db, "shelf_life_requests", lambda: {("movie", 1): {"profile_id": 4, "available_at": _ago(200)}})
+    play_log([_p("jellyfin", "zz", "movie", 100, key="jf-1", link={"kind": "movie", "id": mid, "source": "library"})])
+    assert _facts(db, "movie")[mid]["request"]["requester_watched"] is True
+    play_log([_p("plex", 7, "movie", 100, key="m-Asked")])
+    assert _facts(db, "movie")[mid]["request"]["requester_watched"] is False
+    monkeypatch.setattr(media_accounts, "jellyfin_linked_profiles", lambda: [])
+    assert _facts(db, "movie")[mid]["request"]["requester_watched"] is None
+
+
+def test_an_empty_log_reads_as_nothing(db, play_log):
+    play_log([])
+    assert _REAL_PLAY_LOG(db) is None
+
+
+def test_a_log_that_cant_be_read_stops_the_run_and_changes_nothing(db, worker, play_log, monkeypatch):
+    from core.server_activity import store
+    _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    before = [f["id"] for f in _pending(db)]
+    assert before
+
+    def broken(*a, **k):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(store, "query", broken)
+    with pytest.raises(RuntimeError, match="locked"):
+        job_module.gather(db, dict(job_module.ShelfLifeJob.default_settings))
+    _run(worker)
+    assert [f["id"] for f in _pending(db)] == before
+
+
+def test_a_title_playing_now_is_held_and_never_flagged(db, worker, monkeypatch):
+    from core.video.repair import shelf_life as job
+    mid = _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    monkeypatch.setattr(job, "_playing_now", lambda db: {("movie", mid)})
+    _run(worker)
+    assert _stored(db, "movie", [mid])[mid]["gate"] == "playing"
+    assert _pending(db) == []
+
+
+def test_playing_now_reads_every_session_linked_to_the_library(db, monkeypatch):
+    from core import server_activity
+    mid = _movie(db, "Elsewhere", tmdb=77)
+    up = [{"server": "plex", "reachable": True}, {"server": "jellyfin", "reachable": True}]
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": True, "servers": up, "sessions": [
+        {"link": {"kind": "movie", "id": 3, "source": "library"}},
+        {"link": {"kind": "show", "id": 9, "source": "library", "season": 1, "episode": 2}},
+        {"link": {"kind": "movie", "id": 77, "source": "tmdb"}},       # on the other server, owned
+        {"link": {"kind": "movie", "id": 550, "source": "tmdb"}},      # not ours
+        {"link": None}]})
+    assert _REAL_PLAYING_NOW(db) == {("movie", 3), ("show", 9), ("movie", mid)}
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": False, "reason": "no_server"})
+    assert _REAL_PLAYING_NOW(db) == set()
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": False, "reason": "unreachable"})
+    assert _REAL_PLAYING_NOW(db) is None
+
+
+def test_playing_now_cant_say_while_any_server_cant_be_asked(db, monkeypatch):
+    # plex answered with nothing playing, jellyfin didn't answer: not "nothing playing"
+    from core import server_activity
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": True, "sessions": [], "servers": [
+        {"server": "plex", "reachable": True}, {"server": "jellyfin", "reachable": False}]})
+    assert _REAL_PLAYING_NOW(db) is None
+
+
+@pytest.mark.parametrize("playing,error", [
+    (lambda mid: {("movie", mid)}, "Someone is playing it right now"),
+    (lambda mid: None, "Couldn't ask the server"),
+])
+def test_fix_asks_the_server_again_right_before_deleting(db, worker, monkeypatch, playing, error):
+    from core.video import delete_title
+    from core.video.repair import shelf_life as job
+    calls = []
+    monkeypatch.setattr(delete_title, "run", lambda *a, **k: calls.append((a, k)) or {"success": True})
+    mid = _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    # someone starts it after the scan
+    monkeypatch.setattr(job, "_playing_now", lambda db: playing(mid))
+    res = worker.fix_finding(fid, fix_action="Dead")
+    assert res["success"] is False and error in res["error"]
+    assert calls == []
+    assert db.repair_get_finding(fid)["status"] == "pending"
