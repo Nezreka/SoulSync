@@ -1692,15 +1692,16 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     color: var(--text-3);
 }
 #dashboard-page.dash-room .wd-body {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 16px 28px;
-    align-items: end;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     padding: 0;
 }
 #dashboard-page.dash-room .wd-lead {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 6px 14px;
     min-width: 0;
 }
 #dashboard-page.dash-room .wd-lead .wd-num {
@@ -1711,7 +1712,8 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     color: var(--text-1);
 }
 #dashboard-page.dash-room .wd-lead .wd-label {
-    margin-top: 4px;
+    margin-top: 0;
+    padding-bottom: 4px;
     font-size: 13px;
     letter-spacing: 0;
     text-transform: none;
@@ -1722,11 +1724,9 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
 #dashboard-page.dash-room .wd-chart {
     display: flex;
     align-items: flex-end;
-    justify-self: end;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
-    max-width: 440px;
-    height: 76px;
+    height: 150px;
     margin: 0;
     padding: 0;
     border: 0;
@@ -1737,14 +1737,65 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     flex-direction: column;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 5px;
+    min-width: 0;
     height: 100%;
 }
-#dashboard-page.dash-room .wd-bar {
+/* what the bar is worth, over it */
+#dashboard-page.dash-room .wd-val {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-3);
+    white-space: nowrap;
+}
+/* the room a bar grows in: the top of it is kept for the cover a bar wears */
+#dashboard-page.dash-room .wd-stick {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
     width: 100%;
-    max-width: 44px;
-    min-height: 4px;
+    min-height: 0;
+    padding-top: 16px;
+}
+/* the album played most that day, on top of its bar */
+#dashboard-page.dash-room .wd-bar-cover {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    width: 28px;
+    height: 28px;
+    margin-left: -14px;
     border-radius: 7px;
+    outline: 2px solid var(--bg-primary);
+    object-fit: cover;
+    box-shadow: 0 8px 18px var(--black-a45);
+}
+#dashboard-page.dash-room .wd-bar-cover--none {
+    display: none;
+}
+#dashboard-page.dash-room .wd-bar-col--best .wd-val,
+#dashboard-page.dash-room .wd-bar-col--today .wd-day {
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .wd-bar-col--today .wd-day {
+    font-weight: 700;
+}
+/* a bar that wears a cover is tall enough to carry it clear of the day */
+#dashboard-page.dash-room .wd-bar:has(.wd-bar-cover) {
+    min-height: 16px;
+}
+/* a day with nothing played is a mark on the floor, not a missing bar */
+#dashboard-page.dash-room .wd-bar-col--none .wd-bar {
+    background: var(--white-a16);
+    animation: none;
+}
+#dashboard-page.dash-room .wd-bar {
+    position: relative;
+    width: 100%;
+    max-width: 46px;
+    min-height: 3px;
+    border-radius: 9px 9px 4px 4px;
     background: linear-gradient(rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
     transform-origin: bottom;
     animation: room-grow 0.9s var(--ease-decelerate) 0.3s both;
@@ -1756,6 +1807,76 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     font-size: 10px;
     font-family: var(--font-mono);
     color: var(--text-3);
+}
+/* this week against the last one */
+#dashboard-page.dash-room .wd-trend {
+    margin-left: auto;
+    margin-bottom: 3px;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .wd-trend--up {
+    background: rgba(var(--success-rgb), 0.14);
+    color: var(--success);
+}
+/* on repeat: the albums the week was made of */
+#dashboard-page.dash-room .wd-repeat {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+#dashboard-page.dash-room .wd-repeat-title {
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .wd-repeat-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 12px;
+    padding: 6px 0;
+}
+#dashboard-page.dash-room .wd-repeat-row + .wd-repeat-row {
+    border-top: 1px solid var(--white-a06);
+}
+#dashboard-page.dash-room .wd-repeat-art {
+    width: 38px;
+    height: 38px;
+    border-radius: 7px;
+    object-fit: cover;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .wd-repeat-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .wd-repeat-text > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .wd-repeat-text b {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+#dashboard-page.dash-room .wd-repeat-plays {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-2);
+    white-space: nowrap;
 }
 #dashboard-page.dash-room .wd-chips {
     display: flex;
@@ -1914,7 +2035,173 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     transform: rotate(calc((var(--n) - 2) * 9deg)) translateY(-3px);
 }
 
+/* ── the two counts, what each is made of ── */
+#dashboard-page.dash-room .dash-tile-lead {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-tile-from {
+    font-size: 12px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-tile-facts {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    gap: 6px;
+    min-width: 0;
+    margin-top: 12px;
+}
+#dashboard-page.dash-room .dash-tile-fact {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-tile-fact b {
+    color: var(--text-1);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+#dashboard-page.dash-room .dash-tile-newest {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    gap: 10px;
+    min-width: 0;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--white-a06);
+    font-size: 12px;
+    color: var(--text-3);
+}
+#dashboard-page.dash-room .dash-tile-newest img {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    object-fit: cover;
+}
+#dashboard-page.dash-room .dash-tile-newest > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-tile-newest b {
+    color: var(--text-1);
+    font-weight: 600;
+}
+/* the music board's two counts are always one over the other: each has a
+   number, what it is made of and its newest thing, which is a row's worth.
+   with room (the card is the container) the parts sit beside the number */
+#dashboard-page.dash-room .room-board > .header-quick-nav {
+    flex-direction: column;
+}
+#dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile + .dash-tile {
+    border-left: 0;
+    border-top: 1px solid var(--white-a08);
+}
+@container (min-width: 440px) {
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+        align-content: center;
+        align-items: center;
+        column-gap: 20px;
+    }
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile-facts {
+        align-self: center;
+        margin-top: 0;
+    }
+    #dashboard-page.dash-room .room-board > .header-quick-nav .dash-tile-newest {
+        grid-column: 1 / -1;
+    }
+}
+
 /* ── playlist sync ── */
+#dashboard-page.dash-room .dash-sync-say {
+    flex: 1;
+    min-width: 0;
+}
+/* the playlists themselves: how many are whole, how many are short */
+#dashboard-page.dash-room .dash-sync-mix {
+    display: flex;
+    gap: 2px;
+    height: 6px;
+    margin-top: 9px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .dash-sync-mix i {
+    display: block;
+    flex-basis: 0;
+    height: 100%;
+}
+#dashboard-page.dash-room .dash-sync-mix-whole {
+    background: var(--success);
+}
+#dashboard-page.dash-room .dash-sync-mix-short {
+    background: var(--warning);
+}
+#dashboard-page.dash-room .dash-sync-mixkey {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 6px 0 0;
+    font-size: 12px;
+    font-weight: 600;
+}
+#dashboard-page.dash-room .dash-sync-mixkey span::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 6px;
+    border-radius: var(--radius-circle);
+    background: currentColor;
+}
+#dashboard-page.dash-room .dash-sync-mixkey-whole {
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-sync-mixkey-short {
+    color: var(--warning);
+}
+/* how much of one playlist is in the library */
+#dashboard-page.dash-room .dash-sync-cover {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5px;
+}
+#dashboard-page.dash-room .dash-sync-cover i {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--white-a08);
+}
+#dashboard-page.dash-room .dash-sync-cover u {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: rgba(var(--accent-rgb), 0.8);
+}
+#dashboard-page.dash-room .dash-sync-cover em {
+    flex: none;
+    font-size: 11.5px;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+    white-space: nowrap;
+}
 #dashboard-page.dash-room .dash-sync-health {
     display: flex;
     flex-direction: row;
@@ -2535,10 +2822,11 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     #dashboard-page.dash-room .room-board > .weekly-digest .wd-chips {
         margin-top: 0;
     }
-    /* the two counts one over the other, each a row: pictures left, number right */
+    /* the two counts one over the other */
     #dashboard-page.dash-room .room-board > .dash-tiles {
         flex-direction: column;
     }
+
     #dashboard-page.dash-room .room-board > .dash-tiles .dash-tile + .dash-tile {
         border-left: 0;
         border-top: 1px solid var(--white-a08);

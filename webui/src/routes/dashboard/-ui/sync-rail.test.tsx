@@ -37,7 +37,10 @@ const ROWS = [
 
 describe('syncHealth', () => {
   it('adds up every playlist with a known total', () => {
-    expect(syncHealth(ROWS)).toEqual({ inLibrary: 336, total: 350, pct: 96, short: 4 });
+    const health = syncHealth(ROWS)!;
+    expect(health).toMatchObject({ inLibrary: 336, total: 350, pct: 96, short: 4 });
+    // every playlist with a total is either whole or short
+    expect(health.complete + health.short).toBe(ROWS.filter((r) => r.coverage).length);
   });
 
   it('rounds DOWN, it never claims more of your playlists than you own', () => {
@@ -65,6 +68,14 @@ describe('railRows', () => {
       row('Also Done', { inLibrary: 9, total: 9, pct: 100 }),
     ];
     expect(railRows(oneShort, false).map((r) => r.name)).toEqual(['Hot Hits']);
+  });
+
+  it('the board asks for five', () => {
+    const many = Array.from({ length: 8 }, (_, n) =>
+      row(`P${n}`, { inLibrary: n, total: 20, pct: n * 5 }),
+    );
+    expect(railRows(many, false, 'missing', () => false, 5)).toHaveLength(5);
+    expect(railRows(many, false)).toHaveLength(3);
   });
 
   it('See all shows every playlist, most missing first', () => {
@@ -283,6 +294,16 @@ describe('the card with playlists', () => {
       row.querySelector('.dash-sync-sub')?.textContent,
     ]);
     expect(subs).toEqual([['Alpha Mix', '6 missing']]);
+  });
+
+  it('splits the playlists into whole and short, and shows how much of a row is owned', async () => {
+    const view = await mount();
+    expect(view.container.querySelector('.dash-sync-mixkey')!.textContent).toBe(
+      '1 complete1 missing tracks',
+    );
+    const cover = view.container.querySelector<HTMLElement>('.dash-sync-row .dash-sync-cover')!;
+    expect(cover.querySelector('em')!.textContent).toMatch(/^\d+ of \d+$/);
+    expect(cover.querySelector<HTMLElement>('u')!.style.width).toMatch(/^\d+%$/);
   });
 });
 

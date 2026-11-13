@@ -22,6 +22,96 @@ export interface TilePicture {
 type Kind = 'faces' | 'sleeves';
 
 const pictures: Record<Kind, TilePicture[]> = { faces: [], sleeves: [] };
+
+/** What each count is made of, and the newest thing in it. */
+export interface TileFacts {
+  watchlist: {
+    /** watched artists with a release in the last 30 days */
+    releasedMonth: number;
+    /** releases found for them in the last 30 days */
+    releasesMonth: number;
+    /** artists added to the watchlist in the last 7 days */
+    addedWeek: number;
+    newest: { album: string; artist: string; date: string; image_url: string | null } | null;
+  };
+  wishlist: {
+    albums: number;
+    artists: number;
+    kinds: { album: number; single: number; ep: number };
+    newest: { name: string; artist: string; image_url: string | null } | null;
+  };
+}
+
+const NO_FACTS: TileFacts = {
+  watchlist: { releasedMonth: 0, releasesMonth: 0, addedWeek: 0, newest: null },
+  wishlist: { albums: 0, artists: 0, kinds: { album: 0, single: 0, ep: 0 }, newest: null },
+};
+let facts: TileFacts = NO_FACTS;
+
+const count = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
+const text = (value: unknown): string => (typeof value === 'string' ? value : '');
+const picture = (value: unknown): string | null =>
+  typeof value === 'string' && /^(https?:\/\/|\/api\/)/.test(value) ? value : null;
+
+/** The server's facts, read defensively: anything missing is a zero. */
+export function readTileFacts(value: unknown): TileFacts {
+  const raw = (value ?? {}) as {
+    watchlist?: Record<string, unknown>;
+    wishlist?: Record<string, unknown>;
+  };
+  const watch = raw.watchlist ?? {};
+  const wish = raw.wishlist ?? {};
+  const kinds = (wish.kinds ?? {}) as Record<string, unknown>;
+  const newestWatch = watch.newest as Record<string, unknown> | null | undefined;
+  const newestWish = wish.newest as Record<string, unknown> | null | undefined;
+  return {
+    watchlist: {
+      releasedMonth: count(watch.released_month),
+      releasesMonth: count(watch.releases_month),
+      addedWeek: count(watch.added_week),
+      newest:
+        newestWatch && text(newestWatch.album)
+          ? {
+              album: text(newestWatch.album),
+              artist: text(newestWatch.artist),
+              date: text(newestWatch.date),
+              image_url: picture(newestWatch.image_url),
+            }
+          : null,
+    },
+    wishlist: {
+      albums: count(wish.albums),
+      artists: count(wish.artists),
+      kinds: { album: count(kinds.album), single: count(kinds.single), ep: count(kinds.ep) },
+      newest:
+        newestWish && text(newestWish.name)
+          ? {
+              name: text(newestWish.name),
+              artist: text(newestWish.artist),
+              image_url: picture(newestWish.image_url),
+            }
+          : null,
+    },
+  };
+}
+
+export function publishTileFacts(value: unknown): void {
+  const next = readTileFacts(value);
+  if (JSON.stringify(next) === JSON.stringify(facts)) return;
+  facts = next;
+  emit();
+}
+
+export function useTileFacts(): TileFacts {
+  return useSyncExternalStore(
+    subscribe,
+    () => facts,
+    () => facts,
+  );
+}
 let heroArt: string | null = null;
 const listeners = new Set<() => void>();
 
@@ -66,9 +156,14 @@ export async function loadTilePictures(): Promise<void> {
   try {
     const response = await fetch('/api/dashboard/tile-pictures');
     if (!response.ok) return;
-    const data = (await response.json()) as { faces?: unknown; sleeves?: unknown };
+    const data = (await response.json()) as {
+      faces?: unknown;
+      sleeves?: unknown;
+      facts?: unknown;
+    };
     publishTilePictures('faces', data.faces);
     publishTilePictures('sleeves', data.sleeves);
+    publishTileFacts(data.facts);
   } catch {
     // the tiles are whole without pictures
   }
@@ -102,5 +197,6 @@ export function resetDashRoom(): void {
   pictures.faces = [];
   pictures.sleeves = [];
   heroArt = null;
+  facts = NO_FACTS;
   emit();
 }

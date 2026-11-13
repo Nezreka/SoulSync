@@ -141,13 +141,19 @@ def get_dashboard_tile_pictures():
     artists' pictures and the sleeves of the newest wishes. Its own request
     because the counts mostly arrive over the socket. Read-only."""
     try:
-        from core.dashboard_tiles import watched_faces, wished_sleeves
+        from core.dashboard_tiles import (
+            watched_faces, watchlist_facts, wished_sleeves, wishlist_facts)
         database = get_database()
         profile_id = get_current_profile_id()
         return jsonify({
             "success": True,
             "faces": watched_faces(database, profile_id),
             "sleeves": wished_sleeves(database, profile_id),
+            # what each count is made of, and the newest thing in it
+            "facts": {
+                "watchlist": watchlist_facts(database, profile_id),
+                "wishlist": wishlist_facts(database, profile_id),
+            },
         })
     except Exception as e:
         logger.error(f"Error getting dashboard tile pictures: {e}")

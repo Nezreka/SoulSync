@@ -13,6 +13,7 @@ import {
   loadTilePictures,
   publishHeroArt,
   publishTilePictures,
+  readTileFacts,
   readTilePictures,
   resetDashRoom,
   useHeroArt,
@@ -22,6 +23,38 @@ import {
 afterEach(() => {
   act(() => resetDashRoom());
   vi.unstubAllGlobals();
+});
+
+describe('readTileFacts', () => {
+  it('reads what each count is made of, and zeroes whatever is missing', () => {
+    const facts = readTileFacts({
+      watchlist: {
+        released_month: 9,
+        releases_month: '14',
+        added_week: -2,
+        newest: {
+          album: 'Currents',
+          artist: 'Tame Impala',
+          date: '2026-11-09',
+          image_url: 'ftp://x',
+        },
+      },
+      wishlist: { albums: 6, kinds: { album: 7, single: 3 }, newest: { name: '' } },
+    });
+    expect(facts.watchlist).toEqual({
+      releasedMonth: 9,
+      releasesMonth: 14,
+      addedWeek: 0,
+      newest: { album: 'Currents', artist: 'Tame Impala', date: '2026-11-09', image_url: null },
+    });
+    expect(facts.wishlist).toEqual({
+      albums: 6,
+      artists: 0,
+      kinds: { album: 7, single: 3, ep: 0 },
+      newest: null,
+    });
+    expect(readTileFacts(undefined).watchlist.newest).toBeNull();
+  });
 });
 
 describe('readTilePictures', () => {

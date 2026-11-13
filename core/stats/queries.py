@@ -854,6 +854,20 @@ def _library_artist_picture(cursor, name) -> Optional[str]:
     return f"/api/library/v2/artwork/artist/{int(row[0])}" if row else None
 
 
+def _library_album_cover(cursor, title) -> Optional[str]:
+    """SoulSync's own artwork route for a library album of that title, or None."""
+    if not title:
+        return None
+    try:
+        cursor.execute(
+            "SELECT id FROM lib2_albums WHERE title = ? COLLATE NOCASE "
+            "AND COALESCE(image_url, '') <> '' ORDER BY id LIMIT 1", (str(title),))
+        row = cursor.fetchone()
+    except Exception:  # noqa: BLE001 - no catalogue yet
+        return None
+    return f"/api/library/v2/artwork/album/{int(row[0])}" if row else None
+
+
 def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     """This-week listening digest for the dashboard banner.
 
@@ -918,12 +932,50 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         discoveries = cursor.fetchone()[0] or 0
 
         cursor.execute(
-            f"""SELECT date(lh.played_at, 'localtime') AS d, COALESCE(SUM({play_duration_sql('lh')}), 0)
+            f"""SELECT date(lh.played_at, 'localtime') AS d, COALESCE(SUM({play_duration_sql('lh')}), 0),
+                       COUNT(*)
                 FROM listening_history lh
                 WHERE {window} AND {scope}
                 GROUP BY d"""
         )
-        day_ms = {row[0]: row[1] for row in cursor.fetchall()}
+        day_rows = cursor.fetchall()
+        day_ms = {row[0]: row[1] for row in day_rows}
+        day_plays = {row[0]: row[2] for row in day_rows}
+
+        # the week before this one, for "more than last week". the same
+        # played_at index, the next seven days back
+        cursor.execute(
+            f"""SELECT COALESCE(SUM({play_duration_sql('lh')}), 0)
+                FROM listening_history lh
+                WHERE lh.played_at >= datetime('now', '-14 days')
+                  AND lh.played_at < datetime('now', '-7 days') AND {scope}"""
+        )
+        previous_ms = cursor.fetchone()[0] or 0
+
+        # the album each day was mostly made of, and the week's three
+        album_present = "+lh.album IS NOT NULL AND TRIM(lh.album) <> ''"
+        cursor.execute(
+            f"""SELECT date(lh.played_at, 'localtime') AS d, lh.album, COUNT(*) AS c
+                FROM listening_history lh
+                WHERE {window} AND {scope} AND {album_present}
+                GROUP BY d, LOWER(lh.album) ORDER BY d ASC, c DESC, lh.album ASC"""
+        )
+        day_album: dict = {}
+        for day_key, album_name, _count in cursor.fetchall():
+            day_album.setdefault(day_key, album_name)
+        cursor.execute(
+            f"""SELECT lh.album, lh.artist, COUNT(*) AS c
+                FROM listening_history lh
+                WHERE {window} AND {scope} AND {album_present}
+                GROUP BY LOWER(lh.album), LOWER(COALESCE(lh.artist, ''))
+                ORDER BY c DESC, lh.album ASC LIMIT 3"""
+        )
+        repeat_rows = cursor.fetchall()
+        covers: dict = {}
+        for title in {*day_album.values(), *(row[0] for row in repeat_rows)}:
+            covers[title] = _library_album_cover(cursor, title)
+        on_repeat = [{'name': row[0], 'artist': row[1], 'play_count': row[2],
+                      'image_url': covers.get(row[0])} for row in repeat_rows]
 
         today = date.today()
         streak = _listening_streak(cursor, scope, today)
@@ -940,6 +992,10 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
             'date': key,
             'day': 'mtwtfss'[day.weekday()],
             'hours': round((day_ms.get(key) or 0) / 3_600_000, 1),
+            'tracks': day_plays.get(key) or 0,
+            # the album played most that day, and its cover when the library has one
+            'album': day_album.get(key),
+            'cover': covers.get(day_album.get(key)) if day_album.get(key) else None,
         })
 
     return {
@@ -953,4 +1009,6 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         'start_date': (today - timedelta(days=6)).isoformat(),
         'end_date': today.isoformat(),
         'daily': daily,
+        'previous_time_ms': previous_ms,
+        'on_repeat': on_repeat,
     }

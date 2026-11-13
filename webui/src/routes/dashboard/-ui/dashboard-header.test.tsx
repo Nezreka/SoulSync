@@ -22,7 +22,12 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDashboardHeader } from '../-dash.header';
-import { publishHeroArt, publishTilePictures, resetDashRoom } from '../-dash.room';
+import {
+  publishHeroArt,
+  publishTileFacts,
+  publishTilePictures,
+  resetDashRoom,
+} from '../-dash.room';
 import { vanillaDashboardHtml } from './dash-artefact';
 import { DashboardHeaderView, QuickNavTiles } from './dashboard-header';
 
@@ -170,6 +175,36 @@ describe('the listening room pieces', () => {
     expect(
       view.container.querySelector('#watchlist-button .room-tile-art')!.getAttribute('aria-hidden'),
     ).toBe('true');
+  });
+
+  it('the watchlist count says what it is made of, and names its newest release', async () => {
+    const view = await mountHeader();
+    expect(view.container.querySelector('#watchlist-button .dash-tile-facts')).toBeNull();
+    act(() =>
+      publishTileFacts({
+        watchlist: {
+          released_month: 9,
+          releases_month: 1,
+          added_week: 0,
+          newest: {
+            album: 'Currents',
+            artist: 'Tame Impala',
+            date: '2026-11-09',
+            image_url: 'https://cdn.example/c.jpg',
+          },
+        },
+      }),
+    );
+    const tile = view.container.querySelector('#watchlist-button')!;
+    // a part that is zero is not a line
+    expect(
+      Array.from(tile.querySelectorAll('.dash-tile-fact')).map((row) => row.textContent),
+    ).toEqual(['9released something this month', '1new release this month']);
+    expect(tile.querySelector('.dash-tile-newest')!.textContent).toBe(
+      'Newest release: Currents by Tame Impala, Nov 9',
+    );
+    // an empty wishlist has nothing to break down
+    expect(view.container.querySelector('#wishlist-button .dash-tile-facts')).toBeNull();
   });
 
   it('a picture that fails to load steps out of the way', async () => {

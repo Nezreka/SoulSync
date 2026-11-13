@@ -133,9 +133,9 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
 
 Under the listen band the dashboard holds four live cards:
 
-- **This week** — hours listened across how many tracks, a bar for each of the last seven days, and your top artist (with their picture), new discoveries and streak. **Full stats** opens the Stats page.
-- **Watchlist and Wishlist** — two tiles that jump straight to **Watchlist** (live watched-artist count, a countdown to the next scan, and the faces of the artists you watched most recently) and **Wishlist** (live queue count and the sleeves of the songs wished for most recently).
-- **Playlist sync** — a ring for the share of playlist tracks in your library, with how many of how many. Sort by **Most missing**, **Last synced**, **Next run** or **Name**. Each row says what the playlist needs and when it syncs next; point at a row (or tap it) for **Listen**, **Sync**, and **Sync and download**. **Manage** opens the sync board.
+- **This week** — hours listened across how many tracks and how that compares with last week, a bar for each of the last seven days with its hours and the album you played most that day, **On repeat** (the three albums played most), and your top artist (with their picture), new discoveries and streak. **Full stats** opens the Stats page.
+- **Watchlist and Wishlist** — two tiles that jump straight to **Watchlist** (live watched-artist count, a countdown to the next scan, and the faces of the artists you watched most recently) and **Wishlist** (live queue count and the sleeves of the songs wished for most recently). Each tile also says what its count is made of: watched artists who released something in the last 30 days and the newest release, and how many wishes are album tracks, singles or from an EP with the newest wish.
+- **Playlist sync** — a ring for the share of playlist tracks in your library, with how many of how many, and a bar splitting your playlists into complete and missing tracks. Each row shows how much of that playlist you own. Sort by **Most missing**, **Last synced**, **Next run** or **Name**. Each row says what the playlist needs and when it syncs next; point at a row (or tap it) for **Listen**, **Sync**, and **Sync and download**. **Manage** opens the sync board.
 - **Up next** — a line of the next hour with a mark per automation due, then the next five with how long until each. Point at a row for pause and **Run**. The **Automations** link opens the full [Automations page](#auto-overview).
 
 The dashboard footer holds quick settings toggles.

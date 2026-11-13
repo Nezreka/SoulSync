@@ -81,3 +81,75 @@ def test_a_failure_is_an_empty_tile_never_an_error():
 
     assert T.watched_faces(Broken(), 1) == []
     assert T.wished_sleeves(Broken(), 1) == []
+
+
+def _typed_wish(name, artist, album, kind, image=None):
+    data = {"name": name, "artists": [{"name": artist}],
+            "album": {"name": album, "album_type": kind,
+                      "images": [{"url": image}] if image else []}}
+    return {"spotify_data": data}
+
+
+def test_wishlist_facts_say_what_the_count_is_made_of():
+    db = _DB(tracks=[
+        _typed_wish("a1", "Tame Impala", "Currents", "album"),
+        _typed_wish("a2", "Tame Impala", "Currents", "album"),
+        _typed_wish("c1", "Various", "Hits", "compilation"),
+        _typed_wish("s1", "Caribou", "Odessa", "single"),
+        _typed_wish("e1", "Caribou", "Swim EP", "ep"),
+        {"spotify_data": "not a dict"},
+        _typed_wish("newest", "Four Tet", "Rounds", None, "https://cdn.example/r.jpg"),
+    ])
+    facts = T.wishlist_facts(db, 2)
+    assert db.asked == [("wish", 2)]
+    assert facts["kinds"] == {"album": 3, "single": 2, "ep": 1}
+    assert facts["albums"] == 5 and facts["artists"] == 4
+    assert facts["newest"] == {"name": "newest", "artist": "Four Tet",
+                               "image_url": "https://cdn.example/r.jpg"}
+
+
+def test_facts_are_zeroes_when_the_data_cannot_be_read():
+    class Broken:
+        def get_wishlist_tracks(self, **_):
+            raise RuntimeError("no table")
+
+        def _get_connection(self):
+            raise RuntimeError("no db")
+
+    assert T.wishlist_facts(Broken(), 1) == {
+        "albums": 0, "artists": 0, "kinds": {"album": 0, "single": 0, "ep": 0}, "newest": None}
+    assert T.watchlist_facts(Broken(), 1) == {
+        "released_month": 0, "releases_month": 0, "added_week": 0, "newest": None}
+
+
+def test_watchlist_facts_count_this_months_releases_and_this_weeks_adds(tmp_path):
+    from datetime import date, timedelta
+
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    day = lambda back: (date.today() - timedelta(days=back)).isoformat()  # noqa: E731
+    with db._get_connection() as conn:
+        ids = {}
+        for name, added in (("Fresh", 2), ("Old", 90), ("Quiet", 90)):
+            ids[name] = conn.execute(
+                "INSERT INTO watchlist_artists(spotify_artist_id, artist_name, date_added, profile_id) "
+                "VALUES(?,?,datetime('now', ?),1)", (f"sp-{name}", name, f"-{added} days")).lastrowid
+        rows = [(ids["Fresh"], "a1", "New One", day(3), "https://cdn.example/n.jpg"),
+                (ids["Fresh"], "a2", "Also New", day(10), None),
+                (ids["Old"], "a3", "Recent", day(20), None),
+                (ids["Old"], "a4", "Last Year", day(300), None),
+                (ids["Old"], "a5", "Announced", day(-40), None)]
+        for artist_id, album_id, title, released, cover in rows:
+            conn.execute(
+                "INSERT INTO recent_releases(watchlist_artist_id, album_spotify_id, album_name, "
+                "release_date, album_cover_url) VALUES(?,?,?,?,?)",
+                (artist_id, album_id, title, released, cover))
+        conn.commit()
+    facts = T.watchlist_facts(db, 1)
+    assert facts["released_month"] == 2
+    assert facts["releases_month"] == 3
+    assert facts["added_week"] == 1
+    # an announced album is not the newest release: it is not out
+    assert facts["newest"] == {"album": "New One", "artist": "Fresh", "date": day(3),
+                               "image_url": "https://cdn.example/n.jpg"}
+    assert T.watchlist_facts(db, 7)["releases_month"] == 0

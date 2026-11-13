@@ -746,6 +746,8 @@ export function syncHealth(rows: SyncBandRow[]): {
   total: number;
   pct: number;
   short: number;
+  /** playlists with every track in the library */
+  complete: number;
 } | null {
   const known = rows.filter((r) => r.coverage && r.coverage.total > 0);
   if (!known.length) return null;
@@ -756,8 +758,12 @@ export function syncHealth(rows: SyncBandRow[]): {
     total,
     pct: Math.floor((inLibrary / total) * 100),
     short: known.filter((r) => missingOf(r) > 0).length,
+    complete: known.filter((r) => missingOf(r) === 0).length,
   };
 }
+
+/** how many playlists the board's rail lists before See all */
+export const RAIL_ROWS = 5;
 
 export type RailSort = 'missing' | 'recent' | 'next' | 'name';
 
@@ -808,6 +814,8 @@ export function railRows(
   showAll: boolean,
   sort: RailSort = 'missing',
   isLive: (row: SyncBandRow) => boolean = () => false,
+  /** how many the collapsed rail lists */
+  limit = 3,
 ): SyncBandRow[] {
   const ranked = [...rows];
   if (sort === 'missing') ranked.sort((a, b) => missingOf(b) - missingOf(a));
@@ -818,7 +826,7 @@ export function railRows(
   if (showAll) return [...live, ...rest];
   const fill = (sort === 'missing' ? rest.filter((r) => missingOf(r) > 0) : rest).slice(
     0,
-    Math.max(0, 3 - live.length),
+    Math.max(0, limit - live.length),
   );
   return [...live, ...fill];
 }
@@ -869,8 +877,12 @@ export function SyncRail() {
   const [sort, setSort] = useRailSort();
   const loaded = seamPhase !== 'loading' || entries !== null;
   const health = syncHealth(rows);
-  const shown = railRows(rows, showAll, sort, (row) =>
-    Boolean(row.schedule?.running ?? liveForRow(row)),
+  const shown = railRows(
+    rows,
+    showAll,
+    sort,
+    (row) => Boolean(row.schedule?.running ?? liveForRow(row)),
+    RAIL_ROWS,
   );
   const rest = rows.length - shown.length;
 
@@ -904,13 +916,26 @@ export function SyncRail() {
               >
                 <span className="dash-sync-pct">{health.pct}%</span>
               </div>
-              <p className="dash-sync-of">
-                <b>
-                  {health.inLibrary.toLocaleString()} of {health.total.toLocaleString()}
-                </b>
-                playlist tracks are in your library, across {rows.length} playlist
-                {rows.length === 1 ? '' : 's'}
-              </p>
+              <div className="dash-sync-say">
+                <p className="dash-sync-of">
+                  <b>
+                    {health.inLibrary.toLocaleString()} of {health.total.toLocaleString()}
+                  </b>
+                  playlist tracks are in your library, across {rows.length} playlist
+                  {rows.length === 1 ? '' : 's'}
+                </p>
+                {/* how the playlists themselves stand: whole, or short of tracks */}
+                <div className="dash-sync-mix" aria-hidden="true">
+                  <i className="dash-sync-mix-whole" style={{ flexGrow: health.complete }} />
+                  <i className="dash-sync-mix-short" style={{ flexGrow: health.short }} />
+                </div>
+                <p className="dash-sync-mixkey">
+                  <span className="dash-sync-mixkey-whole">{health.complete} complete</span>
+                  {health.short > 0 ? (
+                    <span className="dash-sync-mixkey-short">{health.short} missing tracks</span>
+                  ) : null}
+                </p>
+              </div>
             </div>
           ) : null}
           <div className="dash-sync-sortbar" role="group" aria-label="Sort playlists">
@@ -979,6 +1004,25 @@ export function SyncRail() {
                         </span>
                       ) : null}
                     </span>
+                    {/* how much of this playlist is in the library */}
+                    {row.coverage && row.coverage.total > 0 ? (
+                      <span
+                        className="dash-sync-cover"
+                        title={`${row.coverage.inLibrary.toLocaleString()} of ${row.coverage.total.toLocaleString()} in your library`}
+                      >
+                        <i>
+                          <u
+                            style={{
+                              width: `${Math.min(100, Math.round((row.coverage.inLibrary / row.coverage.total) * 100))}%`,
+                            }}
+                          />
+                        </i>
+                        <em>
+                          {row.coverage.inLibrary.toLocaleString()} of{' '}
+                          {row.coverage.total.toLocaleString()}
+                        </em>
+                      </span>
+                    ) : null}
                   </span>
                   <span className="dash-sync-actions" onClick={(e) => e.stopPropagation()}>
                     {row.last?.id !== undefined ? (

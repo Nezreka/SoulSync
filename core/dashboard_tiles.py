@@ -75,4 +75,88 @@ def wished_sleeves(database, profile_id: int, limit: int = LIMIT) -> List[Dict[s
         return []
 
 
-__all__ = ["LIMIT", "watched_faces", "wished_sleeves"]
+def watchlist_facts(database, profile_id: int) -> Dict[str, Any]:
+    """What the watched count is made of: who released something in the last
+    30 days and how much, who was added this week, and the newest release."""
+    facts: Dict[str, Any] = {"released_month": 0, "releases_month": 0,
+                             "added_week": 0, "newest": None}
+    try:
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            # a release dated in the future (an announced album) is not out yet
+            out = "rr.release_date <= date('now', '+1 day')"
+            cursor.execute(
+                f"""SELECT COUNT(DISTINCT rr.watchlist_artist_id), COUNT(*)
+                      FROM recent_releases rr
+                      JOIN watchlist_artists wa ON wa.id = rr.watchlist_artist_id
+                     WHERE wa.profile_id = ? AND {out}
+                       AND rr.release_date >= date('now', '-30 days')""", (profile_id,))
+            row = cursor.fetchone()
+            facts["released_month"], facts["releases_month"] = int(row[0] or 0), int(row[1] or 0)
+            cursor.execute(
+                "SELECT COUNT(*) FROM watchlist_artists WHERE profile_id = ? "
+                "AND date_added >= datetime('now', '-7 days')", (profile_id,))
+            facts["added_week"] = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                f"""SELECT rr.album_name, wa.artist_name, rr.release_date, rr.album_cover_url
+                      FROM recent_releases rr
+                      JOIN watchlist_artists wa ON wa.id = rr.watchlist_artist_id
+                     WHERE wa.profile_id = ? AND {out}
+                     ORDER BY rr.release_date DESC, rr.added_date DESC LIMIT 1""", (profile_id,))
+            newest = cursor.fetchone()
+            if newest and newest[0]:
+                facts["newest"] = {
+                    "album": str(newest[0]), "artist": str(newest[1] or ""),
+                    "date": str(newest[2] or "")[:10], "image_url": _loadable(newest[3]) or None}
+    except Exception as exc:  # noqa: BLE001 - the count stands without its parts
+        logger.debug("watchlist facts unavailable: %s", exc)
+    return facts
+
+
+def _first_artist(data: Dict[str, Any]) -> str:
+    artists = data.get("artists") or []
+    first = artists[0] if artists else None
+    if isinstance(first, dict):
+        return str(first.get("name") or "")
+    return str(first or "")
+
+
+def wishlist_facts(database, profile_id: int) -> Dict[str, Any]:
+    """What the wished count is made of: how many releases and artists the
+    tracks come from, how many are album tracks, singles or from an EP, and
+    the newest wish."""
+    facts: Dict[str, Any] = {"albums": 0, "artists": 0,
+                             "kinds": {"album": 0, "single": 0, "ep": 0}, "newest": None}
+    try:
+        tracks = database.get_wishlist_tracks(profile_id=profile_id) or []
+        albums, artists = set(), set()
+        for track in tracks:
+            data = track.get("spotify_data") if isinstance(track, dict) else None
+            if not isinstance(data, dict):
+                continue
+            album = data.get("album") if isinstance(data.get("album"), dict) else {}
+            kind = str(album.get("album_type") or "").strip().lower()
+            # a compilation track is an album track; anything unnamed is a single,
+            # the way the wishlist page files it
+            kind = "album" if kind in ("album", "compilation") else "ep" if kind == "ep" else "single"
+            facts["kinds"][kind] += 1
+            artist = _first_artist(data)
+            key = str(album.get("id") or album.get("name") or "").strip().casefold()
+            if key:
+                albums.add((key, artist.casefold()))
+            if artist:
+                artists.add(artist.casefold())
+        facts["albums"], facts["artists"] = len(albums), len(artists)
+        # the wishlist reads oldest first: the last one is the newest
+        for track in reversed(tracks):
+            data = track.get("spotify_data") if isinstance(track, dict) else None
+            if isinstance(data, dict) and data.get("name"):
+                facts["newest"] = {"name": str(data["name"]), "artist": _first_artist(data),
+                                   "image_url": _sleeve(track) or None}
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("wishlist facts unavailable: %s", exc)
+    return facts
+
+
+__all__ = ["LIMIT", "watched_faces", "watchlist_facts", "wished_sleeves", "wishlist_facts"]

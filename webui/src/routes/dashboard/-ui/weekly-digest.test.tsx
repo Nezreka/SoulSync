@@ -1,7 +1,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WeeklyDigest } from './weekly-digest';
+import { WeeklyDigest, weekTrend } from './weekly-digest';
 
 const DIGEST = {
   success: true,
@@ -64,6 +64,80 @@ describe('the week on the board', () => {
     const { container } = render(<WeeklyDigest />);
     await waitFor(() => expect(banner()).toBeTruthy());
     expect(container.querySelector('.wd-chip--artist img')).toBeNull();
+  });
+});
+
+describe('the week, day by day', () => {
+  const RICH = {
+    ...DIGEST,
+    previous_time_ms: DIGEST.time_ms - 2 * 3600000,
+    daily: DIGEST.daily.map((day, n) => ({
+      ...day,
+      hours: n === 2 ? 0 : day.hours,
+      tracks: n === 2 ? 0 : 10 + n,
+      album: n === 0 ? 'Currents' : null,
+      cover: n === 0 ? '/api/library/v2/artwork/album/3' : null,
+    })),
+    on_repeat: [
+      { name: 'Currents', artist: 'Tame Impala', play_count: 31, image_url: '/api/art/1' },
+      { name: 'Lonerism', artist: 'Tame Impala', play_count: 1, image_url: null },
+    ],
+  };
+
+  it('each bar says what it is worth, and the busiest and today stand out', async () => {
+    serve(RICH);
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    const cols = Array.from(container.querySelectorAll<HTMLElement>('.wd-bar-col'));
+    expect(cols.map((col) => col.querySelector('.wd-val')!.textContent)).toEqual([
+      '4.2h',
+      '6.1h',
+      '0',
+      '7.8h',
+      '5.5h',
+      '8.9h',
+      '2.5h',
+    ]);
+    expect(cols[5].className).toContain('wd-bar-col--best');
+    expect(cols[6].className).toContain('wd-bar-col--today');
+    expect(cols[2].className).toContain('wd-bar-col--none');
+    expect(cols[2].title).toBe('Nothing played');
+    expect(cols[0].title).toBe('4h 12m, 10 plays, mostly Currents');
+    expect(cols[0].querySelector('img.wd-bar-cover')!.getAttribute('src')).toBe(
+      '/api/library/v2/artwork/album/3',
+    );
+    expect(cols[1].querySelector('.wd-bar-cover')).toBeNull();
+  });
+
+  it('compares the week with the one before, and lists what was on repeat', async () => {
+    serve(RICH);
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    expect(container.querySelector('.wd-trend')!.textContent).toBe('2h 0m more than last week');
+    const rows = Array.from(container.querySelectorAll('.wd-repeat-row'));
+    expect(rows.map((row) => row.querySelector('.wd-repeat-plays')!.textContent)).toEqual([
+      '31 plays',
+      '1 play',
+    ]);
+    expect(rows[0].querySelector('b')!.textContent).toBe('Currents');
+  });
+
+  it('says nothing about last week or repeats when the server sends neither', async () => {
+    serve(DIGEST);
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    expect(container.querySelector('.wd-trend')).toBeNull();
+    expect(container.querySelector('.wd-repeat')).toBeNull();
+  });
+
+  it('puts the comparison into words', () => {
+    expect(weekTrend(3600000, undefined)).toBeNull();
+    expect(weekTrend(3600000, 0)).toBeNull();
+    expect(weekTrend(3600000, 3600000 + 60000)?.tone).toBe('same');
+    expect(weekTrend(3600000, 7200000)).toEqual({
+      text: '1h 0m less than last week',
+      tone: 'down',
+    });
   });
 });
 
