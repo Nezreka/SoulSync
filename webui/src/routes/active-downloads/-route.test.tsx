@@ -66,7 +66,8 @@ afterEach(() => {
 });
 
 /** The page is on screen once its title has painted. */
-const settled = () => screen.findByText('Downloads');
+// the page name: the first view's pill is called Downloads too
+const settled = () => screen.findByRole('heading', { level: 1, name: 'Downloads' });
 
 describe('the active-downloads route', () => {
   it('renders without the shell’s .page class', async () => {
