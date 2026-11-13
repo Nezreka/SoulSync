@@ -172,3 +172,35 @@ def test_the_owner_of_a_download_is_its_task_then_its_batch():
     assert owner(batch_id="b1") == 5
     assert owner(batch_id="b2") is None
     assert owner() is None
+
+
+def _route_decorators(relative, names):
+    source = (ROOT / relative).read_text(encoding="utf-8")
+    found = {}
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name in names:
+            found[node.name] = [ast.unparse(d) for d in node.decorator_list]
+    return found
+
+
+def test_a_database_backup_is_listed_and_downloaded_by_an_admin_only():
+    """nov 13 2026 review: making, deleting and restoring a backup were admin
+    only, listing and downloading one were not. a backup is the whole database:
+    every profile's password hash, recovery answer and data."""
+    names = {"list_backups_endpoint", "download_backup_endpoint", "backup_database_endpoint",
+             "delete_backup_endpoint", "restore_backup_endpoint", "database_vacuum",
+             "enable_incremental_vacuum"}
+    found = _route_decorators("api/database_admin.py", names)
+    assert set(found) == names
+    for name, decorators in found.items():
+        assert "admin_only" in decorators, name
+        assert decorators[0].startswith("bp.route("), name   # the check runs inside the route
+
+
+def test_the_memory_diagnostics_are_admin_only():
+    """they start tracemalloc or walk every live object: slow, and for one person"""
+    names = {"debug_memory_start", "debug_memory_report", "debug_memory_stop", "debug_memory_objects"}
+    found = _route_decorators("web_server.py", names)
+    assert set(found) == names
+    for name, decorators in found.items():
+        assert "admin_only" in decorators, name

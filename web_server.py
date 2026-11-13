@@ -4204,6 +4204,7 @@ def get_debug_info():
 # active, which is why it never runs by default.
 
 @app.route('/api/debug/memory/start')
+@admin_only
 def debug_memory_start():
     try:
         from core.diagnostics.memory_tracker import start_tracking
@@ -4213,6 +4214,7 @@ def debug_memory_start():
 
 
 @app.route('/api/debug/memory/report')
+@admin_only
 def debug_memory_report():
     try:
         from core.diagnostics.memory_tracker import report
@@ -4223,6 +4225,7 @@ def debug_memory_report():
 
 
 @app.route('/api/debug/memory/stop')
+@admin_only
 def debug_memory_stop():
     try:
         from core.diagnostics.memory_tracker import stop_tracking
@@ -4232,6 +4235,7 @@ def debug_memory_stop():
 
 
 @app.route('/api/debug/memory/objects')
+@admin_only
 def debug_memory_objects():
     """One-shot memory breakdown by live object type (plain gc — NO tracemalloc, so it
     won't lock up a loaded app). Hit this once when RSS is high to see which type/cache
