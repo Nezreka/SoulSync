@@ -200,8 +200,16 @@ async function openEnrichmentManager(workerId) {
     document.addEventListener('keydown', _emOnKeydown);
     enrichmentManagerState.open = true;
 
-    await refreshAllEnrichmentStatuses();
+    // The window is drawn now, from whatever is already known (the dashboard
+    // has been keeping every worker's status), and the fresh statuses land on
+    // the rows when they arrive. It used to wait for that request with an
+    // empty window on screen.
     renderEnrichmentRail();
+    refreshAllEnrichmentStatuses().then(() => {
+        if (!enrichmentManagerState.open) return;
+        _emVisibleWorkers().forEach(w => _emUpdateRailRow(w.id));
+        _emUpdateHeaderLive();
+    });
 
     // Selection priority: explicit deep-link arg → last-viewed (remembered) →
     // first running worker → first in the list.
@@ -250,10 +258,12 @@ function _emOnKeydown(e) {
 // Manual refresh: re-pull every worker's status + the selected worker's data.
 async function refreshEnrichmentManager(btn) {
     if (btn) btn.classList.add('em-spinning');
+    // asked for by hand: forget what was kept, here and on the server
+    enrichmentManagerState.cache = {};
     await refreshAllEnrichmentStatuses();
     renderEnrichmentRail();
     const sel = enrichmentManagerState.selected;
-    if (sel) await Promise.all([_emLoadBreakdown(sel), _emLoadUnmatched()]);
+    if (sel) await Promise.all([_emLoadBreakdown(sel, true), _emLoadUnmatched()]);
     _emRenderEntityCards();
     _emRenderUnmatchedList();
     _emRenderPanelHeader();
@@ -283,10 +293,15 @@ async function _emPollSelected() {
     try {
         const res = await fetch(`/api/enrichment/${id}/status`);
         if (res.ok) {
-            enrichmentManagerState.statuses[id] = await res.json();
+            const before = enrichmentManagerState.statuses[id];
+            const status = await res.json();
+            if (id !== enrichmentManagerState.selected) return;   // switched while it was out
+            enrichmentManagerState.statuses[id] = status;
             _emUpdateHeaderLive();   // in-place — no logo reflow/flicker
             _emUpdateRailRow(id);
-            _emRenderEntityCards();
+            // the cards only change when the worker moves to another group.
+            // redrawing them every three seconds restarted their bars from zero
+            if (_emCurrentPhase(before) !== _emCurrentPhase(status)) _emRenderEntityCards();
         }
     } catch (_e) { /* transient — keep last */ }
 }
@@ -498,13 +513,21 @@ function _emUpdateRailRow(id) {
 
 // ── Worker selection ──────────────────────────────────────────────────────────
 
+// What was last seen of each worker, so coming back to one shows it at once
+// while the fresh copy is fetched: { [id]: { breakdown, priority, unmatched } }.
+function _emKept(id) {
+    const cache = enrichmentManagerState.cache || (enrichmentManagerState.cache = {});
+    return cache[id] || (cache[id] = {});
+}
+
 async function selectEnrichmentWorker(id) {
     enrichmentManagerState.selected = id;
     try { localStorage.setItem('em-last-worker', id); } catch (_e) { /* ignore */ }
+    const kept = _emKept(id);
     enrichmentManagerState.selectedItems.clear();
-    enrichmentManagerState.breakdown = null;
-    enrichmentManagerState.unmatched = null;
-    enrichmentManagerState.priority = '';
+    enrichmentManagerState.breakdown = kept.breakdown || null;
+    enrichmentManagerState.unmatched = kept.unmatched || null;
+    enrichmentManagerState.priority = kept.priority || '';
     enrichmentManagerState.search = '';
     enrichmentManagerState.page = 0;
     enrichmentManagerState.statusFilter = 'unmatched';
@@ -512,19 +535,34 @@ async function selectEnrichmentWorker(id) {
 
     // Pick a default entity tab the worker actually supports (filled after the
     // unmatched call returns entity_types; default to artist meanwhile).
-    enrichmentManagerState.entityTab = 'artist';
+    enrichmentManagerState.entityTab = (kept.unmatched && kept.unmatched.entity_type) || 'artist';
     renderEnrichmentPanel();
-    await Promise.all([_emLoadBreakdown(id), _emLoadUnmatched(), _emLoadPriority(id)]);
-    renderEnrichmentPanel();
+
+    // Each part is drawn when its own answer lands. They used to be awaited
+    // together, so the numbers (fast) sat behind the list (slow), and a click
+    // on another worker while they were out was overwritten when they came in.
+    const mine = () => enrichmentManagerState.selected === id && enrichmentManagerState.open;
+    _emLoadBreakdown(id).then(() => { if (mine()) _emRenderEntityCards(); });
+    _emLoadPriority(id).then(() => { if (mine()) _emRenderEntityCards(); });
+    _emLoadUnmatched().then(() => {
+        if (!mine()) return;
+        _emRenderEntityCards();
+        _emRenderUnmatchedControls();
+        _emRenderUnmatchedList();
+        _emRenderPager();
+    });
 }
 
 async function _emLoadPriority(id) {
+    let priority = '';
     try {
         const res = await fetch(`/api/enrichment/${id}/priority`);
-        enrichmentManagerState.priority = res.ok ? ((await res.json()).priority || '') : '';
+        priority = res.ok ? ((await res.json()).priority || '') : '';
     } catch (_e) {
-        enrichmentManagerState.priority = '';
+        priority = '';
     }
+    _emKept(id).priority = priority;
+    if (enrichmentManagerState.selected === id) enrichmentManagerState.priority = priority;
 }
 
 // Which phase the worker is on right now, from current_item.type.
@@ -537,12 +575,18 @@ function _emCurrentPhase(status) {
     return '';
 }
 
-async function _emLoadBreakdown(id) {
+async function _emLoadBreakdown(id, fresh) {
+    let breakdown = null;
     try {
-        const res = await fetch(`/api/enrichment/${id}/breakdown`);
-        enrichmentManagerState.breakdown = res.ok ? (await res.json()).breakdown : null;
+        const res = await fetch(`/api/enrichment/${id}/breakdown${fresh ? '?fresh=1' : ''}`);
+        breakdown = res.ok ? (await res.json()).breakdown : null;
     } catch (_e) {
-        enrichmentManagerState.breakdown = null;
+        breakdown = null;
+    }
+    // a failed refresh keeps the numbers that were showing
+    if (breakdown) _emKept(id).breakdown = breakdown;
+    if (enrichmentManagerState.selected === id) {
+        enrichmentManagerState.breakdown = breakdown || _emKept(id).breakdown || null;
     }
 }
 
@@ -562,6 +606,10 @@ async function _emLoadUnmatched() {
         const data = res.ok ? await res.json() : { total: 0, items: [] };
         if (token !== enrichmentManagerState.loadToken) return; // stale
         enrichmentManagerState.unmatched = data;
+        // the first page of the default view is what coming back to this worker shows
+        if (res.ok && !search && page === 0 && statusFilter === 'unmatched') {
+            _emKept(id).unmatched = { ...data, entity_type: entityTab };
+        }
     } catch (_e) {
         if (token === enrichmentManagerState.loadToken) {
             enrichmentManagerState.unmatched = { total: 0, items: [] };
