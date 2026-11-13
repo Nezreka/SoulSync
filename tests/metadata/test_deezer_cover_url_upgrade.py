@@ -173,6 +173,8 @@ class TestDownloadFallbackOnCdnRefusal:
             def __exit__(self, *a): pass
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             call_log.append(url)
             if url == upgraded_url:
                 raise Exception("403 Forbidden")
@@ -196,6 +198,8 @@ class TestDownloadFallbackOnCdnRefusal:
         call_log = []
 
         def fake_urlopen(url, timeout=None):
+
+            url = getattr(url, 'full_url', url)  # a Request since #2079
             call_log.append(url)
             raise Exception("network error")
 

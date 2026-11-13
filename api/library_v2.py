@@ -3066,7 +3066,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         if not ok:
-            return _fail("Could not download or validate that image URL")
+            from core.library2.artwork import remote_artwork_failure
+            return _fail(remote_artwork_failure(url)
+                         or "Could not download or validate that image URL")
 
         # A1: a picked cover only lands in the DB/cache above — without this,
         # existing files keep their old embedded art forever (build_tag_diff
@@ -3234,7 +3236,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         if not ok:
-            return _fail("Could not download or validate that image URL")
+            from core.library2.artwork import remote_artwork_failure
+            return _fail(remote_artwork_failure(url)
+                         or "Could not download or validate that image URL")
         return jsonify({
             "success": True, "artist_id": artist_id,
             "image_url": _artwork_url("artist", artist_id),
