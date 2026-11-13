@@ -205,7 +205,8 @@ class AlbumTagConsistencyJob(RepairJob):
         'The fix normalizes all tracks in the album to the most common (majority) value, '
         'then writes the corrected tags to the actual audio files.\n\n'
         'A compilation with no album artist tag, filed as one album per track artist, '
-        'is reported too: one folder, one title, several album artists.\n\n'
+        'is reported too: one folder, one title, several album artists, or the same '
+        'title in three or more artist folders whose track numbers fit together as one record.\n\n'
         'Also reviews native album rows with the same artist and title that may '
         'have split on your server. Conflicting years, release identities, editions '
         'and library owners are kept separate. Apply only changes the listed files; '
@@ -325,18 +326,40 @@ class AlbumTagConsistencyJob(RepairJob):
         The same-artist pass above cannot see these: a compilation with no
         album artist tag is filed under each track's own artist, so no two of
         its rows share an artist. What they share is the folder and the title.
+
+        Or the title and the shelf: an organiser that filed by track artist
+        leaves one track in each of ``Skream/Wipeout Pulse``,
+        ``Kraftwerk/Wipeout Pulse`` and so on. Those are grouped by the folder
+        above the artist folders, and because every artist has a "Greatest
+        Hits", that group has to look like one record: three or more albums,
+        and no two files holding the same disc and track number.
         """
         try:
-            groups = {}
+            groups, shelves = {}, {}
             for subject in subjects:
                 folder = release_folder(subject.get('path'))
                 title = split_group_key('', subject.get('album_title'))[1]
                 if folder and title:
-                    key = (folder.casefold(), title, subject.get('owner_profile_id'))
-                    groups.setdefault(key, []).append(subject)
-            for members in groups.values():
+                    owner = subject.get('owner_profile_id')
+                    groups.setdefault((folder.casefold(), title, owner), []).append(subject)
+                    shelf = os.path.dirname(os.path.dirname(folder))
+                    if shelf:
+                        shelves.setdefault((shelf.casefold(), title, owner), []).append(subject)
+            reported = set()
+            candidates = [(members, False) for members in groups.values()]
+            candidates += [(members, True) for members in shelves.values()]
+            for members, across_folders in candidates:
                 if context.check_stop() or context.wait_if_paused():
                     return
+                if across_folders:
+                    folders = {release_folder(s.get('path')).casefold() for s in members}
+                    places = [(int(s.get('disc_number') or 1), int(s.get('track_number') or 0))
+                              for s in members]
+                    if (len(folders) < 3 or len({s['album_id'] for s in members}) < 3
+                            or any(track <= 0 for _disc, track in places)
+                            or len(set(places)) != len(places)
+                            or {s['album_id'] for s in members} <= reported):
+                        continue
                 album_ids = sorted({s['album_id'] for s in members})
                 artists = {str(s.get('album_artist_name') or s.get('artist_name') or '').casefold()
                            for s in members}
@@ -365,13 +388,16 @@ class AlbumTagConsistencyJob(RepairJob):
                 with closing(context.db._get_connection()) as conn:
                     state = split_catalogue_state(conn, album_ids)
                 album_title = members[0].get('album_title')
+                reported.update(album_ids)
+                where = ('sit in separate artist folders' if across_folders
+                         else 'sit in one folder')
                 inserted = context.create_finding(
                     job_id=self.job_id, finding_type='album_tag_inconsistency',
                     severity='warning', entity_type='album', entity_id=f'lib2:{album_ids[0]}',
                     file_path=None,
                     title=f'Split by artist on your server: {album_title}',
                     description=(
-                        f'{len(album_ids)} albums named "{album_title}" sit in one folder under '
+                        f'{len(album_ids)} albums named "{album_title}" {where} under '
                         f'{len(artists)} different album artists. Unify Tags sets the album '
                         f'artist to "{album_artist}" on every file so the server shows one album.'),
                     details={'album_id': f'lib2:{album_ids[0]}', 'album_ids': album_ids,

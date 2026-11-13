@@ -15,7 +15,8 @@ from tests.repair_jobs.test_album_tag_consistency_reporting import _make_flac
 ARTISTS = ['Aphex Twin', 'Booka Shade', 'Kraftwerk', 'Noisia']
 
 
-def _build(conn, folder, artists, *, title='Wipeout Pulse', tags=None):
+def _build(conn, folder, artists, *, title='Wipeout Pulse', tags=None, by_artist=False,
+           numbers=None):
     folder.mkdir(parents=True, exist_ok=True)
     albums, paths = [], []
     for index, name in enumerate(artists):
@@ -24,9 +25,13 @@ def _build(conn, folder, artists, *, title='Wipeout Pulse', tags=None):
                              (artist, title)).lastrowid
         conn.execute("INSERT INTO lib2_album_artists(album_id,artist_id,role) VALUES(?,?,'primary')",
                      (album, artist))
-        track = conn.execute('INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)',
-                             (album, f'Song {index}')).lastrowid
-        path = folder / f'{index:02d}.flac'
+        number = numbers[index] if numbers else index + 1
+        track = conn.execute('INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,?,?)',
+                             (album, f'Song {index}', number)).lastrowid
+        # an organiser that files by track artist: <shelf>/<artist>/<album>/file
+        home = folder / name / title if by_artist else folder
+        home.mkdir(parents=True, exist_ok=True)
+        path = home / f'{index:02d}.flac'
         _make_flac(path, {'album': title, 'title': f'Song {index}', 'artist': name,
                           'date': '2007', **(tags or {})})
         conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (track, str(path)))
@@ -96,6 +101,27 @@ def test_different_years_in_one_folder_stay_apart(env):
     audio = FLAC(paths[0])
     audio['date'] = ['1999']
     audio.save()
+    assert _scan(env) == []
+
+
+def test_one_track_in_each_artist_folder_is_found_across_them(env):
+    albums, paths = _build(env.conn, env.tmp / 'music', ARTISTS, by_artist=True)
+    findings = _scan(env)
+    assert len(findings) == 1
+    assert sorted(findings[0]['details']['album_ids']) == sorted(albums)
+    assert 'separate artist folders' in findings[0]['description']
+    assert findings[0]['details']['inconsistencies'][0]['canonical'] == 'Various Artists'
+
+
+def test_every_artist_has_a_greatest_hits(env):
+    # same title on the same shelf, but each is its own record: they all start at track 1
+    _build(env.conn, env.tmp / 'music', ARTISTS, title='Greatest Hits', by_artist=True,
+           numbers=[1, 1, 1, 1])
+    assert _scan(env) == []
+
+
+def test_two_artist_folders_are_not_enough_to_call_it_one_record(env):
+    _build(env.conn, env.tmp / 'music', ARTISTS[:2], title='Split', by_artist=True)
     assert _scan(env) == []
 
 
