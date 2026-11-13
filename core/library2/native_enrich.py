@@ -1475,7 +1475,10 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
                   if _artist_is_a_release_primary(conn, aid)]
         if len(owners) != 1:
             stats["ambiguous"] += 1
-            logger.info(
+            # one line each at debug: these groups are left as they are, so the
+            # same ones came back on every pass (304 info lines per start on
+            # one library). the pass says how many in one line below
+            logger.debug(
                 "borrowed identity %s/%s shared by %s and no catalogue owner",
                 namespace, value, artist_ids,
             )
@@ -1488,6 +1491,10 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
             stats["released"] += 1
             if aid not in stats["artist_ids"]:
                 stats["artist_ids"].append(aid)
+    if stats["ambiguous"] or stats["released"]:
+        logger.info(
+            "borrowed identities: %d taken back, %d shared with no catalogue owner and left alone",
+            stats["released"], stats["ambiguous"])
     return stats
 
 
