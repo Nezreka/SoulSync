@@ -16,7 +16,9 @@ INCLUDE_DEFAULTS: Dict[str, bool] = {
     'include_albums': True,
     'include_eps': True,
     'include_singles': True,
+    # live albums. a live version on any other release is the next rule (#2082)
     'include_live': False,
+    'include_live_tracks': False,
     'include_remixes': False,
     'include_acoustic': False,
     'include_compilations': False,
@@ -26,16 +28,35 @@ INCLUDE_DEFAULTS: Dict[str, bool] = {
 INCLUDE_KEYS = tuple(INCLUDE_DEFAULTS)
 
 
+# a rule that came later takes the value of the one it was split from until it
+# is set itself: one Live switch covered live albums and live tracks (#2082)
+SPLIT_FROM: Dict[str, str] = {'include_live_tracks': 'include_live'}
+
+
 def default_values(config_manager) -> Dict[str, bool]:
-    """the nine default release rules, from watchlist.global_include_*."""
+    """the default release rules, from watchlist.global_include_*."""
     values = {}
     for key, fallback in INCLUDE_DEFAULTS.items():
+        unset = None if key in SPLIT_FROM else fallback
         try:
-            raw = config_manager.get(f'watchlist.global_{key}', fallback)
+            raw = config_manager.get(f'watchlist.global_{key}', unset)
         except Exception:  # noqa: BLE001 - a config hiccup reads as the fallback
-            raw = fallback
+            raw = unset
+        if raw is None:
+            raw = values.get(SPLIT_FROM.get(key, ''), fallback)
         values[key] = bool(raw)
     return values
+
+
+def stored_rule(artist: Any, key: str):
+    """one of an artist's own rules as stored, None when it was never set. a
+    split rule never set reads as the rule it was split from."""
+    def read(name):
+        return artist.get(name) if isinstance(artist, dict) else getattr(artist, name, None)
+    raw = read(key)
+    if raw is None and key in SPLIT_FROM:
+        raw = read(SPLIT_FROM[key])
+    return raw
 
 
 def legacy_override_on(config_manager) -> bool:
@@ -64,7 +85,7 @@ def stamp_value(row: Dict[str, Any], defaults: Dict[str, bool], override_on: boo
     if override_on:
         return 1
     for key, value in defaults.items():
-        stored = row.get(key)
+        stored = stored_rule(row, key)
         stored = INCLUDE_DEFAULTS[key] if stored is None else bool(stored)
         if stored != value:
             return 0
@@ -72,14 +93,14 @@ def stamp_value(row: Dict[str, Any], defaults: Dict[str, bool], override_on: boo
 
 
 def effective_rules(artist: Any, config_manager, override_on: Optional[bool] = None) -> Dict[str, bool]:
-    """the nine rules a scan applies to this artist."""
+    """the rules a scan applies to this artist."""
     if override_on is None:
         override_on = legacy_override_on(config_manager)
     if follows_defaults(artist, override_on):
         return default_values(config_manager)
     out = {}
     for key, fallback in INCLUDE_DEFAULTS.items():
-        raw = artist.get(key) if isinstance(artist, dict) else getattr(artist, key, None)
+        raw = stored_rule(artist, key)
         out[key] = fallback if raw is None else bool(raw)
     return out
 
@@ -118,7 +139,7 @@ def reset_all_to_defaults(database, profile_id: int) -> int:
 
 
 __all__ = [
-    'INCLUDE_DEFAULTS', 'INCLUDE_KEYS', 'default_values', 'legacy_override_on',
+    'INCLUDE_DEFAULTS', 'INCLUDE_KEYS', 'SPLIT_FROM', 'default_values', 'stored_rule', 'legacy_override_on',
     'follows_defaults', 'stamp_value', 'effective_rules', 'retire_legacy_override',
     'reset_all_to_defaults',
 ]

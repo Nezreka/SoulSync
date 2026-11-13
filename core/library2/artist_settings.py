@@ -18,6 +18,7 @@ WATCHLIST_BOOLEAN_FIELDS = (
     "include_eps",
     "include_singles",
     "include_live",
+    "include_live_tracks",
     "include_remixes",
     "include_acoustic",
     "include_compilations",
@@ -124,7 +125,7 @@ def _bool_value(row, columns: Iterable[str], field: str, default: bool) -> bool:
 
 
 def _release_rules(watchlist, columns: Iterable[str]) -> tuple[Dict[str, bool], bool]:
-    """The nine release rules a scan applies, and whether they are the
+    """The release rules a scan applies, and whether they are the
     watchlist defaults the artist follows (#1822) rather than its own."""
     from core.settings import config_manager
     from core.watchlist_defaults import effective_rules, follows_defaults, legacy_override_on

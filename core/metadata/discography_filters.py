@@ -75,6 +75,7 @@ from core.watchlist_scanner import (
     is_acoustic_version,
     is_compilation_album,
     is_instrumental_version,
+    is_live_album,
     is_live_version,
     is_remix_version,
     matches_custom_exclude_terms,
@@ -130,58 +131,98 @@ def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool
     return False
 
 
+_UNPLUGGED_RE = re.compile(r'\bunplugged\b', re.IGNORECASE)
+
+
+def live_tracks_included(settings: Dict[str, Any]) -> bool:
+    """The Live tracks rule. A caller or a saved artist from before the rule
+    existed has no value for it and gets its one Live rule, as it always did."""
+    value = settings.get('include_live_tracks')
+    if value is None:
+        return bool(settings.get('include_live', False))
+    return bool(value)
+
+
 def content_type_skip_reason(
     track_name: str,
     album_name: str,
     settings: Dict[str, Any],
+    *,
+    requested: bool = False,
 ) -> Optional[str]:
     """Return a short skip-reason string if the track is a content type
     the user has chosen to exclude, else None.
 
     `settings` is a dict keyed by the same names as the watchlist
-    globals (``include_live`` / ``include_remixes`` / ``include_acoustic``
-    / ``include_instrumentals``). All default to False — i.e. exclude
-    by default — matching the watchlist scanner's default contract.
+    globals (``include_live`` / ``include_live_tracks`` / ``include_remixes``
+    / ``include_acoustic`` / ``include_instrumentals``). All default to
+    False, i.e. exclude by default, matching the watchlist scanner's contract.
+
+    Live is two rules (#2082). ``include_live`` is about live ALBUMS: a
+    release that is itself a live recording ("MTV Unplugged"). On such a
+    release every track goes or stays with the album. ``include_live_tracks``
+    is about a live version on any other release (a live bonus track).
+
+    ``requested``: the person picked this very release. What the release
+    itself is never keeps it out then: someone who asks for a live album, a
+    remix album or an acoustic album gets its tracks. A stray version of
+    another kind on it (a remix on a live album) is still judged.
     """
-    if not settings.get('include_live', False) and is_live_version(track_name, album_name):
+    if is_live_album(album_name):
+        if not requested and not settings.get('include_live', False):
+            return 'live'
+    elif not live_tracks_included(settings) and is_live_version(track_name):
         return 'live'
-    if not settings.get('include_remixes', False) and is_remix_version(track_name, album_name):
-        return 'remix'
-    if not settings.get('include_acoustic', False) and is_acoustic_version(track_name, album_name):
-        return 'acoustic'
-    if not settings.get('include_instrumentals', False) and is_instrumental_version(track_name, album_name):
-        return 'instrumental'
+    # "unplugged" is one word for a live acoustic set, and the live rules
+    # above have just let it through. the acoustic rule reading the same word
+    # kept MTV Unplugged out with Live on and Acoustic off
+    track_name = _UNPLUGGED_RE.sub(' ', track_name or '')
+    album_name = _UNPLUGGED_RE.sub(' ', album_name or '')
+    for key, detect, reason in (
+        ('include_remixes', is_remix_version, 'remix'),
+        ('include_acoustic', is_acoustic_version, 'acoustic'),
+        ('include_instrumentals', is_instrumental_version, 'instrumental'),
+    ):
+        if settings.get(key, False):
+            continue
+        if requested:
+            # the release's own kind is what was asked for
+            if not detect(album_name or '') and detect(track_name):
+                return reason
+        elif detect(track_name, album_name):
+            return reason
     return None
 
 
 def load_global_content_filter_settings(config_manager: Any) -> Dict[str, Any]:
-    """Read the four watchlist content-type globals from config.
+    """Read the watchlist content-type globals from config.
 
     Centralises the key names so the endpoint and the helper agree on
-    where the settings live. All four default to False (exclude) — same
-    contract as the watchlist scanner.
+    where the settings live. All default to False (exclude), the same
+    contract as the watchlist scanner. Live tracks, never saved, follow the
+    Live albums rule: one switch covered both before #2082.
     """
+    off = {
+        'include_live': False,
+        'include_live_tracks': False,
+        'include_remixes': False,
+        'include_acoustic': False,
+        'include_instrumentals': False,
+    }
     if config_manager is None:
-        return {
-            'include_live': False,
-            'include_remixes': False,
-            'include_acoustic': False,
-            'include_instrumentals': False,
-        }
+        return off
     try:
+        live = bool(config_manager.get('watchlist.global_include_live', False))
+        live_tracks = config_manager.get('watchlist.global_include_live_tracks', None)
         return {
-            'include_live': bool(config_manager.get('watchlist.global_include_live', False)),
+            'include_live': live,
+            'include_live_tracks': live if live_tracks is None else bool(live_tracks),
             'include_remixes': bool(config_manager.get('watchlist.global_include_remixes', False)),
             'include_acoustic': bool(config_manager.get('watchlist.global_include_acoustic', False)),
             'include_instrumentals': bool(config_manager.get('watchlist.global_include_instrumentals', False)),
         }
     except Exception:
-        return {
-            'include_live': False,
-            'include_remixes': False,
-            'include_acoustic': False,
-            'include_instrumentals': False,
-        }
+        return off
 
 
 def _normalize_artist_name(name: str) -> str:
@@ -301,6 +342,8 @@ def resolve_watchlist_content_settings(
         return settings
     settings = {
         'include_live': bool(getattr(artist_row, 'include_live', False)),
+        # None on a row from before the rule: it follows include_live
+        'include_live_tracks': getattr(artist_row, 'include_live_tracks', None),
         'include_remixes': bool(getattr(artist_row, 'include_remixes', False)),
         'include_acoustic': bool(getattr(artist_row, 'include_acoustic', False)),
         'include_instrumentals': bool(getattr(artist_row, 'include_instrumentals', False)),
@@ -608,6 +651,7 @@ def owned_release_tracks(
 __all__ = [
     'track_artist_matches',
     'content_type_skip_reason',
+    'live_tracks_included',
     'load_global_content_filter_settings',
     'track_already_owned',
     'owned_release_tracks',

@@ -176,9 +176,11 @@ def test_approving_a_back_catalogue_finding_wishes_for_its_library(tmp_path, mon
         album_id = lib2_seed.album(conn, "Kid Artist", "Second Album", origin="discography")
         conn.commit()
     calls = []
+    asked = []
     monkeypatch.setattr("core.library2.discography.auto_monitor_releases",
-                        lambda _db, _cfg, ids, *, wishlist_profile_id=1:
-                        calls.append((ids, wishlist_profile_id)) or 0)
+                        lambda _db, _cfg, ids, *, wishlist_profile_id=1, requested_ids=None:
+                        (asked.append(requested_ids),
+                         calls.append((ids, wishlist_profile_id))) and 0)
     worker = RepairWorker(database=db)
 
     worker._fix_discography_release("album", f"lib2:{album_id}", None,
@@ -187,6 +189,8 @@ def test_approving_a_back_catalogue_finding_wishes_for_its_library(tmp_path, mon
                                     {"lib2_album_id": album_id})
 
     assert calls == [([album_id], 3), ([album_id], 1)]
+    # #2082: the Fix click is a person asking for this release
+    assert asked == [{album_id}, {album_id}]
 
 
 def test_the_library_walk_paces_its_provider_calls(monkeypatch):
@@ -223,8 +227,9 @@ def _auto_add_case(tmp_path, monkeypatch, *, auto_add, inserted=True):
         conn.commit()
     calls = []
     monkeypatch.setattr("core.library2.discography.auto_monitor_releases",
-                        lambda _db, _cfg, ids, *, wishlist_profile_id=1:
-                        calls.append((ids, wishlist_profile_id)) or 4)
+                        # requested_ids stays unset: the auto add is not a person asking (#2082)
+                        lambda _db, _cfg, ids, *, wishlist_profile_id=1, requested_ids=None:
+                        calls.append((ids, wishlist_profile_id)) or (4 if requested_ids is None else 0))
     created = []
     context = SimpleNamespace(db=db, config_manager=None,
                               create_finding=lambda **kw: created.append(kw) or inserted)

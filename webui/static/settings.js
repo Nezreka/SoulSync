@@ -54,11 +54,15 @@ window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibi
 // the parent filter is off. Called on settings load + the parent's onchange.
 function syncPreferExplicitState() {
     const parent = document.getElementById('allow-explicit');
-    const child = document.getElementById('prefer-explicit');
-    if (!parent || !child) return;
-    child.disabled = !parent.checked;
-    const label = child.closest('.checkbox-label');
-    if (label) label.style.opacity = parent.checked ? '' : '0.45';
+    if (!parent) return;
+    // #2081: "Never download clean versions" hangs off the same parent
+    for (const id of ['prefer-explicit', 'exclude-clean']) {
+        const child = document.getElementById(id);
+        if (!child) continue;
+        child.disabled = !parent.checked;
+        const label = child.closest('.checkbox-label');
+        if (label) label.style.opacity = parent.checked ? '' : '0.45';
+    }
 }
 window.syncPreferExplicitState = syncPreferExplicitState;
 
@@ -3870,6 +3874,7 @@ async function loadSettingsData() {
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
+        document.getElementById('exclude-clean').checked = settings.content_filter?.exclude_clean === true;
         syncPreferExplicitState();
 
         // Prefer a version (off = ''), lives under soulseek with the other match settings
@@ -7174,7 +7179,8 @@ async function saveSettings(quiet = false) {
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
-            prefer_explicit: document.getElementById('prefer-explicit').checked
+            prefer_explicit: document.getElementById('prefer-explicit').checked,
+            exclude_clean: document.getElementById('exclude-clean').checked
         },
         genre_whitelist: {
             enabled: document.getElementById('genre-whitelist-enabled').checked,

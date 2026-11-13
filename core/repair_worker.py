@@ -4550,9 +4550,12 @@ class RepairWorker:
             from core.library2.discography import approve_release
             # a back catalogue finding names the library that holds the
             # artist (#1504); a new-release finding is the admin's as before
+            # the Fix click is a person asking for this release: its own kind
+            # (a live album) and the edition preference do not keep it out (#2082)
             mirrored = approve_release(
                 self.db, self._config_manager, int(album_id),
                 profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
+                requested=True,
             )
         except LookupError as exc:
             return {'success': False, 'error': str(exc)}

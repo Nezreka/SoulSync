@@ -329,6 +329,8 @@ export interface FutureReleases {
   include_eps: boolean;
   include_singles: boolean;
   include_live: boolean;
+  /** #2082: live versions on releases that are not live albums */
+  include_live_tracks: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;
@@ -351,6 +353,8 @@ export function defaultFutureReleases(filters: DiscogFilters): FutureReleases {
     include_eps: filters.ep,
     include_singles: filters.single,
     include_live: filters.live,
+    // the download filter is about live releases; a live bonus track is its own rule
+    include_live_tracks: false,
     include_remixes: false,
     include_acoustic: false,
     include_compilations: filters.compilations,
@@ -399,6 +403,7 @@ export async function watchArtistWithSettings(
         include_eps: settings.include_eps,
         include_singles: settings.include_singles,
         include_live: settings.include_live,
+        include_live_tracks: settings.include_live_tracks,
         include_remixes: settings.include_remixes,
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,

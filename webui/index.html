@@ -8682,6 +8682,23 @@
                                                 Requires explicit content to be allowed.
                                             </div>
 
+                                            <!-- #2081: the hard version of the preference above -->
+                                            <div class="form-group" style="margin-left: 26px;">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="exclude-clean">
+                                                    Never download clean versions
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            </div>
+                                            <div class="help-text setting-help-body" style="margin-left: 26px;" hidden>
+                                                Files marked Clean, Censored, Edited or Radio Edit are never picked for
+                                                a track that is not that cut itself. If only a clean version exists,
+                                                the track waits on your Wishlist until a real one turns up. Requires
+                                                explicit content to be allowed.
+                                            </div>
+
                                             <div class="form-group">
                                                 <label for="music-max-mb-per-minute">Maximum music download size
                                                     (MB/min)</label>

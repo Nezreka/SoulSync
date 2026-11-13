@@ -294,3 +294,76 @@ def test_a_save_that_never_mentions_auto_download_leaves_the_preference_alone(cl
     after = _config(db)
     assert after["auto_download_pref"] is None
     assert after["auto_download"] == before["auto_download"], "the legacy column too"
+
+
+# --- #2082: live albums and live tracks are two rules ------------------------
+
+def _live_tracks(db):
+    with db._get_connection() as conn:
+        return conn.execute("SELECT include_live, include_live_tracks FROM watchlist_artists "
+                            "WHERE spotify_artist_id = 'sp-1'").fetchone()
+
+
+def _own_rules(db):
+    """the artist has rules of its own: a follower shows the defaults instead"""
+    with db._get_connection() as conn:
+        conn.execute("UPDATE watchlist_artists SET follow_defaults = 0")
+        conn.commit()
+
+
+def test_live_tracks_follow_the_live_rule_until_they_are_set(client):
+    test_client, db = client
+    _own_rules(db)
+    assert tuple(_live_tracks(db)) == (1, None)
+    shown = test_client.get("/api/watchlist/artist/sp-1/config").get_json()["config"]
+    assert shown["include_live"] is True and shown["include_live_tracks"] is True
+
+    # a client that only knows one Live switch still moves both
+    response = test_client.post("/api/watchlist/artist/sp-1/config", json={"include_live": False})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert tuple(_live_tracks(db)) == (0, None)
+    echoed = response.get_json()["config"]
+    assert echoed["include_live"] is False and echoed["include_live_tracks"] is False
+
+
+def test_live_tracks_can_be_set_apart_from_live_albums(client):
+    test_client, db = client
+    _own_rules(db)
+    response = test_client.post("/api/watchlist/artist/sp-1/config",
+                                json={"include_live": True, "include_live_tracks": False})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert tuple(_live_tracks(db)) == (1, 0)
+    shown = test_client.get("/api/watchlist/artist/sp-1/config").get_json()["config"]
+    assert shown["include_live"] is True and shown["include_live_tracks"] is False
+
+    # an unrelated save leaves the pair alone
+    test_client.post("/api/watchlist/artist/sp-1/config", json={"include_remixes": False})
+    assert tuple(_live_tracks(db)) == (1, 0)
+
+    bad = test_client.post("/api/watchlist/artist/sp-1/config", json={"include_live_tracks": "maybe"})
+    assert bad.status_code == 400
+
+
+def test_the_scanner_reads_the_pair_from_the_artists_row(client):
+    _test_client, db = client
+    with db._get_connection() as conn:
+        conn.execute("UPDATE watchlist_artists SET include_live=1, include_live_tracks=0, "
+                     "follow_defaults=0 WHERE spotify_artist_id='sp-1'")
+        conn.commit()
+    artist = db.get_watchlist_artists()[0]
+    assert artist.include_live is True and artist.include_live_tracks is False
+    with db._get_connection() as conn:
+        conn.execute("UPDATE watchlist_artists SET include_live_tracks=NULL")
+        conn.commit()
+    assert db.get_watchlist_artists()[0].include_live_tracks is None
+
+
+def test_a_follower_shows_the_default_pair(client, monkeypatch):
+    test_client, _db = client
+    values = {"watchlist.global_include_live": True, "watchlist.global_include_live_tracks": False}
+    real_get = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, "get",
+                        lambda key, default=None: values.get(key, real_get(key, default)))
+    shown = test_client.get("/api/watchlist/artist/sp-1/config").get_json()["config"]
+    assert shown["follow_defaults"] is True
+    assert shown["include_live"] is True and shown["include_live_tracks"] is False
