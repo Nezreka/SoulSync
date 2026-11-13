@@ -1180,7 +1180,8 @@ List all watched artists for the current profile.
 | `include_albums` | bool | Monitor for new albums |
 | `include_eps` | bool | Monitor for new EPs |
 | `include_singles` | bool | Monitor for new singles |
-| `include_live` | bool | Include live recordings |
+| `include_live` | bool | Include live albums (concert recordings, unplugged sets) |
+| `include_live_tracks` | bool | Include a live version on any other release, like a live bonus track. Follows `include_live` until it is set once |
 | `include_remixes` | bool | Include remixes |
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
@@ -1209,7 +1210,7 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
 
 Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 
