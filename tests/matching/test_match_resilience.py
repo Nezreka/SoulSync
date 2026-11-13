@@ -135,7 +135,7 @@ def test_match_release_genuine_miss_is_still_cached(service):
 
     assert service.match_release("Some Album", "Some Artist") is None
     service._save_to_cache.assert_called_once_with(
-        'release', "Some Album", "Some Artist", None, None, 0)
+        'release', "Some Album", "Some Artist", None, {'title_alone': 1}, 0)
 
 
 def test_match_release_passes_raise_on_error(service):
