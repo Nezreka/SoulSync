@@ -3042,13 +3042,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not url:
             return _fail("url is required")
 
-        from core.library2.artwork import apply_manual_artwork
+        from core.library2.artwork import (
+            MANUAL_ART_APPLIED,
+            apply_manual_artwork_outcome,
+            manual_artwork_failure_message,
+        )
         from core.library2.metadata_overrides import MetadataOverrideError
         conn = _conn()
         try:
-            ok = apply_manual_artwork(
+            outcome = apply_manual_artwork_outcome(
                 get_database(), conn, "album", album_id, url, profile_id=_profile(),
             )
+            ok = outcome == MANUAL_ART_APPLIED
             if ok:
                 conn.commit()
             else:
@@ -3066,7 +3071,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         if not ok:
-            return _fail("Could not download or validate that image URL")
+            return _fail(manual_artwork_failure_message(url, outcome))
 
         # A1: a picked cover only lands in the DB/cache above — without this,
         # existing files keep their old embedded art forever (build_tag_diff
@@ -3212,13 +3217,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not url:
             return _fail("url is required")
 
-        from core.library2.artwork import apply_manual_artwork
+        from core.library2.artwork import (
+            MANUAL_ART_APPLIED,
+            apply_manual_artwork_outcome,
+            manual_artwork_failure_message,
+        )
         from core.library2.metadata_overrides import MetadataOverrideError
         conn = _conn()
         try:
-            ok = apply_manual_artwork(
+            outcome = apply_manual_artwork_outcome(
                 get_database(), conn, "artist", artist_id, url, profile_id=_profile(),
             )
+            ok = outcome == MANUAL_ART_APPLIED
             if ok:
                 conn.commit()
             else:
@@ -3234,7 +3244,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
         if not ok:
-            return _fail("Could not download or validate that image URL")
+            return _fail(manual_artwork_failure_message(url, outcome))
         return jsonify({
             "success": True, "artist_id": artist_id,
             "image_url": _artwork_url("artist", artist_id),
