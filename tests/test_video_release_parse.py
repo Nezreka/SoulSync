@@ -71,3 +71,14 @@ def test_plain_web_is_recognised_as_a_source():
     assert parse_release("Movie.2020.WEB.x265")["source"] == "web-dl"
     # but it must NOT mis-grab the WEB inside WEBRip
     assert parse_release("Movie 1080p WEBRip x264")["source"] == "webrip"
+
+
+def test_cam_rip_variants_are_cam():
+    for name in ("How.to.Rob.a.Bank.2026.1080p.CAMRip.ENG.mkv", "Movie 2026 HDCAMRip 720p",
+                 "Movie 2026 HDTC 1080p", "Movie 2026 Telecine 720p", "Movie 2026 PreDVDRip x264"):
+        assert parse_release(name)["source"] == "cam", name
+
+
+def test_ordinary_rips_are_not_cam():
+    assert parse_release("Movie 2024 1080p WEBRip x265")["source"] == "webrip"
+    assert parse_release("Movie 2024 DVDRip XviD")["source"] == "dvd"

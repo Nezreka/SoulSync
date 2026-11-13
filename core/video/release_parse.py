@@ -33,7 +33,8 @@ _SOURCE = [
     (re.compile(r"\bweb\b", re.I), "web-dl"),   # plain "WEB" (very common) — treat as WEB-DL
     (re.compile(r"\bhdtv\b", re.I), "hdtv"),
     (re.compile(r"\b(dvdrip|dvd)\b", re.I), "dvd"),
-    (re.compile(r"\b(cam|hdcam|ts|telesync|hdts)\b", re.I), "cam"),
+    # CAMRip/HDCAMRip, telecine (TC/HDTC) and pre-release DVD rips are cam-grade too
+    (re.compile(r"\b(cam|hdcam|camrip|hdcamrip|ts|telesync|hdts|hdtc|telecine|predvd|predvdrip)\b", re.I), "cam"),
     (re.compile(r"\b(scr|screener|dvdscr|bdscr)\b", re.I), "screener"),
     (re.compile(r"\bworkprint\b", re.I), "workprint"),
 ]
