@@ -11435,6 +11435,10 @@ class MusicDatabase:
                     from core.library.server_paths import local_path_for
                     from core.settings import config_manager
                     file_path = local_path_for(file_path, config_manager) or file_path
+                    # the spelling the catalogue already holds for this file:
+                    # every comparison below is on the path's text
+                    from core.library2.track_files import stored_spelling
+                    file_path = stored_spelling(cursor, file_path)
 
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)

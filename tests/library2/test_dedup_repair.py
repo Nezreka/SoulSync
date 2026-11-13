@@ -1079,3 +1079,128 @@ def test_sanitize_repairs_a_wishlist_row_key_stored_as_the_track_id(repair_db):
     assert read("untouched")[0] == "0VjIjW4GlUZAMYd2vXMi3b"
     # and a second pass has nothing left to do
     assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE spotify_id LIKE '%::%'").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# One file, one path, however it was written (Nov 13 2026)
+# ---------------------------------------------------------------------------
+
+WIN_FWD = "H:/Music/Maroon 5/Lost Stars/01 - Lost Stars.flac"
+WIN_BACK = "H:\\Music\\Maroon 5\\Lost Stars\\01 - Lost Stars.flac"
+
+
+def test_a_windows_path_has_two_spellings_and_a_linux_path_has_one():
+    from core.library2.track_files import path_identity, path_spellings
+
+    assert set(path_spellings(WIN_FWD)) == set(path_spellings(WIN_BACK)) == {WIN_FWD, WIN_BACK}
+    assert path_spellings(WIN_BACK)[0] == WIN_BACK            # the given one first
+    assert path_identity(WIN_FWD) == path_identity(WIN_BACK) == WIN_FWD
+    assert set(path_spellings("\\\\nas\\share\\a.flac")) == {"\\\\nas\\share\\a.flac", "//nas/share/a.flac"}
+    # on linux a backslash is part of a name, never a separator
+    linux = "/app/Transfer/AC\\DC/Back in Black/01.flac"
+    assert path_spellings(linux) == (linux,) and path_identity(linux) == linux
+    assert path_spellings("") == () and path_spellings(None) == ()
+
+
+def test_a_file_is_found_under_its_other_spelling(repair_db):
+    from core.library2.track_files import stored_spelling, track_id_for_path
+
+    _legacy_db, conn = repair_db
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost Stars')",
+                         (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)", (track, WIN_FWD))
+    conn.commit()
+    assert stored_spelling(conn, WIN_BACK) == WIN_FWD
+    assert stored_spelling(conn, WIN_FWD) == WIN_FWD
+    assert stored_spelling(conn, "H:\\Music\\new.flac") == "H:\\Music\\new.flac"   # unknown: as given
+    assert track_id_for_path(conn, WIN_BACK, basename=False) == track
+
+
+def test_the_scan_does_not_adopt_a_file_it_holds_under_the_other_spelling(repair_db, monkeypatch):
+    """the scan resolved the server's path with backslashes, did not find the
+    forward-slash row, and brought the file in a second time: a second file
+    row, or a second track, and the song twice in Songs."""
+    from core.library2 import autolink, media_server_sync
+
+    _legacy_db, conn = repair_db
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost Stars')",
+                         (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)", (track, WIN_FWD))
+    conn.commit()
+    linked = []
+    monkeypatch.setattr(autolink, "link_download_into_library_v2",
+                        lambda context, **kw: linked.append(context) or 1)
+    monkeypatch.setattr(media_server_sync.os.path, "isfile", lambda p: True)
+    adopted = media_server_sync.adopt_scanned_file(
+        conn.cursor(), WIN_BACK, "/data/music/Maroon 5/Lost Stars/01 - Lost Stars.flac", "plex",
+        server_info={"name": "Lost Stars", "artist": "Maroon 5"})
+    assert adopted is False and linked == []
+
+
+def _file_row(conn, track, path, **columns):
+    names = ", ".join(("track_id", "path", *columns))
+    return conn.execute(f"INSERT INTO lib2_track_files({names}) VALUES({','.join('?' * (2 + len(columns)))})",
+                        (track, path, *columns.values())).lastrowid
+
+
+def test_twin_tracks_of_one_file_under_two_spellings_fold_into_one(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    plex = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+                        "VALUES(?, 'Lost Stars', 15, 'plex')", (album,)).lastrowid
+    twin = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                        "VALUES(?, 'Lost Stars', 15)", (album,)).lastrowid
+    _file_row(conn, plex, WIN_BACK)
+    _file_row(conn, twin, WIN_FWD)
+    # an unrelated file written with backslashes, and a linux name holding one
+    other = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                         "VALUES(?, 'Other', 2)", (album,)).lastrowid
+    _file_row(conn, other, "H:\\Music\\Maroon 5\\Lost Stars\\02 - Other.flac")
+    linux_a = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'A', 3)",
+                           (album,)).lastrowid
+    linux_b = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'B', 4)",
+                           (album,)).lastrowid
+    _file_row(conn, linux_a, "/music/AC\\DC.flac")
+    _file_row(conn, linux_b, "/music/AC/DC.flac")
+    conn.commit()
+
+    files_before = conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0]
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["shared_files_folded"] == 1
+    tracks = [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE title='Lost Stars'")]
+    assert tracks == [plex]                                   # the server's row keeps the file
+    assert [r[0] for r in conn.execute("SELECT path FROM lib2_track_files WHERE track_id=?", (plex,))] == [WIN_BACK]
+    # one row gone: the twin's. nothing else was touched
+    assert conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == files_before - 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE id IN (?,?,?)",
+                        (other, linux_a, linux_b)).fetchone()[0] == 3
+    # and nothing more to do
+    again = fold_shared_file_tracks(conn)
+    assert (again["shared_files_folded"], again["file_rows_folded"]) == (0, 0)
+
+
+def test_one_file_twice_on_one_track_keeps_one_row(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    album = _album(conn, _artist(conn, "21 Savage"), "american dream")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+                         "VALUES(?, 'redrum', 3, 'plex')", (album,)).lastrowid
+    first = _file_row(conn, track, "H:/Music/21 Savage/american dream/03 - redrum.flac", size=28734963)
+    _file_row(conn, track, "H:\\Music\\21 Savage\\american dream\\03 - redrum.flac", size=28734963)
+    conn.commit()
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["file_rows_folded"] == 1
+    rows = conn.execute("SELECT id, is_primary FROM lib2_track_files WHERE track_id=?", (track,)).fetchall()
+    assert [(r[0], r[1]) for r in rows] == [(first, 1)]       # the older row, and it is the primary
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE id=?", (track,)).fetchone()[0] == 1

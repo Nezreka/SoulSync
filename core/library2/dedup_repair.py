@@ -578,27 +578,54 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
     """
     from core.library2.mb_reconcile import _fold_duplicate
 
+    from core.library2.track_files import elect_primary_file, path_identity, path_spellings
+
     active = _active_server() or ""
     cursor = conn.cursor()
-    stats = {"shared_files_folded": 0, "server_albums_folded": 0}
-    rows = conn.execute(
-        """SELECT f.id AS file_id, f.path, t.id AS track_id, t.album_id,
-                  COALESCE(t.server_source, '') AS server_source
+    stats = {"shared_files_folded": 0, "server_albums_folded": 0, "file_rows_folded": 0}
+    select = """SELECT f.id AS file_id, f.path, t.id AS track_id, t.album_id,
+                  COALESCE(t.server_source, '') AS server_source,
+                  COALESCE(f.file_state, 'active') AS file_state
              FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id
-            WHERE COALESCE(f.file_state, 'active') <> 'deleted' AND f.path IN (
+            WHERE COALESCE(f.file_state, 'active') <> 'deleted' AND """
+    rows = conn.execute(
+        select + """f.path IN (
                   SELECT path FROM lib2_track_files
                    WHERE COALESCE(file_state, 'active') <> 'deleted'
                    GROUP BY path HAVING COUNT(DISTINCT track_id) > 1)"""
     ).fetchall()
+    # The same file under its other spelling (H:\Music\a.flac beside
+    # H:/Music/a.flac): the scan wrote the first, the import the second, and
+    # neither found the other. Only the rows written with a backslash are read,
+    # then each one's forward-slash partner through the path index.
+    backslashed = conn.execute(select + "instr(f.path, char(92)) > 0").fetchall()
+    partners: List[Any] = []
+    wanted = sorted({form for row in backslashed for form in path_spellings(row["path"])
+                     if form != row["path"]})
+    for start in range(0, len(wanted), 500):
+        part = wanted[start:start + 500]
+        partners.extend(conn.execute(
+            select + f"f.path IN ({','.join('?' * len(part))})", part).fetchall())
+    seen_files = set()
     groups: Dict[str, List[Any]] = {}
-    for row in rows:
-        groups.setdefault(row["path"], []).append(row)
+    for row in (*rows, *backslashed, *partners):
+        if row["file_id"] in seen_files:
+            continue
+        seen_files.add(row["file_id"])
+        groups.setdefault(path_identity(row["path"]), []).append(row)
     emptied: Dict[int, int] = {}
     for members in groups.values():
-        members.sort(key=lambda r: (r["server_source"] != active, int(r["track_id"])))
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda r: (r["server_source"] != active, int(r["track_id"]),
+                                    r["file_state"] != "active", int(r["file_id"])))
         keep = members[0]
         for dup in members[1:]:
             if dup["track_id"] == keep["track_id"]:
+                # the same file twice on one track: one row is enough
+                cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (dup["file_id"],))
+                elect_primary_file(conn, int(keep["track_id"]))
+                stats["file_rows_folded"] += 1
                 continue
             cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (dup["file_id"],))
             cursor.execute(

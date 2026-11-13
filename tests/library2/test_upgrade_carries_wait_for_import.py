@@ -61,3 +61,28 @@ def test_the_shared_file_fold_runs_once_per_finished_import(tmp_path, monkeypatc
     bootstrap.run_deferred_backfills(db)
     bootstrap.run_deferred_backfills(db)
     assert calls == [1, 1]
+
+
+def test_a_library_folded_before_the_spelling_fix_is_folded_once_more(tmp_path, monkeypatch):
+    """nov 13 2026: the fold learned to pair a file with its other path
+    spelling. a library already marked done under the old key must run it
+    once more, and then not again."""
+    from core.library2 import dedup_repair
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    calls = []
+    monkeypatch.setattr(dedup_repair, "fold_shared_file_tracks",
+                        lambda conn: calls.append(1) or {"shared_files_folded": 0})
+    finished = "2026-11-01T10:00:00+00:00"
+    monkeypatch.setattr(bootstrap, "get_state", lambda _db: {"status": "done", "finished_at": finished})
+    with db._get_connection() as conn:
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {bootstrap._SHARED_FILES_MARKER} "
+                     "(import_finished_at TEXT PRIMARY KEY, "
+                     "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+        conn.execute(f"INSERT INTO {bootstrap._SHARED_FILES_MARKER}(import_finished_at, folded) "
+                     "VALUES(?, 0)", (finished,))
+        conn.commit()
+
+    bootstrap.run_deferred_backfills(db)
+    bootstrap.run_deferred_backfills(db)
+    assert calls == [1]

@@ -775,7 +775,11 @@ def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
     state = get_state(database)
     if state.get("status") != "done":
         return {}
-    finished = str(state.get("finished_at") or "")
+    # "|spellings": the fold now also pairs a file with its other path
+    # spelling (H:\Music beside H:/Music), which the media-server scan wrote as
+    # a second file or a twin track until Nov 13 2026. a library folded before
+    # that runs it once more under this key.
+    finished = f"{state.get('finished_at') or ''}|spellings"
     conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
                  "(import_finished_at TEXT PRIMARY KEY, "
                  "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
@@ -785,7 +789,8 @@ def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
     from core.library2.dedup_repair import fold_shared_file_tracks
     stats = fold_shared_file_tracks(conn)
     conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
-                 "VALUES(?, ?)", (finished, int(stats.get("shared_files_folded") or 0)))
+                 "VALUES(?, ?)", (finished, int(stats.get("shared_files_folded") or 0)
+                                  + int(stats.get("file_rows_folded") or 0)))
     return stats
 
 
