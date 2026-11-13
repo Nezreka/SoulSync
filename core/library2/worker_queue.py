@@ -126,8 +126,13 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
              f"AND {worker_credit_ready_sql(entity_type)} "
              f"AND {_unlocked(entity_type, 'e')}")
     if phase == "new":
+        # CROSS JOIN pins the walk to the entity table, in id order. Left to
+        # itself the planner started a track walk from the albums' artist
+        # index and then sorted every unattempted track to hand back one, so
+        # the half that is meant to stop at its first row never did.
+        source = _sources(service)[entity_type].replace(" JOIN ", " CROSS JOIN ")
         return f"""
-            {_sources(service)[entity_type]}
+            {source}
              WHERE NOT EXISTS (SELECT 1 FROM lib2_provider_attempts a
                                 WHERE a.entity_type = :entity
                                   AND a.entity_id = e.id
@@ -139,7 +144,8 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
     # Driven from the due index (CROSS JOIN pins the order): the planner
     # otherwise walked every album/artist to find the few failed attempts.
     source = _sources(service)[entity_type].replace(
-        "FROM lib2_", "FROM lib2_provider_attempts a CROSS JOIN lib2_", 1)
+        "FROM lib2_", "FROM lib2_provider_attempts a CROSS JOIN lib2_", 1).replace(
+        "SELECT e.id AS id", "SELECT a.last_attempted_at AS due_at, e.id AS id", 1)
     return f"""
         {source}
          WHERE a.entity_type = :entity AND a.entity_id = e.id
@@ -199,6 +205,21 @@ def _fetch(conn, entity_type: str, service: str, retry_after_days: int,
     if phase == "new" and after:
         sql = sql.replace("ORDER BY e.id", "AND e.id >= :after ORDER BY e.id", 1)
         params["after"] = int(after)
+    if phase == "retry" and len(set(retry_statuses)) > 1:
+        # One status at a time. The due index is in age order within a status,
+        # so each of these stops at its first owned row; asked for together,
+        # the two statuses' rows had to be gathered and sorted first, every due
+        # row with its owned check, to hand back one (a month after a first
+        # pass that is a few hundred thousand rows per worker tick).
+        oldest = None
+        for status in dict.fromkeys(retry_statuses):
+            row = conn.execute(
+                _pending_sql(entity_type, (status,), require_provider_id, key, phase)
+                + " LIMIT 1", params).fetchone()
+            if row is not None and (oldest is None or (row["due_at"], row["id"])
+                                    < (oldest["due_at"], oldest["id"])):
+                oldest = row
+        return oldest
     return conn.execute(sql + " LIMIT 1", params).fetchone()
 
 
@@ -725,7 +746,56 @@ _CHILD = {
 }
 
 
+def _batch_fingerprint(conn, service: str, child: str) -> tuple:
+    """What can turn "no parent has a child due" into "one does": a parent
+    newly matched, a child's attempt recorded or cleared, a new child row.
+    Three reads off indexes. A child that becomes owned, or a lock coming
+    off, shows in none of them: those call `invalidate_pending_cache`, and
+    the TTL covers anything else."""
+    spec = _CHILD[child]
+    return (
+        conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_type=? "
+                     "AND service=? AND status='matched'",
+                     (spec["parent_type"], service)).fetchone()[0],
+        conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_type=? "
+                     "AND service=?", (child, service)).fetchone()[0],
+        conn.execute(f"SELECT MAX(id) FROM {spec['table']}").fetchone()[0],
+    )
+
+
 def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
+    """`_batch_parent_from`, without walking the same parents every call.
+
+    The walk is in parent id order and every parent below the last answer had
+    nothing due, so it resumes there and goes round once more from the start
+    when it runs out. A worker with no batch left asked this twice per loop
+    and each ask read every matched parent with its children (7s for tracks
+    on a 73k-album library, Nov 13 2026); an empty answer is now remembered
+    for as long as nothing that could change it has moved."""
+    key = str(service).strip().lower()
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not db_file:  # in-memory databases share no identity to memoise on
+        return _batch_parent_from(conn, key, child, 0)
+    memo = ("batch", db_file, key, child)
+    seen = _NEW_IDLE.get(memo)
+    fingerprint = _batch_fingerprint(conn, key, child)
+    if (seen is not None and seen[0] == fingerprint
+            and time.monotonic() - seen[1] < _NEW_IDLE_TTL):
+        return None
+    after = _NEW_CURSOR.get(memo, 0)
+    row = _batch_parent_from(conn, key, child, after)
+    if row is None and after:
+        row = _batch_parent_from(conn, key, child, 0)
+    # inclusive: a parent the worker didn't finish is offered again
+    _NEW_CURSOR[memo] = int(row["parent_id"]) if row is not None else 0
+    if row is None:
+        _NEW_IDLE[memo] = (fingerprint, time.monotonic())
+    else:
+        _NEW_IDLE.pop(memo, None)
+    return row
+
+
+def _batch_parent_from(conn, service: str, child: str, after: int) -> Optional[Any]:
     """A settled parent, holding a provider id, with at least one child due."""
     # The ownership filter `_pending_sql` applies is needed here too. The
     # single-item path was owned-filtered and the BATCH path was not, so a
@@ -744,15 +814,18 @@ def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
         select = ("p.id AS parent_id, p.title AS parent_name, "
                   "ar.name AS grandparent_name")
         child_link = "c.album_id = p.id"
+    # CROSS JOIN: walk the parents in id order and stop at the first with a
+    # child due. The planner otherwise started from the matched attempts and
+    # sorted every qualifying parent to hand back the lowest one.
     grandparent = (
-        "JOIN lib2_artists ar ON ar.id = p.primary_artist_id"
+        "CROSS JOIN lib2_artists ar ON ar.id = p.primary_artist_id"
         if spec["parent_type"] == "album" else "")
     return conn.execute(
         f"""
         SELECT {select}, {parent_id_sql} AS provider_id
           FROM {parent_table} p
           {grandparent}
-          JOIN lib2_provider_attempts a
+          CROSS JOIN lib2_provider_attempts a
                 ON a.entity_type = :parent_type AND a.entity_id = p.id
                AND a.service = :service AND a.status = 'matched'
          WHERE COALESCE({parent_id_sql}, '') <> ''
@@ -766,10 +839,11 @@ def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
                 WHERE {child_link} AND ca.entity_id IS NULL
                   AND {_unlocked(child, "c")}
                   AND {owned_sql(child, "c", scope=ANY_OWNER)})
+           AND p.id >= :after
          ORDER BY p.id LIMIT 1
         """,
         {"parent_type": spec["parent_type"], "child_type": child,
-         "service": str(service).strip().lower()},
+         "service": str(service).strip().lower(), "after": int(after or 0)},
     ).fetchone()
 
 
