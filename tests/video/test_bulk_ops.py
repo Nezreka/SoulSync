@@ -184,3 +184,124 @@ def test_bulk_api_routes(tmp_path, monkeypatch):
         assert r.status_code == 200 and r.get_json()["added"] == 2
     finally:
         videoapi._video_db = None
+
+
+# ── the library manager's operations (Nov 13 2026) ───────────────────────────
+
+def test_validate_the_managers_operations():
+    v = bulk_ops.validate
+    assert v("movie", [1], "quality_profile", {"profile_id": None}) is None
+    assert v("movie", [1], "quality_profile", {"profile_id": 3}) is None
+    assert v("movie", [1], "quality_profile", {"profile_id": "3"})
+    assert v("movie", [1], "quality_profile", {"profile_id": True})
+    assert v("movie", [1], "wish", {"mode": "missing"}) is None
+    assert v("movie", [1], "wish", {"mode": "everything"})
+    assert v("show", [1], "series_type", {"value": "anime"}) is None
+    assert v("movie", [1], "series_type", {"value": "anime"})     # a show's setting
+    assert v("show", [1], "series_type", {"value": "cartoon"})
+    # a delete of N titles is confirmed as N
+    assert v("movie", [1, 2], "delete", {"confirm": 2}) is None
+    assert v("movie", [1, 2], "delete", {"confirm": 1})
+    assert v("movie", [1, 2], "delete", {})
+    for action in ("rename", "subtitles", "rematch"):
+        assert v("movie", [1], action, {}) is None
+
+
+def test_quality_profile_is_set_and_put_back_to_the_default(db):
+    ids = _seed(db, 1)
+    pid = db.upsert_named_quality_profile(None, "4K", "[]", "2160p")
+    pid = pid if isinstance(pid, int) else db.named_quality_profiles()[0]["id"]
+    assert bulk_ops._apply_one(db, "movie", ids[0], "quality_profile", {"profile_id": pid}, None)["ok"]
+    assert _movie(db, ids[0])["quality_profile_id"] == pid
+    assert bulk_ops._apply_one(db, "movie", ids[0], "quality_profile", {"profile_id": None}, None)["ok"]
+    assert _movie(db, ids[0])["quality_profile_id"] is None
+
+
+def test_wish_missing_asks_only_for_what_is_not_there(db):
+    ids = _seed(db, 1)
+    wanted = db.upsert_movie("plex", {"server_id": "w", "title": "Wanted", "year": 2024, "tmdb_id": 9})
+    # an owned movie has nothing missing
+    assert bulk_ops._apply_one(db, "movie", ids[0], "wish", {"mode": "missing"}, None) == {
+        "ok": True, "pushed": False, "changed": 0}
+    assert bulk_ops._apply_one(db, "movie", wanted, "wish", {"mode": "missing"}, None)["changed"] == 1
+    # and an upgrade watch is for a copy you have
+    assert bulk_ops._apply_one(db, "movie", wanted, "wish", {"mode": "upgrade"}, None)["changed"] == 0
+    assert bulk_ops._apply_one(db, "movie", ids[0], "wish", {"mode": "upgrade"}, None)["changed"] == 1
+    unmatched = db.upsert_movie("plex", {"server_id": "u", "title": "Unknown"})
+    assert bulk_ops._apply_one(db, "movie", unmatched, "wish", {"mode": "missing"}, None)["ok"] is False
+
+
+def test_wish_missing_for_a_show_is_its_aired_monitored_gaps(db):
+    show = db.upsert_show_tree("plex", {"server_id": "s", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"server_id": "e1", "episode_number": 1, "title": "One", "file": {"path": "/s/1.mkv"}}]}]})
+    db.backfill_episodes(show, 1, [
+        {"episode_number": 2, "title": "Aired", "air_date": "2020-01-01"},
+        {"episode_number": 3, "title": "Not yet", "air_date": "2999-01-01"}])
+    conn = db._get_connection()
+    conn.execute("UPDATE shows SET tmdb_id=77 WHERE id=?", (show,))
+    conn.commit()
+    conn.close()
+    assert bulk_ops._apply_one(db, "show", show, "wish", {"mode": "missing"}, None)["changed"] == 1
+    assert bulk_ops._apply_one(db, "show", show, "wish", {"mode": "upgrade"}, None)["changed"] == 1
+    conn = db._get_connection()
+    wished = sorted(r[0] for r in conn.execute(
+        "SELECT episode_number FROM video_wishlist WHERE tmdb_id=77 AND kind='episode'"))
+    conn.close()
+    assert wished == [1, 2]
+
+
+def test_rename_runs_every_file_and_counts_what_changed(db, monkeypatch):
+    from core.video import file_ops
+    ids = _seed(db, 1)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO media_files(movie_id, relative_path) VALUES(?, '/m1.copy.mkv')", (ids[0],))
+    conn.commit()
+    conn.close()
+    answers = iter([{"success": True, "action": "renamed"}, {"success": True, "action": "unchanged"}])
+    seen = []
+    monkeypatch.setattr(file_ops, "rename_to_template",
+                        lambda _db, file_id: seen.append(file_id) or next(answers))
+    out = bulk_ops._apply_one(db, "movie", ids[0], "rename", {}, None)
+    assert out == {"ok": True, "pushed": False, "changed": 1, "files_failed": 0} and len(seen) == 2
+
+    monkeypatch.setattr(file_ops, "rename_to_template",
+                        lambda _db, file_id: {"success": False, "error": "unreachable"})
+    assert bulk_ops._apply_one(db, "movie", ids[0], "rename", {}, None)["ok"] is False
+
+
+def test_series_type_and_rematch(db):
+    show = db.upsert_show_tree("plex", {"server_id": "s", "title": "Show", "tmdb_id": 5, "seasons": []})
+    assert bulk_ops._apply_one(db, "show", show, "series_type", {"value": "anime"}, None)["ok"]
+    conn = db._get_connection()
+    assert conn.execute("SELECT series_type FROM shows WHERE id=?", (show,)).fetchone()[0] == "anime"
+    conn.close()
+
+
+def test_the_job_counts_changes_and_refreshes_the_managers_rows(db):
+    from core.video import library_manager as lm
+    lm.forget()
+    ids = _seed(db, 3)
+    assert all(r["monitored"] for r in lm.titles(db, "movies", {})["items"])
+    res = bulk_ops.start_bulk(db, "movie", ids, "monitored", {"value": False})
+    assert res["ok"], res
+    done = _wait_idle()
+    assert done["ok"] == 3 and done["failed"] == 0
+    # the manager's summary was refreshed for the three, without a full rebuild
+    assert [r["monitored"] for r in lm.titles(db, "movies", {})["items"]] == [False] * 3
+    lm.forget()
+
+
+def test_delete_takes_the_title_out_through_the_detail_pages_delete(db, monkeypatch):
+    from core.video import delete_title
+    ids = _seed(db, 2)
+    ran = []
+    monkeypatch.setattr(delete_title, "plan", lambda _db, kind, item_id: {"title": "T%d" % item_id})
+    monkeypatch.setattr(delete_title, "run", lambda _db, kind, item_id, **kw: (
+        ran.append((item_id, kw["typed_title"], kw["resolved_by"])) or {"success": True}))
+    out = bulk_ops._apply_one(db, "movie", ids[0], "delete", {"profile_id_of_user": 4}, None)
+    assert out["ok"] and out["changed"] == 1 and ran == [(ids[0], "T%d" % ids[0], 4)]
+    # a title already gone is not a failure
+    monkeypatch.setattr(delete_title, "plan", lambda *_a: None)
+    assert bulk_ops._apply_one(db, "movie", ids[1], "delete", {}, None) == {
+        "ok": True, "pushed": False, "changed": 0}

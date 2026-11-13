@@ -221,3 +221,79 @@ def test_a_drive_filter_is_a_prefix_not_a_pattern(db):
     database, _ids = db
     assert lm.files(database, {"kind": "movies", "drive": "/mnt/%"})["totals"]["files"] == 0
     assert _titles(database, drive="/mnt/%") == []
+
+
+# ── over http ────────────────────────────────────────────────────────────────
+
+def _client(database, *, is_admin=True):
+    import api.video as videoapi
+    from flask import Flask
+    videoapi._video_db = database
+    app = Flask(__name__)
+
+    @app.before_request
+    def _stamp():
+        from flask import g
+        g.is_admin = is_admin
+        g.profile_id = 1 if is_admin else 2
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client()
+
+
+def test_the_manager_api_serves_rows_filters_and_ids(db, monkeypatch):
+    database, ids = db
+    monkeypatch.setattr("core.video.sources.resolve_video_server", lambda: "plex")
+    client = _client(database)
+    out = client.get("/api/video/manager/titles?kind=movies&needs=copies").get_json()
+    assert out["success"] and [r["title"] for r in out["items"]] == ["Alien"]
+    files = client.get("/api/video/manager/files?kind=movies&codec=mpeg4").get_json()
+    assert [r["filename"] for r in files["items"]] == ["z.avi"]
+    facets = client.get("/api/video/manager/facets?kind=movies").get_json()
+    assert facets["needs"]["copies"] == 1 and "quality_profiles" in facets and "libraries" in facets
+    picked = client.get("/api/video/manager/ids?kind=movies&status=owned").get_json()
+    assert sorted(picked["ids"]) == sorted(ids[t] for t in ("The Matrix", "Alien", "Zodiac", "Brazil"))
+    assert picked["truncated"] is False
+
+
+def test_the_manager_is_the_admins(db, monkeypatch):
+    database, _ids = db
+    monkeypatch.setattr("core.video.sources.resolve_video_server", lambda: "plex")
+    client = _client(database, is_admin=False)
+    for path in ("/api/video/manager/titles", "/api/video/manager/files",
+                 "/api/video/manager/facets", "/api/video/manager/ids",
+                 "/api/video/manager/rename-preview?kind=movie&ids=1",
+                 "/api/video/manager/delete-preview?kind=movie&ids=1"):
+        assert client.get(path).status_code == 403, path
+
+
+def test_rename_preview_lists_only_the_files_that_would_change(db, monkeypatch):
+    from core.video import file_ops
+    database, ids = db
+    plans = {"a.mkv": {"current": "a.mkv", "expected": "Alien (1979).mkv", "conforms": False},
+             "a.1080.mkv": {"current": "a.1080.mkv", "expected": "a.1080.mkv", "conforms": True}}
+
+    def plan(_db, file_id):
+        row = _db._get_connection().execute(
+            "SELECT relative_path FROM media_files WHERE id=?", (file_id,)).fetchone()
+        return plans.get(row[0].rsplit("/", 1)[-1], {"error": "not reachable"})
+    monkeypatch.setattr(file_ops, "rename_plan", plan)
+    client = _client(database)
+    out = client.get("/api/video/manager/rename-preview?kind=movie&ids=%d,%d" % (
+        ids["Alien"], ids["Zodiac"])).get_json()
+    assert (out["files"], out["to_rename"], out["already_named"], out["unreachable"]) == (3, 1, 1, 1)
+    assert [c["expected"] for c in out["changes"]] == ["Alien (1979).mkv"] and out["more"] == 0
+    assert client.get("/api/video/manager/rename-preview?kind=movie").status_code == 400
+
+
+def test_delete_preview_adds_the_selection_up(db, monkeypatch):
+    from core.video import delete_title
+    database, ids = db
+    monkeypatch.setattr(delete_title, "plan", lambda _db, kind, item_id: {
+        "title": "T%d" % item_id, "files": 2, "size_bytes": 500,
+        "blocked": "seeding" if item_id == ids["Alien"] else None})
+    client = _client(database)
+    out = client.get("/api/video/manager/delete-preview?kind=movie&ids=%d,%d" % (
+        ids["Alien"], ids["Brazil"])).get_json()
+    assert (out["titles"], out["files"], out["size_bytes"]) == (2, 4, 1000)
+    assert out["blocked"] == [{"title": "T%d" % ids["Alien"], "reason": "seeding"}]

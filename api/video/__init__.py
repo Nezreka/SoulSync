@@ -109,7 +109,9 @@ def create_video_blueprint() -> Blueprint:
                    "/api/video/notifications",   # P11: GETs return webhook URLs/bot tokens
                    "/api/video/backups",         # P10: restore/download the whole database
                    # delete a whole title; its preview GET lists file paths
-                   "/api/video/title-delete")
+                   "/api/video/title-delete",
+                   # the library manager: its rows carry file paths
+                   "/api/video/manager")
         # Config the Settings page WRITES but content views (download modal / grab)
         # legitimately READ — gate the writes, leave the GETs open.
         if writing:
@@ -210,6 +212,7 @@ def create_video_blueprint() -> Blueprint:
     from .manual_match import register_routes as reg_manual_match
     from .subtitles import register_routes as reg_subtitles
     from .library_manage import register_routes as reg_library_manage
+    from .manager import register_routes as reg_manager
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -238,5 +241,6 @@ def create_video_blueprint() -> Blueprint:
     reg_manual_match(bp)
     reg_subtitles(bp)
     reg_library_manage(bp)
+    reg_manager(bp)
 
     return bp
