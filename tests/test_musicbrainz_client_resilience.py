@@ -289,3 +289,56 @@ def test_search_recording_raises_on_a_busy_body_when_asked(monkeypatch):
     with pytest.raises(mbc.MusicBrainzBusyError):
         client.search_recording('Song', 'Artist', raise_on_error=True)
     assert len(session.calls) == 2
+
+
+def test_merged_release_group_redirect_is_followed(monkeypatch):
+    """nov 13 2026: musicbrainz answers a merged release-group id with a 301
+    to the group it was merged into (checked against the live api). only
+    recordings were followed, so the album failed on every start with
+    "configure its final base URL"."""
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    session = _Session([
+        _Response(status_code=301, headers={
+            'Location': 'http://mirror:5000/ws/2/release-group/canonical?fmt=json&inc=releases'}),
+        _Response({'id': 'canonical', 'title': 'Album'}),
+    ])
+    client = _client(session)
+    assert client.get_release_group('merged', includes=['releases'])['id'] == 'canonical'
+    assert len(session.calls) == 2
+    assert session.calls[1]['url'] == 'http://mirror:5000/ws/2/release-group/canonical?fmt=json&inc=releases'
+
+
+@pytest.mark.parametrize('asked, target, allowed', [
+    ('/ws/2/artist/a', '/ws/2/artist/b', True),
+    ('/ws/2/release/a', '/ws/2/release/b', True),
+    ('/ws/2/release-group/a', '/ws/2/release-group/b', True),
+    ('/ws/2/recording/a', '/ws/2/recording/b', True),
+    ('/ws/2/work/a', '/ws/2/work/b', True),
+    # another kind of entity, another api root, a browse or search path
+    ('/ws/2/release-group/a', '/ws/2/release/b', False),
+    ('/ws/2/recording/a', '/ws/3/recording/b', False),
+    ('/ws/2/recording/a', '/recording/b', False),
+    ('/ws/2/recording', '/ws/2/recording/b', False),
+    ('/ws/2/recording/a', '/ws/2/recording/b/extra', False),
+    ('/ws/2/recording/a', '/ws/2/recording/', False),
+    ('/ws/2/isrc/a', '/ws/2/isrc/b', False),
+    ('/ws/2/login/a', '/ws/2/login/b', False),
+])
+def test_only_a_same_entity_lookup_redirect_is_followed(asked, target, allowed):
+    import core.musicbrainz_client as mb
+    assert mb._same_entity_redirect('/ws/2', asked, target) is allowed
+    assert mb._same_entity_redirect('/ws/2/', asked, target) is allowed
+
+
+def test_a_release_group_redirect_to_another_host_is_still_refused(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    session = _Session([_Response(status_code=301, headers={
+        'Location': 'https://elsewhere.example/ws/2/release-group/canonical?fmt=json'})])
+    client = _client(session)
+    with pytest.raises(requests.HTTPError, match='final base URL'):
+        client._get('/release-group/merged', params={'fmt': 'json'})
+    assert len(session.calls) == 1
