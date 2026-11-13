@@ -25114,6 +25114,26 @@ class MusicDatabase:
                 conn.close()
         return healed
 
+    def count_library_history_downloads(self) -> int:
+        """How many finished downloads the history holds, and nothing else.
+
+        The dashboard stats ask every 10 seconds while a tab is open, and only
+        for this one number. get_library_history_stats counts every event type
+        to answer, which reads all of a library's import rows (311k on one
+        install, 0.2s a time); this reads the download rows off the index."""
+        try:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM library_history "
+                    "WHERE event_type = 'download' AND cleared_at IS NULL").fetchone()
+                return int(row[0] or 0) if row else 0
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"Error counting library history downloads: {e}")
+            return 0
+
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""
         try:

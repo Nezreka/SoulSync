@@ -4086,7 +4086,7 @@ def _build_system_stats():
     # survives Docker/container restarts and streaming downloads that leave
     # the in-memory task tracker after post-processing.
     try:
-        persistent_finished = int(get_database().get_library_history_stats().get('downloads', 0) or 0)
+        persistent_finished = get_database().count_library_history_downloads()
         with session_stats_lock:
             finished_downloads = max(persistent_finished, session_completed_downloads)
     except Exception:
