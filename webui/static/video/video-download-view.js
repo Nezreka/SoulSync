@@ -1801,6 +1801,21 @@
         perEpisode();
     }
 
+    // is this download for the show the modal is on? a title is not a show:
+    // the office (2005) in flight lit up every row of the office (2001) (#2075).
+    // the ids decide when both sides have one from the same catalogue, else
+    // the title, and the year when both have it. the server asks the same
+    // question the same way (_same_show)
+    function sameShow(dl, ctx, st) {
+        if (String(ctx.title || dl.title) !== String(st.title)) return false;
+        var theirSrc = String(dl.media_source || '').toLowerCase(), theirId = String(dl.media_id == null ? '' : dl.media_id);
+        var mySrc = String(st.mediaSource || '').toLowerCase(), myId = String(st.mediaId == null ? '' : st.mediaId);
+        if (theirSrc && theirId && mySrc && myId && theirSrc === mySrc) return theirId === myId;
+        var theirYear = String(dl.year || ctx.year || '').slice(0, 4), myYear = String(st.year || '').slice(0, 4);
+        if (/^\d{4}$/.test(theirYear) && /^\d{4}$/.test(myYear)) return theirYear === myYear;
+        return true;
+    }
+
     // On (re)open, resume live tracking for any episodes of THIS show already in flight,
     // so closing/reopening the modal never loses the per-episode progress.
     function resumeEpisodeTracking(container, st) {
@@ -1809,7 +1824,7 @@
                 var ctx = dl.search_ctx;
                 if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (e) { ctx = null; } }
                 ctx = ctx || {};
-                if (String(ctx.title || dl.title) !== String(st.title)) return;
+                if (!sameShow(dl, ctx, st)) return;
                 if (ctx.season == null || ctx.episode == null) return;
                 var epEl = _epEl(container, ctx.season, ctx.episode);
                 if (epEl && epEl._epdl == null) { epStatusRender(epEl, dl); epTrack(epEl, dl.id); }

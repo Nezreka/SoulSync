@@ -628,14 +628,33 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     return (accepted[:40] + rejected[:15])
 
 
-def _active_episode_keys(db, title) -> set:
-    """(season, episode) pairs already downloading/queued for a show (by title) — for
+def _same_show(download, title, media_id=None, media_source=None, year=None) -> bool:
+    """is this download for the show being grabbed? a title is not a show: the
+    office (2005) in flight made every episode of the office (2001) read as
+    already downloading, and its grab was dropped (#2075). the ids decide when
+    both sides name one in the same catalogue; else the title, and the year
+    when both have it."""
+    if str(download.get("title") or "") != str(title or ""):
+        return False
+    theirs = (str(download.get("media_source") or "").lower(), str(download.get("media_id") or ""))
+    mine = (str(media_source or "").lower(), str(media_id if media_id is not None else ""))
+    if all(theirs) and all(mine) and theirs[0] == mine[0]:
+        return theirs[1] == mine[1]
+    their_year, my_year = str(download.get("year") or "")[:4], str(year or "")[:4]
+    if their_year.isdigit() and my_year.isdigit():
+        return their_year == my_year
+    return True
+
+
+def _active_episode_keys(db, title, media_id=None, media_source=None, year=None) -> set:
+    """(season, episode) pairs already downloading/queued for THIS show — for
     in-flight dedup so a grab/pack doesn't create a duplicate row for the same episode."""
     import json as _j
     keys = set()
     try:
         for d in (db.get_active_video_downloads() or []):
-            if str(d.get("kind") or "").lower() != "show" or str(d.get("title") or "") != str(title):
+            if (str(d.get("kind") or "").lower() != "show"
+                    or not _same_show(d, title, media_id, media_source, year)):
                 continue
             ctx = d.get("search_ctx")
             if isinstance(ctx, str):
@@ -1602,7 +1621,9 @@ def register_routes(bp):
         _ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
         if (str(body.get("kind") or "").lower() == "show"
                 and _ctx.get("season") is not None and _ctx.get("episode") is not None
-                and (_ctx["season"], _ctx["episode"]) in _active_episode_keys(db, body.get("title") or "")):
+                and (_ctx["season"], _ctx["episode"]) in _active_episode_keys(
+                    db, body.get("title") or "", body.get("media_id"),
+                    body.get("media_source"), body.get("year"))):
             return jsonify({"ok": True, "already": True})
 
         import json as _json
@@ -1838,7 +1859,8 @@ def register_routes(bp):
                 owned = db.owned_episode_keys(int(body["media_id"]))
             except (ValueError, TypeError):
                 owned = set()
-        in_flight = _active_episode_keys(db, title)
+        in_flight = _active_episode_keys(
+            db, title, body.get("media_id"), body.get("media_source"), body.get("year"))
 
         started, ids, skipped = 0, [], 0
         for f in files:
