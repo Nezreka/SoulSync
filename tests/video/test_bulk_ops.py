@@ -305,3 +305,24 @@ def test_delete_takes_the_title_out_through_the_detail_pages_delete(db, monkeypa
     monkeypatch.setattr(delete_title, "plan", lambda *_a: None)
     assert bulk_ops._apply_one(db, "movie", ids[1], "delete", {}, None) == {
         "ok": True, "pushed": False, "changed": 0}
+
+
+def test_lock_takes_every_editable_detail_and_unlock_hands_them_back(db):
+    from core.video import library_manager as lm
+    from database.video_database import _USER_EDITABLE
+    ids = _seed(db, 1)
+    out = bulk_ops._apply_one(db, "movie", ids[0], "lock", {"value": True}, None)
+    assert out["ok"] and out["changed"] == len(_USER_EDITABLE["movies"])
+    assert set(db.title_identity("movie", ids[0])["locked_fields"]) == _USER_EDITABLE["movies"]
+    lm.forget()
+    assert [r["title"] for r in lm.titles(db, "movies", {"locked": "1"})["items"]] == ["Movie 1"]
+    assert lm.titles(db, "movies", {"locked": "0"})["items"] == []
+
+    out = bulk_ops._apply_one(db, "movie", ids[0], "lock", {"value": False}, None)
+    assert out["ok"] and out["changed"] == len(_USER_EDITABLE["movies"])
+    assert db.title_identity("movie", ids[0])["locked_fields"] == []
+    # nothing held: nothing to hand back, and not a failure
+    assert bulk_ops._apply_one(db, "movie", ids[0], "lock", {"value": False}, None) == {
+        "ok": True, "pushed": False, "changed": 0}
+    assert bulk_ops.validate("movie", ids, "lock", {}) is not None
+    lm.forget()

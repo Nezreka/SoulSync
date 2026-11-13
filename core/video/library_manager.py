@@ -438,6 +438,9 @@ def _matches(row: Dict[str, Any], args: Dict[str, Any], watched: Optional[set]) 
     monitored = str(args.get("monitored") or "")
     if monitored in ("1", "0") and bool(row["monitored"]) != (monitored == "1"):
         return False
+    locked = str(args.get("locked") or "")
+    if locked in ("1", "0") and bool(row["locked_fields"]) != (locked == "1"):
+        return False
     res = str(args.get("resolution") or "").strip().lower()
     if res:
         label = RES_LABELS.get(_RES_BY_NAME.get(res, -1))

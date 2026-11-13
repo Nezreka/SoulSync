@@ -23,6 +23,9 @@ action the detail page already has, run over a selection:
   rematch         {}            — let go of the match so it is identified again
   series_type     {value}       — shows: standard | daily | anime
   delete          {}            — the whole title, files to the recycle folder
+  lock            {value}       — lock every detail a person can edit (scans and
+                                  metadata refreshes leave the title as it is),
+                                  or hand them all back
 
 Add-to-collection is NOT here: it's a single body merge on the collection
 definition (see api/video/bulk.py), not a per-item loop.
@@ -44,7 +47,7 @@ _JOB = _channel.job
 
 ACTIONS = ("content_rating", "genre_add", "genre_remove", "monitored", "watched",
            "refresh_art", "quality_profile", "rename", "wish", "subtitles", "rematch",
-           "series_type", "delete")
+           "series_type", "delete", "lock")
 #: the ones that move or remove files: an admin's to run
 FILE_ACTIONS = ("rename", "delete")
 SERIES_TYPES = ("standard", "daily", "anime")
@@ -75,6 +78,7 @@ def _label(action: str, params: dict, kind: str, n: int) -> str:
         "rematch": "Identify again",
         "series_type": "Series type → " + str(params.get("value") or ""),
         "delete": "Delete",
+        "lock": ("Lock details" if params.get("value") else "Unlock details"),
     }.get(action, action)
     return f"{what} · {n} {noun}"
 
@@ -91,7 +95,7 @@ def validate(kind: str, ids, action: str, params: dict):
         return "value required"
     if action in ("genre_add", "genre_remove") and not str(params.get("genre") or "").strip():
         return "genre required"
-    if action in ("monitored", "watched") and not isinstance(params.get("value"), bool):
+    if action in ("monitored", "watched", "lock") and not isinstance(params.get("value"), bool):
         return "value must be true/false"
     if action == "quality_profile":
         pid = params.get("profile_id")
@@ -155,7 +159,33 @@ def _apply_one(db, kind: str, item_id: int, action: str, params: dict, source) -
                 "pushed": False}
     if action == "delete":
         return _delete_title(db, kind, item_id, params.get("profile_id_of_user") or 1)
+    if action == "lock":
+        return _lock_title(db, kind, item_id, bool(params["value"]), source)
     return {"ok": False}
+
+
+def _lock_title(db, kind: str, item_id: int, locked: bool, source) -> dict:
+    """lock every detail a person can edit, or hand them all back. a locked
+    field is the user's: scans and metadata refreshes leave it alone. handing
+    one back tells the server too, so its next scan sets the field again."""
+    from core.video import metadata as med
+    from database.video_database import _USER_EDITABLE
+    fields = sorted(_USER_EDITABLE["movies" if kind == "movie" else "shows"])
+    changed = 0
+    if locked:
+        for field in fields:
+            if db.set_field_lock(kind, item_id, field, True) is None:
+                return {"ok": False, "reason": "not found"}
+            changed += 1
+        return {"ok": True, "pushed": False, "changed": changed}
+    held = set((db.title_identity(kind, item_id) or {}).get("locked_fields") or [])
+    for field in fields:
+        if field in held:
+            res = med.release_lock(db, kind, item_id, field, source=source) or {}
+            if not res.get("ok"):
+                return {"ok": False, "reason": res.get("error")}
+            changed += 1
+    return {"ok": True, "pushed": False, "changed": changed}
 
 
 def _title_file_ids(db, kind: str, item_id: int) -> list:
