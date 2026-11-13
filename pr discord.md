@@ -1,17 +1,17 @@
-**SoulSync 3.6.4 is out** :musical_note:
+**SoulSync 3.6.5 is out** :musical_note:
 
-Video now supports your own movie and TV libraries. Each library has its own quality profile, download sources, client category, Prowlarr indexers and automatic search, and the same movie can live in two libraries as two copies. Releases are ranked one way everywhere (quality, then custom formats, then tie-breaks), and every search result says why it ranked where it did. SABnzbd and NZBGet now receive the NZB file itself, and a season grab checks it has the right show (thanks SeadogsBooty and Thibs). Admins can now delete a show or movie and have it stay deleted: nothing grabs it again, and its folder goes to the recycle bin as one entry you can restore (thanks PapaBearDoes).
+Both dashboards have been rebuilt. Music and video each open on a hero with the worker orbs, then the system as a board: your week, your watchlist and wishlist counts with what is in them, playlist sync, and what runs next. The orbs now respond to a hover straight away.
 
-Own-library profiles now work on Navidrome 0.58+ (thanks mirlooun). Every profile can hide the pages and jobs it doesn't use, and the Playlists and Watchlist pages have been redesigned.
+The Tools, Automations and Stats pages have been redesigned, and the notification bell has been rebuilt: notes stay new until you close the panel, it survives a reload, toasts stack, and history is grouped by day. Movie and show pages are now one page with no tabs.
 
-Download Discography now uses the artist's quality profile (thanks Foxxify). You can follow a YouTube channel without downloading its new uploads (thanks JuanVqz), Library Health has per-artist cleanup checks (thanks QT3496), and mirrored playlists can be exported as M3U (thanks TaunGadd).
+New installs no longer hit a failed library upgrade when pressing Import library (#2062).
 
-Everything Library v2 touched was reviewed five times end to end. Every finding was fixed with a test, covering the 3.6.1 upgrade, household and own-library separation, tags, artwork, repair jobs and downloads. The library pages, reports and startup are much faster on large libraries.
+Artist merges are now safe. Two different bands could be merged because they shared one catalogue ID (thanks SeadogsBooty, #2073). Merges now need real evidence, every merge is recorded and can be undone, and a new Artist Merge Review job finds artists merged by mistake and splits them.
 
-Playlists can now be rotating: a song the playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).
+Albums and artists can be locked once reviewed, so enrichment and repairs leave them alone (#2046). Automatic quality upgrades now work properly (#2060), and artist pages have sections for live albums, compilations, soundtracks and remixes (#2055).
 
-Library scans no longer get flagged as stuck while an own-library profile's scan is still working (#2036).
+New tools: Use File Tags for one album or the whole library, and Compilation Songs to Original Albums (thanks wolf39us, #2070, #2074, #2077). Album Tag Consistency now finds compilations split into one album per artist (thanks Storm, #2072).
 
-Thanks also to nick2000713, splitsec2, lozog, Eric-sson, cremonies and jdfrye2 for fixes and reports.
+Also: search all sources at once (#2051), ListenBrainz Daily Jams as a rolling playlist (thanks mpaugam, #2076), same-named shows no longer share a folder or a download status (#2052, #2075), a much faster Manage Workers window, and fixes for Prowlarr, Tidal, Deezer, Soulseek and torrents (#2061 to #2069).
 
 Full notes on GitHub.

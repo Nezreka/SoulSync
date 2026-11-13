@@ -1,64 +1,54 @@
-# soulsync 3.6.4: `dev` → `main`
+# soulsync 3.6.5: `dev` → `main`
 
-a big one. your own video libraries with their own sources, indexers and quality profiles, one release ranking that says why, delete a show or movie and have it stay deleted, own libraries on navidrome, every profile can hide what it doesn't use, the playlists and watchlist pages redone, and five full reviews of everything library v2 touched, with every finding fixed and tested.
+a design release with a lot of fixes under it. both dashboards rebuilt, the tools, automations, stats and notifications redone, video detail pages as one page, a review lock for albums and artists, every artist merge recorded and undoable, and a new install that no longer trips on a library upgrade it never needed.
 
-## video
+## new installs
 
-- **your own movie and tv libraries (thanks SeadogsBooty, #2029).** make as many libraries as you like and pick what goes in each by hand, by rules or by default. each library has its own quality profile, its own download sources in order, its own client category, its own prowlarr indexers, and its own automatic search and upgrades. the same movie can sit in two libraries as two copies (a 1080p and a 4k, say). movies, wanted and downloads get a library filter. not built yet: two instances of the same client, and a second copy of a tv show.
-- **one release ranking, and why (thanks SeadogsBooty, #2033).** quality first, then custom formats, then tie-breaks, the same order everywhere a release is picked. every search result says why it ranked where it did, and a preferred size setting breaks ties toward the size you want.
-- **sabnzbd and nzbget get the nzb file, not the prowlarr link (thanks SeadogsBooty, #2030).** soulsync fetches the nzb itself and sends the file, so the client never needs to reach prowlarr, and a fetch that fails says so instead of handing the client a dead link.
-- **delete show / delete movie, and it stays deleted (thanks PapaBearDoes, #2020).** admins get it in a title's More menu. it mutes the follow and clears wishlist rows, downloads, pending requests and repair findings for every profile first, so nothing grabs it straight back, then the title's folder goes to the recycle bin as one entry you can restore in one click. you type the title to confirm, and torrents still seeding are left in the client. the wishlist run also skips anything taken off the wishlist while its search ran.
-- **a grab checks it's the right show (thanks SeadogsBooty and Thibs, #2027, #2021).** grab season could take episodes of a different series with a similar name. a release must match the wanted show now, and the search tries the show's english and original names too.
-- **a cropped bluray reads as 1080p (thanks Thibs, #2025).** a 1920x800 encode read as unknown quality and below target. the width counts now.
-- **a Monitor Specials setting.** specials can be hidden on a show page and left out of a whole-show grab, and specials you set by hand keep their state.
-- **filter search results by language.**
-- **video discover and the calendar can be hidden on their own (#1909).**
-- a season you unmonitor stays unmonitored, a show card counts only the episodes you have or still want, the library grid asks for right-sized posters, a new import joins a folder that differs only by letter case, and full disc images are no longer grabbed (thanks PapaBearDoes, #2015, #2017, #2018, #2019, #1995).
-- a season whose files all left the server keeps its episodes and monitoring, and the Missing filter counts a gap the way the card does.
+- **a new install is not sent into a library upgrade (#2062).** pressing import library on a fresh install raised "legacy table is missing required columns" and the page then said the upgrade had failed and everything was paused. a new install has no older library, so it says that now and points at search and import. there is a test that walks a brand new install end to end: nothing paused, every library request answers, music arrives by a scan and by a download.
+
+## the dashboards
+
+- **the music dashboard, rebuilt.** a hero without a frame, the worker orbs on a wider orbit, mixes under the hero, and the system as a board: this week bar by bar with the album each day wore and what was on repeat, counts that say what they are made of, playlist sync split into complete and missing with each playlist's share, and up next as a line of the next hour with what just ran.
+- **the video dashboard joins it.** next up and continue watching under the hero, this week day by day with the posters that aired, the watchlist and wishlist counts with what is in them, up next, and make it yours beside it.
+- **hover a point on the up next line** for the whole run: when it fires, its schedule, when it last ran and what it did.
+- **the worker orbs answer at once.** hovering used to wait for the orbs to fly home before any button appeared (about 0.9s to the first, longer on an idle dashboard). the buttons bloom in as the orbs move now, and the animation runs on a clock so it behaves the same asleep, in reduce effects, or on a fast screen.
+
+## notifications
+
+- **the bell, rebuilt.** notes stay new until you close the panel, and a reload no longer empties it. filters have names and counts, running jobs are rows that fold past three, a file path is cut to its name with copy path beside it, and a note can be dismissed. toasts stack up to three with the time left as a line that stops while you point at it, and a problem stays twice as long as good news. history is grouped by day with search, and system health is a row per check with the worst first.
+
+## tools
+
+- **the tools page, redone.** one page with four pills, artwork leading every finding, findings in plain words with before and after, and re-tag keeps history and can undo.
+- **artist merge review (thanks SeadogsBooty, #2073).** two different bands were merged because they shared one catalogue id. that pass needs real evidence now, every merge is written down and can be undone, doubtful pairs are asked about instead of merged, and artists merged by mistake before any of this are found by their folders and tags and split.
+- **use file tags, for one album or the whole library (thanks wolf39us, #2070, #2074).** the library takes its titles, numbers, year, genre and album from your files, with a preview.
+- **compilation songs to original albums (thanks wolf39us, #2077, #2053).** a job that finds where each song on a best-of first came out, the studio album when the same recording is on one, otherwise the single, and files it there once approved. off by default.
+- **album tag consistency finds a split compilation (thanks Storm, #2072).** one album filed as one per track artist is reported from a shared folder, from artist folders whose track numbers fit together, or from the release id on the tags.
+- **a library emptied on purpose can be cleared (#2005)**, the acoustid scanner runs by hand with verification off (#2042), and a tag-scan finding writes only the fields it flagged.
+
+## library
+
+- **review lock (#2046).** a padlock on an album or artist keeps what you reviewed: enrichment, repairs and re-matching leave it alone.
+- **automatic quality upgrades that work (#2060).** a few at a time, with a growing wait, and no download that cannot be better. a song you already have is no longer put back on the wishlist every hour.
+- **live, compilations, soundtracks, remixes, demos and spoken word get their own sections on the artist page (#2055).**
+- **manage workers is fast.** the numbers for every worker come from one pass instead of one per worker and kind, and the window opens and switches without waiting.
+- **the musicbrainz worker finds a release the artist search misses (thanks Storm, #2071)**, asking by title alone and taking only an answer the title pins down.
+- **one release is one album however many servers listed it (#1985)**, and an artist two servers listed is one artist.
+- view settings and artist settings redrawn, and it is the Library now, not library v2.
 
 ## music
 
-- **own libraries on navidrome (thanks mirlooun, #2031).** own-library profiles worked with plex and jellyfin. on navidrome 0.58+ they use navidrome's own multi-library support now.
-- **every profile can hide what it doesn't use (#1909).** pages, tabs and jobs can be hidden per profile, soulsync offers to hide what you never open, a hidden page says so instead of vanishing, and settings show when they saved. podcast and audiobook jobs pause when nobody uses them.
-- **the playlists page, redone around the covers.** cover cards, one main button and one filter row, source panels and a settings sheet.
-- **rotating playlists (#2039).** turn on Rotating in a playlist's settings and a song it downloaded is removed once it leaves the playlist. it rides the expired download cleaner, so anything played, favourited, rated or still in another mirrored playlist is kept, and with dry run on (the default) removals wait as findings. works on mirrored playlists and my playlists.
-- **the watchlist page, redone top to bottom.** calmer artist cards that say where things stand and show what was found.
-- **download discography uses the artist's quality profile (thanks Foxxify, #2022).** the profile on the artist's watchlist rules counts, then track, album and artist profiles in the library, most specific first. songs still waiting move over when you run it again.
-- **an album folder never lands at the library root (thanks SeadogsBooty, #2023)**, and a credit given as one string splits on the first listed artist when that's your folder setting (#2028).
-- **per-artist cleanup checks in library health (thanks QT3496, #2004).**
-- **follow a youtube channel without downloading its new uploads (thanks JuanVqz, #2008).**
-- **the downloads badge says when files wait in quarantine, and the quarantine view shows expected vs actual length (thanks lozog, #2001).**
-- **the plex metadata updater fills empty artist bios (thanks Eric-sson, #1993).**
-- **export a mirrored playlist as m3u without a media server (thanks TaunGadd, #1990).**
-- **household members keep their own watchlist in the shared library**, and Enhance Quality can aim a run at another profile again.
-- a re-tag mismatch shows the file's value next to soulsync's.
+- **search all sources at once (#2051)**, the same release shown once.
+- **daily jams is a rolling playlist like weekly jams (thanks mpaugam, #2076).**
+- **rotating playlists can let go of songs you played (#2047)**, and two source tracks that are one song on the server are marked (#2059).
+- the automations page and the stats page redone, and the auto-sync manager redrawn around covers.
+- **$explicit works on downloads and imports (#2068)**, and $discalways names the disc on every album (#2044).
+- **prowlarr search pacing is a setting (#2061)**, tidal download requests are spaced (#2069), a spotify id is never sent to deezer (#2066), a soulseek search that finishes between two reads no longer comes back empty (#2065), a finished torrent is not imported before its files are collected (#2064), and a tag in front of the artist is no longer an artist mismatch (#2063).
+- a spotify track is matched onto musicbrainz by isrc (#2067), a new album keeps the cover its download came with (#2058), and an itunes m3u reads as title and artist.
 
-## library v2, reviewed five times
+## video
 
-every part of the app library v2 touched was read again end to end, five times over. each finding was proved with a failing test before it was fixed. the highlights:
-
-- **the upgrade from 3.6.1 brings everything over:** musicbrainz release-group ids, track artists, the server's paths, deezer compilations, and releases listed once per server get merged. genres the cleanup locked stay locked through merges, enrich, retag and the provider workers.
-- **household members and own libraries stay separate.** a member's wish, unwatch, refresh, bulk monitor or redownload only touches their own part, and own-library approvals, duplicate checks, the unmatched review and source info only read that library.
-- **watching or removing one artist leaves its namesakes alone**, splitting a watched collaboration doesn't watch the guest, and a scan no longer folds same-named artists whose ids differ.
-- **tags:** editing one custom mp3 tag, mood or language keeps the others, writing lyrics replaces the old frame, and write tags keeps a hand-set year and can sync to plex and jellyfin again.
-- **artwork:** a picked cover or artist photo reaches the media server and the folder again, the art picker takes a pasted url, and a cover art archive link is only used when there's a front cover.
-- **repair and tools:** bulk buttons act on exactly the rows the view counts, repair jobs read the whole library instead of the first few thousand files, and a paused job never holds the write lock.
-- **downloads:** album torrents honour your seed goals, a cancelled torrent stays cancelled, a slow usenet download is never failed while the client still has it, and a feat. credit in a title no longer passes another act's recording.
-- **an artist's release counts stay "x of all" (thanks QT3496, #2012)**, reorganize names files with the explicit flag the page shows (thanks QT3496, #2009), navidrome shows soulsync as one player (thanks cremonies, #2005), and liked music imports with cookies again (thanks jdfrye2, #2013).
-- **the sources tab shows a source the video or audiobook chain uses as in use (thanks SeadogsBooty, #2026).**
-- **a scan isn't called stuck while an own library is still scanning (thanks QT3496, #2036).** own-library profile scans never reported progress, so one that ran past 5 minutes tripped the stall check. the quiet steps at the end of a scan name themselves too, so a real stall says where it stopped.
-- a failed boot ends the process so the container restarts, and the healthcheck goes through the app again once it's up.
-
-## performance
-
-measured on a 300k-track copy of a real library:
-
-- **the library pages:** the artist grid, albums grid, missing, cutoff unmet and could be better read their page off indexes instead of scanning everything.
-- **whole-library reports answer from their last result**, the integrity report runs as a job and never holds a request, and cache health opens in under a second (33s before).
-- **chat's share-from-library search answers in about 150 ms** (9 to 14 s before).
-- **startup skips scans it did every start**, and re-filing plays by account reads first and writes only what moves.
-- an import no longer re-runs the library size report every 3 seconds, and the download monitor polls the clients only when something is in flight.
-
-## contributors
-
-thanks PapaBearDoes (video fixes and the wishlist failure log, #1998), JuanVqz (a numeric keypad for the launch pin, #2007), nick2000713 (text in a number column no longer stops the v2 upgrade, #1991), TaunGadd (m3u export, and aiff files get re-tagged, #1997) and splitsec2 (the release workflow passes the version tag safely, #2037).
+- **movie and show pages are one page.** no tabs, files as cards, and the library tab fixes what it reports.
+- **video automations, watchlist, search and discover redrawn**, and video automations live on the redesigned automations page.
+- **two shows with one name never share a folder (thanks SeadogsBooty, #2052)**, and a download in flight belongs to its show, not its title, so grabbing the office (2001) is not answered "already downloading" by the office (2005) (#2075).
+- an unreadable video database is set aside at startup instead of stopping the app.
