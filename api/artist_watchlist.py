@@ -2202,6 +2202,11 @@ def watchlist_global_config():
             return jsonify({"success": True, "config": config})
 
         else:  # POST
+            # the watchlist's global rules apply to every profile's artists:
+            # an admin's to change (Nov 13 2026). reading stays open
+            from core.profile_context import is_admin_request
+            if not is_admin_request():
+                return jsonify({"success": False, "error": "Admin access required"}), 403
             data = request.get_json()
             if not data:
                 return jsonify({"success": False, "error": "No data provided"}), 400

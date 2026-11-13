@@ -204,3 +204,44 @@ def test_the_memory_diagnostics_are_admin_only():
     assert set(found) == names
     for name, decorators in found.items():
         assert "admin_only" in decorators, name
+
+
+def test_auto_import_and_the_watchlist_global_rules_are_changed_by_an_admin_only():
+    """boulder, nov 13 2026: "non admins shouldn't be able to change auto
+    import or global settings". reading them stays open, the pages show them."""
+    for relative, names in (("api/auto_import.py", {"auto_import_toggle", "auto_import_settings"}),
+                            ("api/artist_watchlist.py", {"watchlist_global_config"})):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.FunctionDef) and node.name in names:
+                body = ast.get_source_segment(source, node)
+                gate = body.index("if not is_admin_request():")
+                assert '"Admin access required"}), 403' in body[gate:gate + 160], node.name
+                # nothing is written before the caller is checked
+                first_write = min((body.index(w) for w in ("config_manager.set(", ".stop()", "defer_or_start(")
+                                   if w in body), default=len(body))
+                assert gate < first_write, node.name
+                names = names - {node.name}
+        assert not names, names
+
+
+def test_a_non_admin_reads_the_auto_import_settings_and_cannot_write_them(monkeypatch):
+    import api.auto_import as auto_import
+    import core.profile_context as profile_context
+
+    written = []
+    values = {}
+    monkeypatch.setattr(auto_import, "config_manager", type("C", (), {
+        "get": staticmethod(lambda key, default=None: values.get(key, default)),
+        "set": staticmethod(lambda key, value: written.append(key))})())
+    app = Flask(__name__)
+    app.register_blueprint(auto_import.bp)
+    client = app.test_client()
+    monkeypatch.setattr(profile_context, "is_admin_request", lambda: False)
+    assert client.get("/api/auto-import/settings").status_code == 200
+    assert client.post("/api/auto-import/settings", json={"enabled": True}).status_code == 403
+    assert client.post("/api/auto-import/toggle", json={"enabled": False}).status_code == 403
+    assert written == []
+    monkeypatch.setattr(profile_context, "is_admin_request", lambda: True)
+    assert client.post("/api/auto-import/settings", json={"scan_interval": 30}).status_code == 200
+    assert written == ["auto_import.scan_interval"]
