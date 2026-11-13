@@ -21,7 +21,11 @@ export function PodcastCategoryPills({
     : null;
 
   return (
-    <div className={styles.categoryPills} role="tablist" aria-label="Podcast categories">
+    <div
+      className={`pgf-pills ${styles.categoryPills}`}
+      role="tablist"
+      aria-label="Podcast categories"
+    >
       {POPULAR_PILL_CATEGORIES.map((cat) => {
         const isActive = selectedCategory.toLowerCase() === cat.id.toLowerCase();
         return (
@@ -30,7 +34,7 @@ export function PodcastCategoryPills({
             type="button"
             role="tab"
             aria-selected={isActive}
-            className={`${styles.categoryPill} ${isActive ? styles.categoryPillActive : ''}`}
+            className={`pgf-pill ${styles.categoryPill}`}
             onClick={() => onSelectCategory(cat.id)}
           >
             <span style={{ marginRight: 4 }}>{cat.icon}</span>
@@ -45,7 +49,7 @@ export function PodcastCategoryPills({
           type="button"
           role="tab"
           aria-selected={true}
-          className={`${styles.categoryPill} ${styles.categoryPillActive}`}
+          className={`pgf-pill ${styles.categoryPill}`}
           onClick={() => onSelectCategory(activeCustomDef.id)}
         >
           <span style={{ marginRight: 4 }}>{activeCustomDef.icon}</span>
@@ -56,7 +60,7 @@ export function PodcastCategoryPills({
       {/* Button to open Category Explorer Modal */}
       <button
         type="button"
-        className={`${styles.categoryPill} ${styles.allCategoriesBtn}`}
+        className={`pgf-pill ${styles.categoryPill}`}
         onClick={onOpenCategoryModal}
         title="Explore all 20 podcast categories"
         aria-label="All Categories (20)"
