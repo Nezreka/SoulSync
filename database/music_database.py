@@ -11896,6 +11896,10 @@ class MusicDatabase:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
 
+    # (database file, library scope) -> (stamp, built at, artist name map, credit map)
+    _quarantine_name_maps: Dict[tuple, tuple] = {}
+    _QUARANTINE_NAME_MAPS_TTL = 300.0
+
     def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None, *, lookup_cache=None):
         """Read actual v2 files in the import's library; errors propagate.
 
@@ -11930,6 +11934,18 @@ class MusicDatabase:
             # Resolve names once per list request, including punctuation and
             # compilation credits. Subsequent targets use indexed artist/album
             # and artist/track joins, never a title UDF over the whole catalogue.
+            # the two name maps below read every artist and every credited
+            # track (~3s of cpu on a 30k-artist library) and were rebuilt for
+            # each open of the quarantine list. kept per database and library
+            # while no artist or file was added, five minutes at most
+            stamp = None
+            if 'artist_keys' not in lookup_cache:
+                stamp = (cursor.execute("SELECT MAX(id), COUNT(*) FROM lib2_artists").fetchone()[:2],
+                         cursor.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0])
+                stamp = (tuple(stamp[0]), stamp[1])
+                kept = self._quarantine_name_maps.get((str(self.database_path), scope))
+                if kept and kept[0] == stamp and time.monotonic() - kept[1] < self._QUARANTINE_NAME_MAPS_TTL:
+                    lookup_cache['artist_keys'], lookup_cache['credit_keys'] = kept[2], kept[3]
             if 'artist_keys' not in lookup_cache:
                 by_name, by_credit = {}, {}
                 for row in cursor.execute('SELECT id,name FROM lib2_artists'):
@@ -11945,6 +11961,9 @@ class MusicDatabase:
                         by_credit.setdefault(key, set()).add(row['id'])
                 lookup_cache['artist_keys'] = by_name
                 lookup_cache['credit_keys'] = by_credit
+                if self._QUARANTINE_NAME_MAPS_TTL > 0:
+                    self._quarantine_name_maps[(str(self.database_path), scope)] = (
+                        stamp, time.monotonic(), by_name, by_credit)
             artist_ids = set()
             for artist in artists:
                 key = normalize_key(re.sub(r'^the\s+', '', artist.strip(), flags=re.I))

@@ -1170,6 +1170,9 @@ def _fresh_fold_index():
     from database.music_database import MusicDatabase
     MusicDatabase._owned_genres_cache.clear()
     saved_genres_ttl, MusicDatabase._OWNED_GENRES_TTL = MusicDatabase._OWNED_GENRES_TTL, 0.0
+    # the quarantine list's artist name maps are kept per database too
+    MusicDatabase._quarantine_name_maps.clear()
+    saved_quarantine_ttl, MusicDatabase._QUARANTINE_NAME_MAPS_TTL = MusicDatabase._QUARANTINE_NAME_MAPS_TTL, 0.0
     # which profiles keep a library of their own is cached per process. a test
     # that set some up left it filled for the next test on the same xdist
     # worker, which then filtered by library and read tables it doesn't have
@@ -1185,6 +1188,7 @@ def _fresh_fold_index():
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
+    MusicDatabase._QUARANTINE_NAME_MAPS_TTL = saved_quarantine_ttl
     worker_queue.PENDING_COUNT_TTL = saved_pending_ttl
     _mirror_outbox.BACKGROUND_DRAIN = saved_bg_drain
     _metasync_depot.BACKGROUND_ASK = saved_bg_ask
