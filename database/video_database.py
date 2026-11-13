@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 67   # v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 68   # v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -1050,6 +1050,15 @@ class VideoDatabase:
             conn.execute(
                 "UPDATE shows SET episodes_synced = 0 WHERE id IN ("
                 + VideoDatabase._LUMPED_ANIME_SQL + ")")
+        if prev_version < 68:
+            # v68: the AniList split now reads a season the map still files
+            # under a TMDB season that TMDB folded away (Dandadan), and is no
+            # longer held back by a cour that isn't on TMDB yet (The Apothecary
+            # Diaries) or a map offset one out (Tokyo Revengers). the episode
+            # sync is one-time, so the shows it passed over are queued again.
+            conn.execute(
+                "UPDATE shows SET episodes_synced = 0 WHERE id IN ("
+                + VideoDatabase._LUMPED_ANIME_SQL + ")")
         if prev_version < 41:
             # v41 heal: the details backfill used to swallow failed TMDB calls
             # (429/5xx/timeout) into empty metadata and still mark
@@ -1521,14 +1530,29 @@ class VideoDatabase:
         "AND s.tmdb_id IS NOT NULL AND s.episodes_synced = 1 "
         "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id = a.item_id "
         "  AND e.season_number = a.tmdb_season AND e.episode_number > a.tmdb_offset "
+        "  AND e.server_id IS NULL AND COALESCE(e.has_file, 0) = 0) "
+        # or the map files a later entry under a TMDB season this show doesn't
+        # have (TMDB folded it into an earlier one: Dandadan's second season),
+        # and the entry before it holds more missing episodes than it has
+        "UNION "
+        "SELECT DISTINCT a.item_id FROM video_anime a "
+        "JOIN shows s ON s.id = a.item_id "
+        "JOIN video_anime p ON p.kind = 'show' AND p.item_id = a.item_id "
+        "  AND p.tvdb_season = a.tvdb_season - 1 AND p.tmdb_season > 0 AND p.episodes > 0 "
+        "WHERE a.kind = 'show' AND a.tmdb_season > 1 AND COALESCE(a.tmdb_offset, 0) = 0 "
+        "AND s.tmdb_id IS NOT NULL AND s.episodes_synced = 1 "
+        "AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.show_id = a.item_id "
+        "  AND e.season_number = a.tmdb_season) "
+        "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id = a.item_id "
+        "  AND e.season_number = p.tmdb_season AND e.episode_number > p.episodes "
         "  AND e.server_id IS NULL AND COALESCE(e.has_file, 0) = 0)")
 
     def requeue_lumped_anime(self, show_id=None) -> int:
         """queue the episode sync again for a show TMDB lumped that AniList
         can split (one show, or all of them). returns shows queued."""
-        sql, args = self._LUMPED_ANIME_SQL, []
+        sql, args = "SELECT item_id FROM (" + self._LUMPED_ANIME_SQL + ")", []
         if show_id is not None:
-            sql += " AND a.item_id = ?"
+            sql += " WHERE item_id = ?"
             args.append(int(show_id))
         conn = self._get_connection()
         try:
@@ -11485,6 +11509,31 @@ class VideoDatabase:
                 (s, e, int(show_tmdb_id), s, s, e)).fetchone()
             # the episode itself must be known — otherwise the count is a guess
             return int(row["n"]) if row and row["hit"] else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def episode_season_position(self, show_tmdb_id, season_number, episode_number):
+        """(position, size): where the episode sits in its own season counting
+        from 1, and how many episodes the season has. None when the episode
+        isn't in the library. For a season numbered on from the last one
+        (TMDB's Naruto Shippuden S19 runs E394 to E413), position is the number
+        a release named per season carries (S19E04)."""
+        try:
+            s, e = int(season_number), int(episode_number)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS size, "
+                "SUM(CASE WHEN e.episode_number <= ? THEN 1 ELSE 0 END) AS pos, "
+                "SUM(CASE WHEN e.episode_number = ? THEN 1 ELSE 0 END) AS hit "
+                "FROM episodes e "
+                "WHERE e.show_id = (SELECT id FROM shows WHERE tmdb_id=? ORDER BY id LIMIT 1) "
+                "AND e.season_number = ?", (e, e, int(show_tmdb_id), s)).fetchone()
+            return (int(row["pos"]), int(row["size"])) if row and row["hit"] else None
         except (sqlite3.Error, TypeError, ValueError):
             return None
         finally:
