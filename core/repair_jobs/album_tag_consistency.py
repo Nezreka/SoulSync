@@ -136,6 +136,9 @@ def _compatible_split(state, tags):
 
 
 VARIOUS_ARTISTS = 'Various Artists'
+#: same-titled albums the release-id pass will read the tags of. a title this
+#: many albums share is a generic one, and reading every file of it is the cost
+RELEASE_GROUP_LIMIT = 40
 _DISC_FOLDER = re.compile(r'^(cd|disc|disk)\s*\d+$', re.IGNORECASE)
 
 
@@ -206,7 +209,8 @@ class AlbumTagConsistencyJob(RepairJob):
         'then writes the corrected tags to the actual audio files.\n\n'
         'A compilation with no album artist tag, filed as one album per track artist, '
         'is reported too: one folder, one title, several album artists, or the same '
-        'title in three or more artist folders whose track numbers fit together as one record.\n\n'
+        'title in three or more artist folders whose track numbers fit together as one record, '
+        'or same-titled albums whose files carry one MusicBrainz release id wherever they sit.\n\n'
         'Also reviews native album rows with the same artist and title that may '
         'have split on your server. Conflicting years, release identities, editions '
         'and library owners are kept separate. Apply only changes the listed files; '
@@ -327,6 +331,9 @@ class AlbumTagConsistencyJob(RepairJob):
         album artist tag is filed under each track's own artist, so no two of
         its rows share an artist. What they share is the folder and the title.
 
+        Or the tags say so themselves: the same MusicBrainz release id on files
+        of same-titled albums, wherever they are kept.
+
         Or the title and the shelf: an organiser that filed by track artist
         leaves one track in each of ``Skream/Wipeout Pulse``,
         ``Kraftwerk/Wipeout Pulse`` and so on. Those are grouped by the folder
@@ -335,22 +342,54 @@ class AlbumTagConsistencyJob(RepairJob):
         and no two files holding the same disc and track number.
         """
         try:
-            groups, shelves = {}, {}
+            groups, shelves, titled = {}, {}, {}
             for subject in subjects:
                 folder = release_folder(subject.get('path'))
                 title = split_group_key('', subject.get('album_title'))[1]
                 if folder and title:
                     owner = subject.get('owner_profile_id')
                     groups.setdefault((folder.casefold(), title, owner), []).append(subject)
+                    titled.setdefault((title, owner), []).append(subject)
                     shelf = os.path.dirname(os.path.dirname(folder))
                     if shelf:
                         shelves.setdefault((shelf.casefold(), title, owner), []).append(subject)
             reported = set()
-            candidates = [(members, False) for members in groups.values()]
-            candidates += [(members, True) for members in shelves.values()]
-            for members, across_folders in candidates:
+
+            def by_release():
+                """Wherever the files sit: albums of one title under different
+                album artists whose files carry the same MusicBrainz release id
+                are one release, on the tags' own word (#2072, Storm: "I
+                thought this was metadata based rather than folder based").
+                A title half the library shares ("Greatest Hits") is not read
+                through: past RELEASE_GROUP_LIMIT albums the folder passes
+                above are the ones that apply."""
+                for same_title in titled.values():
+                    albums = {s['album_id'] for s in same_title}
+                    if not 2 <= len(albums) <= RELEASE_GROUP_LIMIT or albums <= reported:
+                        continue
+                    if len({str(s.get('album_artist_name') or s.get('artist_name') or '').casefold()
+                            for s in same_title}) < 2:
+                        continue
+                    releases = {}
+                    for tag in _read_subject_tags(same_title, context):
+                        if tag.get('mbid_tag'):
+                            releases.setdefault(tag['mbid_tag'], set()).add(tag['file_id'])
+                    for file_ids in releases.values():
+                        yield [s for s in same_title if s['file_id'] in file_ids], 'release'
+
+            def candidates():
+                for members in groups.values():
+                    yield members, 'folder'
+                for members in shelves.values():
+                    yield members, 'shelf'
+                yield from by_release()
+
+            for members, kind in candidates():
                 if context.check_stop() or context.wait_if_paused():
                     return
+                across_folders = kind == 'shelf'
+                if kind == 'release' and {s['album_id'] for s in members} <= reported:
+                    continue
                 if across_folders:
                     folders = {release_folder(s.get('path')).casefold() for s in members}
                     places = [(int(s.get('disc_number') or 1), int(s.get('track_number') or 0))
@@ -389,8 +428,9 @@ class AlbumTagConsistencyJob(RepairJob):
                     state = split_catalogue_state(conn, album_ids)
                 album_title = members[0].get('album_title')
                 reported.update(album_ids)
-                where = ('sit in separate artist folders' if across_folders
-                         else 'sit in one folder')
+                where = {'shelf': 'sit in separate artist folders',
+                         'release': 'carry the same MusicBrainz release id'}.get(
+                             kind, 'sit in one folder')
                 inserted = context.create_finding(
                     job_id=self.job_id, finding_type='album_tag_inconsistency',
                     severity='warning', entity_type='album', entity_id=f'lib2:{album_ids[0]}',
@@ -401,7 +441,7 @@ class AlbumTagConsistencyJob(RepairJob):
                         f'{len(artists)} different album artists. Unify Tags sets the album '
                         f'artist to "{album_artist}" on every file so the server shows one album.'),
                     details={'album_id': f'lib2:{album_ids[0]}', 'album_ids': album_ids,
-                        'server_split': True, 'folder_split': True,
+                        'server_split': True, 'folder_split': True, 'split_evidence': kind,
                         'split_catalogue_state': state, 'library_v2_native': True,
                         'library_owner_id': members[0].get('owner_profile_id') or 1,
                         'album_title': album_title, 'artist_name': album_artist,

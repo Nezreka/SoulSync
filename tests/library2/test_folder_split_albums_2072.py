@@ -125,6 +125,28 @@ def test_two_artist_folders_are_not_enough_to_call_it_one_record(env):
     assert _scan(env) == []
 
 
+def test_one_release_id_on_the_tags_is_enough_wherever_the_files_sit(env):
+    # no shared folder, no shared shelf, no track numbers that fit: only the tags
+    first, _ = _build(env.conn, env.tmp / 'drive a' / 'x', ARTISTS[:2], title='Scattered',
+                      tags={'musicbrainz_albumid': 'rel-1'}, numbers=[1, 1])
+    second, _ = _build(env.conn, env.tmp / 'drive b' / 'y' / 'z', ARTISTS[2:], title='Scattered',
+                       tags={'musicbrainz_albumid': 'rel-1'}, numbers=[1, 1])
+    findings = _scan(env)
+    assert len(findings) == 1
+    assert findings[0]['details']['split_evidence'] == 'release'
+    assert sorted(findings[0]['details']['album_ids']) == sorted(first + second)
+    assert 'same MusicBrainz release id' in findings[0]['description']
+
+
+def test_same_title_with_different_release_ids_is_two_records(env):
+    _build(env.conn, env.tmp / 'drive a' / 'x', ARTISTS[:2], title='Scattered',
+           tags={'musicbrainz_albumid': 'rel-1'}, numbers=[1, 1])
+    _build(env.conn, env.tmp / 'drive b' / 'y' / 'z', ARTISTS[2:], title='Scattered',
+           tags={'musicbrainz_albumid': 'rel-2'}, numbers=[1, 1])
+    # each pair shares a folder and a release, but two artists evenly is not enough to name one
+    assert _scan(env) == []
+
+
 def test_disc_folders_are_one_release():
     assert release_folder('/m/Box/CD1/01.flac') == '/m/Box'
     assert release_folder('/m/Box/Disc 2/01.flac') == '/m/Box'
