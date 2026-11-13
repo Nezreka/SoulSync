@@ -25288,7 +25288,7 @@ def start_runtime_services():
         if stuck_flags_recovered:
             logger.warning("Recovered stuck flags from previous session")
         else:
-            logger.warning("No stuck flags detected - system healthy")
+            logger.info("No stuck flags detected - system healthy")
 
         # Album-bundle staging sweep — remove orphan ``<batch_id>``
         # dirs left behind by previous-session crashes, errored
