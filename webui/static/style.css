@@ -67778,10 +67778,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     gap: 14px;
 }
 
-.explorer-container .dashboard-header {
-    margin-bottom: 0 !important;
-}
-
 .explorer-playlist-picker {
     position: relative;
     display: flex;
@@ -76146,6 +76142,38 @@ body.src-modal-open { overflow: hidden; }
     align-items: center;
     gap: 8px;
     min-width: 0;
+}
+/* a page opened from another one says where it came from, above its name */
+.pgf-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--white-a65);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color var(--dur-fast) ease;
+}
+.pgf-back:hover { color: var(--text-1); }
+.pgf-back svg {
+    flex: none;
+    width: 14px;
+    height: 14px;
+}
+/* ...and slides in over it, the way the studios do */
+.pgf-shell--slide {
+    animation: pgf-slide-in var(--dur-moderate) var(--ease-emphasized) both;
+}
+@keyframes pgf-slide-in {
+    from { opacity: 0; transform: translateX(28px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .pgf-shell--slide { animation: none; }
 }
 /* a quiet button; the one thing the page is for is the filled one */
 .pgf-btn {

@@ -14,6 +14,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { useFeatureOn } from '@/platform/features';
+
 import type { SyncLibrarySummary } from './mirrored-tab';
 
 import {
@@ -134,6 +136,10 @@ export function SyncShell({
   }, [panelOpen, closePanel]);
 
   const shownCollection = panelOpen ? base : tab;
+  // window globals, not the router: this shell also renders without one
+  const explorerOn =
+    useFeatureOn('explorer') &&
+    (window.SoulSyncWebShellBridge?.isPageAllowed('playlist-explorer') ?? true);
   const sub = summary ? summaryParts(summary) : null;
 
   return (
@@ -184,6 +190,42 @@ export function SyncShell({
           </p>
         </div>
         <div className={`pl-header-actions ${styles.topActions}`}>
+          {/* the explorer is a view of these playlists, so it opens from here
+              and has no sidebar entry of its own. hidden with its feature
+              switch, and for a profile that was not given the page */}
+          {explorerOn ? (
+            <a
+              href="/playlist-explorer"
+              onClick={(event) => {
+                // a plain click stays in the app; a modified one opens a tab
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+                if (!window.navigateToPage) return;
+                event.preventDefault();
+                void window.navigateToPage('playlist-explorer');
+              }}
+              className={`pl-explorer-btn ${styles.iconBtn}`}
+              aria-label="Playlist Explorer"
+              title="Playlist Explorer: see the albums and discographies behind a playlist"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="5" r="2.5" />
+                <path d="M12 7.5V12M12 12l-6.5 5M12 12l6.5 5M12 12v5" />
+                <circle cx="5" cy="19" r="2" />
+                <circle cx="12" cy="19" r="2" />
+                <circle cx="19" cy="19" r="2" />
+              </svg>
+            </a>
+          ) : null}
           {/* everything else this page can do, behind one button (#1909).
               same names as the windows they open, with a line each. */}
           <ActionMenu

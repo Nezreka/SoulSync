@@ -109,9 +109,9 @@ const HELPER_CONTENT = {
             'The ⋯ menu clears finished rows, failed rows, or everything (only Clear everything also empties the Review queue); a failed row\'s ⋯ has Remove from list'
         ]
     },
-    '.nav-button[data-page="playlist-explorer"]': {
+    '.pl-explorer-btn': {
         title: 'Playlist Explorer',
-        description: 'Visual exploration tool for playlists. Browse album art grids or full discographies from any playlist source. Select tracks to add to wishlist or download directly.',
+        description: 'Opens the Playlist Explorer, a visual exploration tool for playlists. Browse album art grids or full discographies from any playlist source. Select tracks to add to wishlist or download directly.',
         tips: [
             'Toggle between Albums view and Full Discog view',
             'Select multiple tracks across albums for batch operations',

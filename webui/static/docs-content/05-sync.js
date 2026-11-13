@@ -309,6 +309,8 @@ A track identification couldn't find is skipped by a download too. **Download Mi
             body: `
 A visual tree-based browser for exploring playlists across all sources. Navigate through your server playlists, Spotify playlists, and mirrored playlists in a unified interface.
 
+It opens from the **Playlists** page: the tree button at the top right, beside Playlist tools. **Playlists** at the top of the explorer takes you back. It has no entry of its own in the sidebar.
+
 Click any playlist to expand and view its tracks, then download or sync directly — without jumping between tabs.
 `
         },
