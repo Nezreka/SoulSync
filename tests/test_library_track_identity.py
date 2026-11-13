@@ -441,3 +441,20 @@ class TestExternalIdColumnsMap:
         cols = list(EXTERNAL_ID_COLUMNS.values())
         assert len(cols) == len(set(cols)), \
             f"Duplicate column targets in EXTERNAL_ID_COLUMNS: {cols}"
+
+
+def test_a_wishlist_row_key_or_placeholder_is_never_looked_up_as_an_id():
+    """nov 13 2026: a wishlist track's id is its row key ("<track>::<album>"),
+    and files tagged before the fix carry that key or 'explicit_artist' as a
+    provider id. looked up as they were, they found nothing by id."""
+    from core.library.track_identity import extract_external_ids
+
+    assert extract_external_ids({'id': '4348466402::1121691992', 'provider': 'deezer'}) == {
+        'deezer_id': '4348466402'}
+    assert extract_external_ids({'DEEZER_TRACK_ID': '4348466402::1121691992',
+                                 'spotify_track_id': 'explicit_artist',
+                                 'isrc': 'GBUM71029604'}) == {
+        'deezer_id': '4348466402', 'isrc': 'GBUM71029604'}
+    # a real id is not touched
+    assert extract_external_ids({'spotify_id': '6rqhFgbbKwnb9MLmUQDhG6', 'trackId': 1440833100}) == {
+        'spotify_id': '6rqhFgbbKwnb9MLmUQDhG6', 'itunes_id': '1440833100'}
