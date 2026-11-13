@@ -16391,8 +16391,29 @@ def prioritize_download_batch_next():
         logger.error(f"Error prioritizing download batch: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _download_owner_profile(*, task_id=None, batch_id=None):
+    """The profile that started a download task or batch, or None when it
+    isn't recorded (the task's own stamp, else its batch's)."""
+    with tasks_lock:
+        task = download_tasks.get(task_id) if task_id else None
+        if task is not None:
+            if task.get('profile_id') is not None:
+                return task.get('profile_id')
+            batch_id = batch_id or task.get('batch_id')
+        batch = download_batches.get(batch_id) if batch_id else None
+        return batch.get('profile_id') if batch else None
+
+
+def _cancel_refused(owner_profile_id):
+    """A 403 unless the caller is an admin or cancelling a download their own
+    profile started (core/permissions.may_cancel_download)."""
+    from core.permissions import may_cancel_download
+    if may_cancel_download(owner_profile_id, get_current_profile_id(), is_admin_request()):
+        return None
+    return jsonify({"success": False, "error": "Admin access required"}), 403
+
+
 @app.route('/api/downloads/cancel_task', methods=['POST'])
-@admin_only
 def cancel_download_task():
     """
     Cancels a single, specific download task.
@@ -16403,6 +16424,9 @@ def cancel_download_task():
     task_id = data.get('task_id')
     if not task_id:
         return jsonify({"success": False, "error": "Missing task_id"}), 400
+    refused = _cancel_refused(_download_owner_profile(task_id=task_id))
+    if refused:
+        return refused
 
     try:
         with tasks_lock:
@@ -16675,7 +16699,6 @@ def _atomic_cancel_task(playlist_id, track_index):
         return False, f"Internal error: {str(e)}", None
 
 @app.route('/api/downloads/cancel_task_v2', methods=['POST'])
-@admin_only
 def cancel_task_v2():
     """
     NEW ATOMIC CANCEL SYSTEM V2
@@ -16693,6 +16716,12 @@ def cancel_task_v2():
             "success": False,
             "error": "Missing playlist_id or track_index"
         }), 400
+
+    with tasks_lock:
+        _owned_task_id, _ = _find_task_by_playlist_track(playlist_id, track_index)
+    refused = _cancel_refused(_download_owner_profile(task_id=_owned_task_id))
+    if refused:
+        return refused
 
     if playlist_id == 'audiobooks':
         from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
@@ -16894,12 +16923,14 @@ def _cancel_one_batch(batch_id):
 
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
-@admin_only
 def cancel_batch(batch_id):
     """
     Cancels an entire batch - useful for cancelling during analysis phase
     or cancelling all downloads at once.
     """
+    refused = _cancel_refused(_download_owner_profile(batch_id=batch_id))
+    if refused:
+        return refused
     if batch_id == 'audiobooks':
         from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
         try:

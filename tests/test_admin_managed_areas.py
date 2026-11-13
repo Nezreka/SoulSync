@@ -98,8 +98,10 @@ DOWNLOADS_PAGE = {
     "download_selected_candidate", "manual_search_for_task", "clear_all_searches",
     "delete_download_origins", "inspect_task_sources", "clear_completed_downloads",
     "remove_download_from_list", "prioritize_download_task_next",
-    "prioritize_download_batch_next", "cancel_download_task", "cancel_task_v2", "cancel_batch",
+    "prioritize_download_batch_next",
 }
+# stopping a download is the admin's, or the profile's that started it
+OWN_CANCEL = {"cancel_download_task", "cancel_task_v2", "cancel_batch"}
 
 
 def test_managing_the_downloads_page_is_admin_only():
@@ -116,3 +118,57 @@ def test_managing_the_downloads_page_is_admin_only():
         # the route decorator is outermost, so the check runs inside the route
         assert decorators.index("admin_only") > max(
             i for i, d in enumerate(decorators) if d.startswith("app.route(")), name
+
+
+def test_a_profile_may_cancel_what_it_started_and_nothing_else():
+    from core.permissions import may_cancel_download
+
+    assert may_cancel_download(3, 3, False)
+    assert may_cancel_download("3", 3, False)
+    assert not may_cancel_download(4, 3, False)        # somebody else's
+    assert not may_cancel_download(1, 3, False)        # the admin's
+    assert not may_cancel_download(None, 3, False)     # nobody's on record
+    assert not may_cancel_download(3, None, False)     # no profile picked
+    assert not may_cancel_download("x", 3, False)
+    for owner in (1, 3, 4, None):
+        assert may_cancel_download(owner, 2, True)     # any admin, any download
+
+
+def test_the_three_cancel_routes_ask_whose_download_it_is():
+    source = (ROOT / "web_server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    seen = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in OWN_CANCEL:
+            decorators = [ast.unparse(d) for d in node.decorator_list]
+            if any(d.startswith("app.route(") for d in decorators):
+                seen[node.name] = (decorators, ast.get_source_segment(source, node))
+    assert set(seen) == OWN_CANCEL
+    for name, (decorators, body) in seen.items():
+        assert "admin_only" not in decorators, name
+        check = body.index("_cancel_refused(_download_owner_profile(")
+        # asked before anything is cancelled
+        for act in ("_atomic_cancel_task(", "cancel_audiobooks(", "download_tasks[task_id]", "download_batches[batch_id]"):
+            if act in body:
+                assert check < body.index(act), (name, act)
+
+
+def test_the_owner_of_a_download_is_its_task_then_its_batch():
+    """the helper the routes use, run on its own with the app's two tables"""
+    import threading
+    source = (ROOT / "web_server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_download_owner_profile")
+    scope = {"tasks_lock": threading.Lock(),
+             "download_tasks": {"t1": {"profile_id": 3, "batch_id": "b1"},
+                                "t2": {"batch_id": "b1"}, "t3": {}},
+             "download_batches": {"b1": {"profile_id": 5}, "b2": {}}}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "web_server.py", "exec"), scope)  # noqa: S102
+    owner = scope["_download_owner_profile"]
+    assert owner(task_id="t1") == 3
+    assert owner(task_id="t2") == 5
+    assert owner(task_id="t3") is None
+    assert owner(task_id="missing") is None
+    assert owner(batch_id="b1") == 5
+    assert owner(batch_id="b2") is None
+    assert owner() is None
