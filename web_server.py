@@ -24637,8 +24637,8 @@ def _emit_rate_monitor_loop():
 # Idle-worker stats cache for the enrichment socket loop: name → (monotonic,
 # status). Emits still happen every 2s (the UI heartbeat is untouched) — this
 # only spaces out the DATABASE reads behind them for workers that are idle.
-_enrich_stats_cache: dict = {}
-_ENRICH_IDLE_STATS_TTL = 30.0
+from core.enrichment.status_cache import WorkerStatsCache as _WorkerStatsCache  # noqa: E402
+_enrich_stats = _WorkerStatsCache()
 
 
 def _emit_enrichment_status_loop():
@@ -24722,26 +24722,16 @@ def _emit_enrichment_status_loop():
                 # Idle workers don't earn fresh aggregates every 2s: each
                 # get_stats() is ~6 whole-table scans of the (10 GB) library
                 # db, and 18 workers made this loop ~108 scans per tick,
-                # forever, while any tab was open (perf sweep, Aug 2026). A
-                # RUNNING worker's numbers actually move, so it stays on the
-                # 2s beat; an idle one re-reads every 30s. Transitions are
-                # caught instantly via the worker's IN-MEMORY running/paused
-                # attributes (free to read), so starting or pausing a worker
-                # never shows stale for even one tick.
-                now_mono = time.monotonic()
-                hit = _enrich_stats_cache.get(name)
-                fresh_needed = (
-                    hit is None
-                    or hit[1].get('running')
-                    or getattr(worker, 'running', False) != bool(hit[1].get('running'))
-                    or getattr(worker, 'paused', False) != bool(hit[1].get('paused'))
-                    or now_mono - hit[0] >= _ENRICH_IDLE_STATS_TTL
-                )
-                if fresh_needed:
-                    status = worker.get_stats()
-                    _enrich_stats_cache[name] = (now_mono, status)
-                else:
-                    status = hit[1]
+                # forever, while any tab was open (perf sweep, Aug 2026).
+                # A working worker's numbers are re-read every few seconds,
+                # not every beat, and less often when its own read is slow:
+                # Similar Artists and MusicBrainz each ran their own counts
+                # on every tick, most of what this loop still cost after the
+                # shared pending pass (Nov 13 2026, profiled live). Starts,
+                # pauses and the item in hand are read from the worker's
+                # IN-MEMORY attributes (free), so those never show stale.
+                # core/enrichment/status_cache.py has the rules and the tests.
+                status = _enrich_stats.get(name, worker)
                 # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
@@ -25153,6 +25143,9 @@ def _emit_discovery_progress_loop():
             except Exception as e:
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
+_wishlist_next_run = {'at': -1e9, 'value': 0}
+
+
 def _emit_scan_status_loop():
     """Push watchlist and media scan status every 2 seconds.
     Skipped entirely while no client is connected."""
@@ -25180,7 +25173,17 @@ def _emit_scan_status_loop():
             logger.debug(f"Error emitting media scan: {e}")
         # Wishlist stats (auto-processing detection + countdown refresh)
         try:
-            next_run = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
+            # the countdown is read from the database every 10s and counted
+            # down in between: it was a connection and a query on every beat
+            _now = time.monotonic()
+            if _now - _wishlist_next_run['at'] >= 10.0:
+                _wishlist_next_run['value'] = (
+                    automation_engine.get_system_automation_next_run_seconds('process_wishlist')
+                    if automation_engine else 0)
+                _wishlist_next_run['at'] = _now
+                _now = time.monotonic()
+            next_run = max(0, int(_wishlist_next_run['value'] - (_now - _wishlist_next_run['at']))) \
+                if _wishlist_next_run['value'] else 0
             active_batches = 0
             with tasks_lock:
                 active_batches = sum(
