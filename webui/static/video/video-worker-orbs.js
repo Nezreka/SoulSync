@@ -46,8 +46,16 @@
     const ORB_RADIUS = 7;
     const ORB_DIAMETER = ORB_RADIUS * 2;
     const CONNECTION_DIST = 70;
-    const LERP_SPEED = 0.08;
-    const EXPAND_STAGGER = 35;
+    // hover has to hand over a button now, not after a show: the orbs fly
+    // home in about a fifth of a second and the buttons bloom in as they go
+    const LERP_SPEED = 0.22;
+    const EXPAND_STAGGER = 12;
+    // the simulation runs on a clock, not on frames: 60 steps a second on a
+    // 60Hz screen, a 144Hz one, a throttled 20fps one. counted in frames, a
+    // sleeping dashboard (drawn at 20fps) took three times as long to answer
+    // a hover, and a fast screen ran everything double speed
+    const STEP_MS = 1000 / 60;
+    const MAX_STEPS = 4;          // a stalled tab catches up this far, then lets go
     const MAX_SPARKS = 60;       // global spark pool cap
     const SPARK_RATE = 0.12;     // chance per frame per active orb to emit
     const MAX_INFLOWS = 48;      // hub inbound-pulse pool cap
@@ -429,6 +437,7 @@
         if (state === 'orbs') return;
         state = 'orbs';
         expandProgress = 0;
+        revealing = false;
 
         orbs.forEach(orb => {
             orb.el.classList.add('worker-orb-hidden');
@@ -444,10 +453,11 @@
         startLoop();
     }
 
-    function enterExpandedState() {
-        state = 'expanded';
-        expandProgress = 1;
-
+    // The worker buttons bloom in, a few milliseconds apart, while the canvas
+    // fades under them. Each one takes clicks the moment it starts to show.
+    function revealButtons() {
+        if (revealing) return;
+        revealing = true;
         clearStaggerTimers();
         orbs.forEach((orb, i) => {
             const t = setTimeout(() => {
@@ -456,8 +466,14 @@
             }, i * EXPAND_STAGGER);
             staggerTimers.push(t);
         });
-
         canvas.style.opacity = '0';
+    }
+
+    function enterExpandedState() {
+        state = 'expanded';
+        expandProgress = 1;
+        revealButtons();
+
         setTimeout(() => {
             if (state === 'expanded') {
                 canvas.style.display = 'none';
@@ -468,6 +484,7 @@
 
     function enterCollapsingState() {
         state = 'collapsing';
+        revealing = false;
         clearStaggerTimers();
 
         const total = orbs.length;
@@ -519,6 +536,9 @@
         if (state === 'orbs' || state === 'collapsing') {
             state = 'expanding';
             expandProgress = 0;
+            // the buttons do not wait for the orbs to land: they arrive together
+            revealButtons();
+            startLoop();
         }
     }
 
@@ -558,6 +578,12 @@
     // ── Animation loop ──
 
     let frameCount = 0;
+    let lastTickAt = 0;          // 0 = the clock starts over on the next tick
+    let simDebt = 0;             // time owed to the simulation, ms
+    let lastDrawAt = 0;
+    let simVisible = [];         // what the last step saw, for the draw
+    let simHub = null;
+    let revealing = false;       // the buttons are already blooming in
 
     let _scrollPauseUntil = 0;
     (function attachScrollPause() {
@@ -574,6 +600,7 @@
             return;
         }
         if (animFrame) return;
+        lastTickAt = 0;
         tick();
     }
 
@@ -595,31 +622,69 @@
         if (!canvas || !ctx) return;
 
         // Yield the frame to active scrolling (orbs freeze, resume on idle).
-        if (performance.now() < _scrollPauseUntil) return;
+        const now = performance.now();
+        if (now < _scrollPauseUntil) { lastTickAt = 0; return; }
 
-        frameCount++;
-        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
-        // difference is invisible, and the canvas GPU cost drops by two thirds
-        // for the hours the dashboard sits idle. Wakes re-run every frame.
-        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
-        // reduce effects draws every other frame instead of turning them off
-        if (sleepLevel <= 0.95 && window._reduceEffectsActive && frameCount % 2 !== 0) return;
-        const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
-
         if (w === 0 || h === 0) {
             resizeCanvas();
             return;
         }
 
+        // Pay the simulation what the clock says it is owed, in whole steps.
+        // A frame that lands within a hair of 60Hz is one step exactly, so
+        // timer jitter does not turn into a step skipped here and doubled there.
+        let elapsed = lastTickAt ? Math.min(100, now - lastTickAt) : STEP_MS;
+        if (Math.abs(elapsed - STEP_MS) < 3) elapsed = STEP_MS;
+        lastTickAt = now;
+        simDebt += elapsed;
+        let steps = 0;
+        while (simDebt >= STEP_MS - 0.01 && steps < MAX_STEPS) {
+            simDebt -= STEP_MS;
+            steps++;
+            simulate(w, h);
+        }
+        if (steps === MAX_STEPS) simDebt = 0;
+        if (!steps) return;     // a faster screen: nothing moved, nothing to draw
+
+        // Drawing is what costs, so it is what gets rationed: every frame while
+        // awake or answering a hover, ~30 a second with reduce effects on, ~20
+        // asleep (the drift is a crawl then). The steps above ran regardless.
+        const gap = state === 'expanding' ? 0
+            : sleepLevel > 0.95 ? 48
+                : window._reduceEffectsActive ? 31 : 0;
+        if (now - lastDrawAt < gap) return;
+        lastDrawAt = now;
+
+        const time = frameCount / 60;
+        ctx.clearRect(0, 0, w, h);
+
+        drawConnections(ctx, simVisible, time);
+        drawSparks(ctx);
+        drawInflows(ctx, simHub);
+        drawRipples(ctx);
+        drawOrbs(ctx, simVisible, time);
+    }
+
+    // One sixtieth of a second of the system: who is working, sleep and wake,
+    // the drift, and the pulses on their way in. No drawing.
+    function simulate(w, h) {
+        frameCount++;
+        const time = frameCount / 60;
+
+
         // Health stress cools off when errors stop (~6s to settle from a spike)
         if (errorHeat > 0.0001) errorHeat *= 0.992; else errorHeat = 0;
 
         // Check active state every 30 frames (button ref is cached at init)
-        if (frameCount % 30 === 0) {
+        {
+            // a worker that starts shows it on the next step, not up to half a
+            // second later. whether it is on screen is a layout read, so that
+            // one still waits its turn
+            const lookAgain = frameCount % 30 === 0;
             orbs.forEach(orb => {
-                orb.visible = orb.el.offsetParent !== null;
+                if (lookAgain) orb.visible = orb.el.offsetParent !== null;
                 const nowActive = orb.btn ? orb.btn.classList.contains('active') : false;
                 if (nowActive && !orb.active && !orb.hub) {
                     // Excitement kick: a freshly-woken worker jolts into motion
@@ -709,15 +774,8 @@
         updateSparks();
         updateInflows(hub);
         updateRipples();
-
-        // Draw
-        ctx.clearRect(0, 0, w, h);
-
-        drawConnections(ctx, visibleOrbs, time);
-        drawSparks(ctx);
-        drawInflows(ctx, hub);
-        drawRipples(ctx);
-        drawOrbs(ctx, visibleOrbs, time);
+        simVisible = visibleOrbs;
+        simHub = hub;
     }
 
     // ── Physics ──
@@ -837,7 +895,7 @@
             if (dist > 3) allClose = false;
         }
 
-        expandProgress = Math.min(1, expandProgress + 0.03);
+        expandProgress = Math.min(1, expandProgress + 0.08);
 
         if (allClose || expandProgress >= 1) {
             enterExpandedState();
@@ -1184,10 +1242,15 @@
         // Queue the new events and (re)set a drip rate that empties the current
         // backlog over the interval until the next push — steady stream, not a burst.
         if (dWork > 0) {
+            // the first pulse of a batch leaves on the next step; the rest drip
+            if (orb.pendingWork <= 0) orb.workCarry = 1;
+            lastActivityAt = performance.now();
             orb.pendingWork = Math.min(PULSE_CAP, orb.pendingWork + dWork);
             orb.workRate = Math.max(MIN_RELEASE_RATE, orb.pendingWork / STATUS_FRAMES);
         }
         if (dErr > 0) {
+            if (orb.pendingErr <= 0) orb.errCarry = 1;
+            lastActivityAt = performance.now();
             orb.pendingErr = Math.min(PULSE_CAP, orb.pendingErr + dErr);
             orb.errRate = Math.max(MIN_RELEASE_RATE, orb.pendingErr / STATUS_FRAMES);
             // Feed the nucleus health gauge — each real error eases the hub's
