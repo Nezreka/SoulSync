@@ -46642,9 +46642,13 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     opacity: 1;
     transition: opacity var(--dur-slow) ease;
 }
+/* closed is gone, not just see-through: an invisible overlay still kept its
+   blur layer alive over the whole app. it leaves once the fade has finished */
 .np-modal-overlay.hidden {
     opacity: 0;
     pointer-events: none;
+    visibility: hidden;
+    transition: opacity var(--dur-slow) ease, visibility 0s linear var(--dur-slow);
 }
 .np-modal {
     --np-ambient-r: 29;
@@ -47552,10 +47556,12 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-album-art-container.viz-on .np-art-viz { display: flex; }
 .np-album-art-container.viz-on .np-album-art,
 .np-album-art-container.viz-on .np-album-art-placeholder { opacity: 0; transition: opacity 0.35s ease; }
+/* full height and scaled, not resized: 28 bars changing height was a layout
+   of the whole player on every frame */
 .np-art-viz-bar {
-    width: 7px; border-radius: 5px; height: 12%;
+    width: 7px; border-radius: 5px; height: 100%;
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb),0.35));
-    transform-origin: bottom; transition: height 0.08s linear;
+    transform: scaleY(0.12); transform-origin: center; transition: transform 0.08s linear;
 }
 
 /* ── Sleep / Crossfade utility row (top-right of controls) ── */

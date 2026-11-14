@@ -644,9 +644,32 @@ function togglePopover(): void {
 /* ------------------------------------------------------------------ */
 
 /**
+ * a phone, a tablet or a small machine gets a lighter sky: half the frames
+ * and fewer pixels. the scenes are slow drifts (cloud, rain, snow), so 30 a
+ * second reads the same, and a full-height canvas at 2x was the single
+ * biggest thing the sidebar asked of a phone's gpu.
+ */
+export function liteDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  const body = document.body;
+  if (body?.classList.contains('max-performance') || body?.classList.contains('reduce-effects')) {
+    return true;
+  }
+  const mq = (query: string) =>
+    typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
+  if (mq('(max-width: 768px)') || mq('(pointer: coarse)')) return true;
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  return (nav.hardwareConcurrency ?? 8) <= 4 || (nav.deviceMemory ?? 8) <= 4;
+}
+
+/** seconds between frames: every frame on a desktop, every other one when lite */
+export const LITE_FRAME_GAP = 1 / 31;
+
+/**
  * mount the scene on a canvas and run it. the drawing lives in
  * weather-scene.ts; this owns the loop: paused while the tab is hidden,
- * fully stopped while the sidebar is collapsed, refit on resize.
+ * fully stopped while the sidebar is collapsed or off screen (a phone's
+ * drawer when it is closed), refit on resize.
  */
 function startScene(
   canvas: HTMLCanvasElement,
@@ -660,10 +683,11 @@ function startScene(
   const sky = holidaySky(data);
   const layer = sky ? createHolidaySky(ctx, cond, Math.random, sky) : null;
   const engine = createWeatherScene(ctx, cond, Math.random, { ...sceneExtras(data), layer });
+  const lite = liteDevice();
 
   function fit(): void {
     const r = sidebar.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, lite ? 1.5 : 2);
     const w = Math.max(1, r.width || 280);
     const h = Math.max(1, r.height || 600);
     canvas.width = Math.round(w * dpr);
@@ -680,44 +704,38 @@ function startScene(
   let running = true;
   let last = typeof performance !== 'undefined' ? performance.now() : 0;
   let t = 0;
+  // the sidebar is on screen. a phone keeps it off to the left until the
+  // menu is opened, and nobody is there to see the sky move
+  let onScreen = true;
 
   function frame(now: number): void {
     if (!running) return;
-    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
-    last = now;
-    t += dt;
-    engine.frame(dt, t);
     if (typeof window.requestAnimationFrame === 'function') {
       raf = window.requestAnimationFrame(frame);
     }
+    const elapsed = Math.max(0, (now - last) / 1000);
+    // a lite device draws every other frame; the scene's clock still runs true
+    if (lite && elapsed < LITE_FRAME_GAP) return;
+    const dt = Math.min(lite ? 0.1 : 0.05, elapsed);
+    last = now;
+    t += dt;
+    engine.frame(dt, t);
   }
 
-  /** cancel the whole loop while collapsed; restart it on expand */
-  function setCollapsed(collapsed: boolean): void {
-    if (!running || typeof window.requestAnimationFrame !== 'function') return;
-    if (collapsed) {
-      if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(raf);
-        raf = null;
-      }
-    } else if (raf === null) {
-      last = typeof performance !== 'undefined' ? performance.now() : 0;
-      raf = window.requestAnimationFrame(frame);
+  function stop(): void {
+    if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(raf);
     }
+    raf = null;
   }
 
-  function onVisibility(): void {
-    if (document.hidden) {
-      if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(raf);
-        raf = null;
-      }
-    } else if (
-      running &&
-      raf === null &&
-      !sidebarCollapsed() &&
-      typeof window.requestAnimationFrame === 'function'
-    ) {
+  /** run only while there is something to look at */
+  function sync(): void {
+    if (!running || typeof window.requestAnimationFrame !== 'function') return;
+    const wanted = onScreen && !document.hidden && !sidebarCollapsed();
+    if (!wanted) {
+      stop();
+    } else if (raf === null) {
       last = typeof performance !== 'undefined' ? performance.now() : 0;
       raf = window.requestAnimationFrame(frame);
     }
@@ -726,12 +744,20 @@ function startScene(
   fit();
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
   ro?.observe(sidebar);
-  document.addEventListener('visibilitychange', onVisibility);
-  const stopCollapseWatch = watchSidebarCollapse(setCollapsed);
+  const io =
+    typeof IntersectionObserver !== 'undefined'
+      ? new IntersectionObserver((entries) => {
+          const entry = entries[entries.length - 1];
+          if (!entry) return;
+          onScreen = entry.isIntersecting;
+          sync();
+        })
+      : null;
+  io?.observe(sidebar);
+  document.addEventListener('visibilitychange', sync);
+  const stopCollapseWatch = watchSidebarCollapse(sync);
   engine.frame(0, 0); // one static frame even without rAF
-  if (typeof window.requestAnimationFrame === 'function' && !sidebarCollapsed()) {
-    raf = window.requestAnimationFrame(frame);
-  }
+  sync();
   // fade in: the next frame, so the transition has a start state
   const reveal = () => canvas.classList.add('is-visible');
   if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(reveal);
@@ -739,13 +765,11 @@ function startScene(
 
   return () => {
     running = false;
-    document.removeEventListener('visibilitychange', onVisibility);
+    document.removeEventListener('visibilitychange', sync);
     stopCollapseWatch();
     ro?.disconnect();
-    if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(raf);
-      raf = null;
-    }
+    io?.disconnect();
+    stop();
     canvas.remove();
   };
 }
