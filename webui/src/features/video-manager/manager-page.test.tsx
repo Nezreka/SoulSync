@@ -21,6 +21,7 @@ import {
 import { describeDone } from './manager-bulk';
 import { EpisodesTab } from './manager-extras';
 import { ManagerPage } from './manager-page';
+import { PosterGrid } from './manager-views';
 import { changedFields } from './title-sheet';
 import { EMPTY_FILTERS } from './types';
 
@@ -400,6 +401,38 @@ describe('the views', () => {
       'href',
       '/video-detail/library/movie/1',
     );
+  });
+
+  it('the cards rise and fade in one after another, like the music library’s', async () => {
+    await mount();
+    const cards = Array.from(document.querySelectorAll('article')) as HTMLElement[];
+    expect(cards.length).toBe(2);
+    // the shared keyframe, each card a beat after the last
+    expect(cards[0].style.animation).toContain('cardFadeIn');
+    expect(cards[0].style.animation).toContain(' 0ms ');
+    expect(cards[1].style.animation).toContain(' 30ms ');
+    // backwards, not both: a fill that outlives the animation holds the
+    // transform and the hover lift never shows
+    expect(cards[0].style.animation).toContain('backwards');
+  });
+
+  it('a poster fades in when it has arrived, not before', () => {
+    render(
+      <PosterGrid
+        rows={[title({ has_poster: true })]}
+        side="movies"
+        selected={new Set()}
+        selecting={false}
+        loading={false}
+        onToggle={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const img = document.querySelector('article img') as HTMLImageElement;
+    expect(img.getAttribute('data-shown')).toBeNull();
+    expect(img.getAttribute('decoding')).toBe('async');
+    fireEvent.load(img);
+    expect(img.getAttribute('data-shown')).toBe('true');
   });
 
   it('shows the same titles as a table, with what they are made of', async () => {

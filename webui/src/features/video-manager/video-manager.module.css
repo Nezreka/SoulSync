@@ -452,6 +452,18 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--dur-slow, 320ms) ease;
+}
+
+.posterImg[data-shown] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .posterImg {
+    transition: none;
+  }
 }
 
 .posterEmpty {

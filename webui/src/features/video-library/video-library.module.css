@@ -1421,7 +1421,7 @@
   width: 30px;
   height: 30px;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--white-a55);
   font-size: 18px;
@@ -1441,7 +1441,7 @@
   margin-right: 6px;
   border: 2px solid var(--white-a16);
   border-top-color: var(--text-1);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: vltSpin 0.8s linear infinite;
 }
 
@@ -1473,7 +1473,7 @@
 .freshDot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--white-a30);
 }
 

@@ -44,13 +44,45 @@ def _ids():
     return out[:_MAX_IDS]
 
 
+# which media server the video side reads from. working it out reads and
+# decrypts both servers' settings, about a sixth of a second, and the manager
+# asks on every page turn and every filter: the answer is kept a few seconds.
+# keyed on the resolver itself, so a test that swaps it never reads another's
+_server_cache: dict = {}
+_SERVER_TTL = 15.0
+
+
+def _active_server(db):
+    import time
+
+    from core.video import sources
+    resolver = sources.resolve_video_server
+    key = (id(resolver), str(getattr(db, "database_path", "")))
+    hit = _server_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _SERVER_TTL:
+        return hit[1]
+    server = resolver()
+    if len(_server_cache) > 16:
+        _server_cache.clear()
+    _server_cache[key] = (now, server)
+    return server
+
+
 def register_routes(bp):
     def _ctx():
-        from core.video.sources import resolve_video_server
+        from core.video import library_manager
         from core.video.watch_scope import current_watcher
 
         from . import get_video_db
-        return get_video_db(), resolve_video_server(), current_watcher().rows
+        db = get_video_db()
+        server = _active_server(db)
+        # the tab that is not open is summed up in the background, so it is
+        # ready by the time it is clicked
+        asked = request.args.get("kind")
+        if asked in library_manager.KINDS:
+            library_manager.warm(db, "shows" if asked == "movies" else "movies", server)
+        return db, server, current_watcher().rows
 
     @bp.route("/manager/titles", methods=["GET"])
     def video_manager_titles():
