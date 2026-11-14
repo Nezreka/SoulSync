@@ -37,6 +37,8 @@ export interface PlaylistSettingsSheetProps {
   onToggleOrganize: (enabled: boolean) => void;
   /** rotating (#2039); absent hides the row */
   onToggleRotating?: (enabled: boolean) => void;
+  /** find uncatalogued tracks (#2097); absent hides the row */
+  onToggleUncatalogued?: (enabled: boolean) => void;
   /** '' = back to the global mode */
   onSetSyncMode: (mode: string) => void;
   onToggleAutoRemove?: () => void;
@@ -56,6 +58,7 @@ export function PlaylistSettingsSheet({
   onRename,
   onToggleOrganize,
   onToggleRotating,
+  onToggleUncatalogued,
   onSetSyncMode,
   onToggleAutoRemove,
   onEditSource,
@@ -291,6 +294,27 @@ export function PlaylistSettingsSheet({
                   aria-label="Rotating"
                   checked={Boolean(row.rotating)}
                   onChange={(e) => onToggleRotating?.(e.target.checked)}
+                />
+                <span />
+              </label>
+            </div>
+          ) : null}
+          {onToggleUncatalogued ? (
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <div className={styles.rowTitle}>Find uncatalogued tracks</div>
+                <div className={styles.rowDesc}>
+                  Searches for bootlegs, edits and unofficial remixes by this playlist&apos;s own
+                  artist and title when no catalog has them. A file is only taken when its name says
+                  it is that exact version, and it is tagged from the playlist
+                </div>
+              </div>
+              <label className={styles.switch}>
+                <input
+                  type="checkbox"
+                  aria-label="Find uncatalogued tracks"
+                  checked={Boolean(row.allow_uncatalogued)}
+                  onChange={(e) => onToggleUncatalogued(e.target.checked)}
                 />
                 <span />
               </label>
