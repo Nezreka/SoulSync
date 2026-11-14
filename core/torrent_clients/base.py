@@ -136,7 +136,7 @@ class TorrentClientAdapter(Protocol):
     async def add_torrent(
         self,
         url_or_magnet: str,
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         """Hand the torrent client a HTTP/HTTPS URL pointing to a
@@ -148,7 +148,7 @@ class TorrentClientAdapter(Protocol):
     async def add_torrent_file(
         self,
         file_bytes: bytes,
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         """Upload a raw ``.torrent`` payload. Same return as
