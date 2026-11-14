@@ -7703,6 +7703,82 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def set_episodes_monitored(self, show_id: int, episode_ids, monitored: bool) -> int:
+        """monitor or unmonitor a picked set of one show's episodes, by row
+        id (the show page has them). a special set by hand makes the show's
+        Specials the user's own, like the single flip. returns rows moved."""
+        try:
+            ids = sorted({int(i) for i in (episode_ids or [])})
+        except (TypeError, ValueError):
+            return 0
+        if not ids:
+            return 0
+        conn = self._get_connection()
+        try:
+            moved = 0
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                marks = ",".join("?" * len(chunk))
+                cur = conn.execute(
+                    f"UPDATE episodes SET monitored=? WHERE show_id=? AND id IN ({marks})",
+                    [1 if monitored else 0, int(show_id), *chunk])
+                moved += int(cur.rowcount or 0)
+                if conn.execute(
+                        f"SELECT 1 FROM episodes WHERE show_id=? AND season_number=0 "
+                        f"AND id IN ({marks}) LIMIT 1", [int(show_id), *chunk]).fetchone():
+                    conn.execute("UPDATE seasons SET monitor_locked=1 WHERE season_number=0 "
+                                 "AND show_id=?", (int(show_id),))
+            conn.commit()
+            return moved
+        except sqlite3.Error:
+            logger.exception("set_episodes_monitored failed")
+            return 0
+        finally:
+            conn.close()
+
+    def file_episodes(self, file_ids) -> dict:
+        """{file id: (show id, episode id)} for the episode files among these"""
+        try:
+            ids = sorted({int(i) for i in (file_ids or [])})
+        except (TypeError, ValueError):
+            return {}
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                for r in conn.execute(
+                        "SELECT f.id, e.show_id, e.id FROM media_files f JOIN episodes e "
+                        f"ON e.id = f.episode_id WHERE f.id IN ({','.join('?' * len(chunk))})",
+                        chunk):
+                    out[int(r[0])] = (int(r[1]), int(r[2]))
+        except sqlite3.Error:
+            logger.exception("file_episodes failed")
+        finally:
+            conn.close()
+        return out
+
+    def episodes_left_without_files(self, episode_ids) -> list:
+        """the ones among these episodes that have no file on record now"""
+        try:
+            ids = sorted({int(i) for i in (episode_ids or [])})
+        except (TypeError, ValueError):
+            return []
+        out: list = []
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                out.extend(int(r[0]) for r in conn.execute(
+                    "SELECT e.id FROM episodes e WHERE e.id IN "
+                    f"({','.join('?' * len(chunk))}) AND NOT EXISTS "
+                    "(SELECT 1 FROM media_files f WHERE f.episode_id = e.id)", chunk))
+        except sqlite3.Error:
+            logger.exception("episodes_left_without_files failed")
+        finally:
+            conn.close()
+        return out
+
     _MONITOR_SPECIALS_KEY = "monitor_specials"
 
     @classmethod

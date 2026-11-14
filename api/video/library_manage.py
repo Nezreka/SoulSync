@@ -73,6 +73,43 @@ def _refresh_server(kind: str) -> None:
     threading.Thread(target=run, name="video-file-refresh", daemon=True).start()
 
 
+_PREVIEW_ROWS = 200
+
+
+def _file_ids(raw) -> list:
+    out = []
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if part.isdigit():
+            out.append(int(part))
+    return out[:2000]
+
+
+def _episode_files(db, episode_id) -> list:
+    """every file on record for one episode"""
+    conn = db._get_connection()
+    try:
+        return [{"file_id": int(r[0]), "item_id": episode_id} for r in conn.execute(
+            "SELECT id FROM media_files WHERE episode_id = ?", (int(episode_id),))]
+    finally:
+        conn.close()
+
+
+def _stop_hunting(db, episodes: dict) -> int:
+    """the deleted files' episodes that have no copy left stop being hunted,
+    so the file a person just threw out is not fetched again. returns how
+    many episodes that was."""
+    by_show: dict = {}
+    for show_id, episode_id in episodes.values():
+        by_show.setdefault(show_id, set()).add(episode_id)
+    moved = 0
+    for show_id, ids in by_show.items():
+        gone = db.episodes_left_without_files(ids)
+        if gone:
+            moved += db.set_episodes_monitored(show_id, gone, False)
+    return moved
+
+
 def register_routes(bp):
     @bp.route("/detail/<kind>/<int:item_id>/library", methods=["GET"])
     def video_title_library(kind, item_id):
@@ -125,14 +162,17 @@ def register_routes(bp):
         from core.video import file_ops
         db = get_video_db()
         row = db.library_file_row(file_id) or {}
+        from core.video import file_history
         try:
-            res = file_ops.rename_to_template(db, file_id)
+            with file_history.batch() as batch_id:
+                res = file_ops.rename_to_template(db, file_id)
         except Exception:
             logger.exception("rename failed for file %s", file_id)
             return jsonify({"success": False, "error": "Rename failed — see app.log"}), 500
         if not res.get("success"):
             return jsonify(res), 409
         if res.get("action") == "renamed":
+            res["batch"] = batch_id        # what Undo on the page reverses
             _refresh_server("movie" if row.get("scope") == "movie" else "show")
         return jsonify(res)
 
@@ -142,8 +182,12 @@ def register_routes(bp):
         from core.video import file_ops
         db = get_video_db()
         row = db.library_file_row(file_id) or {}
+        from core.video import file_history
+        body = request.get_json(silent=True) or {}
+        episode = (db.file_episodes([file_id]) or {}).get(file_id)
         try:
-            res = file_ops.delete_to_recycle(db, file_id)
+            with file_history.batch() as batch_id:
+                res = file_ops.delete_to_recycle(db, file_id)
         except Exception:
             logger.exception("delete failed for file %s", file_id)
             return jsonify({"success": False, "error": "Delete failed — see app.log"}), 500
@@ -151,6 +195,10 @@ def register_routes(bp):
             return jsonify(res), 409
         logger.info("library tab deleted file %s (%s) — recycled=%s",
                     file_id, row.get("relative_path"), res.get("recycled"))
+        if res.get("recycled"):
+            res["batch"] = batch_id        # only a recycled file can come back
+        if body.get("stop_hunting") and episode:
+            res["unmonitored"] = _stop_hunting(db, {file_id: episode})
         _refresh_server("movie" if row.get("scope") == "movie" else "show")
         return jsonify(res)
 
@@ -172,12 +220,133 @@ def register_routes(bp):
             ids = [int(i) for i in ids]
         except (TypeError, ValueError):
             return jsonify({"success": False, "error": "file_ids must be numbers"}), 400
-        res = library_actions.bulk(get_video_db(), str(body.get("action") or ""), ids)
+        db = get_video_db()
+        action = str(body.get("action") or "")
+        # read before the delete drops the rows: whose episodes these were
+        episodes = db.file_episodes(ids) if action == "delete" and body.get("stop_hunting") else {}
+        res = library_actions.bulk(db, action, ids)
         if not res.get("success"):
             return jsonify(res), 400
+        if episodes:
+            res["unmonitored"] = _stop_hunting(db, episodes)
         if res.get("done"):
             _refresh_server(str(body.get("kind") or "show"))
         return jsonify(res)
+
+    @bp.route("/files/rename-preview", methods=["GET"])
+    def video_files_rename_preview():
+        """?file_ids=1,2,3: what Rename would do to these files. the ones not
+        named by the template, each with the name it would get."""
+        from . import get_video_db
+        from core.video import file_ops
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        ids = _file_ids(request.args.get("file_ids"))
+        if not ids:
+            return jsonify({"success": False, "error": "file_ids is required"}), 400
+        db = get_video_db()
+        changes, conforming, unreachable = [], 0, 0
+        for file_id in ids:
+            try:
+                plan = file_ops.rename_plan(db, file_id) or {}
+            except Exception:   # noqa: BLE001 - one unreadable file never ends the preview
+                plan = {"error": "could not be read"}
+            if plan.get("error"):
+                unreachable += 1
+            elif plan.get("conforms"):
+                conforming += 1
+            else:
+                changes.append({"file_id": file_id, "current": plan.get("current"),
+                                "expected": plan.get("expected")})
+        return jsonify({"success": True, "files": len(ids), "to_rename": len(changes),
+                        "already_named": conforming, "unreachable": unreachable,
+                        "changes": changes[:_PREVIEW_ROWS],
+                        "more": max(0, len(changes) - _PREVIEW_ROWS)})
+
+    @bp.route("/files/delete-preview", methods=["GET"])
+    def video_files_delete_preview():
+        """?file_ids=1,2,3: what deleting these files would take. each file
+        with its size, and how many episodes or movies would be left with no
+        copy at all."""
+        from . import get_video_db
+        from core.video import file_ops, library_actions, library_manage
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        ids = _file_ids(request.args.get("file_ids"))
+        if not ids:
+            return jsonify({"success": False, "error": "file_ids is required"}), 400
+        db = get_video_db()
+        picked, items, size, unreachable = set(ids), [], 0, 0
+        owners: set = set()
+        for file_id in ids:
+            row = db.library_file_row(file_id)
+            if not row:
+                continue
+            real = file_ops._locate(db, row)
+            if not real:
+                unreachable += 1
+            else:
+                size += int(row.get("size_bytes") or 0)
+            owners.add((row.get("scope"), row.get("item_id")))
+            items.append({"file_id": file_id, "label": library_actions._label(row),
+                          "filename": library_actions._name(row),
+                          "size_bytes": int(row.get("size_bytes") or 0),
+                          "reachable": bool(real)})
+        # an episode or movie goes missing when every copy it has is picked
+        emptied = 0
+        for scope, item_id in owners:
+            rows = (db.library_title_files("movie", item_id) if scope == "movie"
+                    else _episode_files(db, item_id))
+            have = {r["file_id"] for r in rows}
+            if have and have <= picked:
+                emptied += 1
+        return jsonify({"success": True, "files": len(items), "size_bytes": size,
+                        "unreachable": unreachable, "emptied": emptied,
+                        "recycle": library_manage._recycle_on(db),
+                        "items": items[:_PREVIEW_ROWS],
+                        "more": max(0, len(items) - _PREVIEW_ROWS)})
+
+    @bp.route("/detail/show/<int:show_id>/episodes/monitor", methods=["POST"])
+    def video_set_episodes_monitor(show_id):
+        """body {episode_ids, monitored}: hunt, or stop hunting, a picked set
+        of this show's episodes."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        ids = body.get("episode_ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 5000:
+            return jsonify({"success": False, "error": "episode_ids must be a list"}), 400
+        if not isinstance(body.get("monitored"), bool):
+            return jsonify({"success": False, "error": "monitored must be true or false"}), 400
+        moved = get_video_db().set_episodes_monitored(show_id, ids, body["monitored"])
+        if not moved:
+            return jsonify({"success": False, "error": "None of those episodes are this show's."}), 404
+        return jsonify({"success": True, "monitored": body["monitored"], "episodes": moved})
+
+    @bp.route("/detail/<kind>/<int:item_id>/padlock", methods=["POST"])
+    def video_set_padlock(kind, item_id):
+        """body {locked}: the padlock on one title. locked, automation leaves
+        the title and its files alone; what a person does on its page still
+        goes through."""
+        from . import get_video_db
+        from core.video import bulk_ops
+        from core.video.sources import get_active_video_source
+        body = request.get_json(silent=True) or {}
+        if kind not in _KINDS or not isinstance(body.get("locked"), bool):
+            return jsonify({"success": False, "error": "kind and locked are required"}), 400
+        db = get_video_db()
+        try:
+            source = get_active_video_source()
+        except Exception:   # noqa: BLE001 - no server: the lock is still ours to keep
+            source = None
+        try:
+            res = bulk_ops._lock_title(db, kind, item_id, body["locked"], source)
+        except Exception:
+            logger.exception("padlock failed for %s %s", kind, item_id)
+            return jsonify({"success": False, "error": "Couldn't change the padlock"}), 500
+        if not res.get("ok"):
+            return jsonify({"success": False,
+                            "error": res.get("reason") or "Couldn't change the padlock"}), 409
+        return jsonify({"success": True, "locked": body["locked"]})
 
     @bp.route("/files/<int:file_id>/reassign", methods=["POST"])
     def video_file_reassign(file_id):
@@ -185,13 +354,17 @@ def register_routes(bp):
         from . import get_video_db
         from core.video import library_actions
         body = request.get_json(silent=True) or {}
+        from core.video import file_history
         try:
-            res = library_actions.reassign_file(get_video_db(), file_id, body.get("episode_id"))
+            with file_history.batch() as batch_id:
+                res = library_actions.reassign_file(get_video_db(), file_id, body.get("episode_id"))
         except Exception:
             logger.exception("reassign failed for file %s", file_id)
             return jsonify({"success": False, "error": "Couldn't move the file — see app.log"}), 500
         if not res.get("success"):
             return jsonify(res), 409
+        if res.get("action") == "reassigned":
+            res["batch"] = batch_id
         if res.get("renamed"):
             _refresh_server("show")
         return jsonify(res)

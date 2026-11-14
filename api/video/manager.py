@@ -201,7 +201,8 @@ def register_routes(bp):
         files = size = copy = skipped = held = 0
         sample, error, why = [], None, {}
         for item_id in _ids():
-            if db.is_hands_off(kind, item_id):
+            # by_hand: one title moved from its own page, which a padlock allows
+            if request.args.get("by_hand") != "1" and db.is_hands_off(kind, item_id):
                 held += 1
                 continue
             plan = bulk_ops.move_plan(db, kind, item_id, library_id)
