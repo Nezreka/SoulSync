@@ -38,6 +38,7 @@ the video library becomes a real library manager. the library page is a table of
 ## downloads
 
 - **start the torrents soulsync adds (thanks @onnwee, #2087).** a new switch in the torrent client settings for a qbittorrent that adds torrents stopped, or stops them once the metadata is in. soulsync's torrents start anyway and what other apps add keeps your qbittorrent setting.
+- **music usenet grabs use your category (thanks Randomname653, #2096).** every music nzb was sent as "soulsync" whatever category was set, so it landed in the root of the completed folder. a grab that names no category uses the one in settings now, on sabnzbd and nzbget.
 - a profile can cancel a download it started.
 
 ## server activity
@@ -54,5 +55,6 @@ the video library becomes a real library manager. the library page is a table of
 
 - **a security pass.** api keys, tokens and passwords are blanked out of every log line, names and urls are escaped before they reach the page, and backups, diagnostics, auto-import settings, quality profiles, repair findings and automations are checked against the profile asking.
 - status loops, discover shelves, the quarantine list and bulk repair fixes each stopped re-reading the whole library.
+- **bulk fixing orphan files is fast (thanks Randomname653, #2095).** each finding rebuilt the path of every file in the library to recheck one. it reads only the files that share the orphan's name now: about two seconds a finding where it took a minute on a 311k file library.
 
 tested: the frontend suite and the video, library, wishlist, activity and release suites pass locally. the full suite runs on dev's nightly build, which is the check on this pr.
