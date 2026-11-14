@@ -11,7 +11,7 @@ import type { LibraryFile, ShowLibrary } from './types';
 import { pad2 } from './format';
 import { ReassignDialog } from './library-dialogs';
 import { invalidate, onInvalidate, seasonLibrary } from './library-store';
-import { bridge, type FileActions, FileCards, useFileActions } from './library-tab';
+import { bridge, type FileActions, FileCards, refreshPage, useFileActions } from './library-tab';
 import s from './video-library.module.css';
 
 export function EpisodeFiles({
@@ -88,7 +88,7 @@ export function EpisodeFiles({
           onDone={() => {
             setMoving(null);
             reload();
-            b.reloadPage?.();
+            refreshPage();
           }}
         />
       ) : null}

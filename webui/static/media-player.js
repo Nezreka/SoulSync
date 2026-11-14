@@ -1870,7 +1870,8 @@ function initExpandedPlayer() {
     if (artContainer) {
         artContainer.addEventListener('click', () => {
             const on = artContainer.classList.toggle('viz-on');
-            if (on) { npBuildArtViz(); npInitVisualizer(); npStartVisualizerLoop(); }
+            // restart, so the loop picks up the bars that were just built
+            if (on) { npBuildArtViz(); npInitVisualizer(); npStopVisualizerLoop(); npStartVisualizerLoop(); }
         });
     }
 
@@ -3474,6 +3475,34 @@ function npEnsureAudioContextRunning() {
     } catch (_) { /* no-op */ }
 }
 
+// ── what the visualizers may spend ──
+// A phone or a small machine draws every other frame: the bars move the same
+// to the eye and the battery is spared. Reduced effects and max performance
+// (Settings) ask for the same. Nothing is drawn for a surface nobody can see.
+function npLiteMotion() {
+    const body = document.body;
+    if (body && (body.classList.contains('max-performance') || body.classList.contains('reduce-effects'))) return true;
+    const mq = (q) => !!(window.matchMedia && window.matchMedia(q).matches);
+    if (mq('(max-width: 768px)') || mq('(pointer: coarse)')) return true;
+    return (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+}
+const NP_LITE_FRAME_MS = 32;
+const _npVizLast = { np: 0, sidebar: 0 };
+// true when this frame should be drawn (always on a desktop)
+function npVizFrameDue(which) {
+    if (!npLiteMotion()) return true;
+    const now = (window.performance && performance.now) ? performance.now() : Date.now();
+    if (now - _npVizLast[which] < NP_LITE_FRAME_MS) return false;
+    _npVizLast[which] = now;
+    return true;
+}
+// The sidebar visualizer is hidden on a phone (mobile.css), and asked to be
+// off by reduced motion: its loop has nothing to draw into.
+function sidebarVizAllowed() {
+    const mq = (q) => !!(window.matchMedia && window.matchMedia(q).matches);
+    return !mq('(max-width: 768px)') && !mq('(prefers-reduced-motion: reduce)');
+}
+
 function npInitVisualizer() {
     if (npVizInitialized || !audioPlayer) return;
     try {
@@ -3523,11 +3552,19 @@ function npStartVisualizerLoop() {
     }
 
     const bars = document.querySelectorAll('.np-viz-bar');
+    // looked up once, not sixty times a second (the art bars are built before
+    // the loop starts, or by npBuildArtViz, which restarts it)
+    const artBars = document.querySelectorAll('.np-art-viz-bar');
+    const artOn = () => {
+        const box = document.querySelector('.np-album-art-container');
+        return !!(box && box.classList.contains('viz-on'));
+    };
     const bufferLength = npAnalyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
     function draw() {
         npVizAnimFrame = requestAnimationFrame(draw);
+        if (!npVizFrameDue('np')) return;
         npAnalyser.getByteFrequencyData(dataArray);
 
         // Map 7 transport bars to frequency bins (skip bin 0 = DC offset)
@@ -3540,13 +3577,13 @@ function npStartVisualizerLoop() {
 
         // Big album-art visualizer (when toggled on) — same real analyser,
         // spread across more bars for a fuller spectrum.
-        const artBars = document.querySelectorAll('.np-art-viz-bar');
-        if (artBars.length) {
+        // (a transform, not a height: 28 bars resizing was a layout every frame)
+        if (artBars.length && artOn()) {
             const span = bufferLength - 1;
             for (let i = 0; i < artBars.length; i++) {
                 const binIndex = 1 + Math.floor((i / artBars.length) * span);
                 const value = dataArray[Math.min(binIndex, bufferLength - 1)] / 255;
-                artBars[i].style.height = Math.max(6, value * 100) + '%';
+                artBars[i].style.transform = `scaleY(${Math.max(0.06, value)})`;
             }
         }
     }
@@ -3621,6 +3658,7 @@ function buildSidebarVizElements(type) {
 function startSidebarVisualizer() {
     const type = sidebarVisualizerType;
     if (type === 'none') return;
+    if (!sidebarVizAllowed()) return;
 
     const container = document.getElementById('sidebar-visualizer');
     if (!container) return;
@@ -3650,6 +3688,7 @@ function startSidebarVisualizer() {
         if (bars.length === 0) return;
         function drawBars() {
             sidebarVizAnimFrame = requestAnimationFrame(drawBars);
+            if (!npVizFrameDue('sidebar')) return;
             npAnalyser.getByteFrequencyData(dataArray);
             for (let i = 0; i < bars.length; i++) {
                 const value = getBinValue(i, bars.length);
@@ -3669,6 +3708,7 @@ function startSidebarVisualizer() {
         let hueOffset = 0;
         function drawWave() {
             sidebarVizAnimFrame = requestAnimationFrame(drawWave);
+            if (!npVizFrameDue('sidebar')) return;
             const ch = container.clientHeight;
             if (ch > 0 && canvas.height !== ch) canvas.height = ch;
             npAnalyser.getByteFrequencyData(dataArray);
@@ -3716,6 +3756,7 @@ function startSidebarVisualizer() {
 
         function drawSpectrum() {
             sidebarVizAnimFrame = requestAnimationFrame(drawSpectrum);
+            if (!npVizFrameDue('sidebar')) return;
             const ch = container.clientHeight;
             if (ch > 0 && canvas.height !== ch) canvas.height = ch;
             npAnalyser.getByteFrequencyData(dataArray);
@@ -3785,6 +3826,7 @@ function startSidebarVisualizer() {
         if (bars.length === 0) return;
         function drawMirror() {
             sidebarVizAnimFrame = requestAnimationFrame(drawMirror);
+            if (!npVizFrameDue('sidebar')) return;
             npAnalyser.getByteFrequencyData(dataArray);
             const half = Math.floor(bars.length / 2);
             for (let i = 0; i < half; i++) {
@@ -3814,6 +3856,7 @@ function startSidebarVisualizer() {
 
         function drawEqualizer() {
             sidebarVizAnimFrame = requestAnimationFrame(drawEqualizer);
+            if (!npVizFrameDue('sidebar')) return;
             npAnalyser.getByteFrequencyData(dataArray);
             for (let i = 0; i < wraps.length; i++) {
                 const value = getBinValue(i, wraps.length);
@@ -3852,6 +3895,17 @@ function stopSidebarVisualizer() {
     if (container) {
         container.classList.remove('active');
     }
+}
+
+// A window dragged narrow, or a tablet turned on its side, crosses the phone
+// width while music plays: stop the loop the phone layout hides, start it back.
+if (window.matchMedia) {
+    const _vizWidth = window.matchMedia('(max-width: 768px)');
+    const _onVizWidth = () => {
+        if (!sidebarVizAllowed()) stopSidebarVisualizer();
+        else if (typeof isPlaying !== 'undefined' && isPlaying) { npInitVisualizer(); startSidebarVisualizer(); }
+    };
+    if (_vizWidth.addEventListener) _vizWidth.addEventListener('change', _onVizWidth);
 }
 
 // Listen for visualizer type changes in settings — use isPlaying (not wasRunning)

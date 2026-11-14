@@ -42,7 +42,7 @@ import {
 import { EpisodeFiles } from './episode-files';
 import { audioLabel, codecLabel, formatBytes, pad2, rangeLabel, resolutionTone } from './format';
 import { invalidate, picked, showData, togglePicked } from './library-store';
-import { bridge } from './library-tab';
+import { bridge, refreshPage } from './library-tab';
 import { DeleteDialog, RenameDialog, RenumberDialog } from './manage-dialogs';
 import s from './video-library.module.css';
 
@@ -1017,7 +1017,7 @@ export function EpisodeList(props: EpisodeListProps) {
             setDialog(null);
             clearPicked();
             reload();
-            b.reloadPage?.();
+            refreshPage();
           }}
         />
       ) : null}
@@ -1030,7 +1030,7 @@ export function EpisodeList(props: EpisodeListProps) {
           onChanged={() => {
             clearPicked();
             reload();
-            b.reloadPage?.();
+            refreshPage();
           }}
         />
       ) : null}

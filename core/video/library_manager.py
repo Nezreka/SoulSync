@@ -15,8 +15,10 @@ Nothing here writes. The bulk operations live in ``library_manager_ops``.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
+import sqlite3
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,16 +42,6 @@ def res_rank_sql(col: str) -> str:
             f"WHEN {c} LIKE '1080%' THEN 3 WHEN {c} LIKE '720%' THEN 2 "
             f"WHEN {c} = '' THEN 0 ELSE 1 END)")
 
-
-_FILE_SORTS = {
-    "title": ("title_sort COLLATE NOCASE", "asc"),
-    "size": ("mf.size_bytes", "desc"),
-    "resolution": ("res_rank", "desc"),
-    "codec": ("LOWER(COALESCE(mf.video_codec, ''))", "asc"),
-    "added": ("mf.added_at", "desc"),
-    "path": ("mf.relative_path COLLATE NOCASE", "asc"),
-    "runtime": ("mf.runtime_seconds", "desc"),
-}
 
 #: the "needs a look" filters, in the order the page lists them
 NEEDS = ("missing", "below_cutoff", "copies", "unmatched", "no_subtitles",
@@ -192,18 +184,62 @@ def _show_ctes(e_scope: str = "", f_scope: str = "") -> str:
 _SNAP_TTL = 300.0
 _snapshots: Dict[tuple, Dict[str, Any]] = {}
 _snap_lock = threading.Lock()
+# every change to a snapshot's rows takes the next number: what is worked out
+# from a snapshot (the filter counts) is kept until its number moves
+_version = itertools.count(1)
 
 
 def forget(db=None) -> None:
-    """drop every summed-up row (a scan ran, files moved underneath us)"""
+    """drop every summed-up row (files moved underneath us and nobody knows
+    whose they were)"""
     with _snap_lock:
         if db is None:
             _snapshots.clear()
+            _file_snaps.clear()
         else:
             path = str(getattr(db, "database_path", ""))
-            for key in [k for k in _snapshots if k[0] == path]:
-                _snapshots.pop(key, None)
+            for store in (_snapshots, _file_snaps):
+                for key in [k for k in store if k[0] == path]:
+                    store.pop(key, None)
     forget_facets()
+
+
+def expire(db=None) -> None:
+    """a scan finished: everything summed up is out of date. the old rows
+    keep answering while each side is summed again in the background, so
+    the page that is open never waits on a cold build."""
+    path = str(getattr(db, "database_path", "")) if db is not None else None
+    with _snap_lock:
+        for store in (_snapshots, _file_snaps):
+            for key, snap in store.items():
+                if path is None or key[0] == path:
+                    snap["at"] = 0.0
+    forget_facets()
+
+
+def warm(db, kind: str, server_source) -> None:
+    """sum one side up in the background if it has not been yet. the page
+    asks for the side it opens on; the other is ready by the time its tab
+    is clicked."""
+    kind = kind if kind in KINDS else "movies"
+    key = _snap_key(db, kind, server_source)
+    with _snap_lock:
+        if key in _snapshots or key in _warming:
+            return
+        _warming.add(key)
+
+    def build():
+        try:
+            _snapshot(db, kind, server_source)
+        except Exception:   # noqa: BLE001 - the tab builds it itself when clicked
+            logger.debug("library snapshot warm-up failed (%s)", kind, exc_info=True)
+        finally:
+            with _snap_lock:
+                _warming.discard(key)
+    threading.Thread(target=build, daemon=True, name="video-library-warm").start()
+
+
+_warming: set = set()
 
 
 def _snap_key(db, kind: str, server_source) -> tuple:
@@ -340,14 +376,16 @@ def _snapshot(db, kind: str, server_source) -> List[Dict[str, Any]]:
     if snap is None:
         rows = _build_rows(db, kind, server_source)
         with _snap_lock:
-            _snapshots[key] = {"at": time.monotonic(), "rows": rows, "building": False}
+            _snapshots[key] = {"at": time.monotonic(), "rows": rows, "building": False,
+                               "v": next(_version)}
         return rows
     if not fresh and not refreshing:
         def rebuild():
             try:
                 rows = _build_rows(db, kind, server_source)
                 with _snap_lock:
-                    _snapshots[key] = {"at": time.monotonic(), "rows": rows, "building": False}
+                    _snapshots[key] = {"at": time.monotonic(), "rows": rows, "building": False,
+                                       "v": next(_version)}
             except Exception:   # noqa: BLE001 - the old rows keep answering
                 logger.exception("library snapshot rebuild failed (%s)", kind)
                 with _snap_lock:
@@ -374,11 +412,19 @@ def refresh(db, kind: str, ids, *, server_source=None) -> int:
             snap = _snapshots.get(key)
             if snap is None:
                 continue
-            kept = [r for r in snap["rows"] if r["id"] not in set(wanted)]
+            gone = set(wanted)
+            kept = [r for r in snap["rows"] if r["id"] not in gone]
             snap["rows"] = kept + list(fresh.values())
+            snap["v"] = next(_version)
         done += len(fresh)
+    _refresh_files(db, kind, wanted)
     forget_facets()
     return done
+
+
+def _snapshot_version(db, kind: str, server_source) -> int:
+    with _snap_lock:
+        return int((_snapshots.get(_snap_key(db, kind, server_source)) or {}).get("v") or 0)
 
 
 def _watched_ids(db, kind: str, watcher) -> Optional[set]:
@@ -401,93 +447,109 @@ def _watched_ids(db, kind: str, watcher) -> Optional[set]:
         conn.close()
 
 
-def _matches(row: Dict[str, Any], args: Dict[str, Any], watched: Optional[set]) -> bool:
-    """does one summed-up row pass the page's filters"""
+def _need_hit(row: Dict[str, Any], need: str, watched: Optional[set]) -> bool:
+    """is this title one that a "needs a look" filter shows"""
+    if need == "missing":
+        return (row.get("episodes_missing", 0) > 0 if row["kind"] == "show"
+                else (not row["owned"] and row["monitored"]))
+    if need == "not_owned":
+        return not row["owned"]
+    if need == "below_cutoff":
+        return bool(row["below_cutoff"])
+    if need == "copies":
+        return row["extra_copies"] > 0
+    if need == "unmatched":
+        return not row["matched"]
+    if need == "no_subtitles":
+        return bool(row["files_without_subtitles"]) and row["unprobed_files"] < row["file_count"]
+    if need == "unprobed":
+        return row["unprobed_files"] > 0
+    if need == "unmonitored":
+        return not row["monitored"]
+    is_watched = (row["id"] in watched) if watched is not None else row["watched"]
+    return bool(row["owned"] and not is_watched)      # unwatched
+
+
+def _compile(args: Dict[str, Any], watched: Optional[set]):
+    """the page's filters as one test of a row. the query is read here, once,
+    and only the filters that are set are asked of each row: the same
+    parsing per row, over a whole library, was most of a request."""
+    tests: List[Any] = []
     vlib = _int(args.get("video_library"))
-    if vlib and row.get("video_library_id") != vlib:
-        return False
+    if vlib:
+        tests.append(lambda r: r.get("video_library_id") == vlib)
     search = str(args.get("search") or "").strip().lower()
-    if search and search not in str(row.get("title") or "").lower():
-        return False
+    if search:
+        tests.append(lambda r: search in str(r.get("title") or "").lower())
     letter = str(args.get("letter") or "").strip().lower()
     if letter and letter != "all":
-        first = (row.get("sort_title") or "")[:1]
         if letter == "#":
-            if "a" <= first <= "z":
-                return False
-        elif first != letter[:1]:
-            return False
+            tests.append(lambda r: not ("a" <= (r.get("sort_title") or "")[:1] <= "z"))
+        else:
+            first = letter[:1]
+            tests.append(lambda r: (r.get("sort_title") or "")[:1] == first)
     genre = str(args.get("genre") or "").strip().lower()
-    if genre and genre not in [g.lower() for g in row.get("genres") or []]:
-        return False
+    if genre:
+        tests.append(lambda r: genre in [g.lower() for g in r.get("genres") or []])
     year_from, year_to = _int(args.get("year_from")), _int(args.get("year_to"))
-    year = row.get("year")
-    if year_from and not (year and year >= year_from):
-        return False
-    if year_to and not (year and year <= year_to):
-        return False
+    if year_from:
+        tests.append(lambda r: bool(r.get("year") and r["year"] >= year_from))
+    if year_to:
+        tests.append(lambda r: bool(r.get("year") and r["year"] <= year_to))
     profile = str(args.get("quality_profile") or "").strip()
-    if profile == "default" and row.get("quality_profile_id"):
-        return False
-    if _int(profile) and row.get("quality_profile_id") != _int(profile):
-        return False
+    if profile == "default":
+        tests.append(lambda r: not r.get("quality_profile_id"))
+    profile_id = _int(profile)
+    if profile_id:
+        tests.append(lambda r: r.get("quality_profile_id") == profile_id)
     status = str(args.get("status") or "all")
-    if status == "owned" and not row["owned"]:
-        return False
-    if status == "not_owned" and row["owned"]:
-        return False
+    if status == "owned":
+        tests.append(lambda r: bool(r["owned"]))
+    elif status == "not_owned":
+        tests.append(lambda r: not r["owned"])
     monitored = str(args.get("monitored") or "")
-    if monitored in ("1", "0") and bool(row["monitored"]) != (monitored == "1"):
-        return False
+    if monitored in ("1", "0"):
+        want_monitored = monitored == "1"
+        tests.append(lambda r: bool(r["monitored"]) == want_monitored)
     locked = str(args.get("locked") or "")
-    if locked in ("1", "0") and bool(row.get("locked")) != (locked == "1"):
-        return False
+    if locked in ("1", "0"):
+        want_locked = locked == "1"
+        tests.append(lambda r: bool(r.get("locked")) == want_locked)
     res = str(args.get("resolution") or "").strip().lower()
     if res:
         label = RES_LABELS.get(_RES_BY_NAME.get(res, -1))
-        if not label or not row["resolution_mix"].get(label):
-            return False
+        if not label:
+            return lambda r: False
+        tests.append(lambda r: bool(r["resolution_mix"].get(label)))
     codec = str(args.get("codec") or "").strip().lower()
-    if codec and codec not in row["video_codecs"]:
-        return False
+    if codec:
+        tests.append(lambda r: codec in r["video_codecs"])
     hdr = str(args.get("hdr") or "")
-    if hdr == "1" and not row["dynamic_range"]:
-        return False
-    if hdr == "0" and (row["dynamic_range"] or not row["owned"]):
-        return False
+    if hdr == "1":
+        tests.append(lambda r: bool(r["dynamic_range"]))
+    elif hdr == "0":
+        tests.append(lambda r: not r["dynamic_range"] and bool(r["owned"]))
     audio = str(args.get("audio_language") or "").strip().lower()
-    if audio and audio not in row["audio_languages"]:
-        return False
+    if audio:
+        tests.append(lambda r: audio in r["audio_languages"])
     sub = str(args.get("subtitle_language") or "").strip().lower()
-    if sub and sub not in row["subtitle_languages"]:
-        return False
+    if sub:
+        tests.append(lambda r: sub in r["subtitle_languages"])
     drive = str(args.get("drive") or "").strip()
-    if drive and row.get("drive") != drive:
-        return False
-    is_watched = (row["id"] in watched) if watched is not None else row["watched"]
+    if drive:
+        tests.append(lambda r: r.get("drive") == drive)
     for need in [n for n in str(args.get("needs") or "").split(",") if n in NEEDS]:
-        if need == "missing":
-            hit = (row.get("episodes_missing", 0) > 0 if row["kind"] == "show"
-                   else (not row["owned"] and row["monitored"]))
-        elif need == "not_owned":
-            hit = not row["owned"]
-        elif need == "below_cutoff":
-            hit = row["below_cutoff"]
-        elif need == "copies":
-            hit = row["extra_copies"] > 0
-        elif need == "unmatched":
-            hit = not row["matched"]
-        elif need == "no_subtitles":
-            hit = bool(row["files_without_subtitles"]) and row["unprobed_files"] < row["file_count"]
-        elif need == "unprobed":
-            hit = row["unprobed_files"] > 0
-        elif need == "unmonitored":
-            hit = not row["monitored"]
-        else:   # unwatched
-            hit = row["owned"] and not is_watched
-        if not hit:
-            return False
-    return True
+        tests.append(lambda r, need=need: _need_hit(r, need, watched))
+    if not tests:
+        return lambda r: True
+    if len(tests) == 1:
+        return tests[0]
+    return lambda r: all(test(r) for test in tests)
+
+
+def _matches(row: Dict[str, Any], args: Dict[str, Any], watched: Optional[set]) -> bool:
+    """does one summed-up row pass the page's filters"""
+    return bool(_compile(args, watched)(row))
 
 
 _SORT_KEYS = {
@@ -532,7 +594,8 @@ def _public(row: Dict[str, Any], watched: Optional[set]) -> Dict[str, Any]:
 
 def _filtered(db, kind: str, args: Dict[str, Any], server_source, watcher) -> Tuple[List[Dict[str, Any]], Optional[set]]:
     watched = _watched_ids(db, kind, watcher)
-    rows = [r for r in _snapshot(db, kind, server_source) if _matches(r, args, watched)]
+    passes = _compile(args, watched)
+    rows = [r for r in _snapshot(db, kind, server_source) if passes(r)]
     return rows, watched
 
 
@@ -563,22 +626,258 @@ def title_ids(db, kind: str, args: Optional[Dict[str, Any]] = None, *, server_so
     return [r["id"] for r in _sorted(rows, dict(args or {}))[: int(cap)]]
 
 
-def _like_prefix(prefix: str) -> str:
-    esc = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return esc.rstrip("/") + "/%"
-
-
-def _order(sorts: Dict[str, Tuple[str, str]], args: Dict[str, Any], default: str,
-           tiebreak: str) -> str:
-    name = str(args.get("sort") or default)
-    sql, direction = sorts.get(name) or sorts[default]
-    asked = str(args.get("dir") or "").lower()
-    direction = asked if asked in ("asc", "desc") else direction
-    nulls = f"{sql} IS NULL, " if name not in ("title", "path") else ""
-    return f"{nulls}{sql} {direction.upper()}, {tiebreak}"
-
-
 # ── files ────────────────────────────────────────────────────────────────────
+# the Files view is every file of one side as a row. asking the database for a
+# page of them joined three tables over a hundred thousand files and sorted
+# the lot, seconds per request, for every page turn and every filter. the
+# files are read once into memory instead (plain tuples: a dict per file was
+# several times the room), kept the way the title rows are, and every filter,
+# sort and page is worked out over that. a write refreshes just its title's
+# files, and a side nobody has looked at for a while is let go.
+
+_file_snaps: Dict[tuple, Dict[str, Any]] = {}
+_FILE_IDLE = 900.0                # a side's files are dropped after this long unread
+
+# what each place in a file's tuple holds
+(F_ID, F_PATH, F_SIZE, F_RANK, F_VCODEC, F_ACODEC, F_SOURCE, F_QUALITY, F_RUNTIME, F_CHANNELS,
+ F_HDR, F_ATMOS, F_ALANGS, F_SLANGS, F_ADDED, F_TITLE_ID, F_TITLE, F_SORT, F_YEAR, F_EP_ID,
+ F_SEASON, F_EPISODE, F_EP_TITLE, F_VLIB, F_PROFILE) = range(25)
+
+
+def _res_rank(value: Any) -> int:
+    """res_rank_sql, for a value already read"""
+    c = str(value or "").lower()
+    if c in ("4k", "2160", "2160p", "2k", "1440", "1440p", "uhd"):
+        return 4
+    if c.startswith("1080"):
+        return 3
+    if c.startswith("720"):
+        return 2
+    return 0 if c == "" else 1
+
+
+def _file_rows(db, kind: str, server_source, title_ids: Optional[List[int]] = None) -> List[tuple]:
+    """one side's files (or just these titles'), in the order the Files view
+    opens in: by title, then season and episode"""
+    is_shows = kind == "shows"
+    if is_shows:
+        # the episode's show, season and number come off idx_episodes_summary
+        # alone. the episode rows carry each overview, and reading one per
+        # file to learn its number was most of this query; the title, which
+        # the index does not hold, is read for the page that is shown
+        src = ("episodes ep INDEXED BY idx_episodes_summary "
+               "JOIN media_files mf ON mf.episode_id = ep.id "
+               "JOIN shows t ON t.id = ep.show_id")
+        extra = "ep.id, ep.season_number, ep.episode_number, NULL"
+    else:
+        src = "media_files mf JOIN movies t ON t.id = mf.movie_id"
+        extra = "NULL, NULL, NULL, NULL"
+    where, params = [], []
+    if server_source:
+        where.append("t.server_source = ?")
+        params.append(server_source)
+    if title_ids is not None:
+        where.append("t.id IN (%s)" % ",".join("?" * len(title_ids)))
+        params.extend(title_ids)
+    sql = ("SELECT mf.id, mf.relative_path, mf.size_bytes, mf.resolution, mf.video_codec, "
+           "mf.audio_codec, mf.release_source, mf.quality, mf.runtime_seconds, mf.audio_channels, "
+           "mf.dynamic_range, mf.atmos, mf.audio_languages, mf.subtitle_languages, mf.added_at, "
+           "t.id, t.title, COALESCE(t.sort_title, t.title), t.year, " + extra + ", "
+           "t.video_library_id, t.quality_profile_id FROM " + src
+           + ((" WHERE " + " AND ".join(where)) if where else ""))
+    conn = db._get_connection()
+    try:
+        try:
+            raw = conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError:
+            # a database opened before the index was made: the plain join
+            raw = conn.execute(sql.replace(" INDEXED BY idx_episodes_summary", ""),
+                               params).fetchall()
+    finally:
+        conn.close()
+    sorts: Dict[int, str] = {}              # one string per title, shared by its files
+    out = []
+    for r in raw:
+        title_id = r[15]
+        sort = sorts.get(title_id)
+        if sort is None:
+            sort = sorts[title_id] = str(r[17] or "").lower()
+        out.append((
+            r[0], r[1] or "", int(r[2] or 0) if r[2] is not None else None, _res_rank(r[3]),
+            (r[4] or "").lower() or None, (r[5] or "").lower() or None, r[6], r[7], r[8], r[9],
+            r[10] or None, bool(r[11]), r[12], r[13], r[14], title_id, r[16], sort, r[18],
+            r[19], r[20], r[21], r[22], r[23], r[24]))
+    out.sort(key=_file_base_key)
+    return out
+
+
+def _file_base_key(f: tuple) -> tuple:
+    return (f[F_SORT], f[F_TITLE_ID], f[F_SEASON] or 0, f[F_EPISODE] or 0, f[F_ID])
+
+
+def _file_snapshot(db, kind: str, server_source) -> List[tuple]:
+    key = _snap_key(db, kind, server_source)
+    now = time.monotonic()
+    with _snap_lock:
+        # a side nobody has opened the Files view of in a while gives its room back
+        for other in [k for k, v in _file_snaps.items()
+                      if k != key and now - v.get("used", now) > _FILE_IDLE and not v.get("building")]:
+            _file_snaps.pop(other, None)
+        snap = _file_snaps.get(key)
+        fresh = snap is not None and now - snap["at"] < _SNAP_TTL
+        refreshing = bool(snap and snap.get("building"))
+        if snap is not None:
+            snap["used"] = now
+            if not fresh and not refreshing:
+                snap["building"] = True
+    if snap is None:
+        rows = _file_rows(db, kind, server_source)
+        with _snap_lock:
+            _file_snaps[key] = {"at": time.monotonic(), "rows": rows, "building": False,
+                                "used": time.monotonic()}
+        return rows
+    if not fresh and not refreshing:
+        def rebuild():
+            try:
+                rows = _file_rows(db, kind, server_source)
+                with _snap_lock:
+                    if key in _file_snaps:
+                        _file_snaps[key].update(at=time.monotonic(), rows=rows, building=False)
+            except Exception:   # noqa: BLE001 - the old rows keep answering
+                logger.exception("library file snapshot rebuild failed (%s)", kind)
+                with _snap_lock:
+                    if key in _file_snaps:
+                        _file_snaps[key]["building"] = False
+        threading.Thread(target=rebuild, daemon=True, name="video-library-files").start()
+    return snap["rows"]
+
+
+def _refresh_files(db, kind: str, title_ids: List[int]) -> None:
+    """read these titles' files again into the file snapshots that hold them"""
+    path = str(getattr(db, "database_path", ""))
+    with _snap_lock:
+        keys = [k for k in _file_snaps if k[0] == path and k[1] == kind]
+    gone = set(title_ids)
+    for key in keys:
+        try:
+            fresh = _file_rows(db, kind, key[2] or None, title_ids)
+        except Exception:   # noqa: BLE001 - the next rebuild catches up
+            logger.debug("file snapshot refresh failed", exc_info=True)
+            continue
+        with _snap_lock:
+            snap = _file_snaps.get(key)
+            if snap is None:
+                continue
+            rows = [f for f in snap["rows"] if f[F_TITLE_ID] not in gone] + fresh
+            rows.sort(key=_file_base_key)
+            snap["rows"] = rows
+
+
+#: sort name -> (the value sorted on, the direction it opens in, can be unknown)
+_FILE_SORT_KEYS = {
+    "title": (None, "asc", False),          # the order the rows are kept in
+    "size": (lambda f: f[F_SIZE], "desc", True),
+    "resolution": (lambda f: f[F_RANK], "desc", False),
+    "codec": (lambda f: f[F_VCODEC] or "", "asc", False),
+    "added": (lambda f: f[F_ADDED], "desc", True),
+    "path": (lambda f: f[F_PATH].lower(), "asc", False),
+    "runtime": (lambda f: f[F_RUNTIME], "desc", True),
+}
+
+
+def _file_tests(db, kind: str, args: Dict[str, Any], rows: List[tuple]) -> List[Any]:
+    tests: List[Any] = []
+    vlib = _int(args.get("video_library"))
+    if vlib:
+        tests.append(lambda f: f[F_VLIB] == vlib)
+    title_id = _int(args.get("title_id"))
+    if title_id:
+        tests.append(lambda f: f[F_TITLE_ID] == title_id)
+    search = str(args.get("search") or "").strip().lower()
+    if search:
+        tests.append(lambda f: search in str(f[F_TITLE] or "").lower() or search in f[F_PATH].lower())
+    res = _RES_BY_NAME.get(str(args.get("resolution") or "").strip().lower())
+    if res:
+        tests.append(lambda f: f[F_RANK] == res)
+    codec = str(args.get("codec") or "").strip().lower()
+    if codec:
+        tests.append(lambda f: (f[F_VCODEC] or "") == codec)
+    audio_codec = str(args.get("audio_codec") or "").strip().lower()
+    if audio_codec:
+        tests.append(lambda f: (f[F_ACODEC] or "") == audio_codec)
+    hdr = str(args.get("hdr") or "")
+    if hdr == "1":
+        tests.append(lambda f: bool(f[F_HDR]))
+    elif hdr == "0":
+        tests.append(lambda f: not f[F_HDR])
+    audio = str(args.get("audio_language") or "").strip().lower()
+    if audio:
+        tests.append(lambda f: ("," + audio + ",") in ("," + str(f[F_ALANGS] or "").lower() + ","))
+    sub = str(args.get("subtitle_language") or "").strip().lower()
+    if sub:
+        tests.append(lambda f: ("," + sub + ",") in ("," + str(f[F_SLANGS] or "").lower() + ","))
+    drive = str(args.get("drive") or "").strip()
+    if drive:
+        prefix = drive.rstrip("/").lower() + "/"
+        tests.append(lambda f: f[F_PATH].lower().startswith(prefix))
+    source = str(args.get("release_source") or "").strip().lower()
+    if source:
+        tests.append(lambda f: str(f[F_SOURCE] or "").lower() == source)
+    for need in [n for n in str(args.get("needs") or "").split(",") if n]:
+        if need == "no_subtitles":
+            tests.append(lambda f: f[F_ALANGS] is not None and not (f[F_SLANGS] or ""))
+        elif need == "unprobed":
+            tests.append(lambda f: f[F_ALANGS] is None)
+        elif need == "copies":
+            owner = F_EP_ID if kind == "shows" else F_TITLE_ID
+            held: Dict[Any, int] = {}
+            for f in rows:
+                held[f[owner]] = held.get(f[owner], 0) + 1
+            tests.append(lambda f, owner=owner, held=held: held.get(f[owner], 0) > 1)
+        elif need == "below_cutoff":
+            default_cut, named_cut = _cutoff_ranks(db, kind if kind in KINDS else "movies")
+
+            def below(f, default_cut=default_cut, named_cut=named_cut):
+                cut = named_cut.get(f[F_PROFILE], default_cut) if f[F_PROFILE] else default_cut
+                return cut > 0 and 0 < f[F_RANK] < cut
+            tests.append(below)
+    return tests
+
+
+def _episode_titles(db, episode_ids: List[int]) -> Dict[int, Any]:
+    """the titles of the episodes on the page being shown"""
+    ids = sorted({int(i) for i in episode_ids if i is not None})
+    if not ids:
+        return {}
+    conn = db._get_connection()
+    try:
+        return {int(r[0]): r[1] for r in conn.execute(
+            "SELECT id, title FROM episodes WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
+def _file_public(f: tuple, kind: str, drive_of, episode_titles: Dict[int, Any]) -> Dict[str, Any]:
+    path = f[F_PATH]
+    return {
+        "id": f[F_ID], "kind": "show" if kind == "shows" else "movie",
+        "title_id": f[F_TITLE_ID], "title": f[F_TITLE], "year": f[F_YEAR],
+        "episode_id": f[F_EP_ID], "season_number": f[F_SEASON],
+        "episode_number": f[F_EPISODE],
+        "episode_title": episode_titles.get(f[F_EP_ID], f[F_EP_TITLE]),
+        "path": path, "filename": path.replace("\\", "/").rsplit("/", 1)[-1],
+        "drive": drive_of(path), "size_bytes": int(f[F_SIZE] or 0),
+        "resolution": RES_LABELS.get(f[F_RANK], ""), "resolution_rank": f[F_RANK],
+        "video_codec": f[F_VCODEC], "audio_codec": f[F_ACODEC],
+        "release_source": f[F_SOURCE], "quality": f[F_QUALITY],
+        "runtime_seconds": f[F_RUNTIME], "audio_channels": f[F_CHANNELS],
+        "dynamic_range": f[F_HDR], "atmos": f[F_ATMOS],
+        "audio_languages": _langs(f[F_ALANGS]), "subtitle_languages": _langs(f[F_SLANGS]),
+        "probed": f[F_ALANGS] is not None, "added_at": f[F_ADDED],
+    }
+
 
 def files(db, args: Optional[Dict[str, Any]] = None, *, server_source=None) -> Dict[str, Any]:
     """One page of video files, each with the title it belongs to.
@@ -587,126 +886,46 @@ def files(db, args: Optional[Dict[str, Any]] = None, *, server_source=None) -> D
 
     args = dict(args or {})
     kind = str(args.get("kind") or "movies")
-    is_shows = kind == "shows"
-    rr = res_rank_sql("mf.resolution")
-    if is_shows:
-        src = ("media_files mf JOIN episodes ep ON ep.id = mf.episode_id "
-               "JOIN shows t ON t.id = ep.show_id")
-        cols = ("t.id AS title_id, t.title AS title, COALESCE(t.sort_title, t.title) AS title_sort, "
-                "t.year AS year, ep.id AS episode_id, ep.season_number AS season_number, "
-                "ep.episode_number AS episode_number, ep.title AS episode_title, ")
-        tiebreak = "ep.season_number, ep.episode_number, mf.id"
+    kind = kind if kind in KINDS else "movies"
+    rows = _file_snapshot(db, kind, server_source)
+    tests = _file_tests(db, kind, args, rows)
+    if tests:
+        rows = [f for f in rows if all(test(f) for test in tests)]
+    name = str(args.get("sort") or "title")
+    key, direction, nullable = _FILE_SORT_KEYS.get(name) or _FILE_SORT_KEYS["title"]
+    asked = str(args.get("dir") or "").lower()
+    desc = (asked if asked in ("asc", "desc") else direction) == "desc"
+    if key is None:
+        rows = rows[::-1] if desc else rows
     else:
-        src = "media_files mf JOIN movies t ON t.id = mf.movie_id"
-        cols = ("t.id AS title_id, t.title AS title, COALESCE(t.sort_title, t.title) AS title_sort, "
-                "t.year AS year, NULL AS episode_id, NULL AS season_number, "
-                "NULL AS episode_number, NULL AS episode_title, ")
-        tiebreak = "mf.id"
-    where: List[str] = []
-    params: List[Any] = []
-
-    def add(sql: str, *values: Any) -> None:
-        where.append(sql)
-        params.extend(values)
-
-    if server_source:
-        add("t.server_source = ?", server_source)
-    vlib = _int(args.get("video_library"))
-    if vlib:
-        add("t.video_library_id = ?", vlib)
-    title_id = _int(args.get("title_id"))
-    if title_id:
-        add("t.id = ?", title_id)
-    search = str(args.get("search") or "").strip()
-    if search:
-        add("(t.title LIKE ? COLLATE NOCASE OR mf.relative_path LIKE ? COLLATE NOCASE)",
-            "%" + search + "%", "%" + search + "%")
-    res = _RES_BY_NAME.get(str(args.get("resolution") or "").strip().lower())
-    if res:
-        add(f"{rr} = ?", res)
-    codec = str(args.get("codec") or "").strip().lower()
-    if codec:
-        add("LOWER(COALESCE(mf.video_codec, '')) = ?", codec)
-    audio_codec = str(args.get("audio_codec") or "").strip().lower()
-    if audio_codec:
-        add("LOWER(COALESCE(mf.audio_codec, '')) = ?", audio_codec)
-    if str(args.get("hdr") or "") == "1":
-        add("COALESCE(mf.dynamic_range, '') <> ''")
-    elif str(args.get("hdr") or "") == "0":
-        add("COALESCE(mf.dynamic_range, '') = ''")
-    audio = str(args.get("audio_language") or "").strip().lower()
-    if audio:
-        add("(',' || COALESCE(mf.audio_languages, '') || ',') LIKE ?", f"%,{audio},%")
-    sub = str(args.get("subtitle_language") or "").strip().lower()
-    if sub:
-        add("(',' || COALESCE(mf.subtitle_languages, '') || ',') LIKE ?", f"%,{sub},%")
-    drive = str(args.get("drive") or "").strip()
-    if drive:
-        add("mf.relative_path LIKE ? ESCAPE '\\'", _like_prefix(drive))
-    source = str(args.get("release_source") or "").strip().lower()
-    if source:
-        add("LOWER(COALESCE(mf.release_source, '')) = ?", source)
-    for need in [n for n in str(args.get("needs") or "").split(",") if n]:
-        if need == "no_subtitles":
-            add("mf.audio_languages IS NOT NULL AND COALESCE(mf.subtitle_languages, '') = ''")
-        elif need == "unprobed":
-            add("mf.audio_languages IS NULL")
-        elif need == "copies":
-            key = "mf.episode_id" if is_shows else "mf.movie_id"
-            add(f"(SELECT COUNT(*) FROM media_files o WHERE o.{key[3:]} = {key}) > 1")
-        elif need == "below_cutoff":
-            default_cut, named_cut = _cutoff_ranks(db, kind if kind in KINDS else "movies")
-            cut = _cutoff_sql(default_cut, named_cut)
-            add(f"{cut} > 0 AND {rr} > 0 AND {rr} < {cut}")
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    order = _order(_FILE_SORTS, args, "title", tiebreak)
+        # stable: files that tie keep the title order they are held in
+        known = [f for f in rows if key(f) is not None] if nullable else list(rows)
+        unknown = [f for f in rows if key(f) is None] if nullable else []
+        known.sort(key=key, reverse=desc)
+        rows = known + unknown                 # a file with no value sorts last either way
     page, limit = _paging(args)
-    conn = db._get_connection()
-    try:
-        totals = conn.execute(
-            f"SELECT COUNT(*) AS n, COALESCE(SUM(mf.size_bytes), 0) AS size FROM {src}{where_sql}",
-            params).fetchone()
-        rows = conn.execute(
-            f"SELECT mf.id, mf.relative_path, mf.size_bytes, mf.resolution, mf.video_codec, "
-            f"mf.audio_codec, mf.release_source, mf.quality, mf.runtime_seconds, mf.audio_channels, "
-            f"mf.dynamic_range, mf.atmos, mf.audio_languages, mf.subtitle_languages, mf.added_at, "
-            f"{cols}{rr} AS res_rank FROM {src}{where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
-            params + [limit, (page - 1) * limit]).fetchall()
-    finally:
-        conn.close()
-    items = []
-    for r in rows:
-        path = r["relative_path"] or ""
-        items.append({
-            "id": r["id"], "kind": "show" if is_shows else "movie",
-            "title_id": r["title_id"], "title": r["title"], "year": r["year"],
-            "episode_id": r["episode_id"], "season_number": r["season_number"],
-            "episode_number": r["episode_number"], "episode_title": r["episode_title"],
-            "path": path, "filename": path.replace("\\", "/").rsplit("/", 1)[-1],
-            "drive": drive_root(path), "size_bytes": int(r["size_bytes"] or 0),
-            "resolution": RES_LABELS.get(int(r["res_rank"] or 0), ""),
-            "resolution_rank": int(r["res_rank"] or 0),
-            "video_codec": (r["video_codec"] or "").lower() or None,
-            "audio_codec": (r["audio_codec"] or "").lower() or None,
-            "release_source": r["release_source"], "quality": r["quality"],
-            "runtime_seconds": r["runtime_seconds"], "audio_channels": r["audio_channels"],
-            "dynamic_range": r["dynamic_range"] or None, "atmos": bool(r["atmos"]),
-            "audio_languages": _langs(r["audio_languages"]),
-            "subtitle_languages": _langs(r["subtitle_languages"]),
-            "probed": r["audio_languages"] is not None, "added_at": r["added_at"],
-        })
-    total = int(totals["n"] or 0)
+    total = len(rows)
     pages = max(1, (total + limit - 1) // limit)
-    return {"items": items, "kind": kind,
-            "totals": {"files": total, "size_bytes": int(totals["size"] or 0)},
+    shown = rows[(page - 1) * limit: page * limit]
+    episode_titles = _episode_titles(db, [f[F_EP_ID] for f in shown]) if kind == "shows" else {}
+    return {"items": [_file_public(f, kind, drive_root, episode_titles) for f in shown],
+            "kind": kind,
+            "totals": {"files": total, "size_bytes": sum(f[F_SIZE] or 0 for f in rows)},
             "pagination": {"page": page, "limit": limit, "total_pages": pages,
                            "total_count": total, "has_prev": page > 1, "has_next": page < pages}}
 
 
 # ── facets ───────────────────────────────────────────────────────────────────
 
+# the counts are worked out from a snapshot in one pass and kept until that
+# snapshot's rows change: they were worked out again for every visit, walking
+# the whole library once per "needs a look" filter
+_facet_cache: Dict[tuple, tuple] = {}
+
+
 def forget_facets() -> None:
-    """kept for callers: the counts are read off the snapshot, which they share"""
+    """the counts follow the snapshot's version, so there is nothing to drop;
+    kept for callers"""
 
 
 def facets(db, kind: str, *, server_source=None, watcher: Any = None) -> Dict[str, Any]:
@@ -716,45 +935,73 @@ def facets(db, kind: str, *, server_source=None, watcher: Any = None) -> Dict[st
     filter would show."""
     kind = kind if kind in KINDS else "movies"
     rows = _snapshot(db, kind, server_source)
+    version = _snapshot_version(db, kind, server_source)
     watched = _watched_ids(db, kind, watcher)
+    # a profile's own watched titles change the unwatched count, and nothing else
+    cache_key = (_snap_key(db, kind, server_source), None if watched is None else len(watched),
+                 None if watched is None else hash(frozenset(watched)))
+    hit = _facet_cache.get(cache_key)
+    if hit and hit[0] == version and version:
+        return dict(hit[1])
 
-    def counted(values_of, limit: int = 40) -> List[Dict[str, Any]]:
-        tally: Dict[str, int] = {}
-        for row in rows:
+    tallies: Dict[str, Dict[str, int]] = {name: {} for name in (
+        "resolutions", "codecs", "audio_codecs", "release_sources", "hdr", "audio_languages",
+        "subtitle_languages", "genres")}
+    sources = (("resolutions", lambda r: r["resolution_mix"]), ("codecs", lambda r: r["video_codecs"]),
+               ("audio_codecs", lambda r: r["audio_codecs"]),
+               ("release_sources", lambda r: r["release_sources"]),
+               ("hdr", lambda r: r["dynamic_range"]),
+               ("audio_languages", lambda r: r["audio_languages"]),
+               ("subtitle_languages", lambda r: r["subtitle_languages"]),
+               ("genres", lambda r: r["genres"]))
+    drives: Dict[str, Dict[str, int]] = {}
+    needs = dict.fromkeys(NEEDS, 0)
+    size = files_n = owned = 0
+    for row in rows:                                   # the whole library, once
+        size += row["size_bytes"]
+        files_n += row["file_count"]
+        owned += 1 if row["owned"] else 0
+        for name, values_of in sources:
+            tally = tallies[name]
             for value in values_of(row):
                 if value:
                     tally[value] = tally.get(value, 0) + 1
-        return [{"value": k, "count": v}
-                for k, v in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
-
-    drives: Dict[str, Dict[str, int]] = {}
-    for row in rows:
         if row.get("drive"):
             d = drives.setdefault(row["drive"], {"count": 0, "size_bytes": 0})
             d["count"] += 1
             d["size_bytes"] += row["size_bytes"]
+        for need in NEEDS:
+            if _need_hit(row, need, watched):
+                needs[need] += 1
+
+    def counted(name: str, limit: int = 40) -> List[Dict[str, Any]]:
+        return [{"value": k, "count": v}
+                for k, v in sorted(tallies[name].items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
+
     order = {label: rank for rank, label in RES_LABELS.items()}
-    resolutions = sorted(counted(lambda r: list(r["resolution_mix"])),
-                         key=lambda x: -order.get(x["value"], 0))
-    return {
+    out = {
         "kind": kind,
         "titles": len(rows),
-        "size_bytes": sum(r["size_bytes"] for r in rows),
-        "files": sum(r["file_count"] for r in rows),
-        "owned": sum(1 for r in rows if r["owned"]),
-        "resolutions": resolutions,
-        "codecs": counted(lambda r: r["video_codecs"], 12),
-        "audio_codecs": counted(lambda r: r["audio_codecs"], 12),
-        "release_sources": counted(lambda r: r["release_sources"], 8),
-        "hdr": counted(lambda r: r["dynamic_range"]),
-        "audio_languages": counted(lambda r: r["audio_languages"]),
-        "subtitle_languages": counted(lambda r: r["subtitle_languages"]),
-        "genres": counted(lambda r: r["genres"], 60),
+        "size_bytes": size,
+        "files": files_n,
+        "owned": owned,
+        "resolutions": sorted(counted("resolutions"), key=lambda x: -order.get(x["value"], 0)),
+        "codecs": counted("codecs", 12),
+        "audio_codecs": counted("audio_codecs", 12),
+        "release_sources": counted("release_sources", 8),
+        "hdr": counted("hdr"),
+        "audio_languages": counted("audio_languages"),
+        "subtitle_languages": counted("subtitle_languages"),
+        "genres": counted("genres", 60),
         "drives": [{"value": k, **v} for k, v in sorted(drives.items())],
-        "needs": {need: sum(1 for r in rows if _matches(r, {"needs": need}, watched))
-                  for need in NEEDS},
+        "needs": needs,
     }
+    if version:
+        if len(_facet_cache) > 32:
+            _facet_cache.clear()
+        _facet_cache[cache_key] = (version, out)
+    return dict(out)
 
 
-__all__ = ["KINDS", "NEEDS", "RES_LABELS", "facets", "files", "forget_facets",
-           "res_rank_sql", "title_ids", "titles"]
+__all__ = ["KINDS", "NEEDS", "RES_LABELS", "expire", "facets", "files", "forget",
+           "forget_facets", "refresh", "res_rank_sql", "title_ids", "titles", "warm"]

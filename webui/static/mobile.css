@@ -2374,12 +2374,29 @@
         max-width: none;
         max-height: none;
         height: 100vh;
+        /* the screen as it is with the browser's bars showing: at 100vh the
+           transport sat under the address bar */
+        height: 100dvh;
         border-radius: 0;
     }
     .np-body {
         flex-direction: column;
         overflow-y: auto;
         max-height: 100vh;
+        max-height: 100dvh;
+    }
+    /* the player fills the screen here, so the blur behind it shows nowhere
+       and was only work for the phone */
+    .np-modal-overlay {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+    /* the drawer is off screen until the menu opens: its seasonal decorations
+       and the weather glyph stop moving while nobody can see them */
+    .sidebar:not(.mobile-open) *,
+    .sidebar:not(.mobile-open) *::before,
+    .sidebar:not(.mobile-open) *::after {
+        animation-play-state: paused;
     }
     .np-track-info {
         width: 100%;

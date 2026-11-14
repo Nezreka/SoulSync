@@ -1421,7 +1421,7 @@
   width: 30px;
   height: 30px;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--white-a55);
   font-size: 18px;
@@ -1441,7 +1441,7 @@
   margin-right: 6px;
   border: 2px solid var(--white-a16);
   border-top-color: var(--text-1);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: vltSpin 0.8s linear infinite;
 }
 
@@ -1455,6 +1455,41 @@
   .undoToast,
   .listScope .selectBar,
   .undoSpin {
+    animation: none;
+  }
+}
+
+/* ── is the title current ────────────────────────────────────────────────── */
+
+.fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vlt-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.freshDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--white-a30);
+}
+
+.freshDot[data-busy] {
+  background: rgb(var(--vlt-accent));
+  animation: vltPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vltPulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .freshDot[data-busy] {
     animation: none;
   }
 }

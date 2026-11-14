@@ -397,7 +397,68 @@ def test_get_stats_caches(monkeypatch):
 
 
 # ── Jellyfin (merged activity) ───────────────────────────────────────────────
+# ── what a card shows: the thing playing, before whoever made it (#2089) ─────
+
+def test_a_track_shows_its_albums_cover_not_the_artists_picture():
+    tr = _movie(type="track", title="I Don't Get Lonely (Extended Mix)", grandparentTitle="Orjan Nilsen",
+                parentTitle="Anomalous", thumb="/library/metadata/9/thumb/1",
+                parentThumb="/library/metadata/8/thumb/1", grandparentThumb="/library/metadata/7/thumb/1",
+                art="/library/metadata/7/art/1", grandparentArt="/library/metadata/7/art/1")
+    s = normalize_session(tr)
+    assert s["thumb"] == "/library/metadata/8/thumb/1"
+    # the backdrop is the cover too, not the artist's art
+    assert s["art"] == "/library/metadata/8/thumb/1"
+
+
+def test_an_audiobook_chapter_shows_the_books_cover_not_the_authors_picture():
+    # plex files a book as an album under its author
+    ch = _movie(type="track", title="Chapter 12", grandparentTitle="Caroline Peckham",
+                parentTitle="Zodiac Academy 8", thumb=None,
+                parentThumb="/library/metadata/21/thumb/1", grandparentThumb="/library/metadata/20/thumb/1",
+                art="/library/metadata/20/art/1")
+    s = normalize_session(ch)
+    assert s["thumb"] == s["art"] == "/library/metadata/21/thumb/1"
+
+
+def test_the_artists_picture_is_only_what_is_left_without_a_cover():
+    tr = _movie(type="track", title="Loose Single", grandparentTitle="Someone", parentTitle="",
+                thumb=None, parentThumb=None, grandparentThumb="/library/metadata/7/thumb/1",
+                art="/library/metadata/7/art/1")
+    s = normalize_session(tr)
+    assert s["thumb"] == "/library/metadata/7/thumb/1" and s["art"] == "/library/metadata/7/art/1"
+
+
+def test_an_episode_keeps_its_shows_poster_and_a_movie_its_own():
+    ep = _movie(type="episode", title="Pilot", grandparentTitle="Severance",
+                thumb="/library/metadata/3/thumb/1", parentThumb="/library/metadata/2/thumb/1",
+                grandparentThumb="/library/metadata/1/thumb/1", art="/library/metadata/1/art/1")
+    assert normalize_session(ep)["thumb"] == "/library/metadata/1/thumb/1"
+    mv = _movie(thumb="/library/metadata/5/thumb/1", art="/library/metadata/5/art/1")
+    s = normalize_session(mv)
+    assert (s["thumb"], s["art"]) == ("/library/metadata/5/thumb/1", "/library/metadata/5/art/1")
+
+
+def test_history_rows_show_the_cover_too():
+    from core.server_activity import normalize_history
+    row = NS(type="track", title="Teardrop", grandparentTitle="Massive Attack", parentTitle="Mezzanine",
+             thumb="/t", parentThumb="/album", grandparentThumb="/artist", accountID=1, deviceID=1,
+             viewedAt=None)
+    assert normalize_history(row, {}, {})["thumb"] == "/album"
+
+
 from core.server_activity import normalize_jellyfin  # noqa: E402
+
+
+def test_a_jellyfin_track_with_no_picture_of_its_own_shows_its_albums_cover():
+    npi = {"Type": "Audio", "Name": "Teardrop", "AlbumArtist": "Massive Attack", "Album": "Mezzanine",
+           "Id": "track1", "AlbumId": "album1", "AlbumPrimaryImageTag": "abc", "ImageTags": {}}
+    n = normalize_jellyfin({"NowPlayingItem": npi, "PlayState": {}}, npi)
+    assert n["thumb"] == n["art"] == "jf:album1"
+    # one with its own picture keeps it, and one with nothing to borrow keeps its id
+    own = dict(npi, ImageTags={"Primary": "t"})
+    assert normalize_jellyfin({"NowPlayingItem": own, "PlayState": {}}, own)["thumb"] == "jf:track1"
+    bare = {"Type": "Audio", "Name": "X", "Id": "track2", "AlbumId": "album2"}
+    assert normalize_jellyfin({"NowPlayingItem": bare, "PlayState": {}}, bare)["thumb"] == "jf:track2"
 
 
 def test_jellyfin_episode_normalizes_to_shared_shape():

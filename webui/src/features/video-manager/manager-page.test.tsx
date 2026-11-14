@@ -21,6 +21,7 @@ import {
 import { describeDone } from './manager-bulk';
 import { EpisodesTab } from './manager-extras';
 import { ManagerPage } from './manager-page';
+import { PosterGrid } from './manager-views';
 import { changedFields } from './title-sheet';
 import { EMPTY_FILTERS } from './types';
 
@@ -223,7 +224,18 @@ function answer(url: string, method: string): unknown {
     return {
       success: true,
       libraries: [
-        { id: 1, name: 'Movies', path: '/mnt/a/Movies', is_default: true },
+        {
+          id: 1,
+          name: 'Movies',
+          path: '/mnt/a/Movies',
+          is_default: true,
+          // one library on three drives
+          folders: [
+            { path: '/mnt/a/Movies', primary: true, free_bytes: 5e11 },
+            { path: '/mnt/easystore2/Movies', primary: false, free_bytes: 2e12 },
+            { path: '/mnt/easystore3/Movies', primary: false, free_bytes: null },
+          ],
+        },
         { id: 4, name: 'Kids', path: '/mnt/b/Kids', is_default: false },
       ],
     };
@@ -389,6 +401,38 @@ describe('the views', () => {
       'href',
       '/video-detail/library/movie/1',
     );
+  });
+
+  it('the cards rise and fade in one after another, like the music library’s', async () => {
+    await mount();
+    const cards = Array.from(document.querySelectorAll('article')) as HTMLElement[];
+    expect(cards.length).toBe(2);
+    // the shared keyframe, each card a beat after the last
+    expect(cards[0].style.animation).toContain('cardFadeIn');
+    expect(cards[0].style.animation).toContain(' 0ms ');
+    expect(cards[1].style.animation).toContain(' 30ms ');
+    // backwards, not both: a fill that outlives the animation holds the
+    // transform and the hover lift never shows
+    expect(cards[0].style.animation).toContain('backwards');
+  });
+
+  it('a poster fades in when it has arrived, not before', () => {
+    render(
+      <PosterGrid
+        rows={[title({ has_poster: true })]}
+        side="movies"
+        selected={new Set()}
+        selecting={false}
+        loading={false}
+        onToggle={() => {}}
+        onEdit={() => {}}
+      />,
+    );
+    const img = document.querySelector('article img') as HTMLImageElement;
+    expect(img.getAttribute('data-shown')).toBeNull();
+    expect(img.getAttribute('decoding')).toBe('async');
+    fireEvent.load(img);
+    expect(img.getAttribute('data-shown')).toBe('true');
   });
 
   it('shows the same titles as a table, with what they are made of', async () => {
@@ -618,7 +662,7 @@ describe('history, undo and the tools beside the list', () => {
   it('Move shows what would move to the picked library before it moves anything', async () => {
     await pickBoth();
     fireEvent.click(screen.getByRole('button', { name: /More/ }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another library' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another drive or library' }));
     const run = await screen.findByRole('button', { name: 'Move' });
     expect(run).toBeDisabled();
     fireEvent.click(await screen.findByRole('radio', { name: /Kids/ }));
@@ -631,6 +675,40 @@ describe('history, undo and the tools beside the list', () => {
       expect(lastCall('bulk/start')?.body).toMatchObject({
         action: 'move',
         params: { library_id: 4 },
+      }),
+    );
+  });
+
+  it('Move offers every drive of a library, and says which one was picked', async () => {
+    await pickBoth();
+    fireEvent.click(screen.getByRole('button', { name: /More/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another drive or library' }));
+    // the library is named once, with each of its drives under it
+    expect(await screen.findByText('· 3 drives')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(4);
+    expect(screen.getByText(/New titles land here/)).toBeInTheDocument();
+    // the library's own folder is the default: no folder is named for it
+    fireEvent.click(screen.getByRole('radio', { name: 'Movies, /mnt/a/Movies' }));
+    await waitFor(() => expect(lastCall('move-preview')?.url).toContain('library_id=1'));
+    expect(lastCall('move-preview')?.url).not.toContain('folder=');
+    const drive = screen.getByRole('radio', { name: 'Movies, /mnt/easystore2/Movies' });
+    expect(drive.textContent).toContain('free');
+    fireEvent.click(drive);
+    await waitFor(() =>
+      expect(decodeURIComponent(lastCall('move-preview')?.url ?? '')).toContain(
+        'folder=/mnt/easystore2/Movies',
+      ),
+    );
+    expect(drive).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Movies, /mnt/a/Movies' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Move 2 files' }));
+    await waitFor(() =>
+      expect(lastCall('bulk/start')?.body).toMatchObject({
+        action: 'move',
+        params: { library_id: 1, folder: '/mnt/easystore2/Movies' },
       }),
     );
   });

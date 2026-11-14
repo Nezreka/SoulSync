@@ -351,7 +351,9 @@ class VideoLibraryScanner:
             # scan just changed underneath them
             try:
                 from core.video import library_manager
-                library_manager.forget()
+                # the old rows keep answering while each side is summed again
+                # in the background: the open page never waits on a cold build
+                library_manager.expire()
             except Exception:   # noqa: BLE001 - a stale page is not a failed scan
                 logger.debug("library manager not told about the scan", exc_info=True)
             if paused:

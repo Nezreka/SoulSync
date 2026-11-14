@@ -361,7 +361,7 @@ export function BulkBar({
                         <Item onSelect={() => (close(), void run('rematch'))}>Identify again</Item>
                         <p className={s.menuHead}>Files</p>
                         <Item onSelect={() => (close(), setAsk({ kind: 'move' }))}>
-                          Move to another library
+                          Move to another drive or library
                         </Item>
                         <p className={s.menuHead}>Padlock</p>
                         <Item onSelect={() => (close(), void run('lock', { value: true }))}>
@@ -489,7 +489,9 @@ export function BulkBar({
           side={side}
           ids={ids}
           onClose={() => setAsk(null)}
-          onRun={(libraryId) => void run('move', { library_id: libraryId })}
+          onRun={(target) =>
+            void run('move', { library_id: target.libraryId, folder: target.folder })
+          }
         />
       ) : null}
       {ask?.kind === 'collection' ? (

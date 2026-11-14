@@ -196,6 +196,12 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_air      ON episodes(air_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_wanted   ON episodes(monitored, has_file);
+-- what the library manager sums a show up from (v72): how many episodes it
+-- has, owns and is missing, and which episode each file is. with every column
+-- in the index neither one ever
+-- touches the episode rows themselves, which carry each episode's overview:
+-- reading 224k of them to count took 5 seconds, the index takes half of one.
+CREATE INDEX IF NOT EXISTS idx_episodes_summary ON episodes(show_id, season_number, episode_number, has_file, monitored, air_date);
 
 -- ── Genres (normalised many-to-many; no comma-blob) ─────────────────────────
 CREATE TABLE IF NOT EXISTS genres (
@@ -1208,3 +1214,15 @@ CREATE TABLE IF NOT EXISTS video_file_changes (
     undone_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_vfc_title ON video_file_changes(kind, item_id, id);
+
+-- When each source was last asked about one title (v71). A title's page reads
+-- from this database, then asks the sources that have gone stale: the media
+-- server for its files and watch state, the metadata provider for what changed
+-- since it was matched, and the ratings. One row per title per source.
+CREATE TABLE IF NOT EXISTS video_title_freshness (
+    kind        TEXT NOT NULL,            -- movie | show
+    item_id     INTEGER NOT NULL,
+    source      TEXT NOT NULL,            -- server | metadata | ratings
+    checked_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, source)
+);

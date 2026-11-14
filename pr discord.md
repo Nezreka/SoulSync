@@ -1,17 +1,15 @@
-**SoulSync 3.6.5 is out** :musical_note:
+**SoulSync 3.6.6 is out** :musical_note:
 
-Both dashboards have been rebuilt. Music and video each open on a hero with the worker orbs, then the system as a board: your week, your watchlist and wishlist counts with what is in them, playlist sync, and what runs next. The orbs now respond to a hover straight away.
+The video library is now a full library manager. The Library page shows your movies and shows as posters, as a sortable table of titles, or as a table of the files themselves, with filters for what needs a look and for what the files are. You can act on a selection or on everything a filter matches: rename with a preview, move to another drive or library, set a quality profile, look for upgrades, fetch subtitles and more. Every rename, move and delete is recorded and can be undone, and a padlock keeps automation away from a title you have finished curating.
 
-The Tools, Automations and Stats pages have been redesigned, and the notification bell has been rebuilt: notes stay new until you close the panel, it survives a reload, toasts stack, and history is grouped by day. Movie and show pages are now one page with no tabs.
+Movie and show pages now manage their own seasons, episodes and files: rename, renumber and delete with a preview, stop hunting single episodes, and undo any change from the page. Pages also keep themselves current, checking your media server, the metadata provider and ratings in the background when they have gone stale.
 
-New installs no longer hit a failed library upgrade when pressing Import library (#2062).
+It is fast. On a large library the Files view went from several seconds a page to instant.
 
-Artist merges are now safe. Two different bands could be merged because they shared one catalogue ID (thanks SeadogsBooty, #2073). Merges now need real evidence, every merge is recorded and can be undone, and a new Artist Merge Review job finds artists merged by mistake and splits them.
+Server Activity now shows album and book covers for music and audiobooks (thanks SeadogsBooty, #2089), and its drawer no longer sits under the floating buttons (#2090).
 
-Albums and artists can be locked once reviewed, so enrichment and repairs leave them alone (#2046). Automatic quality upgrades now work properly (#2060), and artist pages have sections for live albums, compilations, soundtracks and remixes (#2055).
+Thanks to onnwee for two contributions: cam releases are caught however they are spelled (#2088), and a new setting starts SoulSync's torrents on a qBittorrent that adds them stopped (#2087).
 
-New tools: Use File Tags for one album or the whole library, and Compilation Songs to Original Albums (thanks wolf39us, #2070, #2074, #2077). Album Tag Consistency now finds compilations split into one album per artist (thanks Storm, #2072).
-
-Also: search all sources at once (#2051), ListenBrainz Daily Jams as a rolling playlist (thanks mpaugam, #2076), same-named shows no longer share a folder or a download status (#2052, #2075), a much faster Manage Workers window, and fixes for Prowlarr, Tidal, Deezer, Soulseek and torrents (#2061 to #2069).
+Also: live albums and live tracks are separate rules (#2082), original release and clean version filters (#2080, #2081), Albums You're Missing no longer lists albums you own (#2083), dead file rows can be removed (thanks wolf39us, #2086), Discogs artist images download again (thanks Ktzenjammer, #2079), anime numbered as one long season is handled (thanks Thibs), one shared page frame across the app, a security pass, and a lighter sidebar and player on phones.
 
 Full notes on GitHub.

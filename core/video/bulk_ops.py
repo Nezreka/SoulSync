@@ -118,6 +118,8 @@ def validate(kind: str, ids, action: str, params: dict):
         lid = params.get("library_id")
         if isinstance(lid, bool) or not isinstance(lid, int) or lid <= 0:
             return "library_id must be a library's id"
+        if params.get("folder") is not None and not isinstance(params["folder"], str):
+            return "folder must be one of the library's folders"
     if action == "delete" and params.get("confirm") != len(ids):
         # the count typed back: a delete of N titles is confirmed as N
         return "confirm must be the number of titles being deleted"
@@ -133,7 +135,7 @@ def _apply_one(db, kind: str, item_id: int, action: str, params: dict, source) -
             and not params.get("by_hand") and db.is_hands_off(kind, item_id):
         return {"ok": True, "pushed": False, "held": True}
     if action == "move":
-        return _move_title(db, kind, item_id, int(params["library_id"]))
+        return _move_title(db, kind, item_id, int(params["library_id"]), params.get("folder"))
     if action == "content_rating":
         return med.edit_item(db, kind, item_id,
                              {"content_rating": str(params["value"]).strip()}, source=source)
@@ -229,21 +231,39 @@ def _server_view(db, local: str):
     return None
 
 
-def move_plan(db, kind: str, item_id: int, library_id: int) -> dict:
-    """where every file of a title lands when it moves to another library:
-    the naming template's path under that library's folder. nothing here
-    touches the disk beyond looking. {moves: [{file_id, from, to}], skipped,
-    size_bytes, copy_bytes} or {error}."""
-    import os
-
-    from core.video import file_ops, libraries, organization
-    from core.video.library_actions import _same_drive
+def move_root(db, kind: str, library_id: int, folder=None) -> dict:
+    """the folder a move lands in: the library's own, or the one of its
+    drives that was picked. {library, root} or {error}. only a folder the
+    library really has is taken, never a path the caller made up."""
+    from core.video import libraries
     lib = libraries.get_library(db, library_id)
     if not lib or lib["kind"] != kind:
         return {"error": "No such library for this kind of title."}
     root = libraries.folder_for(lib)
     if not lib.get("usable") or not root:
         return {"error": "That library has no folder set, or is turned off."}
+    if folder:
+        match = [f for f in libraries.library_folders(db, lib) if libraries._same(f, folder)]
+        if not match:
+            return {"error": "That folder is not one of this library's."}
+        root = match[0]
+    return {"library": lib, "root": root}
+
+
+def move_plan(db, kind: str, item_id: int, library_id: int, folder=None) -> dict:
+    """where every file of a title lands when it moves to another library,
+    or to another drive of the one it is in: the naming template's path
+    under that folder. nothing here touches the disk beyond looking.
+    {moves: [{file_id, from, to}], skipped, size_bytes, copy_bytes} or
+    {error}."""
+    import os
+
+    from core.video import file_ops, organization
+    from core.video.library_actions import _same_drive
+    where = move_root(db, kind, library_id, folder)
+    if where.get("error"):
+        return where
+    lib, root = where["library"], where["root"]
     settings = organization.load(db)
     moves, skipped, size, cross = [], [], 0, 0
     for row in db.library_title_files(kind, item_id):
@@ -277,12 +297,12 @@ def move_plan(db, kind: str, item_id: int, library_id: int) -> dict:
             "skipped": skipped, "files": len(moves), "size_bytes": size, "copy_bytes": cross}
 
 
-def _move_title(db, kind: str, item_id: int, library_id: int) -> dict:
-    """a title and its files to another library: each file to the template's
-    path under that library's folder, then the title is filed there so what
-    it downloads next lands beside them."""
+def _move_title(db, kind: str, item_id: int, library_id: int, folder=None) -> dict:
+    """a title and its files to another library, or to another drive of its
+    own: each file to the template's path under that folder, then the title
+    is filed under the library so what it downloads next goes with it."""
     from core.video import file_ops, libraries
-    plan = move_plan(db, kind, item_id, library_id)
+    plan = move_plan(db, kind, item_id, library_id, folder)
     if plan.get("error"):
         return {"ok": False, "reason": plan["error"]}
     moved = failed = 0

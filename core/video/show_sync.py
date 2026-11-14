@@ -23,6 +23,10 @@ from utils.logging_config import get_logger
 logger = get_logger("video.show_sync")
 
 
+class _Skip(Exception):
+    """the caller refreshes the schedule itself"""
+
+
 class ShowSyncError(RuntimeError):
     """Sync could not run (server unreachable, wrong server, busy…)."""
 
@@ -40,10 +44,16 @@ def _counts(db, show_id: int) -> tuple:
         conn.close()
 
 
-def sync_show(db, show_id: int) -> dict:
+def sync_show(db, show_id: int, *, remove_when_gone: bool = True,
+              refresh_schedule: bool = True) -> dict:
     """Reconcile ONE local show against the server. Returns
     {status, title, episodes_added, episodes_removed, files_added,
-    files_removed, show_removed} or raises ShowSyncError."""
+    files_removed, show_removed} or raises ShowSyncError.
+
+    ``remove_when_gone=False``: a show the server no longer has is reported
+    (``gone``) and left in place. the page's own refresh reads this way: only
+    a person pressing Sync removes a title. ``refresh_schedule=False`` leaves
+    the episode schedule to whoever asked."""
     conn = db._get_connection()
     try:
         row = conn.execute(
@@ -72,6 +82,9 @@ def sync_show(db, show_id: int) -> dict:
     tree = source.show_tree(row["server_id"], title=row["title"],
                             tmdb_id=row["tmdb_id"])   # raises on server errors
 
+    if tree is None and not remove_when_gone:
+        return {"status": "ok", "title": row["title"], "show_removed": False, "gone": True,
+                "episodes_added": 0, "episodes_removed": 0, "files_added": 0, "files_removed": 0}
     if tree is None:
         # Verified gone from the server — remove it here too (cascades).
         conn = db._get_connection()
@@ -128,6 +141,8 @@ def sync_show(db, show_id: int) -> dict:
     # counts so restored episodes show up in the toast.
     schedule_refresh = "skipped"
     try:
+        if not refresh_schedule:
+            raise _Skip
         from core.video.enrichment.engine import get_video_enrichment_engine
         res = get_video_enrichment_engine().refresh_show_art(
             target_id, with_ratings=False, recent_seasons_only=True)
@@ -138,6 +153,8 @@ def sync_show(db, show_id: int) -> dict:
             schedule_refresh = "failed:%s" % ((res or {}).get("reason") or "unknown")
             logger.warning("show sync: episode schedule refresh for '%s' did not run: %s",
                            row["title"], schedule_refresh)
+    except _Skip:
+        pass
     except Exception as e:   # noqa: BLE001 - schedule refresh is a bonus, not the sync
         schedule_refresh = "error:%s" % e
         logger.warning("show sync: episode-list refresh failed for '%s': %s", row["title"], e)

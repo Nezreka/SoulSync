@@ -44,13 +44,45 @@ def _ids():
     return out[:_MAX_IDS]
 
 
+# which media server the video side reads from. working it out reads and
+# decrypts both servers' settings, about a sixth of a second, and the manager
+# asks on every page turn and every filter: the answer is kept a few seconds.
+# keyed on the resolver itself, so a test that swaps it never reads another's
+_server_cache: dict = {}
+_SERVER_TTL = 15.0
+
+
+def _active_server(db):
+    import time
+
+    from core.video import sources
+    resolver = sources.resolve_video_server
+    key = (id(resolver), str(getattr(db, "database_path", "")))
+    hit = _server_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _SERVER_TTL:
+        return hit[1]
+    server = resolver()
+    if len(_server_cache) > 16:
+        _server_cache.clear()
+    _server_cache[key] = (now, server)
+    return server
+
+
 def register_routes(bp):
     def _ctx():
-        from core.video.sources import resolve_video_server
+        from core.video import library_manager
         from core.video.watch_scope import current_watcher
 
         from . import get_video_db
-        return get_video_db(), resolve_video_server(), current_watcher().rows
+        db = get_video_db()
+        server = _active_server(db)
+        # the tab that is not open is summed up in the background, so it is
+        # ready by the time it is clicked
+        asked = request.args.get("kind")
+        if asked in library_manager.KINDS:
+            library_manager.warm(db, "shows" if asked == "movies" else "movies", server)
+        return db, server, current_watcher().rows
 
     @bp.route("/manager/titles", methods=["GET"])
     def video_manager_titles():
@@ -187,8 +219,23 @@ def register_routes(bp):
 
         from . import get_video_db
         kind = "show" if request.args.get("kind") in ("show", "shows") else "movie"
-        libs = [{"id": x["id"], "name": x["name"], "path": x["path"], "is_default": x["is_default"]}
-                for x in libraries.list_libraries(get_video_db(), kind) if x.get("usable")]
+        import shutil
+
+        def free(folder):
+            try:
+                return shutil.disk_usage(folder).free
+            except OSError:
+                return None                     # a drive that is not mounted right now
+        db = get_video_db()
+        libs = []
+        for x in libraries.list_libraries(db, kind):
+            if not x.get("usable"):
+                continue
+            # a library can sit on many drives: each is somewhere a title can move to
+            folders = [{"path": f, "primary": i == 0, "free_bytes": free(f)}
+                       for i, f in enumerate(libraries.library_folders(db, x))]
+            libs.append({"id": x["id"], "name": x["name"], "path": x["path"],
+                         "is_default": x["is_default"], "folders": folders})
         return jsonify({"success": True, "libraries": libs})
 
     @bp.route("/manager/move-preview", methods=["GET"])
@@ -202,6 +249,7 @@ def register_routes(bp):
         except ValueError:
             library_id = 0
         db = get_video_db()
+        folder = (request.args.get("folder") or "").strip() or None
         files = size = copy = skipped = held = 0
         sample, error, why = [], None, {}
         for item_id in _ids():
@@ -209,7 +257,7 @@ def register_routes(bp):
             if request.args.get("by_hand") != "1" and db.is_hands_off(kind, item_id):
                 held += 1
                 continue
-            plan = bulk_ops.move_plan(db, kind, item_id, library_id)
+            plan = bulk_ops.move_plan(db, kind, item_id, library_id, folder)
             if plan.get("error"):
                 error = plan["error"]
                 break
@@ -228,9 +276,8 @@ def register_routes(bp):
         try:
             import shutil
 
-            from core.video import libraries
-            lib = libraries.get_library(db, library_id) or {}
-            free = shutil.disk_usage(lib.get("path") or "").free
+            where = bulk_ops.move_root(db, kind, library_id, folder)
+            free = shutil.disk_usage(where.get("root") or "").free
         except OSError:
             free = None
         return jsonify({"success": True, "files": files, "size_bytes": size, "copy_bytes": copy,

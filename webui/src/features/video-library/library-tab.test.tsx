@@ -466,7 +466,9 @@ describe('movie tab', () => {
       batch: 'm1',
     });
     render(<LibraryTab kind="movie" id={7} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Move to another library…' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Move to another drive or library…' }),
+    );
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(await within(dialog).findByRole('radio', { name: /Kids/ }));
     expect(await within(dialog).findByText('/mnt/kids/Heat (1995)/Heat (1995).mkv')).toBeTruthy();
@@ -481,8 +483,8 @@ describe('movie tab', () => {
         params: { library_id: 3, by_hand: true },
       }),
     );
+    expect(await screen.findByText('Moved 2 files')).toBeTruthy();
     await waitFor(() => expect(lastChange.get()?.batch).toBe('m1'));
-    expect(await screen.findByText('Moved 2 files to the other library')).toBeTruthy();
   });
 
   it('a file soulsync cannot reach cannot be renamed or deleted from here', async () => {
@@ -1004,6 +1006,111 @@ describe('the one-page movie', () => {
     expect(await screen.findByText('Not known')).toBeTruthy();
     expect(screen.getByText('SoulSync can’t see the folder')).toBeTruthy();
     expect(screen.getByText('Languages not read yet')).toBeTruthy();
+  });
+});
+
+describe('keeping the title current', () => {
+  const fresh = (over: Record<string, unknown> = {}) => ({
+    success: true,
+    changed: false,
+    asked: ['server', 'metadata', 'ratings'],
+    notes: {},
+    gone: false,
+    moved_to: null,
+    sources: {
+      server: { age_seconds: 4, ttl_seconds: 600, stale: false },
+      metadata: { age_seconds: 200000, ttl_seconds: 1209600, stale: false },
+      ratings: { age_seconds: null, ttl_seconds: 2592000, stale: true },
+    },
+    ...over,
+  });
+  const libraryReads = () => calls.filter((c) => c.url.includes('/library')).length;
+
+  it('asks once on opening, and leaves a page that did not change alone', async () => {
+    const refreshPage = vi.fn();
+    window.SoulSyncVideoDetail = { refreshPage };
+    routes['/library'] = () => movie();
+    routes['/freshen'] = () => fresh();
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Up to date')).toBeTruthy();
+    const asked = calls.filter((c) => c.url.endsWith('/detail/movie/7/freshen'));
+    expect(asked.length).toBe(1);
+    expect(asked[0].method).toBe('POST');
+    expect(asked[0].body).toEqual({});
+    expect(libraryReads()).toBe(1);
+    expect(refreshPage).not.toHaveBeenCalled();
+    // each source's own age is one hover away
+    const line = screen.getByText('Up to date');
+    expect(line.getAttribute('title')).toContain('media server: checked just now');
+    expect(line.getAttribute('title')).toContain('Details and episodes: checked 2 days ago');
+    expect(line.getAttribute('title')).toContain('Ratings: checked not yet');
+  });
+
+  it('reads again and redraws the page in place when something moved', async () => {
+    const refreshPage = vi.fn();
+    const reloadPage = vi.fn();
+    window.SoulSyncVideoDetail = { refreshPage, reloadPage };
+    routes['/library'] = () => movie();
+    routes['/freshen'] = () => fresh({ changed: true });
+    render(<LibraryTab kind="movie" id={7} />);
+    await waitFor(() => expect(refreshPage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(libraryReads()).toBe(2));
+    // in place: the whole page is not loaded again, and it does not ask twice
+    expect(reloadPage).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.url.includes('/freshen')).length).toBe(1);
+  });
+
+  it('asks every source now when Refresh is pressed', async () => {
+    routes['/library'] = () => movie();
+    routes['/freshen'] = () => fresh();
+    render(<LibraryTab kind="movie" id={7} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/freshen')).at(-1)?.body).toEqual({ force: true }),
+    );
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Nothing has changed.', 'success'),
+    );
+  });
+
+  it('says so when the media server no longer has the title, and removes nothing', async () => {
+    routes['/library'] = () => movie();
+    routes['/freshen'] = () => fresh({ gone: true });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Your media server no longer has this movie')).toBeTruthy();
+    expect(calls.some((c) => c.url.includes('/sync') || c.url.includes('title-delete'))).toBe(
+      false,
+    );
+  });
+
+  it('says when the media server could not be asked', async () => {
+    routes['/library'] = () => show();
+    routes['/freshen'] = () => fresh({ notes: { server: 'No video server configured/reachable' } });
+    render(<LibraryTab kind="show" id={445} />);
+    const line = await screen.findByText('Media server not reached');
+    expect(line.getAttribute('title')).toContain('not answered (No video server');
+  });
+
+  it('follows a title the server re-keyed to its new page', async () => {
+    const opened = vi.fn();
+    document.addEventListener('soulsync:video-open-detail', opened);
+    routes['/library'] = () => show();
+    routes['/freshen'] = () => fresh({ changed: true, moved_to: 900 });
+    render(<LibraryTab kind="show" id={445} />);
+    await waitFor(() => expect(opened).toHaveBeenCalled());
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      kind: 'show',
+      id: 900,
+      source: 'library',
+    });
+    document.removeEventListener('soulsync:video-open-detail', opened);
+  });
+
+  it('a refresh that fails on opening is quiet', async () => {
+    routes['/library'] = () => movie();
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Not checked')).toBeTruthy();
+    expect(window.showToast).not.toHaveBeenCalled();
   });
 });
 

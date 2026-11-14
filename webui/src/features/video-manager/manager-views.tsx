@@ -3,6 +3,8 @@
 import clsx from 'clsx';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { cardFadeIn } from '@/routes/library/-ui/card-fade';
+
 import type { Facets, FileRow, Side, Sort, TitleRow } from './types';
 
 import {
@@ -19,12 +21,19 @@ import s from './video-manager.module.css';
 
 const POSTER_W = 342;
 
+/** someone who asked their system for less motion gets the cards without the rise */
+const STILL =
+  typeof window !== 'undefined' &&
+  Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
 export function posterUrl(kind: 'movie' | 'show', id: number, width = POSTER_W) {
   return `/api/video/poster/${kind}/${id}?w=${width}`;
 }
 
 function Poster({ row, small = false }: { row: TitleRow; small?: boolean }) {
   const [failed, setFailed] = useState(false);
+  // a poster fades in when it has arrived, so a slow one never pops
+  const [shown, setShown] = useState(false);
   if (!row.has_poster || failed) {
     return (
       <div className={clsx(s.posterEmpty, small && s.posterSmall)} aria-hidden="true">
@@ -38,6 +47,13 @@ function Poster({ row, small = false }: { row: TitleRow; small?: boolean }) {
       src={posterUrl(row.kind, row.id, small ? 92 : POSTER_W)}
       alt=""
       loading="lazy"
+      decoding="async"
+      data-shown={shown || undefined}
+      // an image already in the cache is complete before React attaches onLoad
+      ref={(img) => {
+        if (img?.complete && img.naturalWidth > 0) setShown(true);
+      }}
+      onLoad={() => setShown(true)}
       onError={() => setFailed(true)}
     />
   );
@@ -113,12 +129,18 @@ export function PosterGrid({
 }) {
   return (
     <div className={clsx(s.grid, loading && s.dim)} data-selecting={selecting || undefined}>
-      {rows.map((row) => {
+      {rows.map((row, index) => {
         const picked = selected.has(row.id);
         const owned = row.episodes_owned ?? 0;
         const total = row.episodes_total ?? 0;
         return (
-          <article key={row.id} className={clsx(s.card, picked && s.cardPicked)}>
+          <article
+            key={row.id}
+            className={clsx(s.card, picked && s.cardPicked)}
+            // the same rise and fade the music library's artist and album
+            // cards arrive with, one after another
+            style={STILL ? undefined : { animation: cardFadeIn(index) }}
+          >
             <a
               className={s.cardArt}
               aria-label={row.title}

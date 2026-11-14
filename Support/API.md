@@ -2448,8 +2448,15 @@ Named movie and TV libraries, each with its own folder (#2029). The main and 4K 
 - `POST /api/video/bulk/start` body `{kind, ids, action, params}` runs one in the background; `GET /api/video/bulk/status` follows it. Actions: `monitored`, `watched`, `content_rating`, `genre_add`, `genre_remove`, `refresh_art`, `quality_profile`, `rename`, `wish` (`mode`: `missing` / `upgrade`), `subtitles`, `rematch`, `series_type`, `lock` (`value`: true / false), `move` (`library_id`), `delete` (`confirm`: the number of ids). The status carries `held` (padlocked titles left alone) and `batch` (the file changes of a rename or move, for undo).
 - `GET /history?kind=&id=&limit=&offset=`: file changes, newest first, for one title or all. `POST /history/<id>/undo` puts one back; `POST /history/undo-batch` body `{batch}` puts back a whole run. `409` with a plain reason when it can't be (the file moved on, the old path is taken, the recycle folder was emptied).
 - `GET /views` and `PUT /views` body `{views: [{name, state}]}`: the saved views.
+- `GET /libraries?kind=`: each usable library with `folders: [{path, primary, free_bytes}]`. A library can sit on many drives: the main library is its own folder plus the additional folders and the mapped server folders of its kind, its own folder first. `GET /move-preview` and the `move` action take `folder` (one of that library's folders, `409` otherwise) to move to that drive; without it the library's own folder is used.
 - `GET /move-preview` takes `by_hand=1`, and the `move` action takes `params.by_hand: true`, for one title moved from its own page: a padlock holds a sweep, not that.
 - `GET /episodes/<show_id>`: seasons, episodes and the files under each. `POST /renumber/<show_id>` body `{file_ids, season, start_episode, apply?}`: files the chosen files under consecutive episodes of that season. Without `apply` it answers with the plan.
+
+**Keeping a title current** (any profile that can see the title; `force` is admin only):
+
+- `POST /api/video/detail/<movie|show>/<id>/freshen` body `{force?}`: asks the sources whose answer has gone stale and returns `{changed, asked: [source...], notes: {source: reason}, gone, moved_to, sources: {server|metadata|ratings: {age_seconds, ttl_seconds, stale}}}`. `server` re-reads that one title from the media server (files, watch state), `metadata` asks the provider for what changes after a match, `ratings` asks for the scores. `changed` is true only when something the page shows moved. `gone` means the media server no longer has the title; nothing is removed (`POST .../sync` does that). `moved_to` is the title's new row when the server re-keyed it. A second call while one is running answers `running: true` and asks nothing.
+- `GET` on the same path: `{sources}` only.
+- Clocks: the server every 10 minutes; metadata daily and ratings every 3 days for a show that has not ended or a movie within 90 days of its release, otherwise 14 and 30 days. A source that could not answer waits out its clock, unless a library scan or a spent ratings quota was in the way.
 
 **Managing files from a title's page** (admin):
 

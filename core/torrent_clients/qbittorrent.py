@@ -102,12 +102,25 @@ class QBittorrentAdapter:
             config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
         ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
+        # Start what SoulSync adds even when qBittorrent's "add torrents stopped"
+        # preference is on (other clients sharing qBittorrent keep that default).
+        self._start_torrents = bool(config_manager.get('torrent_client.start_torrents', False))
         # Drop any existing session — credentials may have changed.
         with self._session_lock:
             self._session = None
 
     def reload_settings(self) -> None:
         self._load_config()
+
+    def _apply_start_flags(self, data: dict) -> None:
+        """With torrent_client.start_torrents on, ask qBittorrent to start the
+        torrent: ``stopped`` is the 5.x add parameter, ``paused`` the 4.x one.
+        ``stopCondition=None`` overrides a global "stop when metadata received"
+        condition, which would otherwise stop a magnet right after it starts."""
+        if getattr(self, '_start_torrents', False):
+            data['stopped'] = 'false'
+            data['paused'] = 'false'
+            data['stopCondition'] = 'None'
 
     def is_configured(self) -> bool:
         # qBittorrent allows no-auth setups (LAN), so credentials are
@@ -219,6 +232,7 @@ class QBittorrentAdapter:
         data = {'urls': url_or_magnet, 'category': cat}
         if save_path or self._save_path:
             data['savepath'] = save_path or self._save_path
+        self._apply_start_flags(data)
         resp = self._call('POST', '/api/v2/torrents/add', data=data)
         if not resp or not resp.ok:
             logger.warning("qBittorrent /torrents/add returned HTTP %s body=%r",
@@ -354,6 +368,7 @@ class QBittorrentAdapter:
         data = {'category': cat}
         if save_path or self._save_path:
             data['savepath'] = save_path or self._save_path
+        self._apply_start_flags(data)
         files = {'torrents': ('soulsync.torrent', file_bytes, 'application/x-bittorrent')}
         resp = self._call('POST', '/api/v2/torrents/add', data=data, files=files)
         if not resp or not resp.ok:

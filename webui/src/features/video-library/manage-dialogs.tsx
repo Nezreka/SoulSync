@@ -10,7 +10,13 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { FileChange } from '@/features/video-manager/types';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
-import { fetchBulkStatus, fetchChanges, startBulk, undoBatch } from '@/features/video-manager/api';
+import {
+  type MoveTarget,
+  fetchBulkStatus,
+  fetchChanges,
+  startBulk,
+  undoBatch,
+} from '@/features/video-manager/api';
 import {
   ChangeList,
   EpisodesTab,
@@ -460,10 +466,14 @@ export function TitleHistoryDialog({
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 /** the move runs as the library's one background job: start it, then watch it */
-async function runMove(kind: TitleKind, id: number, libraryId: number): Promise<void> {
+async function runMove(kind: TitleKind, id: number, target: MoveTarget): Promise<void> {
   working.set('Moving the files…');
   try {
-    await startBulk(kind, [id], 'move', { library_id: libraryId, by_hand: true });
+    await startBulk(kind, [id], 'move', {
+      library_id: target.libraryId,
+      folder: target.folder,
+      by_hand: true,
+    });
     let status = await fetchBulkStatus();
     // a show crossing to another drive takes a while: there is no deadline
     while (status.running) {
@@ -476,8 +486,8 @@ async function runMove(kind: TitleKind, id: number, libraryId: number): Promise<
     const text = status.failed
       ? 'Some files could not be moved. They are where they were.'
       : moved
-        ? `Moved ${plural(moved, 'file')} to the other library`
-        : 'Filed in the other library. No file had to move.';
+        ? `Moved ${plural(moved, 'file')}`
+        : 'Filed there. No file had to move.';
     toast(text, status.failed ? 'warning' : 'success');
     announce({ kind, id, text }, status.batch);
   } catch (e) {
@@ -504,9 +514,9 @@ export function MoveTitleDialog({
       ids={[id]}
       byHand
       onClose={onClose}
-      onRun={(libraryId) => {
+      onRun={(target) => {
         onClose();
-        void runMove(kind, id, libraryId);
+        void runMove(kind, id, target);
       }}
     />
   );
@@ -583,7 +593,8 @@ export function UndoToast({ kind, id }: { kind: TitleKind; id: number }) {
     setBusy(false);
     lastChange.set(null);
     invalidate(kind, id);
-    window.SoulSyncVideoDetail?.reloadPage?.();
+    const page = window.SoulSyncVideoDetail;
+    (page?.refreshPage ?? page?.reloadPage)?.();
   };
 
   return (

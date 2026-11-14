@@ -3543,6 +3543,9 @@ async function loadSettingsData() {
         if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
         if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
         if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
+        // #2087: start what SoulSync adds even when qBittorrent adds torrents stopped
+        const _tcStart = document.getElementById('torrent-client-start-torrents');
+        if (_tcStart) _tcStart.checked = settings.torrent_client?.start_torrents === true;
         // Seeding goals (torrent grabs) — off (0) by default, mirrors the video side.
         const _tcRatio = document.getElementById('music-seed-ratio');
         const _tcHours = document.getElementById('music-seed-hours');
@@ -7080,6 +7083,7 @@ async function saveSettings(quiet = false) {
             password: _cfgStr('torrent-client-password'),
             category: _cfgStr('torrent-client-category', { fallback: 'soulsync' }),
             save_path: _cfgStr('torrent-client-save-path'),
+            start_torrents: !!(document.getElementById('torrent-client-start-torrents') || {}).checked,
             seed_ratio_goal: _cfgFloat('music-seed-ratio', 0),
             seed_time_goal_hours: _cfgInt('music-seed-hours', 0),
             seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,

@@ -259,11 +259,28 @@ export async function fetchTitleHistory(kind: TitleKind, id: number): Promise<Hi
 
 /* ── move to another library ─────────────────────────────────────────────── */
 
+/** one folder a library keeps its titles in: a library can sit on many drives */
+export interface LibraryFolder {
+  path: string;
+  /** the folder new titles are filed into */
+  primary: boolean;
+  free_bytes: number | null;
+}
+
 export interface LibraryRef {
   id: number;
   name: string;
   path: string;
   is_default: boolean;
+  /** every folder of the library, the primary one first */
+  folders?: LibraryFolder[];
+}
+
+/** where a move goes: a library, and which of its folders */
+export interface MoveTarget {
+  libraryId: number;
+  /** absent for the library's primary folder */
+  folder?: string;
 }
 
 export async function fetchLibraries(kind: TitleKind): Promise<LibraryRef[]> {
@@ -288,13 +305,17 @@ export interface MovePreview {
 export function fetchMovePreview(
   kind: TitleKind,
   ids: number[],
-  libraryId: number,
+  target: MoveTarget,
   byHand = false,
 ): Promise<MovePreview> {
-  return send<MovePreview>(
-    `/api/video/manager/move-preview?kind=${kind}&library_id=${libraryId}&ids=${ids.join(',')}` +
-      (byHand ? '&by_hand=1' : ''),
-  );
+  const params = new URLSearchParams({
+    kind,
+    library_id: String(target.libraryId),
+    ids: ids.join(','),
+  });
+  if (target.folder) params.set('folder', target.folder);
+  if (byHand) params.set('by_hand', '1');
+  return send<MovePreview>(`/api/video/manager/move-preview?${params}`);
 }
 
 /* ── history and undo ────────────────────────────────────────────────────── */

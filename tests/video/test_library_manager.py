@@ -322,15 +322,15 @@ def test_a_write_from_any_page_refreshes_that_titles_row(db, monkeypatch):
     assert calls == []
 
 
-def test_a_scan_forgets_the_summary(db, monkeypatch):
+def test_a_scan_marks_the_summary_out_of_date(db, monkeypatch):
     from core.video import scanner as sc
     database, _ids = db
     assert len(lm.titles(database, "movies", {})["items"]) == 5
-    forgotten = []
-    monkeypatch.setattr(lm, "forget", lambda *a: forgotten.append(1))
+    expired = []
+    monkeypatch.setattr(lm, "expire", lambda *a: expired.append(1))
     scan = sc.VideoLibraryScanner(database)
 
     def no_server():
         raise RuntimeError("no server")
     scan._run(no_server, "full", "all")
-    assert forgotten, "a scan, even one that failed, drops the summed-up rows"
+    assert expired, "a scan, even one that failed, marks the summed-up rows out of date"
