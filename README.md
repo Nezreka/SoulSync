@@ -130,7 +130,7 @@ One search box with three modes.
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous |
 | **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
-| **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction |
+| **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction; an option to start SoulSync's torrents on a qBittorrent that adds them stopped |
 | **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 
 **Downloads page.** Live batches with speed and ETA, "download this next", a step-by-step detail sheet on every download (found, downloaded, verified, imported), manual search on failed tracks, play straight from finished ones, per-track audit trails (lifecycle, embedded tags, lyrics), a **Review** queue for anything that needs a human, and a **Clients** pane that manages slskd, your torrent client and your usenet client from one place.
