@@ -19,6 +19,7 @@ import {
   shortPath,
 } from './format';
 import { describeDone } from './manager-bulk';
+import { EpisodesTab } from './manager-extras';
 import { ManagerPage } from './manager-page';
 import { changedFields } from './title-sheet';
 import { EMPTY_FILTERS } from './types';
@@ -42,6 +43,7 @@ function title(over: Partial<TitleRow> = {}): TitleRow {
     quality_profile_id: null,
     video_library_id: 1,
     locked_fields: [],
+    locked: false,
     status: 'released',
     genres: ['Action'],
     below_cutoff: false,
@@ -157,6 +159,7 @@ interface Server {
   calls: { url: string; method: string; body: unknown }[];
   forbidden: boolean;
   bulk: BulkStatus;
+  views: unknown[];
 }
 
 let server: Server;
@@ -216,6 +219,109 @@ function answer(url: string, method: string): unknown {
   if (path === '/api/video/bulk/start' && method === 'POST')
     return { ok: true, total: 2, label: 'Working' };
   if (path === '/api/video/bulk/status') return server.bulk;
+  if (path === '/api/video/manager/libraries')
+    return {
+      success: true,
+      libraries: [
+        { id: 1, name: 'Movies', path: '/mnt/a/Movies', is_default: true },
+        { id: 4, name: 'Kids', path: '/mnt/b/Kids', is_default: false },
+      ],
+    };
+  if (path === '/api/video/manager/move-preview')
+    return {
+      success: true,
+      files: 2,
+      size_bytes: 12e9,
+      copy_bytes: 12e9,
+      skipped: 0,
+      held: 1,
+      free_bytes: 5e11,
+      enough_room: true,
+      moves: [{ from: '/mnt/a/Movies/Alien (1979)/a.mkv', to: '/mnt/b/Kids/Alien (1979)/a.mkv' }],
+    };
+  if (path === '/api/video/manager/history' && method === 'GET')
+    return {
+      success: true,
+      total: 1,
+      items: [
+        {
+          id: 7,
+          at: '2026-11-13 09:00:00',
+          action: 'rename',
+          kind: 'movie',
+          item_id: 2,
+          title: 'Alien',
+          label: 'a.mkv',
+          from_path: '/mnt/a/Movies/Alien (1979)/a.mkv',
+          to_path: '/mnt/a/Movies/Alien (1979)/Alien (1979).mkv',
+          from_name: 'a.mkv',
+          to_name: 'Alien (1979).mkv',
+          batch: 'b1',
+          undone: false,
+        },
+      ],
+    };
+  if (path === '/api/video/manager/history/7/undo')
+    return { success: true, message: 'Put back as a.mkv' };
+  if (path === '/api/video/manager/history/undo-batch')
+    return { success: true, undone: 1, failed: [] };
+  if (path === '/api/video/manager/views') {
+    if (method === 'PUT') {
+      server.views = (server.calls.at(-1)?.body as { views: unknown[] }).views;
+    }
+    return { success: true, views: server.views };
+  }
+  if (path === '/api/video/manager/episodes/9')
+    return {
+      success: true,
+      seasons: [
+        {
+          season: 1,
+          episodes: [
+            {
+              id: 31,
+              episode: 1,
+              title: 'Pilot',
+              air_date: '2008-01-20',
+              files: [
+                {
+                  file_id: 81,
+                  filename: 'wrong.mkv',
+                  size_bytes: 1e9,
+                  resolution: '1080',
+                  quality: null,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          season: 2,
+          episodes: [{ id: 32, episode: 1, title: 'Seven', air_date: null, files: [] }],
+        },
+      ],
+    };
+  if (path === '/api/video/manager/renumber/9') {
+    const body = server.calls.at(-1)?.body as { apply?: boolean };
+    return body?.apply
+      ? { success: true, moved: 1, not_renamed: 0, batch: 'b2' }
+      : {
+          success: true,
+          files: 1,
+          moves: [{ file_id: 81, filename: 'wrong.mkv', from: 'S01E01', to: 'S02E01' }],
+        };
+  }
+  if (path.startsWith('/api/video/detail/'))
+    return {
+      id: 9,
+      title: 'Breaking Bad',
+      year: 2008,
+      tmdb_id: 1396,
+      genres: ['Drama'],
+      locked_fields: [],
+      series_type: 'standard',
+      hands_off: false,
+    };
   if (path === '/api/video/library')
     return page([{ id: 5, title: 'Plain Poster', year: 2001, has_poster: false }]);
   return { success: true };
@@ -226,6 +332,7 @@ beforeEach(() => {
   server = {
     calls: [],
     forbidden: false,
+    views: [],
     bulk: {
       running: false,
       done: 2,
@@ -257,6 +364,8 @@ afterEach(() => {
   delete window.showToast;
   delete window.showConfirmDialog;
 });
+
+const onChanged = vi.fn();
 
 const called = (part: string) => server.calls.filter((c) => c.url.includes(part));
 const lastCall = (part: string) => called(part).at(-1);
@@ -462,6 +571,125 @@ describe('acting on a selection', () => {
   });
 });
 
+describe('history, undo and the tools beside the list', () => {
+  async function pickBoth() {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Titles' }));
+    await screen.findByText('Alien');
+    fireEvent.click(screen.getByLabelText('Select this page'));
+    await screen.findByText('selected');
+  }
+
+  it('a run that renamed files leaves a line that undoes the whole run', async () => {
+    server.bulk = { ...server.bulk, batch: 'b1' };
+    await pickBoth();
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename 1 file' }));
+    const strip = await screen.findByRole('status');
+    expect(strip).toHaveTextContent('1 file renamed');
+    fireEvent.click(within(strip).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(lastCall('undo-batch')?.body).toEqual({ batch: 'b1' }));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('1 file put back', 'success'),
+    );
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+  });
+
+  it('a run that moved no files offers nothing to undo', async () => {
+    server.bulk = { ...server.bulk, action: 'monitored', batch: null };
+    await pickBoth();
+    fireEvent.click(screen.getByRole('button', { name: 'Get missing' }));
+    await waitFor(() => expect(window.showToast).toHaveBeenCalled());
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('History lists what was done by hand and undoes one change', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    expect(await screen.findByText('Renamed · Alien')).toBeInTheDocument();
+    expect(screen.getByText('Alien (1979).mkv')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(lastCall('history/7/undo')?.method).toBe('POST'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Put back as a.mkv', 'success'),
+    );
+  });
+
+  it('Move shows what would move to the picked library before it moves anything', async () => {
+    await pickBoth();
+    fireEvent.click(screen.getByRole('button', { name: /More/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another library' }));
+    const run = await screen.findByRole('button', { name: 'Move' });
+    expect(run).toBeDisabled();
+    fireEvent.click(await screen.findByRole('radio', { name: /Kids/ }));
+    expect(await screen.findByText('/mnt/b/Kids/Alien (1979)/a.mkv')).toBeInTheDocument();
+    expect(screen.getByText(/1 locked title will be left alone/)).toBeInTheDocument();
+    expect(lastCall('move-preview')?.url).toContain('library_id=4');
+    expect(called('bulk/start')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Move 2 files' }));
+    await waitFor(() =>
+      expect(lastCall('bulk/start')?.body).toMatchObject({
+        action: 'move',
+        params: { library_id: 4 },
+      }),
+    );
+  });
+
+  it('a view saves what is on screen and brings it back in one click', async () => {
+    await mount();
+    fireEvent.click(await screen.findByRole('button', { name: /Extra copies/ }));
+    await waitFor(() => expect(lastCall('manager/titles')?.url).toContain('needs=copies'));
+    fireEvent.click(screen.getByRole('button', { name: /Views/ }));
+    fireEvent.change(screen.getByLabelText('View name'), { target: { value: 'Clean up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(lastCall('manager/views')?.method).toBe('PUT'));
+    expect(lastCall('manager/views')?.body).toMatchObject({
+      views: [
+        {
+          name: 'Clean up',
+          state: { tab: 'movies', view: 'posters', filters: { needs: ['copies'] } },
+        },
+      ],
+    });
+    // drop the filter, then the saved view puts it back
+    fireEvent.click(screen.getByRole('button', { name: /Extra copies/ }));
+    await waitFor(() => expect(lastCall('manager/titles')?.url).not.toContain('needs='));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Clean up/ }));
+    await waitFor(() => expect(lastCall('manager/titles')?.url).toContain('needs=copies'));
+  });
+
+  it("the padlock in a title's sheet locks it", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Titles' }));
+    await screen.findByText('Alien');
+    fireEvent.click(screen.getAllByTitle('Edit')[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Lock' }));
+    await waitFor(() =>
+      expect(lastCall('bulk/start')?.body).toMatchObject({
+        action: 'lock',
+        params: { value: true },
+      }),
+    );
+    expect(await screen.findByRole('button', { name: 'Locked' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('Episodes files a ticked run under another season after showing the plan', async () => {
+    render(<EpisodesTab showId={9} onChanged={onChanged} />);
+    fireEvent.click(await screen.findByLabelText(/wrong\.mkv/));
+    fireEvent.change(screen.getByLabelText('Season'), { target: { value: '2' } });
+    expect(await screen.findByText('S01E01 to S02E01')).toBeInTheDocument();
+    expect(lastCall('renumber/9')?.body).toEqual({ file_ids: [81], season: 2, start_episode: 1 });
+    fireEvent.click(screen.getByRole('button', { name: 'File 1 file' }));
+    await waitFor(() => expect(lastCall('renumber/9')?.body).toMatchObject({ apply: true }));
+    await waitFor(() =>
+      expect(onChanged).toHaveBeenCalledWith({ batch: 'b2', text: '1 file filed under Season 2' }),
+    );
+  });
+});
+
 describe('the words', () => {
   it('sizes, codecs, languages and paths read the way a person says them', () => {
     expect(formatSize(20.4e12)).toBe('20.4 TB');
@@ -503,6 +731,9 @@ describe('the words', () => {
     );
     expect(describeDone(done({ action: 'subtitles', changed: 2, failed: 1 }), 'movies')).toBe(
       '2 subtitles queued, 1 could not be done',
+    );
+    expect(describeDone(done({ action: 'move', changed: 6, held: 2 }), 'movies')).toBe(
+      '6 files moved, 2 locked titles left alone',
     );
     expect(describeDone(done({ action: 'monitored', label: 'Monitor · 3 movies' }), 'movies')).toBe(
       'Monitor · 3 movies: 3 movies',

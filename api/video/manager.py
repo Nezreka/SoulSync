@@ -199,7 +199,7 @@ def register_routes(bp):
             library_id = 0
         db = get_video_db()
         files = size = copy = skipped = held = 0
-        sample, error = [], None
+        sample, error, why = [], None, {}
         for item_id in _ids():
             if db.is_hands_off(kind, item_id):
                 held += 1
@@ -212,6 +212,8 @@ def register_routes(bp):
             size += plan["size_bytes"]
             copy += plan["copy_bytes"]
             skipped += len(plan["skipped"])
+            for skip in plan["skipped"]:
+                why[skip["reason"]] = why.get(skip["reason"], 0) + 1
             for mv in plan["moves"]:
                 if len(sample) < _PREVIEW_FILES:
                     sample.append({"from": mv["from"], "to": mv["to"]})
@@ -228,6 +230,8 @@ def register_routes(bp):
             free = None
         return jsonify({"success": True, "files": files, "size_bytes": size, "copy_bytes": copy,
                         "skipped": skipped, "held": held, "free_bytes": free,
+                        # the commonest reason a file stays put, to say it plainly
+                        "skipped_why": max(why, key=why.get) if why else None,
                         "enough_room": free is None or free > copy, "moves": sample})
 
     # ── history and undo ────────────────────────────────────────────────────

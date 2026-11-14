@@ -45,6 +45,8 @@ export interface TitleRow extends FileFacts {
   quality_profile_id: number | null;
   video_library_id: number | null;
   locked_fields: string[];
+  /** the padlock: reviewed, and automation leaves it and its files alone */
+  locked: boolean;
   status: string | null;
   genres: string[];
   below_cutoff: boolean;
@@ -155,7 +157,7 @@ export interface Filters {
   needs: Need[];
   status: '' | 'owned' | 'not_owned';
   monitored: '' | '1' | '0';
-  /** details a person set and locked */
+  /** the padlock is on */
   locked: '' | '1' | '0';
   resolution: string;
   codec: string;
@@ -203,6 +205,10 @@ export interface BulkStatus {
   failed: number;
   pushed?: number;
   changed?: number;
+  /** padlocked titles the run left alone */
+  held?: number;
+  /** the file changes of this run, for Undo */
+  batch?: string | null;
   action?: string | null;
   label?: string | null;
   error?: string | null;
@@ -223,4 +229,59 @@ export type BulkAction =
   | 'series_type'
   | 'delete'
   | 'lock'
+  | 'move'
   | 'collection_add';
+
+/** one change made to a file by hand (core/video/file_history.py) */
+export interface FileChange {
+  id: number;
+  at: string;
+  action: 'rename' | 'move' | 'delete' | 'reassign';
+  kind: TitleKind | null;
+  item_id: number | null;
+  title: string | null;
+  label: string | null;
+  from_path: string | null;
+  to_path: string | null;
+  from_name: string;
+  to_name: string;
+  batch: string | null;
+  undone: boolean;
+}
+
+/** what a finished run offers to put back */
+export interface Undoable {
+  batch: string;
+  text: string;
+}
+
+/** a named set of filters, sort, view and columns */
+export interface SavedView {
+  name: string;
+  state: {
+    tab: Side;
+    view: ViewMode;
+    filters: Filters;
+    sort: Sort;
+    columns?: string[];
+  };
+}
+
+export interface EpisodeFile {
+  file_id: number;
+  filename: string;
+  size_bytes: number;
+  resolution: string | null;
+  quality: string | null;
+}
+
+export interface SeasonEpisodes {
+  season: number;
+  episodes: {
+    id: number;
+    episode: number;
+    title: string | null;
+    air_date: string | null;
+    files: EpisodeFile[];
+  }[];
+}

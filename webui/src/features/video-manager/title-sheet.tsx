@@ -8,11 +8,12 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog';
 
-import type { Facets, FileRow, TitleKind } from './types';
+import type { Facets, FileChange, FileRow, TitleKind, Undoable } from './types';
 
 import {
   type HistoryRow,
   type TitleDetail,
+  fetchChanges,
   fetchFiles,
   fetchTitleDetail,
   fetchTitleHistory,
@@ -21,12 +22,20 @@ import {
   startBulk,
 } from './api';
 import { channelsLabel, codecName, formatDate, formatSize, languageCodes, plural } from './format';
+import { ChangeList, EpisodesTab, PadlockIcon, PosterPicker } from './manager-extras';
 import { openTitle } from './manager-page';
 import { posterUrl, ResBadge } from './manager-views';
 import { EMPTY_FILTERS } from './types';
 import s from './video-manager.module.css';
 
-type Tab = 'details' | 'files' | 'history';
+type Tab = 'details' | 'files' | 'episodes' | 'history';
+
+const TAB_NAMES: Record<Tab, string> = {
+  details: 'Details',
+  files: 'Files',
+  episodes: 'Episodes',
+  history: 'History',
+};
 
 interface Draft {
   title: string;
@@ -124,7 +133,8 @@ export function TitleSheet({
   id: number;
   facets: Facets | null;
   onClose: () => void;
-  onChanged: () => void;
+  /** a change that moved files hands back what Undo would reverse */
+  onChanged: (undoable?: Undoable) => void;
 }) {
   const [tab, setTab] = useState<Tab>('details');
   const [detail, setDetail] = useState<TitleDetail | null>(null);
@@ -136,6 +146,12 @@ export function TitleSheet({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<string>('');
+  const [seriesType, setSeriesType] = useState('standard');
+  const [locked, setLocked] = useState(false);
+  const [changesMade, setChangesMade] = useState<FileChange[] | null>(null);
+  const [picking, setPicking] = useState(false);
+  /** bumped when the poster changes, so the image is asked for again */
+  const [art, setArt] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -148,6 +164,8 @@ export function TitleSheet({
         setSaved(start);
         setLocks(d.locked_fields ?? []);
         setProfile(d.quality_profile_id ? String(d.quality_profile_id) : '');
+        setSeriesType(d.series_type || 'standard');
+        setLocked(Boolean(d.hands_off));
       })
       .catch((e: Error) => live && setError(e.message));
     return () => {
@@ -183,6 +201,17 @@ export function TitleSheet({
       live = false;
     };
   }, [tab, history, kind, id]);
+
+  useEffect(() => {
+    if (tab !== 'history' || changesMade) return;
+    let live = true;
+    fetchChanges({ kind, id })
+      .then((out) => live && setChangesMade(out.items))
+      .catch(() => live && setChangesMade([]));
+    return () => {
+      live = false;
+    };
+  }, [tab, changesMade, kind, id]);
 
   const changes = useMemo(
     () => (draft && saved ? changedFields(saved, draft, kind) : {}),
@@ -228,6 +257,40 @@ export function TitleSheet({
     }
   };
 
+  const changeSeriesType = async (value: string) => {
+    setSeriesType(value);
+    try {
+      await startBulk(kind, [id], 'series_type', { value });
+      toast('Series type set');
+      onChanged();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not set the series type', 'error');
+    }
+  };
+
+  const togglePadlock = async () => {
+    const next = !locked;
+    setLocked(next);
+    try {
+      await startBulk(kind, [id], 'lock', { value: next });
+      // locking takes every detail too; unlocking hands them all back
+      window.setTimeout(() => {
+        fetchTitleDetail(kind, id)
+          .then((d) => setLocks(d.locked_fields ?? []))
+          .catch(() => undefined);
+        onChanged();
+      }, 700);
+      toast(
+        next
+          ? 'Locked: automation leaves it and its files alone'
+          : 'Unlocked: scans and maintenance look after it again',
+      );
+    } catch (e) {
+      setLocked(!next);
+      toast(e instanceof Error ? e.message : 'Could not change the padlock', 'error');
+    }
+  };
+
   const field = (
     key: keyof Draft,
     label: string,
@@ -270,7 +333,11 @@ export function TitleSheet({
       aria-label={detail?.title ?? 'Title'}
     >
       <header className={s.sheetHead}>
-        <img className={s.sheetPoster} src={posterUrl(kind, id, 185)} alt="" />
+        <img
+          className={s.sheetPoster}
+          src={posterUrl(kind, id, 185) + (art ? `&v=${art}` : '')}
+          alt=""
+        />
         <div className={s.sheetHeadText}>
           <h2 className={s.sheetTitle}>{detail?.title ?? 'Loading…'}</h2>
           <p className={s.sheetMeta}>
@@ -283,6 +350,11 @@ export function TitleSheet({
           >
             Open its page
           </button>
+          {detail?.tmdb_id ? (
+            <button type="button" className={s.linkBtn} onClick={() => setPicking(true)}>
+              Change poster
+            </button>
+          ) : null}
         </div>
         <div className={s.sheetActions}>
           {tab === 'details' && dirty ? (
@@ -293,6 +365,22 @@ export function TitleSheet({
               onClick={() => void save()}
             >
               {saving ? 'Saving…' : 'Save'}
+            </button>
+          ) : null}
+          {detail ? (
+            <button
+              type="button"
+              className={s.padlock}
+              aria-pressed={locked}
+              title={
+                locked
+                  ? 'Locked. Maintenance jobs, mass rename and automatic upgrades leave this title and its files alone, and its details are kept. Click to unlock.'
+                  : 'Lock this title once it is the way you want it. Automation then leaves it and its files alone.'
+              }
+              onClick={() => void togglePadlock()}
+            >
+              <PadlockIcon open={!locked} />
+              {locked ? 'Locked' : 'Lock'}
             </button>
           ) : null}
           <button type="button" className={s.barClose} aria-label="Close" onClick={onClose}>
@@ -310,7 +398,10 @@ export function TitleSheet({
       </header>
 
       <div className={s.sheetTabs} role="tablist" aria-label="Sections">
-        {(['details', 'files', 'history'] as const).map((t) => (
+        {(kind === 'show'
+          ? (['details', 'files', 'episodes', 'history'] as const)
+          : (['details', 'files', 'history'] as const)
+        ).map((t) => (
           <button
             key={t}
             type="button"
@@ -319,7 +410,7 @@ export function TitleSheet({
             className={s.sheetTab}
             onClick={() => setTab(t)}
           >
-            {t === 'details' ? 'Details' : t === 'files' ? 'Files' : 'History'}
+            {TAB_NAMES[t]}
           </button>
         ))}
       </div>
@@ -363,6 +454,23 @@ export function TitleSheet({
                 What searches and upgrades for this title aim for.
               </span>
             </label>
+            {kind === 'show' ? (
+              <label className={s.field}>
+                <span className={s.fieldLabel}>Series type</span>
+                <select
+                  className={s.select}
+                  value={seriesType}
+                  onChange={(e) => void changeSeriesType(e.target.value)}
+                >
+                  <option value="standard">Standard (S01E02)</option>
+                  <option value="daily">Daily (by air date)</option>
+                  <option value="anime">Anime (absolute numbers)</option>
+                </select>
+                <span className={s.fieldHint}>
+                  How its releases are named, which decides how they are searched for.
+                </span>
+              </label>
+            ) : null}
             <p className={s.sheetNote}>
               What you change here is kept: scans and metadata refreshes leave those fields alone,
               and the change is sent to your media server.
@@ -418,6 +526,33 @@ export function TitleSheet({
           )
         ) : null}
 
+        {tab === 'episodes' && kind === 'show' ? (
+          <EpisodesTab
+            showId={id}
+            onChanged={(done) => {
+              setFiles(null);
+              setChangesMade(null);
+              onChanged(done);
+            }}
+          />
+        ) : null}
+
+        {tab === 'history' && changesMade && changesMade.length ? (
+          <>
+            <p className={s.sheetSection}>Changes to its files</p>
+            <ChangeList
+              changes={changesMade}
+              showTitle={false}
+              onUndone={() => {
+                setChangesMade(null);
+                setFiles(null);
+                onChanged();
+              }}
+            />
+            <p className={s.sheetSection}>Downloads</p>
+          </>
+        ) : null}
+
         {tab === 'history' ? (
           history === null ? (
             <p className={s.dialogNote}>Loading…</p>
@@ -456,6 +591,18 @@ export function TitleSheet({
           )
         ) : null}
       </div>
+      {picking && detail?.tmdb_id ? (
+        <PosterPicker
+          kind={kind}
+          id={id}
+          tmdbId={detail.tmdb_id}
+          onPicked={() => {
+            setArt(Date.now());
+            onChanged();
+          }}
+          onClose={() => setPicking(false)}
+        />
+      ) : null}
     </DialogFrame>
   );
 }

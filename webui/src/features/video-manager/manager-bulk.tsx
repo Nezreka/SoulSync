@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 
-import type { BulkAction, BulkStatus, Facets, Side, TitleKind, ViewMode } from './types';
+import type { BulkAction, BulkStatus, Facets, Side, TitleKind, Undoable, ViewMode } from './types';
 
 import {
   type CollectionRef,
@@ -22,6 +22,7 @@ import {
   startBulk,
 } from './api';
 import { formatSize, noun, plural } from './format';
+import { MoveDialog } from './manager-extras';
 import s from './video-manager.module.css';
 
 function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
@@ -36,15 +37,20 @@ type Ask =
   | { kind: 'rating' }
   | { kind: 'series' }
   | { kind: 'collection' }
+  | { kind: 'move' }
   | null;
 
 /** what a finished job says about itself */
 export function describeDone(status: BulkStatus, side: Side): string {
   const titles = `${status.ok.toLocaleString()} ${noun(side, status.ok)}`;
-  const failed = status.failed ? `, ${status.failed.toLocaleString()} could not be done` : '';
+  const failed =
+    (status.failed ? `, ${status.failed.toLocaleString()} could not be done` : '') +
+    (status.held ? `, ${plural(status.held, 'locked title', 'locked titles')} left alone` : '');
   switch (status.action) {
     case 'rename':
       return `${plural(status.changed ?? 0, 'file', 'files')} renamed${failed}`;
+    case 'move':
+      return `${plural(status.changed ?? 0, 'file', 'files')} moved${failed}`;
     case 'wish':
       return status.changed
         ? `${plural(status.changed, 'item', 'items')} added to your Wishlist${failed}`
@@ -148,7 +154,8 @@ export function BulkBar({
   ids: number[];
   facets: Facets | null;
   onClear: () => void;
-  onDone: () => void;
+  /** a run that moved files hands back what Undo would reverse */
+  onDone: (undoable?: Undoable) => void;
 }) {
   const kind: TitleKind = side === 'shows' ? 'show' : 'movie';
   const [ask, setAsk] = useState<Ask>(null);
@@ -173,11 +180,12 @@ export function BulkBar({
           return;
         }
         setJob(null);
+        const said = describeDone(status, side);
         if (status.error) toast(status.error, 'error');
-        else toast(describeDone(status, side), status.failed ? 'warning' : 'success');
+        else toast(said, status.failed ? 'warning' : 'success');
         if (status.action === 'wish')
           document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
-        onDone();
+        onDone(status.batch && status.changed ? { batch: status.batch, text: said } : undefined);
       } catch {
         setJob(null);
         onDone();
@@ -229,16 +237,16 @@ export function BulkBar({
         unchanged?: number;
         failed?: number;
         error?: string;
+        batch?: string | null;
       };
       if (!response.ok || !data.success) throw new Error(data.error || 'That did not work');
       const verb = action === 'rename' ? 'renamed' : 'deleted';
-      toast(
+      const said =
         `${plural(data.done ?? 0, 'file', 'files')} ${verb}` +
-          (data.unchanged ? `, ${data.unchanged} already right` : '') +
-          (data.failed ? `, ${data.failed} could not be done` : ''),
-        data.failed ? 'warning' : 'success',
-      );
-      onDone();
+        (data.unchanged ? `, ${data.unchanged} already right` : '') +
+        (data.failed ? `, ${data.failed} could not be done` : '');
+      toast(said, data.failed ? 'warning' : 'success');
+      onDone(data.batch ? { batch: data.batch, text: said } : undefined);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'That did not work', 'error');
     }
@@ -351,11 +359,16 @@ export function BulkBar({
                           Refresh artwork
                         </Item>
                         <Item onSelect={() => (close(), void run('rematch'))}>Identify again</Item>
+                        <p className={s.menuHead}>Files</p>
+                        <Item onSelect={() => (close(), setAsk({ kind: 'move' }))}>
+                          Move to another library
+                        </Item>
+                        <p className={s.menuHead}>Padlock</p>
                         <Item onSelect={() => (close(), void run('lock', { value: true }))}>
-                          Lock details
+                          Lock
                         </Item>
                         <Item onSelect={() => (close(), void run('lock', { value: false }))}>
-                          Unlock details
+                          Unlock
                         </Item>
                         <p className={s.menuHead}>Watched</p>
                         <Item onSelect={() => (close(), void run('watched', { value: true }))}>
@@ -468,6 +481,15 @@ export function BulkBar({
           confirm="Set rating"
           onClose={() => setAsk(null)}
           onRun={(value) => void run('content_rating', { value })}
+        />
+      ) : null}
+      {ask?.kind === 'move' ? (
+        <MoveDialog
+          kind={kind}
+          side={side}
+          ids={ids}
+          onClose={() => setAsk(null)}
+          onRun={(libraryId) => void run('move', { library_id: libraryId })}
         />
       ) : null}
       {ask?.kind === 'collection' ? (

@@ -78,8 +78,8 @@ function Flags({ row }: { row: TitleRow }) {
   if (row.below_cutoff) flags.push(['Below quality', `Its profile asks for ${row.cutoff}`]);
   if (row.extra_copies) flags.push([`+${row.extra_copies}`, 'Extra copies on disk']);
   if (!row.monitored) flags.push(['Off', 'Not monitored']);
-  if (row.locked_fields.length)
-    flags.push(['Locked', 'You set its details: scans and metadata refreshes leave them alone']);
+  if (row.locked)
+    flags.push(['Locked', 'Reviewed and locked: automation leaves it and its files alone']);
   if (!flags.length) return null;
   return (
     <span className={s.flags}>

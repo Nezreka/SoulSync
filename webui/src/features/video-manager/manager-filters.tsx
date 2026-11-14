@@ -135,11 +135,11 @@ export function FilterPanel({
               ]}
             />
             <Pick
-              label="Details"
+              label="Padlock"
               value={filters.locked}
               onChange={(locked) => set({ locked: locked as Filters['locked'] })}
               options={[
-                { value: '1', label: 'Locked by you' },
+                { value: '1', label: 'Locked' },
                 { value: '0', label: 'Not locked' },
               ]}
             />
@@ -247,7 +247,7 @@ export function ActiveFilters({
   if (filters.status) add('status', filters.status === 'owned' ? 'On disk' : 'Not on disk');
   if (filters.monitored)
     add('monitored', filters.monitored === '1' ? 'Monitored' : 'Not monitored');
-  if (filters.locked) add('locked', filters.locked === '1' ? 'Locked by you' : 'Not locked');
+  if (filters.locked) add('locked', filters.locked === '1' ? 'Locked' : 'Not locked');
   if (filters.video_library)
     add(
       'video_library',

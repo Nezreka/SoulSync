@@ -12,11 +12,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { PageBar, PageFrame, PageHeader, PagePills, PageSearch } from '@/components/page-header';
 
-import type { Facets, FileRow, Filters, Need, Side, Sort, TitleRow, ViewMode } from './types';
+import type {
+  Facets,
+  FileRow,
+  Filters,
+  Need,
+  SavedView,
+  Side,
+  Sort,
+  TitleRow,
+  Undoable,
+  ViewMode,
+} from './types';
 
 import { fetchFacets, fetchFiles, fetchMatchingIds, fetchTitles, ManagerError } from './api';
 import { NEED_COPY, NEED_ORDER, countFilters, formatSize, noun, plural } from './format';
 import { BulkBar } from './manager-bulk';
+import { HistoryDialog, UndoStrip, ViewsMenu } from './manager-extras';
 import { ActiveFilters, FilterPanel } from './manager-filters';
 import { ChannelsGrid, LegacyPosters } from './manager-legacy';
 import { FilesTable, PosterGrid, TitleTable, type ColumnId, defaultColumns } from './manager-views';
@@ -119,6 +131,9 @@ export function ManagerPage() {
     label: '',
   });
   const [reloadKey, setReloadKey] = useState(0);
+  /** the last run that moved files, offered back as Undo */
+  const [undoable, setUndoable] = useState<Undoable | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const side: Side = tab === 'shows' ? 'shows' : 'movies';
   const requestRef = useRef(0);
 
@@ -295,6 +310,31 @@ export function ManagerPage() {
     remember('vmgr:columns', all);
   };
 
+  /** a saved view puts back the side, layout, filters, sort and columns */
+  const applyView = (state: SavedView['state']) => {
+    const nextTab: Tab = state.tab === 'shows' ? 'shows' : 'movies';
+    const nextView: ViewMode = (['posters', 'table', 'files'] as const).includes(state.view)
+      ? state.view
+      : 'table';
+    if (nextTab !== tab) {
+      setTab(nextTab);
+      remember('vmgr:tab', nextTab);
+      setFacets(null);
+    }
+    setViewState(nextView);
+    remember('vmgr:view', nextView);
+    setFilters({ ...EMPTY_FILTERS, ...state.filters });
+    setSort(state.sort?.by ? state.sort : DEFAULT_SORT[nextView]);
+    if (state.columns?.length) {
+      const all = { ...columns, [state.tab]: state.columns as ColumnId[] };
+      setColumns(all);
+      remember('vmgr:columns', all);
+    }
+    setPage(1);
+    setSelected(new Set());
+    clearRows();
+  };
+
   const needsAttention = facets
     ? NEED_ORDER.reduce((sum, need) => sum + (facets.needs[need] ? 1 : 0), 0)
     : 0;
@@ -327,32 +367,57 @@ export function ManagerPage() {
         title="Library"
         subtitle={status}
         actions={
-          <button
-            type="button"
-            className="pgf-btn"
-            disabled={scan.running}
-            title="Read the media server again"
-            onClick={() =>
-              document.dispatchEvent(
-                new CustomEvent('soulsync:video-scan-start', { detail: { mode: 'full' } }),
-              )
-            }
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.9}
-              aria-hidden="true"
+          <>
+            {restricted || tab === 'channels' ? null : (
+              <button
+                type="button"
+                className="pgf-btn"
+                title="Renames, moves and deletes made by hand, with undo"
+                onClick={() => setHistoryOpen(true)}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5M12 8v4l3 2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                History
+              </button>
+            )}
+            <button
+              type="button"
+              className="pgf-btn"
+              disabled={scan.running}
+              title="Read the media server again"
+              onClick={() =>
+                document.dispatchEvent(
+                  new CustomEvent('soulsync:video-scan-start', { detail: { mode: 'full' } }),
+                )
+              }
             >
-              <path
-                d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            {scan.running ? scan.label : 'Scan'}
-          </button>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.9}
+                aria-hidden="true"
+              >
+                <path
+                  d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {scan.running ? scan.label : 'Scan'}
+            </button>
+          </>
         }
       />
 
@@ -409,6 +474,10 @@ export function ManagerPage() {
               )}
             </div>
             <div className={s.needsEnd}>
+              <ViewsMenu
+                current={{ tab: side, view, filters, sort, columns: columns[side] }}
+                onApply={applyView}
+              />
               <button
                 type="button"
                 className={s.filterBtn}
@@ -441,6 +510,10 @@ export function ManagerPage() {
             />
           ) : null}
           <ActiveFilters side={side} filters={filters} facets={facets} onChange={changeFilters} />
+
+          {undoable ? (
+            <UndoStrip undoable={undoable} onDone={reload} onDismiss={() => setUndoable(null)} />
+          ) : null}
 
           <div className={s.resultLine}>
             <span>
@@ -566,8 +639,9 @@ export function ManagerPage() {
               ids={[...selected]}
               facets={facets}
               onClear={() => setSelected(new Set())}
-              onDone={() => {
+              onDone={(done) => {
                 setSelected(new Set());
+                setUndoable(done ?? null);
                 reload();
               }}
             />
@@ -581,8 +655,14 @@ export function ManagerPage() {
           id={editing.id}
           facets={facets}
           onClose={() => setEditing(null)}
-          onChanged={reload}
+          onChanged={(done) => {
+            if (done) setUndoable(done);
+            reload();
+          }}
         />
+      ) : null}
+      {historyOpen ? (
+        <HistoryDialog onClose={() => setHistoryOpen(false)} onChanged={reload} />
       ) : null}
     </PageFrame>
   );

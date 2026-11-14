@@ -4,8 +4,11 @@ import type {
   BulkAction,
   BulkStatus,
   Facets,
+  FileChange,
   FilesPage,
   Filters,
+  SavedView,
+  SeasonEpisodes,
   Side,
   Sort,
   TitleKind,
@@ -199,6 +202,8 @@ export interface TitleDetail {
   tmdb_id?: number | null;
   quality_profile_id?: number | null;
   series_type?: string | null;
+  /** the padlock */
+  hands_off?: boolean;
 }
 
 export function fetchTitleDetail(kind: TitleKind, id: number): Promise<TitleDetail> {
@@ -250,4 +255,158 @@ export interface HistoryRow {
 export async function fetchTitleHistory(kind: TitleKind, id: number): Promise<HistoryRow[]> {
   const data = await send<{ history: HistoryRow[] }>(`/api/video/detail/${kind}/${id}/history`);
   return data.history ?? [];
+}
+
+/* ── move to another library ─────────────────────────────────────────────── */
+
+export interface LibraryRef {
+  id: number;
+  name: string;
+  path: string;
+  is_default: boolean;
+}
+
+export async function fetchLibraries(kind: TitleKind): Promise<LibraryRef[]> {
+  const data = await send<{ libraries: LibraryRef[] }>(`/api/video/manager/libraries?kind=${kind}`);
+  return data.libraries ?? [];
+}
+
+export interface MovePreview {
+  files: number;
+  size_bytes: number;
+  /** what crosses to another drive, so is copied and takes room */
+  copy_bytes: number;
+  skipped: number;
+  /** the commonest reason a file is left where it is */
+  skipped_why?: string | null;
+  held: number;
+  free_bytes: number | null;
+  enough_room: boolean;
+  moves: { from: string; to: string }[];
+}
+
+export function fetchMovePreview(
+  kind: TitleKind,
+  ids: number[],
+  libraryId: number,
+): Promise<MovePreview> {
+  return send<MovePreview>(
+    `/api/video/manager/move-preview?kind=${kind}&library_id=${libraryId}&ids=${ids.join(',')}`,
+  );
+}
+
+/* ── history and undo ────────────────────────────────────────────────────── */
+
+export function fetchChanges(
+  title?: { kind: TitleKind; id: number },
+  limit = 100,
+): Promise<{ items: FileChange[]; total: number }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (title) {
+    params.set('kind', title.kind);
+    params.set('id', String(title.id));
+  }
+  return send(`/api/video/manager/history?${params}`);
+}
+
+export function undoChange(id: number): Promise<{ success: boolean; message?: string }> {
+  return send(`/api/video/manager/history/${id}/undo`, { method: 'POST' });
+}
+
+export async function undoBatch(
+  batch: string,
+): Promise<{ undone: number; failed: { id: number; error: string }[] }> {
+  const response = await fetch('/api/video/manager/history/undo-batch', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch }),
+  });
+  const data = (await response.json()) as {
+    undone?: number;
+    failed?: { id: number; error: string }[];
+    error?: string;
+  };
+  if (!data.undone && !data.failed?.length)
+    throw new ManagerError(data.error || 'Nothing could be put back', response.status);
+  return { undone: data.undone ?? 0, failed: data.failed ?? [] };
+}
+
+/* ── saved views ─────────────────────────────────────────────────────────── */
+
+export async function fetchViews(): Promise<SavedView[]> {
+  const data = await send<{ views: SavedView[] }>('/api/video/manager/views');
+  return data.views ?? [];
+}
+
+export async function saveViews(views: SavedView[]): Promise<SavedView[]> {
+  const data = await send<{ views: SavedView[] }>('/api/video/manager/views', {
+    method: 'PUT',
+    body: JSON.stringify({ views }),
+  });
+  return data.views ?? [];
+}
+
+/* ── episodes and renumbering ────────────────────────────────────────────── */
+
+export async function fetchEpisodes(showId: number): Promise<SeasonEpisodes[]> {
+  const data = await send<{ seasons: SeasonEpisodes[] }>(`/api/video/manager/episodes/${showId}`);
+  return data.seasons ?? [];
+}
+
+export interface RenumberPlan {
+  moves: { file_id: number; filename: string; from: string; to: string }[];
+  files: number;
+}
+
+export function planRenumber(
+  showId: number,
+  fileIds: number[],
+  season: number,
+  startEpisode: number,
+): Promise<RenumberPlan> {
+  return send<RenumberPlan>(`/api/video/manager/renumber/${showId}`, {
+    method: 'POST',
+    body: JSON.stringify({ file_ids: fileIds, season, start_episode: startEpisode }),
+  });
+}
+
+export function applyRenumber(
+  showId: number,
+  fileIds: number[],
+  season: number,
+  startEpisode: number,
+): Promise<{ moved: number; not_renamed: number; batch: string | null }> {
+  return send(`/api/video/manager/renumber/${showId}`, {
+    method: 'POST',
+    body: JSON.stringify({
+      file_ids: fileIds,
+      season,
+      start_episode: startEpisode,
+      apply: true,
+    }),
+  });
+}
+
+/* ── artwork ─────────────────────────────────────────────────────────────── */
+
+export interface PosterOption {
+  thumb: string;
+  full: string;
+  lang?: string | null;
+}
+
+export async function fetchPosterOptions(kind: TitleKind, tmdbId: number): Promise<PosterOption[]> {
+  const response = await fetch(`/api/video/poster/options/${kind}/${tmdbId}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return [];
+  const data = (await response.json()) as { posters?: PosterOption[] };
+  return (data.posters ?? []).filter((p) => p && p.full);
+}
+
+export function setPoster(kind: TitleKind, id: number, posterUrl: string): Promise<unknown> {
+  return send('/api/video/poster/set', {
+    method: 'POST',
+    body: JSON.stringify({ kind, id, poster_url: posterUrl }),
+  });
 }
