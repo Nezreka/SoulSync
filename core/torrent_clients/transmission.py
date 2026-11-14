@@ -185,7 +185,7 @@ class TransmissionAdapter:
     async def add_torrent(
         self,
         url_or_magnet: str,
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         return await run_control(
@@ -205,7 +205,7 @@ class TransmissionAdapter:
     async def add_torrent_file(
         self,
         file_bytes: bytes,
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         return await run_control(

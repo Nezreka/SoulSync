@@ -111,7 +111,7 @@ class Aria2Adapter:
         return await run_control(lambda: self._rpc('aria2.getVersion') is not None)
 
     # ── add ──
-    async def add_torrent(self, url_or_magnet: str, category: str = "soulsync",
+    async def add_torrent(self, url_or_magnet: str, category: Optional[str] = None,
                           save_path: Optional[str] = None) -> Optional[str]:
         return await run_control(self._add_uri_sync, url_or_magnet, save_path)
 
@@ -125,7 +125,7 @@ class Aria2Adapter:
         result = self._rpc('aria2.addUri', [uri], self._opts(save_path))
         return str(result) if result else None   # GID
 
-    async def add_torrent_file(self, file_bytes: bytes, category: str = "soulsync",
+    async def add_torrent_file(self, file_bytes: bytes, category: Optional[str] = None,
                                save_path: Optional[str] = None) -> Optional[str]:
         return await run_control(self._add_file_sync, file_bytes, save_path)
 

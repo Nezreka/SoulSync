@@ -80,7 +80,7 @@ class UsenetClientAdapter(Protocol):
     async def add_nzb(
         self,
         url_or_bytes,
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         """Hand the usenet client either a ``.nzb`` HTTP URL (``str``)

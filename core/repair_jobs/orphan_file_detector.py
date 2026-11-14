@@ -30,6 +30,7 @@ you can judge what you have before deciding to import or remove it.
 """
 
 import os
+import sqlite3
 import re
 import time
 
@@ -114,6 +115,69 @@ def known_file_suffixes(db):
             " AND COALESCE(file_state, 'active') <> 'deleted'"
         ):
             parts = file_path.replace('\\', '/').split('/')
+            for depth in range(1, min(5, len(parts) + 1)):
+                suffixes.add('/'.join(parts[-depth:]).lower())
+        return suffixes
+    finally:
+        conn.close()
+
+
+def tracked_suffixes_for(db, file_path):
+    """The suffixes of the tracked files that could be this one: those with
+    its file name. What ``is_tracked_path`` needs to answer for ONE file.
+
+    The fix for a finding rechecks its file, because a file can enter the
+    catalogue after the finding was raised. It used ``known_file_suffixes``
+    for that, which reads every tracked file and builds four strings for each:
+    a million strings on a large library, built and thrown away once per
+    finding, so a bulk fix of 700 findings took over ten hours (#2095). Any
+    path that matches this file at any depth ends in its file name, so only
+    those rows are read. Same rule, same answer.
+    """
+    name = file_path.replace('\\', '/').split('/')[-1]
+    wanted = name.lower()
+    if not wanted:
+        return set()
+    conn = db._get_connection()
+    try:
+        # the paths come off their own index, never the table: a row carries
+        # the file's tags and pipeline detail, and reading every one of those
+        # to compare a path was as slow as the snapshot this replaces
+        if wanted.isascii():
+            # LIKE folds case the way lower() does, for ascii
+            escaped = name.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            sql, params = "WHERE path LIKE ? ESCAPE '\\'", ('%' + escaped,)
+        else:
+            # LIKE does not fold case outside ascii: every path is compared
+            # here the way the full snapshot compares them, with nothing kept
+            sql, params = "WHERE path IS NOT NULL AND path != ''", ()
+        try:
+            rows = conn.execute(
+                "SELECT id, path FROM lib2_track_files INDEXED BY idx_lib2_track_files_path "
+                + sql, params)
+            rows = rows.fetchall() if wanted.isascii() else rows
+        except sqlite3.OperationalError:
+            # a database without that index: the plain read, slower, same answer
+            rows = conn.execute("SELECT id, path FROM lib2_track_files " + sql, params)
+        matched = {}
+        for file_id, path in rows:
+            parts = (path or '').replace('\\', '/').split('/')
+            if parts[-1].lower() == wanted:
+                matched[file_id] = parts
+        if not matched:
+            return set()
+        # only the few rows that share the name are asked whether they are live
+        ids = list(matched)
+        live = set()
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            live.update(r[0] for r in conn.execute(
+                "SELECT id FROM lib2_track_files WHERE id IN (%s) "
+                "AND COALESCE(file_state, 'active') <> 'deleted'" % ",".join("?" * len(chunk)),
+                chunk))
+        suffixes = set()
+        for file_id in live:
+            parts = matched[file_id]
             for depth in range(1, min(5, len(parts) + 1)):
                 suffixes.add('/'.join(parts[-depth:]).lower())
         return suffixes

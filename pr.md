@@ -34,10 +34,13 @@ the video library becomes a real library manager. the library page is a table of
 - **a dead file's row has a remove button (thanks wolf39us, #2086)**, and values taken from file tags can be released for an album, an artist or the whole library (#2084).
 - artist images from discogs download again (thanks Ktzenjammer, #2079), each track of a multi-track single keeps its own number (#2044), and album tag consistency finds a split album by a shared release id (#2072).
 - a moved file is one file: the scan no longer adopts it twice, lists the song twice or downloads it again.
+- **playlists can find bootlegs, edits and unofficial remixes (thanks CptSamFalcon, #2097).** a track no catalog has waited in the wing it pool forever. a new "find uncatalogued tracks" switch in a playlist's settings searches for it by the playlist's own artist and title on every sync, takes a file only when its name says it is that exact version, and tags it from the playlist.
+- **one playlist on the server per mirror, on jellyfin and plex (#2098).** a sync found the server playlist by name, deleted it and made it again, so a refused delete or a second playlist with the name left a stale twin with a different track count. the playlist is rewritten in place now and the mirror follows it by id, renames included, as navidrome mirrors already did.
 
 ## downloads
 
 - **start the torrents soulsync adds (thanks @onnwee, #2087).** a new switch in the torrent client settings for a qbittorrent that adds torrents stopped, or stops them once the metadata is in. soulsync's torrents start anyway and what other apps add keeps your qbittorrent setting.
+- **music usenet grabs use your category (thanks Randomname653, #2096).** every music nzb was sent as "soulsync" whatever category was set, so it landed in the root of the completed folder. a grab that names no category uses the one in settings now, on sabnzbd and nzbget.
 - a profile can cancel a download it started.
 
 ## server activity
@@ -54,5 +57,6 @@ the video library becomes a real library manager. the library page is a table of
 
 - **a security pass.** api keys, tokens and passwords are blanked out of every log line, names and urls are escaped before they reach the page, and backups, diagnostics, auto-import settings, quality profiles, repair findings and automations are checked against the profile asking.
 - status loops, discover shelves, the quarantine list and bulk repair fixes each stopped re-reading the whole library.
+- **bulk fixing orphan files is fast (thanks Randomname653, #2095).** each finding rebuilt the path of every file in the library to recheck one. it reads only the files that share the orphan's name now: about two seconds a finding where it took a minute on a 311k file library.
 
 tested: the frontend suite and the video, library, wishlist, activity and release suites pass locally. the full suite runs on dev's nightly build, which is the check on this pr.
