@@ -96,6 +96,89 @@ def test_track_titles_artist_and_album():
     assert s["subtitle"] == "Massive Attack · Mezzanine"
 
 
+# ── per-type artwork (#2089: tracks showed the artist/author photo) ─────────
+def test_track_session_prefers_album_art_over_artist():
+    tr = _movie(type="track", thumb="/t/trk", parentThumb="/t/album",
+                grandparentThumb="/t/artist", art="/a/artist", grandparentArt="/a/artist")
+    s = normalize_session(tr)
+    assert s["thumb"] == "/t/album" and s["art"] == "/t/album"
+
+
+def test_track_session_uses_own_thumb_when_no_parent_thumb():
+    s = normalize_session(_movie(type="track", thumb="/t/trk"))
+    assert s["thumb"] == "/t/trk" and s["art"] == "/t/trk"
+
+
+def test_track_session_falls_back_to_artist_image():
+    tr = _movie(type="track", thumb=None, art=None,
+                grandparentThumb="/t/artist", grandparentArt="/a/artist")
+    s = normalize_session(tr)
+    assert s["thumb"] == "/t/artist" and s["art"] == "/a/artist"
+
+
+def test_track_session_without_any_artwork_is_empty_not_error():
+    s = normalize_session(NS(type="track"))
+    assert s["thumb"] == "" and s["art"] == ""
+
+
+def test_episode_session_still_prefers_show_poster():
+    ep = _movie(type="episode", thumb="/t/still", parentThumb="/t/season",
+                grandparentThumb="/t/show", art="/a/ep", grandparentArt="/a/show")
+    s = normalize_session(ep)
+    assert s["thumb"] == "/t/show" and s["art"] == "/a/ep"
+    s2 = normalize_session(_movie(type="episode", thumb="/t/still", parentThumb="/t/season",
+                                  grandparentThumb="/t/show", art=None, grandparentArt="/a/show"))
+    assert s2["art"] == "/a/show"
+
+
+def test_movie_session_images_unchanged():
+    s = normalize_session(_movie())
+    assert s["thumb"] == "/t/heat" and s["art"] == "/a/heat"
+
+
+def test_track_session_art_chain_when_no_album_or_own_thumb():
+    # parentThumb and thumb both absent: the track's own art beats the
+    # artist artwork, and the artist artwork is the last resort
+    tr = _movie(type="track", thumb=None, art="/a/own", grandparentArt="/a/artist")
+    s = normalize_session(tr)
+    assert s["art"] == "/a/own"
+    s2 = normalize_session(_movie(type="track", thumb=None, art=None, grandparentArt="/a/artist"))
+    assert s2["art"] == "/a/artist"
+
+
+def test_track_session_only_artist_thumb_leaves_art_empty():
+    # deliberate: track art never falls back to grandparentThumb — when art
+    # is empty the frontend falls back to s.thumb (the artist thumb here)
+    s = normalize_session(_movie(type="track", thumb=None, art=None,
+                                 grandparentThumb="/t/artist", grandparentArt=None))
+    assert s["thumb"] == "/t/artist" and s["art"] == ""
+
+
+def test_track_session_parent_thumb_with_no_own_thumb():
+    s = normalize_session(_movie(type="track", thumb=None, parentThumb="/t/album"))
+    assert s["thumb"] == "/t/album" and s["art"] == "/t/album"
+
+
+def test_movie_session_prefers_grandparent_chain_like_before():
+    m = _movie(thumb="/t/heat", parentThumb="/t/p", grandparentThumb="/t/gp",
+               art="/a/heat", grandparentArt="/a/gp")
+    s = normalize_session(m)
+    assert s["thumb"] == "/t/gp" and s["art"] == "/a/heat"
+
+
+def test_movie_session_parent_thumb_beats_own_thumb_without_grandparent():
+    s = normalize_session(_movie(grandparentThumb=None, parentThumb="/t/parent", thumb="/t/own"))
+    assert s["thumb"] == "/t/parent"
+
+
+def test_unknown_type_session_images_unchanged():
+    s = normalize_session(NS(type="clip", title="C", thumb="/t", parentThumb="/pt",
+                             grandparentThumb="/gt", art="/a", grandparentArt="/ga",
+                             media=[], players=[_player()], usernames=["boulder"],
+                             session=_sess(), transcodeSessions=[]))
+    assert s["thumb"] == "/gt" and s["art"] == "/a"
+
+
 def test_direct_stream_when_only_audio_copies_but_no_video_transcode():
     # both decisions 'copy' → Direct Stream (remux, not transcode)
     ep = _movie(transcodeSessions=[_transcode(vdec="copy", adec="copy")])
@@ -197,6 +280,35 @@ def test_history_row_resolves_user_and_device():
 def test_history_unknown_account_falls_back():
     r = normalize_history(_hist(accountID=999), {2: "boulder"}, {})
     assert r["user"] == "Someone" and r["device"] == ""
+
+
+def test_history_track_row_prefers_album_thumb():
+    assert normalize_history(_hist(type="track", parentThumb="/pt"), {}, {})["thumb"] == "/pt"
+    assert normalize_history(_hist(type="track"), {}, {})["thumb"] == "/t"
+    assert normalize_history(_hist(type="track", thumb=None), {}, {})["thumb"] == "/gt"
+
+
+def test_history_episode_row_still_uses_show_thumb():
+    assert normalize_history(_hist(), {}, {})["thumb"] == "/gt"
+
+
+def test_history_movie_row_uses_non_track_thumb_chain():
+    assert normalize_history(_hist(type="movie", title="Heat"), {}, {})["thumb"] == "/gt"
+    assert normalize_history(_hist(type="movie", title="Heat", grandparentThumb=None), {}, {})["thumb"] == "/t"
+    assert normalize_history(_hist(type="movie", title="Heat", grandparentThumb=None,
+                                   parentThumb="/pt"), {}, {})["thumb"] == "/pt"
+
+
+def test_history_track_row_without_any_images_is_empty():
+    r = normalize_history(_hist(type="track", thumb=None, grandparentThumb=None), {}, {})
+    assert r["thumb"] == ""
+
+
+def test_images_of_normalises_mixed_case_type():
+    from core.server_activity import _images_of
+    item = NS(parentThumb="/pt", thumb="/t", grandparentThumb="/gt", art="/a", grandparentArt="/ga")
+    assert _images_of(item, "Track") == ("/pt", "/pt")
+    assert _images_of(item, "EPISODE") == ("/gt", "/a")
 
 
 class _HistPlex:
@@ -375,6 +487,16 @@ def test_compute_stats_rolls_up_content_users_devices():
 def test_compute_stats_empty():
     d = compute_stats([], {}, {}, 30)
     assert d["total_plays"] == 0 and d["top_content"] == [] and len(d["series"]) == 14
+
+
+def test_stats_track_rollup_keeps_artist_thumb():
+    # the stats roll-up groups tracks BY ARTIST (the entry's title is the
+    # artist name), so the artist thumb is the intentional image there (#2089)
+    it = _hitem("track", "Teardrop", "Massive Attack", 1, 9, datetime(2026, 7, 12, 12, 0, 0))
+    it.parentThumb = "/pt"
+    d = compute_stats([it], {1: "boulder"}, {9: "TV"}, 30)
+    assert d["top_content"][0]["title"] == "Massive Attack"
+    assert d["top_content"][0]["thumb"] == "/gt"
 
 
 def test_get_stats_caches(monkeypatch):
