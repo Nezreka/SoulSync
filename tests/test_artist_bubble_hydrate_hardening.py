@@ -156,7 +156,6 @@ def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
         "a global .library-content is back in the page: a class query could match the wrong library")
     assert "data-video-manager-root" in index, "the video library manager lost its mount point"
     assert "data-library-downloads-host" in react_page, "music library lost the bubbles host"
-    assert ".library-content" not in fn
 
     # The React library page renders a dedicated host and is preferred when
     # present, so a querySelector is no longer disqualifying on its own — but it

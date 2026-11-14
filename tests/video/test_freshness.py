@@ -286,10 +286,15 @@ def test_a_placeholder_episode_title_gives_way_to_the_real_one_and_a_real_one_st
     conn.execute("UPDATE episodes SET title='TBA' WHERE id=?", (eps[(2, 2)],))
     conn.commit()
     conn.close()
+    # a provider that only fills gaps leaves a title that is there, placeholder or not:
+    # some shows really do call an episode "Episode 1"
+    db.backfill_episodes(sid, 2, [{"episode_number": 1, "title": "Episode 1 - Premiere"}])
+    assert _row(db, "SELECT title FROM episodes WHERE id=?", eps[(2, 1)]) == ("Episode 1",)
+    # the provider the titles come from replaces its own placeholder
     db.backfill_episodes(sid, 2, [{"episode_number": 1, "title": "Seven Thirty-Seven"},
-                                  {"episode_number": 2, "title": "Grilled"}])
+                                  {"episode_number": 2, "title": "Grilled"}], overwrite_air_date=True)
     db.backfill_episodes(sid, 1, [{"episode_number": 1, "title": "Something Else"},
-                                  {"episode_number": 2, "title": "Episode 2"}])
+                                  {"episode_number": 2, "title": "Episode 2"}], overwrite_air_date=True)
     assert _row(db, "SELECT title FROM episodes WHERE id=?", eps[(2, 1)]) == ("Seven Thirty-Seven",)
     assert _row(db, "SELECT title FROM episodes WHERE id=?", eps[(2, 2)]) == ("Grilled",)
     # a real title is never replaced, least of all by a placeholder

@@ -3015,9 +3015,13 @@ class VideoDatabase:
                             continue
                         if overwrite_air_date and col == "air_date" and e[col]:
                             sets.append("air_date=?")
-                        elif col == "title" and not _placeholder_title(e[col]):
-                            # "Episode 5" and "TBA" are what a provider says before
-                            # an episode has a name: the real one replaces them
+                        elif col == "title" and overwrite_air_date and not _placeholder_title(e[col]):
+                            # "Episode 5" and "TBA" are what the provider says before
+                            # an episode has a name: its real one replaces them. only
+                            # from the provider the title came from (the same caller
+                            # that may move an air date): a show whose episodes really
+                            # are called "Episode 1" keeps them when another provider
+                            # fills its gaps
                             sets.append("title=CASE WHEN title IS NULL OR title='' OR "
                                         "title GLOB 'Episode [0-9]*' OR UPPER(title) IN ('TBA','TBD') "
                                         "THEN ? ELSE title END")
