@@ -121,6 +121,113 @@ def known_file_suffixes(db):
         conn.close()
 
 
+def _basename_like_pattern(name):
+    """LIKE pattern matching every DB basename that could equal ``name``.
+
+    The pattern only has to be a SUPERSET of the rows whose basename
+    ``.lower()`` equals ``name.lower()`` — the caller compares exactly in
+    Python afterwards. SQLite LIKE folds ASCII case only, while Python's
+    ``.lower()`` also folds non-ASCII, so:
+
+    - a non-ASCII character becomes ``%`` (matches any run, which also
+      covers ``.lower()`` changing a character's length, e.g. 'İ', and
+      avoids binding surrogate-escaped names SQLite cannot encode);
+    - ``%``, ``_``, ``k``, ``K``, ``i``, ``I`` become ``_`` (exactly one
+      character): the wildcards must not act as wildcards, and the only
+      non-ASCII code points whose ``.lower()`` yields an ASCII character
+      are U+0130 ('İ' -> 'i' + combining dot) and U+212A (Kelvin sign ->
+      'k'), so a literal 'k'/'i' in the pattern could miss a row stored
+      with one of those;
+    - any other ASCII character stands for itself (LIKE folds its case).
+
+    No ESCAPE clause is needed: no literal wildcard is ever emitted.
+    Relies on SQLite's default case-insensitive LIKE: nothing in the
+    codebase sets ``PRAGMA case_sensitive_like``, and the superset
+    argument breaks if a future connection ever turns it on.
+    """
+    pattern = ['%']
+    for ch in name:
+        if ord(ch) >= 0x80:
+            pattern.append('%')
+        elif ch in '%_kKiI':
+            pattern.append('_')
+        else:
+            pattern.append(ch)
+    # Collapse runs of '%' — one wildcard run is enough.
+    collapsed = []
+    for piece in pattern:
+        if piece == '%' and collapsed and collapsed[-1] == '%':
+            continue
+        collapsed.append(piece)
+    return ''.join(collapsed)
+
+
+def tracked_suffixes_for_file(db, file_path):
+    """The ``known_file_suffixes`` set, restricted to one file's name.
+
+    A tracked row can only suffix-match ``file_path`` at any depth if its
+    basename equals this file's basename case-insensitively, so building
+    suffixes from just those rows gives ``is_tracked_path`` the same
+    answers as the full snapshot — without reading the catalogue's wide
+    table rows (phase 1 still scans the path index, the cheap part).
+    That is what a per-finding re-check costs: ``known_file_suffixes``
+    scans every (wide) ``lib2_track_files`` row, and the orphan fixer
+    runs once per finding, so a bulk fix was O(findings x library).
+
+    Two phases, both index-only or keyed: phase 1 scans the covering
+    path index (``SELECT id, path ... WHERE path LIKE ?`` — selecting
+    ``file_state`` too would force a full table scan of the wide rows)
+    and keeps rows whose basename matches exactly in Python; phase 2
+    fetches the rows carrying that name by primary key under the exact
+    ``known_file_suffixes`` filter and builds their depth 1-4 suffixes.
+    Neither phase is literally constant-cost: a broad name (all
+    non-ASCII, or a short stem of the wildcard-folded letters) widens
+    phase 1's index scan and the Python filter behind it, and phase 2
+    grows with how many rows share the name. Both stay far below
+    reading the wide rows for every finding.
+    Exceptions propagate: the caller fails closed on any DB error.
+    """
+    name = file_path.replace('\\', '/').split('/')[-1]
+    if not name:
+        # Degenerate input (trailing separator): keep the old behaviour.
+        return known_file_suffixes(db)
+    name_lower = name.lower()
+    conn = db._get_connection()
+    try:
+        candidate_ids = [
+            row_id for row_id, path in conn.execute(
+                "SELECT id, path FROM lib2_track_files WHERE path LIKE ?",
+                (_basename_like_pattern(name),),
+            )
+            if path.replace('\\', '/').split('/')[-1].lower() == name_lower
+        ]
+        if not candidate_ids:
+            return set()
+        suffixes = set()
+        for start in range(0, len(candidate_ids), 500):
+            chunk = candidate_ids[start:start + 500]
+            marks = ','.join('?' for _ in chunk)
+            for (path,) in conn.execute(
+                f"SELECT path FROM lib2_track_files WHERE id IN ({marks})"
+                " AND path IS NOT NULL AND path != ''"
+                " AND COALESCE(file_state, 'active') <> 'deleted'",
+                chunk,
+            ):
+                # A row renamed between the two phases no longer belongs
+                # to this file's name; its suffixes must not leak in. The
+                # reverse (renamed TO this name after phase 1) is missed,
+                # like any insert in that window — the same race the old
+                # single snapshot had against the move/delete that follows.
+                if path.replace('\\', '/').split('/')[-1].lower() != name_lower:
+                    continue
+                parts = path.replace('\\', '/').split('/')
+                for depth in range(1, min(5, len(parts) + 1)):
+                    suffixes.add('/'.join(parts[-depth:]).lower())
+        return suffixes
+    finally:
+        conn.close()
+
+
 def is_tracked_path(file_path, suffixes, *, min_depth=2):
     """Match a DB path without conflating unrelated same-named files.
 
