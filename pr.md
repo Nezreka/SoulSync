@@ -34,6 +34,8 @@ the video library becomes a real library manager. the library page is a table of
 - **a dead file's row has a remove button (thanks wolf39us, #2086)**, and values taken from file tags can be released for an album, an artist or the whole library (#2084).
 - artist images from discogs download again (thanks Ktzenjammer, #2079), each track of a multi-track single keeps its own number (#2044), and album tag consistency finds a split album by a shared release id (#2072).
 - a moved file is one file: the scan no longer adopts it twice, lists the song twice or downloads it again.
+- **playlists can find bootlegs, edits and unofficial remixes (thanks CptSamFalcon, #2097).** a track no catalog has waited in the wing it pool forever. a new "find uncatalogued tracks" switch in a playlist's settings searches for it by the playlist's own artist and title on every sync, takes a file only when its name says it is that exact version, and tags it from the playlist.
+- **one playlist on the server per mirror, on jellyfin and plex (#2098).** a sync found the server playlist by name, deleted it and made it again, so a refused delete or a second playlist with the name left a stale twin with a different track count. the playlist is rewritten in place now and the mirror follows it by id, renames included, as navidrome mirrors already did.
 
 ## downloads
 
