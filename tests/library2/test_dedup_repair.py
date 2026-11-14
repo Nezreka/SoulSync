@@ -1204,3 +1204,96 @@ def test_one_file_twice_on_one_track_keeps_one_row(repair_db, monkeypatch):
     rows = conn.execute("SELECT id, is_primary FROM lib2_track_files WHERE track_id=?", (track,)).fetchall()
     assert [(r[0], r[1]) for r in rows] == [(first, 1)]       # the older row, and it is the primary
     assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE id=?", (track,)).fetchone()[0] == 1
+
+
+# ── #2094: a rip's "Album - Title" row is the leftover of the retagged song ──
+
+def _labor_days(conn, *, leftover_ms=152000, kept_ms=153000, leftover_title="Labor Days - Labor"):
+    artist = _artist(conn, "Aesop Rock")
+    album = _album(conn, artist, "Labor Days")
+    leftover = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, duration, play_count) "
+        "VALUES(?, ?, 1, 1, ?, 2)", (album, leftover_title, leftover_ms)).lastrowid
+    kept = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, duration, play_count) "
+        "VALUES(?, 'Labor', 1, 1, ?, 5)", (album, kept_ms)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/Aesop Rock/Labor Days/01 - Labor.flac')",
+                 (kept,))
+    conn.commit()
+    return album, leftover, kept
+
+
+def test_a_row_titled_with_its_album_in_front_folds_into_the_song(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, leftover, kept = _labor_days(conn)
+    assert fold_fileless_twins(conn, [leftover]) == 1
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE album_id=?", (album,))] == [kept]
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?", (kept,)).fetchone()[0] == 7
+
+
+@pytest.mark.parametrize("title", [
+    "Aesop Rock - Labor", "Aesop Rock - Labor Days - Labor", "labor days – labor", "Labor Days: Labor"])
+def test_the_artist_in_front_and_other_dashes_read_the_same(repair_db, title):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    _album_id, leftover, _kept = _labor_days(conn, leftover_title=title)
+    assert fold_fileless_twins(conn, [leftover]) == 1
+
+
+def test_a_prefixed_title_of_another_length_is_another_recording(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, leftover, _kept = _labor_days(conn, leftover_ms=152000, kept_ms=240000)
+    assert fold_fileless_twins(conn, [leftover]) == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,)).fetchone()[0] == 2
+
+
+def test_a_different_song_at_that_position_is_never_folded(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    _album_id, leftover, _kept = _labor_days(conn, leftover_title="Labor Days - Daylight")
+    assert fold_fileless_twins(conn, [leftover]) == 0
+    # and a song whose own name starts with the album's is left whole
+    _a2, other, _k2 = _labor_days(conn, leftover_title="Labor Days")
+    assert fold_fileless_twins(conn, [other]) == 0
+
+
+def test_the_sweep_finds_leftovers_no_removal_reported(repair_db):
+    """the retag moved the file to another row: nothing was removed, so
+    nothing ever asked for the old row to be folded"""
+    from core.library2.dedup_repair import fold_leftover_rows
+    _legacy_db, conn = repair_db
+    album, _leftover, kept = _labor_days(conn)
+    # a missing track with no twin, and a filed track, are not touched
+    missing = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+                           "VALUES(?, 'Daylight', 2, 1)", (album,)).lastrowid
+    conn.commit()
+    assert fold_leftover_rows(conn) == {"leftover_tracks_folded": 1}
+    assert [r[0] for r in conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY id", (album,))] == [kept, missing]
+    assert fold_leftover_rows(conn) == {"leftover_tracks_folded": 0}
+
+
+def test_a_page_address_is_not_a_spotify_id(repair_db):
+    """a last.fm page stored as the spotify id read as an id that disagreed
+    with the real one, and kept two rows of one album apart"""
+    from core.library2.dedup_repair import _sanitize_provider_namespaces
+    _legacy_db, conn = repair_db
+    artist = _artist(conn, "Aesop Rock")
+    page = "https://www.last.fm/music/Aesop+Rock/Labor+Days"
+    column = _album(conn, artist, "Labor Days", spotify_id=page)
+    blob = _album(conn, artist, "Float", external_ids=json.dumps({"spotify": page, "deezer": "9"}))
+    link = _album(conn, artist, "Bazooka Tooth",
+                  spotify_id="https://open.spotify.com/album/3zJMNOxnbHWG2rZwswnSM2?si=x")
+    real = _album(conn, artist, "None Shall Pass", spotify_id="3zJMNOxnbHWG2rZwswnSM2")
+    conn.commit()
+    assert _sanitize_provider_namespaces(conn, conn.cursor()) == 3
+    row = lambda pk: conn.execute(  # noqa: E731
+        "SELECT spotify_id, external_ids FROM lib2_albums WHERE id=?", (pk,)).fetchone()
+    assert row(column)["spotify_id"] is None
+    assert json.loads(row(column)["external_ids"]) == {"lastfm": page}
+    assert json.loads(row(blob)["external_ids"]) == {"deezer": "9", "lastfm": page}
+    assert row(link)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
+    assert row(real)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
+    assert _sanitize_provider_namespaces(conn, conn.cursor()) == 0
