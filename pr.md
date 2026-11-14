@@ -1,54 +1,58 @@
-# soulsync 3.6.5: `dev` → `main`
+# soulsync 3.6.6: `dev` → `main`
 
-a design release with a lot of fixes under it. both dashboards rebuilt, the tools, automations, stats and notifications redone, video detail pages as one page, a review lock for albums and artists, every artist merge recorded and undoable, and a new install that no longer trips on a library upgrade it never needed.
+the video library becomes a real library manager. the library page is a table of titles and a table of files as well as posters, with bulk operations, history with undo and a padlock, and a movie or show page now manages its own seasons, episodes and files and keeps itself current. plus the page frame on every page, a security pass, and a batch of fixes.
 
-## new installs
+## video library manager
 
-- **a new install is not sent into a library upgrade (#2062).** pressing import library on a fresh install raised "legacy table is missing required columns" and the page then said the upgrade had failed and everything was paused. a new install has no older library, so it says that now and points at search and import. there is a test that walks a brand new install end to end: nothing paused, every library request answers, music arrives by a scan and by a download.
+- **the library page is a manager.** posters, a sortable table of titles with the columns you pick, and a table of the files themselves. filters for what needs a look (missing, below your target, extra copies, unmatched, no subtitles) and for what the files are (resolution, codec, hdr, languages, drive, library). save any set as a named view.
+- **bulk operations** on a selection or on everything a filter matches: rename with a preview, move to another drive or library, quality profile, look for upgrades, get missing, subtitles, identify again, genres, series type, and delete with a preview.
+- **history and undo.** every rename, move, delete and re-file made by hand is listed and one click puts it back, a whole bulk run at once.
+- **the padlock.** lock a title once it is the way you want it and maintenance, mass rename and automatic upgrades leave it and its files alone.
+- **a library can sit on many drives.** move lists each library with every drive it has and the free space on each. pick another drive of the same library, or another library.
+- **it is fast.** lists, filter counts and the files view are answered from memory. on a 120k file library the files view went from 3 to 7 seconds a page to about 10ms, filter counts from over half a second to nothing, and the tab you are not on is ready before you click it.
+- the cards rise and fade in like the music library's, and the page is as wide as the watchlist.
 
-## the dashboards
+## movie and show pages
 
-- **the music dashboard, rebuilt.** a hero without a frame, the worker orbs on a wider orbit, mixes under the hero, and the system as a board: this week bar by bar with the album each day wore and what was on repeat, counts that say what they are made of, playlist sync split into complete and missing with each playlist's share, and up next as a line of the next hour with what just ran.
-- **the video dashboard joins it.** next up and continue watching under the hero, this week day by day with the posters that aired, the watchlist and wishlist counts with what is in them, up next, and make it yours beside it.
-- **hover a point on the up next line** for the whole run: when it fires, its schedule, when it last ran and what it did.
-- **the worker orbs answer at once.** hovering used to wait for the orbs to fly home before any button appeared (about 0.9s to the first, longer on an idle dashboard). the buttons bloom in as the orbs move now, and the animation runs on a clock so it behaves the same asleep, in reduce effects, or on a fast screen.
-
-## notifications
-
-- **the bell, rebuilt.** notes stay new until you close the panel, and a reload no longer empties it. filters have names and counts, running jobs are rows that fold past three, a file path is cut to its name with copy path beside it, and a note can be dismissed. toasts stack up to three with the time left as a line that stops while you point at it, and a problem stays twice as long as good news. history is grouped by day with search, and system health is a row per check with the worst first.
-
-## tools
-
-- **the tools page, redone.** one page with four pills, artwork leading every finding, findings in plain words with before and after, and re-tag keeps history and can undo.
-- **artist merge review (thanks SeadogsBooty, #2073).** two different bands were merged because they shared one catalogue id. that pass needs real evidence now, every merge is written down and can be undone, doubtful pairs are asked about instead of merged, and artists merged by mistake before any of this are found by their folders and tags and split.
-- **use file tags, for one album or the whole library (thanks wolf39us, #2070, #2074).** the library takes its titles, numbers, year, genre and album from your files, with a preview.
-- **compilation songs to original albums (thanks wolf39us, #2077, #2053).** a job that finds where each song on a best-of first came out, the studio album when the same recording is on one, otherwise the single, and files it there once approved. off by default.
-- **album tag consistency finds a split compilation (thanks Storm, #2072).** one album filed as one per track artist is reported from a shared folder, from artist folders whose track numbers fit together, or from the release id on the tags.
-- **a library emptied on purpose can be cleared (#2005)**, the acoustid scanner runs by hand with verification off (#2042), and a tag-scan finding writes only the fields it flagged.
-
-## library
-
-- **review lock (#2046).** a padlock on an album or artist keeps what you reviewed: enrichment, repairs and re-matching leave it alone.
-- **automatic quality upgrades that work (#2060).** a few at a time, with a growing wait, and no download that cannot be better. a song you already have is no longer put back on the wishlist every hour.
-- **live, compilations, soundtracks, remixes, demos and spoken word get their own sections on the artist page (#2055).**
-- **manage workers is fast.** the numbers for every worker come from one pass instead of one per worker and kind, and the window opens and switches without waiting.
-- **the musicbrainz worker finds a release the artist search misses (thanks Storm, #2071)**, asking by title alone and taking only an answer the title pins down.
-- **one release is one album however many servers listed it (#1985)**, and an artist two servers listed is one artist.
-- view settings and artist settings redrawn, and it is the Library now, not library v2.
-
-## music
-
-- **search all sources at once (#2051)**, the same release shown once.
-- **daily jams is a rolling playlist like weekly jams (thanks mpaugam, #2076).**
-- **rotating playlists can let go of songs you played (#2047)**, and two source tracks that are one song on the server are marked (#2059).
-- the automations page and the stats page redone, and the auto-sync manager redrawn around covers.
-- **$explicit works on downloads and imports (#2068)**, and $discalways names the disc on every album (#2044).
-- **prowlarr search pacing is a setting (#2061)**, tidal download requests are spaced (#2069), a spotify id is never sent to deezer (#2066), a soulseek search that finishes between two reads no longer comes back empty (#2065), a finished torrent is not imported before its files are collected (#2064), and a tag in front of the artist is no longer an artist mismatch (#2063).
-- a spotify track is matched onto musicbrainz by isrc (#2067), a new album keeps the cover its download came with (#2058), and an itunes m3u reads as title and artist.
+- **manage a title from its own page.** the padlock, file history with undo and move are on the page. a season has rename files, renumber episodes and delete files, each showing what it will do first. tick episodes, or the whole season, to rename, renumber, delete, look for upgrades or stop hunting them.
+- **stop hunting one episode** from its menu, and a delete can stop the hunt for what it empties so a file you threw out is not fetched again.
+- **every change leaves an undo** at the foot of the page.
+- **a page that keeps itself current.** opening a movie or show asks whichever source has gone stale, in the background: your media server for that one title, the metadata provider for what changed since it was matched, and the ratings. the page redraws in place only if something moved, and refresh asks all three now.
+- **the season and episode list is react now**, with the new tools built in, and a rename or an undo no longer throws you back to the first season.
+- a scan keeps a file's id and the date it was added, so an open menu or an undo still points at the right file afterwards.
 
 ## video
 
-- **movie and show pages are one page.** no tabs, files as cards, and the library tab fixes what it reports.
-- **video automations, watchlist, search and discover redrawn**, and video automations live on the redesigned automations page.
-- **two shows with one name never share a folder (thanks SeadogsBooty, #2052)**, and a download in flight belongs to its show, not its title, so grabbing the office (2001) is not answered "already downloading" by the office (2005) (#2075).
-- an unreadable video database is set aside at startup instead of stopping the app.
+- **anime the server numbers as one long season (thanks Thibs).** it keeps that season and is searched and subtitled by its split numbers, and tmdb lumps split when the anime map is stale or one out.
+- **cam releases are caught however they are spelled (thanks @onnwee, #2088).** camrip, hdcamrip, hdtsrip, tsrip, telecine, hd-tc and pre-dvd rips all read as cam now. a pre-dvd rip used to pass as a retail dvd.
+- rename and delete previews read each folder once, so a 400 file season previews in under a second.
+
+## music
+
+- **live albums and live tracks are two rules (#2082)**, a release you pick yourself is never kept out by what it is, the original release is the standard edition (#2080), and clean copies can be left out (#2081).
+- **albums you're missing no longer lists albums you own (#2083)** under other punctuation, a pressing tag or an ep suffix.
+- **a dead file's row has a remove button (thanks wolf39us, #2086)**, and values taken from file tags can be released for an album, an artist or the whole library (#2084).
+- artist images from discogs download again (thanks Ktzenjammer, #2079), each track of a multi-track single keeps its own number (#2044), and album tag consistency finds a split album by a shared release id (#2072).
+- a moved file is one file: the scan no longer adopts it twice, lists the song twice or downloads it again.
+
+## downloads
+
+- **start the torrents soulsync adds (thanks @onnwee, #2087).** a new switch in the torrent client settings for a qbittorrent that adds torrents stopped, or stops them once the metadata is in. soulsync's torrents start anyway and what other apps add keeps your qbittorrent setting.
+- a profile can cancel a download it started.
+
+## server activity
+
+- **music and audiobooks show the album or book cover (thanks SeadogsBooty, #2089)**, on the card and behind it, not the artist or author picture.
+- **the drawer covers the floating buttons while it is open (thanks SeadogsBooty, #2090)**, so they no longer sit on the playback cards.
+
+## every page
+
+- **one page frame.** search, discover, playlists, watchlist, tools, requests, downloads, import, issues, wishlist, stats, audiobooks and podcasts share one width, header, pill row and section heading.
+- **lighter on a phone.** the sidebar sky stops drawing while the menu is closed and draws half the frames at fewer pixels on a phone, the sidebar visualizer no longer runs where the phone layout hides it, and the now playing screen drops a blur nobody could see and fits the real screen height.
+
+## security and upkeep
+
+- **a security pass.** api keys, tokens and passwords are blanked out of every log line, names and urls are escaped before they reach the page, and backups, diagnostics, auto-import settings, quality profiles, repair findings and automations are checked against the profile asking.
+- status loops, discover shelves, the quarantine list and bulk repair fixes each stopped re-reading the whole library.
+
+tested: the frontend suite and the video, library, wishlist, activity and release suites pass locally. the full suite runs on dev's nightly build, which is the check on this pr.

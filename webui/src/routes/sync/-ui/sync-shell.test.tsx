@@ -26,6 +26,50 @@ afterEach(() => {
   delete window.openDownloadOriginsModal;
 });
 
+describe('the way into the Playlist Explorer', () => {
+  // the explorer has no sidebar entry any more: this button is how it opens
+  const saved = {
+    nav: window.navigateToPage,
+    features: window.SoulSyncFeatures,
+    bridge: window.SoulSyncWebShellBridge,
+  };
+  afterEach(() => {
+    window.navigateToPage = saved.nav;
+    window.SoulSyncFeatures = saved.features;
+    window.SoulSyncWebShellBridge = saved.bridge;
+  });
+
+  it('sits in the header and opens the explorer in the app', () => {
+    const navigateToPage = vi.fn();
+    window.navigateToPage = navigateToPage as unknown as typeof window.navigateToPage;
+    renderShell();
+    const link = screen.getByRole('link', { name: 'Playlist Explorer' });
+    // a real link, so it can still be opened in a new tab
+    expect(link.getAttribute('href')).toBe('/playlist-explorer');
+    expect(link.classList.contains('pl-explorer-btn')).toBe(true);
+    fireEvent.click(link);
+    expect(navigateToPage).toHaveBeenCalledWith('playlist-explorer');
+  });
+
+  it('is gone when the Playlist Explorer is switched off', () => {
+    window.SoulSyncFeatures = {
+      ...(saved.features ?? {}),
+      isOn: (id: string) => id !== 'explorer',
+    } as unknown as typeof window.SoulSyncFeatures;
+    renderShell();
+    expect(screen.queryByRole('link', { name: 'Playlist Explorer' })).toBeNull();
+  });
+
+  it('is gone for a profile that was not given the page', () => {
+    window.SoulSyncWebShellBridge = {
+      ...(saved.bridge ?? {}),
+      isPageAllowed: (page: string) => page !== 'playlist-explorer',
+    } as unknown as typeof window.SoulSyncWebShellBridge;
+    renderShell();
+    expect(screen.queryByRole('link', { name: 'Playlist Explorer' })).toBeNull();
+  });
+});
+
 describe('the header', () => {
   it('renders the title, and a plain subtitle until the library reports', () => {
     const { container } = renderShell();
@@ -160,8 +204,10 @@ describe('the page root', () => {
   it('carries page-shell and the page id, as every flipped route does', () => {
     const { container } = renderShell();
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toBe('page-shell');
+    // the panel is the page frame's; the measured column sits inside it
+    expect(root.className).toBe('page-shell pgf-shell');
     expect(root.id).toBe('sync-page');
+    expect(root.firstElementChild?.className).toBe('pgf-page pgf-page--plain');
   });
 });
 

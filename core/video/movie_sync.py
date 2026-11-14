@@ -13,6 +13,10 @@ from utils.logging_config import get_logger
 logger = get_logger("video.movie_sync")
 
 
+class _Skip(Exception):
+    """the caller refreshes the metadata itself"""
+
+
 class MovieSyncError(RuntimeError):
     """Sync could not run (server unreachable, wrong server, busy...)."""
 
@@ -28,12 +32,18 @@ def _file_count(db, movie_id: int) -> int:
         conn.close()
 
 
-def sync_movie(db, movie_id: int) -> dict:
+def sync_movie(db, movie_id: int, *, remove_when_gone: bool = True,
+               refresh_metadata: bool = True) -> dict:
     """Reconcile ONE local movie against the server.
 
     Returns {status, title, files_added, files_removed, movie_removed} or raises
     MovieSyncError for expected refusal cases. Unexpected server failures are
     allowed to bubble so callers do not mistake a hiccup for deletion.
+
+    ``remove_when_gone=False``: a movie the server no longer has is reported
+    (``gone``) and left in place. the page's own refresh reads this way: only
+    a person pressing Sync removes a title. ``refresh_metadata=False`` leaves
+    the metadata to whoever asked (the page refreshes it on its own clock).
     """
     conn = db._get_connection()
     try:
@@ -63,6 +73,9 @@ def sync_movie(db, movie_id: int) -> dict:
         raise MovieSyncError("This video server does not support per-movie sync")
 
     item = source.movie_item(row["server_id"], title=row["title"], tmdb_id=row["tmdb_id"])
+    if item is None and not remove_when_gone:
+        return {"status": "ok", "title": row["title"], "movie_removed": False, "gone": True,
+                "files_added": 0, "files_removed": 0}
     if item is None:
         conn = db._get_connection()
         try:
@@ -91,9 +104,13 @@ def sync_movie(db, movie_id: int) -> dict:
 
     metadata_refresh = "skipped"
     try:
+        if not refresh_metadata:
+            raise _Skip
         from core.video.enrichment.engine import get_video_enrichment_engine
         res = get_video_enrichment_engine().refresh_movie_art(target_id)
         metadata_refresh = "ok" if (res and res.get("ok")) else "failed:%s" % ((res or {}).get("reason") or "unknown")
+    except _Skip:
+        pass
     except Exception as e:  # noqa: BLE001 - metadata refresh is useful, not required
         metadata_refresh = "error:%s" % e
         logger.warning("movie sync: metadata refresh failed for '%s': %s", row["title"], e)

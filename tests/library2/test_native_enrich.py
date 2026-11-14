@@ -1732,3 +1732,28 @@ def test_a_local_split_creates_the_guest_unwatched(imported_conn):
     flags = {r[0]: r[1] for r in imported_conn.execute(
         "SELECT name, monitored FROM lib2_artists WHERE name IN ('Oneheart', 'Malek')")}
     assert flags == {"Oneheart": 1, "Malek": 0}
+
+
+@pytest.mark.parametrize("namespace, column", [("spotify", "spotify_id"), ("musicbrainz", "musicbrainz_id")])
+def test_a_released_identity_is_gone_from_the_id_list_too(imported_conn, namespace, column):
+    """nov 13 2026, 30 artists on a real library: the id was cleared from its
+    column and left in external_ids, where the same pass reads it. the guest
+    still held the id, so it was "taken back" on every start and never was."""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    guest = _insert_native_artist(imported_conn, "DJ Snake")
+    for artist in (owner, guest):
+        imported_conn.execute(
+            f"UPDATE lib2_artists SET {column}='ID-ML', external_ids=? WHERE id=?",
+            (json.dumps({namespace: "ID-ML", "deezer": f"dz-{artist}"}), artist))
+    _insert_album(imported_conn, owner, "Peace Is The Mission", spotify_id="SP-PITM")
+
+    assert NE.release_borrowed_artist_identities(imported_conn)["released"] == 1
+    row = imported_conn.execute(
+        f"SELECT {column} AS col, external_ids FROM lib2_artists WHERE id=?", (guest,)).fetchone()
+    assert row["col"] is None
+    assert json.loads(row["external_ids"]) == {"deezer": f"dz-{guest}"}
+    kept = imported_conn.execute(
+        f"SELECT {column} AS col, external_ids FROM lib2_artists WHERE id=?", (owner,)).fetchone()
+    assert kept["col"] == "ID-ML" and json.loads(kept["external_ids"])[namespace] == "ID-ML"
+    # and the next pass has nothing to take back
+    assert NE.release_borrowed_artist_identities(imported_conn)["released"] == 0

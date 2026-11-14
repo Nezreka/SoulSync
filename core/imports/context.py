@@ -358,6 +358,16 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
     }
 
 
+def get_provider_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """`get_import_source_ids`, as ids the provider itself would recognise.
+
+    Use this for a provider lookup, a tag or a library id column. The plain
+    version keeps the pipeline's own keys, which the wishlist needs to find
+    the row a download came from; see `core.context_sentinels.provider_id`."""
+    from core.context_sentinels import provider_id
+    return {key: provider_id(value) for key, value in get_import_source_ids(context).items()}
+
+
 def get_source_tag_names(source: str) -> Dict[str, Optional[str]]:
     source_name = (source or "").strip().lower()
     if source_name == "spotify":

@@ -288,16 +288,29 @@ def anilist_regroup(season: int, episodes: Sequence[Dict[str, Any]],
                     entries: Sequence[Dict[str, Any]]):
     """split one lumped TMDB season by the AniList entries it holds.
 
-    the anime id map says where each AniList entry starts inside a TMDB season
-    (Jujutsu Kaisen's third season starts after TMDB S1E47) and which TVDB
-    season that is; AniList says how many episodes each entry has. TVDB does
-    the same split by air date, but only with a TVDB key; this needs neither.
+    AniList says how many episodes each entry (each season, each cour) has, so
+    walking the entries in order and adding the counts up gives where each one
+    starts inside the TMDB season. the anime id map says the same thing its own
+    way (Jujutsu Kaisen's third season starts after TMDB S1E47) and names the
+    TVDB season each entry is. TVDB does the same split by air date, but only
+    with a TVDB key; this needs neither.
 
-    the map lags behind TMDB sometimes (it still files JJK's second season
-    under a TMDB season 2 that TMDB folded into season 1), so an entry pointing
-    elsewhere is used only when it sits between two entries of this season and
-    the episode counts add up exactly. anything that doesn't add up leaves the
-    season as it is.
+    the two are checked against each other, because each is wrong sometimes:
+
+    - the map lags behind TMDB (it files JJK's and Dandadan's second seasons
+      under a TMDB season 2 that TMDB folded into season 1) and is off by one
+      here and there (Tokyo Revengers, Re:Zero). the counts are believed when
+      something bears them out: a map entry further on that starts exactly
+      where the counts say, or the counts ending exactly on the season's last
+      episode.
+    - an entry that starts past the season's last episode hasn't reached TMDB
+      yet (The Apothecary Diaries' next cour). it is left out, and no longer
+      keeps the seasons before it from splitting.
+    - where the counts are missing or nothing bears them out, the map's own
+      offsets are used, but only when the map places every entry inside this
+      season.
+
+    anything else leaves the season as it is.
 
     returns ({season: [episode dicts]}, {old episode number: (season, episode)})."""
     season = int(season)
@@ -309,44 +322,70 @@ def anilist_regroup(season: int, episodes: Sequence[Dict[str, Any]],
         except (TypeError, ValueError):
             return None
 
+    numbers = [n for n in (_n(e.get("episode_number")) for e in episodes or []) if n is not None]
+    total = max(numbers) if numbers else 0
     rows = [e for e in entries or []
             if (_n(e.get("tvdb_season")) or 0) > 0
             and str(e.get("format") or "").upper() in _RUN_FORMATS]
     rows.sort(key=lambda e: (_n(e["tvdb_season"]), _n(e.get("tvdb_offset")) or 0))
-    anchors = [i for i, e in enumerate(rows) if _n(e.get("tmdb_season")) == season]
-    if season <= 0 or len(anchors) < 2:
+    here = [i for i, e in enumerate(rows) if _n(e.get("tmdb_season")) == season]
+    if season <= 0 or total <= 0 or not here:
         return unchanged
-    first = rows[anchors[0]]
+    chain = rows[here[0]:]
+    first = chain[0]
     if (_n(first.get("tmdb_offset")) or 0) != 0 or _n(first["tvdb_season"]) != season:
         return unchanged
 
-    # (first TMDB episode number of the run - 1, tvdb season, tvdb offset)
-    runs: List[Tuple[int, int, int]] = []
-    for a, b in zip(anchors, anchors[1:], strict=False):
-        start = _n(rows[a].get("tmdb_offset")) or 0
-        nxt = _n(rows[b].get("tmdb_offset")) or 0
-        if nxt <= start:
+    def _mapped(row):
+        """where the map starts this entry inside this season, if it says"""
+        return (_n(row.get("tmdb_offset")) or 0) if _n(row.get("tmdb_season")) == season else None
+
+    # by the counts: (start, row). start = the TMDB episode number before its first
+    counted: List[Tuple[int, Dict[str, Any]]] = [(0, first)]
+    borne_out = False       # something agreed with the counts since the last disagreement
+    usable = True
+    for prev, row in zip(chain, chain[1:], strict=False):
+        count = _n(prev.get("episodes"))
+        mapped = _mapped(row)
+        if count:
+            start = counted[-1][0] + count
+            if mapped is not None and mapped < total:
+                if mapped == start:
+                    borne_out = True
+                else:
+                    borne_out = False
+        elif mapped is not None:
+            # no count: the map's word for where this one starts. a start
+            # worked out from counts just before it can't be checked against
+            # anything now (how long was the entry in between?), so that
+            # leaves the season alone
+            if len(counted) > 1 and not borne_out:
+                usable = False
+                break
+            start = mapped
+        else:
+            usable = False
+            break
+        if start >= total:
+            break                               # not on TMDB yet
+        if start <= counted[-1][0]:
+            usable = False
+            break
+        counted.append((start, row))
+    if usable:
+        last_count = _n(counted[-1][1].get("episodes"))
+        if last_count and counted[-1][0] + last_count == total:
+            borne_out = True
+    runs = counted if (usable and borne_out and len(counted) > 1) else None
+
+    if runs is None:
+        # the map alone, when it places every entry in this season itself
+        placed = [(_mapped(r), r) for r in chain]
+        placed = [(start, r) for start, r in placed if start is None or start < total]
+        if (len(placed) < 2 or any(start is None for start, _ in placed)
+                or any(b[0] <= a[0] for a, b in zip(placed, placed[1:], strict=False))):
             return unchanged
-        runs.append((start, _n(rows[a]["tvdb_season"]), _n(rows[a].get("tvdb_offset")) or 0))
-        between = rows[a + 1:b]
-        if between:
-            count = _n(rows[a].get("episodes"))
-            if not count:
-                return unchanged
-            pos = start + count
-            for m in between:
-                runs.append((pos, _n(m["tvdb_season"]), _n(m.get("tvdb_offset")) or 0))
-                count = _n(m.get("episodes"))
-                if not count:
-                    return unchanged
-                pos += count
-            if pos != nxt:
-                return unchanged
-        elif _n(rows[a].get("episodes")) and start + _n(rows[a]["episodes"]) != nxt:
-            return unchanged
-    last = rows[anchors[-1]]
-    runs.append((_n(last.get("tmdb_offset")) or 0, _n(last["tvdb_season"]),
-                 _n(last.get("tvdb_offset")) or 0))
+        runs = placed
 
     groups: Dict[int, List[Dict[str, Any]]] = {season: []}
     moved: Dict[int, Numbering] = {}
@@ -354,9 +393,9 @@ def anilist_regroup(season: int, episodes: Sequence[Dict[str, Any]],
         en = _n(e.get("episode_number"))
         target = None
         if en is not None:
-            for start, ts, toff in runs:
+            for start, row in runs:
                 if en > start:
-                    target = (ts, en - start + toff)
+                    target = (_n(row["tvdb_season"]), en - start + (_n(row.get("tvdb_offset")) or 0))
         if target and target[0] != season:
             moved[en] = target
             groups.setdefault(target[0], []).append(dict(e, episode_number=target[1]))
@@ -401,7 +440,9 @@ def split_preview_seasons(seasons: Sequence[Dict[str, Any]],
         out.append(dict(s, episode_total=len(groups[n])))
         source[n] = n
         for k in extra:
-            out.append({"season_number": k, "name": "Season %d" % k,
+            # "title" is the key a season card reads: the split season came
+            # out with no name on it (Thibs' second Frieren card)
+            out.append({"season_number": k, "name": "Season %d" % k, "title": "Season %d" % k,
                         "episode_total": len(groups[k]), "episode_owned": 0, "episodes": [],
                         "poster_url": s.get("poster_url"), "has_poster": s.get("has_poster"),
                         "air_date": None})
@@ -427,12 +468,62 @@ def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) ->
     for it in items:
         if it.get("episode_number") is None:
             continue
+        kept = kept_season_number(it, db)
+        if kept:
+            it["alt_season"], it["alt_episode"] = kept
+            continue
         info = scene_info(it, db=db, client=client)
         if info:
             (it["alt_season"], it["alt_episode"]), exclusive = info
             if exclusive:
                 it["alt_exclusive"] = True
+            continue
+        alt = season_relative(it, db)
+        if alt:
+            it["alt_season"], it["alt_episode"] = alt
     return items
+
+
+def kept_season_number(item: Dict[str, Any], db: Any) -> Optional[Numbering]:
+    """the split number of an episode in a season kept the way the server
+    numbers it, or None.
+
+    a server that numbers Jujutsu Kaisen as TMDB does (one season of 59) keeps
+    that season here too, so its files stay where the server has them. the
+    episode sync wrote down where each one sits in the split everything else
+    uses, and S01E48 goes out as S03E01 as well. TVDB's air-date match only
+    looks one season either side and needs a key; this needs neither."""
+    try:
+        return db.scene_number(item.get("show_tmdb_id"), item.get("season_number"),
+                               item.get("episode_number"))
+    except Exception:   # noqa: BLE001 - a numbering assist must never break a search
+        return None
+
+
+def season_relative(item: Dict[str, Any], db: Any) -> Optional[Numbering]:
+    """the per-season number of an episode TMDB numbers on from the season
+    before, or None.
+
+    TMDB runs Naruto Shippuden's season 19 from E394 to E413, so the search
+    went out as S19E397 and found nothing: a release is named S19E04, or by
+    the absolute number (Thibs). TVDB gives the per-season number when there is
+    a key; without one it is simply the episode's place in its season. only
+    for a number past the season's own length, which can't be a per-season
+    number already, so a normal season is never touched. it goes out as one
+    more thing to search for and accept, never instead of TMDB's number."""
+    try:
+        season, episode = int(item.get("season_number")), int(item.get("episode_number"))
+        if season < 1 or not item.get("show_tmdb_id"):
+            return None
+        place = db.episode_season_position(item["show_tmdb_id"], season, episode)
+    except Exception:   # noqa: BLE001 - a numbering assist must never break a search
+        return None
+    if not place:
+        return None
+    position, size = place
+    if episode > size and 0 < position != episode:
+        return (season, position)
+    return None
 
 
 def ctx_alt(ctx: Dict[str, Any]):

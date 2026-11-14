@@ -22,18 +22,7 @@ the settings sheet,
   flex: 1 1 320px;
   min-width: 0;
 }
-.title {
-  margin: 0;
-  font-size: 40px;
-  font-weight: 800;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-  color: var(--text-1);
-}
 .sub {
-  margin: 10px 0 0;
-  color: var(--text-2);
-  font-size: 14px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -94,6 +83,21 @@ the settings sheet,
 }
 .cta:hover {
   transform: scale(1.03);
+}
+/* in the page header the buttons are the page frame's size (34px) */
+.topActions .iconBtn {
+  width: 34px;
+  height: 34px;
+}
+.topActions .iconBtn svg {
+  width: 17px;
+  height: 17px;
+}
+.topActions .cta {
+  height: 34px;
+  padding: 0 16px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .toolItem {
   display: flex;
@@ -1080,9 +1084,6 @@ select.field {
   }
 }
 @media (max-width: 760px) {
-  .title {
-    font-size: 32px;
-  }
   .topActions {
     width: 100%;
   }

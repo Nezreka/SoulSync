@@ -788,6 +788,24 @@ describe('findingsBulkBarState', () => {
   });
 });
 
+describe('a bulk re-tag that filled and left differences', () => {
+  it('is counted apart from what was fixed, and is not a failure', () => {
+    expect(bulkFixRunMessage({ fixed: 30000, partial: 11000, failed: 0, total: 41000 })).toEqual({
+      message:
+        'Fixed 30000, filled the blank tags in 11000 more (what differs is left for you to review) of 41000',
+      type: 'success',
+    });
+    // nothing fully fixed, some filled: still a success, never "error"
+    expect(bulkFixRunMessage({ fixed: 0, partial: 3, failed: 0, total: 3 }).type).toBe('success');
+    expect(bulkFixLoopMessage(2, 0, '', 0, 0, 1)).toEqual({
+      message: 'Fixed 2, filled the blank tags in 1 more (what differs is left for you to review)',
+      type: 'success',
+    });
+    // and a run with none of them reads as it always did
+    expect(bulkFixRunMessage({ fixed: 8, failed: 0, total: 8 }).message).toBe('Fixed 8 of 8');
+  });
+});
+
 describe('bulkFixRunMessage', () => {
   it('reports fixed of total', () => {
     expect(bulkFixRunMessage({ fixed: 8, failed: 0, total: 8 })).toEqual({

@@ -271,6 +271,27 @@ describe('Library re-tag checks (Storm)', () => {
     },
   } as unknown as RepairFinding;
 
+  it('a genre or year that only differs is shown as left alone, not as a fault', () => {
+    const quiet = {
+      ...retag,
+      details: {
+        validation: {
+          checks: { genre: 'differs', year: 'differs', total_discs: 'missing' },
+          reference: { genres: ['Electronic'], year: 1996 },
+        },
+      },
+    } as unknown as RepairFinding;
+    const { container } = render(
+      <FindingDetail finding={quiet} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />,
+    );
+    const text = container.textContent ?? '';
+    expect(text).toContain('differs from the library, which has Electronic. Left as it is');
+    expect(text).toContain('differs from the library, which has 1996. Left as it is');
+    // never the raw state word, and never dressed as something to fix
+    expect(text).not.toMatch(/Genre\s*differs$/);
+    expect(text).toContain('missing from the file');
+  });
+
   it('says what the file has and what SoulSync would write for a mismatch', () => {
     const { container } = render(
       <FindingDetail finding={retag} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />,

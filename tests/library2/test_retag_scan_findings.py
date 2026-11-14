@@ -7,6 +7,7 @@ every core tag and the embedded cover rewritten for "total_discs: missing".
 import json
 from contextlib import closing
 
+import pytest
 from mutagen.flac import FLAC
 
 from core.library2 import retag
@@ -15,6 +16,14 @@ from core.tag_writer import build_tag_diff, keeps_various_album_artist, total_is
 from tests.library2.test_metadata_consistency import (  # noqa: F401 - fixtures
     _no_cover_art_artist_name_search, library, observe,
 )
+
+
+@pytest.fixture(autouse=True)
+def _genre_and_year_differences_are_flagged(monkeypatch):
+    """these tests use a changed genre and year as their example of a tag that
+    differs. those two are only filed when the setting asks (off by default,
+    tests/library2/test_retag_fill_only.py), so here it asks."""
+    monkeypatch.setattr('core.library2.validation.quiet_differences', lambda config: frozenset())
 
 
 def _finding(db, checks, **details):

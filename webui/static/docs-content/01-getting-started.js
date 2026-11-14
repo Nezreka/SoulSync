@@ -157,7 +157,7 @@ SoulSync uses a **sidebar navigation** layout. The left sidebar holds links to e
 - **Automations** — scheduled tasks and event-driven workflows
 - **Active Downloads** — live download queue with progress, candidates, and retries
 - **Library** — browse and manage your collection, standard or enhanced views
-- **Playlist Explorer** — build and explore playlists from your library
+- **Playlist Explorer** — build and explore playlists from your library (opens from the Playlists page)
 - **Stats** — listening stats and history
 - **Import** — import existing files with album/track matching
 - **Podcasts / Audiobooks** — spoken-word libraries

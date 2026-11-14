@@ -100,13 +100,13 @@ export function AudiobookSearchBar({
         </button>
       </form>
 
-      <div className={styles.searchModes} role="group" aria-label="Search mode">
+      <div className={`pgf-pills ${styles.searchModes}`} role="group" aria-label="Search mode">
         {MODES.map((mode) => (
           <button
             key={mode.value}
             type="button"
             title={mode.hint}
-            className={`${styles.searchMode} ${searchType === mode.value ? styles.searchModeActive : ''}`}
+            className={`pgf-pill ${styles.searchMode}`}
             onClick={() => onSearchTypeChange(mode.value)}
             aria-pressed={searchType === mode.value}
           >

@@ -267,3 +267,85 @@ def test_force_refresh_does_not_clobber_a_manual_pick(imported_conn, legacy_db, 
     assert path is not None
     with Image.open(path) as image:
         assert image.getpixel((0, 0)) == pytest.approx((9, 9, 9), abs=2)
+
+
+# --- #2079: a Discogs photo could not be picked -----------------------------
+
+def _public_dns(monkeypatch):
+    monkeypatch.setattr(
+        artwork.socket, "getaddrinfo",
+        lambda host, port, **_kwargs: [
+            (artwork.socket.AF_INET, artwork.socket.SOCK_STREAM, 6, "", (host, port))
+        ],
+    )
+
+
+class _Answer:
+    raw = None
+
+    def __init__(self, status=200, content_type="image/png", body=b"x"):
+        self.status_code = status
+        self.headers = {"Content-Type": content_type}
+        self._body = body
+
+    def iter_content(self, chunk_size):
+        yield self._body
+
+    def close(self):
+        return None
+
+
+def test_the_fetch_names_soulsync_because_image_hosts_refuse_library_names(monkeypatch):
+    """Discogs' image host answers 403 to "python-requests" and 200 to a named
+    app (checked live Nov 13 2026), so every Discogs photo failed the picker."""
+    from utils.http_identity import APP_USER_AGENT
+
+    _public_dns(monkeypatch)
+    sent = []
+
+    def host(url, **kwargs):
+        sent.append(kwargs.get("headers") or {})
+        named = "SoulSync" in (kwargs.get("headers") or {}).get("User-Agent", "")
+        return _Answer(200 if named else 403)
+
+    monkeypatch.setattr("requests.get", host)
+    assert artwork._download_remote_artwork("https://93.184.216.34/a.jpeg") == b"x"
+    assert sent[0]["User-Agent"] == APP_USER_AGENT
+    assert sent[0]["Accept"] == "image/*"
+
+
+@pytest.mark.parametrize("answer, said", [
+    (_Answer(403), "refused the download (HTTP 403)"),
+    (_Answer(200, "text/html; charset=utf-8"), "a web page, not an image"),
+    (_Answer(200, "application/pdf"), "not an image"),
+    (_Answer(200, "image/png", b""), "empty file"),
+])
+def test_a_failed_link_says_why(monkeypatch, answer, said):
+    _public_dns(monkeypatch)
+    monkeypatch.setattr("requests.get", lambda *_a, **_k: answer)
+    url = "https://93.184.216.34/thing"
+    assert artwork._download_remote_artwork(url) is None
+    assert said in artwork.remote_artwork_failure(url)
+    # read once: the next failure of the same link is not answered with a stale reason
+    assert artwork.remote_artwork_failure(url) is None
+
+
+def test_a_private_address_says_why_and_a_good_fetch_clears_the_reason(monkeypatch):
+    assert artwork._download_remote_artwork("http://127.0.0.1/a.jpg") is None
+    assert "not a public web address" in artwork.remote_artwork_failure("http://127.0.0.1/a.jpg")
+
+    _public_dns(monkeypatch)
+    url = "https://93.184.216.34/a.jpg"
+    monkeypatch.setattr("requests.get", lambda *_a, **_k: _Answer(404))
+    assert artwork._download_remote_artwork(url) is None
+    monkeypatch.setattr("requests.get", lambda *_a, **_k: _Answer(200))
+    assert artwork._download_remote_artwork(url) == b"x"
+    assert artwork.remote_artwork_failure(url) is None
+
+
+def test_bytes_that_are_not_an_image_say_so(imported_conn, legacy_db, monkeypatch, album_id):
+    monkeypatch.setattr(artwork, "_download_remote_artwork", lambda url: b"not-an-image")
+    url = "https://example.com/page"
+    assert not artwork.apply_manual_artwork(
+        _art_db(legacy_db), imported_conn, "album", album_id, url)
+    assert "not an image SoulSync can read" in artwork.remote_artwork_failure(url)

@@ -208,26 +208,40 @@ def _is_pre_feat_fix_miss(cached: Dict[str, Any], title: str) -> bool:
     return not (isinstance(metadata, dict) and metadata.get('feat_retry'))
 
 
-def _release_miss_metadata(title: str, artist_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    """what a negative RELEASE row stores: the feat. marker, and one saying
-    the title-alone search already ran (#2071)."""
+def _release_miss_metadata(title: str, artist_name: Optional[str],
+                           track_titles: Any = None) -> Optional[Dict[str, Any]]:
+    """what a negative RELEASE row stores: the feat. marker, one saying the
+    title-alone search already ran (#2071), and one saying it had the album's
+    track list to check candidates against."""
     metadata = dict(_feat_miss_metadata(title) or {})
     if artist_name:
         metadata['title_alone'] = 1
+        if _enough_tracks_to_check(track_titles):
+            metadata['track_list'] = 1
     return metadata or None
 
 
-def _is_pre_title_alone_miss(cached: Dict[str, Any], artist_name: Optional[str]) -> bool:
+def _enough_tracks_to_check(track_titles: Any) -> bool:
+    """two different track titles is the least a track list can prove with:
+    one song named like its single proves nothing."""
+    return len({str(title or '').strip().casefold() for title in track_titles or []} - {''}) >= 2
+
+
+def _is_pre_title_alone_miss(cached: Dict[str, Any], artist_name: Optional[str],
+                             track_titles: Any = None) -> bool:
     """true for a release miss that found nothing at all under an artist and
-    was written before the title-alone search existed (#2071). it only
-    proves the artist-scoped search was empty, so it is asked once more
-    instead of waiting out the 30 day negative ttl."""
+    was written before the title-alone search existed (#2071), or before that
+    search could check a candidate's track list. it only proves the
+    artist-scoped search was empty, so it is asked once more instead of
+    waiting out the 30 day negative ttl."""
     if cached.get('musicbrainz_id') or not artist_name:
         return False
     if int(cached.get('confidence') or 0) > 0:
         return False
     metadata = cached.get('metadata')
-    return not (isinstance(metadata, dict) and metadata.get('title_alone'))
+    if not (isinstance(metadata, dict) and metadata.get('title_alone')):
+        return True
+    return _enough_tracks_to_check(track_titles) and not metadata.get('track_list')
 
 
 class MusicBrainzService:
@@ -690,39 +704,93 @@ class MusicBrainzService:
         text = unicodedata.normalize('NFKC', str(title or '')).casefold()
         return [part for part in re.split(r'\W+', text) if part]
 
-    def _match_release_by_title_alone(self, album_name: str) -> Optional[Dict[str, Any]]:
+    #: how many same-titled releases have their track list fetched
+    TRACK_LIST_CANDIDATES = 5
+    #: the share of the album's own track titles a release has to carry
+    TRACK_LIST_SHARE = 0.8
+
+    def _match_release_by_title_alone(self, album_name: str,
+                                      track_titles: Any = None) -> Optional[Dict[str, Any]]:
         """The release a title names with no artist to help, or None.
 
         Only for when the artist-scoped search came back empty. The title has
-        to be the same words, long enough to be its own, and the answer has to
-        be either a Various Artists release or the one release group
-        MusicBrainz knows under that title. Anything else stays unmatched: a
-        wrong MBID here feeds cover art and tags with nothing downstream to
-        catch it.
+        to be the same words. Then one of two things has to pin it down:
+
+        - the title by itself: long enough to be its own, and the answer either
+          a Various Artists release or the one release group MusicBrainz knows
+          under that title;
+        - the album's own tracks: a release whose track list carries them.
+          That is what finds a doujin compilation credited to its circle
+          ("AD:PIANO" by Diverse System, every track by somebody else) when
+          the library has it under a track artist (#2071, Storm), and what
+          tells two albums of one title apart.
+
+        Anything else stays unmatched: a wrong MBID here feeds cover art and
+        tags with nothing downstream to catch it.
         """
         wanted = self._title_words(album_name)
-        if len(wanted) < self.TITLE_ALONE_MIN_WORDS:
+        if not wanted:
             return None
+        can_check_tracks = _enough_tracks_to_check(track_titles)
+        long_enough = len(wanted) >= self.TITLE_ALONE_MIN_WORDS
+        if not long_enough and not can_check_tracks:
+            return None
+        # a bare query reads "AD:PIANO" as the word PIANO in a field named AD,
+        # so a title with query syntax in it is asked as a quoted phrase
+        plain = not any(ch in ':/"[]{}^~\\' for ch in album_name)
         results = self.mb_client.search_release(
-            album_name, None, limit=8, strict=False, raise_on_error=True)
+            album_name, None, limit=8, strict=not plain, raise_on_error=True)
         exact = [result for result in results or []
                  if self._title_words(result.get('title', '')) == wanted]
         if not exact:
             return None
-        for result in exact:
-            credits = result.get('artist-credit') or []
-            if any(isinstance(credit, dict)
-                   and (credit.get('artist') or {}).get('id') == self.VARIOUS_ARTISTS_MBID
-                   for credit in credits):
-                return result
-        groups = {self.release_group_of(result) for result in exact}
-        if len(groups) == 1 and None not in groups:
-            return exact[0]
+        if long_enough:
+            for result in exact:
+                credits = result.get('artist-credit') or []
+                if any(isinstance(credit, dict)
+                       and (credit.get('artist') or {}).get('id') == self.VARIOUS_ARTISTS_MBID
+                       for credit in credits):
+                    return result
+            groups = {self.release_group_of(result) for result in exact}
+            if len(groups) == 1 and None not in groups:
+                return exact[0]
+        if can_check_tracks:
+            return self._release_carrying_tracks(exact, track_titles)
         return None
 
-    def match_release(self, album_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _release_carrying_tracks(self, candidates: list, track_titles: Any) -> Optional[Dict[str, Any]]:
+        """The candidate whose track list carries the album's own tracks, when
+        every candidate that does is the same release group. Raises when a
+        track list could not be fetched and nothing was decided, so a timeout
+        is not written down as "no such release"."""
+        owned = {tuple(self._title_words(title)) for title in track_titles or []} - {()}
+        needed = max(2, -(-len(owned) * int(self.TRACK_LIST_SHARE * 100) // 100))
+        carrying, unread = [], 0
+        for candidate in candidates[:self.TRACK_LIST_CANDIDATES]:
+            release = self.mb_client.get_release(candidate.get('id'), includes=['recordings'])
+            if not isinstance(release, dict):
+                unread += 1
+                continue
+            listed = {tuple(self._title_words(track.get('title', '')))
+                      for medium in release.get('media') or []
+                      for track in (medium.get('tracks') or [])}
+            if len(owned & listed) >= needed:
+                carrying.append(candidate)
+        groups = {self.release_group_of(candidate) for candidate in carrying}
+        if carrying and len(groups) == 1 and None not in groups:
+            return carrying[0]
+        if unread and not carrying:
+            raise RuntimeError('MusicBrainz track list could not be read')
+        return None
+
+    def match_release(self, album_name: str, artist_name: Optional[str] = None,
+                      track_titles: Any = None) -> Optional[Dict[str, Any]]:
         """
         Match a release (album) by name to MusicBrainz
+
+        ``track_titles`` are the album's own track titles when the caller has
+        them: with no release under the artist, a same-titled release is
+        believed when its track list carries them.
 
         Returns:
             Dict with 'mbid', 'release_group_mbid', 'title', 'confidence'
@@ -732,7 +800,7 @@ class MusicBrainzService:
         # Check cache first
         cached = self._check_cache('release', album_name, artist_name)
         if (cached and not _is_pre_feat_fix_miss(cached, album_name)
-                and not _is_pre_title_alone_miss(cached, artist_name)):
+                and not _is_pre_title_alone_miss(cached, artist_name, track_titles)):
             logger.debug(f"Cache hit for release '{album_name}'")
             return {
                 'mbid': cached['musicbrainz_id'],
@@ -785,7 +853,7 @@ class MusicBrainzService:
             # all. ask again by title alone, and take only an answer the
             # title pins down by itself.
             if not results and artist_name:
-                by_title = self._match_release_by_title_alone(album_name)
+                by_title = self._match_release_by_title_alone(album_name, track_titles)
                 if by_title is not None:
                     best_match, best_confidence = by_title, self.TITLE_ALONE_CONFIDENCE
                     results = [by_title]
@@ -793,7 +861,7 @@ class MusicBrainzService:
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
                 self._save_to_cache('release', album_name, artist_name, None,
-                                    _release_miss_metadata(album_name, artist_name), 0)
+                                    _release_miss_metadata(album_name, artist_name, track_titles), 0)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -816,7 +884,7 @@ class MusicBrainzService:
             else:
                 logger.info(f"Low confidence match for release '{album_name}' (best: {best_confidence})")
                 self._save_to_cache('release', album_name, artist_name, None,
-                                    _release_miss_metadata(album_name, artist_name),
+                                    _release_miss_metadata(album_name, artist_name, track_titles),
                                     best_confidence)
                 return None
                 

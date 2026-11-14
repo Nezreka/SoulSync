@@ -405,7 +405,7 @@ def _make_organizer(db):
             return {"status": "failed", "progress": 100.0, "error": size_err,
                     "dest_path": src, "_bad_release": True}
         from core.video.recycle import discarder
-        from core.video.importer import plan_import
+        from core.video.importer import plan_import, title_locked
         # Plan BEFORE the file moves: move mode relocates the source before the
         # completed row is persisted, so a crash in between used to strand the row
         # at importing/100% with the file already in the library. The destination
@@ -423,7 +423,8 @@ def _make_organizer(db):
                            settings=settings, library_dir=owned_dir,
                            expected_duration_sec=_expected_duration_sec(db, dl),
                            ids=ids,
-                           series_name=_series_name(db, dl, settings, ids, owned_dir))
+                           series_name=_series_name(db, dl, settings, ids, owned_dir),
+                           locked=title_locked(db, dl))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -893,6 +894,14 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
         if isinstance(ctx, dict) and ctx.get("season") is not None:
             identity["season"] = ctx.get("season")
             identity["episode"] = ctx.get("episode")
+            try:
+                # a lumped season kept the server's way: the subtitle sites
+                # only know its split numbers
+                scene = db.scene_number(tmdb_id, ctx.get("season"), ctx.get("episode"))
+            except Exception:   # noqa: BLE001
+                scene = None
+            if scene:
+                identity["season"], identity["episode"] = scene
         if not (identity.get("tmdb_id") or identity.get("imdb_id")):
             return
 

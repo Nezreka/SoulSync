@@ -292,6 +292,12 @@ class VideoRepairWorker:
         cls = self._job_for_finding_type(f["finding_type"])
         if not cls:
             return {"success": False, "error": f"no fixer for {f['finding_type']}"}
+        if self.db.finding_is_held(f):
+            # filed before the padlock went on; the next scan clears it
+            res = {"success": False,
+                   "error": "This title is locked, so maintenance leaves it alone. Unlock it to fix this."}
+            self.db.repair_set_finding_error(finding_id, res["error"])
+            return res
         if fix_action is not None:
             details = dict(f.get("details") or {})
             details["_fix_action"] = fix_action

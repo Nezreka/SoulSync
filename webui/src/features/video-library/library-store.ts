@@ -42,3 +42,67 @@ export function onInvalidate(listener: Listener): () => void {
     listeners.delete(listener);
   };
 }
+
+/* ── what the page's roots share besides the files ───────────────────────────
+ * the island under the hero, the episode list and each dialog are separate
+ * React roots or far apart in one, so the small things they agree on live
+ * here: the show's library data, the ticked episodes, the last change that
+ * can be put back, and what the page's own menu asked the island to open. */
+
+type Plain = () => void;
+
+function channel<T>(first: T) {
+  let value = first;
+  const subs = new Set<Plain>();
+  return {
+    get: () => value,
+    set(next: T) {
+      value = next;
+      for (const sub of Array.from(subs)) sub();
+    },
+    subscribe(sub: Plain) {
+      subs.add(sub);
+      return () => {
+        subs.delete(sub);
+      };
+    },
+  };
+}
+
+/** the show the page is on, with its files, as the island last read it */
+export const showData = channel<ShowLibrary | null>(null);
+
+/** the episodes ticked in the list, by episode id */
+export const picked = channel<readonly number[]>([]);
+
+export function togglePicked(episodeId: number, on: boolean): void {
+  const now = picked.get();
+  if (on === now.includes(episodeId)) return;
+  picked.set(on ? [...now, episodeId] : now.filter((id) => id !== episodeId));
+}
+
+/** a change that was just made and can be put back */
+export interface Undoable {
+  batch: string;
+  text: string;
+  kind: TitleKind;
+  id: number;
+}
+
+export const lastChange = channel<Undoable | null>(null);
+
+/** what the page's More menu can ask the island to open */
+export type PageCommand = 'history' | 'move' | 'rename';
+
+const commands = new Set<(what: PageCommand) => void>();
+
+export function sendCommand(what: PageCommand): void {
+  for (const listener of Array.from(commands)) listener(what);
+}
+
+export function onCommand(listener: (what: PageCommand) => void): () => void {
+  commands.add(listener);
+  return () => {
+    commands.delete(listener);
+  };
+}

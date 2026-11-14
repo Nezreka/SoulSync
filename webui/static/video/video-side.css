@@ -438,21 +438,6 @@ body[data-side="video"] .dashboard-header-sweep {
     font-size: 14px;
 }
 
-/* Empty-state line inside reused dashboard cards (e.g. Recent Downloads). */
-
-/* ── Library page ──────────────────────────────────────────────────────── */
-/* The grid/cards/search/alphabet all reuse the music library CSS verbatim.
-   The only video-specific bit is the Movies/Shows tab pill. */
-.video-library-tabs {
-    display: flex;
-    gap: 6px;
-    padding: 4px;
-    margin: 0 auto 4px;
-    width: max-content;
-    background: var(--black-a25);
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-lg);
-}
 .video-lib-tab {
     padding: 8px 22px;
     font-size: 13px;
@@ -469,51 +454,11 @@ body[data-side="video"] .dashboard-header-sweep {
     color: #fff;
     background: rgb(var(--accent-rgb));
 }
-.video-library-filters {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    margin: 4px 0;
-}
-/* one toolbar (#1909). the music library css stacks .library-controls as a
-   column, and there the search box's flex: 1 1 240px became 240px of HEIGHT:
-   a big empty block with the glass icon floating in it, then the filters
-   centred under it. here it's a wrapping row: the tabs on their own line,
-   search left and filters right on the next, the alphabet under them. */
-#video-library-page .library-controls {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-}
-#video-library-page .library-controls::before {
-    content: "";
-    order: -1;
-    flex-basis: 100%;
-    height: 0;
-}
-#video-library-page .video-library-tabs { order: -2; }
-#video-library-page .library-controls > .library-search-container { flex: 1 1 240px; }
-#video-library-page .video-library-filters {
-    flex: 0 1 auto;
-    margin: 0 0 0 auto;
-    justify-content: flex-end;
-}
-#video-library-page .library-controls > .alphabet-selector {
-    order: 1;
-    flex-basis: 100%;
-}
-@media (max-width: 640px) {
-    #video-library-page .library-controls > .library-search-container { flex-basis: 100%; max-width: none; }
-    #video-library-page .video-library-filters { flex-basis: 100%; margin: 0; }
-}
+
+
 /* Phones: the centered no-wrap row (3 selects + Select) overflowed BOTH edges
    — wrap it into a tidy 2-up grid instead. */
-@media (max-width: 640px) {
-    .video-library-filters { flex-wrap: wrap; gap: 8px; }
-    .video-library-filters .library-source-filter-select { flex: 1 1 calc(50% - 4px); min-width: 0; }
-    .video-library-filters .video-lib-select-btn { flex: 1 1 calc(50% - 4px); }
-}
+
 /* Resolution chip on a poster card (top-left, above the gradient overlay). */
 .library-artist-card .video-card-badge {
     position: absolute;
@@ -4499,9 +4444,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     .vdl-active, .vdl-active--active { animation: none !important; }
 }
 
-/* ── Library cards: rating · watched tick · show status chip · progress line ── */
-.vlib-rate { color: #fbbf24; font-weight: 700; white-space: nowrap; }
-.vlib-watched { color: #2bd17e; font-weight: 800; }
+
 /* Show lifecycle on the poster corner (movies wear resolution there) — the
    stat line is too tight on small cards to carry it. */
 .library-artist-card .video-card-badge--airing { color: #2bd17e; background: rgba(10, 40, 22, 0.82);
@@ -4511,10 +4454,6 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .library-artist-card .video-card-badge--upcoming { color: #60a5fa; background: rgba(12, 25, 48, 0.82);
     border: 1px solid rgba(96, 165, 250, 0.38); }
 
-/* slim owned-episodes progress under a show card's stats */
-.vlib-prog { margin-top: 7px; height: 3px; border-radius: var(--radius-pill); background: var(--white-a09); overflow: hidden; }
-.vlib-prog-fill { height: 100%; border-radius: var(--radius-pill); background: linear-gradient(90deg, rgba(164, 114, 245, 0.65), rgb(164, 114, 245)); }
-.vlib-prog-fill--full { background: linear-gradient(90deg, rgba(var(--success-strong-rgb), 0.65), #2bd17e); }
 
 /* first-visit loading skeleton (removed on the first render) */
 .vdpg-skel-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 10px;
@@ -4968,41 +4907,6 @@ body[data-side="video"] #gsearch-aura {
 .vdl-res-grab--override { color: #fbbf24; border-color: rgba(251,191,36,0.55); }
 .vdl-res-grab--override:hover { color: #fde68a; background: rgba(251,191,36,0.12); }
 
-/* ── Library bulk select mode + action bar ─────────────────────────────────
-   Select N cards → floating action bar (bulk metadata via /api/video/bulk —
-   the same edit-and-lock engine as the Manage sidebar). */
-.video-lib-select-btn {
-    padding: 8px 16px; border-radius: var(--radius-control); font-size: 12.5px; font-weight: 700;
-    cursor: pointer; background: var(--white-a06);
-    border: 1px solid var(--white-a12); color: var(--white-a75);
-    transition: all .13s; white-space: nowrap;
-}
-.video-lib-select-btn:hover { background: rgba(255,255,255,0.11); color: #fff; }
-.video-lib-select-btn.active {
-    background: rgba(var(--accent-rgb), 0.22);
-    border-color: rgba(var(--accent-rgb), 0.55); color: #fff;
-}
-
-/* Cards in select mode: no nav affordance, overlay controls parked, and a
-   pick ring — the circle appears on every card, the check fills the picked. */
-.video-lib--selecting .library-artist-card { cursor: copy; position: relative; }
-.video-lib--selecting .library-artist-card button { pointer-events: none; opacity: 0 !important; }
-.video-lib--selecting .library-artist-card::after {
-    content: ""; position: absolute; top: 10px; right: 10px; width: 22px; height: 22px;
-    border-radius: var(--radius-circle); border: 2px solid var(--white-a55);
-    background: var(--black-a45); z-index: 5; transition: all var(--dur-xfast);
-}
-.video-lib--selecting .video-card--picked::after {
-    content: "\2713"; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 900; color: #fff;
-    background: rgb(var(--accent-rgb));
-    border-color: rgb(var(--accent-rgb));
-    box-shadow: 0 2px 10px var(--black-a50);
-}
-.video-lib--selecting .video-card--picked {
-    outline: 2px solid rgba(var(--accent-rgb), 0.85);
-    outline-offset: 2px; border-radius: var(--radius-lg);
-}
 
 /* The floating bar (fixed; hides with the page since ancestors display:none) */
 .video-bulkbar {
@@ -5011,84 +4915,10 @@ body[data-side="video"] #gsearch-aura {
     max-width: min(860px, calc(100vw - 32px));
 }
 .video-bulkbar.hidden { display: none; }
-.vbb-row {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-    background: rgba(14,14,19,0.96); border: 1px solid rgba(255,255,255,0.11);
-    border-radius: var(--radius-xl); box-shadow: 0 18px 50px var(--black-a60);
-    backdrop-filter: blur(12px); flex-wrap: wrap;
-}
-.vbb-count { font-size: 12.5px; font-weight: 800; color: #fff; white-space: nowrap; }
-.vbb-link {
-    all: unset; cursor: pointer; font-size: 11.5px; font-weight: 700;
-    color: var(--white-a55); padding: 2px 4px;
-}
-.vbb-link:hover { color: #fff; }
-.vbb-link[disabled] { opacity: 0.35; cursor: default; }
-.vbb-sep { width: 1px; height: 18px; background: var(--white-a12); }
+
+
 .vbb-spacer { flex: 1; min-width: 6px; }
-.vbb-act {
-    padding: 7px 13px; border-radius: var(--radius-control); font-size: 12px; font-weight: 700;
-    cursor: pointer; background: var(--white-a06);
-    border: 1px solid var(--white-a12); color: var(--white-a80);
-    transition: all var(--dur-xfast); white-space: nowrap;
-}
-.vbb-act:hover:not(:disabled) { background: var(--white-a12); color: #fff; }
-.vbb-act:disabled { opacity: 0.35; cursor: default; }
-.vbb-act--on {
-    background: rgba(var(--accent-rgb), 0.22);
-    border-color: rgba(var(--accent-rgb), 0.55); color: #fff;
-}
-.vbb-close {
-    all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: var(--radius-circle);
-    display: flex; align-items: center; justify-content: center; font-size: 17px;
-    color: var(--white-a60); border: 1px solid var(--white-a14);
-}
-.vbb-close:hover { color: #fff; background: var(--white-a08); }
 
-/* The action popover (rendered above the row) */
-.vbb-pop {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-    background: rgba(14,14,19,0.96); border: 1px solid rgba(255,255,255,0.11);
-    border-radius: var(--radius-card); box-shadow: 0 18px 50px var(--black-a60);
-    backdrop-filter: blur(12px); flex-wrap: wrap;
-}
-.vbb-pop-label { font-size: 12px; font-weight: 700; color: var(--white-a60); white-space: nowrap; }
-.vbb-input {
-    padding: 8px 11px; border-radius: 9px; font-size: 12.5px; font-family: inherit;
-    background: var(--white-a06); border: 1px solid var(--white-a12);
-    color: #eef1f7; outline: none; min-width: 150px; transition: border .13s, box-shadow .13s;
-}
-.vbb-input:focus {
-    border-color: rgba(var(--accent-rgb), 0.6);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
-}
-.vbb-select { min-width: 190px; }
-.vbb-select option { background: #16161d; color: #eef1f7; }
-.vbb-apply {
-    padding: 8px 14px; border-radius: var(--radius-control); font-size: 12px; font-weight: 800;
-    cursor: pointer; border: none; color: #fff;
-    background: rgb(var(--accent-rgb));
-    box-shadow: 0 5px 14px rgba(var(--accent-rgb), 0.3);
-    transition: filter .13s; white-space: nowrap;
-}
-.vbb-apply:hover { filter: brightness(1.12); }
-.vbb-apply--ghost {
-    background: var(--white-a07); border: 1px solid var(--white-a14);
-    box-shadow: none; color: var(--white-a85);
-}
-.vbb-apply--ghost:hover { background: rgba(255,255,255,0.13); filter: none; }
-
-/* Progress view while a bulk job runs */
-.vbb-row--progress { flex-wrap: nowrap; min-width: min(430px, calc(100vw - 60px)); }
-.vbb-track {
-    flex: 1; height: 7px; border-radius: var(--radius-pill); background: var(--white-a10);
-    overflow: hidden; min-width: 120px;
-}
-.vbb-fill {
-    height: 100%; border-radius: var(--radius-pill);
-    background: rgb(var(--accent-rgb)); transition: width var(--dur-slower) ease;
-}
-@media (prefers-reduced-motion: reduce) { .vbb-fill { transition: none; } }
 
 /* ── Detail hero: the Manage (metadata editor) button ──────────────────────
    Deliberately unlike the accent-filled content actions (Trailer / Get /
@@ -8605,9 +8435,7 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
     font-size: 13px; color: var(--white-a55);
 }
-.vd-page .vd-libselect { position: sticky; top: 8px; z-index: 5; }
-.vd-page .vd-libselect:empty, .vd-page .vd-libfoot:empty, .vd-page .vd-libline:empty { display: none; }
-.vd-page .vd-libselect > * { margin-bottom: 10px; }
+.vd-page .vd-libfoot:empty, .vd-page .vd-libline:empty { display: none; }
 .vd-page .vd-libfoot { margin-top: 36px; }
 @media (max-width: 720px) { .vd-page .vd-ep-files { padding: 4px 0 0; } }
 

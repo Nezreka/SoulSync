@@ -168,6 +168,9 @@ export interface BulkFixStatus {
   /** Findings held back by design (e.g. the album completeness gate),
    *  tallied apart from failures. */
   skipped?: number;
+  /** Re-tag findings whose blank tags were filled while a tag that differs
+   *  was left for a person: still open, and not a failure. */
+  partial?: number;
   /** Tracks the album gate held back across the run, including on
    *  findings that otherwise fixed successfully. */
   other_artist_skipped?: number;
@@ -185,8 +188,13 @@ export type QualityFixAction = 'redownload' | 'delete' | 'ignore';
 export type BackfillFixAction = 'add_to_wishlist' | 'dismiss';
 /** `safe` keeps a field the user set by hand, which is the default everywhere
  *  in Library v2; `overwrite_manual` deliberately hands it back to the
- *  catalogue. Sent as the finding's `fix_action`, per row or per group. */
-export type RetagFixAction = 'safe' | 'overwrite_manual';
+ *  catalogue. Sent as the finding's `fix_action`, per row or per group.
+ *
+ *  A bulk run only fills blank tags. `replace_differences` is the one answer
+ *  that lets it replace a tag a file already has (RETAG_REPLACE_ACTION in
+ *  core/repair_worker.py); a single finding applied on its own row replaces
+ *  without it, because both values are in front of the person. */
+export type RetagFixAction = 'safe' | 'overwrite_manual' | 'replace_differences';
 
 // ── Cache health ─────────────────────────────────────────────────────────────
 

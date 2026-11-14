@@ -130,7 +130,7 @@ One search box with three modes.
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous |
 | **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
-| **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction |
+| **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction; an option to start SoulSync's torrents on a qBittorrent that adds them stopped |
 | **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 
 **Downloads page.** Live batches with speed and ETA, "download this next", a step-by-step detail sheet on every download (found, downloaded, verified, imported), manual search on failed tracks, play straight from finished ones, per-track audit trails (lifecycle, embedded tags, lyrics), a **Review** queue for anything that needs a human, and a **Clients** pane that manages slskd, your torrent client and your usenet client from one place.
@@ -166,14 +166,14 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, live records, compilations, soundtracks, remixes and spoken word in sections of their own, live completion bars for albums / EPs / singles, top tracks, similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
   - **Gap-fill** pulls in releases your other metadata sources know about.
-  - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, Use File Tags to take the Library's metadata from your files instead (fields, album year, and which album a track is on), ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
+  - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, Use File Tags to take the Library's metadata from your files instead (fields, album year, and which album a track is on) and release those values again later, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
   - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
   - **Lock what you have reviewed** (admins): the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter the library by **Reviewed** / **Not reviewed**.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
 ## Watchlist & wishlist
 
-- **Watchlist**: follow artists and labels. SoulSync scans for new releases on a schedule, with per-artist rules (albums, EPs, singles, live, remixes, compilations), lookback windows, scan source and auto-download. The **Artist Inspector** shows linked IDs per provider and recent releases, and a **Blocklist** keeps things you never want.
+- **Watchlist**: follow artists and labels. SoulSync scans for new releases on a schedule, with per-artist rules (albums, EPs, singles, live albums, live tracks, remixes, compilations), one edition per album (the original release or the most complete) with clean copies left out, lookback windows, scan source and auto-download. The **Artist Inspector** shows linked IDs per provider and recent releases, and a **Blocklist** keeps things you never want.
 - **Wishlist**: everything wanted, retried automatically with progressive backoff. Browse it as a **Nebula** (an orb per artist, grouped by what's stuck: no match found, or downloaded then rejected) or a dense list. Open an artist to see why each track failed in plain words, retry it, or pick a source by hand. Export it as CSV or JSON (the video wishlist too: everything, movies or TV shows).
 - **Requests**: Overseerr-style for music too — profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin approved.
 
@@ -287,6 +287,14 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
   - Presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
+- **Library manager**: the Library page is your movies and shows three ways (posters, a sortable table of titles with the columns you pick, and a table of the files themselves).
+  - **Filters that manage**: missing, below your quality target, extra copies, unmatched, no subtitles, unmonitored, unwatched, locked, and by resolution, codec, HDR, audio and subtitle language, drive, library, quality profile, genre and year. Save any set as a named **view**.
+  - **Bulk operations** on a selection or on everything a filter matches: rename with a preview, **move to another drive or library** (a library can sit on many drives, and each is offered with its free space), quality profile, look for upgrades, get missing, fetch subtitles, identify again, genres, content rating, series type, collections, and delete with a preview and a typed count.
+  - **An editor for every title**: details with per-field locks, poster, quality profile, series type, and for a show an **Episodes** tab that files a run of episode files under the right season and episode (specials are season 0) and renames them to match.
+  - **History and undo**: every rename, move, delete and re-file made by hand is listed, and one click puts it back, a whole bulk run at once. A deleted file comes back owned while the recycle folder still holds it.
+  - **The padlock**: lock a title once it is the way you want it, and maintenance jobs, mass rename and automatic upgrades leave it and its files alone.
+  - **A page that keeps itself current**: opening a movie or show asks whichever source has gone stale, in the background. Your media server is asked about that one title (files and watch state), the metadata provider for what changed since it was matched (a show that ended or came back, new and renamed episodes, moved air dates, a movie's release date or collection), and the ratings. Each has its own clock, and a title still airing or just released is asked about more often than a settled one. The page redraws in place only if something moved, and **Refresh** asks all three now.
+  - **Manage a title from its own page**: a movie's or show's page carries the padlock, its **file history** with undo, and **Move to another drive or library**. A show's season has **Rename files**, **Renumber episodes** and **Delete files**, each showing what it will do first. Tick episodes (or the whole season) to rename, renumber, delete, look for upgrades, or **stop hunting** them, and stop the hunt for a single episode from its menu. A delete can stop the hunt for the episodes it empties, so a file you threw out is not fetched again. Every change leaves an **Undo** at the foot of the page.
 - **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
 - **Watch Together** in chat: vote on a title and watch together.

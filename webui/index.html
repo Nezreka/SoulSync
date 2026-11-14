@@ -396,20 +396,6 @@
                         <span class="nav-text">Discover</span>
                         <span class="dl-nav-badge hidden" id="discover-nav-badge">0</span>
                     </a>
-                    <a class="nav-button" data-page="playlist-explorer" href="/playlist-explorer">
-                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="5" r="3" />
-                                <line x1="12" y1="8" x2="12" y2="12" />
-                                <line x1="12" y1="12" x2="5" y2="18" />
-                                <line x1="12" y1="12" x2="19" y2="18" />
-                                <circle cx="5" cy="19" r="2" />
-                                <circle cx="19" cy="19" r="2" />
-                                <line x1="12" y1="12" x2="12" y2="18" />
-                                <circle cx="12" cy="19" r="2" />
-                            </svg></span>
-                        <span class="nav-text">Explorer</span>
-                    </a>
                     <a class="nav-button" data-page="sync" href="/sync">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -949,97 +935,11 @@
                 <!-- the video dashboard is the React /dashboard?media=video page
                      (webui/src/routes/dashboard/-video); video-side.js hands off to it -->
                 <section class="video-subpage" data-video-subpage="video-library" hidden>
-                    <!-- Reuses the music library's exact classes (.library-container,
-                         .library-artist-card, .alphabet-selector, .library-search-input)
-                         so it looks identical — just fed from /api/video/library. -->
-                    <div class="library-page-embed" id="video-library-page">
-                        <div class="library-container">
-                            <div class="library-header">
-                                <div class="library-header-content">
-                                    <h2 class="library-title"><img src="/static/library.png" class="page-header-icon"
-                                            alt=""><span>Library</span></h2>
-                                    <p class="library-subtitle">Movies and shows from your media server</p>
-                                </div>
-                                <div class="library-stats">
-                                    <span class="library-stat">
-                                        <span class="stat-number" data-video-lib-count>0</span>
-                                        <span class="stat-label" data-video-lib-count-label>Movies</span>
-                                    </span>
-                                </div>
-                                <button class="library-watchlist-all-btn library-export-btn" type="button"
-                                    data-video-scan-mode="full" title="Scan the media server">
-                                    <span class="watchlist-all-icon" data-video-scan-icon>&#128260;</span>
-                                    <span class="watchlist-all-text" data-video-scan-label>Scan</span>
-                                </button>
-                            </div>
-                            <div class="library-controls">
-                                <div class="video-library-tabs">
-                                    <button class="video-lib-tab active" type="button"
-                                        data-video-lib-tab="movies">Movies</button>
-                                    <button class="video-lib-tab" type="button"
-                                        data-video-lib-tab="shows">Shows</button>
-                                    <button class="video-lib-tab" type="button"
-                                        data-video-lib-tab="channels">Channels</button>
-                                </div>
-                                <div class="library-search-container">
-                                    <input type="text" class="library-search-input" data-video-lib-search
-                                        placeholder="Search movies...">
-                                    <div class="library-search-icon">&#128269;</div>
-                                </div>
-                                <div class="video-library-filters">
-                                    <select class="library-source-filter-select" data-video-lib-sort title="Sort">
-                                        <option value="title">Title</option>
-                                        <option value="year">Year</option>
-                                        <option value="added">Recently Added</option>
-                                        <option value="rating">Rating</option>
-                                        <option value="size">Largest</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-status title="Filter">
-                                        <option value="all">All</option>
-                                        <option value="owned">Owned</option>
-                                        <option value="wanted">Wanted</option>
-                                        <option value="missing" hidden>Missing episodes</option>
-                                        <option value="watched">Watched</option>
-                                        <option value="unwatched">Unwatched</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-vlib title="Library" hidden>
-                                        <option value="">All Libraries</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-res title="Quality">
-                                        <option value="">Any Quality</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-genre title="Genre">
-                                        <option value="">All Genres</option>
-                                    </select>
-                                    <button class="video-lib-select-btn" type="button" data-video-lib-select
-                                        title="Select items for bulk edits">Select</button>
-                                </div>
-                                <div class="alphabet-selector">
-                                    <div class="alphabet-selector-inner" data-video-lib-alphabet></div>
-                                </div>
-                            </div>
-                            <div class="library-content">
-                                <div class="library-loading hidden" data-video-lib-loading>
-                                    <div class="loading-spinner"></div>
-                                    <div class="loading-text">Loading library...</div>
-                                </div>
-                                <div class="library-artists-grid" data-video-lib-grid></div>
-                                <div class="library-empty hidden" data-video-lib-empty>
-                                    <div class="empty-icon">&#127916;</div>
-                                    <div class="empty-title" data-video-lib-empty-title>Nothing here yet</div>
-                                    <div class="empty-subtitle">Run a scan to pull your library from the media server.
-                                    </div>
-                                </div>
-                                <div class="library-pagination hidden" data-video-lib-pagination>
-                                    <button class="pagination-btn" type="button" data-video-lib-prev
-                                        disabled><span>&larr; Previous</span></button>
-                                    <div class="pagination-info"><span data-video-lib-pageinfo>Page 1 of 1</span></div>
-                                    <button class="pagination-btn" type="button" data-video-lib-next disabled><span>Next
-                                            &rarr;</span></button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- The library manager (React, webui/src/features/video-manager):
+                         posters, a table of titles and a table of files, with the
+                         filters and bulk operations. Mounted the first time the
+                         page is shown; the old video-library.js is gone. -->
+                    <div id="video-library-page" data-video-manager-root></div>
                 </section>
                 <!-- Search (in-app): movies / shows / people from TMDB, each result
                      linking to the owned library detail or the TMDB-backed detail.
@@ -1615,7 +1515,6 @@
                                     shortly.</span>
                             </div>
                             <!-- the bar for the episodes ticked in the list below (React) -->
-                            <div class="vd-libselect" data-vd-libselect></div>
                             <div class="vd-episodes" data-vd-episodes></div>
                             <!-- where the show lives on disk (React) -->
                             <div class="vd-libfoot" data-vd-libfoot></div>
@@ -2050,7 +1949,7 @@
                     <div class="settings-content">
                         <nav class="stg-category-nav" aria-label="Settings categories">
                             <div class="stg-navigation-heading">
-                                <div><span class="stg-eyebrow">YOUR WORKSPACE</span>
+                                <div>
                                     <h2>Settings</h2>
                                 </div>
                                 <div class="stg-nav-search-wrap">
@@ -4894,6 +4793,20 @@
                                                                 Override where the torrent client writes downloads. This
                                                                 path is on the <strong>torrent client's</strong>
                                                                 machine, not SoulSync's.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label
+                                                                style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                                                <input type="checkbox" id="torrent-client-start-torrents">
+                                                                Start the torrents SoulSync adds
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                qBittorrent only. Turn this on if your qBittorrent is
+                                                                set to add torrents stopped, or to stop them once the
+                                                                metadata is in. SoulSync's torrents then start anyway,
+                                                                and everything other apps add keeps your qBittorrent
+                                                                setting.
                                                             </div>
                                                         </div>
                                                         <div class="form-group">
@@ -8694,6 +8607,23 @@
                                                 rank higher and Clean/Censored/Radio-Edit files rank lower. Nothing is
                                                 ever skipped &mdash; if only a clean version exists, it still downloads.
                                                 Requires explicit content to be allowed.
+                                            </div>
+
+                                            <!-- #2081: the hard version of the preference above -->
+                                            <div class="form-group" style="margin-left: 26px;">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="exclude-clean">
+                                                    Never download clean versions
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            </div>
+                                            <div class="help-text setting-help-body" style="margin-left: 26px;" hidden>
+                                                Files marked Clean, Censored, Edited or Radio Edit are never picked for
+                                                a track that is not that cut itself. If only a clean version exists,
+                                                the track waits on your Wishlist until a real one turns up. Requires
+                                                explicit content to be allowed.
                                             </div>
 
                                             <div class="form-group">
@@ -12837,8 +12767,7 @@
          used by the detail page's inline acquisition buttons -->
     <script src="{{ url_for('static', filename='video/video-grab.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
-    <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
-    <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
+    <!-- the video library page is React (webui/src/features/video-manager) -->
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
     <!-- Subtitle overrides + manual search (Phase 3; hooks into video-detail.js) -->

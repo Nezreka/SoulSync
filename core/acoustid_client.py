@@ -23,7 +23,7 @@ import shutil
 import logging
 import logging.handlers
 
-from utils.logging_config import app_log_path, get_logger
+from utils.logging_config import SafeFormatter, app_log_path, get_logger
 from core.settings import config_manager
 
 # fpcalc binary location (downloaded automatically if needed)
@@ -39,7 +39,7 @@ if not _acoustid_logger.handlers:
         _acoustid_log_path, encoding='utf-8', maxBytes=5*1024*1024, backupCount=2
     )
     _acoustid_file_handler.setLevel(logging.DEBUG)
-    _acoustid_file_handler.setFormatter(logging.Formatter(
+    _acoustid_file_handler.setFormatter(SafeFormatter(
         fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     ))

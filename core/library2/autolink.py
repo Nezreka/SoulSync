@@ -807,7 +807,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             get_import_context_album,
             get_import_context_artist,
             get_import_source,
-            get_import_source_ids,
+            get_provider_source_ids,
         )
 
         raw_track_info = context.get("track_info")
@@ -817,7 +817,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             ti = {}
         canonical_album = get_import_context_album(context)
         canonical_artist = get_import_context_artist(context)
-        source_ids = get_import_source_ids(context)
+        source_ids = get_provider_source_ids(context)
 
         # A grab that started from Library v2 carries the server-resolved
         # entity (audit P1-16) — the file links to that exact row, no
@@ -1055,10 +1055,15 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             )
             main_file_role = "derivative" if destructive_retention else "master"
 
+            # any spelling of the path: the same file must not get a second row
+            from core.library2.track_files import path_spellings
+            _forms = path_spellings(file_path)
             existing = conn.execute(
                 "SELECT id, COALESCE(file_state,'active') AS file_state"
-                "  FROM lib2_track_files WHERE track_id=? AND path=?",
-                (track_id, file_path),
+                "  FROM lib2_track_files WHERE track_id=?"
+                f" AND path IN ({','.join('?' * len(_forms))})"
+                " ORDER BY (COALESCE(file_state,'active')='deleted'), id LIMIT 1",
+                (track_id, *_forms),
             ).fetchone()
             if existing:
                 conn.execute(

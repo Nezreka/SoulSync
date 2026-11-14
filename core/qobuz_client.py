@@ -625,6 +625,7 @@ class QobuzClient(DownloadSourcePlugin):
                 _qobuz_set_rate_limit(retry_after)
                 return None
             elif resp.status_code != 200:
+                self._last_refused_status = resp.status_code
                 # which id was refused: "album/get returned 400" alone can't
                 # be chased. ids only, never the signature or tokens
                 asked = {k: v for k, v in (params or {}).items()
@@ -702,13 +703,43 @@ class QobuzClient(DownloadSourcePlugin):
             logger.error(f"Error getting Qobuz artist {artist_id}: {e}")
             return None
 
+    # album/get has always been sent with extra=tracks. Nov 13 2026: on one
+    # install every such call came back HTTP 400 (2,900 in six hours, not one
+    # album matched in 40 MB of log), and the clients that document the
+    # endpoint list only albumsFromSameArtist / focus / focusAll for `extra`,
+    # with the tracks in the answer either way. It could not be tried against
+    # Qobuz from here, so the old request stays the first one sent: when it is
+    # refused with a 400 the plain request is tried once, and whichever shape
+    # Qobuz accepts is the one used from then on.
+    _album_extra = 'unknown'     # 'unknown' | 'wanted' | 'refused'
+    _album_plain_refused = False
+
     def get_album(self, album_id):
         """Get full album details by Qobuz ID."""
         try:
-            data = self._api_request('album/get', {
-                'album_id': album_id,
-                'extra': 'tracks',
-            })
+            cls = type(self)
+            if cls._album_extra != 'refused':
+                self._last_refused_status = None
+                data = self._api_request('album/get', {
+                    'album_id': album_id,
+                    'extra': 'tracks',
+                })
+                if data is not None:
+                    cls._album_extra = 'wanted'
+                    return data
+                if (getattr(self, '_last_refused_status', None) != 400
+                        or cls._album_extra == 'wanted' or cls._album_plain_refused):
+                    return None
+            self._last_refused_status = None
+            data = self._api_request('album/get', {'album_id': album_id})
+            if data is not None:
+                if cls._album_extra != 'refused':
+                    logger.info("Qobuz refuses album/get with extra=tracks and answers without it; "
+                                "asking without it from now on")
+                cls._album_extra = 'refused'
+            elif cls._album_extra != 'refused' and getattr(self, '_last_refused_status', None) == 400:
+                # not the parameter: this album is refused either way
+                cls._album_plain_refused = True
             return data
         except Exception as e:
             logger.error(f"Error getting Qobuz album {album_id}: {e}")

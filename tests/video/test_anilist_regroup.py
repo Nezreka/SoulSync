@@ -329,3 +329,263 @@ def test_the_preview_detail_comes_back_split(db, monkeypatch):
     assert [(s["season_number"], s["episode_total"]) for s in d["seasons"]] == [(1, 28), (2, 10)]
     assert d["season_count"] == 2
     assert engine._cache_get(("anime_split", 209867))["source"] == {1: 1, 2: 1}
+
+
+# -- Nov 13 2026 (Thibs): Dandadan, Apothecary Diaries, Tokyo Revengers, Re:Zero --
+
+def test_dandadan_splits_when_the_map_still_points_at_a_season_tmdb_folded():
+    # the stale entry is the LAST one, so it was never "between two anchors"
+    dandadan = [_entry(171018, 1, 1, 0, 12), _entry(185660, 2, 2, 0, 12)]
+    groups, moved = numbering.anilist_regroup(1, _season(24), dandadan)
+    assert len(groups[1]) == 12 and [e["episode_number"] for e in groups[2]] == list(range(1, 13))
+    assert moved[13] == (2, 1) and moved[24] == (2, 12)
+    # while TMDB still has its own season 2, season 1 is 12 long and nothing moves
+    assert numbering.anilist_regroup(1, _season(12), dandadan)[1] == {}
+
+
+def test_a_cour_that_is_not_on_tmdb_yet_does_not_stop_the_split():
+    # The Apothecary Diaries: 24 + 24 + 12 on TMDB, the map already places a
+    # fourth entry at 72. 48 + 12 != 72 left all 60 in one season
+    apothecary = [_entry(161645, 1, 1, 0, 24), _entry(176301, 2, 1, 24, 24),
+                  _entry(195516, 3, 1, 48, 12), _entry(200927, 4, 1, 72, 12)]
+    groups, moved = numbering.anilist_regroup(1, _season(60), apothecary)
+    assert {k: len(v) for k, v in groups.items()} == {1: 24, 2: 24, 3: 12}
+    assert moved[25] == (2, 1) and moved[49] == (3, 1) and moved[60] == (3, 12)
+    # a season still airing: TMDB has 8 of the 12 so far
+    groups, _moved = numbering.anilist_regroup(1, _season(56), apothecary)
+    assert {k: len(v) for k, v in groups.items()} == {1: 24, 2: 24, 3: 8}
+
+
+def test_a_map_offset_one_out_is_overruled_by_counts_a_later_entry_bears_out():
+    # Tokyo Revengers: the map starts the third season at 36, the counts say 37,
+    # and the fourth entry at 50 agrees with the counts
+    revengers = [_entry(120120, 1, 1, 0, 24), _entry(142853, 2, 1, 24, 13),
+                 _entry(163329, 3, 1, 36, 13), _entry(178083, 4, 1, 50, 13)]
+    groups, moved = numbering.anilist_regroup(1, _season(58), revengers)
+    assert {k: len(v) for k, v in groups.items()} == {1: 24, 2: 13, 3: 13, 4: 8}
+    assert moved[37] == (2, 13) and moved[38] == (3, 1) and moved[51] == (4, 1)
+    # Re:Zero: the map starts season 2 at 26, season 1 has 25
+    rezero = [_entry(21355, 1, 1, 0, 25), _entry(108632, 2, 1, 26, 13),
+              _entry(119661, 2, 1, 38, 12, tvdb_offset=13), _entry(163134, 3, 1, 50, 16),
+              _entry(189046, 4, 1, 66, 19)]
+    groups, moved = numbering.anilist_regroup(1, _season(85), rezero)
+    assert {k: len(v) for k, v in groups.items()} == {1: 25, 2: 25, 3: 16, 4: 19}
+    assert moved[26] == (2, 1) and moved[39] == (2, 14) and moved[51] == (3, 1)
+
+
+def test_counts_nothing_bears_out_fall_back_to_a_map_that_places_every_entry():
+    # the counts never meet the map or the end, and every entry is placed in
+    # this season by the map itself: the map's offsets are the split
+    shifted = [_entry(1, 1, 1, 0, 25), _entry(2, 2, 1, 26, 13), _entry(3, 3, 1, 40, 12)]
+    groups, moved = numbering.anilist_regroup(1, _season(55), shifted)
+    assert {k: len(v) for k, v in groups.items()} == {1: 26, 2: 14, 3: 15}
+    # one entry the map places elsewhere, and nothing to bear the counts out: left alone
+    shifted[1] = _entry(2, 2, 2, 0, 13)
+    assert numbering.anilist_regroup(1, _season(55), shifted)[1] == {}
+
+
+def test_one_entry_is_never_a_split():
+    # Blue Box: one season on AniList so far
+    assert numbering.anilist_regroup(1, _season(25), [_entry(173694, 1, 1, 0, 25)])[1] == {}
+    assert numbering.anilist_regroup(1, [], JJK)[1] == {}
+
+
+def test_a_preview_season_out_of_a_split_has_its_name_where_the_card_reads_it():
+    seasons = [{"season_number": 0, "title": "Specials", "episode_total": 26},
+               {"season_number": 1, "title": "Season 1", "episode_total": 38}]
+    out, source = numbering.split_preview_seasons(seasons, FRIEREN)
+    assert [(s["season_number"], s["title"], s["episode_total"]) for s in out] == [
+        (0, "Specials", 26), (1, "Season 1", 28), (2, "Season 2", 10)]
+    assert source == {1: 1, 2: 1}
+
+
+# -- Nov 13 2026: getting the wider split onto existing libraries, and searches --
+
+DANDADAN = [_entry(171018, 1, 1, 0, 12), _entry(185660, 2, 2, 0, 12)]
+
+
+def _one_season_of(db, count, owned=6):
+    show_id = _server_show(db, {1: owned})
+    db.backfill_episodes(show_id, 1, [{"episode_number": i, "title": "E%d" % i}
+                                      for i in range(1, count + 1)])
+    db.mark_episodes_synced(show_id)
+    return show_id
+
+
+def test_a_show_whose_second_season_tmdb_folded_is_queued(db):
+    # no entry starts inside season 1, so the first rule never saw Dandadan
+    show_id = _one_season_of(db, 24)
+    _link(db, show_id, DANDADAN)
+    assert db.requeue_lumped_anime(show_id) == 1 and _synced(db, show_id) == 0
+
+
+def test_a_show_tmdb_really_gives_two_seasons_is_not_queued(db):
+    show_id = _one_season_of(db, 12)
+    db.backfill_episodes(show_id, 2, [{"episode_number": i} for i in range(1, 13)])
+    _link(db, show_id, DANDADAN)
+    assert db.requeue_lumped_anime(show_id) == 0 and _synced(db, show_id) == 1
+    # and one season of exactly its own length has nothing folded into it
+    other = db.upsert_show_tree("plex", {"server_id": "y", "title": "Other", "seasons": []})
+    db.backfill_episodes(other, 1, [{"episode_number": i} for i in range(1, 13)])
+    db.mark_episodes_synced(other)
+    _link(db, other, DANDADAN)
+    assert db.requeue_lumped_anime(other) == 0
+
+
+def test_v68_queues_the_shows_the_old_split_passed_over(tmp_path):
+    path = tmp_path / "old.db"
+    db = VideoDatabase(database_path=str(path))
+    folded = _one_season_of(db, 24)
+    _link(db, folded, DANDADAN)
+    plain = db.upsert_show_tree("plex", {"server_id": "x", "title": "Arrow", "seasons": []})
+    db.mark_episodes_synced(plain)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 67")
+    conn.commit()
+    conn.close()
+    video_database._initialized_paths.discard(str(path.resolve()))   # a restart
+    db = VideoDatabase(database_path=str(path))
+    assert _synced(db, folded) == 0 and _synced(db, plain) == 1
+
+
+def test_a_season_numbered_on_from_the_last_one_is_also_searched_by_its_own_count(db):
+    # TMDB runs Naruto Shippuden S19 from E394: "S19E397" finds nothing, the
+    # release is S19E04 (Thibs)
+    show_id = db.upsert_show_tree("plex", {"server_id": "n", "title": "Naruto", "seasons": []})
+    conn = db._get_connection()
+    conn.execute("UPDATE shows SET tmdb_id=31910 WHERE id=?", (show_id,))
+    conn.commit()
+    conn.close()
+    db.backfill_episodes(show_id, 19, [{"episode_number": n} for n in range(394, 414)])
+    db.backfill_episodes(show_id, 1, [{"episode_number": n} for n in range(1, 33)])
+
+    def item(season, episode):
+        return {"show_tmdb_id": 31910, "season_number": season, "episode_number": episode}
+
+    assert numbering.season_relative(item(19, 397), db) == (19, 4)
+    assert numbering.season_relative(item(19, 394), db) == (19, 1)
+    # a season numbered from 1 is left as it is, and so is an episode nobody knows
+    assert numbering.season_relative(item(1, 12), db) is None
+    assert numbering.season_relative(item(19, 500), db) is None
+    assert numbering.season_relative(item(0, 3), db) is None
+
+    class _NoTvdb:
+        enabled = False
+
+        def season_episodes(self, *a):
+            return []
+    out = numbering.annotate([item(19, 397), item(1, 12)], db=db, client=_NoTvdb())
+    assert (out[0]["alt_season"], out[0]["alt_episode"]) == (19, 4)
+    assert "alt_exclusive" not in out[0] and "alt_season" not in out[1]
+
+
+def test_a_split_season_asked_for_after_the_cache_emptied_still_loads(monkeypatch):
+    # the second Frieren card came up with no episodes: the split only lived
+    # in the cache next to the detail
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    engine = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    engine._cache = _Cache()
+    built = []
+
+    def detail(kind, tv_id):
+        built.append(tv_id)
+        if tv_id == 209867:
+            engine._cache_put(("anime_split", tv_id), {"source": {1: 1, 2: 1}, "rows": FRIEREN})
+        return {}
+    monkeypatch.setattr(engine, "tmdb_detail", detail)
+    monkeypatch.setattr(engine, "_tmdb_season_raw", lambda tv_id, n: (
+        {"season_number": n, "episodes": _season(38)} if n == 1 else None))
+
+    season = engine.tmdb_season(209867, 2)
+    assert [e["episode_number"] for e in season["episodes"]] == list(range(1, 11))
+    assert built == [209867]
+    # a show with nothing to split is looked at once, not on every season opened
+    assert engine.tmdb_season(1396, 2) is None and engine.tmdb_season(1396, 3) is None
+    assert built == [209867, 1396]
+
+
+# -- a season kept the server's way is searched and subtitled by its split
+# numbers (Thibs' Jujutsu Kaisen: 36 files in one season 1, S01E37+ never found)
+
+def _item(season, episode):
+    return {"show_tmdb_id": 95479, "season_number": season, "episode_number": episode}
+
+
+def test_a_kept_season_writes_down_where_each_episode_sits_in_the_split(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    eps = _eps(db, show_id)
+    assert len(eps) == 59 and all(k[0] == 1 for k in eps)   # filed as the server has it
+    assert db.scene_number(95479, 1, 25) == (2, 1)
+    assert db.scene_number(95479, 1, 47) == (2, 23)
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+    assert db.scene_number(95479, 1, 59) == (3, 12)
+    assert db.scene_number(95479, 1, 24) is None            # season one is season one
+    assert db.scene_number(95479, 1, 60) is None
+    assert db.scene_number(None, 1, 48) is None
+
+
+def test_a_kept_season_goes_out_under_its_split_number_too(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    out = numbering.annotate([_item(1, 59), _item(1, 12)], db=db,
+                             client=numbering._default_client(db))
+    assert (out[0]["alt_season"], out[0]["alt_episode"]) == (3, 12)
+    assert "alt_exclusive" not in out[0]      # a release named S01E59 still counts
+    assert "alt_season" not in out[1]
+
+
+def test_subtitles_for_a_kept_season_are_asked_for_by_the_split_number(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    conn = db._get_connection()
+    ids = {r["episode_number"]: r["id"] for r in conn.execute(
+        "SELECT id, episode_number FROM episodes WHERE show_id=? AND season_number=1", (show_id,))}
+    conn.close()
+    info = db.subtitle_video_info("episode", ids[30])
+    assert (info["season"], info["episode"], info["tmdb_id"]) == (2, 6, 95479)
+    info = db.subtitle_video_info("episode", ids[3])
+    assert (info["season"], info["episode"]) == (1, 3)
+
+
+def test_a_season_that_does_split_keeps_no_second_numbers(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+    # the server is renumbered the split way and scanned again
+    conn = db._get_connection()
+    conn.execute("DELETE FROM episodes WHERE show_id=? AND episode_number > 24", (show_id,))
+    conn.commit()
+    conn.close()
+    _sync(db, show_id)
+    assert (3, 12) in _eps(db, show_id)
+    assert db.scene_number(95479, 1, 48) is None
+
+
+def test_another_providers_episode_pass_leaves_the_numbers_alone(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    VideoEnrichmentWorker(db, "tvdb", FakeTMDB())._cascade_episodes(show_id, 95479, [1])
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+
+
+def test_v69_queues_a_lumped_show_whose_episodes_are_all_owned(tmp_path, no_tvdb):
+    path = tmp_path / "old.db"
+    db = VideoDatabase(database_path=str(path))
+    owned = _server_show(db, {1: 59})
+    _link(db, owned)
+    db.mark_episodes_synced(owned)
+    plain = db.upsert_show_tree("plex", {"server_id": "x", "title": "Arrow", "seasons": []})
+    db.mark_episodes_synced(plain)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 68")
+    conn.commit()
+    conn.close()
+    video_database._initialized_paths.discard(str(path.resolve()))   # a restart
+    db = VideoDatabase(database_path=str(path))
+    assert _synced(db, owned) == 0 and _synced(db, plain) == 1

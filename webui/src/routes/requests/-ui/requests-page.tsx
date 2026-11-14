@@ -228,86 +228,88 @@ export function RequestsPage() {
   const quotaText = isAdmin ? '' : quotaLine(listQuery.data?.quota);
 
   return (
-    <div className={styles.page}>
-      <header className={styles.head}>
-        <div className={styles.headText}>
-          <h1 className={styles.title}>Requests</h1>
-          <p className={styles.subtitle}>
-            {isAdmin
-              ? 'What your household asked for. Approve once, everyone who asked hears about it.'
-              : 'What you asked for, and where it’s at.'}
-          </p>
-          {quotaText ? <p className={styles.quota}>{quotaText}</p> : null}
-        </div>
-        {isAdmin && waitingCount > 1 ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={() => void confirmApproveAll()}
-          >
-            {approveAll.isPending ? 'Approving…' : 'Approve all'}
-          </Button>
-        ) : null}
-      </header>
+    <div className="page-shell pgf-shell">
+      <div className="pgf-page pgf-page--plain">
+        <header className={styles.head}>
+          <div className={styles.headText}>
+            <h1 className="pgf-title">Requests</h1>
+            <p className="pgf-status">
+              {isAdmin
+                ? 'What your household asked for. Approve once, everyone who asked hears about it.'
+                : 'What you asked for, and where it’s at.'}
+            </p>
+            {quotaText ? <p className={styles.quota}>{quotaText}</p> : null}
+          </div>
+          {isAdmin && waitingCount > 1 ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void confirmApproveAll()}
+            >
+              {approveAll.isPending ? 'Approving…' : 'Approve all'}
+            </Button>
+          ) : null}
+        </header>
 
-      <div className={styles.tabs} role="tablist" aria-label="Request status">
-        {REQUEST_TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            className={clsx(styles.tab, tab === t.id && styles.tabActive)}
-            onClick={() => setTab(t.id)}
-          >
-            {tabLabel(t, countForTab(items, t.id))}
-          </button>
-        ))}
-      </div>
-
-      {listQuery.isError ? (
-        <div className={styles.empty}>
-          Couldn’t load requests.{' '}
-          <button
-            type="button"
-            className={styles.linkButton}
-            onClick={() => void listQuery.refetch()}
-          >
-            Try again
-          </button>
-        </div>
-      ) : listQuery.isPending ? (
-        <div className={styles.empty}>Loading…</div>
-      ) : visible.length === 0 ? (
-        <div className={styles.empty}>
-          {emptyText(tab, isAdmin, listQuery.data?.asksFirst ?? false)}
-        </div>
-      ) : (
-        <ul className={styles.list}>
-          {visible.map((item) => (
-            <RequestRow
-              key={itemKey(item)}
-              busy={busy}
-              isAdmin={isAdmin}
-              item={item}
-              onApprove={() => approve.mutate(item)}
-              onDecline={() => setDeclining(item)}
-              onRemove={() => remove.mutate(item)}
-              onWithdraw={() => void confirmWithdraw(item)}
-            />
+        <div className={`pgf-pills ${styles.tabs}`} role="tablist" aria-label="Request status">
+          {REQUEST_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className="pgf-pill"
+              onClick={() => setTab(t.id)}
+            >
+              {tabLabel(t, countForTab(items, t.id))}
+            </button>
           ))}
-        </ul>
-      )}
+        </div>
 
-      <DeclineDialog
-        item={declining}
-        pending={decline.isPending}
-        onClose={() => setDeclining(null)}
-        onConfirm={(response) => {
-          if (declining) decline.mutate({ item: declining, response });
-        }}
-      />
+        {listQuery.isError ? (
+          <div className={styles.empty}>
+            Couldn’t load requests.{' '}
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => void listQuery.refetch()}
+            >
+              Try again
+            </button>
+          </div>
+        ) : listQuery.isPending ? (
+          <div className={styles.empty}>Loading…</div>
+        ) : visible.length === 0 ? (
+          <div className={styles.empty}>
+            {emptyText(tab, isAdmin, listQuery.data?.asksFirst ?? false)}
+          </div>
+        ) : (
+          <ul className={styles.list}>
+            {visible.map((item) => (
+              <RequestRow
+                key={itemKey(item)}
+                busy={busy}
+                isAdmin={isAdmin}
+                item={item}
+                onApprove={() => approve.mutate(item)}
+                onDecline={() => setDeclining(item)}
+                onRemove={() => remove.mutate(item)}
+                onWithdraw={() => void confirmWithdraw(item)}
+              />
+            ))}
+          </ul>
+        )}
+
+        <DeclineDialog
+          item={declining}
+          pending={decline.isPending}
+          onClose={() => setDeclining(null)}
+          onConfirm={(response) => {
+            if (declining) decline.mutate({ item: declining, response });
+          }}
+        />
+      </div>
     </div>
   );
 }

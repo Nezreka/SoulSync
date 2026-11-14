@@ -1502,7 +1502,7 @@ class PlexClient(MediaServerBase):
                 'Content-Type': 'image/jpeg'
             }
             
-            response = requests.post(upload_url, data=image_data, headers=headers)
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
             response.raise_for_status()
             
             # Refresh artist to see changes
@@ -1547,7 +1547,7 @@ class PlexClient(MediaServerBase):
                 'Content-Type': 'image/jpeg'
             }
             
-            response = requests.post(upload_url, data=image_data, headers=headers)
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
             response.raise_for_status()
             
             # Refresh album to see changes

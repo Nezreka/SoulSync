@@ -8,6 +8,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { useReactPageShell } from '@/platform/shell/route-controllers';
@@ -42,6 +43,7 @@ import { ExplorerWishlistModal } from './explorer-wishlist-modal';
 export const EXPLORER_PLAYLISTS_QUERY_KEY = ['playlist-explorer', 'mirrored-playlists'];
 
 export function ExplorerPage() {
+  const navigate = useNavigate();
   useReactPageShell('playlist-explorer');
 
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -215,69 +217,91 @@ export function ExplorerPage() {
     // it, clicking the page background explains nothing. The `page` CLASS is
     // deliberately NOT here: the shell styles `.page` display:none, so a React
     // page carrying it renders invisible with every test still passing.
-    <div className="page-shell explorer-container" id="playlist-explorer-page">
-      <div className="dashboard-header" style={{ marginBottom: '12px' }}>
-        <div className="dashboard-header-sweep" aria-hidden="true">
-          <span />
+    <div
+      className="page-shell pgf-shell pgf-shell--slide explorer-container"
+      id="playlist-explorer-page"
+    >
+      <div className="pgf-page">
+        <header className="pgf-head">
+          <div className="pgf-head-main">
+            {/* the explorer is part of Playlists: it opens from there and this
+                is the way back */}
+            <button
+              type="button"
+              className="pgf-back"
+              onClick={() => void navigate({ to: '/sync' })}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 5l-7 7 7 7" />
+              </svg>
+              Playlists
+            </button>
+            <h1 className="pgf-title">Playlist Explorer</h1>
+            <p className="pgf-status">
+              Pick a mirrored playlist and see the albums and discographies behind it
+            </p>
+          </div>
+        </header>
+
+        <ExplorerPicker
+          playlists={playlists}
+          activeSource={activeSource}
+          onSelectSource={setActiveSource}
+          selectedPlaylistId={selectedPlaylistId}
+          onSelectPlaylist={setSelectedPlaylistId}
+          onStartDiscovery={(id) => void startDiscovery(id)}
+          discoverStates={discoverStates}
+          liveDiscovery={liveDiscovery}
+          mode={mode}
+          onSetMode={setMode}
+          building={building}
+          hasBuilt={hasBuilt}
+          onBuild={() => void buildTree()}
+        />
+
+        {meta && !building ? (
+          <ExplorerActionBar
+            selectedCount={selectedAlbums.size}
+            onSelectAll={() => setSelectedAlbums(new Set(explorerSelectableAlbumIds(artists)))}
+            onDeselectAll={() => setSelectedAlbums(new Set())}
+            onAddToWishlist={openWishlist}
+          />
+        ) : null}
+
+        <div className="explorer-viewport" id="explorer-viewport" ref={viewportRef}>
+          <ExplorerZoomControls
+            onZoom={zoomBy}
+            onFitToView={fitToView}
+            onResetZoom={resetZoom}
+            wheelZoomLocked={wheelZoomLocked}
+            onToggleWheelZoomLock={toggleWheelZoomLock}
+          />
+          <ExplorerTree
+            meta={meta}
+            artists={artists}
+            expandedArtists={expandedArtists}
+            artistsWithSelection={artistsWithSelection}
+            selectedAlbums={selectedAlbums}
+            addedAlbums={addedAlbums}
+            expandedTracks={expandedTracks}
+            onToggleArtist={toggleArtist}
+            onAlbumClick={onAlbumClick}
+            zoom={zoom}
+            connections={geometry}
+            treeRef={treeRef}
+          />
         </div>
-        <div className="header-text">
-          <h2 className="header-title">
-            <img src="/static/explorer.png" className="page-header-icon" alt="" />
-            <span>Playlist Explorer</span>
-          </h2>
-        </div>
+
+        {progress ? <ExplorerProgress percent={progress.pct} text={progress.text} /> : null}
       </div>
-
-      <ExplorerPicker
-        playlists={playlists}
-        activeSource={activeSource}
-        onSelectSource={setActiveSource}
-        selectedPlaylistId={selectedPlaylistId}
-        onSelectPlaylist={setSelectedPlaylistId}
-        onStartDiscovery={(id) => void startDiscovery(id)}
-        discoverStates={discoverStates}
-        liveDiscovery={liveDiscovery}
-        mode={mode}
-        onSetMode={setMode}
-        building={building}
-        hasBuilt={hasBuilt}
-        onBuild={() => void buildTree()}
-      />
-
-      {meta && !building ? (
-        <ExplorerActionBar
-          selectedCount={selectedAlbums.size}
-          onSelectAll={() => setSelectedAlbums(new Set(explorerSelectableAlbumIds(artists)))}
-          onDeselectAll={() => setSelectedAlbums(new Set())}
-          onAddToWishlist={openWishlist}
-        />
-      ) : null}
-
-      <div className="explorer-viewport" id="explorer-viewport" ref={viewportRef}>
-        <ExplorerZoomControls
-          onZoom={zoomBy}
-          onFitToView={fitToView}
-          onResetZoom={resetZoom}
-          wheelZoomLocked={wheelZoomLocked}
-          onToggleWheelZoomLock={toggleWheelZoomLock}
-        />
-        <ExplorerTree
-          meta={meta}
-          artists={artists}
-          expandedArtists={expandedArtists}
-          artistsWithSelection={artistsWithSelection}
-          selectedAlbums={selectedAlbums}
-          addedAlbums={addedAlbums}
-          expandedTracks={expandedTracks}
-          onToggleArtist={toggleArtist}
-          onAlbumClick={onAlbumClick}
-          zoom={zoom}
-          connections={geometry}
-          treeRef={treeRef}
-        />
-      </div>
-
-      {progress ? <ExplorerProgress percent={progress.pct} text={progress.text} /> : null}
 
       {wishlistOpen ? (
         <ExplorerWishlistModal

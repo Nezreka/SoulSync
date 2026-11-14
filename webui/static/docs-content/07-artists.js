@@ -123,7 +123,8 @@ Click the config icon on any watched artist to customize which release types to 
 - Albums
 - EPs
 - Singles
-- Live versions
+- Live albums (concert recordings, unplugged sets)
+- Live tracks (a live version on any other release, like a live bonus track)
 - Remixes
 - Acoustic versions
 - Compilations
@@ -133,6 +134,10 @@ Click the config icon on any watched artist to customize which release types to 
 Open **⋯ → Watchlist defaults** to set the release rules every artist uses. A new artist follows them, and changing them changes every artist that follows them.
 
 To give one artist its own rules, open it and change a rule on the **Rules** tab. It then shows a **Custom** badge. Turn **Follow watchlist defaults** back on to put it back, or use **Reset all to defaults** in the defaults to put every custom artist back at once.
+
+Live albums and Live tracks are two rules, so you can keep live bonus tracks out and still have live albums added. A release you pick yourself, in Download Discography or with Fix on a discography finding, is never kept out by what it is: asking for a live album with Live albums off still adds its tracks.
+
+**Edition Preference** in the defaults decides what happens when an album exists in several editions. **Standard** is the original release: the edition with the fewest tracks, and among those the one that is not a remaster or reissue, then the earliest. With **Prefer explicit edition** on, the clean copy of an album that is also listed uncensored is never added, in any mode.
 
 > [!TIP]
 > If you generally only want studio albums, set the defaults to Albums only and your wishlist stays focused.

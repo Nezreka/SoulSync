@@ -98,7 +98,9 @@ class TestUiPins:
         assert "'/watched'" in js                       # hits the existing API
         assert 'function renderAwards(d)' in js
         assert js.count('renderAwards(d)') >= 3         # def + main + youtube-path clear
-        assert 'vd-ep-new-chip' in js
+        # the episode rows are the React list's
+        assert 'vd-ep-new-chip' in (
+            _ROOT / "webui" / "src" / "features" / "video-library" / "episode-list.tsx").read_text(encoding="utf-8")
         assert 'After-credits scene' in js
         assert "rows.push(['Digital release', fmtDate(d.digital_release_date)])" in js   # About, since Oct 26
         # the file facts moved to the Your library tab (Oct 2026)

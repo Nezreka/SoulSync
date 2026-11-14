@@ -103,6 +103,24 @@ def _json_ids(ids) -> str:
     return json.dumps([int(i) for i in ids])
 
 
+def _retag_difference_flags(settings) -> tuple:
+    """the two switches that decide which tag differences are filed as faults"""
+    settings = settings if isinstance(settings, dict) else {}
+    return (settings.get('flag_genre_differences') is True,
+            settings.get('flag_year_differences') is True)
+
+
+# a tag-scan finding a bulk run has something to do with: at least one tag
+# blank in the file. (a re-tag job's own finding carries a reviewed diff or
+# its options and is not judged here.) see RepairWorker._fix_library_retag
+_RETAG_HAS_A_BLANK = (
+    "NOT (finding_type = 'library_retag' AND json_valid(COALESCE(details_json, '')) "
+    "AND json_extract(details_json, '$.retag_options') IS NULL "
+    "AND json_extract(details_json, '$.diff') IS NULL "
+    "AND json_extract(details_json, '$.validation.checks') IS NOT NULL "
+    "AND json_extract(details_json, '$.validation.checks') NOT LIKE '%\"missing\"%')")
+
+
 # #2046: what a bulk fix answers for a finding on something reviewed and locked
 LOCKED_FIX_MESSAGE = ('This {what} is locked, so a bulk fix left it alone. '
                       'Fix it from the finding itself, or unlock it.')
@@ -718,6 +736,15 @@ RETAG_NEEDS_EDITION = (
 )
 
 #: the album has no cover and no source offers one. names the way out.
+#: the action that lets a bulk run replace tags a file already has. without it
+#: a bulk run over the tag scan's findings only fills blank tags
+RETAG_REPLACE_ACTION = 'replace_differences'
+
+RETAG_DIFFERS_REVIEW = (
+    "This file's tags differ from the library's. Fix All only fills blank tags, so this "
+    "one waits for you: open it to see both values, then apply or dismiss it."
+)
+
 RETAG_NO_COVER_FOUND = (
     "No cover art was found for this album on any source. Open the album in the Library, "
     "pick one with Change Cover, then apply again."
@@ -1210,6 +1237,7 @@ class RepairWorker:
             if not isinstance(settings, dict):
                 settings = {}
             current = self._config_manager.get(f'repair.jobs.{job_id}.settings', {})
+            flags_before = _retag_difference_flags(current) if job_id == 'library_retag' else None
             if isinstance(current, dict):
                 current.update(settings)
             else:
@@ -1230,6 +1258,25 @@ class RepairWorker:
                 for key in ('include_artists', 'include_albums', 'allow_live_calls'):
                     if not isinstance(current.get(key), bool): current[key] = defaults[key]
             self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
+            if flags_before is not None and _retag_difference_flags(current) != flags_before:
+                self._recheck_retag_findings()
+
+    def _recheck_retag_findings(self) -> None:
+        """Which differences count as faults just changed: re-check the open
+        tag findings against it now, from the cached tags, off the request.
+
+        Turning one off closes what it had filed. Turning one on files
+        nothing by itself: that takes the next read of each file.
+        """
+        def run():
+            try:
+                from core.library2.validation import settle_scan_findings
+                stats = settle_scan_findings(self.db, self._config_manager,
+                                             should_stop=lambda: self.should_stop)
+                logger.info("tag findings re-checked after a re-tag setting change: %s", stats)
+            except Exception as exc:  # noqa: BLE001 - the next start runs the same pass
+                logger.warning("tag findings not re-checked after a setting change: %s", exc)
+        threading.Thread(target=run, daemon=True, name='retag-findings-recheck').start()
 
     def get_all_job_info(self) -> List[dict]:
         """Get info for all jobs (for API response).
@@ -2979,7 +3026,8 @@ class RepairWorker:
         status, entity_id, details_json = row[0], row[1], row[2]
         details = json.loads(details_json) if details_json else {}
         changes = (details.get('applied') or {}).get('changes') or []
-        if status != 'resolved' or not changes:
+        # 'pending' too: a bulk fill leaves the finding open for what differs
+        if status not in ('resolved', 'pending') or not changes:
             return {'success': False, 'error': 'Nothing recorded to undo for this finding'}
 
         from core.library2.retag import _persist_file_tags
@@ -3574,7 +3622,16 @@ class RepairWorker:
                         )
                     from core.library2.validation import verify_finding_change
                     verified = verify_finding_change(self.db, finding_type, entity_type, entity_id, file_path, details, self._config_manager)
-                    if verified is False:
+                    if verified is False and result.get('left_for_review'):
+                        # a bulk run filled the blank tags and left the ones
+                        # that differ. the finding stays open for those, with
+                        # no error on it, and what was written is kept so it
+                        # can be shown and undone like any other fix
+                        result['partial'] = True
+                        self._set_finding_error(finding_id, None)
+                        if changes:
+                            self._save_applied(finding_id, changes)
+                    elif verified is False:
                         # say what is still wrong when the fix knows, and put
                         # it in the log either way ("logs show nothing")
                         reason = result.pop('incomplete_reason', None)
@@ -4493,9 +4550,12 @@ class RepairWorker:
             from core.library2.discography import approve_release
             # a back catalogue finding names the library that holds the
             # artist (#1504); a new-release finding is the admin's as before
+            # the Fix click is a person asking for this release: its own kind
+            # (a live album) and the edition preference do not keep it out (#2082)
             mirrored = approve_release(
                 self.db, self._config_manager, int(album_id),
                 profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
+                requested=True,
             )
         except LookupError as exc:
             return {'success': False, 'error': str(exc)}
@@ -4700,7 +4760,7 @@ class RepairWorker:
             'success': True,
             'action': 'removed' if fix_action == 'remove' else 'redownload',
             'message': (
-                f'Removed missing file reference for "{title}"'
+                f'"{title}" is out of your library. Nothing will be downloaded.'
                 if fix_action == 'remove'
                 else f'Queued "{title}" for re-download'
             ),
@@ -4712,8 +4772,8 @@ class RepairWorker:
             payload['repair_intent'] = 'remove'
         else:
             payload['message'] = (
-                f'Removed missing file reference for "{title}" — the track '
-                f'keeps its other file and stays monitored'
+                f'The missing copy of "{title}" is gone from your library. '
+                f'The track keeps its other file.'
             )
         return payload
 
@@ -4919,10 +4979,24 @@ class RepairWorker:
         validation = details.get('validation') or {}
         from core.library2 import retag
         options = retag.retag_options(details['retag_options']) if details.get('retag_options') is not None else None
+        left_for_review = []
         if options is None and not details.get('diff'):
             # filed by the tag scan: it writes the fields it flagged, never
             # the whole tag set (scan_finding_options)
-            options = retag.scan_finding_options(details)
+            #
+            # and a bulk run only fills. replacing a tag the file already has
+            # throws the file's value away, and on one library the pile was
+            # 49k genres and 13k years the catalogue had no better claim to.
+            # that is for the person looking at the finding, or a run that
+            # asked for it by name
+            replaces = (bool(details.get('_explicit_single_fix'))
+                        or details.get('_fix_action') == RETAG_REPLACE_ACTION)
+            options = retag.scan_finding_options(details, fill_only=not replaces)
+            if not replaces and options is not None:
+                parts = retag.scan_finding_parts(details)
+                left_for_review = parts['replace']
+                if not parts['fill']:
+                    return {'success': False, 'skipped_by_design': True, 'error': RETAG_DIFFERS_REVIEW}
         selected = options.get('fields') if options else None
         numbers = {'track_number', 'disc_number', 'total_tracks', 'total_discs', 'track_count'}
         writes_numbers = selected is None or bool(set(selected) & numbers)
@@ -5019,6 +5093,14 @@ class RepairWorker:
                         'Re-identify and they can be written too')
         result = {'success': True, 'action': 'applied_tags', 'message': message,
                   'changes': stats.get('changes') or []}
+        if left_for_review:
+            # the blanks are filled; what differs is still the finding
+            result['left_for_review'] = left_for_review
+            result['message'] = ('Filled the blank tags. ' + ', '.join(
+                f.replace('_', ' ') for f in left_for_review) +
+                (' differs' if len(left_for_review) == 1 else ' differ') +
+                ' from the library and ' + ('was' if len(left_for_review) == 1 else 'were') +
+                ' left for you to review')
         if no_cover_found:
             # the tags were written; the cover is what keeps the finding open
             result['incomplete_reason'] = RETAG_NO_COVER_FOUND
@@ -6991,8 +7073,11 @@ class RepairWorker:
                 'musicbrainz_releasegroupid': to.get('release_group_id'),
             }
             fields = {k: v for k, v in fields.items() if v not in (None, '')}
+            # the Library takes the file's tags again below, so a value it took
+            # from a file tag earlier (Use File Tags) is not in the way (#2084)
             allowed = repair_field_protection(self.db, track_file, fields,
-                                              track_id=track_id, file_id=move.get('file_id'))
+                                              track_id=track_id, file_id=move.get('file_id'),
+                                              follows_file_tags=True)
             # the album tag is the move: without it nothing else is written either
             if 'album' not in allowed:
                 skipped += 1
@@ -7019,9 +7104,14 @@ class RepairWorker:
 
         done = {}
         if moved_ids:
-            # the Library follows the tags just written: the same move Use file tags makes
+            self._undo_compilation_rename(album_id, moves)
+            # the Library follows the tags just written: the same move Use file
+            # tags makes. never a rename: with one song of the compilation in
+            # the library, "every file names another album" renamed the whole
+            # compilation and filed nothing (#2084)
             done = tags_to_library.apply(
-                self.db, moved_ids, profile_id=int((details or {}).get('library_owner_id') or 1))
+                self.db, moved_ids, profile_id=int((details or {}).get('library_owner_id') or 1),
+                allow_rename=False)
             # an album made by that move was typed after the one the track
             # left, a compilation. it is what MusicBrainz says it is, and it
             # takes the release id the files now carry
@@ -7059,6 +7149,30 @@ class RepairWorker:
         if skipped:
             message += f', {skipped} left where they were'
         return {'success': True, 'action': 'moved_to_original_albums', 'message': message}
+
+    def _undo_compilation_rename(self, album_id, moves):
+        """A compilation that an earlier run renamed to one of its songs'
+        original albums (#2084) gets its own title back, or the move below
+        sees a song that is already "on" the album it is going to."""
+        from core.library2.importer import release_title_key
+        from core.library2.metadata_overrides import get_field_overrides
+        from core.library2.tags_to_library import FILE_TAGS_REASON
+        targets = {release_title_key((m.get('to') or {}).get('album_title') or '') for m in moves}
+        conn = self.db._get_connection()
+        try:
+            held = get_field_overrides(conn, entity_type='release_group', entity_id=int(album_id)).get('title')
+            if (held is None or (getattr(held, 'reason', None) or '') != FILE_TAGS_REASON
+                    or release_title_key(str(getattr(held, 'value', '') or '')) not in targets):
+                return
+            conn.execute(
+                "DELETE FROM lib2_metadata_overrides WHERE entity_type='release_group' "
+                "AND entity_id=? AND field_name='title'", (int(album_id),))
+            conn.commit()
+            logger.info("compilation %s: title taken from a song's file tag put back", album_id)
+        except Exception as exc:  # noqa: BLE001 - the move still runs; it reports what it could not do
+            logger.warning("compilation %s: renamed title not put back: %s", album_id, exc)
+        finally:
+            conn.close()
 
     def _fix_file_tags_differ(self, entity_type, entity_id, file_path, details):
         """The Library takes what the album's files say (#2074): the album
@@ -7729,8 +7843,13 @@ class RepairWorker:
     def _pending_fixable_ids(self, job_id: str = None, severity: str = None,
                              finding_ids: List[int] = None,
                              finding_type: str = None,
-                             safe_only: bool = False) -> List[int]:
+                             safe_only: bool = False,
+                             replace_tags: bool = False) -> List[int]:
         """IDs of pending findings the fix loop can actually fix.
+
+        A tag-scan finding with no blank tag in it is left out unless
+        ``replace_tags``: a bulk run only fills, so all it could do with that
+        row is refuse it (``_fix_library_retag``), tens of thousands of times.
 
         Fixable = has a fix handler — derived from the dispatch map so the
         two can never drift apart again (a stale copy of this list silently
@@ -7768,6 +7887,8 @@ class RepairWorker:
             library = _findings_library_clause()
             if library:
                 where_parts.append(library)
+            if not replace_tags:
+                where_parts.append(_RETAG_HAS_A_BLANK)
 
             where = f"WHERE {' AND '.join(where_parts)}"
             cursor.execute(f"SELECT id FROM repair_findings {where}", params)
@@ -7785,11 +7906,13 @@ class RepairWorker:
         """
         try:
             ids_to_fix = self._pending_fixable_ids(
-                job_id=job_id, severity=severity, finding_ids=finding_ids)
+                job_id=job_id, severity=severity, finding_ids=finding_ids,
+                replace_tags=fix_action == RETAG_REPLACE_ACTION)
 
             fixed = 0
             failed = 0
             skipped = 0
+            partial = 0
             other_artist_skipped = 0
             errors = []
             for fid in ids_to_fix:
@@ -7806,7 +7929,10 @@ class RepairWorker:
                 # Tracks the album gate held back, counted even on a
                 # successful finding so a partial gate is never silent.
                 other_artist_skipped += result.get('other_artist_skipped', 0) or 0
-                if result.get('success'):
+                if result.get('partial'):
+                    # blanks filled, differences left: still open, not failed
+                    partial += 1
+                elif result.get('success'):
                     fixed += 1
                 elif result.get('skipped_by_design'):
                     # Held back on purpose (e.g. an album whose only
@@ -7819,7 +7945,7 @@ class RepairWorker:
                     errors.append({'id': fid, 'error': error_msg})
                     failed += 1
 
-            return {'fixed': fixed, 'failed': failed, 'skipped': skipped,
+            return {'fixed': fixed, 'failed': failed, 'skipped': skipped, 'partial': partial,
                     'other_artist_skipped': other_artist_skipped,
                     'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
@@ -7878,7 +8004,8 @@ class RepairWorker:
             try:
                 ids = self._pending_fixable_ids(
                     job_id=job_id, severity=severity, finding_ids=finding_ids,
-                    finding_type=finding_type, safe_only=safe_only)
+                    finding_type=finding_type, safe_only=safe_only,
+                    replace_tags=fix_action == RETAG_REPLACE_ACTION)
             except Exception as e:
                 logger.error("Error starting bulk fix: %s", e, exc_info=True)
                 return {'started': False, 'error': str(e)}
@@ -7901,6 +8028,9 @@ class RepairWorker:
                 # partial gate on a resolved finding counts here too, so
                 # it is never silent.
                 'skipped': 0,
+                # blank tags filled, with tags that differ left on the finding
+                # for a person: still open, and not a failure
+                'partial': 0,
                 'other_artist_skipped': 0,
                 'stopped': False,
                 'job_id': job_id,
@@ -8088,7 +8218,9 @@ class RepairWorker:
                         tally = {'fixed': 0, 'failed': 0}
                         state['per_type'][slug] = tally
                     tally['fixed' if result.get('success') else 'failed'] += 1
-                if result.get('success'):
+                if result.get('partial'):
+                    state['partial'] = state.get('partial', 0) + 1
+                elif result.get('success'):
                     state['fixed'] += 1
                 elif skipped_by_design:
                     # Held back on purpose — pending with its reason on

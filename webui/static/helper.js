@@ -109,9 +109,9 @@ const HELPER_CONTENT = {
             'The ⋯ menu clears finished rows, failed rows, or everything (only Clear everything also empties the Review queue); a failed row\'s ⋯ has Remove from list'
         ]
     },
-    '.nav-button[data-page="playlist-explorer"]': {
+    '.pl-explorer-btn': {
         title: 'Playlist Explorer',
-        description: 'Visual exploration tool for playlists. Browse album art grids or full discographies from any playlist source. Select tracks to add to wishlist or download directly.',
+        description: 'Opens the Playlist Explorer, a visual exploration tool for playlists. Browse album art grids or full discographies from any playlist source. Select tracks to add to wishlist or download directly.',
         tips: [
             'Toggle between Albums view and Full Discog view',
             'Select multiple tracks across albums for batch operations',
@@ -3457,25 +3457,24 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.6.5': [
-        { date: 'November 2026 · 3.6.5' },
-        { title: 'Both dashboards, rebuilt', desc: 'Music and video open on a hero with the worker orbs, then the system as a board: your week, the watchlist and wishlist counts with what is in them, playlist sync and what runs next. Hover a point on the Up next line for the whole run, and the orbs answer a hover at once.', page: 'dashboard' },
-        { title: 'The bell, rebuilt', desc: 'Notes stay new until you close the panel and survive a reload. Filters have names and counts, running jobs are rows, a note can be dismissed, toasts stack with the time left, and History is grouped by day.' },
-        { title: 'New installs', desc: 'Pressing Import library on a new install no longer fails with a library upgrade that was never needed (#2062).', page: 'library' },
-        { title: 'Artist Merge Review', desc: 'Two different bands could be merged for sharing one catalogue id. Merges need real evidence now, every merge is written down and can be undone, doubtful pairs are asked about, and artists merged by mistake are found and split (thanks SeadogsBooty, #2073).', page: 'tools' },
-        { title: 'Tools, redone', desc: 'One page with four pills, artwork leading every finding, findings in plain words with before and after, and re-tag keeps history and can undo.', page: 'tools' },
-        { title: 'Use File Tags', desc: 'The Library takes its titles, numbers, year, genre and album from your files, with a preview: on one album or artist, or as a job for the whole library (thanks wolf39us, #2070, #2074).', page: 'tools' },
-        { title: 'Compilation songs to original albums', desc: 'A job that finds where each song on a best-of first came out and files it under that album once approved, so a player that filters by album year gets it right. Off by default (thanks wolf39us, #2077).', page: 'tools' },
-        { title: 'Review lock', desc: 'A padlock on an album or artist keeps what you reviewed: enrichment, repairs and re-matching leave it alone (#2046).', page: 'library' },
-        { title: 'Upgrades that work', desc: 'Automatic quality upgrades run a few at a time with a growing wait, and a song you already have is no longer put back on the wishlist every hour (#2060).', page: 'library' },
-        { title: 'Artist page sections', desc: 'Live albums, compilations, soundtracks, remixes, demos and spoken word get their own sections (#2055), and one release is one album however many servers listed it (#1985).', page: 'library' },
-        { title: 'Faster Manage Workers', desc: 'The numbers for every worker come from one pass instead of one per worker, and the window opens and switches without waiting.', page: 'dashboard' },
-        { title: 'Search all sources', desc: 'Search every source at once, with the same release shown once (#2051).', page: 'search' },
-        { title: 'Playlists', desc: 'ListenBrainz Daily Jams is one rolling playlist like Weekly Jams (thanks mpaugam, #2076), rotating playlists can let go of songs you played (#2047), and two source tracks that are one song are marked (#2059).', page: 'sync' },
-        { title: 'Redesigned pages', desc: 'Automations and Stats are redone, the Auto-Sync manager is drawn around covers, and View Settings and Artist Settings show every option as the thing it controls.', page: 'automations' },
-        { title: 'Video', desc: 'Movie and show pages are one page with files as cards. Video automations, watchlist, search and discover are redrawn. Two shows with one name never share a folder or a download status (thanks SeadogsBooty, #2052, #2075).' },
-        { title: 'Fixes', desc: 'Album Tag Consistency finds a compilation split into one album per artist (thanks Storm, #2072), the MusicBrainz worker finds releases the artist search misses (#2071), $explicit works on downloads and imports (#2068), Prowlarr search pacing is a setting (#2061), and fixes for Tidal, Deezer, Soulseek and torrents (#2063 to #2069).' },
-        { title: 'Earlier versions', desc: '3.6.4 brought your own video libraries, one release ranking, own libraries on Navidrome and five full reviews of the new Library. 3.6.2 brought the new Library, built by @nick2000713.' },
+    '3.6.6': [
+        { date: 'November 2026 · 3.6.6' },
+        { title: 'A video library manager', desc: 'The video Library page shows your movies and shows as posters, as a sortable table of titles with the columns you pick, or as a table of the files themselves. Filter by what needs a look and by what the files are, and save any set as a view.' },
+        { title: 'Bulk operations', desc: 'Act on a selection or on everything a filter matches: rename with a preview, move to another drive or library, quality profile, look for upgrades, get missing, subtitles, identify again, and delete with a preview.' },
+        { title: 'History, undo and the padlock', desc: 'Every rename, move, delete and re-file made by hand is listed and one click puts it back. Lock a title once it is the way you want it, and maintenance, mass rename and automatic upgrades leave it alone.' },
+        { title: 'Manage a title from its own page', desc: 'A movie or show page carries the padlock, file history and move. A season has Rename files, Renumber episodes and Delete files, each with a preview. Tick episodes to act on several, stop hunting one from its menu, and undo any change from the foot of the page.' },
+        { title: 'Pages that keep themselves current', desc: 'Opening a movie or show asks your media server, the metadata provider and the ratings again when each has gone stale, in the background, and redraws only if something moved. Refresh asks all three now.' },
+        { title: 'A library on many drives', desc: 'Move lists each library with every drive it sits on and the free space on each. Pick another drive of the same library, or another library.' },
+        { title: 'A fast Library page', desc: 'Lists, filter counts and the Files view are answered from memory. On a large library the Files view went from several seconds a page to instant, and the cards rise and fade in like the music library’s.' },
+        { title: 'Server Activity', desc: 'Music and audiobooks show the album or book cover, not the artist or author picture (thanks SeadogsBooty, #2089), and the drawer covers the floating buttons while it is open (#2090).' },
+        { title: 'Start SoulSync’s torrents', desc: 'A new switch in the torrent client settings for a qBittorrent that adds torrents stopped, or stops them once the metadata is in. SoulSync’s torrents start anyway (thanks onnwee, #2087).', page: 'settings' },
+        { title: 'Cam releases', desc: 'CAMRip, HDCAMRip, HDTSRip, TSRip, telecine and pre-DVD rips are all read as cam, however they are spelled (thanks onnwee, #2088).' },
+        { title: 'Watchlist rules', desc: 'Live albums and live tracks are two rules (#2082), the original release is the standard edition (#2080), clean copies can be left out (#2081), and a release you pick yourself is never kept out by what it is.', page: 'watchlist' },
+        { title: 'Library fixes', desc: 'Albums You’re Missing no longer lists albums you own (#2083), a dead file’s row has a Remove button (thanks wolf39us, #2086), file tag values can be released (#2084), and a moved file is no longer listed or downloaded twice.', page: 'library' },
+        { title: 'One page frame', desc: 'Search, Discover, Playlists, Watchlist, Tools, Requests, Downloads, Import, Wishlist, Stats, Audiobooks and Podcasts share one width, header, pill row and section heading.' },
+        { title: 'Lighter on a phone', desc: 'The sidebar sky stops drawing while the menu is closed and draws less on a phone, the sidebar visualizer no longer runs where it is hidden, and Now Playing fits the real screen height.' },
+        { title: 'Security and upkeep', desc: 'Keys, tokens and passwords are blanked out of every log line, names are escaped before they reach the page, and more management routes check the profile asking. Discogs artist images download again (thanks Ktzenjammer, #2079), and anime numbered as one long season is handled (thanks Thibs).' },
+        { title: 'Earlier versions', desc: '3.6.5 rebuilt both dashboards and the bell, redid Tools, Automations and Stats, added the review lock and made artist merges undoable. 3.6.4 brought your own video libraries. 3.6.2 brought the new Library, built by @nick2000713.' },
     ],
 };
 
@@ -3505,23 +3504,24 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.6.5: the dashboards, the bell and safe merges',
-        description: 'Both dashboards rebuilt, the notification bell, Tools, Automations and Stats redone, video pages as one page, a review lock, artist merges that are recorded and can be undone, and a new install that no longer trips on a library upgrade.',
+        title: '3.6.6: the video library manager',
+        description: 'The video Library page becomes a manager with tables, bulk operations, history with undo and a padlock. Movie and show pages manage their own seasons, episodes and files and keep themselves current. Plus one page frame everywhere, a security pass and a lighter app on phones.',
         features: [
-            'Music and video dashboards rebuilt: a hero with the worker orbs, then your week, your counts, playlist sync and what runs next as a board.',
-            'The bell rebuilt: notes stay new until you close the panel, it survives a reload, toasts stack, and History is grouped by day.',
-            'A new install is no longer sent into a library upgrade it never needed (#2062).',
-            'Artist Merge Review: merges need real evidence, every merge can be undone, and artists merged by mistake are found and split (thanks SeadogsBooty, #2073).',
-            'Use File Tags for one album or the whole library, and Compilation Songs to Original Albums (thanks wolf39us, #2070, #2074, #2077).',
-            'Review lock on albums and artists (#2046), automatic upgrades that work (#2060), and artist page sections for live, compilations, soundtracks and remixes (#2055).',
-            'The Tools, Automations and Stats pages redesigned, and Manage Workers much faster.',
-            'Search all sources at once (#2051), and ListenBrainz Daily Jams as a rolling playlist (thanks mpaugam, #2076).',
-            'Movie and show pages as one page, and same-named shows never share a folder or a download status (thanks SeadogsBooty, #2052, #2075).',
+            'The video Library as posters, a table of titles or a table of files, with filters that manage and saved views.',
+            'Bulk operations with previews: rename, move to another drive or library, quality profile, upgrades, subtitles, identify again and delete.',
+            'History with undo for every rename, move and delete, and a padlock that keeps automation off a finished title.',
+            'Movie and show pages manage their own files: rename, renumber and delete by season or by ticked episodes, stop hunting one episode, and undo from the page.',
+            'Pages keep themselves current, asking your media server, the metadata provider and the ratings again when each has gone stale.',
+            'A fast Library page: the Files view went from several seconds a page to instant on a large library.',
+            'Server Activity shows album and book covers and no longer sits under the floating buttons (thanks SeadogsBooty, #2089, #2090).',
+            'Start SoulSync’s torrents on a qBittorrent that adds them stopped, and cam releases caught however they are spelled (thanks onnwee, #2087, #2088).',
+            'Live albums and live tracks as two rules, original release and clean version filters (#2080, #2081, #2082), and Albums You’re Missing fixed (#2083).',
+            'One page frame across the app, a security pass on logs and management routes, and a lighter sidebar and player on phones.',
         ],
     },
     {
-        title: 'Earlier in 3.6.4',
-        description: 'Your own video libraries with their own sources and profiles, one release ranking, delete a show or movie for good, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of the new Library.',
+        title: 'Earlier in 3.6.5',
+        description: 'Both dashboards rebuilt, the notification bell, Tools, Automations and Stats redone, video pages as one page, a review lock, artist merges that are recorded and can be undone, and a new install that no longer trips on a library upgrade.',
         features: [],
     },
 ];

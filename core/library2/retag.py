@@ -42,6 +42,10 @@ def retag_options(options=None) -> Dict[str, Any]:
         'lyrics': raw.get('lyrics', 'skip'),
         'source': raw.get('source', 'auto') or 'auto',
         'auto_apply': raw.get('auto_apply', raw.get('dry_run') is False) is True,
+        # which differences the tag scan files as something to fix
+        # (validation.quiet_differences)
+        'flag_genre_differences': raw.get('flag_genre_differences') is True,
+        'flag_year_differences': raw.get('flag_year_differences') is True,
     }
     if raw.get('dry_run') is True:
         result['auto_apply'] = False
@@ -77,8 +81,32 @@ _CHECK_FIELDS = {
 }
 
 
-def scan_finding_options(details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def scan_finding_parts(details: Dict[str, Any]) -> Dict[str, list]:
+    """A scan-made finding's fields, split by what a fix would do to the file.
+
+    ``fill``: blank in the file, so writing it loses nothing. ``replace``:
+    the file holds a value and the library holds another, so writing it
+    throws the file's away. Both as tag field names (``album_artist``,
+    ``cover_art``).
+    """
+    checks = (details.get('validation') or {}).get('checks') or {}
+    parts = {'fill': set(), 'replace': set()}
+    for key, state in checks.items():
+        field = _CHECK_FIELDS.get(key)
+        if field and state == 'missing':
+            parts['fill'].add(field)
+        elif field and state == 'mismatch':
+            parts['replace'].add(field)
+    parts['replace'] -= parts['fill']
+    return {name: sorted(fields) for name, fields in parts.items()}
+
+
+def scan_finding_options(details: Dict[str, Any], *, fill_only: bool = False) -> Optional[Dict[str, Any]]:
     """The write a scan-made finding is allowed: the fields it flagged.
+
+    ``fill_only`` is what a bulk run gets: only the tags that are blank in
+    the file, and never over a value that is there (``mode: fill_missing``
+    holds that even if the file changed since the scan).
 
     A finding the tag scan files has no options of its own, and applying it
     took the Write Tags path: every core tag rewritten from the library and
@@ -88,8 +116,16 @@ def scan_finding_options(details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     cover only where there is none. None when the finding flagged nothing.
     """
     validation = details.get('validation') or {}
+    if fill_only:
+        if not validation:
+            return None
+        return retag_options({'fields': scan_finding_parts(details)['fill'], 'mode': 'fill_missing',
+                              'cover_art': 'fill_missing', 'lyrics': 'skip'})
     flagged = set(details.get('required_fields') or ())
     flagged.update(k for k, v in (validation.get('checks') or {}).items() if v in ('missing', 'mismatch'))
+    # a difference the settings say to leave alone is not written, however it
+    # got onto the list of what this finding once needed
+    flagged -= {k for k, v in (validation.get('checks') or {}).items() if v == 'differs'}
     if not validation and not flagged:
         return None
     # nothing flagged any more: an empty list writes nothing, where None
@@ -139,8 +175,15 @@ def _lyrics_for_row(row):
     return (getattr(lyrics, 'synced_lyrics', None) or getattr(lyrics, 'plain_lyrics', None)) if lyrics else data.get('lyrics')
 
 
-def repair_field_protection(database, file_path, fields, *, track_id=None, file_id=None):
-    """Revalidate file ownership and manual fields immediately before a repair."""
+def repair_field_protection(database, file_path, fields, *, track_id=None, file_id=None,
+                            follows_file_tags=False):
+    """Revalidate file ownership and manual fields immediately before a repair.
+
+    ``follows_file_tags``: the caller writes the file and then has the Library
+    take the file's tags again (tags_to_library.apply). A value the Library
+    took from a file tag is then not something to protect: it follows the file
+    it came from (#2084). An edit typed in by hand still is.
+    """
     from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
     from core.library2.paths import resolve_lib2_path
     keys = hand_tagged_path_keys(database)
@@ -177,6 +220,10 @@ def repair_field_protection(database, file_path, fields, *, track_id=None, file_
         ):
             if entity_id:
                 overrides = get_field_overrides(conn, entity_type=entity, entity_id=int(entity_id))
+                if follows_file_tags:
+                    from core.library2.tags_to_library import FILE_TAGS_REASON
+                    overrides = {k: v for k, v in overrides.items()
+                                 if (getattr(v, 'reason', None) or '') != FILE_TAGS_REASON}
                 protected.update(mapping[k] for k in overrides if k in mapping)
         # Number/identity repairs cannot replace a pinned edition's reference.
         album = conn.execute('SELECT canonical_locked FROM lib2_albums WHERE id=?', (row['album_id'],)).fetchone()

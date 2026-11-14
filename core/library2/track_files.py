@@ -36,6 +36,7 @@ from the schema-ensure step and repairs installs that predate the columns.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
@@ -299,6 +300,52 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
+# One file, one path -- however it was written.
+#
+# A Windows path names the same file with either slash. The catalogue holds
+# both: the upgrade and the import wrote "H:/Music/a.flac", the media-server
+# scan resolves the server's path through os.path.abspath and gets
+# "H:\\Music\\a.flac". Every lookup compared the text, so the scan did not
+# find the file it was looking at and adopted it a second time: a second file
+# row on the track ("2 copies"), or a second track row, and the song listed
+# twice in Songs (Nov 13 2026: 286 files on one library, 89 of them as twin
+# tracks). Lookups ask for every spelling, and writers keep the one stored.
+_WINDOWS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
+
+
+def path_spellings(path: Any) -> Tuple[str, ...]:
+    """Every way this file's path may be stored, the given one first.
+
+    Only a Windows path (a drive letter or a UNC share) has more than one: on
+    Linux a backslash is a character in a file name, not a separator."""
+    text = str(path or "")
+    if not text:
+        return ()
+    if not _WINDOWS_PATH.match(text):
+        return (text,)
+    return tuple(dict.fromkeys((text, text.replace("\\", "/"), text.replace("/", "\\"))))
+
+
+def path_identity(path: Any) -> str:
+    """One key for all of a path's spellings (grouping, not storing)."""
+    text = str(path or "")
+    return text.replace("\\", "/") if _WINDOWS_PATH.match(text) else text
+
+
+def stored_spelling(conn, path: Any) -> str:
+    """``path`` as the catalogue already writes this file, else as given.
+
+    A live row wins over a deleted one, the oldest row over a newer copy.
+    One read through the path index."""
+    forms = path_spellings(path)
+    if len(forms) < 2:
+        return forms[0] if forms else ""
+    row = conn.execute(
+        f"SELECT path FROM lib2_track_files WHERE path IN ({','.join('?' * len(forms))})"
+        " ORDER BY (COALESCE(file_state,'active')='deleted'), id LIMIT 1", forms).fetchone()
+    return str(row[0]) if row else forms[0]
+
+
 def track_id_for_path(conn, file_path: Any, *, scoped: bool = False,
                       basename: bool = True) -> Optional[int]:
     """The catalogue track that owns a file path, or ``None``.
@@ -326,11 +373,12 @@ def track_id_for_path(conn, file_path: Any, *, scoped: bool = False,
     if scoped:
         from core.library2.sql_util import owner_clause
         owner = owner_clause(column="owner_profile_id")
+    forms = path_spellings(file_path)
     row = conn.execute(
         f"SELECT track_id FROM lib2_track_files"
-        f" WHERE path = ? AND track_id IS NOT NULL"
+        f" WHERE path IN ({','.join('?' * len(forms))}) AND track_id IS NOT NULL"
         f" AND COALESCE(file_state,'active') <> 'deleted'{owner}"
-        f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
+        f" ORDER BY {primary_order()} LIMIT 1", forms).fetchone()
     if row:
         return int(row[0])
     if not basename:

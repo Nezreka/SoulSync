@@ -513,6 +513,9 @@ class WatchlistArtist:
     include_acoustic: bool = False
     include_compilations: bool = False
     include_instrumentals: bool = False
+    # #2082: include_live is about live ALBUMS; this is a live version on any
+    # other release (a live bonus track). None = never set, follows include_live.
+    include_live_tracks: Optional[bool] = None
     # When False (default), the watchlist scan only wishlists tracks credited
     # to the monitored artist — tribute albums, soundtracks and compilations
     # no longer flood the wishlist with other artists' tracks. When True,
@@ -1627,6 +1630,7 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
             self._ensure_discovery_pool_decade_index(cursor)
+            self._ensure_discovery_pool_shelf_index(cursor)
             self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
@@ -1657,6 +1661,8 @@ class MusicDatabase:
             self._add_watchlist_quality_profile_column(cursor)
             # #1822: defaults instead of a global override. same ordering rule.
             self._add_watchlist_follow_defaults_column(cursor)
+            # #2082: live tracks apart from live albums. same ordering rule.
+            self._add_watchlist_live_tracks_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -4396,6 +4402,25 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding follow_defaults to watchlist_artists: {e}")
 
+    def _add_watchlist_live_tracks_column(self, cursor):
+        """Add include_live_tracks (#2082): a live version on a release that
+        is not a live album. include_live is about live albums from here on.
+
+        NULL, and nothing is stamped: a NULL reads as the artist's include_live
+        (core.watchlist_defaults.stored_rule), so every artist's scan applies
+        the rules it applied the day before. it becomes a rule of its own the
+        first time it is saved."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if not columns or 'include_live_tracks' in columns:
+                return
+            cursor.execute(
+                "ALTER TABLE watchlist_artists ADD COLUMN include_live_tracks INTEGER DEFAULT NULL")
+            logger.info("Added include_live_tracks column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding include_live_tracks to watchlist_artists: {e}")
+
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
         try:
@@ -5093,6 +5118,31 @@ class MusicDatabase:
             "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
             "ON metadata_match_provenance(origin, service)"
         )
+
+    def _ensure_discovery_pool_shelf_index(self, cursor):
+        """Discover's drawn shelves (popular picks, hidden gems, discovery
+        shuffle) pick their candidates in one pass over the pool.
+
+        that pass needs seven small columns and read every pool row in full to
+        get them, track json and all (500 MB for a 233k-row pool): about 2s a
+        shelf live, the whole cost of a shelf once the owned list was shared
+        (Nov 13 2026). this index holds exactly those columns, so the pass
+        never opens a row. measured on a copy of that pool: 0.76s to build
+        once, 10 MB, and the pass went from 0.41s to 0.05s. after the profile
+        migrations, which add profile_id."""
+        try:
+            had = cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' "
+                "AND name='idx_discovery_pool_shelf'").fetchone()
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_discovery_pool_shelf ON discovery_pool "
+                "(profile_id, source, artist_name, popularity, "
+                "spotify_track_id, itunes_track_id, deezer_track_id)")
+            if not had:
+                # tell the planner about it now, not at the next stats refresh
+                cursor.execute("ANALYZE idx_discovery_pool_shelf")
+        except Exception as e:  # noqa: BLE001 - an index is an assist, retried next start
+            logger.debug("discovery_pool shelf index skipped: %s", e)
 
     def _ensure_discovery_pool_decade_index(self, cursor):
         """Discover's decade shelves group the pool by its release year.
@@ -11385,6 +11435,10 @@ class MusicDatabase:
                     from core.library.server_paths import local_path_for
                     from core.settings import config_manager
                     file_path = local_path_for(file_path, config_manager) or file_path
+                    # the spelling the catalogue already holds for this file:
+                    # every comparison below is on the path's text
+                    from core.library2.track_files import stored_spelling
+                    file_path = stored_spelling(cursor, file_path)
 
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)
@@ -11896,6 +11950,10 @@ class MusicDatabase:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
 
+    # (database file, library scope) -> (stamp, built at, artist name map, credit map)
+    _quarantine_name_maps: Dict[tuple, tuple] = {}
+    _QUARANTINE_NAME_MAPS_TTL = 300.0
+
     def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None, *, lookup_cache=None):
         """Read actual v2 files in the import's library; errors propagate.
 
@@ -11930,6 +11988,18 @@ class MusicDatabase:
             # Resolve names once per list request, including punctuation and
             # compilation credits. Subsequent targets use indexed artist/album
             # and artist/track joins, never a title UDF over the whole catalogue.
+            # the two name maps below read every artist and every credited
+            # track (~3s of cpu on a 30k-artist library) and were rebuilt for
+            # each open of the quarantine list. kept per database and library
+            # while no artist or file was added, five minutes at most
+            stamp = None
+            if 'artist_keys' not in lookup_cache:
+                stamp = (cursor.execute("SELECT MAX(id), COUNT(*) FROM lib2_artists").fetchone()[:2],
+                         cursor.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0])
+                stamp = (tuple(stamp[0]), stamp[1])
+                kept = self._quarantine_name_maps.get((str(self.database_path), scope))
+                if kept and kept[0] == stamp and time.monotonic() - kept[1] < self._QUARANTINE_NAME_MAPS_TTL:
+                    lookup_cache['artist_keys'], lookup_cache['credit_keys'] = kept[2], kept[3]
             if 'artist_keys' not in lookup_cache:
                 by_name, by_credit = {}, {}
                 for row in cursor.execute('SELECT id,name FROM lib2_artists'):
@@ -11945,6 +12015,9 @@ class MusicDatabase:
                         by_credit.setdefault(key, set()).add(row['id'])
                 lookup_cache['artist_keys'] = by_name
                 lookup_cache['credit_keys'] = by_credit
+                if self._QUARANTINE_NAME_MAPS_TTL > 0:
+                    self._quarantine_name_maps[(str(self.database_path), scope)] = (
+                        stamp, time.monotonic(), by_name, by_credit)
             artist_ids = set()
             for artist in artists:
                 key = normalize_key(re.sub(r'^the\s+', '', artist.strip(), flags=re.I))
@@ -18866,7 +18939,8 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults',
+                                   'include_live_tracks']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -18903,6 +18977,12 @@ class MusicDatabase:
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
                     include_other_artists = bool(row['include_other_artists']) if 'include_other_artists' in existing_columns else False
+                    include_live_tracks = (
+                        bool(row['include_live_tracks'])
+                        if 'include_live_tracks' in existing_columns
+                        and row['include_live_tracks'] is not None
+                        else None
+                    )
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
@@ -18937,6 +19017,7 @@ class MusicDatabase:
                         include_compilations=include_compilations,
                         include_instrumentals=include_instrumentals,
                         include_other_artists=include_other_artists,
+                        include_live_tracks=include_live_tracks,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
@@ -25113,6 +25194,26 @@ class MusicDatabase:
             if conn:
                 conn.close()
         return healed
+
+    def count_library_history_downloads(self) -> int:
+        """How many finished downloads the history holds, and nothing else.
+
+        The dashboard stats ask every 10 seconds while a tab is open, and only
+        for this one number. get_library_history_stats counts every event type
+        to answer, which reads all of a library's import rows (311k on one
+        install, 0.2s a time); this reads the download rows off the index."""
+        try:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM library_history "
+                    "WHERE event_type = 'download' AND cleared_at IS NULL").fetchone()
+                return int(row[0] or 0) if row else 0
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"Error counting library history downloads: {e}")
+            return 0
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""

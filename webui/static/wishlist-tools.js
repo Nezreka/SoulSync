@@ -3732,7 +3732,7 @@ async function openBlacklistModal() {
         }).join('');
 
     } catch (e) {
-        document.getElementById('blacklist-modal-body').innerHTML = `<div class="blacklist-empty">Error: ${e.message}</div>`;
+        document.getElementById('blacklist-modal-body').innerHTML = `<div class="blacklist-empty">Error: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -3997,7 +3997,7 @@ async function openMetadataCacheDetail(source, entityType, entityId) {
         const shapeClass = isArtist ? ' artist' : '';
         let imageHtml = '';
         if (data.image_url) {
-            imageHtml = `<img class="mcache-detail-image${shapeClass}" src="${data.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="mcache-detail-image-placeholder${shapeClass}" style="display:none">${(data.name || '?')[0].toUpperCase()}</div>`;
+            imageHtml = `<img class="mcache-detail-image${shapeClass}" src="${escapeHtml(data.image_url)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="mcache-detail-image-placeholder${shapeClass}" style="display:none">${(data.name || '?')[0].toUpperCase()}</div>`;
         } else {
             imageHtml = `<div class="mcache-detail-image-placeholder${shapeClass}">${(data.name || '?')[0].toUpperCase()}</div>`;
         }
@@ -4064,8 +4064,8 @@ async function openMetadataCacheDetail(source, entityType, entityId) {
             <div class="mcache-detail-hero">
                 ${imageHtml}
                 <div class="mcache-detail-hero-info">
-                    <div class="mcache-detail-hero-name">${data.name || 'Unknown'}</div>
-                    ${entityType !== 'artist' && data.artist_name ? `<div class="mcache-detail-hero-sub">${data.artist_name}</div>` : ''}
+                    <div class="mcache-detail-hero-name">${escapeHtml(data.name || 'Unknown')}</div>
+                    ${entityType !== 'artist' && data.artist_name ? `<div class="mcache-detail-hero-sub">${escapeHtml(data.artist_name)}</div>` : ''}
                     <div class="mcache-detail-badges">
                         ${sourceBadge}
                         ${typeBadge}

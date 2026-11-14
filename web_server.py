@@ -34,7 +34,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import app_log_path, get_logger, setup_logging
+from utils.logging_config import SafeFormatter as _SafeFormatter, app_log_path, get_logger, redact as _redact_log_line, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -52,7 +52,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.5"
+_SOULSYNC_BASE_VERSION = "3.6.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -80,7 +80,7 @@ if not source_reuse_logger.handlers:
     _sr_handler = _logging_handlers.RotatingFileHandler(
         _log_dir / "source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
-    _sr_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _sr_handler.setFormatter(_SafeFormatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     source_reuse_logger.addHandler(_sr_handler)
     source_reuse_logger.propagate = False
 
@@ -91,7 +91,7 @@ if not pp_logger.handlers:
     _pp_handler = _logging_handlers.RotatingFileHandler(
         _log_dir / "post_processing.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
-    _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _pp_handler.setFormatter(_SafeFormatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
 from core.api_validation import parse_strict_bool, parse_strict_id, parse_strict_int
@@ -4086,7 +4086,7 @@ def _build_system_stats():
     # survives Docker/container restarts and streaming downloads that leave
     # the in-memory task tracker after post-processing.
     try:
-        persistent_finished = int(get_database().get_library_history_stats().get('downloads', 0) or 0)
+        persistent_finished = get_database().count_library_history_downloads()
         with session_stats_lock:
             finished_downloads = max(persistent_finished, session_completed_downloads)
     except Exception:
@@ -4204,6 +4204,7 @@ def get_debug_info():
 # active, which is why it never runs by default.
 
 @app.route('/api/debug/memory/start')
+@admin_only
 def debug_memory_start():
     try:
         from core.diagnostics.memory_tracker import start_tracking
@@ -4213,6 +4214,7 @@ def debug_memory_start():
 
 
 @app.route('/api/debug/memory/report')
+@admin_only
 def debug_memory_report():
     try:
         from core.diagnostics.memory_tracker import report
@@ -4223,6 +4225,7 @@ def debug_memory_report():
 
 
 @app.route('/api/debug/memory/stop')
+@admin_only
 def debug_memory_stop():
     try:
         from core.diagnostics.memory_tracker import stop_tracking
@@ -4232,6 +4235,7 @@ def debug_memory_stop():
 
 
 @app.route('/api/debug/memory/objects')
+@admin_only
 def debug_memory_objects():
     """One-shot memory breakdown by live object type (plain gc — NO tracemalloc, so it
     won't lock up a loaded app). Hit this once when RSS is high to see which type/cache
@@ -4850,7 +4854,9 @@ def get_log_tail():
                         continue
                 if search and search not in stripped.lower():
                     continue
-                result_lines.append(stripped)
+                # lines written before the formatters blanked credentials are
+                # still on disk: never hand one to the page as it was
+                result_lines.append(_redact_log_line(stripped))
             # Trim to requested count after filtering
             result_lines = result_lines[-lines:]
         except Exception as e:
@@ -8335,6 +8341,7 @@ from core.downloads import cancel as _downloads_cancel
 
 
 @app.route('/api/downloads/cancel', methods=['POST'])
+@admin_only
 def cancel_download():
     """Cancel a specific download transfer, matching GUI functionality."""
     data = request.get_json()
@@ -8358,6 +8365,7 @@ def cancel_download():
 
 
 @app.route('/api/downloads/cancel-all', methods=['POST'])
+@admin_only
 def cancel_all_downloads():
     """Cancel all active downloads from slskd, then clear completed ones."""
     try:
@@ -8373,6 +8381,7 @@ def cancel_all_downloads():
 
 
 @app.route('/api/downloads/clear-finished', methods=['POST'])
+@admin_only
 def clear_finished_downloads():
     """Clear all terminal (completed, cancelled, failed) downloads from slskd."""
     try:
@@ -8571,6 +8580,7 @@ def get_task_candidates(task_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/downloads/task/<task_id>/download-candidate', methods=['POST'])
+@admin_only
 def download_selected_candidate(task_id):
     """Restart a not_found/failed task by downloading a user-selected candidate."""
     dl_err = check_download_permission()
@@ -8787,6 +8797,7 @@ def _resolve_link_track_query(source: str, entity_id: str, kind: str = 'track',
 
 
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
+@admin_only
 def manual_search_for_task(task_id):
     """Run a user-driven search against one (or all) configured download
     sources and stream candidate results as NDJSON — one JSON object per
@@ -9033,6 +9044,7 @@ def get_scan_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/clear-all', methods=['POST'])
+@admin_only
 def clear_all_searches():
     """
     Clear all searches from slskd search history.
@@ -9091,6 +9103,7 @@ def get_download_origins():
 
 
 @app.route('/api/download-origins/delete', methods=['POST'])
+@admin_only
 def delete_download_origins():
     """Delete origin-history entries; optionally (default) also delete the
     files on disk and their library track rows."""
@@ -11443,6 +11456,7 @@ def redownload_start(track_id):
 # download or a wishlist item instead of a library track.
 
 @app.route('/api/downloads/task/<task_id>/inspect', methods=['POST'])
+@admin_only
 def inspect_task_sources(task_id):
     """Every source's hits for a download task's track, with the verdicts.
     A pick goes back through /download-candidate."""
@@ -16263,6 +16277,7 @@ def get_batch_history():
 
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
+@admin_only
 def clear_completed_downloads():
     """Clear finished rows from the Downloads page.
 
@@ -16306,6 +16321,7 @@ _REMOVE_REFUSALS = {
 
 
 @app.route('/api/downloads/remove', methods=['POST'])
+@admin_only
 def remove_download_from_list():
     """Take one failed / not-found / cancelled row off the Downloads page.
 
@@ -16327,6 +16343,7 @@ def remove_download_from_list():
 
 
 @app.route('/api/downloads/task/download-next', methods=['POST'])
+@admin_only
 def prioritize_download_task_next():
     """Move one queued task to the next unstarted slot in its batch."""
     data = request.get_json(silent=True) or {}
@@ -16354,6 +16371,7 @@ def prioritize_download_task_next():
 
 
 @app.route('/api/downloads/batch/download-next', methods=['POST'])
+@admin_only
 def prioritize_download_batch_next():
     """Run a batch next after already-active workers elsewhere drain."""
     data = request.get_json(silent=True) or {}
@@ -16377,6 +16395,28 @@ def prioritize_download_batch_next():
         logger.error(f"Error prioritizing download batch: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _download_owner_profile(*, task_id=None, batch_id=None):
+    """The profile that started a download task or batch, or None when it
+    isn't recorded (the task's own stamp, else its batch's)."""
+    with tasks_lock:
+        task = download_tasks.get(task_id) if task_id else None
+        if task is not None:
+            if task.get('profile_id') is not None:
+                return task.get('profile_id')
+            batch_id = batch_id or task.get('batch_id')
+        batch = download_batches.get(batch_id) if batch_id else None
+        return batch.get('profile_id') if batch else None
+
+
+def _cancel_refused(owner_profile_id):
+    """A 403 unless the caller is an admin or cancelling a download their own
+    profile started (core/permissions.may_cancel_download)."""
+    from core.permissions import may_cancel_download
+    if may_cancel_download(owner_profile_id, get_current_profile_id(), is_admin_request()):
+        return None
+    return jsonify({"success": False, "error": "Admin access required"}), 403
+
+
 @app.route('/api/downloads/cancel_task', methods=['POST'])
 def cancel_download_task():
     """
@@ -16388,6 +16428,9 @@ def cancel_download_task():
     task_id = data.get('task_id')
     if not task_id:
         return jsonify({"success": False, "error": "Missing task_id"}), 400
+    refused = _cancel_refused(_download_owner_profile(task_id=task_id))
+    if refused:
+        return refused
 
     try:
         with tasks_lock:
@@ -16678,6 +16721,12 @@ def cancel_task_v2():
             "error": "Missing playlist_id or track_index"
         }), 400
 
+    with tasks_lock:
+        _owned_task_id, _ = _find_task_by_playlist_track(playlist_id, track_index)
+    refused = _cancel_refused(_download_owner_profile(task_id=_owned_task_id))
+    if refused:
+        return refused
+
     if playlist_id == 'audiobooks':
         from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
         with tasks_lock:
@@ -16883,6 +16932,9 @@ def cancel_batch(batch_id):
     Cancels an entire batch - useful for cancelling during analysis phase
     or cancelling all downloads at once.
     """
+    refused = _cancel_refused(_download_owner_profile(batch_id=batch_id))
+    if refused:
+        return refused
     if batch_id == 'audiobooks':
         from core.audiobook_download_monitor import cancel_downloads as cancel_audiobooks
         try:
@@ -24620,8 +24672,8 @@ def _emit_rate_monitor_loop():
 # Idle-worker stats cache for the enrichment socket loop: name → (monotonic,
 # status). Emits still happen every 2s (the UI heartbeat is untouched) — this
 # only spaces out the DATABASE reads behind them for workers that are idle.
-_enrich_stats_cache: dict = {}
-_ENRICH_IDLE_STATS_TTL = 30.0
+from core.enrichment.status_cache import WorkerStatsCache as _WorkerStatsCache  # noqa: E402
+_enrich_stats = _WorkerStatsCache()
 
 
 def _emit_enrichment_status_loop():
@@ -24705,26 +24757,16 @@ def _emit_enrichment_status_loop():
                 # Idle workers don't earn fresh aggregates every 2s: each
                 # get_stats() is ~6 whole-table scans of the (10 GB) library
                 # db, and 18 workers made this loop ~108 scans per tick,
-                # forever, while any tab was open (perf sweep, Aug 2026). A
-                # RUNNING worker's numbers actually move, so it stays on the
-                # 2s beat; an idle one re-reads every 30s. Transitions are
-                # caught instantly via the worker's IN-MEMORY running/paused
-                # attributes (free to read), so starting or pausing a worker
-                # never shows stale for even one tick.
-                now_mono = time.monotonic()
-                hit = _enrich_stats_cache.get(name)
-                fresh_needed = (
-                    hit is None
-                    or hit[1].get('running')
-                    or getattr(worker, 'running', False) != bool(hit[1].get('running'))
-                    or getattr(worker, 'paused', False) != bool(hit[1].get('paused'))
-                    or now_mono - hit[0] >= _ENRICH_IDLE_STATS_TTL
-                )
-                if fresh_needed:
-                    status = worker.get_stats()
-                    _enrich_stats_cache[name] = (now_mono, status)
-                else:
-                    status = hit[1]
+                # forever, while any tab was open (perf sweep, Aug 2026).
+                # A working worker's numbers are re-read every few seconds,
+                # not every beat, and less often when its own read is slow:
+                # Similar Artists and MusicBrainz each ran their own counts
+                # on every tick, most of what this loop still cost after the
+                # shared pending pass (Nov 13 2026, profiled live). Starts,
+                # pauses and the item in hand are read from the worker's
+                # IN-MEMORY attributes (free), so those never show stale.
+                # core/enrichment/status_cache.py has the rules and the tests.
+                status = _enrich_stats.get(name, worker)
                 # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
@@ -24741,6 +24783,10 @@ def _emit_video_enrichment_status_loop():
     the access log). No-op until the video engine is actually running, so this
     never spins it up on the music side."""
     from core.video.enrichment.engine import peek_video_enrichment_engine
+    from core.enrichment.status_cache import WorkerStatsCache
+    # the beat stays at 2s; the COUNT(*)s behind each worker's numbers do not
+    # (twelve workers x four counts per kind every tick was 39% of a core)
+    stats_cache = WorkerStatsCache()
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         if not _has_connected_clients():
@@ -24753,7 +24799,7 @@ def _emit_video_enrichment_status_loop():
         # wiring here.
         for svc, w in (eng.workers or {}).items():
             try:
-                socketio.emit(f'enrichment:{svc}', w.get_stats())
+                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w))
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")
         # The YouTube date enricher is a standalone daemon (not an engine worker),
@@ -25132,6 +25178,9 @@ def _emit_discovery_progress_loop():
             except Exception as e:
                 logger.debug(f"Error in {platform_name} discovery loop: {e}")
 
+_wishlist_next_run = {'at': -1e9, 'value': 0}
+
+
 def _emit_scan_status_loop():
     """Push watchlist and media scan status every 2 seconds.
     Skipped entirely while no client is connected."""
@@ -25159,7 +25208,17 @@ def _emit_scan_status_loop():
             logger.debug(f"Error emitting media scan: {e}")
         # Wishlist stats (auto-processing detection + countdown refresh)
         try:
-            next_run = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
+            # the countdown is read from the database every 10s and counted
+            # down in between: it was a connection and a query on every beat
+            _now = time.monotonic()
+            if _now - _wishlist_next_run['at'] >= 10.0:
+                _wishlist_next_run['value'] = (
+                    automation_engine.get_system_automation_next_run_seconds('process_wishlist')
+                    if automation_engine else 0)
+                _wishlist_next_run['at'] = _now
+                _now = time.monotonic()
+            next_run = max(0, int(_wishlist_next_run['value'] - (_now - _wishlist_next_run['at']))) \
+                if _wishlist_next_run['value'] else 0
             active_batches = 0
             with tasks_lock:
                 active_batches = sum(
@@ -25282,7 +25341,7 @@ def start_runtime_services():
         if stuck_flags_recovered:
             logger.warning("Recovered stuck flags from previous session")
         else:
-            logger.warning("No stuck flags detected - system healthy")
+            logger.info("No stuck flags detected - system healthy")
 
         # Album-bundle staging sweep — remove orphan ``<batch_id>``
         # dirs left behind by previous-session crashes, errored

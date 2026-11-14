@@ -707,7 +707,7 @@ class WebMetadataUpdateWorker:
                     'Content-Type': 'image/jpeg'
                 }
                 
-                response = requests.post(upload_url, data=image_data, headers=headers)
+                response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
                 response.raise_for_status()
                 
                 # Refresh artist to see changes
@@ -731,7 +731,7 @@ class WebMetadataUpdateWorker:
                     'Content-Type': 'image/jpeg'
                 }
 
-                response = requests.post(upload_url, data=image_data, headers=headers)
+                response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
                 response.raise_for_status()
                 return True
 

@@ -821,7 +821,7 @@ async function _runMBSearch(entryId) {
             `;
         }).join('');
     } catch (err) {
-        resultsEl.innerHTML = `<div class="failed-mb-empty">Search error: ${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="failed-mb-empty">Search error: ${escapeHtml(err.message)}</div>`;
     } finally {
         goBtn.disabled = false;
         goBtn.textContent = 'Search';

@@ -1079,7 +1079,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                     const timerElement = document.getElementById('wishlist-next-auto-timer');
                     if (timerElement) {
                         const countdownText = formatCountdownTime(remainingSeconds);
-                        timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                        timerElement.textContent = `${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
                     }
                 }
             } else {
@@ -1114,7 +1114,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                         const timerElement = document.getElementById('wishlist-next-auto-timer');
                         if (timerElement) {
                             const countdownText = formatCountdownTime(remainingSeconds);
-                            timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                            timerElement.textContent = `${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
                         }
                     }
                 } catch (error) {
@@ -1127,7 +1127,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
         const timerElement = document.getElementById('wishlist-next-auto-timer');
         if (timerElement) {
             const countdownText = formatCountdownTime(remainingSeconds);
-            timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+            timerElement.textContent = `${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
         }
     }, 1000); // Update every second
 }
@@ -7060,7 +7060,7 @@ async function _gsLazyLoadArtistImages() {
             const data = await res.json();
             if (data.success && data.image_url) {
                 const artDiv = card.querySelector('.gsearch-item-art');
-                if (artDiv) artDiv.innerHTML = `<img src="${data.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">`;
+                if (artDiv) artDiv.innerHTML = `<img src="${escapeHtml(data.image_url)}" loading="lazy" onerror="this.parentElement.textContent='🎤'">`;
                 card.removeAttribute('data-needs-image');
             }
         } catch (e) { /* ignore */ }

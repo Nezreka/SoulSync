@@ -69,6 +69,17 @@ def configure(*, config_manager_, docker_resolve_path_,
 bp = Blueprint('quarantine', __name__)
 
 
+@bp.before_request
+def _admin_manages_this():
+    """The quarantine is the admin's to change (Nov 13 2026). Reading stays open: the
+    pages that show it are not admin pages."""
+    from flask import jsonify as _jsonify, request as _request
+    from core.profile_context import is_admin_request
+    if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not _request.path.endswith(("/play", "/compare-stream")) and not is_admin_request():
+        return _jsonify({"success": False, "error": "Admin access required"}), 403
+    return None
+
+
 @bp.route('/api/quarantine/clear', methods=['POST'])
 def clear_quarantine():
     """Delete all files and folders inside the ss_quarantine directory."""
