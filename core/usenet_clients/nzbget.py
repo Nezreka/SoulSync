@@ -110,7 +110,7 @@ class NZBGetAdapter:
     async def add_nzb(
         self,
         url_or_bytes: Union[str, bytes],
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         # its own pool, like sab: the add now fetches the nzb first (#2030)
@@ -120,9 +120,12 @@ class NZBGetAdapter:
     def _add_nzb_sync(
         self,
         url_or_bytes: Union[str, bytes],
-        category: str,
+        category: Optional[str],
         save_path: Optional[str],
     ) -> Optional[str]:
+        # no category asked for: the one set in Settings. the parameter used to
+        # default to "soulsync", so this fallback never ran and a music grab
+        # arrived under a category the client did not have (#2096)
         cat = category or self._category
         # NZBGet's ``append`` takes: NZBFilename, Content, Category,
         # Priority, AddToTop, AddPaused, DupeKey, DupeScore, DupeMode,

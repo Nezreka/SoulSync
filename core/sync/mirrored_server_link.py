@@ -34,6 +34,16 @@ from core.playlists.source_refs import _MIRRORED_PK_PREFIXES
 
 logger = get_logger("sync.mirrored_server_link")
 
+# the servers whose clients can read a playlist by id and write to one. a
+# mirror on any of them follows its own server playlist by id; before #2098
+# only navidrome did, and jellyfin and plex found theirs by name every sync,
+# which is how one mirror ended up with two server playlists.
+LINKED_SERVERS = ("navidrome", "jellyfin", "plex")
+
+
+def follows_by_id(server_type: object) -> bool:
+    return str(server_type or "").lower() in LINKED_SERVERS
+
 
 def mirrored_pk_from_sync_id(playlist_id: object) -> Optional[int]:
     """Strict mirror-PK parse for sync ids.
@@ -71,9 +81,9 @@ def resolve_sync_server_playlist_id(
     :func:`resolve_mirrored_server_playlist_id`. ``db`` is injectable for
     tests; when omitted a ``MusicDatabase`` is constructed. Never raises.
     """
-    if server_type != "navidrome" or media_client is None:
-        # Navidrome-first: other server types keep the legacy name-match
-        # (their clients don't accept a playlist_id kwarg yet).
+    if not follows_by_id(server_type) or media_client is None:
+        # the other server types keep the name-match: their clients take no
+        # playlist_id
         return None
     mirror_pk = mirrored_pk_from_sync_id(playlist_id)
     if mirror_pk is None:
@@ -161,6 +171,15 @@ def resolve_mirrored_server_playlist_id(
         return None
     if not matches:
         return None
+    if len(matches) > 1:
+        # the server holds several with this name. the mirror takes the first
+        # and keeps to it from here on, so the others are no longer touched.
+        logger.warning(
+            "Mirror %s: %d %s playlists are named %r (ids %s); linking the first. "
+            "the others are left alone and can be deleted on the server",
+            mirrored_playlist_id, len(matches), server_type, playlist_name,
+            ", ".join(str(m.id) for m in matches),
+        )
     found_id = str(matches[0].id)
     try:
         db.link_mirrored_playlist_to_server(int(mirrored_playlist_id), found_id, server_type, profile_id=profile_id)

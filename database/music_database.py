@@ -1808,6 +1808,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_rotating_column(cursor)
+            self._add_mirrored_playlist_uncatalogued_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
             self._add_mirrored_playlist_request_list_columns(cursor)
@@ -3201,6 +3202,21 @@ class MusicDatabase:
                 logger.info("Added quality_profile_id column to mirrored_playlists")
         except Exception as e:
             logger.error(f"Error adding mirrored playlist quality profile column: {e}")
+
+    def _add_mirrored_playlist_uncatalogued_column(self, cursor):
+        """Find uncatalogued tracks (#2097). a playlist with this on searches
+        for the tracks no catalogue has by their own artist and title
+        (core/playlists/uncatalogued.py)."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'allow_uncatalogued' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN allow_uncatalogued INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added allow_uncatalogued column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding allow_uncatalogued column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_rotating_column(self, cursor):
         """Rotating playlists (#2039). a rotating playlist's downloads are
@@ -26553,6 +26569,7 @@ class MusicDatabase:
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
         pl['rotating'] = bool(pl.get('rotating', 0))
+        pl['allow_uncatalogued'] = bool(pl.get('allow_uncatalogued', 0))
         pl['is_request_list'] = bool(pl.get('is_request_list', 0))
         pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
         pl['custom_cover'] = bool(pl.get('custom_cover', 0))
@@ -26876,6 +26893,7 @@ class MusicDatabase:
         quality_profile_id: Optional[int] = None,
         sync_mode: Optional[str] = None,
         rotating: Optional[bool] = None,
+        allow_uncatalogued: Optional[bool] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
 
@@ -26918,6 +26936,10 @@ class MusicDatabase:
                 if rotating is not None:
                     assignments.append("rotating=?")
                     params.append(1 if rotating else 0)
+
+                if allow_uncatalogued is not None:
+                    assignments.append("allow_uncatalogued=?")
+                    params.append(1 if allow_uncatalogued else 0)
 
                 if not assignments:
                     return 'ok'

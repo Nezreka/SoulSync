@@ -36,6 +36,7 @@ function stubPreview(body: object = preview) {
 
 function renderSheet(over: Partial<MirroredPlaylistRow> = {}, withRotating = true) {
   const onToggleRotating = vi.fn();
+  const onToggleUncatalogued = vi.fn();
   const row: MirroredPlaylistRow = { id: 7, name: 'Mix', source: 'spotify', ...over };
   render(
     <PlaylistSettingsSheet
@@ -46,12 +47,13 @@ function renderSheet(over: Partial<MirroredPlaylistRow> = {}, withRotating = tru
       onRename={vi.fn()}
       onToggleOrganize={vi.fn()}
       onToggleRotating={withRotating ? onToggleRotating : undefined}
+      onToggleUncatalogued={withRotating ? onToggleUncatalogued : undefined}
       onSetSyncMode={vi.fn()}
       onDelete={vi.fn()}
       onClose={vi.fn()}
     />,
   );
-  return { onToggleRotating };
+  return { onToggleRotating, onToggleUncatalogued };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -125,5 +127,30 @@ describe('the Rotating row', () => {
     stubPreview();
     renderSheet({}, false);
     expect(screen.queryByLabelText('Rotating')).toBeNull();
+  });
+});
+
+describe('the Find uncatalogued tracks row (#2097)', () => {
+  it("shows the playlist's setting and hands a flip to the tab", () => {
+    stubPreview();
+    const { onToggleUncatalogued } = renderSheet({ allow_uncatalogued: true });
+    const toggle = screen.getByLabelText('Find uncatalogued tracks') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    expect(onToggleUncatalogued).toHaveBeenCalledWith(false);
+  });
+
+  it('is off unless the playlist turned it on, and absent without a handler', () => {
+    stubPreview();
+    renderSheet({});
+    expect((screen.getByLabelText('Find uncatalogued tracks') as HTMLInputElement).checked).toBe(
+      false,
+    );
+  });
+
+  it('is not offered where nothing can set it', () => {
+    stubPreview();
+    renderSheet({}, false);
+    expect(screen.queryByLabelText('Find uncatalogued tracks')).toBeNull();
   });
 });

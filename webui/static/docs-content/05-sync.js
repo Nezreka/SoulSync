@@ -245,6 +245,17 @@ Some playlists change on their own: a weekly chart, a discovery mix, a Beatport 
 - Works on mirrored playlists and on **My Playlists**, where removing a song by hand counts as leaving. Request lists and Liked Songs can't be rotating
 - Use **Reconcile** or **Replace** sync mode with Rotating. **Append only** keeps every song in the server playlist, and a song in a server playlist is kept while curation signals are on
 
+## Bootlegs, edits and unofficial remixes
+
+Some tracks are in no catalog: a bootleg, a DJ edit, an unofficial remix. Discovery can't match them, so they wait in the **Wing It Pool**, and picking the original there would download the wrong recording. Turn on **Find uncatalogued tracks** in a playlist's **Settings** and SoulSync looks for them by the playlist's own artist and title instead.
+
+- It searches the same sources your downloads use, on every sync and again whenever the wishlist runs, until the track turns up
+- A file is only taken when its name says it is that exact version: the whole title, the credit in brackets ("MIZE Remix"), and one of the artists. A file that names another version (a different remix, live, slowed, instrumental) is passed over, and so is the original
+- When the playlist gives a length, the file has to be within seven seconds of it
+- The file is tagged from the playlist's text and is not looked up by name afterwards, so a remix is never retagged as the studio release
+- It is off by default and set per playlist. Tracks a catalog does have are matched and downloaded as before
+- A track that isn't found stays in the playlist and in the pool, where **Fix Match** still works
+
 ## Auto-sync schedules
 
 Mirrored playlists can refresh and re-sync on a schedule from **More → Bulk schedule** in the page header:

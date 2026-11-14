@@ -1506,6 +1506,102 @@ class JellyfinClient(MediaServerBase):
                 return playlist
         return None
 
+    def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
+        """every playlist with this name, any casing. jellyfin allows several
+        with one name, and a sync that only ever saw the first left the others
+        stale beside it (#2098)."""
+        wanted = str(name or '').strip().lower()
+        return [p for p in self.get_all_playlists()
+                if str(p.title or '').strip().lower() == wanted]
+
+    def get_playlist_by_id(self, playlist_id) -> Optional[PlaylistInfo]:
+        """one playlist by its server id, None when the server no longer has
+        it. what lets a mirror follow its own playlist instead of whichever
+        one has its name today (#2098). never raises."""
+        if not playlist_id or not self.ensure_connection():
+            return None
+        try:
+            item = self._make_request(f'/Users/{self.user_id}/Items/{playlist_id}')
+        except Exception as e:  # noqa: BLE001 - an unreadable id is an unusable one
+            logger.debug(f"Jellyfin playlist {playlist_id} could not be read: {e}")
+            return None
+        if not isinstance(item, dict) or not item.get('Id') or item.get('Type') != 'Playlist':
+            return None
+        return PlaylistInfo(
+            id=str(item.get('Id')),
+            title=item.get('Name', 'Unknown Playlist'),
+            description=item.get('Overview'),
+            duration=(item.get('RunTimeTicks') or 0) // 10000,
+            leaf_count=item.get('ChildCount', 0),
+            tracks=[],
+        )
+
+    def _target_playlist(self, playlist_name: str, playlist_id=None) -> Optional[PlaylistInfo]:
+        """the playlist a write goes to: the one with this id while the server
+        still has it (a rename there is followed), else the one with the name"""
+        if playlist_id:
+            followed = self.get_playlist_by_id(playlist_id)
+            if followed is not None:
+                return followed
+            logger.info(f"Jellyfin playlist id {playlist_id} for '{playlist_name}' is gone, "
+                        f"looking it up by name")
+        return self.get_playlist_by_name(playlist_name)
+
+    def _playlist_entries(self, playlist_id) -> Optional[list]:
+        """[(track id, entry id)] in playlist order, None when it can't be read"""
+        resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+        if resp is None:
+            return None
+        return [(str(item.get('Id') or ''), str(item.get('PlaylistItemId') or ''))
+                for item in resp.get('Items', []) if item.get('Id')]
+
+    def _valid_track_ids(self, tracks) -> List[str]:
+        ids = []
+        for track in tracks or []:
+            if isinstance(track, dict):
+                tid = track.get('Id') or track.get('id')
+            else:
+                tid = getattr(track, 'ratingKey', None) or getattr(track, 'id', None)
+            tid = str(tid or '').strip()
+            if tid and self._is_valid_guid(tid):
+                ids.append(tid)
+        return ids
+
+    def _replace_in_place(self, playlist_id, playlist_name: str, tracks) -> bool:
+        """make an existing playlist hold exactly these tracks, in this order,
+        without deleting it. the playlist keeps its id, so the mirror that
+        syncs to it keeps finding it, and its cover and description stay
+        (#2098). False = nothing usable happened, the caller recreates it."""
+        import requests
+        desired = self._valid_track_ids(tracks)
+        if not desired:
+            return False
+        entries = self._playlist_entries(playlist_id)
+        if entries is None:
+            return False
+        if [tid for tid, _eid in entries] == desired:
+            logger.info(f"Jellyfin playlist '{playlist_name}' already holds these {len(desired)} tracks")
+            return True
+        hdr = {'X-Emby-Token': self.api_key, 'Authorization': self._auth_header()}
+        items_url = f"{self.base_url}/Playlists/{playlist_id}/Items"
+        # out first, then in: a server that skips adding a track the playlist
+        # still holds would otherwise lose the new order
+        old = [eid for _tid, eid in entries if eid]
+        for i in range(0, len(old), 100):
+            r = requests.delete(items_url, params={'EntryIds': ','.join(old[i:i + 100])},
+                                headers=hdr, timeout=30)
+            if r.status_code not in (200, 204):
+                logger.warning(f"Jellyfin replace of '{playlist_name}': clearing failed, HTTP {r.status_code}")
+                return False
+        for i in range(0, len(desired), 100):
+            r = requests.post(items_url, params={'Ids': ','.join(desired[i:i + 100]), 'UserId': self.user_id},
+                              headers=hdr, timeout=30)
+            if r.status_code not in (200, 204):
+                logger.warning(f"Jellyfin replace of '{playlist_name}': adding failed, HTTP {r.status_code}")
+                return False
+        logger.info(f"Replaced the tracks of Jellyfin playlist '{playlist_name}' in place ({len(desired)} tracks)")
+        return True
+
     def delete_playlist(self, playlist_id: str) -> bool:
         """Delete a playlist by id. Same DELETE /Items/{id} call update_playlist
         has always made inline for its overwrite step."""
@@ -1825,7 +1921,7 @@ class JellyfinClient(MediaServerBase):
             logger.debug(f"Could not set playlist poster for '{playlist_name}': {e}")
         return False
 
-    def append_to_playlist(self, playlist_name: str, tracks) -> bool:
+    def append_to_playlist(self, playlist_name: str, tracks, *, playlist_id=None) -> bool:
         """Append tracks to an existing playlist (creates it if missing).
 
         Differs from `update_playlist`: never deletes existing tracks,
@@ -1837,7 +1933,7 @@ class JellyfinClient(MediaServerBase):
             return False
 
         try:
-            existing_playlist = self.get_playlist_by_name(playlist_name)
+            existing_playlist = self._target_playlist(playlist_name, playlist_id)
             if not existing_playlist:
                 logger.info(
                     f"Jellyfin append: playlist '{playlist_name}' doesn't exist yet — "
@@ -1917,7 +2013,7 @@ class JellyfinClient(MediaServerBase):
             logger.error(f"Error appending to Jellyfin playlist '{playlist_name}': {e}")
             return False
 
-    def reconcile_playlist(self, playlist_name: str, tracks) -> bool:
+    def reconcile_playlist(self, playlist_name: str, tracks, *, playlist_id=None) -> bool:
         """In-place reconcile (#792): add missing + remove gone on the existing
         playlist (POST/DELETE /Playlists/{id}/Items) so its poster, name, and Id
         survive — no delete/recreate. Removal needs each entry's PlaylistItemId,
@@ -1928,7 +2024,7 @@ class JellyfinClient(MediaServerBase):
         try:
             import requests
             from core.sync.playlist_edit import plan_playlist_reconcile
-            existing = self.get_playlist_by_name(playlist_name)
+            existing = self._target_playlist(playlist_name, playlist_id)
             if not existing:
                 logger.info(f"Jellyfin reconcile: '{playlist_name}' doesn't exist — creating")
                 return self.create_playlist(playlist_name, tracks)
@@ -2078,13 +2174,19 @@ class JellyfinClient(MediaServerBase):
             logger.error(f"Error reordering Jellyfin playlist '{playlist_name}': {e}")
             return False
 
-    def update_playlist(self, playlist_name: str, tracks) -> bool:
-        """Update an existing playlist or create it if it doesn't exist"""
+    def update_playlist(self, playlist_name: str, tracks, *, playlist_id=None) -> bool:
+        """Update an existing playlist or create it if it doesn't exist.
+
+        an existing playlist is rewritten in place and keeps its id. it used
+        to be deleted and made again on every sync, so nothing could follow
+        it, and a delete the server refused left the old one beside a new one
+        with the same name (#2098). ``playlist_id`` is the playlist a mirror
+        is linked to; without one, or once it is gone, the name finds it."""
         if not self.ensure_connection():
             return False
         
         try:
-            existing_playlist = self.get_playlist_by_name(playlist_name)
+            existing_playlist = self._target_playlist(playlist_name, playlist_id)
             
             # Check if backup is enabled in config
             from core.settings import config_manager
@@ -2095,13 +2197,16 @@ class JellyfinClient(MediaServerBase):
                 backup_name = f"{playlist_name} Backup"
                 logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
-                if self.copy_playlist(playlist_name, backup_name):
+                if self.copy_playlist(existing_playlist.title, backup_name):
                     logger.info("Backup created successfully")
                 else:
                     logger.warning("Failed to create backup, continuing with sync")
             
+            if existing_playlist and self._replace_in_place(existing_playlist.id, playlist_name, tracks):
+                return True
+
             if existing_playlist:
-                # Delete existing playlist using DELETE request
+                # in place did not work: delete it and make it again
                 import requests
                 url = f"{self.base_url}/Items/{existing_playlist.id}"
                 headers = {
@@ -2112,7 +2217,10 @@ class JellyfinClient(MediaServerBase):
                 if response.status_code in [200, 204]:
                     logger.info(f"Deleted existing Jellyfin playlist '{playlist_name}'")
                 else:
-                    logger.warning(f"Could not delete existing playlist '{playlist_name}' (status: {response.status_code}), creating anyway")
+                    # creating anyway is what left two playlists with one name
+                    logger.error(f"Could not delete Jellyfin playlist '{playlist_name}' "
+                                 f"(status: {response.status_code}); not making a second one")
+                    return False
             
             # Create new playlist with tracks
             return self.create_playlist(playlist_name, tracks)

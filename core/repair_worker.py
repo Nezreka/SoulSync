@@ -5384,10 +5384,12 @@ class RepairWorker:
             # raised. Fail closed if the DB cannot be read: neither action may
             # move or delete a file whose current status is unknown.
             from core.repair_jobs.orphan_file_detector import (
-                is_tracked_path, known_file_suffixes, same_name_library_paths,
+                is_tracked_path, same_name_library_paths, tracked_suffixes_for,
             )
             try:
-                suffixes = known_file_suffixes(self.db)
+                # only the tracked files with this file's name are read: the
+                # whole catalogue, once per finding, made a bulk fix take hours
+                suffixes = tracked_suffixes_for(self.db, resolved)
             except Exception as e:
                 logger.error("Could not recheck orphan file against tracks: %s", e,
                              exc_info=True)

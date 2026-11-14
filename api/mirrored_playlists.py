@@ -517,7 +517,8 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode', 'rotating'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode', 'rotating',
+                 'allow_uncatalogued'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -562,6 +563,13 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
                 if refusal:
                     return jsonify({"error": refusal}), 400
 
+        # #2097: search for the tracks no catalogue has by their own text
+        allow_uncatalogued = None
+        if 'allow_uncatalogued' in data:
+            allow_uncatalogued = parse_strict_bool(data.get('allow_uncatalogued'))
+            if allow_uncatalogued is None:
+                return jsonify({"error": "Invalid allow_uncatalogued"}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -572,7 +580,15 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             quality_profile_id=quality_profile_id,
             sync_mode=sync_mode,
             rotating=rotating,
+            allow_uncatalogued=allow_uncatalogued,
         )
+        if allow_uncatalogued is not None and outcome == 'ok':
+            from core.playlists import uncatalogued
+            uncatalogued.forget()
+            if allow_uncatalogued != bool(playlist.get('allow_uncatalogued')):
+                # the next sync has to look at this playlist's unmatched
+                # tracks again, not skip it as unchanged
+                _invalidate_mirror_sync_fingerprint(playlist_id)
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404
         if outcome == 'unknown_quality_profile':

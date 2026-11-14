@@ -90,7 +90,7 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
             # placeholder should_wishlist_stub recognizes, so it would read
             # as a real title and let a nameless stub through.
             _source_title = track_data.get('name', '') if isinstance(track_data, dict) else ''
-            if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title):
+            if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title, sp_id):
                 wing_it_skipped += 1
                 logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                 continue
