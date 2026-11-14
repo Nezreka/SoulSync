@@ -186,6 +186,31 @@ def _title_of(item: Any, mtype: str) -> Dict[str, str]:
     return {"title": title, "subtitle": str(year) if year else "", "grandparent": gp}
 
 
+def _images_of(item: Any, mtype: str) -> tuple[str, str]:
+    """(thumb, art) for a session/history item, shaped per media type.
+
+    The Plex hierarchy differs by type: for an EPISODE the grandparent is the
+    show, so grandparentThumb IS the poster the card wants. For a TRACK the
+    grandparent is the artist (the author, for an audiobook) and the parent
+    is the album (the book) — grandparent-first showed the artist/author
+    photo instead of the album/book artwork (#2089). Tracks therefore prefer
+    the parent (album/book) image, then their own, and use the artist image
+    only as a fallback. A track has no parentArt in plexapi, so its art
+    follows the same album-first chain, and the track's own art (usually
+    the artist backdrop) only comes after the album and track thumbs,
+    before the artist artwork as the last resort."""
+    parent_thumb = _g(item, "parentThumb")
+    own_thumb = _g(item, "thumb")
+    grandparent_thumb = _g(item, "grandparentThumb")
+    own_art = _g(item, "art")
+    grandparent_art = _g(item, "grandparentArt")
+    if str(mtype or "").lower() == "track":
+        return (str(parent_thumb or own_thumb or grandparent_thumb or ""),
+                str(parent_thumb or own_thumb or own_art or grandparent_art or ""))
+    return (str(grandparent_thumb or parent_thumb or own_thumb or ""),
+            str(own_art or grandparent_art or ""))
+
+
 def normalize_session(item: Any) -> Dict[str, Any]:
     """One raw plexapi session → the clean activity card payload. Defensive:
     any attribute may be missing on a given media type / server version."""
@@ -199,8 +224,7 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     username = str(_first(_g(item, "usernames", [])) or _g(item, "_username", "") or "Someone")
 
     state = str(_g(player, "state", "") or "playing").lower()
-    thumb = _g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb")
-    art = _g(item, "art") or _g(item, "grandparentArt")
+    thumb, art = _images_of(item, mtype)
     # what identifies the SoulSync library row to jump to: a movie is its own
     # ratingKey; an episode links to its SHOW. Title+year are a fallback when the
     # server id doesn't line up (re-scan, different server_source, etc.).
@@ -535,7 +559,7 @@ def normalize_history(item: Any, accounts: Dict, devices: Dict) -> Dict[str, Any
         "media_type": mtype,
         "user": accounts.get(_g(item, "accountID"), "") or "Someone",
         "device": devices.get(_g(item, "deviceID"), "") or "",
-        "thumb": str(_g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb") or ""),
+        "thumb": _images_of(item, mtype)[0],
         "viewed_epoch": epoch,
     }
 
