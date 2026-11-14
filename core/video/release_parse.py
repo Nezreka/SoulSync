@@ -32,9 +32,15 @@ _SOURCE = [
     (re.compile(r"\bweb-?rip\b", re.I), "webrip"),
     (re.compile(r"\bweb\b", re.I), "web-dl"),   # plain "WEB" (very common) — treat as WEB-DL
     (re.compile(r"\bhdtv\b", re.I), "hdtv"),
+    # a pre-release DVD rip is cam-grade whatever it is spelled as (PreDVDRip,
+    # PRE-DVD, PDVDRip). it sits before the plain DVD rule, which would take
+    # the "DVDRip" in "PRE-DVDRip" for a retail disc
+    (re.compile(r"\b(pre[-. ]?dvd(rip)?|pdvd(rip)?)\b", re.I), "cam"),
     (re.compile(r"\b(dvdrip|dvd)\b", re.I), "dvd"),
-    # CAMRip/HDCAMRip, telecine (TC/HDTC) and pre-release DVD rips are cam-grade too
-    (re.compile(r"\b(cam|hdcam|camrip|hdcamrip|ts|telesync|hdts|hdtc|telecine|predvd|predvdrip)\b", re.I), "cam"),
+    # CAMRip/HDCAMRip, telesync (TS/HDTS/TSRip) and telecine (HDTC) are cam-grade
+    # too, joined or split: HD-CAM, CAM-Rip, HD-TS, HD-TC
+    (re.compile(r"\b(cam|hd[-. ]?cam|cam[-. ]?rip|hd[-. ]?cam[-. ]?rip|ts|tsrip|telesync|"
+                r"hd[-. ]?ts|hd[-. ]?tsrip|hd[-. ]?tc|telecine)\b", re.I), "cam"),
     (re.compile(r"\b(scr|screener|dvdscr|bdscr)\b", re.I), "screener"),
     (re.compile(r"\bworkprint\b", re.I), "workprint"),
 ]

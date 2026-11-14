@@ -82,3 +82,21 @@ def test_cam_rip_variants_are_cam():
 def test_ordinary_rips_are_not_cam():
     assert parse_release("Movie 2024 1080p WEBRip x265")["source"] == "webrip"
     assert parse_release("Movie 2024 DVDRip XviD")["source"] == "dvd"
+
+
+def test_cam_grade_names_are_caught_however_they_are_split():
+    for name in ("Movie 2026 HDTSRip x264", "Movie 2026 TSRip", "Movie.2026.HD-TC.x264",
+                 "Movie.2026.HD-TS.1080p", "Movie.2026.HD.CAM.1080p", "Movie 2026 HDCAM-Rip",
+                 "Movie 2026 CAM-Rip 720p", "Movie.2026.PRE-DVDRip.x264", "Movie 2026 PDVDRip",
+                 "Movie 2026 PreDVD", "Movie 2026 pDVD x264"):
+        assert parse_release(name)["source"] == "cam", name
+
+
+def test_a_title_with_cam_in_it_is_not_a_cam_release():
+    for name, source in (("The.Camera.Man.2024.1080p.WEB-DL", "web-dl"),
+                         ("Camp.Rock.2008.1080p.BluRay", "bluray"),
+                         ("Scam.1992.S01.1080p.WEB-DL", "web-dl"),
+                         ("Movie.2024.1080p.BluRay.DTS.x264", "bluray"),
+                         ("Movie.2024.WEB-DL.DTS-HD", "web-dl"),
+                         ("Movie 2024 HDTV 720p", "hdtv")):
+        assert parse_release(name)["source"] == source, name
