@@ -94,7 +94,8 @@ def test_a_preview_asks_the_disk_once_per_folder_not_once_per_file(db, tmp_path,
     assert found[here] and all(found[g] is None for g in gone)
     # thirteen files, and no folder was listed twice
     assert len(lists) == len(set(lists))
-    assert stats == []                               # nothing was asked about file by file
+    # nothing under the library was asked about file by file
+    assert [p for p in stats if str(p).startswith(str(tmp_path))] == []
 
 
 def test_a_rename_preview_reads_the_folders_and_the_settings_once(db, tmp_path, monkeypatch):
@@ -258,6 +259,97 @@ def test_a_locked_title_still_moves_when_its_own_page_asks(db, tmp_path):
     plan = client.get("/api/video/manager/move-preview?kind=movie&ids=%d&library_id=%d&by_hand=1"
                       % (mid, lid)).get_json()
     assert plan["held"] == 0
+
+
+# ── a library on many drives ─────────────────────────────────────────────────
+
+def _main(db):
+    return next(x for x in libraries.list_libraries(db, "movie") if x["builtin"] == "main")
+
+
+def _three_drives(db, tmp_path):
+    """the main movie library on its own folder, an extra folder and a mapped server drive"""
+    import json
+    from core.video import drive_map
+    for name in ("Movies", "Drive2/Movies", "Drive3/Movies"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    db.set_setting("movies_additional_paths", json.dumps([str(tmp_path / "Drive2/Movies")]))
+    drive_map.save(db, [{"server": "/mnt/easystore3/Movies", "local": str(tmp_path / "Drive3/Movies"),
+                         "kind": "movie"},
+                        {"server": "/mnt/easystore3/TV", "local": str(tmp_path / "Drive3/TV"),
+                         "kind": "episode"}])
+
+
+def test_the_main_library_is_every_drive_it_sits_on_its_own_folder_first(db, tmp_path):
+    _three_drives(db, tmp_path)
+    kids = libraries.create_library(db, {"kind": "movie", "name": "Kids", "path": str(tmp_path / "Kids")})
+    assert libraries.library_folders(db, _main(db)) == [
+        str(tmp_path / "Movies"), str(tmp_path / "Drive2/Movies"), str(tmp_path / "Drive3/Movies")]
+    # a tv drive is not a movie library's, and another library keeps its one folder
+    assert libraries.library_folders(db, libraries.get_library(db, kids["id"])) == [str(tmp_path / "Kids")]
+
+
+def test_a_folder_that_is_another_librarys_is_not_also_the_main_ones(db, tmp_path):
+    import json
+    (tmp_path / "Kids/Shorts").mkdir(parents=True)
+    libraries.create_library(db, {"kind": "movie", "name": "Kids", "path": str(tmp_path / "Kids")})
+    db.set_setting("movies_additional_paths",
+                   json.dumps([str(tmp_path / "Kids"), str(tmp_path / "Kids/Shorts")]))
+    assert libraries.library_folders(db, _main(db)) == [str(tmp_path / "Movies")]
+
+
+def test_a_title_moves_to_another_drive_of_the_library_it_is_in(db, tmp_path):
+    import os
+    _three_drives(db, tmp_path)
+    mid = _movie(db)
+    old = tmp_path / "Movies/Dune (2021)/dune.rip.mkv"
+    fid = _add_file(db, movie_id=mid, path=old)
+    main, drive3 = _main(db), str(tmp_path / "Drive3/Movies")
+
+    plan = bulk_ops.move_plan(db, "movie", mid, main["id"], drive3)
+    assert plan["files"] == 1 and plan["moves"][0]["to"].startswith(drive3) and old.exists()
+    # no drive named: the library's own folder, which is where it already sits
+    assert bulk_ops.move_plan(db, "movie", mid, main["id"])["moves"][0]["to"].startswith(
+        str(tmp_path / "Movies"))
+
+    with file_history.batch("move") as batch:
+        res = bulk_ops._apply_one(db, "movie", mid, "move",
+                                  {"library_id": main["id"], "folder": drive3}, None)
+    assert res["ok"] and res["changed"] == 1 and not old.exists()
+    assert os.path.isfile(plan["moves"][0]["to"])
+    assert _row(db, "SELECT relative_path FROM media_files WHERE id=?", fid)[0].startswith(
+        "/mnt/easystore3/Movies")                     # stored the way the media server sees that drive
+    assert file_history.undo_batch(db, batch)["undone"] == 1 and old.exists()
+
+
+def test_a_move_only_takes_a_folder_the_library_really_has(db, tmp_path):
+    _three_drives(db, tmp_path)
+    mid = _movie(db)
+    _add_file(db, movie_id=mid, path=tmp_path / "Movies/Dune (2021)/dune.rip.mkv")
+    main = _main(db)
+    for folder in (str(tmp_path / "Elsewhere"), "/etc", str(tmp_path / "Drive3/TV")):
+        assert "not one of this library" in bulk_ops.move_plan(db, "movie", mid, main["id"], folder)["error"]
+    assert bulk_ops.validate("movie", [mid], "move", {"library_id": main["id"], "folder": 5})
+    assert bulk_ops.validate("movie", [mid], "move",
+                             {"library_id": main["id"], "folder": str(tmp_path / "Drive2/Movies")}) is None
+
+
+def test_the_move_dialog_is_handed_each_library_with_its_drives_and_their_room(db, tmp_path):
+    _three_drives(db, tmp_path)
+    mid = _movie(db)
+    _add_file(db, movie_id=mid, size=700, path=tmp_path / "Movies/Dune (2021)/dune.rip.mkv")
+    client = _client(db)
+    libs = client.get("/api/video/manager/libraries?kind=movie").get_json()["libraries"]
+    main = next(x for x in libs if x["folders"] and len(x["folders"]) == 3)
+    assert [f["primary"] for f in main["folders"]] == [True, False, False]
+    assert all(isinstance(f["free_bytes"], int) for f in main["folders"])
+    drive2 = str(tmp_path / "Drive2/Movies")
+    plan = client.get("/api/video/manager/move-preview", query_string={
+        "kind": "movie", "ids": str(mid), "library_id": main["id"], "folder": drive2}).get_json()
+    assert plan["success"] and plan["files"] == 1 and plan["moves"][0]["to"].startswith(drive2)
+    bad = client.get("/api/video/manager/move-preview", query_string={
+        "kind": "movie", "ids": str(mid), "library_id": main["id"], "folder": "/etc"})
+    assert bad.status_code == 409
 
 
 # ── the gate ─────────────────────────────────────────────────────────────────

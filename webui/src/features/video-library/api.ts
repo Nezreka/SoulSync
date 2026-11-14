@@ -397,3 +397,37 @@ export function releaseIdentity(kind: TitleKind, id: number): Promise<{ success:
     body: '{}',
   });
 }
+
+/* ── keeping the title current ────────────────────────────────────────────── */
+
+export type FreshSource = 'server' | 'metadata' | 'ratings';
+
+export interface Freshness {
+  success: boolean;
+  /** something the page shows moved: read it again */
+  changed?: boolean;
+  /** another visit is already asking */
+  running?: boolean;
+  asked?: FreshSource[];
+  /** why a source could not answer, in words */
+  notes?: Partial<Record<FreshSource, string>>;
+  /** the media server no longer has this title */
+  gone?: boolean;
+  /** the server re-keyed it: it lives on this row now */
+  moved_to?: number | null;
+  sources?: Partial<
+    Record<FreshSource, { age_seconds: number | null; ttl_seconds: number; stale: boolean }>
+  >;
+}
+
+/**
+ * ask the sources that have gone stale about this title (its files and watch
+ * state from the media server, what changed at the metadata provider, the
+ * ratings). `force` asks all three now, whatever their clocks say.
+ */
+export function freshenTitle(kind: TitleKind, id: number, force = false): Promise<Freshness> {
+  return send<Freshness>(`/api/video/detail/${kind}/${id}/freshen`, {
+    method: 'POST',
+    body: JSON.stringify(force ? { force: true } : {}),
+  });
+}

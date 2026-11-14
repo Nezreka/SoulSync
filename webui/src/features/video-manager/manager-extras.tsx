@@ -13,6 +13,7 @@ import type { FileChange, SavedView, SeasonEpisodes, Side, TitleKind, Undoable }
 import {
   type LibraryRef,
   type MovePreview,
+  type MoveTarget,
   type PosterOption,
   type RenumberPlan,
   applyRenumber,
@@ -395,10 +396,10 @@ export function MoveDialog({
   /** one title moved from its own page: a padlock does not hold it */
   byHand?: boolean;
   onClose: () => void;
-  onRun: (libraryId: number) => void;
+  onRun: (target: MoveTarget) => void;
 }) {
   const [libraries, setLibraries] = useState<LibraryRef[] | null>(null);
-  const [picked, setPicked] = useState<number | null>(null);
+  const [picked, setPicked] = useState<MoveTarget | null>(null);
   const [plan, setPlan] = useState<MovePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -424,22 +425,22 @@ export function MoveDialog({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, picked]);
+  }, [kind, picked?.libraryId, picked?.folder]);
 
   const short = plan != null && !plan.enough_room;
   return (
     <DialogFrame open onOpenChange={(open) => !open && onClose()} className={s.dialog}>
       <DialogHeader
-        title={`Move ${ids.length.toLocaleString()} ${noun(side, ids.length)}`}
+        title={`Move ${ids.length.toLocaleString()} ${noun(side, ids.length)} to another drive or library`}
         closeLabel="Close"
         compact
       />
       <DialogBody>
         <div className={s.dialogBody}>
           <p className={s.dialogNote}>
-            The files move to the library's folder, named by your template, with their subtitles.
-            The {noun(side, ids.length)} {ids.length === 1 ? 'is' : 'are'} then filed there, so
-            anything downloaded later lands beside them.
+            Pick a library and which of its drives. The files move there, named by your template,
+            with their subtitles, and the {noun(side, ids.length)} {ids.length === 1 ? 'is' : 'are'}{' '}
+            filed under that library.
           </p>
           {libraries === null ? <p className={s.dialogNote}>Loading…</p> : null}
           {libraries && libraries.length === 0 ? (
@@ -448,20 +449,57 @@ export function MoveDialog({
             </p>
           ) : null}
           {libraries && libraries.length ? (
-            <div className={s.options} role="radiogroup" aria-label="Library">
-              {libraries.map((lib) => (
-                <button
-                  key={lib.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={picked === lib.id}
-                  className={s.option}
-                  onClick={() => setPicked(lib.id)}
-                >
-                  {lib.name}
-                  <span className={s.optionPath}>{lib.path}</span>
-                </button>
-              ))}
+            <div className={s.options} role="radiogroup" aria-label="Library and drive">
+              {libraries.map((lib) => {
+                // a library can sit on many drives: each is somewhere to move to
+                const folders = lib.folders?.length
+                  ? lib.folders
+                  : [{ path: lib.path, primary: true, free_bytes: null }];
+                return (
+                  <div key={lib.id} className={s.optionGroup}>
+                    <p className={s.optionHead}>
+                      {lib.name}
+                      {folders.length > 1 ? (
+                        <span className={s.muted}> · {folders.length} drives</span>
+                      ) : null}
+                    </p>
+                    {folders.map((folder) => {
+                      const on =
+                        picked?.libraryId === lib.id &&
+                        (picked.folder ?? folders.find((f) => f.primary)?.path) === folder.path;
+                      return (
+                        <button
+                          key={folder.path}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          aria-label={`${lib.name}, ${folder.path}`}
+                          className={s.option}
+                          onClick={() =>
+                            setPicked({
+                              libraryId: lib.id,
+                              folder: folder.primary ? undefined : folder.path,
+                            })
+                          }
+                        >
+                          <span className={s.optionRow}>
+                            <span className={s.optionPath}>{folder.path}</span>
+                            <span className={s.optionMeta}>
+                              {folder.primary && folders.length > 1 ? 'New titles land here' : ''}
+                              {folder.primary && folders.length > 1 && folder.free_bytes != null
+                                ? ' · '
+                                : ''}
+                              {folder.free_bytes != null
+                                ? `${formatSize(folder.free_bytes)} free`
+                                : ''}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           {error ? <p className={s.dialogWarn}>{error}</p> : null}

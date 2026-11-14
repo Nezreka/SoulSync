@@ -95,6 +95,20 @@ describe('the page has no tabs', () => {
     );
   });
 
+  it('redraws in place when the title’s facts change, and reloads only for a new match', () => {
+    // a rename, an undo or a refresh from the server must not throw the
+    // reader back to the first season and the top of the page
+    const at = JS.indexOf('        refreshPage: function () {');
+    expect(at).toBeGreaterThan(-1);
+    const body = JS.slice(at, JS.indexOf('        reloadPage: function () {', at));
+    expect(body).toContain('reloadMovieQuiet(currentId)');
+    expect(body).toContain('reloadDetail(currentId)');
+    expect(body).not.toContain('loadShow(');
+    const quiet = extractFunction('reloadDetail', JS) + extractFunction('reloadMovieQuiet', JS);
+    expect(quiet).not.toContain('scrollTop');
+    expect(quiet).not.toContain('showLoading(true)');
+  });
+
   it('opens the island’s dialogs from the More menu', () => {
     const actions = extractFunction('renderActions', JS);
     for (const act of ['rename-files', 'move-library', 'file-history']) {

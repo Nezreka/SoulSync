@@ -1876,3 +1876,41 @@
     transform: none;
   }
 }
+
+/* ── a library and its drives, in the move dialog ────────────────────────── */
+
+.optionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.optionGroup + .optionGroup {
+  margin-top: 10px;
+}
+
+.optionHead {
+  margin: 0;
+  color: var(--white-a85);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.optionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 14px;
+}
+
+.optionRow .optionPath {
+  margin-top: 0;
+}
+
+.optionMeta {
+  color: var(--white-a55);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}

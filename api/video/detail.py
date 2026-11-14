@@ -284,6 +284,39 @@ def register_routes(bp):
             return restricted_response()
         return jsonify(data)
 
+    @bp.route("/detail/<kind>/<int:item_id>/freshen", methods=["GET", "POST"])
+    def video_title_freshen(kind, item_id):
+        """Keep the title someone is looking at current. GET: how old each
+        source's answer is. POST: ask the sources that have gone stale (the
+        media server for this one title, the metadata provider, the ratings)
+        and say whether what the page shows moved. Open to any profile that
+        can see the title: it is bound by each source's clock and never
+        removes anything. Body {force: true} asks all three now, admins only."""
+        if kind not in ("movie", "show"):
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        from flask import g
+        from core.video import freshness
+        from . import get_video_db
+        from .kids import library_title_allowed, restricted_response, video_cap
+        db = get_video_db()
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(db, kind, item_id, cap):
+            return restricted_response()
+        if request.method == "GET":
+            sources = freshness.status(db, kind, item_id)
+            if not sources:
+                return jsonify({"success": False, "error": "not found"}), 404
+            return jsonify({"success": True, "sources": sources})
+        force = bool((request.get_json(silent=True) or {}).get("force"))
+        if force and not bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1)):
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        try:
+            res = freshness.refresh(db, kind, item_id, force=force)
+        except Exception:
+            logger.exception("freshen failed for %s %s", kind, item_id)
+            return jsonify({"success": False, "error": "Refresh failed, see app.log"}), 500
+        return jsonify(res), (200 if res.get("success") else 404)
+
     @bp.route("/detail/show/<int:show_id>/sync", methods=["POST"])
     def video_show_sync(show_id):
         """Per-show Synchronize: re-read THIS show from the server and

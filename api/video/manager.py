@@ -187,8 +187,23 @@ def register_routes(bp):
 
         from . import get_video_db
         kind = "show" if request.args.get("kind") in ("show", "shows") else "movie"
-        libs = [{"id": x["id"], "name": x["name"], "path": x["path"], "is_default": x["is_default"]}
-                for x in libraries.list_libraries(get_video_db(), kind) if x.get("usable")]
+        import shutil
+
+        def free(folder):
+            try:
+                return shutil.disk_usage(folder).free
+            except OSError:
+                return None                     # a drive that is not mounted right now
+        db = get_video_db()
+        libs = []
+        for x in libraries.list_libraries(db, kind):
+            if not x.get("usable"):
+                continue
+            # a library can sit on many drives: each is somewhere a title can move to
+            folders = [{"path": f, "primary": i == 0, "free_bytes": free(f)}
+                       for i, f in enumerate(libraries.library_folders(db, x))]
+            libs.append({"id": x["id"], "name": x["name"], "path": x["path"],
+                         "is_default": x["is_default"], "folders": folders})
         return jsonify({"success": True, "libraries": libs})
 
     @bp.route("/manager/move-preview", methods=["GET"])
@@ -202,6 +217,7 @@ def register_routes(bp):
         except ValueError:
             library_id = 0
         db = get_video_db()
+        folder = (request.args.get("folder") or "").strip() or None
         files = size = copy = skipped = held = 0
         sample, error, why = [], None, {}
         for item_id in _ids():
@@ -209,7 +225,7 @@ def register_routes(bp):
             if request.args.get("by_hand") != "1" and db.is_hands_off(kind, item_id):
                 held += 1
                 continue
-            plan = bulk_ops.move_plan(db, kind, item_id, library_id)
+            plan = bulk_ops.move_plan(db, kind, item_id, library_id, folder)
             if plan.get("error"):
                 error = plan["error"]
                 break
@@ -228,9 +244,8 @@ def register_routes(bp):
         try:
             import shutil
 
-            from core.video import libraries
-            lib = libraries.get_library(db, library_id) or {}
-            free = shutil.disk_usage(lib.get("path") or "").free
+            where = bulk_ops.move_root(db, kind, library_id, folder)
+            free = shutil.disk_usage(where.get("root") or "").free
         except OSError:
             free = None
         return jsonify({"success": True, "files": files, "size_bytes": size, "copy_bytes": copy,

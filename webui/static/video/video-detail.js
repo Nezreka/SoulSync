@@ -1104,7 +1104,7 @@
             // managing the files as a whole: the React island owns these dialogs
             if (_canManualMatch() && window.VideoLibraryTab.open && (d.owned || d.episode_owned)) {
                 libMore += moreItem('rename-files', 'Aa', 'Rename files…', 'See what every file would be renamed to by your template, then rename them');
-                libMore += moreItem('move-library', '⇄', 'Move to another library…', 'Move this title and its files to another library or drive');
+                libMore += moreItem('move-library', '⇄', 'Move to another drive or library…', 'Move this title and its files to another library or drive');
                 libMore += moreItem('file-history', '↶', 'File history', 'Every rename, move and delete made by hand, each with Undo');
             }
         }
@@ -3230,20 +3230,23 @@
             { method: 'POST', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
-                if (res && res.ok && currentId === id && currentKind === 'movie') {
-                    fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
-                        .then(function (r) { return r.ok ? r.json() : null; })
-                        .then(function (d) {
-                            if (d && !d.error && currentId === id) {
-                                // Keep the live extras (server/trailer/next-ep) the
-                                // detail payload lacks — else Play/Trailer vanish.
-                                var prev = data || {};
-                                d.server = prev.server || null;
-                                d.trailer = prev.trailer || null;
-                                d.next_episode = prev.next_episode || null;
-                                data = d; renderBillboard(d); renderDetails(d);
-                            }
-                        });
+                if (res && res.ok && currentId === id && currentKind === 'movie') reloadMovieQuiet(id);
+            }).catch(function () { /* best-effort */ });
+    }
+    // Read a library movie again and redraw what changed, in place: no loading
+    // state, no scroll jump, and the React island stays mounted.
+    function reloadMovieQuiet(id) {
+        fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && !d.error && currentId === id && currentKind === 'movie') {
+                    // Keep the live extras (server/trailer/next-ep) the detail
+                    // payload lacks, or Play and Trailer vanish.
+                    var prev = data || {};
+                    d.server = prev.server || null;
+                    d.trailer = prev.trailer || null;
+                    d.next_episode = prev.next_episode || null;
+                    data = d; renderBillboard(d); renderDetails(d);
                 }
             }).catch(function () { /* best-effort */ });
     }
@@ -4737,6 +4740,15 @@
                 { defaultLang: window.VideoSubtitles.effectiveFirstLang(data.kind, data.id) });
         },
         openManage: function () { openManagePanel(); },
+        // the title's facts changed under the page (a file renamed, an undo, a
+        // refresh from the server): read it again in place. the season in view,
+        // the scroll and what is open all stay where they are
+        refreshPage: function () {
+            if (!data || currentSource !== 'library') return;
+            if (data.kind === 'movie') reloadMovieQuiet(currentId);
+            else if (data.kind === 'show' && data.source !== 'youtube') reloadDetail(currentId);
+        },
+        // the title itself changed (a fixed match): load the whole page again
         reloadPage: function () {
             if (!data) return;
             if (data.kind === 'movie') loadMovie(currentId, currentSource);

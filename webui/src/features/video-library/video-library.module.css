@@ -1458,3 +1458,38 @@
     animation: none;
   }
 }
+
+/* ── is the title current ────────────────────────────────────────────────── */
+
+.fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vlt-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.freshDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--white-a30);
+}
+
+.freshDot[data-busy] {
+  background: rgb(var(--vlt-accent));
+  animation: vltPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vltPulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .freshDot[data-busy] {
+    animation: none;
+  }
+}

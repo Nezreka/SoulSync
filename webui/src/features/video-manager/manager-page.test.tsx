@@ -223,7 +223,18 @@ function answer(url: string, method: string): unknown {
     return {
       success: true,
       libraries: [
-        { id: 1, name: 'Movies', path: '/mnt/a/Movies', is_default: true },
+        {
+          id: 1,
+          name: 'Movies',
+          path: '/mnt/a/Movies',
+          is_default: true,
+          // one library on three drives
+          folders: [
+            { path: '/mnt/a/Movies', primary: true, free_bytes: 5e11 },
+            { path: '/mnt/easystore2/Movies', primary: false, free_bytes: 2e12 },
+            { path: '/mnt/easystore3/Movies', primary: false, free_bytes: null },
+          ],
+        },
         { id: 4, name: 'Kids', path: '/mnt/b/Kids', is_default: false },
       ],
     };
@@ -618,7 +629,7 @@ describe('history, undo and the tools beside the list', () => {
   it('Move shows what would move to the picked library before it moves anything', async () => {
     await pickBoth();
     fireEvent.click(screen.getByRole('button', { name: /More/ }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another library' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another drive or library' }));
     const run = await screen.findByRole('button', { name: 'Move' });
     expect(run).toBeDisabled();
     fireEvent.click(await screen.findByRole('radio', { name: /Kids/ }));
@@ -631,6 +642,40 @@ describe('history, undo and the tools beside the list', () => {
       expect(lastCall('bulk/start')?.body).toMatchObject({
         action: 'move',
         params: { library_id: 4 },
+      }),
+    );
+  });
+
+  it('Move offers every drive of a library, and says which one was picked', async () => {
+    await pickBoth();
+    fireEvent.click(screen.getByRole('button', { name: /More/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another drive or library' }));
+    // the library is named once, with each of its drives under it
+    expect(await screen.findByText('· 3 drives')).toBeInTheDocument();
+    expect(screen.getAllByRole('radio')).toHaveLength(4);
+    expect(screen.getByText(/New titles land here/)).toBeInTheDocument();
+    // the library's own folder is the default: no folder is named for it
+    fireEvent.click(screen.getByRole('radio', { name: 'Movies, /mnt/a/Movies' }));
+    await waitFor(() => expect(lastCall('move-preview')?.url).toContain('library_id=1'));
+    expect(lastCall('move-preview')?.url).not.toContain('folder=');
+    const drive = screen.getByRole('radio', { name: 'Movies, /mnt/easystore2/Movies' });
+    expect(drive.textContent).toContain('free');
+    fireEvent.click(drive);
+    await waitFor(() =>
+      expect(decodeURIComponent(lastCall('move-preview')?.url ?? '')).toContain(
+        'folder=/mnt/easystore2/Movies',
+      ),
+    );
+    expect(drive).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Movies, /mnt/a/Movies' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Move 2 files' }));
+    await waitFor(() =>
+      expect(lastCall('bulk/start')?.body).toMatchObject({
+        action: 'move',
+        params: { library_id: 1, folder: '/mnt/easystore2/Movies' },
       }),
     );
   });

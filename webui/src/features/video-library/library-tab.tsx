@@ -34,6 +34,9 @@ import {
   type ConsolidateState,
   fetchAcquisition,
   fetchConsolidateState,
+  type Freshness,
+  type FreshSource,
+  freshenTitle,
   fetchTitleLibrary,
   releaseIdentity,
   renameFile,
@@ -75,8 +78,10 @@ export interface VideoDetailBridge {
   clearSeasonFailures?: (season: number) => void;
   subtitleSearch?: (kind: 'movie' | 'episode', id: number, title: string, label: string) => void;
   openManage?: () => void;
-  /** the title changed under the page (fixed match, deleted the last file). */
+  /** the title itself changed (a fixed match): load the whole page again */
   reloadPage?: () => void;
+  /** its facts changed (a file renamed, an undo, a refresh): redraw in place */
+  refreshPage?: () => void;
   /* the episode list is React now and borrows these from the page, which
      owns the show's data and the grab engine */
   grabEpisode?: (episode: number) => void;
@@ -101,6 +106,12 @@ declare global {
 
 export function bridge(): VideoDetailBridge {
   return window.SoulSyncVideoDetail ?? {};
+}
+
+/** redraw the page around the island, keeping the season, scroll and what is open */
+export function refreshPage(): void {
+  const b = bridge();
+  (b.refreshPage ?? b.reloadPage)?.();
 }
 
 function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
@@ -553,7 +564,7 @@ export function useFileActions(reload: () => void, kind: TitleKind, titleId: num
       onDone={(emptied) => {
         setDeleting(null);
         reload();
-        if (emptied) bridge().reloadPage?.();
+        if (emptied) refreshPage();
       }}
     />
   ) : null;
@@ -578,6 +589,105 @@ function useIdentity(kind: TitleKind, id: number, reload: () => void) {
     }
   }, [kind, id, reload]);
   return { fixing, setFixing, onRelease };
+}
+
+/* ── keeping the title current ────────────────────────────────────────────── */
+
+function ago(seconds: number | null | undefined): string {
+  if (seconds == null) return 'not yet';
+  if (seconds < 90) return 'just now';
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 2 * 86400) return `${Math.max(1, Math.round(seconds / 3600))} h ago`;
+  return `${Math.round(seconds / 86400)} days ago`;
+}
+
+const SOURCE_NAMES: Record<FreshSource, string> = {
+  server: 'Files and watch state, from your media server',
+  metadata: 'Details and episodes',
+  ratings: 'Ratings',
+};
+
+/**
+ * the page opens from what SoulSync already knows, then asks whichever source
+ * has gone stale and redraws only if something moved. `refresh` is the same
+ * asked by hand, for all three now.
+ */
+function useFreshness(kind: TitleKind, id: number, reload: () => void) {
+  const [state, setState] = useState<Freshness | null>(null);
+  const [busy, setBusy] = useState(true);
+  const run = useCallback(
+    async (force: boolean) => {
+      setBusy(true);
+      try {
+        const res = await freshenTitle(kind, id, force);
+        setState(res);
+        if (res.moved_to && res.moved_to !== id) {
+          // the server gave the title a new key: its page is that row's now
+          document.dispatchEvent(
+            new CustomEvent('soulsync:video-open-detail', {
+              detail: { kind, id: res.moved_to, source: 'library' },
+            }),
+          );
+          return;
+        }
+        if (res.changed) {
+          reload();
+          refreshPage();
+        }
+        if (force) {
+          toast(res.changed ? 'Refreshed. This page shows what changed.' : 'Nothing has changed.');
+        }
+      } catch (e) {
+        if (force) toast((e as Error).message || 'Couldn’t refresh', 'error');
+      }
+      setBusy(false);
+    },
+    [kind, id, reload],
+  );
+  useEffect(() => {
+    void run(false);
+    // once per title: a redraw of the same title is not another visit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, id]);
+  return { state, busy, refresh: () => void run(true) };
+}
+
+function FreshLine({ fresh }: { fresh: ReturnType<typeof useFreshness> }) {
+  const { state, busy } = fresh;
+  const lines = (['server', 'metadata', 'ratings'] as FreshSource[]).map((source) => {
+    const note = state?.notes?.[source];
+    const age = state?.sources?.[source]?.age_seconds;
+    return `${SOURCE_NAMES[source]}: ${note ? `not answered (${note})` : `checked ${ago(age)}`}`;
+  });
+  const label = busy
+    ? 'Checking for changes…'
+    : !state
+      ? 'Not checked'
+      : state.notes?.server
+        ? 'Media server not reached'
+        : 'Up to date';
+  return (
+    <span className={s.fresh} title={state ? lines.join('\n') : undefined}>
+      <span className={s.freshDot} data-busy={busy || undefined} aria-hidden="true" />
+      {label}
+      {busy ? null : (
+        <button type="button" className={s.linkBtn} onClick={fresh.refresh}>
+          Refresh
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** the media server no longer has the title: said, never acted on by a visit */
+function goneIssue(what: 'movie' | 'show'): Issue {
+  return {
+    key: 'gone',
+    tone: 'warn',
+    title: `Your media server no longer has this ${what}`,
+    detail:
+      'Its files may have been moved or removed outside SoulSync. Nothing was changed here: Sync with server, in the More menu, takes it out of the library.',
+  };
 }
 
 /** what the page's More menu asked for: history, a move, a rename of every file */
@@ -606,7 +716,7 @@ function TitleDialogs({
   const close = () => setOpen(null);
   const changed = () => {
     reload();
-    bridge().reloadPage?.();
+    refreshPage();
   };
   return (
     <>
@@ -646,6 +756,7 @@ function MovieView({
   const { onRename, onDelete, dialogs: fileDialogs } = useFileActions(reload, 'movie', data.id);
   const { fixing, setFixing, onRelease } = useIdentity('movie', data.id, reload);
   const [command, setCommand] = usePageCommands();
+  const fresh = useFreshness('movie', data.id, reload);
   const [copies, setCopies] = useState(false);
   const [busy, setBusy] = useState(false);
   const best = data.files.find((f) => f.best) ?? data.files[0];
@@ -697,6 +808,7 @@ function MovieView({
   const drifted = data.files.filter((f) => f.reachable && f.naming && !f.naming.conforms);
   const extra = data.extra_copies;
   const issues: Issue[] = [];
+  if (fresh.state?.gone) issues.push(goneIssue('movie'));
   if (stuck) {
     issues.push({
       key: 'stuck',
@@ -827,6 +939,7 @@ function MovieView({
               Use the server’s match again
             </button>
           ) : null}
+          <FreshLine fresh={fresh} />
         </span>
       ) : null}
     </div>
@@ -846,7 +959,7 @@ function MovieView({
           <span className={s.headActions}>
             {data.can_manage && data.files.length ? (
               <button type="button" className={s.quietBtn} onClick={() => setCommand('move')}>
-                Move to another library…
+                Move to another drive or library…
               </button>
             ) : null}
             {b.manualSearch ? (
@@ -1002,6 +1115,7 @@ function ShowView({
     [data.id],
   );
   const [command, setCommand] = usePageCommands();
+  const fresh = useFreshness('show', data.id, reload);
   const allFiles = useMemo(
     () =>
       data.seasons.flatMap((season) => season.episodes.flatMap((ep) => ep.files.map((f) => f.id))),
@@ -1024,6 +1138,7 @@ function ShowView({
 
   const extra = data.extra_copies;
   const issues: Issue[] = [];
+  if (fresh.state?.gone) issues.push(goneIssue('show'));
   if (stuck) {
     issues.push({
       key: 'stuck',
@@ -1126,7 +1241,7 @@ function ShowView({
             Where it lives <span className={s.count}>{sm.folders.length}</span>
           </h3>
           <button type="button" className={s.btn} onClick={() => setCommand('move')}>
-            Move to another library…
+            Move to another drive or library…
           </button>
         </div>
         <ul className={s.folders}>
@@ -1220,6 +1335,7 @@ function ShowView({
               Use the server’s match again
             </button>
           ) : null}
+          <FreshLine fresh={fresh} />
         </span>
       ) : null}
     </div>
