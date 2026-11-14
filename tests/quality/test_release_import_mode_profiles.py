@@ -25,7 +25,7 @@ def db(tmp_path, monkeypatch):
 def client(db, monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(quality_profiles.create_blueprint())
-    monkeypatch.setattr(quality_profiles, "add_activity_item", lambda *args: None)
+    monkeypatch.setattr(quality_profiles, "add_activity_item", lambda *args, **kwargs: None)
     # Applying/updating the default may mirror existing settings into config;
     # keep that unrelated file-write boundary isolated from the real config.
     from core.settings import config_manager
