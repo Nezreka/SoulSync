@@ -6642,6 +6642,19 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: none !important;
 }
 
+/* and the server activity drawer (#2090): it sits one z-index step under the
+   floating row, so the activity, bell, helper and oidc override buttons
+   covered the bottom playback card and intercepted its clicks. unlike the
+   sibling rules above this one leaves #gsearch-bar and .hamburger-btn
+   alone: they already sit under the drawer's scrim. keyed on .visible:
+   the closed drawer stays in the DOM, parked off-canvas */
+body:has(.sact-drawer.visible) #notif-bell-btn,
+body:has(.sact-drawer.visible) #helper-float-btn,
+body:has(.sact-drawer.visible) #activity-float-btn,
+body:has(.sact-drawer.visible) #oidc-override-btn {
+    display: none !important;
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
