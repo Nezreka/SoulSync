@@ -192,8 +192,9 @@ export function UndoStrip({
       const res = await undoBatch(undoable.batch);
       toast(
         `${plural(res.undone, 'file', 'files')} put back` +
-          (res.failed.length ? `, ${res.failed.length} could not be` : ''),
-        res.failed.length ? 'warning' : 'success',
+          (res.failed.length ? `, ${res.failed.length} could not be` : '') +
+          (res.not_renamed ? `, ${res.not_renamed} kept the newer file name` : ''),
+        res.failed.length || res.not_renamed ? 'warning' : 'success',
       );
       onDone();
     } catch (e) {

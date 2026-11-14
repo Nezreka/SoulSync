@@ -348,3 +348,240 @@ def test_the_episode_list_carries_each_episodes_files_specials_last(db, tmp_path
     e2 = out["seasons"][0]["episodes"][1]
     assert (e2["episode"], e2["title"], [f["file_id"] for f in e2["files"]]) == (2, "Cat's in the Bag", [fid])
     assert out["seasons"][0]["episodes"][0]["files"] == []
+
+
+# ── what the review found ────────────────────────────────────────────────────
+
+def _rescan(db, file_id):
+    """what a library scan does to a file's row: gone, and back under a new id"""
+    conn = db._get_connection()
+    row = dict(conn.execute("SELECT * FROM media_files WHERE id=?", (file_id,)).fetchone())
+    conn.execute("DELETE FROM media_files WHERE id=?", (file_id,))
+    row["id"] = file_id + 500
+    conn.execute("INSERT INTO media_files (%s) VALUES (%s)" % (",".join(row), ",".join("?" * len(row))),
+                 list(row.values()))
+    conn.commit()
+    conn.close()
+    return row["id"]
+
+
+def test_undo_still_finds_the_file_after_a_scan_gave_it_a_new_id(db, tmp_path):
+    mid = _movie(db)
+    old = tmp_path / "Movies/Dune (2021)/dune.rip.mkv"
+    fid = _add_file(db, movie_id=mid, path=old)
+    new = file_ops.rename_to_template(db, fid)["path"]
+    new_id = _rescan(db, fid)
+    # another file takes the old id: it must never be the one undo touches
+    other = _movie(db, title="Alien", year=1979, tmdb=348, imdb="tt0078748", sid="101")
+    conn = db._get_connection()
+    conn.execute("INSERT INTO media_files (id, movie_id, relative_path, size_bytes) VALUES (?,?,?,?)",
+                 (fid, other, str(tmp_path / "Movies/Alien (1979)/alien.mkv"), 5))
+    conn.commit()
+    conn.close()
+
+    res = file_history.undo(db, _changes(db)[0]["id"])
+
+    assert res["success"], res
+    assert old.exists() and not os.path.exists(new)
+    assert _row(db, "SELECT relative_path FROM media_files WHERE id=?", new_id) == (str(old),)
+    assert _row(db, "SELECT relative_path FROM media_files WHERE id=?", fid) == \
+        (str(tmp_path / "Movies/Alien (1979)/alien.mkv"),)
+
+
+def test_undo_is_refused_when_the_library_no_longer_lists_the_file(db, tmp_path):
+    mid = _movie(db)
+    old = tmp_path / "Movies/Dune (2021)/dune.rip.mkv"
+    fid = _add_file(db, movie_id=mid, path=old)
+    new = file_ops.rename_to_template(db, fid)["path"]
+    conn = db._get_connection()
+    conn.execute("DELETE FROM media_files WHERE id=?", (fid,))
+    conn.commit()
+    conn.close()
+    res = file_history.undo(db, _changes(db)[0]["id"])
+    assert not res["success"] and "no longer lists" in res["error"]
+    assert os.path.exists(new) and not old.exists()            # nothing moved
+
+
+def _long_show(db, n=6):
+    sid = db.upsert_show_tree("plex", {
+        "server_id": "ls", "title": "Long Show", "year": 2020, "tmdb_id": 777,
+        "seasons": [{"server_id": "ls1", "season_number": 1, "episodes": [
+            {"server_id": "le%d" % i, "episode_number": i, "title": "Part %d" % i,
+             "air_date": "2020-01-%02d" % i} for i in range(1, n + 1)]}]})
+    eps = {e: i for i, e in db._get_connection().execute(
+        "SELECT id, episode_number FROM episodes WHERE show_id=?", (sid,)).fetchall()}
+    return sid, eps
+
+
+def test_a_whole_run_shifted_by_one_is_renamed_and_undone_whole(db, tmp_path):
+    sid, eps = _long_show(db)
+    files = []
+    for n in range(1, 5):                       # episodes 1-4 on disk, named by the template
+        fid = _add_file(db, episode_id=eps[n], path=tmp_path / ("TV/x/raw%d.mkv" % n))
+        assert file_ops.rename_to_template(db, fid)["success"]
+        files.append(fid)
+    before = [_row(db, "SELECT relative_path FROM media_files WHERE id=?", f)[0] for f in files]
+    assert all("S01E0%d" % (i + 1) in p for i, p in enumerate(before))
+
+    res = library_actions.renumber(db, sid, files, 1, 2)       # really episodes 2-5
+
+    assert res["success"] and res["moved"] == 4 and res["not_renamed"] == 0, res
+    after = [_row(db, "SELECT relative_path FROM media_files WHERE id=?", f)[0] for f in files]
+    assert all("S01E0%d" % (i + 2) in p and os.path.isfile(p) for i, p in enumerate(after))
+
+    out = file_history.undo_batch(db, res["batch"])
+
+    assert out["undone"] == 4 and out["not_renamed"] == 0 and not out["failed"], out
+    back = [_row(db, "SELECT relative_path FROM media_files WHERE id=?", f)[0] for f in files]
+    assert back == before and all(os.path.isfile(p) for p in back)
+    assert [_row(db, "SELECT episode_id FROM media_files WHERE id=?", f)[0] for f in files] == \
+        [eps[n] for n in range(1, 5)]
+
+
+def test_renumber_refuses_to_file_onto_an_episode_that_keeps_another_file(db, tmp_path):
+    sid, eps = _long_show(db)
+    a = _add_file(db, episode_id=eps[1], path=tmp_path / "TV/x/a.mkv")
+    b = _add_file(db, episode_id=eps[2], path=tmp_path / "TV/x/b.mkv")
+    plan = library_actions.renumber_plan(db, sid, [a], 1, 2)
+    assert "S01E02 already has a file" in plan["error"]
+    # with its neighbour ticked too the whole run moves along
+    assert library_actions.renumber_plan(db, sid, [a, b], 1, 2)["files"] == 2
+
+
+def test_undoing_a_move_stops_filing_the_title_in_the_library_it_left(db, tmp_path):
+    mid = _movie(db)
+    old = tmp_path / "Movies/Dune (2021)/dune.rip.mkv"
+    _add_file(db, movie_id=mid, path=old)
+    lib = libraries.create_library(db, {"kind": "movie", "name": "Kids", "path": str(tmp_path / "Kids")})
+    assert bulk_ops._apply_one(db, "movie", mid, "move", {"library_id": lib["id"]}, None)["ok"]
+    assert libraries.title_assignment(db, "movie", 438631) == lib["id"]
+    assert file_history.undo(db, _changes(db)[0]["id"])["success"]
+    assert libraries.title_assignment(db, "movie", 438631) is None
+    assert _row(db, "SELECT video_library_id FROM movies WHERE id=?", mid) != (lib["id"],)
+
+
+def test_a_finding_filed_before_the_padlock_cannot_be_fixed(db, tmp_path):
+    from core.video.repair.worker import VideoRepairWorker
+    mid = _movie(db)
+    fid = _add_file(db, movie_id=mid, path=tmp_path / "Movies/Dune (2021)/dune.rip.mkv")
+    sid, eps = _show(db, tmp_path)
+    cases = [
+        ({"entity_type": "movie", "details": {"scope": "movie", "item_id": mid, "file_id": fid}}, "movie"),
+        ({"entity_type": "movie", "details": {"movie_id": mid}}, "movie"),
+        ({"entity_type": "movie", "details": {"tmdb_id": 438631}}, "movie"),
+        ({"entity_type": "episode", "details": {"files": [{"episode_id": eps[(1, 1)]}]}}, "show"),
+        ({"entity_type": "episode", "details": {"show_tmdb_id": 1396}}, "show"),
+    ]
+    assert not any(db.finding_is_held(f) for f, _ in cases)
+    db.set_hands_off("movie", mid, True)
+    db.set_hands_off("show", sid, True)
+    assert all(db.finding_is_held(f) for f, _ in cases)
+    # a movie's tmdb id is not a show's
+    assert not db.finding_is_held({"entity_type": "episode", "details": {"show_tmdb_id": 438631}})
+
+    assert db.repair_create_finding("naming_conformance", "naming_mismatch", title="Dune",
+                                    entity_type="movie", entity_id=str(fid),
+                                    details={"scope": "movie", "item_id": mid, "file_id": fid})
+    finding_id = _row(db, "SELECT id FROM video_repair_findings ORDER BY id DESC LIMIT 1")[0]
+    res = VideoRepairWorker(db).fix_finding(finding_id)
+    assert not res["success"] and "locked" in res["error"]
+    assert (tmp_path / "Movies/Dune (2021)/dune.rip.mkv").exists()
+    assert _row(db, "SELECT status FROM video_repair_findings WHERE id=?", finding_id) == ("pending",)
+
+
+def test_an_automatic_replace_never_takes_a_locked_titles_copy(db, tmp_path):
+    import json
+
+    from core.video import importer
+    mid = _movie(db)
+    dl = {"id": 1, "kind": "movie", "title": "Dune", "year": 2021, "media_id": "438631",
+          "media_source": "tmdb", "release_title": "Dune.2021.2160p.WEB-DL.x265-GRP",
+          "target_dir": str(tmp_path / "Movies"),
+          "search_ctx": json.dumps({"scope": "movie", "title": "Dune", "year": 2021})}
+    src = str(tmp_path / "dl/Dune.2021.2160p.WEB-DL.x265-GRP.mkv")
+    have = ["Dune (2021) 720p.mkv"]
+
+    def plan(**kw):
+        return importer.plan_import(dl, src, list_dir=lambda d: have,
+                                    library_dir=str(tmp_path / "Movies/Dune (2021)"), **kw)
+    assert plan()["action"] == "upgrade"
+    assert not importer.title_locked(db, dl)
+    db.set_hands_off("movie", mid, True)
+    assert importer.title_locked(db, dl)
+    held = plan(locked=True)
+    assert held["action"] == "reject" and "locked" in held["reason"]
+    # what the user asks for by hand still goes through
+    assert plan(locked=True, force=True, override={})["action"] == "upgrade"
+    theirs = dict(dl, search_ctx=json.dumps({"scope": "movie", "title": "Dune", "year": 2021,
+                                             "import_policy": "user_replace"}))
+    assert importer.plan_import(theirs, src, list_dir=lambda d: have, locked=True,
+                                library_dir=str(tmp_path / "Movies/Dune (2021)"))["action"] == "upgrade"
+    # a show is locked by its own id, not a movie's
+    assert not importer.title_locked(db, dict(dl, kind="show", search_ctx=json.dumps({"scope": "episode"})))
+
+
+# ── the routes ───────────────────────────────────────────────────────────────
+
+def test_the_routes_list_undo_save_views_plan_and_renumber(db, tmp_path, monkeypatch):
+    from tests.video.test_library_manager import _client
+    monkeypatch.setattr("core.video.sources.resolve_video_server", lambda: "plex")
+    mid = _movie(db)
+    old = tmp_path / "Movies/Dune (2021)/dune.rip.mkv"
+    fid = _add_file(db, movie_id=mid, path=old)
+    new = file_ops.rename_to_template(db, fid)["path"]
+    client = _client(db)
+
+    hist = client.get("/api/video/manager/history?kind=movie&id=%d" % mid).get_json()
+    assert hist["success"] and hist["total"] == 1 and hist["items"][0]["to_name"] == os.path.basename(new)
+    assert "snapshot" not in hist["items"][0]
+    cid = hist["items"][0]["id"]
+    assert client.post("/api/video/manager/history/%d/undo" % cid).get_json()["success"]
+    assert old.exists()
+    again = client.post("/api/video/manager/history/%d/undo" % cid)
+    assert again.status_code == 409 and "already undone" in again.get_json()["error"]
+    assert client.post("/api/video/manager/history/undo-batch", json={}).status_code == 400
+    assert client.post("/api/video/manager/history/undo-batch", json={"batch": "nope"}).status_code == 409
+
+    assert client.get("/api/video/manager/views").get_json()["views"] == []
+    view = {"name": "  Clean up  ", "state": {"tab": "movies", "view": "table"}}
+    assert client.put("/api/video/manager/views", json={"views": [view]}).get_json()["views"] == \
+        [{"name": "Clean up", "state": {"tab": "movies", "view": "table"}}]
+    assert client.get("/api/video/manager/views").get_json()["views"][0]["name"] == "Clean up"
+    assert client.put("/api/video/manager/views", json={"views": [{"name": ""}]}).status_code == 400
+    assert client.put("/api/video/manager/views", json={"views": "x"}).status_code == 400
+
+    lib = libraries.create_library(db, {"kind": "movie", "name": "Kids", "path": str(tmp_path / "Kids")})
+    libs = client.get("/api/video/manager/libraries?kind=movie").get_json()["libraries"]
+    assert "Kids" in [x["name"] for x in libs]
+    plan = client.get("/api/video/manager/move-preview?kind=movie&ids=%d&library_id=%d"
+                      % (mid, lib["id"])).get_json()
+    assert plan["success"] and plan["files"] == 1 and plan["held"] == 0 and old.exists()
+    db.set_hands_off("movie", mid, True)
+    held = client.get("/api/video/manager/move-preview?kind=movie&ids=%d&library_id=%d"
+                      % (mid, lib["id"])).get_json()
+    assert (held["files"], held["held"]) == (0, 1)
+    assert client.get("/api/video/manager/move-preview?kind=movie&ids=%d&library_id=999"
+                      % mid).status_code in (200, 409)
+
+    sid, eps = _show(db, tmp_path)
+    ep = _add_file(db, episode_id=eps[(1, 1)], path=tmp_path / "TV/Breaking Bad/Season 01/a.mkv")
+    seasons = client.get("/api/video/manager/episodes/%d" % sid).get_json()["seasons"]
+    assert seasons[0]["episodes"][0]["files"][0]["file_id"] == ep
+    body = {"file_ids": [ep], "season": 2, "start_episode": 1}
+    preview = client.post("/api/video/manager/renumber/%d" % sid, json=body).get_json()
+    assert preview["files"] == 1 and _row(db, "SELECT episode_id FROM media_files WHERE id=?", ep) == (eps[(1, 1)],)
+    done = client.post("/api/video/manager/renumber/%d" % sid, json=dict(body, apply=True)).get_json()
+    assert done["success"] and done["moved"] == 1 and done["batch"]
+    assert _row(db, "SELECT episode_id FROM media_files WHERE id=?", ep) == (eps[(2, 1)],)
+    bad = client.post("/api/video/manager/renumber/%d" % sid, json=dict(body, season=9))
+    assert bad.status_code == 409 and not bad.get_json()["success"]
+
+
+def test_every_new_route_is_the_admins(db, tmp_path):
+    from tests.video.test_library_manager import _client
+    client = _client(db, is_admin=False)
+    for method, path in (("get", "history"), ("post", "history/1/undo"), ("post", "history/undo-batch"),
+                         ("get", "views"), ("put", "views"), ("get", "libraries"),
+                         ("get", "move-preview"), ("get", "episodes/1"), ("post", "renumber/1")):
+        res = getattr(client, method)("/api/video/manager/" + path, json={})
+        assert res.status_code == 403, (method, path, res.status_code)

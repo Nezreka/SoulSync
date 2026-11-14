@@ -92,8 +92,9 @@ def owner_of(db, file_id) -> Dict[str, Any]:
 
 
 def record(db, action: str, *, file_id=None, owner: Optional[dict] = None, from_path=None,
-           to_path=None, from_stored=None, trash_path=None, from_episode_id=None,
-           to_episode_id=None, snapshot: Optional[dict] = None) -> Optional[int]:
+           to_path=None, from_stored=None, to_stored=None, trash_path=None,
+           from_episode_id=None, to_episode_id=None,
+           snapshot: Optional[dict] = None) -> Optional[int]:
     """one change. never raises: a missing history row is not a failed rename.
     ``owner``: what owner_of read, when the file's row is already gone."""
     if _quiet.get():
@@ -107,10 +108,11 @@ def record(db, action: str, *, file_id=None, owner: Optional[dict] = None, from_
         try:
             cur = conn.execute(
                 "INSERT INTO video_file_changes (action, kind, item_id, title, label, file_id, "
-                "from_path, to_path, from_stored, trash_path, from_episode_id, to_episode_id, "
-                "snapshot, batch) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "from_path, to_path, from_stored, to_stored, trash_path, from_episode_id, "
+                "to_episode_id, snapshot, batch) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (action, who["kind"], who["item_id"], who["title"], who["label"], file_id,
-                 from_path, to_path, from_stored, trash_path, from_episode_id, to_episode_id,
+                 from_path, to_path, from_stored, to_stored, trash_path, from_episode_id,
+                 to_episode_id,
                  json.dumps(snapshot) if snapshot else None, _batch.get()))
             conn.commit()
             return int(cur.lastrowid)
@@ -186,6 +188,61 @@ def _mark_undone(db, change_id: int) -> None:
         conn.close()
 
 
+_GONE = ("The library no longer lists this file where the change left it, so it can't be put "
+         "back from here.")
+
+
+def _file_now(db, ch: dict) -> Optional[int]:
+    """the library row of the file a change left behind, as it is TODAY.
+
+    a scan deletes and re-adds a title's file rows, so the id written down at
+    the time of the change may be gone, or worse, belong to another file. the
+    row is found by the path the change left the file at; the old id is only
+    trusted while it still sits at that path."""
+    stored = ch.get("to_stored")
+    conn = db._get_connection()
+    try:
+        if stored:
+            rows = conn.execute("SELECT id FROM media_files WHERE relative_path = ?",
+                                (stored,)).fetchall()
+            ids = [int(r[0]) for r in rows]
+            if ch.get("file_id") in ids:
+                return int(ch["file_id"])
+            return ids[0] if len(ids) == 1 else None
+        # a change from before to_stored was kept: the id, only if its file
+        # still carries the name the change gave it
+        row = conn.execute("SELECT relative_path FROM media_files WHERE id = ?",
+                           (ch.get("file_id"),)).fetchone()
+        name = os.path.basename(str(ch.get("to_path") or "").replace("\\", "/"))
+        if row and name and os.path.basename(str(row[0] or "").replace("\\", "/")) == name:
+            return int(ch["file_id"])
+        return None
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    finally:
+        conn.close()
+
+
+def _unfile_from_library(db, ch: dict) -> None:
+    """a move to another library filed the title there. going back, the title
+    stops being filed there, or its next download would land in the library
+    it just left."""
+    try:
+        from core.video import libraries
+        kind = ch.get("kind")
+        if kind not in ("movie", "show") or not ch.get("item_id"):
+            return
+        tmdb = (db.title_identity(kind, ch["item_id"]) or {}).get("tmdb_id")
+        there = libraries.library_for_path(db, ch.get("to_path"), kind)
+        home = libraries.library_for_path(db, ch.get("from_path"), kind)
+        if tmdb and there and (not home or home["id"] != there["id"]) \
+                and libraries.title_assignment(db, kind, tmdb) == there["id"]:
+            libraries.assign_title(db, kind, tmdb, None)
+        libraries.attribute_files(db)
+    except Exception:   # noqa: BLE001 - the file is back; the next scan re-files the title
+        logger.debug("un-filing after an undone move failed", exc_info=True)
+
+
 def _undo_move(db, ch: dict) -> Dict[str, Any]:
     from core.video import file_ops
     cur, back = ch.get("to_path"), ch.get("from_path")
@@ -194,10 +251,15 @@ def _undo_move(db, ch: dict) -> Dict[str, Any]:
     if not os.path.isfile(cur):
         return {"success": False,
                 "error": "The file isn't where this change left it any more, so it can't be put back."}
-    res = file_ops.move_into_place(db, ch.get("file_id"), cur, back,
+    file_id = _file_now(db, ch)
+    if file_id is None:
+        return {"success": False, "error": _GONE}
+    res = file_ops.move_into_place(db, file_id, cur, back,
                                    stored=ch.get("from_stored") or None)
     if not res.get("success"):
         return {"success": False, "error": res.get("error") or "The file couldn't be moved back."}
+    if ch.get("action") == "move":
+        _unfile_from_library(db, ch)
     return {"success": True, "message": "Put back as %s" % os.path.basename(back)}
 
 
@@ -252,22 +314,32 @@ def _undo_delete(db, ch: dict) -> Dict[str, Any]:
                         else "Restored. The next scan adds it back to the library")}
 
 
-def _undo_reassign(db, ch: dict) -> Dict[str, Any]:
+def _rename_back(db, file_id) -> str:
+    """rename a re-filed file to its episode's name. '' when it is named
+    right, else why not."""
     from core.video import file_ops
-    moved = db.library_move_file(ch.get("file_id"), ch.get("from_episode_id"))
+    try:
+        res = file_ops.rename_to_template(db, file_id) or {}
+        return "" if res.get("success") else (res.get("error") or "the rename failed")
+    except Exception:   # noqa: BLE001 - the re-file is done; the name is the follow-up
+        logger.exception("rename after undoing a reassign failed")
+        return "the rename failed"
+
+
+def _undo_reassign(db, ch: dict) -> Dict[str, Any]:
+    file_id = _file_now(db, ch)
+    if file_id is None:
+        return {"success": False, "error": _GONE}
+    moved = db.library_move_file(file_id, ch.get("from_episode_id"))
     if not moved:
         return {"success": False,
                 "error": "The file or the episode it came from isn't in the library any more."}
-    note = ""
-    try:
-        res = file_ops.rename_to_template(db, ch.get("file_id")) or {}
-        if not res.get("success"):
-            note = res.get("error") or ""
-    except Exception:   # noqa: BLE001 - the re-file is done; the name is the follow-up
-        logger.exception("rename after undoing a reassign failed")
-        note = "the rename failed"
-    return {"success": True, "message": "Filed back under the episode it came from"
-            + (" (not renamed: %s)" % note if note else "")}
+    note = _rename_back(db, file_id)
+    out = {"success": True, "message": "Filed back under the episode it came from"
+           + (" (not renamed: %s)" % note if note else "")}
+    if note:
+        out["rename_pending"] = file_id     # a batch tries again once its neighbours moved
+    return out
 
 
 def undo(db, change_id) -> Dict[str, Any]:
@@ -304,7 +376,7 @@ def undo_batch(db, batch_id: str) -> Dict[str, Any]:
         ids = []
     finally:
         conn.close()
-    done, failed, titles = 0, [], set()
+    done, failed, titles, unnamed = 0, [], set(), []
     # twice: in a chain (E01 to E02, E02 to E03) one file's old name is free
     # only after the next one has gone back
     for _ in range(2):
@@ -314,13 +386,23 @@ def undo_batch(db, batch_id: str) -> Dict[str, Any]:
             if res.get("success"):
                 done += 1
                 titles.add((res.get("kind"), res.get("item_id")))
+                if res.get("rename_pending"):
+                    unnamed.append(res["rename_pending"])
             else:
                 again.append(cid)
                 failed.append({"id": cid, "error": res.get("error")})
         ids = again
         if not ids:
             break
+    # re-filed files whose old name was still taken: again, while any gets through
+    with quiet():
+        while unnamed:
+            still = [f for f in unnamed if _rename_back(db, f)]
+            if len(still) == len(unnamed):
+                break
+            unnamed = still
     return {"success": done > 0 and not failed, "undone": done, "failed": failed,
+            "not_renamed": len(unnamed),
             "titles": [{"kind": k, "item_id": i} for k, i in titles if k and i]}
 
 

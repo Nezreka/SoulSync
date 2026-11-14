@@ -207,9 +207,10 @@ def _lock_title(db, kind: str, item_id: int, locked: bool, source) -> dict:
     return {"ok": True, "pushed": False, "changed": changed}
 
 
-def _server_view(db, local: str) -> str:
+def _server_view(db, local: str):
     """a local path as the media server writes it: the drive map read
-    backwards, else the path as it is"""
+    backwards. None when no mapped drive holds it, and the move then works
+    the server's path out from the file's old one."""
     try:
         from core.video import drive_map
         p = local.replace("\\", "/")
@@ -223,7 +224,7 @@ def _server_view(db, local: str) -> str:
             return out.replace("/", "\\") if "\\" in best[1] else out
     except Exception:   # noqa: BLE001 - the next server scan re-adopts the truth
         logger.debug("server view of %s not worked out", local, exc_info=True)
-    return local
+    return None
 
 
 def move_plan(db, kind: str, item_id: int, library_id: int) -> dict:
@@ -248,7 +249,7 @@ def move_plan(db, kind: str, item_id: int, library_id: int) -> dict:
         real = file_ops._locate(db, row)
         if not real:
             skipped.append({"file_id": row["file_id"], "filename": name,
-                            "reason": "only your media server can see it"})
+                            "reason": "out of reach from here, on a drive only your media server sees"})
             continue
         fields = file_ops.naming_fields(row)
         if organization.languages_unknown(row.get("scope"), fields, settings):

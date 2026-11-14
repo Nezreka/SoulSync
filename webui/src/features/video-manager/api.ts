@@ -315,7 +315,7 @@ export function undoChange(id: number): Promise<{ success: boolean; message?: st
 
 export async function undoBatch(
   batch: string,
-): Promise<{ undone: number; failed: { id: number; error: string }[] }> {
+): Promise<{ undone: number; not_renamed: number; failed: { id: number; error: string }[] }> {
   const response = await fetch('/api/video/manager/history/undo-batch', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -323,12 +323,17 @@ export async function undoBatch(
   });
   const data = (await response.json()) as {
     undone?: number;
+    not_renamed?: number;
     failed?: { id: number; error: string }[];
     error?: string;
   };
   if (!data.undone && !data.failed?.length)
     throw new ManagerError(data.error || 'Nothing could be put back', response.status);
-  return { undone: data.undone ?? 0, failed: data.failed ?? [] };
+  return {
+    undone: data.undone ?? 0,
+    not_renamed: data.not_renamed ?? 0,
+    failed: data.failed ?? [],
+  };
 }
 
 /* ── saved views ─────────────────────────────────────────────────────────── */

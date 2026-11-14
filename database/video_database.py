@@ -500,6 +500,9 @@ _COLUMN_MIGRATIONS = [
     # automatic upgrades leave the title and its files alone.
     ("movies", "hands_off", "INTEGER NOT NULL DEFAULT 0"),
     ("shows", "hands_off", "INTEGER NOT NULL DEFAULT 0"),
+    # where a file change left the file, as the server sees it: a scan gives
+    # every file a new id, so undo finds the file by this, never by the old id
+    ("video_file_changes", "to_stored", "TEXT"),
     # 'Cleared' download-history rows: hidden from the History modal but KEPT —
     # YouTube completed rows are the ownership ledger (scan dedup, retention,
     # Channels tab); a user clear must never delete the facts.
@@ -7503,6 +7506,74 @@ class VideoDatabase:
                                (int(item_id),)).fetchone()
             return bool(row and row[0])
         except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
+    def finding_is_held(self, finding: dict) -> bool:
+        """a maintenance finding names a padlocked title. findings filed before
+        the padlock went on stay in the list until the next scan clears them,
+        and a fix must not act on one. reads whatever the finding carries:
+        movie / show / episode / file ids, else a tmdb id."""
+        if not finding:
+            return False
+        movies, shows, episodes, files, movie_tmdb, show_tmdb = set(), set(), set(), set(), set(), set()
+        is_movie = str(finding.get("entity_type") or "") == "movie"
+
+        def num(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        def walk(node):
+            if isinstance(node, list):
+                for x in node:
+                    walk(x)
+                return
+            if not isinstance(node, dict):
+                return
+            scope = str(node.get("scope") or node.get("kind") or "")
+            for key, value in node.items():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+                    continue
+                n = num(value)
+                if n is None:
+                    continue
+                if key == "movie_id":
+                    movies.add(n)
+                elif key == "show_id":
+                    shows.add(n)
+                elif key == "episode_id":
+                    episodes.add(n)
+                elif key == "file_id":
+                    files.add(n)
+                elif key == "show_tmdb_id":
+                    show_tmdb.add(n)
+                elif key == "tmdb_id":
+                    (movie_tmdb if (scope == "movie" or (not scope and is_movie)) else show_tmdb).add(n)
+                elif key == "item_id":
+                    (movies if scope == "movie" else episodes if scope == "episode" else set()).add(n)
+
+        walk(finding.get("details") or {})
+        conn = self._get_connection()
+        try:
+            def any_row(sql, ids):
+                ids = sorted(ids)
+                return bool(ids) and conn.execute(
+                    sql % ",".join("?" * len(ids)), ids).fetchone() is not None
+            return (
+                any_row("SELECT 1 FROM movies WHERE hands_off=1 AND id IN (%s)", movies)
+                or any_row("SELECT 1 FROM shows WHERE hands_off=1 AND id IN (%s)", shows)
+                or any_row("SELECT 1 FROM movies WHERE hands_off=1 AND tmdb_id IN (%s)", movie_tmdb)
+                or any_row("SELECT 1 FROM shows WHERE hands_off=1 AND tmdb_id IN (%s)", show_tmdb)
+                or any_row("SELECT 1 FROM episodes e JOIN shows s ON s.id=e.show_id "
+                           "WHERE s.hands_off=1 AND e.id IN (%s)", episodes)
+                or any_row("SELECT 1 FROM media_files f LEFT JOIN movies m ON m.id=f.movie_id "
+                           "LEFT JOIN episodes e ON e.id=f.episode_id LEFT JOIN shows s ON s.id=e.show_id "
+                           "WHERE (m.hands_off=1 OR s.hands_off=1) AND f.id IN (%s)", files))
+        except sqlite3.Error:
             return False
         finally:
             conn.close()

@@ -157,7 +157,8 @@ def reassign_file(db, file_id, episode_id) -> Dict[str, Any]:
         logger.exception("rename after reassign failed for file %s", file_id)
         note = "the rename failed"
     file_history.record(db, "reassign", file_id=file_id, from_episode_id=moved["from_episode"],
-                        to_episode_id=moved["to_episode"])
+                        to_episode_id=moved["to_episode"],
+                        to_stored=db.media_file_stored_path(file_id))
     return {"success": True, "action": "reassigned", "renamed": renamed, "rename_note": note,
             **moved}
 
@@ -193,6 +194,11 @@ def renumber_plan(db, show_id: int, file_ids: List[Any], season: Any, start_epis
             (int(show_id), season))}
     finally:
         conn.close()
+    # what already sits under each episode and is not part of this run
+    others: Dict[Any, int] = {}
+    for r in db.library_title_files("show", show_id):
+        if r["file_id"] not in wanted:
+            others[r["item_id"]] = others.get(r["item_id"], 0) + 1
     moves, step, last = [], -1, None
     for r in rows:
         if r["item_id"] != last:
@@ -205,6 +211,10 @@ def renumber_plan(db, show_id: int, file_ids: List[Any], season: Any, start_epis
                              "Refresh the show's details if it should." % (where, number)}
         if target == r["item_id"]:
             continue
+        if others.get(target):
+            # filing onto it would leave two files there and read as extra copies
+            return {"error": "S%02dE%02d already has a file that isn't ticked. Tick it too, or "
+                             "move it first." % (season, number)}
         moves.append({"file_id": r["file_id"], "filename": _name(r), "from": _label(r),
                       "to": "S%02dE%02d" % (season, number),
                       "from_episode_id": r["item_id"], "to_episode_id": target})
@@ -223,14 +233,13 @@ def renumber(db, show_id: int, file_ids: List[Any], season: Any, start_episode: 
         for mv in plan["moves"]:
             if db.library_move_file(mv["file_id"], mv["to_episode_id"]):
                 moved.append(mv)
-                file_history.record(db, "reassign", file_id=mv["file_id"],
-                                    from_episode_id=mv["from_episode_id"],
-                                    to_episode_id=mv["to_episode_id"])
+        # a run shifted by one: each file wants the name its neighbour still
+        # has, so one pass frees one name. go round while any gets through.
         pending, not_renamed = [m["file_id"] for m in moved], []
         with file_history.quiet():
-            for _ in range(3):
+            while pending:
                 not_renamed = []
-                for file_id in pending:
+                for file_id in reversed(pending):
                     try:
                         res = file_ops.rename_to_template(db, file_id) or {}
                     except Exception:   # noqa: BLE001 - the re-file is done; the name follows
@@ -238,9 +247,15 @@ def renumber(db, show_id: int, file_ids: List[Any], season: Any, start_episode: 
                         res = {"success": False}
                     if not res.get("success"):
                         not_renamed.append(file_id)
-                if not not_renamed or len(not_renamed) == len(pending):
+                if len(not_renamed) == len(pending):
                     break
                 pending = not_renamed
+        # written down after the renames, with where each file ended up
+        for mv in moved:
+            file_history.record(db, "reassign", file_id=mv["file_id"],
+                                from_episode_id=mv["from_episode_id"],
+                                to_episode_id=mv["to_episode_id"],
+                                to_stored=db.media_file_stored_path(mv["file_id"]))
     return {"success": True, "moved": len(moved), "not_renamed": len(not_renamed),
             "batch": batch_id if moved else None}
 

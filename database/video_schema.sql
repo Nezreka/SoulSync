@@ -1185,6 +1185,7 @@ CREATE TABLE IF NOT EXISTS video_file_changes (
     from_path TEXT,
     to_path TEXT,
     from_stored TEXT,                -- the server's view of from_path
+    to_stored TEXT,                  -- the server's view of where the change left it
     trash_path TEXT,                 -- a delete: where the recycle folder holds it
     from_episode_id INTEGER,
     to_episode_id INTEGER,

@@ -174,11 +174,7 @@ def move_into_place(db, file_id, cur: str, want: str, *, stored: Optional[str] =
     except OSError as e:
         return {"success": False, "error": f"rename failed: {e}"}
     moved = move_sidecars(cur, want)
-    # the history row an undo reads: where it was, on disk and as the server saw it
-    from core.video import file_history
-    same_dir = same_path(os.path.dirname(cur), os.path.dirname(want))
-    file_history.record(db, "rename" if same_dir else "move", file_id=file_id,
-                        from_path=cur, to_path=want, from_stored=was_stored)
+
     # the library's stored path must follow, or every lookup by that path
     # (upgrades, a new episode finding its show's folder) misses the file
     # until the media server rescans -- the same mirror Mass Rename keeps
@@ -186,6 +182,18 @@ def move_into_place(db, file_id, cur: str, want: str, *, stored: Optional[str] =
         db.set_media_file_stored_path(int(file_id), stored)
     else:
         update_stored_path(db, file_id, cur, want)
+    # the history row an undo reads: where it was and where it is now, on disk
+    # and as the server sees it
+    from core.video import file_history
+    now_stored = None
+    try:
+        now_stored = db.media_file_stored_path(int(file_id))
+    except Exception:   # noqa: BLE001 - only the history's undo wants it
+        now_stored = None
+    same_dir = same_path(os.path.dirname(cur), os.path.dirname(want))
+    file_history.record(db, "rename" if same_dir else "move", file_id=file_id,
+                        from_path=cur, to_path=want, from_stored=was_stored,
+                        to_stored=now_stored)
     # tidy an emptied folder (only ever the file's own former dir)
     try:
         old_dir = os.path.dirname(cur)
