@@ -11,6 +11,7 @@ the video library becomes a real library manager. the library page is a table of
 - **a library can sit on many drives.** move lists each library with every drive it has and the free space on each. pick another drive of the same library, or another library.
 - **it is fast.** lists, filter counts and the files view are answered from memory. on a 120k file library the files view went from 3 to 7 seconds a page to about 10ms, filter counts from over half a second to nothing, and the tab you are not on is ready before you click it.
 - the cards rise and fade in like the music library's, and the page is as wide as the watchlist.
+- channel cards and the plain posters a profile without the manager browses fade in the same way.
 
 ## movie and show pages
 
@@ -57,7 +58,9 @@ the video library becomes a real library manager. the library page is a table of
 ## security and upkeep
 
 - **a security pass.** api keys, tokens and passwords are blanked out of every log line, names and urls are escaped before they reach the page, and backups, diagnostics, auto-import settings, quality profiles, repair findings and automations are checked against the profile asking.
+- **metasync holds less (#2099).** pairing gives the node a read-only key, since the node only reads. the pool key is handed to the node you paired with and to no address a request names. the node's status, which shows the first characters of its keys, is for admins. a node paired before this keeps its older admin key until you pair it again.
 - status loops, discover shelves, the quarantine list and bulk repair fixes each stopped re-reading the whole library.
 - **bulk fixing orphan files is fast (thanks Randomname653, #2095).** each finding rebuilt the path of every file in the library to recheck one. it reads only the files that share the orphan's name now: about two seconds a finding where it took a minute on a 311k file library.
+- the visual baselines render again (#2102): the artist shot follows the route to the library's artist page, and the library shots show a library.
 
 tested: the frontend suite and the video, library, wishlist, activity and release suites pass locally. the full suite runs on dev's nightly build, which is the check on this pr.
