@@ -468,6 +468,10 @@ def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) ->
     for it in items:
         if it.get("episode_number") is None:
             continue
+        kept = kept_season_number(it, db)
+        if kept:
+            it["alt_season"], it["alt_episode"] = kept
+            continue
         info = scene_info(it, db=db, client=client)
         if info:
             (it["alt_season"], it["alt_episode"]), exclusive = info
@@ -478,6 +482,22 @@ def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) ->
         if alt:
             it["alt_season"], it["alt_episode"] = alt
     return items
+
+
+def kept_season_number(item: Dict[str, Any], db: Any) -> Optional[Numbering]:
+    """the split number of an episode in a season kept the way the server
+    numbers it, or None.
+
+    a server that numbers Jujutsu Kaisen as TMDB does (one season of 59) keeps
+    that season here too, so its files stay where the server has them. the
+    episode sync wrote down where each one sits in the split everything else
+    uses, and S01E48 goes out as S03E01 as well. TVDB's air-date match only
+    looks one season either side and needs a key; this needs neither."""
+    try:
+        return db.scene_number(item.get("show_tmdb_id"), item.get("season_number"),
+                               item.get("episode_number"))
+    except Exception:   # noqa: BLE001 - a numbering assist must never break a search
+        return None
 
 
 def season_relative(item: Dict[str, Any], db: Any) -> Optional[Numbering]:

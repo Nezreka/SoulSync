@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 68   # v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 69   # v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -1056,6 +1056,22 @@ class VideoDatabase:
             # longer held back by a cour that isn't on TMDB yet (The Apothecary
             # Diaries) or a map offset one out (Tokyo Revengers). the episode
             # sync is one-time, so the shows it passed over are queued again.
+            conn.execute(
+                "UPDATE shows SET episodes_synced = 0 WHERE id IN ("
+                + VideoDatabase._LUMPED_ANIME_SQL + ")")
+        if prev_version < 69:
+            # v69: a lumped season the server numbers TMDB's way keeps its one
+            # season, and the episode sync now writes down each episode's split
+            # number for search and subtitles (episode_scene_numbers). the sync
+            # is one-time, so every show with episodes past where a later
+            # season starts is queued again, owned or missing.
+            conn.execute(
+                "UPDATE shows SET episodes_synced = 0 WHERE tmdb_id IS NOT NULL "
+                "AND episodes_synced = 1 AND id IN ("
+                "SELECT a.item_id FROM video_anime a WHERE a.kind = 'show' "
+                "AND a.tmdb_offset > 0 AND a.tmdb_season > 0 AND EXISTS ("
+                "SELECT 1 FROM episodes e WHERE e.show_id = a.item_id "
+                "AND e.season_number = a.tmdb_season AND e.episode_number > a.tmdb_offset))")
             conn.execute(
                 "UPDATE shows SET episodes_synced = 0 WHERE id IN ("
                 + VideoDatabase._LUMPED_ANIME_SQL + ")")
@@ -2957,6 +2973,44 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def set_scene_numbers(self, show_id: int, season_number: int, moved: dict) -> None:
+        """write down the split number of each episode of a season kept the way
+        the server numbers it ({episode: (scene season, scene episode)}). the
+        season's old rows go first, so an empty ``moved`` clears it."""
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM episode_scene_numbers WHERE show_id=? AND season_number=?",
+                         (int(show_id), int(season_number)))
+            conn.executemany(
+                "INSERT OR REPLACE INTO episode_scene_numbers "
+                "(show_id, season_number, episode_number, scene_season, scene_episode) "
+                "VALUES (?,?,?,?,?)",
+                [(int(show_id), int(season_number), int(old), int(new[0]), int(new[1]))
+                 for old, new in (moved or {}).items()])
+            conn.commit()
+        finally:
+            conn.close()
+
+    def scene_number(self, show_tmdb_id, season_number, episode_number):
+        """(scene season, scene episode) for an episode of a season kept the
+        way the server numbers it, or None. never raises."""
+        try:
+            args = (int(show_tmdb_id), int(season_number), int(episode_number))
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT n.scene_season, n.scene_episode FROM episode_scene_numbers n "
+                "JOIN shows s ON s.id = n.show_id WHERE s.tmdb_id=? "
+                "AND n.season_number=? AND n.episode_number=? ORDER BY s.id LIMIT 1",
+                args).fetchone()
+            return (int(row[0]), int(row[1])) if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
     def retire_renumbered_episodes(self, show_id: int, season_number: int, moved: dict) -> int:
         """drop the missing rows an episode left behind at its TMDB number once
         it's filed under TVDB's ({old episode: (season, episode)}), and move any
@@ -3995,6 +4049,14 @@ class VideoDatabase:
                 if row:
                     info["season"] = row["season_number"]
                     info["episode"] = row["episode_number"]
+                    # the subtitle sites only know a lumped season by its split
+                    # numbers (Jujutsu Kaisen S01E48 has none, S03E01 has them)
+                    scene = conn.execute(
+                        "SELECT scene_season, scene_episode FROM episode_scene_numbers "
+                        "WHERE show_id=? AND season_number=? AND episode_number=?",
+                        (row["show_id"], row["season_number"], row["episode_number"])).fetchone()
+                    if scene:
+                        info["season"], info["episode"] = scene[0], scene[1]
                     show = conn.execute(
                         "SELECT tmdb_id, imdb_id FROM shows WHERE id=?",
                         (row["show_id"],)).fetchone()

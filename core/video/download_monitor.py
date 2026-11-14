@@ -893,6 +893,14 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
         if isinstance(ctx, dict) and ctx.get("season") is not None:
             identity["season"] = ctx.get("season")
             identity["episode"] = ctx.get("episode")
+            try:
+                # a lumped season kept the server's way: the subtitle sites
+                # only know its split numbers
+                scene = db.scene_number(tmdb_id, ctx.get("season"), ctx.get("episode"))
+            except Exception:   # noqa: BLE001
+                scene = None
+            if scene:
+                identity["season"], identity["episode"] = scene
         if not (identity.get("tmdb_id") or identity.get("imdb_id")):
             return
 

@@ -502,3 +502,90 @@ def test_a_split_season_asked_for_after_the_cache_emptied_still_loads(monkeypatc
     # a show with nothing to split is looked at once, not on every season opened
     assert engine.tmdb_season(1396, 2) is None and engine.tmdb_season(1396, 3) is None
     assert built == [209867, 1396]
+
+
+# -- a season kept the server's way is searched and subtitled by its split
+# numbers (Thibs' Jujutsu Kaisen: 36 files in one season 1, S01E37+ never found)
+
+def _item(season, episode):
+    return {"show_tmdb_id": 95479, "season_number": season, "episode_number": episode}
+
+
+def test_a_kept_season_writes_down_where_each_episode_sits_in_the_split(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    eps = _eps(db, show_id)
+    assert len(eps) == 59 and all(k[0] == 1 for k in eps)   # filed as the server has it
+    assert db.scene_number(95479, 1, 25) == (2, 1)
+    assert db.scene_number(95479, 1, 47) == (2, 23)
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+    assert db.scene_number(95479, 1, 59) == (3, 12)
+    assert db.scene_number(95479, 1, 24) is None            # season one is season one
+    assert db.scene_number(95479, 1, 60) is None
+    assert db.scene_number(None, 1, 48) is None
+
+
+def test_a_kept_season_goes_out_under_its_split_number_too(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    out = numbering.annotate([_item(1, 59), _item(1, 12)], db=db,
+                             client=numbering._default_client(db))
+    assert (out[0]["alt_season"], out[0]["alt_episode"]) == (3, 12)
+    assert "alt_exclusive" not in out[0]      # a release named S01E59 still counts
+    assert "alt_season" not in out[1]
+
+
+def test_subtitles_for_a_kept_season_are_asked_for_by_the_split_number(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    conn = db._get_connection()
+    ids = {r["episode_number"]: r["id"] for r in conn.execute(
+        "SELECT id, episode_number FROM episodes WHERE show_id=? AND season_number=1", (show_id,))}
+    conn.close()
+    info = db.subtitle_video_info("episode", ids[30])
+    assert (info["season"], info["episode"], info["tmdb_id"]) == (2, 6, 95479)
+    info = db.subtitle_video_info("episode", ids[3])
+    assert (info["season"], info["episode"]) == (1, 3)
+
+
+def test_a_season_that_does_split_keeps_no_second_numbers(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+    # the server is renumbered the split way and scanned again
+    conn = db._get_connection()
+    conn.execute("DELETE FROM episodes WHERE show_id=? AND episode_number > 24", (show_id,))
+    conn.commit()
+    conn.close()
+    _sync(db, show_id)
+    assert (3, 12) in _eps(db, show_id)
+    assert db.scene_number(95479, 1, 48) is None
+
+
+def test_another_providers_episode_pass_leaves_the_numbers_alone(db, no_tvdb):
+    show_id = _server_show(db, {1: 36})
+    _link(db, show_id)
+    _sync(db, show_id)
+    VideoEnrichmentWorker(db, "tvdb", FakeTMDB())._cascade_episodes(show_id, 95479, [1])
+    assert db.scene_number(95479, 1, 48) == (3, 1)
+
+
+def test_v69_queues_a_lumped_show_whose_episodes_are_all_owned(tmp_path, no_tvdb):
+    path = tmp_path / "old.db"
+    db = VideoDatabase(database_path=str(path))
+    owned = _server_show(db, {1: 59})
+    _link(db, owned)
+    db.mark_episodes_synced(owned)
+    plain = db.upsert_show_tree("plex", {"server_id": "x", "title": "Arrow", "seasons": []})
+    db.mark_episodes_synced(plain)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version = 68")
+    conn.commit()
+    conn.close()
+    video_database._initialized_paths.discard(str(path.resolve()))   # a restart
+    db = VideoDatabase(database_path=str(path))
+    assert _synced(db, owned) == 0 and _synced(db, plain) == 1

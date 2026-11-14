@@ -1123,6 +1123,20 @@ CREATE TABLE IF NOT EXISTS tvdb_episode_cache (
     PRIMARY KEY (tvdb_id, season_number)
 );
 
+-- the number the scene, the indexers and the subtitle sites use for an episode
+-- of a season SoulSync keeps the way the media server numbers it. Jujutsu
+-- Kaisen is one TMDB season of 59; a server that numbers its files that way
+-- keeps the one season, and S01E48 is still only ever released as S03E01
+-- (Thibs). written by the episode sync, read by search and subtitles.
+CREATE TABLE IF NOT EXISTS episode_scene_numbers (
+    show_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    scene_season INTEGER NOT NULL,
+    scene_episode INTEGER NOT NULL,
+    PRIMARY KEY (show_id, season_number, episode_number)
+);
+
 -- ── series type for shows not in any library yet ──
 -- a show's series type normally comes from its library row (set by hand, or
 -- the show sits in a library marked anime). a show that is followed, wished
