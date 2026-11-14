@@ -287,6 +287,11 @@ const artistDetail = [
         album_count: 4,
         single_count: 0,
         discography_count: 4,
+        // An hour before the spec's frozen clock (2025-01-13 10:00 UTC), so
+        // the page does not start a "checking for new releases" walk: that
+        // posts a refresh the harness cannot answer and puts a failure toast
+        // in the shot.
+        discography_synced_at: '2025-01-13 09:00:00',
         total_size_bytes: 28 * 30_000_000,
         user_overrides: {},
       },
