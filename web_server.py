@@ -4577,10 +4577,9 @@ def handle_settings():
 
             logger.info("Settings saved successfully via Web UI.")
 
-            # Add activity for settings save
-            changed_services = list(new_settings.keys())
-            services_text = ", ".join(changed_services)
-            add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
+            # the page sends every section on each save, so naming them was a wall
+            # of text. no toast either: the save button already says saved
+            add_activity_item("", "Settings Updated", "Configuration saved", "Now", show_toast=False)
 
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:

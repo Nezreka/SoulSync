@@ -91,7 +91,7 @@ def save_quality_profile():
         if success:
             from core.library2.wishlist_mirror import schedule_quality_profile_refresh
             schedule_quality_profile_refresh(db, db.get_quality_profile()["id"])
-            add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
+            add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now", show_toast=False)
             return jsonify({"success": True, "message": "Quality profile saved successfully"})
         else:
             return jsonify({"success": False, "error": "Failed to save quality profile"}), 500
@@ -317,7 +317,7 @@ def update_custom_quality_profile(profile_id):
 
         from core.library2.wishlist_mirror import schedule_quality_profile_refresh
         schedule_quality_profile_refresh(db, profile_id)
-        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now", show_toast=False)
         return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
         logger.error(f"Error updating quality profile: {e}")
