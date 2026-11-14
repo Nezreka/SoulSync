@@ -85,16 +85,6 @@ def _file_ids(raw) -> list:
     return out[:2000]
 
 
-def _episode_files(db, episode_id) -> list:
-    """every file on record for one episode"""
-    conn = db._get_connection()
-    try:
-        return [{"file_id": int(r[0]), "item_id": episode_id} for r in conn.execute(
-            "SELECT id FROM media_files WHERE episode_id = ?", (int(episode_id),))]
-    finally:
-        conn.close()
-
-
 def _stop_hunting(db, episodes: dict) -> int:
     """the deleted files' episodes that have no copy left stop being hunted,
     so the file a person just threw out is not fetched again. returns how
@@ -247,9 +237,10 @@ def register_routes(bp):
         db = get_video_db()
         changes, conforming, unreachable = [], 0, 0
         rows = db.library_file_rows(ids)          # each title read once
+        finder = file_ops.Locator(db)             # and each folder
         for file_id in ids:
             try:
-                plan = (file_ops.rename_plan(db, file_id, row=rows[file_id])
+                plan = (file_ops.rename_plan(db, file_id, row=rows[file_id], finder=finder)
                         if file_id in rows else {"error": "gone"}) or {}
             except Exception:   # noqa: BLE001 - one unreadable file never ends the preview
                 plan = {"error": "could not be read"}
@@ -283,11 +274,12 @@ def register_routes(bp):
         picked, items, size, unreachable = set(), [], 0, 0
         owners: set = set()
         rows = db.library_file_rows(ids)          # each title read once
+        finder = file_ops.Locator(db)             # and each folder
         for file_id in ids:
             row = rows.get(file_id)
             if not row:
                 continue
-            real = file_ops._locate(db, row)
+            real = finder.locate(row)
             if not real:
                 unreachable += 1
             else:
@@ -298,13 +290,19 @@ def register_routes(bp):
                           "filename": library_actions._name(row),
                           "size_bytes": int(row.get("size_bytes") or 0),
                           "reachable": bool(real)})
-        # an episode or movie goes missing when every copy it has is picked
+        # an episode or movie goes missing when every copy it has is picked.
+        # a show's files are read once for all of its episodes
+        have: dict = {}
+        for show_id in {show for show, _ep in db.file_episodes(ids).values()}:
+            for r in db.library_title_files("show", show_id):
+                have.setdefault(("episode", r["item_id"]), set()).add(r["file_id"])
         emptied = 0
         for scope, item_id in owners:
-            rows = (db.library_title_files("movie", item_id) if scope == "movie"
-                    else _episode_files(db, item_id))
-            have = {r["file_id"] for r in rows}
-            if have and have <= picked:
+            if scope == "movie":
+                mine = {r["file_id"] for r in db.library_title_files("movie", item_id)}
+            else:
+                mine = have.get(("episode", item_id), set())
+            if mine and mine <= picked:
                 emptied += 1
         return jsonify({"success": True, "files": len(items), "size_bytes": size,
                         "unreachable": unreachable, "emptied": emptied,

@@ -213,23 +213,101 @@ def _locate(db, row: dict, resolve: Optional[Callable] = None) -> Optional[str]:
                    size_bytes=row.get("size_bytes"))
 
 
+class Locator:
+    """finds many stored files on disk for one preview, reading each folder
+    once.
+
+    a file is looked for at its stored path, at the drive map's translation
+    and under every library folder at four depths: a dozen "does this exist"
+    calls, and every one of them slow on a drive that is far away or not
+    mounted. a season's files sit in one folder, so the answer for all of
+    them is in that folder's listing. a folder that isn't there is asked
+    about once, however many files were looked for in it.
+
+    for a preview only: nothing here sees a file that appears or is renamed
+    after its folder was read."""
+
+    def __init__(self, db):
+        self.db = db
+        self._folders: Dict[str, Any] = {}
+        self._bases: Optional[list] = None
+        self._roots: Dict[Any, list] = {}
+        self._settings: Optional[dict] = None
+
+    def roots(self, scope) -> list:
+        """the library folders for a kind of title, read once"""
+        from core.video.library_roots import library_roots
+        if scope not in self._roots:
+            self._roots[scope] = library_roots(self.db, scope)
+        return self._roots[scope]
+
+    def settings(self) -> dict:
+        """the naming settings, read once"""
+        from core.video import organization
+        if self._settings is None:
+            self._settings = organization.load(self.db)
+        return self._settings
+
+    def _listing(self, folder: str):
+        """(names, names casefolded) of a folder, None when it isn't there,
+        False when it is there and can't be listed"""
+        if folder not in self._folders:
+            try:
+                with os.scandir(folder) as entries:
+                    names = {e.name for e in entries}
+                self._folders[folder] = (names, {n.casefold() for n in names})
+            except (FileNotFoundError, NotADirectoryError):
+                self._folders[folder] = None
+            except OSError:
+                self._folders[folder] = False
+        return self._folders[folder]
+
+    def exists(self, path: str) -> bool:
+        folder, name = os.path.split(str(path or ""))
+        if not folder or not name:
+            return os.path.exists(path)
+        listing = self._listing(folder)
+        if listing is None:
+            return False
+        if listing is False:
+            return os.path.exists(path)
+        if name in listing[0]:
+            return True
+        # the name in another case: the disk says whether that is the file
+        return name.casefold() in listing[1] and os.path.exists(path)
+
+    def resolve(self, stored_path, base_dirs=None, **kwargs):
+        """the shape of resolve_video_file_path, answered from the listings"""
+        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
+        if self._bases is None:
+            self._bases = video_base_dirs(self.db)
+        kwargs.setdefault("exists", self.exists)
+        return resolve_video_file_path(stored_path, self._bases, **kwargs)
+
+    def locate(self, row: dict) -> Optional[str]:
+        return self.resolve(row.get("relative_path"), size_bytes=row.get("size_bytes"))
+
+
 def rename_plan(db, file_id, *, resolve: Optional[Callable] = None,
-                row: Optional[dict] = None) -> Dict[str, Any]:
+                row: Optional[dict] = None,
+                finder: Optional[Locator] = None) -> Dict[str, Any]:
     """{current, expected, conforms} for one stored file, or {error}. the
     preview the library tab shows before anything moves. ``row``: the file's
-    row when the caller already read it (a preview of many files)."""
+    row when the caller already read it, and ``finder``: one Locator shared
+    by a preview of many files, so the folders and the settings are read
+    once for all of them."""
     from core.video import organization
     from core.video.library_roots import library_roots
     row = row or db.library_file_row(file_id)
     if not row:
         return {"error": "That file isn't in the library any more."}
-    real = _locate(db, row, resolve)
+    real = finder.locate(row) if finder else _locate(db, row, resolve)
     if not real:
         return {"error": "SoulSync can't reach this file from here — only your media server can see it."}
-    roots = library_roots(db, row.get("scope"))
+    roots = finder.roots(row.get("scope")) if finder else library_roots(db, row.get("scope"))
     if not roots:
         return {"error": "No library folder is configured for this type."}
-    want = expected_path(row, real, roots, organization.load(db))
+    want = expected_path(row, real, roots, finder.settings() if finder else organization.load(db))
     if not want:
         return {"error": "This file sits outside your library folders, so it has no template path."}
     return {"current": real, "expected": want, "conforms": same_path(real, want)}
@@ -283,6 +361,6 @@ def delete_to_recycle(db, file_id, *, resolve: Optional[Callable] = None,
             "kind": dropped.get("kind"), "item_id": dropped.get("item_id")}
 
 
-__all__ = ["naming_fields", "same_path", "expected_path", "move_sidecars", "safe_move",
+__all__ = ["Locator", "naming_fields", "same_path", "expected_path", "move_sidecars", "safe_move",
            "update_stored_path", "move_into_place", "rename_plan",
            "rename_to_template", "delete_to_recycle"]

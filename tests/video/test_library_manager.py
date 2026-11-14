@@ -273,7 +273,7 @@ def test_rename_preview_lists_only_the_files_that_would_change(db, monkeypatch):
     plans = {"a.mkv": {"current": "a.mkv", "expected": "Alien (1979).mkv", "conforms": False},
              "a.1080.mkv": {"current": "a.1080.mkv", "expected": "a.1080.mkv", "conforms": True}}
 
-    def plan(_db, file_id):
+    def plan(_db, file_id, **_shared):   # the route hands over the row and one Locator
         row = _db._get_connection().execute(
             "SELECT relative_path FROM media_files WHERE id=?", (file_id,)).fetchone()
         return plans.get(row[0].rsplit("/", 1)[-1], {"error": "not reachable"})

@@ -69,6 +69,72 @@ def test_a_movies_delete_preview_knows_its_last_copy(db, tmp_path):
     assert client.get("/api/video/files/delete-preview?file_ids=%d,%d" % (a, b)).get_json()["emptied"] == 1
 
 
+# ── a preview of many files reads each folder once ───────────────────────────
+
+def test_a_preview_asks_the_disk_once_per_folder_not_once_per_file(db, tmp_path, monkeypatch):
+    import os
+    from core.video import file_ops
+    sid, eps = _show(db, tmp_path)
+    here = _add_file(db, episode_id=eps[(1, 1)], path=tmp_path / "TV/Breaking Bad/Season 01/bb.101.mkv")
+    gone = [_add_file(db, episode_id=eps[(1, 2)], size=5,
+                      path=tmp_path / ("Elsewhere/Breaking Bad/Season 01/bb.102.v%d.mkv" % i))
+            for i in range(12)]
+    for i in range(12):                              # only the media server can see these
+        os.remove(tmp_path / ("Elsewhere/Breaking Bad/Season 01/bb.102.v%d.mkv" % i))
+    os.rmdir(tmp_path / "Elsewhere/Breaking Bad/Season 01")
+    stats, lists = [], []
+    real_exists, real_scandir = os.path.exists, os.scandir
+    monkeypatch.setattr(os.path, "exists", lambda p: stats.append(p) or real_exists(p))
+    monkeypatch.setattr(os, "scandir", lambda p: lists.append(str(p)) or real_scandir(p))
+
+    finder = file_ops.Locator(db)
+    rows = db.library_file_rows([here, *gone])
+    found = {fid: finder.locate(rows[fid]) for fid in [here, *gone]}
+
+    assert found[here] and all(found[g] is None for g in gone)
+    # thirteen files, and no folder was listed twice
+    assert len(lists) == len(set(lists))
+    assert stats == []                               # nothing was asked about file by file
+
+
+def test_a_rename_preview_reads_the_folders_and_the_settings_once(db, tmp_path, monkeypatch):
+    from core.video import library_roots, organization, path_resolver
+    sid, eps = _show(db, tmp_path)
+    ids = [_add_file(db, episode_id=eps[(1, 1)], size=5 + i,
+                     path=tmp_path / ("TV/Breaking Bad/Season 01/bb.101.v%d.mkv" % i)) for i in range(6)]
+    calls = {"bases": 0, "roots": 0, "settings": 0}
+
+    def counted(name, fn):
+        def run(*a, **k):
+            calls[name] += 1
+            return fn(*a, **k)
+        return run
+    monkeypatch.setattr(path_resolver, "video_base_dirs", counted("bases", path_resolver.video_base_dirs))
+    monkeypatch.setattr(organization, "load", counted("settings", organization.load))
+    real_roots = library_roots.library_roots
+    monkeypatch.setattr(library_roots, "library_roots",
+                        lambda db_, scope=None: calls.__setitem__("roots", calls["roots"] + (scope is not None))
+                        or real_roots(db_, scope) if scope is not None else real_roots(db_))
+    out = _client(db).get("/api/video/files/rename-preview?file_ids=%s"
+                          % ",".join(map(str, ids))).get_json()
+    assert out["success"] and out["files"] == 6 and out["unreachable"] == 0
+    assert calls == {"bases": 1, "roots": 1, "settings": 1}, calls
+
+
+def test_the_folder_listing_agrees_with_the_disk(db, tmp_path):
+    import os
+    from core.video import file_ops
+    folder = tmp_path / "TV/Show/Season 01"
+    folder.mkdir(parents=True)
+    (folder / "a.mkv").write_bytes(b"x")
+    finder = file_ops.Locator(db)
+    assert finder.exists(str(folder / "a.mkv"))
+    assert not finder.exists(str(folder / "b.mkv"))
+    assert not finder.exists(str(tmp_path / "Nowhere/Season 01/a.mkv"))
+    # another case is the disk's call: this one tells names apart by case
+    assert finder.exists(str(folder / "A.MKV")) == os.path.exists(str(folder / "A.MKV"))
+
+
 # ── a file action can be put back from the page ──────────────────────────────
 
 def test_rename_delete_and_refile_each_answer_with_what_undoes_them(db, tmp_path):
