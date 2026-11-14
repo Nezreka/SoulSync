@@ -91,12 +91,7 @@ export function LegacyPosters({ side, search }: { side: Side; search: string }) 
               }}
             >
               {it.has_poster ? (
-                <img
-                  className={s.posterImg}
-                  src={`/api/video/poster/${kind}/${it.id}?w=342`}
-                  alt=""
-                  loading="lazy"
-                />
+                <FadeImg src={`/api/video/poster/${kind}/${it.id}?w=342`} />
               ) : (
                 <div className={s.posterEmpty} aria-hidden="true">
                   {String(it.title || '?')
@@ -123,6 +118,30 @@ interface Channel extends LegacyItem {
   poster_url?: string | null;
   owned_count?: number;
   followed?: boolean;
+}
+
+/**
+ * A card's picture. `.posterImg` starts invisible and fades in once it is
+ * marked shown, so every image that wears the class has to mark itself: a
+ * bare <img> with it loaded fine and stayed at opacity 0.
+ */
+function FadeImg({ src }: { src: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <img
+      className={s.posterImg}
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      data-shown={shown || undefined}
+      // an image already in the cache is complete before React attaches onLoad
+      ref={(img) => {
+        if (img?.complete && img.naturalWidth > 0) setShown(true);
+      }}
+      onLoad={() => setShown(true)}
+    />
+  );
 }
 
 export function ChannelsGrid() {
@@ -160,7 +179,7 @@ export function ChannelsGrid() {
                 }}
               >
                 {art ? (
-                  <img className={s.posterImg} src={art} alt="" loading="lazy" />
+                  <FadeImg src={art} />
                 ) : (
                   <div className={s.posterEmpty} aria-hidden="true">
                     {String(it.title || '?')

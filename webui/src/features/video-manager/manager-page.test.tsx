@@ -334,6 +334,16 @@ function answer(url: string, method: string): unknown {
       series_type: 'standard',
       hands_off: false,
     };
+  if (path === '/api/video/library' && u.searchParams.get('kind') === 'channels')
+    return page([
+      {
+        id: 'UC1',
+        title: 'Some Channel',
+        poster_url: 'https://yt3.example/avatar.jpg',
+        video_count: 10,
+        owned_count: 2,
+      },
+    ]);
   if (path === '/api/video/library')
     return page([{ id: 5, title: 'Plain Poster', year: 2001, has_poster: false }]);
   return { success: true };
@@ -431,6 +441,19 @@ describe('the views', () => {
     const img = document.querySelector('article img') as HTMLImageElement;
     expect(img.getAttribute('data-shown')).toBeNull();
     expect(img.getAttribute('decoding')).toBe('async');
+    fireEvent.load(img);
+    expect(img.getAttribute('data-shown')).toBe('true');
+  });
+
+  it('a channel card shows its picture once it has arrived', async () => {
+    // the picture's class starts invisible, so a card that never marks its
+    // image shown stays a blank square (every channel card did)
+    await mount();
+    fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
+    expect(await screen.findByText('Some Channel')).toBeInTheDocument();
+    const img = document.querySelector('article img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('https://yt3.example/avatar.jpg');
+    expect(img.getAttribute('data-shown')).toBeNull();
     fireEvent.load(img);
     expect(img.getAttribute('data-shown')).toBe('true');
   });
