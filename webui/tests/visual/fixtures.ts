@@ -38,19 +38,34 @@ const ARTIST_NAMES = [
   'Thom Yorke',
 ];
 
-const libraryArtists = http.get('*/api/library/artists', () =>
+/** The library page asks this first; without it the page reads `{}` as "no
+ *  library access" and the shot is the "Library is unavailable" notice. */
+const libraryEnabled = http.get('*/api/library/v2/enabled', () =>
+  HttpResponse.json({ success: true, enabled: true, can_write: true }),
+);
+
+const libraryArtists = http.get('*/api/library/v2/artists', () =>
   HttpResponse.json({
     success: true,
     artists: ARTIST_NAMES.map((name, i) => ({
       id: i + 1,
       name,
       image_url: null,
+      remote_image_url: null,
+      genres: i % 2 ? ['electronic'] : ['idm', 'ambient'],
+      monitored: i % 3 === 0,
+      monitor_new_items: 'all',
+      quality_profile_id: 1,
+      added_at: null,
+      album_count: 2 + (i % 5),
+      single_count: i % 4,
       track_count: 10 + i * 7,
-      is_watched: i % 3 === 0,
-      upgradable_count: i % 4 === 0 ? 2 : 0,
-      spotify_artist_id: i % 2 ? `sp${i}` : null,
-      musicbrainz_id: `mb${i}`,
-      deezer_id: i % 3 ? i : null,
+      tracks_present: 10 + i * 7 - (i % 3),
+      tracks_missing: i % 3,
+      total_size_bytes: (10 + i * 7) * 30_000_000,
+      media_server_sources: [],
+      user_overrides: {},
+      provider_ids: i % 2 ? { spotify: `sp${i}` } : {},
     })),
     pagination: {
       page: 1,
@@ -60,7 +75,6 @@ const libraryArtists = http.get('*/api/library/artists', () =>
       has_prev: false,
       has_next: false,
     },
-    upgradable_total: 6,
   }),
 );
 
@@ -206,24 +220,75 @@ const similarArtistStream = [
   .map((message) => `data: ${JSON.stringify(message)}\n\n`)
   .join('');
 
+function artistRelease(id: number, title: string, year: number, present: number, total: number) {
+  return {
+    id,
+    title,
+    album_type: 'album',
+    release_date: `${year}-01-01`,
+    year,
+    image_url: null,
+    remote_image_url: null,
+    monitored: present > 0,
+    quality_profile_id: 1,
+    origin: present > 0 ? 'library' : 'discography',
+    spotify_id: null,
+    explicit: null,
+    label: null,
+    style: null,
+    mood: null,
+    track_count: total,
+    tracks_present: present,
+    tracks_missing: total - present,
+    total_size_bytes: present * 30_000_000,
+    user_overrides: {},
+  };
+}
+
+/**
+ * /artist-detail/library/42 no longer has a page of its own: the route sends
+ * every artist to the library's artist page (/library?artist=42), so these are
+ * the library page's requests, not the old artist-detail endpoint's.
+ */
 const artistDetail = [
+  libraryEnabled,
   http.get(
     '*/api/artist/similar/:name/stream',
     () =>
       new HttpResponse(similarArtistStream, { headers: { 'Content-Type': 'text/event-stream' } }),
   ),
-  http.get('*/api/artist-detail/:id', () =>
+  http.get('*/api/library/v2/artists/42', () =>
     HttpResponse.json({
       success: true,
-      artist: { id: 42, name: 'Aphex Twin', server_source: 'plex' },
-      discography: {
+      artist: {
+        id: 42,
+        name: 'Aphex Twin',
+        image_url: null,
+        remote_image_url: null,
+        provider_ids: {},
+        media_server_sources: ['plex'],
+        summary: null,
+        style: null,
+        mood: null,
+        label: null,
+        genres: ['idm', 'ambient'],
+        monitored: true,
+        monitor_new_items: 'all',
+        quality_profile: null,
         albums: [
-          { id: 1, title: 'Selected Ambient Works 85-92', owned: true, image_url: null },
-          { id: 2, title: 'Richard D. James Album', owned: true, image_url: null },
-          { id: 3, title: 'Drukqs', owned: false, image_url: null },
-          { id: 4, title: 'Syro', owned: false, image_url: null },
+          artistRelease(1, 'Selected Ambient Works 85-92', 1992, 13, 13),
+          artistRelease(2, 'Richard D. James Album', 1996, 15, 15),
+          artistRelease(3, 'Drukqs', 2001, 0, 30),
+          artistRelease(4, 'Syro', 2014, 0, 12),
         ],
-        source: 'spotify',
+        eps: [],
+        singles: [],
+        in_library: true,
+        album_count: 4,
+        single_count: 0,
+        discography_count: 4,
+        total_size_bytes: 28 * 30_000_000,
+        user_overrides: {},
       },
     }),
   ),
@@ -1095,7 +1160,7 @@ const settings = [
 
 /** Handlers per route, on top of `shellHandlers`. */
 export const routeHandlers: Record<string, RequestHandler[]> = {
-  library: [libraryArtists],
+  library: [libraryEnabled, libraryArtists],
   watchlist: watchlistArtists,
   issues,
   stats,
