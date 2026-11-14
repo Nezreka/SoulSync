@@ -2441,6 +2441,15 @@ Named movie and TV libraries, each with its own folder (#2029). The main and 4K 
 - `POST /api/video/libraries/folders/<id>/default`: the default for its kind (needs a folder and to be on).
 - `DELETE /api/video/libraries/folders/<id>`: remove a custom library. Its files stay; titles picked for it go back to the rules and the default; a removed default hands the kind to the main library. The builtins can't be removed (`400`).
 
+**The library manager** (admin, the web UI's own routes under `/api/video/manager`):
+
+- `GET /titles?kind=movies|shows&page=&limit=&sort=&dir=` and `GET /files`: one page of rows. Filters: `search`, `needs` (comma list of `missing`, `below_cutoff`, `copies`, `unmatched`, `no_subtitles`, `unprobed`, `unmonitored`, `unwatched`, `not_owned`), `status`, `monitored`, `locked`, `resolution`, `codec`, `hdr`, `audio_language`, `subtitle_language`, `drive`, `genre`, `video_library`, `quality_profile`, `year_from`, `year_to`. `GET /ids` returns every id the filters match, `GET /facets` what there is to filter by.
+- `GET /rename-preview`, `GET /delete-preview`, `GET /move-preview?kind=&ids=&library_id=`: what the operation would do. Nothing is changed.
+- `POST /api/video/bulk/start` body `{kind, ids, action, params}` runs one in the background; `GET /api/video/bulk/status` follows it. Actions: `monitored`, `watched`, `content_rating`, `genre_add`, `genre_remove`, `refresh_art`, `quality_profile`, `rename`, `wish` (`mode`: `missing` / `upgrade`), `subtitles`, `rematch`, `series_type`, `lock` (`value`: true / false), `move` (`library_id`), `delete` (`confirm`: the number of ids). The status carries `held` (padlocked titles left alone) and `batch` (the file changes of a rename or move, for undo).
+- `GET /history?kind=&id=&limit=&offset=`: file changes, newest first, for one title or all. `POST /history/<id>/undo` puts one back; `POST /history/undo-batch` body `{batch}` puts back a whole run. `409` with a plain reason when it can't be (the file moved on, the old path is taken, the recycle folder was emptied).
+- `GET /views` and `PUT /views` body `{views: [{name, state}]}`: the saved views.
+- `GET /episodes/<show_id>`: seasons, episodes and the files under each. `POST /renumber/<show_id>` body `{file_ids, season, start_episode, apply?}`: files the chosen files under consecutive episodes of that season. Without `apply` it answers with the plan.
+
 Which library a new title files into: a library picked for the grab (`video_library_id` on `POST /api/video/downloads/grab` and the manual import), else one picked for the title, else the 4K library when its quality profile saves to 4K, else the first library whose rules match its genres or TMDB keywords (a keyword also matches inside its name), else the kind's default. The anime folder still takes anime shows unless a library was picked for the title.
 
 - `GET /api/video/downloads/quality/for` adds `libraries` (`[{id, name, builtin}]`, the usable ones of the title's kind), `library` (`{id, name, why}`, where it files now; `why` is `picked`, `assigned`, `profile`, `rule: ...` or `default`) and `library_assigned` (the title's own pick, `0` = none).

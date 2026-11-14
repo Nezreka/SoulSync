@@ -56,7 +56,9 @@ def _prepare(items: List[Dict[str, Any]], media_type: str, *, user_initiated: bo
     if any(it.get("owned") for it in items) and not user_initiated:
         per_item = vpw._cutoff_rank_for_item if any(
             it.get("quality_profile_id") for it in items) else None
-        items = vpw.annotate_upgrades(items, _cutoff_rank(), cutoff_for=per_item)
+        from api.video import get_video_db as _held_db
+        items = vpw.annotate_upgrades(items, _cutoff_rank(), cutoff_for=per_item,
+                                      held=vpw.held_titles(_held_db()))
     active = set(vpw._default_active_keys(media_type) or set())
     todo = []
     with _lock:

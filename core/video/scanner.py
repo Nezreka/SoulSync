@@ -347,6 +347,13 @@ class VideoLibraryScanner:
             logger.exception("Video library scan failed")
             self._set(state="error", phase="failed", error=str(e))
         finally:
+            # the library manager's summed-up rows describe the library the
+            # scan just changed underneath them
+            try:
+                from core.video import library_manager
+                library_manager.forget()
+            except Exception:   # noqa: BLE001 - a stale page is not a failed scan
+                logger.debug("library manager not told about the scan", exc_info=True)
             if paused:
                 self._resume_after_scan()
 

@@ -287,6 +287,12 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
   - Presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
+- **Library manager**: the Library page is your movies and shows three ways (posters, a sortable table of titles with the columns you pick, and a table of the files themselves).
+  - **Filters that manage**: missing, below your quality target, extra copies, unmatched, no subtitles, unmonitored, unwatched, locked, and by resolution, codec, HDR, audio and subtitle language, drive, library, quality profile, genre and year. Save any set as a named **view**.
+  - **Bulk operations** on a selection or on everything a filter matches: rename with a preview, **move to another library or drive**, quality profile, look for upgrades, get missing, fetch subtitles, identify again, genres, content rating, series type, collections, and delete with a preview and a typed count.
+  - **An editor for every title**: details with per-field locks, poster, quality profile, series type, and for a show an **Episodes** tab that files a run of episode files under the right season and episode (specials are season 0) and renames them to match.
+  - **History and undo**: every rename, move, delete and re-file made by hand is listed, and one click puts it back, a whole bulk run at once. A deleted file comes back owned while the recycle folder still holds it.
+  - **The padlock**: lock a title once it is the way you want it, and maintenance jobs, mass rename and automatic upgrades leave it and its files alone.
 - **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
 - **Watch Together** in chat: vote on a title and watch together.

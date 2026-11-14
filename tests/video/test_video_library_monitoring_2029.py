@@ -179,10 +179,12 @@ def test_activity_rows_name_their_library(db, client):
 
 
 def test_library_page_offers_the_filter():
-    root = Path(__file__).resolve().parents[2] / "webui"
-    js = (root / "static/video/video-library.js").read_text(encoding="utf-8")
-    html = (root / "index.html").read_text(encoding="utf-8")
-    assert "data-video-lib-vlib" in html
-    assert "/api/video/library/video-libraries" in js
-    assert "params.set('video_library', state.vlib)" in js
-    assert "sel.hidden = mine.length < 2" in js
+    # the library page is the React manager now: its Library filter is read
+    # from the manager's facets and shown when there is more than one
+    src = Path(__file__).resolve().parents[2] / "webui" / "src" / "features" / "video-manager"
+    filters = (src / "manager-filters.tsx").read_text(encoding="utf-8")
+    assert "facets.libraries.length > 1" in filters
+    assert "video_library" in filters
+    api = (Path(__file__).resolve().parents[2] / "api" / "video" / "manager.py").read_text(encoding="utf-8")
+    assert "list_libraries" in api
+

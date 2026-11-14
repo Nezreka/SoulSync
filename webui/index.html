@@ -935,97 +935,11 @@
                 <!-- the video dashboard is the React /dashboard?media=video page
                      (webui/src/routes/dashboard/-video); video-side.js hands off to it -->
                 <section class="video-subpage" data-video-subpage="video-library" hidden>
-                    <!-- Reuses the music library's exact classes (.library-container,
-                         .library-artist-card, .alphabet-selector, .library-search-input)
-                         so it looks identical — just fed from /api/video/library. -->
-                    <div class="library-page-embed" id="video-library-page">
-                        <div class="library-container">
-                            <div class="library-header">
-                                <div class="library-header-content">
-                                    <h2 class="library-title"><img src="/static/library.png" class="page-header-icon"
-                                            alt=""><span>Library</span></h2>
-                                    <p class="library-subtitle">Movies and shows from your media server</p>
-                                </div>
-                                <div class="library-stats">
-                                    <span class="library-stat">
-                                        <span class="stat-number" data-video-lib-count>0</span>
-                                        <span class="stat-label" data-video-lib-count-label>Movies</span>
-                                    </span>
-                                </div>
-                                <button class="library-watchlist-all-btn library-export-btn" type="button"
-                                    data-video-scan-mode="full" title="Scan the media server">
-                                    <span class="watchlist-all-icon" data-video-scan-icon>&#128260;</span>
-                                    <span class="watchlist-all-text" data-video-scan-label>Scan</span>
-                                </button>
-                            </div>
-                            <div class="library-controls">
-                                <div class="video-library-tabs">
-                                    <button class="video-lib-tab active" type="button"
-                                        data-video-lib-tab="movies">Movies</button>
-                                    <button class="video-lib-tab" type="button"
-                                        data-video-lib-tab="shows">Shows</button>
-                                    <button class="video-lib-tab" type="button"
-                                        data-video-lib-tab="channels">Channels</button>
-                                </div>
-                                <div class="library-search-container">
-                                    <input type="text" class="library-search-input" data-video-lib-search
-                                        placeholder="Search movies...">
-                                    <div class="library-search-icon">&#128269;</div>
-                                </div>
-                                <div class="video-library-filters">
-                                    <select class="library-source-filter-select" data-video-lib-sort title="Sort">
-                                        <option value="title">Title</option>
-                                        <option value="year">Year</option>
-                                        <option value="added">Recently Added</option>
-                                        <option value="rating">Rating</option>
-                                        <option value="size">Largest</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-status title="Filter">
-                                        <option value="all">All</option>
-                                        <option value="owned">Owned</option>
-                                        <option value="wanted">Wanted</option>
-                                        <option value="missing" hidden>Missing episodes</option>
-                                        <option value="watched">Watched</option>
-                                        <option value="unwatched">Unwatched</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-vlib title="Library" hidden>
-                                        <option value="">All Libraries</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-res title="Quality">
-                                        <option value="">Any Quality</option>
-                                    </select>
-                                    <select class="library-source-filter-select" data-video-lib-genre title="Genre">
-                                        <option value="">All Genres</option>
-                                    </select>
-                                    <button class="video-lib-select-btn" type="button" data-video-lib-select
-                                        title="Select items for bulk edits">Select</button>
-                                </div>
-                                <div class="alphabet-selector">
-                                    <div class="alphabet-selector-inner" data-video-lib-alphabet></div>
-                                </div>
-                            </div>
-                            <div class="library-content">
-                                <div class="library-loading hidden" data-video-lib-loading>
-                                    <div class="loading-spinner"></div>
-                                    <div class="loading-text">Loading library...</div>
-                                </div>
-                                <div class="library-artists-grid" data-video-lib-grid></div>
-                                <div class="library-empty hidden" data-video-lib-empty>
-                                    <div class="empty-icon">&#127916;</div>
-                                    <div class="empty-title" data-video-lib-empty-title>Nothing here yet</div>
-                                    <div class="empty-subtitle">Run a scan to pull your library from the media server.
-                                    </div>
-                                </div>
-                                <div class="library-pagination hidden" data-video-lib-pagination>
-                                    <button class="pagination-btn" type="button" data-video-lib-prev
-                                        disabled><span>&larr; Previous</span></button>
-                                    <div class="pagination-info"><span data-video-lib-pageinfo>Page 1 of 1</span></div>
-                                    <button class="pagination-btn" type="button" data-video-lib-next disabled><span>Next
-                                            &rarr;</span></button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- The library manager (React, webui/src/features/video-manager):
+                         posters, a table of titles and a table of files, with the
+                         filters and bulk operations. Mounted the first time the
+                         page is shown; the old video-library.js is gone. -->
+                    <div id="video-library-page" data-video-manager-root></div>
                 </section>
                 <!-- Search (in-app): movies / shows / people from TMDB, each result
                      linking to the owned library detail or the TMDB-backed detail.
@@ -12840,8 +12754,7 @@
          used by the detail page's inline acquisition buttons -->
     <script src="{{ url_for('static', filename='video/video-grab.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
-    <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
-    <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
+    <!-- the video library page is React (webui/src/features/video-manager) -->
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
     <!-- Subtitle overrides + manual search (Phase 3; hooks into video-detail.js) -->

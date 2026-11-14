@@ -371,15 +371,21 @@ registerDocsSection({
         {
             id: 'vlib-browse',
             title: 'Browsing & Filters',
-            lede: 'Your owned movies and shows as a poster wall — filterable, sortable, and scroll-position aware.',
+            lede: 'Your movies and shows as posters, as a table of titles, or as a table of the files themselves, with filters that find what needs a look.',
             body: `
-The **Library** page is your owned movies and shows as a poster wall.
+The **Library** page shows the same library three ways. Pick one with the switch beside the search box:
 
-- **Filter** by status (all / owned / wanted / watched / unwatched), resolution, genre, and more
-- **Sort** by title, added date, release year, or rating
-- The page **remembers your scroll position** when you navigate away and come back
+- **Posters**: the wall, for browsing.
+- **Titles**: a table you sort by any column: year, quality, video and audio format, subtitles, size, drive, added date and more. The column button at the right of the header picks which columns show.
+- **Files**: one row per video file, with its path, size, codecs and languages.
 
-Filters compose — combine "4K + unwatched + sci-fi" to find exactly what you're in the mood for.
+**Needs a look.** The pills above the list are the things worth fixing, each with a count: **Missing**, **Below quality**, **Extra copies**, **Unmatched**, **No subtitles**, **Not read yet**. Click one to see only those. A pill only shows when it holds something.
+
+**Filters** opens the rest: on disk or not, monitored, padlock, quality, video codec, HDR, audio and subtitle language, drive, library, quality profile, genre and year. Each filter you set becomes a chip you can remove.
+
+**Views** saves what is on screen (side, layout, filters, sort and columns) under a name, so "4K without subtitles" or "Kids, unwatched" is one click away. Views are saved on the server, so they follow you to another browser.
+
+For a profile that is not an admin the page stays a plain poster wall.
 `
         },
         {
@@ -401,17 +407,46 @@ Locked fields are respected by every future enrichment pass — your corrections
         {
             id: 'vlib-bulk',
             title: 'Bulk Operations',
-            lede: 'Act on many titles at once — monitor, mark watched, edit ratings and genres, refresh art.',
+            lede: 'Act on a selection, or on everything a filter matches: rename, move, upgrade, fetch subtitles, edit details, delete.',
             body: `
-Select multiple titles to act on them at once:
+Tick titles in any view (or **Select all** to take everything the filters match) and a bar appears at the bottom:
 
-- Bulk **monitor / unmonitor**
-- Bulk **mark watched / unwatched**
-- Bulk **content rating** changes
-- Bulk **genre add / remove**
-- Bulk **artwork refresh**
+- **Monitor** / stop monitoring
+- **Get missing** and **Look for upgrades**: adds to the Wishlist, which does the searching
+- **Rename**: shows every file's old and new name first, then renames to your template
+- **More**: quality profile, fetch missing subtitles, series type, add or remove a genre, content rating, add to a collection, refresh artwork, identify again, **move to another library**, lock or unlock, mark watched, and delete
 
-Large bulk jobs run in the background so the UI stays responsive — kick off a thousand-title job and keep browsing.
+**Move to another library** shows what would move and how much crosses to another drive before anything is touched. Files land where your naming template puts them under that library's folder, with their subtitles, and the title is filed there so later downloads land beside them.
+
+**Delete** lists what goes and asks you to type the number of titles. Files go to the recycle folder.
+
+In the **Files** view the bar acts on the files themselves: rename to template, or delete.
+
+Large jobs run in the background with a progress bar.
+
+### Editing one title
+
+The pencil on a row (or on a poster) opens the title beside the list:
+
+- **Details**: title, year, content rating, sort title, genres, studio or network, tagline, overview, quality profile, and series type for a show. A field you change is marked **Yours** and scans leave it alone; click the mark to hand it back. **Change poster** picks from every poster TMDB has.
+- **Files**: every file with its format, languages and path.
+- **Episodes** (shows): tick the files that are filed under the wrong episode, choose the season and the episode the run starts at, and they are filed in order and renamed to match. Specials are season 0. The plan is shown before anything changes.
+- **History**: changes made to its files, each with **Undo**, and what was downloaded for it.
+
+### History and undo
+
+Every rename, move, delete and re-file you make is recorded. **History** at the top of the page lists them all, newest first, and **Undo** puts a file back where it was. After a bulk rename or move a line appears above the list with one **Undo** for the whole run. A deleted file comes back, owned again, as long as the recycle folder still holds it.
+
+### The padlock
+
+**Lock** a title once it is the way you want it. From then on:
+
+- its details are kept (scans and metadata refreshes leave them alone)
+- maintenance jobs do not raise findings for it, and mass rename skips it
+- automatic upgrades never replace the copy it has
+- in a bulk rename, move, delete, re-identify or upgrade it is left alone, and the result says how many were
+
+New episodes of a locked show still arrive: that is what **monitored** controls. Anything you do to a locked title on its own (from its sheet or its page) still works.
 
 > [!WARNING]
 > Library edits, deletes, re-matches, and bulk jobs are **admin-only**. Non-admin profiles can browse everything, but mutating the library requires an admin profile.

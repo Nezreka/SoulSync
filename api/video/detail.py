@@ -257,6 +257,7 @@ def register_routes(bp):
         data = get_video_db().show_detail(show_id, watcher=watcher.rows)
         if not data:
             return jsonify({"error": "not found"}), 404
+        data["hands_off"] = get_video_db().is_hands_off("show", show_id)
         # a profile with no watch state of its own gets no watched toggle (#1941)
         data["can_mark_watched"] = watcher.can_mark
         # kids profiles: over the cap (or unrated) is a hard no
@@ -275,6 +276,7 @@ def register_routes(bp):
         data = get_video_db().movie_detail(movie_id, watcher=watcher.rows)
         if not data:
             return jsonify({"error": "not found"}), 404
+        data["hands_off"] = get_video_db().is_hands_off("movie", movie_id)
         # a profile with no watch state of its own gets no watched toggle (#1941)
         data["can_mark_watched"] = watcher.can_mark
         cap = video_cap()

@@ -163,12 +163,18 @@ def move_into_place(db, file_id, cur: str, want: str, *, stored: Optional[str] =
         return {"success": False, "error": "the file moved since the scan — re-run it"}
     if os.path.exists(want):
         return {"success": False, "error": "destination already exists — nothing overwritten"}
+    was_stored = None
+    try:
+        was_stored = db.media_file_stored_path(int(file_id))
+    except Exception:   # noqa: BLE001 - only the history's undo wants it
+        was_stored = None
     try:
         os.makedirs(os.path.dirname(want) or ".", exist_ok=True)
         safe_move(cur, want, progress=progress)
     except OSError as e:
         return {"success": False, "error": f"rename failed: {e}"}
     moved = move_sidecars(cur, want)
+
     # the library's stored path must follow, or every lookup by that path
     # (upgrades, a new episode finding its show's folder) misses the file
     # until the media server rescans -- the same mirror Mass Rename keeps
@@ -176,6 +182,18 @@ def move_into_place(db, file_id, cur: str, want: str, *, stored: Optional[str] =
         db.set_media_file_stored_path(int(file_id), stored)
     else:
         update_stored_path(db, file_id, cur, want)
+    # the history row an undo reads: where it was and where it is now, on disk
+    # and as the server sees it
+    from core.video import file_history
+    now_stored = None
+    try:
+        now_stored = db.media_file_stored_path(int(file_id))
+    except Exception:   # noqa: BLE001 - only the history's undo wants it
+        now_stored = None
+    same_dir = same_path(os.path.dirname(cur), os.path.dirname(want))
+    file_history.record(db, "rename" if same_dir else "move", file_id=file_id,
+                        from_path=cur, to_path=want, from_stored=was_stored,
+                        to_stored=now_stored)
     # tidy an emptied folder (only ever the file's own former dir)
     try:
         old_dir = os.path.dirname(cur)
@@ -249,10 +267,15 @@ def delete_to_recycle(db, file_id, *, resolve: Optional[Callable] = None,
                 "error": "This file sits outside your library folders, so there's no recycle bin "
                          "for it. Nothing was deleted."}
     discard = discard or (lambda p: recycle.discard(p, settings, db, reason="deleted from the library tab"))
+    from core.video import file_history
+    owner, snap = file_history.owner_of(db, file_id), file_history.snapshot_file(db, file_id)
     res = discard(real)
     if not res.get("ok"):
         return {"success": False, "error": "Couldn't move the file — it's still where it was."}
     dropped = db.library_drop_file(file_id) or {}
+    file_history.record(db, "delete", file_id=file_id, owner=owner, from_path=real,
+                        trash_path=res.get("trash_path") if res.get("recycled") else None,
+                        snapshot=snap)
     return {"success": True, "action": "deleted", "recycled": bool(res.get("recycled")),
             "trash_path": res.get("trash_path"), "remaining": dropped.get("remaining"),
             "kind": dropped.get("kind"), "item_id": dropped.get("item_id")}
