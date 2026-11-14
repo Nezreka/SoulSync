@@ -126,9 +126,11 @@ def validate(kind: str, ids, action: str, params: dict):
 
 def _apply_one(db, kind: str, item_id: int, action: str, params: dict, source) -> dict:
     """One item, one action. Returns {ok[, pushed]} — exceptions count as failed."""
+    # the padlock holds a sweep. ``by_hand`` is one title acted on from its
+    # own page: a person asked for exactly this, so it goes through
     from core.video import metadata as med
     if (action in _LOCK_HOLDS or (action == "wish" and params.get("mode") == "upgrade")) \
-            and db.is_hands_off(kind, item_id):
+            and not params.get("by_hand") and db.is_hands_off(kind, item_id):
         return {"ok": True, "pushed": False, "held": True}
     if action == "move":
         return _move_title(db, kind, item_id, int(params["library_id"]))

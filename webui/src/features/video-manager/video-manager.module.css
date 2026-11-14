@@ -7,6 +7,12 @@
   position: relative;
 }
 
+/* a table of files wants more room than a page of cards: as wide as the
+   watchlist page, not the frame's reading measure */
+.frame > div {
+  max-width: 1680px;
+}
+
 /* ── the view switch ─────────────────────────────────────────────────────── */
 .viewSwitch {
   display: inline-flex;

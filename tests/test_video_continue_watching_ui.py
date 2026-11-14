@@ -15,22 +15,26 @@ _JS = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(
     encoding="utf-8", errors="replace")
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(
     encoding="utf-8", errors="replace")
+_LIST = (_ROOT / "webui" / "src" / "features" / "video-library" / "episode-list.tsx").read_text(
+    encoding="utf-8")   # a show's season and its rows are React now
 
 
 class TestEpisodeRows:
     def test_watched_check_and_classes(self):
-        assert 'vd-ep-check' in _JS
-        assert "if (ep.watched) owned += ' vd-ep--watched'" in _JS
+        assert 'vd-ep-check' in _LIST
+        assert "ep.watched ? 'vd-ep--watched' : ''" in _LIST
 
     def test_progress_bar_only_for_in_progress(self):
         # in-progress = started but NOT watched, and runtime known (else no %)
-        assert '!ep.watched && (ep.view_offset_ms || 0) > 0 && ep.runtime_minutes' in _JS
-        assert 'vd-ep-prog-fill' in _JS
+        assert '!ep.watched && (ep.view_offset_ms || 0) > 0 && Boolean(ep.runtime_minutes)' in _LIST
+        assert 'vd-ep-prog-fill' in _LIST
 
     def test_next_up_highlight_matches_payload_slot(self):
-        assert 'nu.season_number === selectedSeason' in _JS
-        assert 'nu.episode_number === ep.episode_number' in _JS
-        assert 'vd-ep-next-chip' in _JS
+        assert 'ctx.nextUp?.season_number === season' in _LIST
+        assert 'ctx.nextUp?.episode_number === ep.episode_number' in _LIST
+        assert 'vd-ep-next-chip' in _LIST
+        # the page hands the list the payload's next-up slot
+        assert 'nextUp: data.next_up || null' in _JS
 
 
 class TestHeroCta:

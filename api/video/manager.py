@@ -128,11 +128,15 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "kind and ids are required"}), 400
         db = get_video_db()
         changes, total, conforming, unreachable = [], 0, 0, 0
+        finder = file_ops.Locator(db)             # each folder is read once
         for item_id in ids:
-            for file_id in bulk_ops._title_file_ids(db, kind, item_id):
+            file_ids = bulk_ops._title_file_ids(db, kind, item_id)
+            rows = db.library_file_rows(file_ids)
+            for file_id in file_ids:
                 total += 1
                 try:
-                    plan = file_ops.rename_plan(db, file_id) or {}
+                    plan = (file_ops.rename_plan(db, file_id, row=rows[file_id], finder=finder)
+                            if file_id in rows else {"error": "gone"}) or {}
                 except Exception:   # noqa: BLE001 - one unreadable file never ends the preview
                     plan = {"error": "could not be read"}
                 if plan.get("error"):
@@ -201,7 +205,8 @@ def register_routes(bp):
         files = size = copy = skipped = held = 0
         sample, error, why = [], None, {}
         for item_id in _ids():
-            if db.is_hands_off(kind, item_id):
+            # by_hand: one title moved from its own page, which a padlock allows
+            if request.args.get("by_hand") != "1" and db.is_hands_off(kind, item_id):
                 held += 1
                 continue
             plan = bulk_ops.move_plan(db, kind, item_id, library_id)

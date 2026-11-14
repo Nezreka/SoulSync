@@ -51,7 +51,7 @@ export function EpisodeFiles({
   );
 
   const reload = useCallback(() => invalidate('show', showId), [showId]);
-  const { onRename, onDelete } = useFileActions(reload, 'show');
+  const { onRename, onDelete, dialogs } = useFileActions(reload, 'show', showId);
 
   if (error) return <p className={s.empty}>{error}</p>;
   if (!show) return <p className={s.loading}>Checking the files…</p>;
@@ -65,7 +65,7 @@ export function EpisodeFiles({
     canManage: show.can_manage,
     recycle: show.recycle,
     onRename,
-    onDelete: (f) => onDelete(f, show.recycle, ep.files.length <= 1),
+    onDelete,
     onSubtitles: b.subtitleSearch
       ? () =>
           b.subtitleSearch?.('episode', ep.id, ep.title || `Episode ${ep.episode_number}`, label)
@@ -78,6 +78,7 @@ export function EpisodeFiles({
   return (
     <div className={s.epCards}>
       <FileCards files={ep.files} actions={actions} label={`${label} file`} />
+      {dialogs}
       {moving ? (
         <ReassignDialog
           show={show}

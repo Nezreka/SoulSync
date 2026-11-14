@@ -203,7 +203,9 @@ def create_video_blueprint() -> Blueprint:
                                   # per-show Synchronize — mutates library rows
                                   "/sync",
                                   # fix match + its undo — library identity
-                                  "/identify", "/identify/release"))
+                                  "/identify", "/identify/release",
+                                  # the padlock on one title, from its own page
+                                  "/padlock"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 

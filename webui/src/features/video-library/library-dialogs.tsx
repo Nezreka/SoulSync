@@ -23,6 +23,7 @@ import {
   stopConsolidate,
 } from './api';
 import { driveLabel, formatBytes, pad2 } from './format';
+import { lastChange } from './library-store';
 import s from './video-library.module.css';
 
 function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
@@ -431,6 +432,14 @@ export function ReassignDialog({
             : 'Moved. The file kept its name, so your media server may file it back on its next scan.',
         res.renamed || res.action === 'unchanged' ? 'success' : 'warning',
       );
+      if (res.batch) {
+        lastChange.set({
+          batch: res.batch,
+          kind: 'show',
+          id: show.id,
+          text: 'Filed under another episode',
+        });
+      }
       onDone();
     } catch (e) {
       setSaving(false);

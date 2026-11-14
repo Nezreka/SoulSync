@@ -493,7 +493,11 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
             body: `
 A title in your library is one page, with no tabs: what you own and what you can do with it are part of the page itself.
 
-Under the buttons in the hero, one line says what you have. For a **movie**: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to. For a **show**: how many aired episodes you have, their size, the quality mix, the target and the match. **Quality and download settings** and **Fix match** sit at the end of the line.
+Under the buttons in the hero, one line says what you have. For a **movie**: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to. For a **show**: how many aired episodes you have, their size, the quality mix, the target and the match. **Quality and download settings**, **Fix match** and **File history** sit at the end of the line, after the **Lock** button.
+
+**Lock** is the [padlock](#vlib-manage): once a title is the way you want it, lock it and maintenance jobs, mass rename, automatic upgrades and scans leave it and its files alone. What you do on this page still goes through, and new episodes still arrive.
+
+**File history** lists every rename, move and delete made by hand to this title's files, newest first, each with **Undo**. A deleted file comes back while the recycle bin still holds it.
 
 **Needs attention** comes next, only when something is wrong. A movie's **Files** follow; a show's files are in its **Episodes** list.
 
@@ -517,14 +521,30 @@ Under the buttons in the hero, one line says what you have. For a **movie**: you
 | **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
 | **Search subtitles** | The manual subtitle search, for that file. |
 | **Copy path** | The path as your media server reports it. |
-| **Delete to recycle bin** | Moves the file to the recycle bin. If it was the last copy the title shows as missing. A file outside your library folders is refused rather than deleted for good. |
+| **Delete to recycle bin** | Shows the file and what is left, then moves it to the recycle bin. If it was the last copy the title shows as missing. For an episode, **Stop hunting this episode** in the same window keeps a monitored season from fetching it again. A file outside your library folders is refused rather than deleted for good. |
+
+Every change on the page leaves a line at the foot of it saying what happened, with **Undo**. It stays for half a minute; after that the same undo is in **File history**.
 
 > [!NOTE]
 > A file on a drive only your media server can see (a different Docker mount or NAS path) still shows everything the server reports, but it can't be renamed or deleted from SoulSync. The page says so instead of guessing.
 
 **Delete Show / Delete Movie** (admins, in the page's **More** menu) takes the whole title out of your library and stops it coming back. It unfollows it and clears its wishlist entries for every profile, cancels its downloads in progress, declines pending requests for it (the people who asked are told), closes its repair findings, hides it from Discover, moves its folder into the recycle bin as one entry (so it restores in one step), asks your media server to rescan, and forgets it. Torrents your client is still seeding are left alone; your seeding rules, or you, remove them. The first dialog lists exactly what will happen; the second asks you to type the title. A title with files outside your library folders is refused rather than deleted for good. Restoring the folder brings the files back, not the follow or the wishlist.
 
-For a **show**, the season you are looking at says what's there, its size and its resolution mix on one line, with a **Monitored** switch beside them and **Grab**, **Manual search**, **Wishlist** and **Clear failures** in its menu. Tick episodes (the box under an episode's number, shown when you point at a row) to act on several at once: a bar appears above the list with **Look for upgrades**, **Rename to template** and **Delete**.
+For a **show**, the season you are looking at says what's there, its size and its resolution mix on one line, with a **Monitored** switch beside them and **Grab**, **Manual search**, **Wishlist** and **Clear failures** in its menu.
+
+The same menu manages the season's files:
+
+| In the season's menu | What it does |
+|----------------------|--------------|
+| **Rename files…** | Shows each file's name now and the name your template gives it, then renames them. Files already named right, and files only your media server can see, are counted and left alone. |
+| **Renumber episodes…** | For a season filed under the wrong numbers. Tick the files, say which season and which episode the run starts at, and they are filed in order and renamed to match. Specials are season 0. The plan is shown before anything is filed. |
+| **Delete files…** | Lists every file in the season with its size and says how many episodes would be left with no copy, then moves them to the recycle bin. |
+
+Tick episodes (the box under an episode's number, shown when you point at a row), or the box at the start of the season line for every episode that has a file, to act on several at once. A bar appears above the list with **Look for upgrades**, **Rename…**, **Renumber…**, **Stop hunting** (or **Hunt again**) and **Delete…**.
+
+**Hunting one episode.** A monitored season hunts every missing episode in it. To leave one out, open the episode's menu and pick **Stop hunting this episode**; the row then says *Not hunted*. **Hunt this episode** turns it back on. Nothing on disk changes either way.
+
+**Move to another library…** (in the page's **More** menu, beside a movie's files, and over **Where it lives**) moves the title's files to another library's folder, named by your template, and files the title there so later downloads land beside them. It shows how many files move, how much has to be copied to another drive and whether there is room, before anything moves. **More** also has **Rename files…** for every file of the title.
 
 **Where it lives** lists the folders the show's files are in, each with its drive, file count and size. When a show is split, part of it forked off somewhere else, usually an upgrade that couldn't find the original. **Bring together…** asks which folder to keep and shows what would move before anything does: how many files, how much has to be copied because it sits on another drive, and the free space there. Files keep their names and land in that folder's season folders, subtitles go along, and nothing is overwritten. A copy to another drive only takes its real name once it is complete, so a move that is interrupted leaves the original where it was. The move runs in the background; you can close the window, come back to its progress, or stop it after the current file.
 
