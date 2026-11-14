@@ -3,7 +3,7 @@
 MetaSync is a separate local program (its own UI, default
 http://localhost:8790) that joins metadata pools — SIN is the first — on this
 install's behalf. This module is SoulSync's half of that connection, driven
-from Settings > Advanced > MetaSync:
+from Settings > Connections > MetaSync:
 
 * Pairing (one-click): SoulSync asks the node for a pairing code, the user
   approves it in the node's dashboard, then SoulSync claims the pairing by
@@ -20,9 +20,11 @@ from Settings > Advanced > MetaSync:
   first one whose /health answers as a MetaSync node, so most users never
   type the node URL at all. The manual field stays as the fallback.
 
-Auth model (matches the sidebar-weather posture): the GETs are undecorated
-(they expose no secrets — keys are reported as set/not-set only), the writes
-carry ``@admin_only`` from ``core.profile_context``.
+Auth model (matches the sidebar-weather posture): GET /api/metasync is
+undecorated (it exposes no secrets — keys are reported as set/not-set only);
+the writes and GET /api/metasync/status carry ``@admin_only`` from
+``core.profile_context``. Status passes the node's own answer through, and
+that answer shows the first characters of the pool key and the local key.
 
 Config keys (dot-notation via ConfigManager):
 - ``metasync.node_url`` — where the node lives. Blank = not set up.
@@ -41,12 +43,14 @@ The pending pairing (session id + code) lives in module memory only: the
 code is a short-lived secret and is never written to the config store. A
 server restart drops it; the user just requests a new code.
 
-The minted ``sk_`` key's scope: the key machinery (api/auth.py) knows only
-"admin" and "read", and a read key may only make safe GETs — it cannot
-create or sync playlists, which is half of what the node exists to do. So
-the claim mints an admin key; that is the least scope this machinery has
-that covers the node's job (library / watchlist / wishlist reads + playlist
-create / sync). If a narrower scope ever exists, mint that instead.
+The minted ``sk_`` key's scope is "read". The node only reads: watchlist,
+wishlist, library albums, the download and listening activity counts and
+the MetaSync export, all GETs under /api/v1 that a read key reaches. (It
+used to create and sync playlists, which needed an admin key; SoulSync now
+pulls the charts from the node instead.) The node keeps this key in plain
+text in its own settings, so it should open as little as possible. The
+depot's push routes (api/metasync_depot.py) are admin-only POSTs that no
+node calls yet; a node that gains a pusher needs a scope for them.
 """
 
 from __future__ import annotations
@@ -320,8 +324,8 @@ def post_pair_claim():
     # A fresh key per claim attempt. What happens to it depends on the
     # outcome (see below) — it must never linger unaccounted for.
     from api import key_store
-    from api.auth import SCOPE_ADMIN
-    raw_key, record = key_store.create_key(cfg, "MetaSync", SCOPE_ADMIN)
+    from api.auth import SCOPE_READ
+    raw_key, record = key_store.create_key(cfg, "MetaSync", SCOPE_READ)
 
     # The address the node should call back on: the one this request arrived
     # through, which is by construction an address this install answers on.
@@ -377,7 +381,10 @@ def post_pair_claim():
 def post_handoff():
     body = request.get_json(silent=True) or {}
     cfg = _cfg()
-    node_url = _node_url(body)
+    # The stored node only, never an address from the request: this call
+    # carries the pool key and the node's local key, and a request that
+    # could name the destination could have both sent anywhere.
+    node_url = _node_url()
     local_key = str(_stored("local_api_key"))
     if not local_key:
         return jsonify({"success": False,
@@ -425,6 +432,7 @@ def post_handoff():
 
 
 @bp.route("/api/metasync/status", methods=["GET"])
+@admin_only
 def get_metasync_status():
     node_url = _node_url()
     local_key = str(_stored("local_api_key"))

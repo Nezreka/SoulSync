@@ -487,3 +487,54 @@ def test_detect_stores_the_found_url(client, cfg, node):
     assert cfg.get("metasync.node_url") == "http://localhost:8790"
     view = client.get("/api/metasync").get_json()
     assert view["node_url"] == "http://localhost:8790"
+
+
+# ---------------------------------------------------------------------------
+# November 14, 2026 review fixes
+# ---------------------------------------------------------------------------
+
+def test_handoff_ignores_a_node_url_in_the_request(client, cfg, node):
+    """The handoff carries the pool key and the node's local key. It goes
+    to the stored node only: a request that could name the destination
+    could have both sent to any address."""
+    _pool_ready(client, cfg, node)
+    node.routes[("POST", "/local/handoff/pool-key")] = _FakeResponse(200, {
+        "ok": True, "exchange_status": "bound", "exchange_error": None,
+        "pool": {"id": "sin"}})
+    resp = client.post("/api/metasync/handoff",
+                       json={"node_url": "https://elsewhere.example"})
+    assert resp.get_json()["success"] is True
+    handoffs = [c for c in node.calls
+                if c["path"] == "/local/handoff/pool-key"]
+    assert [c["url"] for c in handoffs] == [_NODE + "/local/handoff/pool-key"]
+    assert not any("elsewhere.example" in c["url"] for c in node.calls)
+    assert cfg.get("metasync.node_url") == _NODE
+
+
+def test_claim_mints_a_read_key_that_reaches_everything_the_node_calls(
+        client, cfg, node):
+    from api.auth import SCOPE_READ, key_scope, read_key_may_access
+
+    assert _connect(client, cfg, node).get_json()["success"] is True
+    keys = cfg.get("api_keys")
+    assert len(keys) == 1 and key_scope(keys[0]) == SCOPE_READ
+    # every call the node's SoulSync client makes (MetaSync
+    # node/metasync_node/soulsync.py): all GETs under /api/v1
+    for path in ("/api/v1/watchlist", "/api/v1/wishlist",
+                 "/api/v1/library/albums",
+                 "/api/v1/library/download-activity",
+                 "/api/v1/library/listening-activity",
+                 "/api/v1/metasync/export"):
+        assert read_key_may_access("GET", path), path
+
+
+def test_status_is_admin_only(client, cfg, node, monkeypatch):
+    """Status passes the node's answer through, key prefixes included."""
+    import core.profile_context as profile_context
+
+    assert _connect(client, cfg, node).get_json()["success"] is True
+    node.routes[("GET", "/local/status")] = _FakeResponse(200, _STATUS)
+    monkeypatch.setattr(profile_context, "is_admin_request", lambda: False)
+    resp = client.get("/api/metasync/status")
+    assert resp.status_code == 403
+    assert not any(c["path"] == "/local/status" for c in node.calls)
