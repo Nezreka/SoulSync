@@ -54,6 +54,7 @@ the video library becomes a real library manager. the library page is a table of
 
 - **one page frame.** search, discover, playlists, watchlist, tools, requests, downloads, import, issues, wishlist, stats, audiobooks and podcasts share one width, header, pill row and section heading.
 - **lighter on a phone.** the sidebar sky stops drawing while the menu is closed and draws half the frames at fewer pixels on a phone, the sidebar visualizer no longer runs where the phone layout hides it, and the now playing screen drops a blur nobody could see and fits the real screen height.
+- **settings save quietly, or only when you say (thanks JonnyJonnster).** saving a setting no longer pops a toast naming every settings section, the save button is the one status. a new switch under system, saving turns autosave off, so changes wait until you click save.
 
 ## security and upkeep
 

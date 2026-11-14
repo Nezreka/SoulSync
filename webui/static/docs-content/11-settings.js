@@ -10,7 +10,7 @@ registerDocsSection({
             body: `
 SoulSync needs credentials for the services it queries for metadata and enrichment. The Settings search finds any setting by name — handy when you're not sure which tab it lives under.
 
-Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed.
+Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed. Rather save by hand? Turn off **Save settings as I change them** under System, Saving. Changes then wait for the save button, and leaving Settings without saving drops them.
 
 ## Service list
 

@@ -151,8 +151,21 @@ function debouncedAutoSaveSettings(event) {
     // user is trying to read. Never auto-save while the Logs tab is active.
     if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
+    // autosave switched off in System: the change waits for the save button.
+    // the switch itself always saves, or turning it back on would need a click
+    if (window._settingsAutosaveOff === true && event?.target?.id !== 'settings-autosave-enabled') {
+        settingsAutoSaveTimer = null;
+        setSettingsSaveState('pending');
+        return;
+    }
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
     setSettingsSaveState('pending');
+}
+
+// the autosave switch (System tab). flips the flag right away so the very
+// next change already follows it
+function handleSettingsAutosaveToggle(event) {
+    window._settingsAutosaveOff = event.target.checked === false;
 }
 
 function handleManualSaveClick() {
@@ -181,10 +194,18 @@ function setSettingsSaveState(state) {
     if (_settingsSavedTimer) { clearTimeout(_settingsSavedTimer); _settingsSavedTimer = null; }
     btn.dataset.state = state;
     const label = btn.querySelector('span');
-    if (label) label.textContent = SETTINGS_SAVE_LABELS[state];
-    btn.title = state === 'idle' || state === 'saved'
-        ? 'Settings save as you go. Click to save again now.'
-        : '';
+    const manual = window._settingsAutosaveOff === true;
+    if (label) {
+        label.textContent = manual && state === 'pending'
+            ? 'Save changes' : SETTINGS_SAVE_LABELS[state];
+    }
+    if (manual) {
+        btn.title = state === 'pending' ? 'Autosave is off. Click to save your changes.' : '';
+    } else {
+        btn.title = state === 'idle' || state === 'saved'
+            ? 'Settings save as you go. Click to save again now.'
+            : '';
+    }
     if (state === 'saved') {
         _settingsSavedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
     }
@@ -492,6 +513,8 @@ function initializeSettings() {
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
         });
+        document.getElementById('settings-autosave-enabled')
+            ?.addEventListener('change', handleSettingsAutosaveToggle);
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
@@ -3985,6 +4008,16 @@ async function loadSettingsData() {
         if (maxPerfCheckbox) maxPerfCheckbox.checked = maxPerf;
         applyMaxPerformance(maxPerf);
 
+        // autosave switch, on unless switched off. the form was just reloaded,
+        // so an unsaved mark left over from a manual-save visit is stale
+        const autosaveOn = settings.ui_appearance?.settings_autosave !== false;
+        const autosaveCheckbox = document.getElementById('settings-autosave-enabled');
+        if (autosaveCheckbox) autosaveCheckbox.checked = autosaveOn;
+        window._settingsAutosaveOff = !autosaveOn;
+        if (document.getElementById('save-settings')?.dataset.state === 'pending' && !settingsAutoSaveTimer) {
+            setSettingsSaveState('idle');
+        }
+
         // Populate Logging information
         const logLevelSelect = document.getElementById('log-level-select');
         if (logLevelSelect) logLevelSelect.value = settings.logging?.level || 'INFO';
@@ -4648,6 +4681,12 @@ function debouncedSaveQualityProfile() {
     if (window._suppressSettingsAutoSave) return;
     if (window._settingsLoadFailed) return;
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
+    // autosave off: the save button writes the profile on screen with the rest
+    if (window._settingsAutosaveOff === true) {
+        qualityProfileAutoSaveTimer = null;
+        setSettingsSaveState('pending');
+        return;
+    }
     // Capture both target and values now. If the user switches profiles before
     // the debounce expires, the pending write still belongs to the profile
     // that was on screen when the edit happened instead of overwriting the
@@ -7336,7 +7375,8 @@ async function saveSettings(quiet = false) {
             particles_enabled: window._particlesEnabled !== false,
             worker_orbs_enabled: window._workerOrbsEnabled !== false,
             reduce_effects: window._reduceEffectsActive === true,
-            max_performance: window._maxPerfActive === true
+            max_performance: window._maxPerfActive === true,
+            settings_autosave: _cfgBool('settings-autosave-enabled') !== false
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,

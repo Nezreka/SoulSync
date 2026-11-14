@@ -1913,7 +1913,7 @@ const HELPER_CONTENT = {
     // Save Button
     '.save-settings': {
         title: 'Saved as you go',
-        description: 'Settings save themselves a moment after you change them. Click to save right away. A few changes need a restart to take effect.',
+        description: 'Settings save themselves a moment after you change them. Click to save right away. A few changes need a restart to take effect. Prefer to save by hand? Turn autosave off under System, Saving.',
     },
 
     // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
