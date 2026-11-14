@@ -186,6 +186,24 @@ def _title_of(item: Any, mtype: str) -> Dict[str, str]:
     return {"title": title, "subtitle": str(year) if year else "", "grandparent": gp}
 
 
+def _artwork(item: Any, mtype: str) -> tuple:
+    """(thumb, backdrop) for what is playing: the thing itself before whoever
+    made it.
+
+    a track or an audiobook chapter shows its album's or its book's cover
+    (plex files a book as an album under its author), and that cover is the
+    card's backdrop too. the artist's or author's picture is only what is
+    left when there is no cover (#2089). an episode keeps its show's poster
+    and a movie its own."""
+    if mtype == "track":
+        cover = _g(item, "parentThumb") or _g(item, "thumb")
+        thumb = cover or _g(item, "grandparentThumb")
+        art = cover or _g(item, "art") or _g(item, "grandparentArt")
+        return thumb, art
+    thumb = _g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb")
+    return thumb, _g(item, "art") or _g(item, "grandparentArt")
+
+
 def normalize_session(item: Any) -> Dict[str, Any]:
     """One raw plexapi session → the clean activity card payload. Defensive:
     any attribute may be missing on a given media type / server version."""
@@ -199,8 +217,7 @@ def normalize_session(item: Any) -> Dict[str, Any]:
     username = str(_first(_g(item, "usernames", [])) or _g(item, "_username", "") or "Someone")
 
     state = str(_g(player, "state", "") or "playing").lower()
-    thumb = _g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb")
-    art = _g(item, "art") or _g(item, "grandparentArt")
+    thumb, art = _artwork(item, mtype)
     # what identifies the SoulSync library row to jump to: a movie is its own
     # ratingKey; an episode links to its SHOW. Title+year are a fallback when the
     # server id doesn't line up (re-scan, different server_source, etc.).
@@ -291,7 +308,13 @@ def normalize_jellyfin(s: Dict[str, Any], npi: Dict[str, Any]) -> Dict[str, Any]
     else:
         subtitle, gp = str(npi.get("ProductionYear") or ""), ""
     item_id = str(npi.get("Id") or "")
-    thumb = ("jf:" + item_id) if item_id else ""
+    # a track with no picture of its own shows its album's cover, never a blank
+    # or the artist (#2089). an audiobook's own id is already the book's cover
+    art_id = item_id
+    if mtype == "track" and not (npi.get("ImageTags") or {}).get("Primary") and npi.get("AlbumId") \
+            and npi.get("AlbumPrimaryImageTag"):
+        art_id = str(npi["AlbumId"])
+    thumb = ("jf:" + art_id) if art_id else ""
     br = int(ti.get("Bitrate") or 0) // 1000
     prov = (npi.get("ProviderIds") or {})
     jf_tmdb = str(prov.get("Tmdb") or prov.get("tmdb") or "")
@@ -535,7 +558,7 @@ def normalize_history(item: Any, accounts: Dict, devices: Dict) -> Dict[str, Any
         "media_type": mtype,
         "user": accounts.get(_g(item, "accountID"), "") or "Someone",
         "device": devices.get(_g(item, "deviceID"), "") or "",
-        "thumb": str(_g(item, "grandparentThumb") or _g(item, "parentThumb") or _g(item, "thumb") or ""),
+        "thumb": str(_artwork(item, mtype)[0] or ""),
         "viewed_epoch": epoch,
     }
 
