@@ -5118,6 +5118,45 @@ def test_use_file_tags_previews_then_applies_over_http(api, monkeypatch):
     assert saved["title"].value == "Tagged Title" and saved["track_number"].value == 9
 
 
+def test_file_tag_values_are_counted_and_released_over_http(api, monkeypatch):
+    # #2084: what Use File Tags saved can be let go of, for one thing or the
+    # whole Library, and a hand edit is not part of that
+    from core.library2.metadata_overrides import get_field_overrides, set_field_override
+
+    client, db, ids = api
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(?, '/m/tagged.flac', 'flac')",
+                 (ids["album_track"],))
+    set_field_override(conn, entity_type="track", entity_id=ids["album_track"],
+                       field_name="disc_number", value=2, reason=None)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda p: p)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda path: {
+        "title": "Tagged Title", "album": None, "year": "2016", "track_number": "9",
+        "disc_number": None, "genre": None})
+    track_url = f"/api/library/v2/tracks/{ids['album_track']}/use-file-tags"
+    client.post(track_url)
+
+    held = client.get(track_url).get_json()["counts"]["held"]
+    assert held >= 2   # the title and the number, and whatever the album took
+    assert client.get("/api/library/v2/use-file-tags").get_json() == {"success": True, "held": held}
+
+    assert client.delete(track_url).get_json() == {"success": True, "released": held}
+    assert client.get("/api/library/v2/use-file-tags").get_json()["held"] == 0
+    conn = db._get_connection()
+    left = get_field_overrides(conn, entity_type="track", entity_id=ids["album_track"])
+    conn.close()
+    assert set(left) == {"disc_number"}
+
+    client.post(track_url)
+    assert client.delete("/api/library/v2/use-file-tags").get_json() == {
+        "success": True, "released": held}
+    assert client.delete("/api/library/v2/use-file-tags").get_json() == {
+        "success": True, "released": 0}
+    assert client.delete("/api/library/v2/albums/999999/use-file-tags").status_code == 404
+
+
 def test_use_file_tags_answers_404_for_something_that_is_not_there(api):
     client, _db, _ids = api
     assert client.get("/api/library/v2/albums/999999/use-file-tags").status_code == 404

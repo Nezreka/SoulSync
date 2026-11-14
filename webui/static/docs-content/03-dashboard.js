@@ -163,9 +163,11 @@ From an artist or album page, **Write Tags** previews the same diff. With Plex o
 
 - **Album**: year, release date and genre, taken from what most of the album's files say.
 - **Track**: title, track number and disc number.
-- **Which album a track is on**: a track whose tag names another album moves to that album under the same artist, and the album is created if the Library does not have it. When every file of an album names the same other title, the album is renamed instead.
+- **Which album a track is on**: a track whose tag names another album moves to that album under the same artist, and the album is created if the Library does not have it. When every file of an album names the same other title, the album is renamed instead, unless the artist already has an album of that name: then the tracks move onto it.
 
 Everything is saved as your own edits, so a metadata refresh does not put the old values back. An empty tag never blanks a value. Artist names are left alone, and the preview lists where a file's artist differs. Files stay where they are on disk; run Rename / Organize afterwards to refile them.
+
+Values taken from file tags stay until you let go of them. The window counts them and has a **Release** link for that album or artist, and the Library's **More** menu has **Release file tag values** for the whole library. Releasing puts each field back to what your metadata sources say, so enrichment and repairs can change it again. Edits you typed in yourself stay, and no file is changed. You can run Use File Tags again at any time, for example after editing tags outside SoulSync.
 
 ![Retag tool interface](dash-retag.jpg)
 
@@ -228,6 +230,8 @@ The view switch offers two more ways in: **Albums** is a lens on the findings th
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
 - **A tag finding shows both sides.** Open a Library Re-tag row and each tag is listed with the value in the file now beside the value Apply Tags would write. Nothing outside that list is touched.
+- **Fix All on tag findings only fills.** It writes the tags that are blank in a file and never replaces a tag the file already has. A finding where the file and the library disagree stays open: open it, read both values, then **Apply Tags** or **Dismiss**. If a finding had both, the blanks are filled, the rest waits, and the row shows what was filled with **Undo the fill**. The prompt has a second answer, **Also replace tags that differ**, which asks again before it runs.
+- **A different genre or year is not a fault.** The file is as often right as the catalogue (a remaster's year, "Electro" against "Electronic"), so those two are shown on the finding as "differs from the library. Left as it is" and are not filed on their own. To have them filed, turn on **Flag genre differences** or **Flag year differences** in the Library Re-tag job's settings. A blank genre or year is always filed.
 - **Fixed tag findings keep their history.** In the Fixed view, a re-tag row shows every tag as it was and as it is now. **Undo changes** writes the old values back and reopens the finding. A cover that was embedded stays, since the old picture is not kept.
 - **Delete matching…** forgets findings outright (the next scan can raise them again). It's not the same as dismiss.
 - A fix that fails keeps its reason on the row, with **Retry Fix**.
@@ -241,7 +245,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your output folder not tracked in the database |
-| Dead File Cleaner | Removes database entries pointing to files that no longer exist. When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
+| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |

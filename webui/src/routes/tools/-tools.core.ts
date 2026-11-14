@@ -984,13 +984,14 @@ export function findingsBulkBarState(
 export function bulkFixRunMessage(
   status: Pick<
     BulkFixStatus,
-    'fixed' | 'failed' | 'skipped' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
+    'fixed' | 'failed' | 'skipped' | 'partial' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
   >,
 ): { message: string; type: 'success' | 'error' } {
   const fixed = status.fixed || 0;
   const failed = status.failed || 0;
   const skipped = status.skipped || 0;
-  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''} of ${status.total || 0}`;
+  const partial = status.partial || 0;
+  let message = `Fixed ${fixed}${partialClause(partial)}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''} of ${status.total || 0}`;
   if (status.stopped) {
     message = `Bulk fix stopped — ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
   }
@@ -1007,7 +1008,18 @@ export function bulkFixRunMessage(
     const errors = status.errors;
     if (errors && errors.length > 0) message += `: ${errors[0].error}`;
   }
-  return { message, type: fixed > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error' };
+  return {
+    message,
+    type: fixed > 0 || partial > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error',
+  };
+}
+
+/** a bulk re-tag fills blank tags and leaves the tags that differ on the
+ *  finding: said apart, so "fixed" never counts a row that is still open. */
+function partialClause(partial: number): string {
+  return partial
+    ? `, filled the blank tags in ${partial} more (what differs is left for you to review)`
+    : '';
 }
 
 /** From the tail of `bulkFixFindings` — the per-id loop's own summary. Note it
@@ -1018,8 +1030,9 @@ export function bulkFixLoopMessage(
   lastError: string,
   skipped = 0,
   otherArtistSkipped = 0,
+  partial = 0,
 ): { message: string; type: 'success' | 'error' } {
-  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
+  let message = `Fixed ${fixed}${partialClause(partial)}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
   if (failed && lastError) message += `: ${lastError}`;
   // A failed gated finding's own error already carries this sentence.
   if (otherArtistSkipped && !lastError.includes('other artists were not added')) {
@@ -1027,7 +1040,10 @@ export function bulkFixLoopMessage(
   }
   // Same rule as bulkFixRunMessage: skipped-by-design softens the type
   // only when nothing actually failed.
-  return { message, type: fixed > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error' };
+  return {
+    message,
+    type: fixed > 0 || partial > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error',
+  };
 }
 
 /**

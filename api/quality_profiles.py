@@ -20,6 +20,17 @@ logger = get_logger("api.quality_profiles")
 
 bp = Blueprint("quality_profiles", __name__)
 
+
+@bp.before_request
+def _admin_manages_this():
+    """A quality profile is the admin's to change (Nov 13 2026). Reading stays open: the
+    pages that show it are not admin pages."""
+    from flask import jsonify as _jsonify, request as _request
+    from core.profile_context import is_admin_request
+    if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not is_admin_request():
+        return _jsonify({"success": False, "error": "Admin access required"}), 403
+    return None
+
 # Injected by configure() at boot.
 get_database = None
 add_activity_item = None
@@ -80,7 +91,7 @@ def save_quality_profile():
         if success:
             from core.library2.wishlist_mirror import schedule_quality_profile_refresh
             schedule_quality_profile_refresh(db, db.get_quality_profile()["id"])
-            add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
+            add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now", show_toast=False)
             return jsonify({"success": True, "message": "Quality profile saved successfully"})
         else:
             return jsonify({"success": False, "error": "Failed to save quality profile"}), 500
@@ -306,7 +317,7 @@ def update_custom_quality_profile(profile_id):
 
         from core.library2.wishlist_mirror import schedule_quality_profile_refresh
         schedule_quality_profile_refresh(db, profile_id)
-        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now", show_toast=False)
         return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
         logger.error(f"Error updating quality profile: {e}")

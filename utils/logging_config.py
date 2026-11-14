@@ -8,6 +8,62 @@ from typing import Optional
 
 LOGGER_NAMESPACE = "soulsync"
 
+# ── secrets never reach a log line ───────────────────────────────────────────
+# An HTTP error's text is the URL that failed, and for most providers the key
+# rides in the query string: a TMDB 404 wrote `?api_key=<the key>` into app.log
+# with its traceback (Nov 13 2026), and logs are what people paste into an
+# issue. Formatters below run every finished line, traceback included, through
+# `redact`. Values only; the parameter name stays so the line still reads.
+_SECRET_PARAMS = (
+    r"api[_-]?key|apikey|api[_-]?sig|request[_-]?sig|signature|"
+    r"access[_-]?token|refresh[_-]?token|auth[_-]?token|user[_-]?auth[_-]?token|id[_-]?token|"
+    r"token|x-plex-token|client[_-]?secret|secret|password|passwd|pwd|"
+    r"session[_-]?key|code[_-]?verifier"
+)
+_SECRET_QUERY_RE = re.compile(
+    r"(?i)([?&;](?:%s)=)[^&\s\"'<>#)\]]+" % _SECRET_PARAMS)
+# names that are a credential on one API and an ordinary word on another
+# (SoulSync's own `?key=now_playing` names a list): only a key-shaped value
+_SHORT_NAME_QUERY_RE = re.compile(r"(?i)([?&;](?:key|sk|sig)=)[A-Za-z0-9._~%+/-]{16,}")
+# subsonic (navidrome) carries the password or its salted hash as p / t / s
+_SUBSONIC_RE = re.compile(r"(?i)([?&](?:p|t|s)=)[^&\s\"'<>#)\]]+")
+# an Authorization header as text or as a logged dict, and a bare bearer token
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?(?:(?:bearer|basic|token|mediabrowser)\s+)?)"
+    r"[^\s'\",}]+")
+_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{20,}")
+_TOKEN_EQUALS_RE = re.compile(r"(?i)(token\"?\s*=\s*\"?)[A-Za-z0-9._~+/%-]{8,}")
+# a logged dict of settings or request params: {'api_key': '...'}
+_SECRET_FIELD_RE = re.compile(
+    r"(?i)(['\"](?:%s)['\"]\s*:\s*['\"])[^'\"]+" % _SECRET_PARAMS)
+_URL_PASSWORD_RE = re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://[^/\s:@\"']+:)[^@\s/\"']+(@)")
+REDACTED = "***"
+
+
+def redact(text: str) -> str:
+    """``text`` with credential values replaced by ``***``."""
+    if not text:
+        return text
+    if "=" in text:
+        text = _SECRET_QUERY_RE.sub(r"\1" + REDACTED, text)
+        text = _SHORT_NAME_QUERY_RE.sub(r"\1" + REDACTED, text)
+        if "/rest/" in text:
+            text = _SUBSONIC_RE.sub(r"\1" + REDACTED, text)
+    lowered = text.lower()
+    # token= first: `Authorization: MediaBrowser Token="..."` carries it there
+    if "token" in lowered:
+        text = _TOKEN_EQUALS_RE.sub(r"\1" + REDACTED, text)
+    if "authorization" in lowered:
+        text = _AUTHORIZATION_RE.sub(r"\1" + REDACTED, text)
+    if "bearer " in lowered:
+        text = _BEARER_RE.sub(r"\1" + REDACTED, text)
+    if "':" in text or '":' in text:
+        text = _SECRET_FIELD_RE.sub(r"\1" + REDACTED, text)
+    if "://" in text and "@" in text:
+        text = _URL_PASSWORD_RE.sub(r"\1" + REDACTED + r"\2", text)
+    return text
+
+
 class SafeFormatter(logging.Formatter):
     """Formatter that handles Unicode characters safely on Windows"""
     
@@ -28,11 +84,15 @@ class SafeFormatter(logging.Formatter):
     def format(self, record):
         # Try to format with emojis first, fall back to stripped version
         try:
-            return super().format(record)
+            line = super().format(record)
         except UnicodeEncodeError:
             # Strip emojis and try again for Windows compatibility
             record.getMessage = lambda: self.strip_emojis(record.msg % record.args if record.args else record.msg)
-            return super().format(record)
+            line = super().format(record)
+        try:
+            return redact(line)
+        except Exception:  # noqa: BLE001 - a log line is never lost to its own cleanup
+            return line
 
 class ColoredFormatter(SafeFormatter):
     COLORS = {

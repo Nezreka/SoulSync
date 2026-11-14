@@ -752,6 +752,28 @@ export function MirroredTab({
     [load],
   );
 
+  /** Find uncatalogued tracks (#2097): the next sync starts looking. */
+  const setUncatalogued = useCallback(
+    async (row: MirroredPlaylistRow, enabled: boolean) => {
+      const name = row.display_name || row.name || 'Playlist';
+      try {
+        const res = await patchMirroredPreferences(row.id, { allow_uncatalogued: enabled });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          enabled
+            ? `"${name}" will search for its uncatalogued tracks on the next sync`
+            : `"${name}" leaves uncatalogued tracks in the Wing It pool`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      }
+    },
+    [load],
+  );
+
   /**
    * Organize-by-playlist, moved off the Auto-Sync board.
    *
@@ -1696,6 +1718,7 @@ export function MirroredTab({
           onRename={(value) => void renameTo(settingsRow, value)}
           onToggleOrganize={(enabled) => void setOrganize(settingsRow, enabled)}
           onToggleRotating={(enabled) => void setRotating(settingsRow, enabled)}
+          onToggleUncatalogued={(enabled) => void setUncatalogued(settingsRow, enabled)}
           onSetSyncMode={(mode) => void setSyncMode(settingsRow, mode)}
           onToggleAutoRemove={() => void toggleAutoRemove(settingsRow)}
           onEditSource={() => {

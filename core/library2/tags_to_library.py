@@ -43,6 +43,10 @@ logger = get_logger("library2.tags_to_library")
 #: tracks one request may plan or apply (the retag preview's ceiling too)
 MAX_TRACKS = 1000
 
+#: the reason every value taken from a file tag is saved with. it is how such
+#: a value is told from an edit typed into the Edit dialog
+FILE_TAGS_REASON = "file tags"
+
 _TRACK_FIELDS = (
     # (plan field, file tag key, db_data key, label)
     ("title", "title", "title", "Title"),
@@ -129,7 +133,76 @@ def _files_per_album(conn, album_ids: Iterable[int]) -> Dict[int, int]:
     return out
 
 
-def plan(database, track_ids: List[int], *, read_tags=None) -> Dict[str, Any]:
+def _sibling_titles(conn, album_ids: Iterable[int]) -> Dict[int, set]:
+    """For each album, the title keys of the OTHER albums its artist has."""
+    from core.library2.importer import release_title_key
+    out: Dict[int, set] = {}
+    for album_id in {int(a) for a in album_ids if a}:
+        out[album_id] = {
+            release_title_key(row[0]) for row in conn.execute(
+                """SELECT o.title FROM lib2_albums a
+                     JOIN lib2_albums o ON o.primary_artist_id = a.primary_artist_id AND o.id <> a.id
+                    WHERE a.id = ? AND o.title IS NOT NULL""", (album_id,))}
+    return out
+
+
+def _ids_json(track_ids: Iterable[int]) -> str:
+    import json
+    return json.dumps(sorted({int(t) for t in track_ids}))
+
+
+_HELD_SQL = """
+    FROM lib2_metadata_overrides
+   WHERE reason = ?
+     AND ((entity_type = 'track' AND entity_id IN (SELECT value FROM json_each(?)))
+       OR (entity_type = 'release_group' AND entity_id IN (
+               SELECT DISTINCT album_id FROM lib2_tracks
+                WHERE id IN (SELECT value FROM json_each(?)))))"""
+
+
+def held_values(conn, track_ids: Optional[Iterable[int]] = None) -> int:
+    """How many Library values are held from file tags: for these tracks and
+    their albums, or the whole Library when no tracks are given."""
+    try:
+        if track_ids is None:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM lib2_metadata_overrides WHERE reason = ?",
+                (FILE_TAGS_REASON,)).fetchone()
+        else:
+            ids = _ids_json(track_ids)
+            row = conn.execute("SELECT COUNT(*)" + _HELD_SQL, (FILE_TAGS_REASON, ids, ids)).fetchone()
+    except Exception as exc:  # noqa: BLE001 - the table is made on the first edit
+        logger.debug("file tag values not counted: %s", exc)
+        return 0
+    return int(row[0] or 0)
+
+
+def release(database, track_ids: Optional[Iterable[int]] = None, *, profile_id: int = 1) -> Dict[str, int]:
+    """Let go of the values taken from file tags (#2084): for these tracks and
+    their albums, or the whole Library. Each field goes back to what the
+    metadata sources say and is free for enrichment and repairs again. Edits
+    made by hand in the Edit dialogs are not touched, and no file is changed.
+    """
+    from core.acquisition.requests import actor_is_admin
+    from core.library2.metadata_overrides import MetadataOverrideError
+
+    with closing(database._get_connection()) as conn:
+        if not actor_is_admin(conn, profile_id):
+            raise MetadataOverrideError("metadata overrides are admin-only", status=403)
+        if held_values(conn, track_ids) == 0:
+            return {"released": 0}
+        if track_ids is None:
+            done = conn.execute("DELETE FROM lib2_metadata_overrides WHERE reason = ?",
+                                (FILE_TAGS_REASON,)).rowcount
+        else:
+            ids = _ids_json(track_ids)
+            done = conn.execute("DELETE" + _HELD_SQL, (FILE_TAGS_REASON, ids, ids)).rowcount
+        conn.commit()
+    logger.info("Use file tags: %d value(s) released", done)
+    return {"released": int(done or 0)}
+
+
+def plan(database, track_ids: List[int], *, read_tags=None, allow_rename: bool = True) -> Dict[str, Any]:
     """What using the file tags would change, without changing anything.
 
     Returns ``{"tracks": [...], "albums": [...], "counts": {...}}``. A track
@@ -137,8 +210,13 @@ def plan(database, track_ids: List[int], *, read_tags=None) -> Dict[str, Any]:
     a ``move``. An album entry carries the album-wide ``changes`` (year,
     release date, genre) and a ``rename`` when every file agrees on a new
     title. ``unreadable`` tracks have a file whose tags could not be read.
+
+    ``allow_rename=False`` is for a caller that knows the tracks are leaving
+    (a compilation's songs going to their original albums): every file of the
+    album naming one other title is then a move of each, never a rename.
     """
     from core.library2 import retag
+    from core.library2.importer import release_title_key
     if read_tags is None:
         from core.tag_writer import read_file_tags as read_tags
 
@@ -146,6 +224,8 @@ def plan(database, track_ids: List[int], *, read_tags=None) -> Dict[str, Any]:
     with closing(database._get_connection()) as conn:
         contexts = [c for c in retag.track_contexts(conn, ids, lyrics=False) if c.get("file_path")]
         with_files = _files_per_album(conn, [c.get("album_id") for c in contexts])
+        siblings = _sibling_titles(conn, [c.get("album_id") for c in contexts])
+        held = held_values(conn, ids)
 
     by_album: Dict[int, List[Dict[str, Any]]] = {}
     tracks: List[Dict[str, Any]] = []
@@ -195,8 +275,11 @@ def plan(database, track_ids: List[int], *, read_tags=None) -> Dict[str, Any]:
         album: Dict[str, Any] = {"album_id": album_id, "title": current_title,
                                  "changes": [], "rename": None}
         whole_album = len(entries) >= with_files.get(album_id, len(entries))
-        renamed = (whole_album and all(elsewhere)
-                   and len({t.casefold() for t in tagged}) == 1)
+        renamed = (allow_rename and whole_album and all(elsewhere)
+                   and len({t.casefold() for t in tagged}) == 1
+                   # the artist already has an album of that name: the files
+                   # belong on it. a rename would make a second one (#2084)
+                   and release_title_key(tagged[0]) not in siblings.get(album_id, ()))
         if renamed:
             album["rename"] = tagged[0]
         else:
@@ -228,6 +311,8 @@ def plan(database, track_ids: List[int], *, read_tags=None) -> Dict[str, Any]:
             "moves": sum(1 for t in tracks if t["move"]),
             "albums": len(albums),
             "unreadable": sum(1 for t in tracks if t.get("unreadable")),
+            # values here already taken from file tags, which Release lets go of
+            "held": held,
         },
         "truncated": len(track_ids) > MAX_TRACKS,
     }
@@ -271,10 +356,11 @@ def _set(conn, entity_type: str, entity_id: int, change: Dict[str, Any], profile
     from core.library2.metadata_overrides import set_field_override
     set_field_override(conn, entity_type=entity_type, entity_id=int(entity_id),
                        field_name=change["field"], value=change["file"],
-                       profile_id=profile_id, reason="file tags")
+                       profile_id=profile_id, reason=FILE_TAGS_REASON)
 
 
-def apply(database, track_ids: List[int], *, profile_id: int = 1, read_tags=None) -> Dict[str, Any]:
+def apply(database, track_ids: List[int], *, profile_id: int = 1, read_tags=None,
+          allow_rename: bool = True) -> Dict[str, Any]:
     """Do what ``plan`` says for these tracks. Returns what was done.
 
     The plan is worked out again here rather than taken from the caller: a
@@ -284,7 +370,7 @@ def apply(database, track_ids: List[int], *, profile_id: int = 1, read_tags=None
     from core.library2.autolink import _find_or_create_album, _find_or_create_track
     from core.library2.track_file_move import MoveError, move_track_file
 
-    the_plan = plan(database, track_ids, read_tags=read_tags)
+    the_plan = plan(database, track_ids, read_tags=read_tags, allow_rename=allow_rename)
     done = {"tracks_changed": 0, "albums_changed": 0, "albums_renamed": 0,
             "moved": 0, "albums_created": 0, "failed": []}
 

@@ -652,6 +652,56 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error fetching playlist '{name}': {e}")
             return None
     
+    def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
+        """every audio playlist with this name, any casing, without loading
+        its tracks. what a mirror's link is first found by (#2098)."""
+        if not self.ensure_connection():
+            return []
+        wanted = str(name or '').strip().lower()
+        try:
+            return [
+                PlaylistInfo(id=str(pl.ratingKey), title=pl.title,
+                             description=getattr(pl, 'summary', None),
+                             duration=getattr(pl, 'duration', 0) or 0,
+                             leaf_count=getattr(pl, 'leafCount', 0) or 0, tracks=[])
+                for pl in self.server.playlists()
+                if getattr(pl, 'playlistType', None) == 'audio'
+                and str(getattr(pl, 'title', '') or '').strip().lower() == wanted
+            ]
+        except Exception as e:
+            logger.error(f"Error listing Plex playlists named '{name}': {e}")
+            return []
+
+    def _playlist_object(self, playlist_id):
+        """the plex playlist with this ratingKey, None when it is gone"""
+        if not playlist_id or not self.ensure_connection():
+            return None
+        try:
+            pl = self.server.fetchItem(int(playlist_id))
+        except Exception as e:  # noqa: BLE001 - gone, or not a key at all
+            logger.debug(f"Plex playlist {playlist_id} could not be read: {e}")
+            return None
+        return pl if getattr(pl, 'playlistType', None) == 'audio' else None
+
+    def get_playlist_by_id(self, playlist_id) -> Optional[PlaylistInfo]:
+        """one playlist by its ratingKey, None when the server no longer has it"""
+        pl = self._playlist_object(playlist_id)
+        if pl is None:
+            return None
+        return PlaylistInfo(id=str(pl.ratingKey), title=pl.title,
+                            description=getattr(pl, 'summary', None),
+                            duration=getattr(pl, 'duration', 0) or 0,
+                            leaf_count=getattr(pl, 'leafCount', 0) or 0, tracks=[])
+
+    def _target_playlist(self, playlist_name: str, playlist_id=None):
+        """the playlist a write goes to: the one with this id while the server
+        still has it (a rename there is followed), else the one with the name.
+        raises NotFound like ``server.playlist`` when there is neither."""
+        followed = self._playlist_object(playlist_id) if playlist_id else None
+        if followed is not None:
+            return followed
+        return self.server.playlist(playlist_name)
+
     # A single createPlaylist/addItems call with ~1000 ratingKeys builds an
     # oversized request that Plex (or a reverse proxy) can reject outright or
     # silently truncate — the sync then reports success while the playlist is
@@ -829,7 +879,8 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error copying playlist '{source_name}' to '{target_name}': {e}")
             return False
 
-    def append_to_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
+    def append_to_playlist(self, playlist_name: str, tracks: List[TrackInfo], *,
+                           playlist_id=None) -> bool:
         """Append tracks to an existing playlist (creates it if missing).
 
         Differs from `update_playlist`: never deletes existing tracks,
@@ -842,7 +893,7 @@ class PlexClient(MediaServerBase):
 
         try:
             try:
-                existing_playlist = self.server.playlist(playlist_name)
+                existing_playlist = self._target_playlist(playlist_name, playlist_id)
             except NotFound:
                 logger.info(
                     f"Plex append: playlist '{playlist_name}' doesn't exist yet — "
@@ -877,7 +928,8 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error appending to Plex playlist '{playlist_name}': {e}")
             return False
 
-    def reconcile_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
+    def reconcile_playlist(self, playlist_name: str, tracks: List[TrackInfo], *,
+                           playlist_id=None) -> bool:
         """In-place reconcile (#792): bring an existing playlist's tracks to match
         ``tracks`` by adding the missing ones and removing the gone ones, WITHOUT
         deleting/recreating the playlist — so its custom poster, summary, and
@@ -889,7 +941,7 @@ class PlexClient(MediaServerBase):
         try:
             from core.sync.playlist_edit import plan_playlist_reconcile
             try:
-                existing = self.server.playlist(playlist_name)
+                existing = self._target_playlist(playlist_name, playlist_id)
             except NotFound:
                 logger.info(f"Plex reconcile: '{playlist_name}' doesn't exist — creating")
                 return self.create_playlist(playlist_name, tracks)
@@ -1007,12 +1059,37 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error reordering Plex playlist '{playlist_name}': {e}")
             return False
 
-    def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
+    def _replace_in_place(self, playlist, playlist_name: str, tracks) -> bool:
+        """make an existing playlist hold exactly these tracks, in this order,
+        without deleting it: it keeps its ratingKey, poster and summary, and
+        the mirror linked to it keeps finding it (#2098). False = the caller
+        deletes it and makes it again."""
+        wanted = [t for t in tracks if t is not None and hasattr(t, 'ratingKey')]
+        if not wanted or len(wanted) != len(tracks):
+            return False        # some need a lookup first: create_playlist does that
+        try:
+            current = [i for i in playlist.items() if hasattr(i, 'ratingKey')]
+            if [str(i.ratingKey) for i in current] == [str(t.ratingKey) for t in wanted]:
+                logger.info(f"Plex playlist '{playlist_name}' already holds these {len(wanted)} tracks")
+                return True
+            if current:
+                playlist.removeItems(current)
+            self._add_items_chunked(playlist, wanted)
+        except Exception as e:  # noqa: BLE001 - the recreate below still gets it right
+            logger.warning(f"Plex replace of '{playlist_name}' in place failed ({e})")
+            return False
+        logger.info(f"Replaced the tracks of Plex playlist '{playlist_name}' in place ({len(wanted)} tracks)")
+        return True
+
+    def update_playlist(self, playlist_name: str, tracks: List[TrackInfo], *,
+                        playlist_id=None) -> bool:
+        """rewrite a playlist, or make it. ``playlist_id`` is the playlist a
+        mirror is linked to; without one, or once it is gone, the name finds it."""
         if not self.ensure_connection():
             return False
         
         try:
-            existing_playlist = self.server.playlist(playlist_name)
+            existing_playlist = self._target_playlist(playlist_name, playlist_id)
             
             # Check if backup is enabled in config
             from core.settings import config_manager
@@ -1023,11 +1100,14 @@ class PlexClient(MediaServerBase):
                 backup_name = f"{playlist_name} Backup"
                 logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
-                if self.copy_playlist(playlist_name, backup_name):
+                if self.copy_playlist(existing_playlist.title, backup_name):
                     logger.info("Backup created successfully")
                 else:
                     logger.warning("Failed to create backup, continuing with sync")
             
+            if self._replace_in_place(existing_playlist, playlist_name, tracks):
+                return True
+
             # Delete original and recreate
             existing_playlist.delete()
             return self.create_playlist(playlist_name, tracks)
@@ -1502,7 +1582,7 @@ class PlexClient(MediaServerBase):
                 'Content-Type': 'image/jpeg'
             }
             
-            response = requests.post(upload_url, data=image_data, headers=headers)
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
             response.raise_for_status()
             
             # Refresh artist to see changes
@@ -1547,7 +1627,7 @@ class PlexClient(MediaServerBase):
                 'Content-Type': 'image/jpeg'
             }
             
-            response = requests.post(upload_url, data=image_data, headers=headers)
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=(10, 60))
             response.raise_for_status()
             
             # Refresh album to see changes

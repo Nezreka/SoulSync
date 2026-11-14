@@ -748,6 +748,10 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+                # qBittorrent only (#2087): start what SoulSync adds even when the
+                # client is set to add torrents stopped, or to stop them once the
+                # metadata is in. Off = the client's own setting decides.
+                "start_torrents": False,
                 # Seeding lifecycle (mirror of the video side): seed a completed
                 # music torrent grab until the ratio/time goal is met, then remove
                 # it from the client. BOTH goals default 0 = sweep OFF = grabs seed

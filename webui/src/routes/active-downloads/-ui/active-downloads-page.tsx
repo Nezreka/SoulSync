@@ -410,7 +410,7 @@ export function ActiveDownloadsPage() {
   const deletedEntries = verification.state.deleted?.entries ?? [];
 
   return (
-    <div className="adl-layout">
+    <div className="pgf-page adl-layout">
       <div className="adl-main">
         <div className="adl-container">
           <AdlHeader

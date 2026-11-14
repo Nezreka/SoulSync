@@ -77,7 +77,7 @@ def reconstruct_sync_track_data(
     # cover) — the live sync keeps them off the wishlist unless
     # wishlist.wing_it_guesses is on, and the re-add has to make the SAME call or it
     # would store a coverless placeholder the sync had deliberately skipped.
-    if is_stub_id(sid) and not should_wishlist_stub(tr.get('artist'), tr.get('name')):
+    if is_stub_id(sid) and not should_wishlist_stub(tr.get('artist'), tr.get('name'), sid):
         return None
 
     # Primary: the exact normalized track the auto-add used.

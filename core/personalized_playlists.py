@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from collections import Counter
 import random
 import json
+import threading
 from utils.logging_config import get_logger
 
 logger = get_logger("personalized_playlists")
@@ -38,41 +39,117 @@ _OWNED_PROVIDER_IDS_SQL = """
                       AND (t.spotify_id IS NOT NULL OR t.external_ids NOT IN ('', '{}'))"""
 
 # the provider ids of every track you own, which every discover shelf leaves
-# out. building them walks the whole catalogue (~2s on a big library), and
-# each shelf, each query, rebuilt them. now each pooled connection keeps them
-# in indexed temp tables, refilled in one sql pass when a file is added or
-# after five minutes.
+# out. building them walks the whole catalogue (~4s on a big library).
+#
+# they used to be kept in temp tables "per pooled connection", refilled after
+# five minutes. the pool drops a connection's temp tables when it is handed
+# back (database/connection_pool.py), so nothing was ever kept: every shelf of
+# every page load rebuilt them, 7-60s each on a busy 319k-track library, five
+# shelves at once (Nov 13 2026). what is kept now is the answer, once per
+# process: the ids of the pool rows you already own. a connection gets them
+# as one small temp table (~30ms) and the shelves leave those rows out.
 _OWNED_IDS_TTL = 300.0
 # a new file still rebuilds them, but not more than once a minute: during a
 # download run every file moved the stamp and every shelf paid a ~4s rebuild
 _OWNED_IDS_MIN_AGE = 60.0
 
+# the three id lists, as the old per-connection filter read them. a pool row
+# is owned when any of its three ids is in the matching list.
+_OWNED_BY_PROVIDER_ID = """
+        NOT ((discovery_pool.spotify_track_id IS NULL OR discovery_pool.spotify_track_id NOT IN (
+                  SELECT v FROM temp.owned_spotify))
+         AND (discovery_pool.itunes_track_id IS NULL OR discovery_pool.itunes_track_id NOT IN (
+                  SELECT v FROM temp.owned_itunes))
+         AND (discovery_pool.deezer_track_id IS NULL OR discovery_pool.deezer_track_id NOT IN (
+                  SELECT v FROM temp.owned_deezer)))"""
+
+_owned_pool_guard = threading.Lock()
+_owned_pool_builds: Dict[str, threading.Lock] = {}
+# database file -> (stamp, built at, ids of owned pool rows in order)
+_owned_pool_cache: Dict[str, Tuple[Any, float, Tuple[int, ...]]] = {}
+
+
+def clear_owned_pool_cache() -> None:
+    with _owned_pool_guard:
+        _owned_pool_cache.clear()
+
+
+def _owned_pool_stamp(conn) -> tuple:
+    """Moves when a file is added or the pool gains rows."""
+    return (conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0],
+            conn.execute("SELECT MAX(id) FROM discovery_pool").fetchone()[0])
+
+
+def _build_owned_pool_ids(conn) -> Tuple[int, ...]:
+    """The ids of the discovery pool rows whose track is already owned."""
+    names = ('owned_spotify', 'owned_itunes', 'owned_deezer')
+    try:
+        conn.execute("DROP TABLE IF EXISTS temp.owned_all")
+        conn.execute(f"CREATE TEMP TABLE owned_all AS {_OWNED_PROVIDER_IDS_SQL}")
+        for name, column in zip(names, ('spotify_id', 'itunes_id', 'deezer_id'), strict=True):
+            conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {name} (v PRIMARY KEY) WITHOUT ROWID")
+            conn.execute(f"DELETE FROM temp.{name}")
+            # sorted: in-order inserts into the key's b-tree are ~3x cheaper
+            # than the catalogue's own order (0.7s against 2.2s for ~700k ids)
+            conn.execute(f"INSERT OR IGNORE INTO temp.{name} "
+                         f"SELECT DISTINCT {column} FROM temp.owned_all "
+                         f"WHERE {column} IS NOT NULL ORDER BY {column}")
+        return tuple(int(row[0]) for row in conn.execute(
+            f"SELECT discovery_pool.id FROM discovery_pool WHERE {_OWNED_BY_PROVIDER_ID} "
+            f"ORDER BY discovery_pool.id"))
+    finally:
+        for name in ('owned_all',) + names:
+            conn.execute(f"DROP TABLE IF EXISTS temp.{name}")
+
+
+def _owned_pool_ids(conn) -> Tuple[Any, Tuple[int, ...]]:
+    """(build token, ids): from the process cache while it is fresh, else
+    built once however many shelves ask at the same moment."""
+    import time as _time
+    db_file = str(conn.execute("PRAGMA database_list").fetchone()[2] or "")
+    if not db_file:  # an in-memory database is its connection: nothing to share
+        return object(), _build_owned_pool_ids(conn)
+    stamp = _owned_pool_stamp(conn)
+
+    def fresh(hit):
+        age = _time.monotonic() - hit[1]
+        return age < _OWNED_IDS_TTL and (hit[0] == stamp or age < _OWNED_IDS_MIN_AGE)
+
+    hit = _owned_pool_cache.get(db_file)
+    if hit is not None and fresh(hit):
+        return hit[1], hit[2]
+    with _owned_pool_guard:
+        building = _owned_pool_builds.setdefault(db_file, threading.Lock())
+    # one build at a time. while it runs, a shelf that has an older answer
+    # uses it; only the very first ask has to wait
+    if not building.acquire(blocking=hit is None):
+        return hit[1], hit[2]
+    try:
+        hit = _owned_pool_cache.get(db_file)
+        if hit is not None and fresh(hit):
+            return hit[1], hit[2]
+        ids = _build_owned_pool_ids(conn)
+        hit = (stamp, _time.monotonic(), ids)
+        _owned_pool_cache[db_file] = hit
+        return hit[1], hit[2]
+    finally:
+        building.release()
+
 
 def _ensure_owned_ids(conn) -> None:
-    """Fill temp.owned_spotify / owned_itunes / owned_deezer for this
-    connection with the current owned provider ids."""
-    import time as _time
-    stamp = conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0]
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS owned_ids_version (stamp, built_at REAL)")
-    current = conn.execute("SELECT stamp, built_at FROM temp.owned_ids_version").fetchone()
-    now = _time.monotonic()
-    if current and now - current[1] < _OWNED_IDS_TTL and (
-            current[0] == stamp or now - current[1] < _OWNED_IDS_MIN_AGE):
-        return
-    conn.execute("DROP TABLE IF EXISTS temp.owned_all")
-    conn.execute(f"CREATE TEMP TABLE owned_all AS {_OWNED_PROVIDER_IDS_SQL}")
-    for name, column in (('owned_spotify', 'spotify_id'), ('owned_itunes', 'itunes_id'),
-                         ('owned_deezer', 'deezer_id')):
-        conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {name} (v PRIMARY KEY) WITHOUT ROWID")
-        conn.execute(f"DELETE FROM temp.{name}")
-        # sorted: in-order inserts into the key's b-tree are ~3x cheaper
-        # than the catalogue's own order (0.7s against 2.2s for ~700k ids)
-        conn.execute(f"INSERT OR IGNORE INTO temp.{name} "
-                     f"SELECT DISTINCT {column} FROM temp.owned_all "
-                     f"WHERE {column} IS NOT NULL ORDER BY {column}")
-    conn.execute("DROP TABLE temp.owned_all")
-    conn.execute("DELETE FROM temp.owned_ids_version")
-    conn.execute("INSERT INTO temp.owned_ids_version VALUES (?, ?)", (stamp, now))
+    """Fill temp.owned_pool on this connection with the ids of the discovery
+    pool rows the library already has."""
+    token, ids = _owned_pool_ids(conn)
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS owned_pool (id INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS owned_pool_version (token)")
+    current = conn.execute("SELECT token FROM temp.owned_pool_version").fetchone()
+    if current is not None and current[0] == token:
+        return  # a connection that was not handed back in between
+    conn.execute("DELETE FROM temp.owned_pool")
+    conn.executemany("INSERT OR IGNORE INTO temp.owned_pool VALUES (?)", ((i,) for i in ids))
+    conn.execute("DELETE FROM temp.owned_pool_version")
+    if isinstance(token, float):
+        conn.execute("INSERT INTO temp.owned_pool_version VALUES (?)", (token,))
 
 
 def _blocklist_profile() -> int:
@@ -354,20 +431,14 @@ class PersonalizedPlaylistsService:
         'source',
     )
 
-    # Three uncorrelated NOT IN lists (one per ID space) over the owned id temp
-    # tables (_ensure_owned_ids, run on the connection first) instead of one
-    # OR'd correlated NOT EXISTS: SQLite cannot index the
-    # OR'd subquery and scans every owned row for every discovery_pool row,
-    # which pins the CPU for minutes on large pools (issue #1350). NULLs are
-    # kept out of the lists (NOT IN with a NULL is never true) and a NULL pool
-    # ID cannot match.
+    # The pool rows the library already has, by row id (_ensure_owned_ids, run
+    # on the connection first). They are worked out once per process from three
+    # uncorrelated NOT IN lists, one per id space, instead of one OR'd
+    # correlated NOT EXISTS: SQLite cannot index the OR'd subquery and scans
+    # every owned row for every discovery_pool row, which pins the CPU for
+    # minutes on large pools (issue #1350).
     _OWNED_CLAUSE = """
-                  AND (discovery_pool.spotify_track_id IS NULL OR discovery_pool.spotify_track_id NOT IN (
-                      SELECT v FROM temp.owned_spotify))
-                  AND (discovery_pool.itunes_track_id IS NULL OR discovery_pool.itunes_track_id NOT IN (
-                      SELECT v FROM temp.owned_itunes))
-                  AND (discovery_pool.deezer_track_id IS NULL OR discovery_pool.deezer_track_id NOT IN (
-                      SELECT v FROM temp.owned_deezer))"""
+                  AND discovery_pool.id NOT IN (SELECT id FROM temp.owned_pool)"""
 
     # the gate every pool read shares: this source, this profile's pool, a
     # usable id, no artist this profile blocked. params: (source, profile, profile)

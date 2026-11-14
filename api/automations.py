@@ -11,6 +11,7 @@ injected as the object itself: it is bound once at boot (engine or
 None), never rebound, and the wiring runs after that binding.
 """
 
+import json
 import os
 from datetime import datetime
 
@@ -20,7 +21,8 @@ from core.automation import api as _auto_api
 from core.automation import blocks as _auto_blocks
 from core.automation import signals as _auto_signals
 from core.automation import progress as _auto_progress
-from core.profile_context import admin_only, get_current_profile_id
+from core.automation import access as _auto_access
+from core.profile_context import admin_only, get_current_profile_id, is_admin_request
 from utils.logging_config import get_logger
 
 logger = get_logger("api.automations")
@@ -42,6 +44,29 @@ def configure(*, get_database_, config_manager_, docker_resolve_path_,
 
 
 bp = Blueprint('automations', __name__)
+
+
+def _refused(automation_ids, check):
+    """A 403 when this caller may not do `check` to one of these automations
+    (core/automation/access.py), else None."""
+    if is_admin_request():
+        return None
+    pid = get_current_profile_id()
+    database = get_database()
+    for automation_id in automation_ids:
+        try:
+            automation = database.get_automation(int(automation_id))
+        except (TypeError, ValueError):
+            continue
+        if not check(automation, pid, False):
+            return jsonify({"error": _auto_access.DENIED}), 403
+    return None
+
+
+def _script_refused(data):
+    if _auto_access.uses_run_script(data) and not is_admin_request():
+        return jsonify({"error": _auto_access.SCRIPT_DENIED}), 403
+    return None
 
 
 @bp.route('/api/automations', methods=['GET'])
@@ -95,6 +120,9 @@ def create_automation():
     """Create a new automation."""
     try:
         profile_id = session.get('profile_id', 1)
+        refused = _script_refused(request.get_json(silent=True))
+        if refused:
+            return refused
         body, status = _auto_api.create_automation(get_database(), automation_engine, profile_id, request.get_json())
         return jsonify(body), status
     except Exception as e:
@@ -106,6 +134,9 @@ def create_automation():
 def get_automation(automation_id):
     """Get a single automation."""
     try:
+        refused = _refused([automation_id], _auto_access.may_read)
+        if refused:
+            return refused
         auto = _auto_api.get_automation(get_database(), automation_id)
         if auto is None:
             return jsonify({"error": "Automation not found"}), 404
@@ -118,6 +149,10 @@ def get_automation(automation_id):
 def update_automation_endpoint(automation_id):
     """Update an automation."""
     try:
+        refused = (_refused([automation_id], _auto_access.may_change)
+                   or _script_refused(request.get_json(silent=True)))
+        if refused:
+            return refused
         body, status = _auto_api.update_automation(get_database(), automation_engine, automation_id, request.get_json())
         return jsonify(body), status
     except Exception as e:
@@ -130,6 +165,9 @@ def batch_update_automation_group():
     """Batch update group_name for multiple automations."""
     try:
         data = request.get_json()
+        refused = _refused(data.get('automation_ids', []), _auto_access.may_change)
+        if refused:
+            return refused
         body, status = _auto_api.batch_update_group(get_database(), data.get('automation_ids', []), data.get('group_name'))
         return jsonify(body), status
     except Exception as e:
@@ -142,6 +180,9 @@ def bulk_toggle_automations():
     """Bulk enable/disable multiple automations."""
     try:
         data = request.get_json()
+        refused = _refused(data.get('automation_ids', []), _auto_access.may_change)
+        if refused:
+            return refused
         body, status = _auto_api.bulk_toggle(get_database(), automation_engine,
                                               data.get('automation_ids', []), data.get('enabled', True))
         return jsonify(body), status
@@ -154,6 +195,9 @@ def bulk_toggle_automations():
 def delete_automation_endpoint(automation_id):
     """Delete an automation. System automations cannot be deleted."""
     try:
+        refused = _refused([automation_id], _auto_access.may_change)
+        if refused:
+            return refused
         body, status = _auto_api.delete_automation(get_database(), automation_engine, automation_id)
         return jsonify(body), status
     except Exception as e:
@@ -166,6 +210,19 @@ def duplicate_automation_endpoint(automation_id):
     """Duplicate an automation. System automations cannot be duplicated."""
     try:
         profile_id = session.get('profile_id', 1)
+        refused = _refused([automation_id], _auto_access.may_read)
+        if refused:
+            return refused
+        source = get_database().get_automation(automation_id) or {}
+        try:
+            then_actions = json.loads(source.get("then_actions") or "[]")
+        except (TypeError, ValueError):
+            then_actions = []
+        refused = _script_refused({"action_type": source.get("action_type"),
+                                   "notify_type": source.get("notify_type"),
+                                   "then_actions": then_actions})
+        if refused:
+            return refused
         body, status = _auto_api.duplicate_automation(get_database(), automation_engine, profile_id, automation_id)
         return jsonify(body), status
     except Exception as e:
@@ -177,6 +234,9 @@ def duplicate_automation_endpoint(automation_id):
 def toggle_automation_endpoint(automation_id):
     """Toggle an automation's enabled state."""
     try:
+        refused = _refused([automation_id], _auto_access.may_change)
+        if refused:
+            return refused
         body, status = _auto_api.toggle_automation(get_database(), automation_engine, automation_id)
         return jsonify(body), status
     except Exception as e:
@@ -188,6 +248,9 @@ def toggle_automation_endpoint(automation_id):
 def run_automation_endpoint(automation_id):
     """Manually trigger an automation."""
     try:
+        refused = _refused([automation_id], _auto_access.may_run)
+        if refused:
+            return refused
         body, status = _auto_api.run_automation(automation_engine, automation_id, get_current_profile_id())
         return jsonify(body), status
     except Exception as e:
@@ -219,6 +282,9 @@ def get_automations_activity():
 @bp.route('/api/automations/<int:automation_id>/history', methods=['GET'])
 def get_automation_history(automation_id):
     """Get run history for a specific automation."""
+    refused = _refused([automation_id], _auto_access.may_read)
+    if refused:
+        return refused
     try:
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)

@@ -84,18 +84,20 @@ export function WishlistPage() {
 
   if (isVideoMedia(search.media)) {
     return (
-      <div className="page-shell wlp wlp--video">
-        <VideoWishlist
-          profileId={profileId}
-          media={search.media}
-          query={search.q}
-          failing={search.failing}
-          onMedia={(media) =>
-            void navigate({ search: (prev) => ({ ...prev, media, q: '', failing: false }) })
-          }
-          onQuery={(q) => void navigate({ search: (prev) => ({ ...prev, q }), replace: true })}
-          onFailing={(failing) => void navigate({ search: (prev) => ({ ...prev, failing }) })}
-        />
+      <div className="page-shell pgf-shell wlp wlp--video">
+        <div className="pgf-page">
+          <VideoWishlist
+            profileId={profileId}
+            media={search.media}
+            query={search.q}
+            failing={search.failing}
+            onMedia={(media) =>
+              void navigate({ search: (prev) => ({ ...prev, media, q: '', failing: false }) })
+            }
+            onQuery={(q) => void navigate({ search: (prev) => ({ ...prev, q }), replace: true })}
+            onFailing={(failing) => void navigate({ search: (prev) => ({ ...prev, failing }) })}
+          />
+        </div>
       </div>
     );
   }
@@ -492,413 +494,57 @@ function MusicWishlistPage() {
 
   const showFailing = () => void navigate({ search: (prev) => ({ ...prev, failing: true }) });
 
-  return (
-    <div className="page-shell wlp">
-      {/* Media tabs. Music and audiobooks are kept as separate lists, the same
-          isolation the video side keeps between movies, shows and channels:
-          they share a page and nothing else — different database, different
-          search, different acquisition chain. */}
-      {showMediaTabs ? (
-        <div className="wlp-media-tabs" role="tablist" aria-label="Wishlist media type">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={media === 'music'}
-            onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'music' }) })}
-          >
-            Music
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={media === 'audiobooks'}
-            onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'audiobooks' }) })}
-          >
-            Audiobooks
-          </button>
-        </div>
-      ) : null}
+  // Music and audiobooks are kept as separate lists, the same isolation the
+  // video side keeps between movies, shows and channels: they share a page and
+  // nothing else. the switch sits in the header of whichever list is showing
+  const mediaTabs = showMediaTabs ? (
+    <div className="wlp-media-tabs" role="tablist" aria-label="Wishlist media type">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={media === 'music'}
+        onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'music' }) })}
+      >
+        Music
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={media === 'audiobooks'}
+        onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'audiobooks' }) })}
+      >
+        Audiobooks
+      </button>
+    </div>
+  ) : null;
 
-      {media === 'audiobooks' ? (
-        <>
-          {/* Audiobooks share the music side's premier presentation — the
+  return (
+    <div className="page-shell pgf-shell wlp">
+      <div className="pgf-page">
+        {media === 'audiobooks' ? (
+          <>
+            {/* Audiobooks share the music side's premier presentation — the
               same wlp hero, stats, triage and command bar — so the two tabs
               read as one page. Only the shared tab strip above is page-level;
               the rest of the panel lives in WishlistAudiobooks. */}
-          <WishlistAudiobooks
-            key={abReloadKey}
-            onClearAll={() => void onClearAudiobooks()}
-            onSearchAlso={searchRouted}
-            onQueryChange={setAbQuery}
-          />
-          {routedGroups.length > 0 && (visibleRoutedGroups.length > 0 || !abQuery.trim()) && (
-            <section className="wlp-routed" aria-label="Music releases filed as audiobooks">
-              <h2 className="wlp-routed-title">Audio plays from the music search</h2>
-              <p className="wlp-routed-note">
-                Wanted through the music search, but filed in your audiobook library because the
-                artist is set to <strong>Treat as audiobook</strong>.
-              </p>
-              <WishlistList
-                groups={visibleRoutedGroups}
-                artistImages={artistImages}
-                filterActive={Boolean(abQuery.trim()) || search.failing}
-                onRemoveAlbum={(albumName, artistName) => void onRemoveAlbum(albumName, artistName)}
-                onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
-                onGrabArtist={onGrabArtist}
-                onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
-                bulkBusy={bulkAction.isPending}
-              />
-            </section>
-          )}
-        </>
-      ) : (
-        <>
-          <header className="wlp-hero">
-            <div className="wlp-hero-top">
-              <div>
-                <div className="wlp-eyebrow">Music</div>
-                <h1 className="wlp-title">Wishlist</h1>
-                <p className="wlp-sub">
-                  Everything you&apos;re hunting down. The automation works this list around the
-                  clock — triage what&apos;s stuck, grab what you want now.
+            <WishlistAudiobooks
+              key={abReloadKey}
+              mediaTabs={mediaTabs}
+              onClearAll={() => void onClearAudiobooks()}
+              onSearchAlso={searchRouted}
+              onQueryChange={setAbQuery}
+            />
+            {routedGroups.length > 0 && (visibleRoutedGroups.length > 0 || !abQuery.trim()) && (
+              <section className="wlp-routed" aria-label="Music releases filed as audiobooks">
+                <h2 className="wlp-routed-title">Audio plays from the music search</h2>
+                <p className="wlp-routed-note">
+                  Wanted through the music search, but filed in your audiobook library because the
+                  artist is set to <strong>Treat as audiobook</strong>.
                 </p>
-              </div>
-              <div className="wlp-nextrun">
-                <div className="wlp-ring" aria-hidden="true">
-                  <svg viewBox="0 0 64 64">
-                    <circle className="wlp-ring-bg" cx="32" cy="32" r="26" />
-                    <circle
-                      className={`wlp-ring-fg${processing ? ' is-live' : ''}`}
-                      cx="32"
-                      cy="32"
-                      r="26"
-                      strokeDasharray={`${RING_CIRCUMFERENCE * 0.22} ${RING_CIRCUMFERENCE}`}
-                      strokeDashoffset={0}
-                    />
-                  </svg>
-                  <span className="wlp-ring-center">{processing ? '⟳' : '◷'}</span>
-                </div>
-                <div className="wlp-nextrun-meta">
-                  <span className="wlp-nextrun-label">
-                    {processing ? 'Auto-run working' : 'Next auto-run'}
-                  </span>
-                  <span className="wlp-nextrun-time" id="wishlist-next-auto-timer">
-                    --
-                  </span>
-                  <span className="wlp-cycle-badge">
-                    {currentCycle === 'albums' ? 'Albums/EPs' : 'Singles'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* The stats strip hides on an empty wishlist, exactly as the old
-                page did — the hero keeps its title and next-run card. */}
-            {total > 0 && (
-              <div className="wlp-stats">
-                <div className="wlp-stat">
-                  <span className="wlp-stat-value wishlist-page-count">
-                    {trackCountLabel(total)}
-                  </span>
-                  <span className="wlp-stat-label">Wanted</span>
-                </div>
-                <div className="wlp-stat">
-                  <span className="wlp-stat-value" id="wishlist-stat-albums">
-                    {albumCount}
-                  </span>
-                  <span className="wlp-stat-label">Album Tracks</span>
-                </div>
-                <div className="wlp-stat">
-                  <span className="wlp-stat-value" id="wishlist-stat-singles">
-                    {singleCount}
-                  </span>
-                  <span className="wlp-stat-label">Singles</span>
-                </div>
-                {failingTotal > 0 && (
-                  <div className="wlp-stat">
-                    <span className="wlp-stat-value wlp-stat-value--warn">{failingTotal}</span>
-                    <span className="wlp-stat-label">Failing</span>
-                  </div>
-                )}
-                <div className="wlp-stat">
-                  <span className="wlp-stat-value">
-                    <select
-                      className="wlp-retry-select"
-                      aria-label="Retry profile"
-                      title={
-                        retryProfileData?.profile?.description ||
-                        'How long repeatedly-failing tracks wait between scheduled retries'
-                      }
-                      value={retryProfileData?.profile?.name ?? 'standard'}
-                      disabled={retryProfileQuery.isPending || retryProfileMutation.isPending}
-                      onChange={(event) => retryProfileMutation.mutate(event.target.value)}
-                    >
-                      {retryProfileOptions.map((p) => (
-                        <option key={p.name} value={p.name} disabled={p.name === 'custom'}>
-                          {p.label}
-                          {p.name === 'custom' ? ' (API only)' : ''}
-                        </option>
-                      ))}
-                      {activeIsCustom && (
-                        <option value="custom" disabled>
-                          {retryProfileData?.profile?.label ?? 'Custom'} (API only)
-                        </option>
-                      )}
-                    </select>
-                  </span>
-                  <span className="wlp-stat-label">Retry Profile</span>
-                </div>
-              </div>
-            )}
-          </header>
-
-          {failingTotal > 0 && (
-            <div className="wlp-triage" role="alert">
-              <span className="wlp-triage-icon" aria-hidden="true">
-                ⚠
-              </span>
-              <span className="wlp-triage-text">
-                <strong>
-                  {failingTotal} {failingTotal === 1 ? 'track keeps' : 'tracks keep'} failing.
-                </strong>{' '}
-                Stuck in the retry loop — clear their backoff to try them right now, or review
-                what&apos;s wrong.
-              </span>
-              <div className="wlp-triage-actions">
-                <button
-                  type="button"
-                  className="wlp-btn wlp-btn--sm wlp-btn--primary"
-                  disabled={bulkAction.isPending}
-                  onClick={onRetryAllFailing}
-                >
-                  <span aria-hidden="true">↻ </span>Retry all now
-                </button>
-                <button type="button" className="wlp-btn wlp-btn--sm" onClick={showFailing}>
-                  Review
-                </button>
-              </div>
-            </div>
-          )}
-
-          {total === 0 ? (
-            <div className="wlp-empty">
-              <div className="wlp-empty-icon" aria-hidden="true">
-                <svg
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="rgba(245,185,66,0.85)"
-                  strokeWidth="1.5"
-                >
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              <h3>Your wishlist is empty</h3>
-              <p>
-                Failed downloads and tracks from watchlist scans will appear here automatically —
-                then the hunt begins.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="wlp-cmdbar">
-                <div className="wlp-search">
-                  <input
-                    type="text"
-                    placeholder="Filter wishlist…"
-                    aria-label="Filter wishlist"
-                    value={search.q}
-                    onChange={(event) =>
-                      void navigate({
-                        search: (prev) => ({ ...prev, q: event.target.value }),
-                        replace: true,
-                      })
-                    }
-                  />
-                </div>
-                <button
-                  type="button"
-                  className={`wlp-chip wlp-chip--warn${search.failing ? ' active' : ''}`}
-                  title="Show only artists with tracks that keep failing to download"
-                  aria-pressed={search.failing}
-                  onClick={() =>
-                    void navigate({ search: (prev) => ({ ...prev, failing: !prev.failing }) })
-                  }
-                >
-                  <span aria-hidden="true">⚠ </span>Failing
-                  {failingTotal > 0 && <span className="wlp-count">{failingTotal}</span>}
-                </button>
-                {view === 'nebula' && (
-                  <label className="wlp-sort">
-                    Sort
-                    <select
-                      aria-label="Sort nebula"
-                      value={nebulaSort}
-                      onChange={(event) => setNebulaSort(event.target.value as NebulaSort)}
-                    >
-                      {NEBULA_SORTS.map((s) => (
-                        <option key={s.key} value={s.key}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <div className="wlp-segmented" role="tablist" aria-label="Wishlist view">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={view === 'nebula'}
-                    title="The orbital view"
-                    onClick={() => pickView('nebula')}
-                  >
-                    <span aria-hidden="true">✦ </span>Nebula
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={view === 'list'}
-                    title="Dense list with retry status — sortable"
-                    onClick={() => pickView('list')}
-                  >
-                    <span aria-hidden="true">☰ </span>List
-                  </button>
-                </div>
-                {/* All three open modals owned by downloads.js and shared with the
-                    wishlist hero button, so they are invoked rather than reimplemented.
-                    they fold into one menu: rare jobs, and one of them wipes the list. */}
-                <ActionMenu
-                  className="wlp-menu"
-                  items={[
-                    {
-                      key: 'ignored',
-                      label: 'Ignored',
-                      title:
-                        'Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.',
-                      onSelect: () => window.openWishlistIgnoreModal?.(),
-                    },
-                    {
-                      key: 'cleanup',
-                      label: 'Cleanup',
-                      title: 'Drop wanted tracks you already own',
-                      onSelect: () => window.cleanupWishlistOverview?.(),
-                    },
-                    {
-                      key: 'export',
-                      label: 'Export…',
-                      title: 'Save the wishlist as CSV or JSON',
-                      onSelect: () => setExporting(true),
-                    },
-                    {
-                      key: 'clear',
-                      label: 'Clear All',
-                      danger: true,
-                      onSelect: () => window.clearEntireWishlist?.(),
-                    },
-                  ]}
-                  trigger={(props) => (
-                    <button
-                      type="button"
-                      className="wlp-btn wlp-more"
-                      title="Ignored, cleanup, export, clear all"
-                      aria-label="More wishlist actions"
-                      {...props}
-                      ref={props.ref as (el: HTMLButtonElement | null) => void}
-                    >
-                      ⋯
-                    </button>
-                  )}
-                />
-                <div className="wlp-split" role="group" aria-label="Download the wishlist">
-                  <button
-                    type="button"
-                    className="wlp-btn wlp-btn--primary wlp-split-main"
-                    disabled={processing || startRun.isPending || total === 0}
-                    title="Download every wanted track now"
-                    onClick={() => startRun.mutate('all')}
-                  >
-                    <span aria-hidden="true">⬇ </span>
-                    {processing
-                      ? 'Downloading…'
-                      : startRun.isPending
-                        ? 'Starting…'
-                        : 'Download now'}
-                  </button>
-                  <ActionMenu
-                    className="wlp-menu"
-                    items={[
-                      {
-                        key: 'all',
-                        label: `Everything (${total})`,
-                        disabled: total === 0,
-                        onSelect: () => startRun.mutate('all'),
-                      },
-                      {
-                        key: 'albums',
-                        label: `Albums & EPs only (${albumCount})`,
-                        disabled: albumCount === 0,
-                        onSelect: () => startRun.mutate('albums'),
-                      },
-                      {
-                        key: 'singles',
-                        label: `Singles only (${singleCount})`,
-                        disabled: singleCount === 0,
-                        onSelect: () => startRun.mutate('singles'),
-                      },
-                    ]}
-                    trigger={(props) => (
-                      <button
-                        type="button"
-                        className="wlp-btn wlp-btn--primary wlp-split-more"
-                        aria-label="Choose what to download"
-                        disabled={processing || startRun.isPending}
-                        {...props}
-                        ref={props.ref as (el: HTMLButtonElement | null) => void}
-                      >
-                        ▾
-                      </button>
-                    )}
-                  />
-                </div>
-              </div>
-
-              {processing ? (
-                <div className="wlp-run" role="status" aria-live="polite">
-                  <div className="wlp-run-head">
-                    <span className="wlp-run-label">{run?.label ?? 'Starting…'}</span>
-                    <span className="wlp-run-actions">
-                      <button
-                        type="button"
-                        className="wlp-btn"
-                        // the old modal, opened on the run that's already going
-                        onClick={() => void window._nebulaDownload?.()}
-                      >
-                        View details
-                      </button>
-                      <button
-                        type="button"
-                        className="wlp-btn"
-                        disabled={!runBatchId || stopRun.isPending}
-                        onClick={() => void onStopRun()}
-                      >
-                        {stopRun.isPending ? 'Stopping…' : 'Stop'}
-                      </button>
-                    </span>
-                  </div>
-                  <div className="wlp-run-bar">
-                    <i style={{ width: `${Math.round((run?.fraction ?? 0) * 100)}%` }} />
-                  </div>
-                </div>
-              ) : null}
-
-              {view === 'list' ? (
                 <WishlistList
-                  groups={visibleGroups}
+                  groups={visibleRoutedGroups}
                   artistImages={artistImages}
-                  filterActive={Boolean(search.q?.trim()) || search.failing}
+                  filterActive={Boolean(abQuery.trim()) || search.failing}
                   onRemoveAlbum={(albumName, artistName) =>
                     void onRemoveAlbum(albumName, artistName)
                   }
@@ -906,90 +552,454 @@ function MusicWishlistPage() {
                   onGrabArtist={onGrabArtist}
                   onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
                   bulkBusy={bulkAction.isPending}
-                  zoned
-                  onRetryIds={onRetryIds}
                 />
-              ) : (
-                <NebulaStage
-                  sheetOpen={sheetGroup !== null}
-                  field={
-                    <div
-                      className={`wl-nebula-field wlp-field${processing ? ' nebula-processing' : ''}`}
-                    >
-                      {nebulaGroups.length === 0 ? (
-                        <div className="wl-nebula-empty">
-                          Nothing matches — clear the filter to see the whole hunt.
-                        </div>
-                      ) : (
-                        nebulaZones.map((zone) => (
-                          <NebulaZone
-                            key={zone.kind}
-                            kind={zone.kind}
-                            title={zone.title}
-                            sub={zone.sub}
-                            action={
-                              zone.stuckIds.length > 0
-                                ? {
-                                    label:
-                                      zone.stuckIds.length === 1
-                                        ? 'Retry now'
-                                        : `Retry all ${zone.stuckIds.length}`,
-                                    title:
-                                      'Clear the retry backoff so the next pass tries these again',
-                                    disabled: bulkAction.isPending,
-                                    onClick: () => onRetryIds(zone.stuckIds),
-                                  }
-                                : null
-                            }
-                          >
-                            {zone.groups.map((group) => (
-                              <WishlistOrb
-                                key={group.name}
-                                group={group}
-                                index={nebulaGroups.indexOf(group)}
-                                artistImages={artistImages}
-                                artistImageFallbacks={artistImageFallbacks}
-                                currentCycle={currentCycle}
-                                processing={processing}
-                                expanded={expandedArtist === group.name}
-                                onToggleExpand={() =>
-                                  setExpandedArtist((current) =>
-                                    current === group.name ? null : group.name,
-                                  )
-                                }
-                              />
-                            ))}
-                          </NebulaZone>
-                        ))
-                      )}
-                    </div>
-                  }
-                  sheet={
-                    sheetGroup ? (
-                      <WishlistArtistSheet
-                        key={sheetGroup.name}
-                        group={sheetGroup}
-                        artistImages={artistImages}
-                        artistImageFallbacks={artistImageFallbacks}
-                        onClose={() => setExpandedArtist(null)}
-                        onGrabArtist={() => onGrabArtist(sheetGroup)}
-                        onGrabAlbum={onGrabAlbum}
-                        onRetry={onRetryIds}
-                        onRemoveAlbum={(albumName, artistName) =>
-                          void onRemoveAlbum(albumName, artistName)
-                        }
-                        onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
-                        onRemoveArtist={() => void onRemoveArtist(sheetGroup)}
-                        actionBusy={bulkAction.isPending}
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            <header className="pgf-head wlp-hero">
+              <div className="pgf-actions wlp-hero-side">
+                {mediaTabs}
+                <div className="wlp-nextrun">
+                  <div className="wlp-ring" aria-hidden="true">
+                    <svg viewBox="0 0 64 64">
+                      <circle className="wlp-ring-bg" cx="32" cy="32" r="26" />
+                      <circle
+                        className={`wlp-ring-fg${processing ? ' is-live' : ''}`}
+                        cx="32"
+                        cy="32"
+                        r="26"
+                        strokeDasharray={`${RING_CIRCUMFERENCE * 0.22} ${RING_CIRCUMFERENCE}`}
+                        strokeDashoffset={0}
                       />
-                    ) : null
-                  }
-                />
-              )}
-            </>
-          )}
-        </>
-      )}
+                    </svg>
+                    <span className="wlp-ring-center">{processing ? '⟳' : '◷'}</span>
+                  </div>
+                  <div className="wlp-nextrun-meta">
+                    <span className="wlp-nextrun-label">
+                      {processing ? 'Auto-run working' : 'Next auto-run'}
+                    </span>
+                    {/* downloads.js writes "Albums/EPs in 22m 57s" in here every second */}
+                    <span className="wlp-nextrun-time" id="wishlist-next-auto-timer">
+                      {currentCycle === 'albums' ? 'Albums/EPs' : 'Singles'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="pgf-head-main">
+                <h1 className="pgf-title">Wishlist</h1>
+                {/* the numbers are the status line; an empty wishlist says what
+                  the page is for instead */}
+                {total > 0 ? (
+                  <div className="pgf-status wlp-stats">
+                    <div className="wlp-stat">
+                      <span className="wlp-stat-value wishlist-page-count">
+                        {trackCountLabel(total)}
+                      </span>
+                      <span className="wlp-stat-label">Wanted</span>
+                    </div>
+                    <div className="wlp-stat">
+                      <span className="wlp-stat-value" id="wishlist-stat-albums">
+                        {albumCount}
+                      </span>
+                      <span className="wlp-stat-label">Album Tracks</span>
+                    </div>
+                    <div className="wlp-stat">
+                      <span className="wlp-stat-value" id="wishlist-stat-singles">
+                        {singleCount}
+                      </span>
+                      <span className="wlp-stat-label">Singles</span>
+                    </div>
+                    {failingTotal > 0 && (
+                      <div className="wlp-stat">
+                        <span className="wlp-stat-value wlp-stat-value--warn">{failingTotal}</span>
+                        <span className="wlp-stat-label">Failing</span>
+                      </div>
+                    )}
+                    <div className="wlp-stat">
+                      <span className="wlp-stat-value">
+                        <select
+                          className="wlp-retry-select"
+                          aria-label="Retry profile"
+                          title={
+                            retryProfileData?.profile?.description ||
+                            'How long repeatedly-failing tracks wait between scheduled retries'
+                          }
+                          value={retryProfileData?.profile?.name ?? 'standard'}
+                          disabled={retryProfileQuery.isPending || retryProfileMutation.isPending}
+                          onChange={(event) => retryProfileMutation.mutate(event.target.value)}
+                        >
+                          {retryProfileOptions.map((p) => (
+                            <option key={p.name} value={p.name} disabled={p.name === 'custom'}>
+                              {p.label}
+                              {p.name === 'custom' ? ' (API only)' : ''}
+                            </option>
+                          ))}
+                          {activeIsCustom && (
+                            <option value="custom" disabled>
+                              {retryProfileData?.profile?.label ?? 'Custom'} (API only)
+                            </option>
+                          )}
+                        </select>
+                      </span>
+                      <span className="wlp-stat-label">Retry Profile</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="pgf-status">
+                    Everything you&apos;re hunting down. The automation works this list around the
+                    clock.
+                  </p>
+                )}
+              </div>
+            </header>
+
+            {failingTotal > 0 && (
+              <div className="wlp-triage" role="alert">
+                <span className="wlp-triage-icon" aria-hidden="true">
+                  ⚠
+                </span>
+                <span className="wlp-triage-text">
+                  <strong>
+                    {failingTotal} {failingTotal === 1 ? 'track keeps' : 'tracks keep'} failing.
+                  </strong>{' '}
+                  Stuck in the retry loop — clear their backoff to try them right now, or review
+                  what&apos;s wrong.
+                </span>
+                <div className="wlp-triage-actions">
+                  <button
+                    type="button"
+                    className="wlp-btn wlp-btn--sm wlp-btn--primary"
+                    disabled={bulkAction.isPending}
+                    onClick={onRetryAllFailing}
+                  >
+                    <span aria-hidden="true">↻ </span>Retry all now
+                  </button>
+                  <button type="button" className="wlp-btn wlp-btn--sm" onClick={showFailing}>
+                    Review
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {total === 0 ? (
+              <div className="wlp-empty">
+                <div className="wlp-empty-icon" aria-hidden="true">
+                  <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="rgba(245,185,66,0.85)"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+                <h3>Your wishlist is empty</h3>
+                <p>
+                  Failed downloads and tracks from watchlist scans will appear here automatically —
+                  then the hunt begins.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="pgf-bar wlp-cmdbar">
+                  <div
+                    className="pgf-pills wlp-segmented"
+                    role="tablist"
+                    aria-label="Wishlist view"
+                  >
+                    <button
+                      type="button"
+                      className="pgf-pill"
+                      role="tab"
+                      aria-selected={view === 'nebula'}
+                      title="The orbital view"
+                      onClick={() => pickView('nebula')}
+                    >
+                      <span aria-hidden="true">✦ </span>Nebula
+                    </button>
+                    <button
+                      type="button"
+                      className="pgf-pill"
+                      role="tab"
+                      aria-selected={view === 'list'}
+                      title="Dense list with retry status — sortable"
+                      onClick={() => pickView('list')}
+                    >
+                      <span aria-hidden="true">☰ </span>List
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className={`pgf-pill wlp-chip wlp-chip--warn${search.failing ? ' active' : ''}`}
+                    title="Show only artists with tracks that keep failing to download"
+                    aria-pressed={search.failing}
+                    onClick={() =>
+                      void navigate({ search: (prev) => ({ ...prev, failing: !prev.failing }) })
+                    }
+                  >
+                    <span aria-hidden="true">⚠ </span>Failing
+                    {failingTotal > 0 && <span className="wlp-count">{failingTotal}</span>}
+                  </button>
+                  <div className="wlp-search">
+                    <input
+                      type="text"
+                      placeholder="Filter wishlist…"
+                      aria-label="Filter wishlist"
+                      value={search.q}
+                      onChange={(event) =>
+                        void navigate({
+                          search: (prev) => ({ ...prev, q: event.target.value }),
+                          replace: true,
+                        })
+                      }
+                    />
+                  </div>
+                  {view === 'nebula' && (
+                    <label className="wlp-sort">
+                      Sort
+                      <select
+                        aria-label="Sort nebula"
+                        value={nebulaSort}
+                        onChange={(event) => setNebulaSort(event.target.value as NebulaSort)}
+                      >
+                        {NEBULA_SORTS.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {/* All three open modals owned by downloads.js and shared with the
+                    wishlist hero button, so they are invoked rather than reimplemented.
+                    they fold into one menu: rare jobs, and one of them wipes the list. */}
+                  <ActionMenu
+                    className="wlp-menu"
+                    items={[
+                      {
+                        key: 'ignored',
+                        label: 'Ignored',
+                        title:
+                          'Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.',
+                        onSelect: () => window.openWishlistIgnoreModal?.(),
+                      },
+                      {
+                        key: 'cleanup',
+                        label: 'Cleanup',
+                        title: 'Drop wanted tracks you already own',
+                        onSelect: () => window.cleanupWishlistOverview?.(),
+                      },
+                      {
+                        key: 'export',
+                        label: 'Export…',
+                        title: 'Save the wishlist as CSV or JSON',
+                        onSelect: () => setExporting(true),
+                      },
+                      {
+                        key: 'clear',
+                        label: 'Clear All',
+                        danger: true,
+                        onSelect: () => window.clearEntireWishlist?.(),
+                      },
+                    ]}
+                    trigger={(props) => (
+                      <button
+                        type="button"
+                        className="wlp-btn wlp-more"
+                        title="Ignored, cleanup, export, clear all"
+                        aria-label="More wishlist actions"
+                        {...props}
+                        ref={props.ref as (el: HTMLButtonElement | null) => void}
+                      >
+                        ⋯
+                      </button>
+                    )}
+                  />
+                  <div className="wlp-split" role="group" aria-label="Download the wishlist">
+                    <button
+                      type="button"
+                      className="wlp-btn wlp-btn--primary wlp-split-main"
+                      disabled={processing || startRun.isPending || total === 0}
+                      title="Download every wanted track now"
+                      onClick={() => startRun.mutate('all')}
+                    >
+                      <span aria-hidden="true">⬇ </span>
+                      {processing
+                        ? 'Downloading…'
+                        : startRun.isPending
+                          ? 'Starting…'
+                          : 'Download now'}
+                    </button>
+                    <ActionMenu
+                      className="wlp-menu"
+                      items={[
+                        {
+                          key: 'all',
+                          label: `Everything (${total})`,
+                          disabled: total === 0,
+                          onSelect: () => startRun.mutate('all'),
+                        },
+                        {
+                          key: 'albums',
+                          label: `Albums & EPs only (${albumCount})`,
+                          disabled: albumCount === 0,
+                          onSelect: () => startRun.mutate('albums'),
+                        },
+                        {
+                          key: 'singles',
+                          label: `Singles only (${singleCount})`,
+                          disabled: singleCount === 0,
+                          onSelect: () => startRun.mutate('singles'),
+                        },
+                      ]}
+                      trigger={(props) => (
+                        <button
+                          type="button"
+                          className="wlp-btn wlp-btn--primary wlp-split-more"
+                          aria-label="Choose what to download"
+                          disabled={processing || startRun.isPending}
+                          {...props}
+                          ref={props.ref as (el: HTMLButtonElement | null) => void}
+                        >
+                          ▾
+                        </button>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {processing ? (
+                  <div className="wlp-run" role="status" aria-live="polite">
+                    <div className="wlp-run-head">
+                      <span className="wlp-run-label">{run?.label ?? 'Starting…'}</span>
+                      <span className="wlp-run-actions">
+                        <button
+                          type="button"
+                          className="wlp-btn"
+                          // the old modal, opened on the run that's already going
+                          onClick={() => void window._nebulaDownload?.()}
+                        >
+                          View details
+                        </button>
+                        <button
+                          type="button"
+                          className="wlp-btn"
+                          disabled={!runBatchId || stopRun.isPending}
+                          onClick={() => void onStopRun()}
+                        >
+                          {stopRun.isPending ? 'Stopping…' : 'Stop'}
+                        </button>
+                      </span>
+                    </div>
+                    <div className="wlp-run-bar">
+                      <i style={{ width: `${Math.round((run?.fraction ?? 0) * 100)}%` }} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {view === 'list' ? (
+                  <WishlistList
+                    groups={visibleGroups}
+                    artistImages={artistImages}
+                    filterActive={Boolean(search.q?.trim()) || search.failing}
+                    onRemoveAlbum={(albumName, artistName) =>
+                      void onRemoveAlbum(albumName, artistName)
+                    }
+                    onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                    onGrabArtist={onGrabArtist}
+                    onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
+                    bulkBusy={bulkAction.isPending}
+                    zoned
+                    onRetryIds={onRetryIds}
+                  />
+                ) : (
+                  <NebulaStage
+                    sheetOpen={sheetGroup !== null}
+                    field={
+                      <div
+                        className={`wl-nebula-field wlp-field${processing ? ' nebula-processing' : ''}`}
+                      >
+                        {nebulaGroups.length === 0 ? (
+                          <div className="wl-nebula-empty">
+                            Nothing matches — clear the filter to see the whole hunt.
+                          </div>
+                        ) : (
+                          nebulaZones.map((zone) => (
+                            <NebulaZone
+                              key={zone.kind}
+                              kind={zone.kind}
+                              title={zone.title}
+                              sub={zone.sub}
+                              action={
+                                zone.stuckIds.length > 0
+                                  ? {
+                                      label:
+                                        zone.stuckIds.length === 1
+                                          ? 'Retry now'
+                                          : `Retry all ${zone.stuckIds.length}`,
+                                      title:
+                                        'Clear the retry backoff so the next pass tries these again',
+                                      disabled: bulkAction.isPending,
+                                      onClick: () => onRetryIds(zone.stuckIds),
+                                    }
+                                  : null
+                              }
+                            >
+                              {zone.groups.map((group) => (
+                                <WishlistOrb
+                                  key={group.name}
+                                  group={group}
+                                  index={nebulaGroups.indexOf(group)}
+                                  artistImages={artistImages}
+                                  artistImageFallbacks={artistImageFallbacks}
+                                  currentCycle={currentCycle}
+                                  processing={processing}
+                                  expanded={expandedArtist === group.name}
+                                  onToggleExpand={() =>
+                                    setExpandedArtist((current) =>
+                                      current === group.name ? null : group.name,
+                                    )
+                                  }
+                                />
+                              ))}
+                            </NebulaZone>
+                          ))
+                        )}
+                      </div>
+                    }
+                    sheet={
+                      sheetGroup ? (
+                        <WishlistArtistSheet
+                          key={sheetGroup.name}
+                          group={sheetGroup}
+                          artistImages={artistImages}
+                          artistImageFallbacks={artistImageFallbacks}
+                          onClose={() => setExpandedArtist(null)}
+                          onGrabArtist={() => onGrabArtist(sheetGroup)}
+                          onGrabAlbum={onGrabAlbum}
+                          onRetry={onRetryIds}
+                          onRemoveAlbum={(albumName, artistName) =>
+                            void onRemoveAlbum(albumName, artistName)
+                          }
+                          onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                          onRemoveArtist={() => void onRemoveArtist(sheetGroup)}
+                          actionBusy={bulkAction.isPending}
+                        />
+                      ) : null
+                    }
+                  />
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
       {exporting ? <WishlistExportDialog side="music" onClose={() => setExporting(false)} /> : null}
     </div>
   );

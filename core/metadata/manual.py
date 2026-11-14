@@ -32,7 +32,17 @@ def is_manual_context(context: Any) -> bool:
     if context.get('_manual_metadata'):
         return True
     info = context.get('track_info')
-    return isinstance(info, dict) and bool(info.get('_manual_metadata'))
+    if not isinstance(info, dict):
+        return False
+    if info.get('_manual_metadata'):
+        return True
+    # a track no catalogue has (#2097): the playlist's own artist and title
+    # are the tags. a lookup by name would file a bootleg as the original.
+    stub_id = str(info.get('id') or '')
+    if stub_id.startswith('wing_it_'):
+        from core.playlists.uncatalogued import is_allowed
+        return is_allowed(stub_id)
+    return False
 
 
 def manual_cover_path(context: Any) -> Optional[str]:

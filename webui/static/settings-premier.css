@@ -18,8 +18,8 @@
     display: flex; align-items: center; justify-content: space-between;
     gap: 24px; margin-bottom: 22px;
 }
-#settings-page .stg-eyebrow { font-size: 10px; letter-spacing: .12em; color: var(--stg-text-secondary); font-weight: 650; }
-#settings-page .stg-navigation-heading h2 { margin: 5px 0 0; font-size: 28px; letter-spacing: -.035em; line-height: 1.2; }
+/* the page frame's title type (.pgf-title in style.css) */
+#settings-page .stg-navigation-heading h2 { margin: 6px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
 #settings-page .stg-nav-search-wrap { position: relative; width: min(340px, 45%); }
 #settings-page .stg-nav-search-wrap input {
     width: 100%; padding: 11px 14px 11px 38px !important; border-radius: var(--radius-control);
@@ -176,7 +176,7 @@
     #settings-page .settings-content { padding: 16px 12px 48px !important; }
     #settings-page .stg-navigation-heading { align-items: stretch; flex-direction: column; gap: 16px; margin-bottom: 12px; }
     #settings-page .stg-nav-search-wrap { width: 100%; }
-    #settings-page .stg-navigation-heading h2 { font-size: 25px; }
+    #settings-page .stg-navigation-heading h2 { font-size: 24px; }
     #settings-page .settings-nav-row { align-items: flex-start; gap: 12px; }
     #settings-page .save-button { padding: 10px 12px; font-size: 12px; }
     #settings-page .save-button svg { display: none; }

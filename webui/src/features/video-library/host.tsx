@@ -1,15 +1,16 @@
 /**
  * mounts the library tab into the vanilla video detail page. video-detail.js
- * calls window.VideoLibraryTab.mount(el, {kind, id}) when the tab opens and
- * unmount(el) when the page moves on; a second mount on the same element
- * re-renders in place.
+ * calls window.VideoLibraryTab.mount(el, {kind, id}) for the island under the
+ * hero and mountEpisodes(el, props) for a show's season, and unmount(el) when
+ * the page moves on; a second mount on the same element re-renders in place.
  */
 
 import { createRoot, type Root } from 'react-dom/client';
 
-import type { TitleKind } from './types';
+import type { EpisodeListProps, TitleKind } from './types';
 
-import { EpisodeFiles } from './episode-files';
+import { EpisodeList } from './episode-list';
+import { type PageCommand, sendCommand } from './library-store';
 import { LibraryTab, type PageSlots } from './library-tab';
 
 export interface VideoLibraryTabApi {
@@ -18,11 +19,10 @@ export interface VideoLibraryTabApi {
     opts: { kind: TitleKind; id: number; heroSlot?: HTMLElement | null; slots?: PageSlots | null },
   ) => void;
   unmount: (el: HTMLElement) => void;
-  /** one episode's file cards, into the page's own episode list */
-  mountEpisode: (
-    el: HTMLElement,
-    opts: { showId: number; season: number; episodeId: number },
-  ) => void;
+  /** a show's season, its bar and its episodes; call again to re-render */
+  mountEpisodes: (el: HTMLElement, props: EpisodeListProps) => void;
+  /** the page's More menu opens one of the island's dialogs */
+  open: (what: PageCommand) => void;
 }
 
 declare global {
@@ -34,21 +34,19 @@ declare global {
 const roots = new WeakMap<HTMLElement, Root>();
 
 export const videoLibraryTab: VideoLibraryTabApi = {
-  mountEpisode(el, { showId, season, episodeId }) {
-    if (!el || ![showId, season, episodeId].every((n) => Number.isFinite(Number(n)))) return;
+  mountEpisodes(el, props) {
+    if (!el || !props?.season || !Number.isFinite(Number(props.show?.id))) return;
     let root = roots.get(el);
     if (!root) {
       root = createRoot(el);
       roots.set(el, root);
     }
-    root.render(
-      <EpisodeFiles
-        key={`${showId}:${season}:${episodeId}`}
-        showId={Number(showId)}
-        season={Number(season)}
-        episodeId={Number(episodeId)}
-      />,
-    );
+    // no key: the same root follows the page from season to season, and an
+    // opened episode stays open through a re-render
+    root.render(<EpisodeList {...props} />);
+  },
+  open(what) {
+    sendCommand(what);
   },
   mount(el, { kind, id, heroSlot, slots }) {
     if (!el || (kind !== 'movie' && kind !== 'show') || !Number.isFinite(Number(id))) return;

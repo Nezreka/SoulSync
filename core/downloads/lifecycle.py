@@ -1227,7 +1227,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
             download_batches[batch_id]['active_count'] -= 1
             new_active = download_batches[batch_id]['active_count']
 
-            logger.error(f"[Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
+            (logger.info if success else logger.warning)(f"[Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
 
         # ENHANCED: Always check batch completion after any task completes (including duplicate calls)
         # This ensures completion is detected even when mixing normal downloads with cancelled tasks
@@ -1285,7 +1285,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
         has_retrying_tasks = retrying_count > 0
 
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
-            logger.error(f"[Batch Manager] Batch {batch_id} truly complete - all {finished_count}/{len(queue)} tasks finished - processing failed tracks to wishlist")
+            logger.info(f"[Batch Manager] Batch {batch_id} truly complete - all {finished_count}/{len(queue)} tasks finished - processing failed tracks to wishlist")
         elif all_tasks_started and no_active_workers and has_retrying_tasks:
             logger.warning(f"[Batch Manager] Batch {batch_id}: all workers free but {retrying_count} tasks retrying - continuing monitoring")
         elif all_tasks_started and no_active_workers:

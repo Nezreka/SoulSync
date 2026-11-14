@@ -52,7 +52,7 @@ async function loadServerPlaylists() {
         if (!Array.isArray(historyNames)) historyNames = [];
 
         if (!data.success || !data.playlists) {
-            if (container) container.innerHTML = `<div class="playlist-placeholder">${data.error || 'Could not load server playlists'}</div>`;
+            if (container) container.innerHTML = `<div class="playlist-placeholder">${escapeHtml(data.error || 'Could not load server playlists')}</div>`;
             return;
         }
 
@@ -149,7 +149,7 @@ async function loadServerPlaylists() {
         container.innerHTML = html;
 
     } catch (e) {
-        if (container) container.innerHTML = `<div class="playlist-placeholder">Error: ${e.message}</div>`;
+        if (container) container.innerHTML = `<div class="playlist-placeholder">Error: ${escapeHtml(e.message)}</div>`;
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🔄 Refresh'; }
     }
@@ -879,7 +879,7 @@ async function _serverSearchExecute() {
         }).join('');
 
     } catch (e) {
-        results.innerHTML = `<div class="server-search-hint">Error: ${e.message}</div>`;
+        results.innerHTML = `<div class="server-search-hint">Error: ${escapeHtml(e.message)}</div>`;
     }
 }
 

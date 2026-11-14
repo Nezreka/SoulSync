@@ -68,6 +68,20 @@ def may_manage_profile(actor_id, actor_is_admin: bool, target_id) -> bool:
     return bool(actor_is_admin)
 
 
+def may_cancel_download(owner_profile_id, actor_id, actor_is_admin: bool) -> bool:
+    """may this caller cancel a download? an admin, any of them. anyone else,
+    only one their own profile started: managing the downloads page is the
+    admin's, stopping something you asked for is yours. a download with no
+    recorded owner is the admin's."""
+    if actor_is_admin:
+        return True
+    try:
+        return (owner_profile_id is not None and actor_id is not None
+                and int(owner_profile_id) == int(actor_id))
+    except (TypeError, ValueError):
+        return False
+
+
 # what anyone may see about another profile: enough to draw the picker card
 PUBLIC_PROFILE_FIELDS = ("id", "name", "avatar_color", "avatar_url", "is_admin",
                          "has_pin", "has_password", "disabled")
@@ -118,5 +132,5 @@ def page_denied(path: str, allowed_pages, is_admin: bool) -> bool:
 
 
 __all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
-           "may_manage_profile", "profile_view_for", "PUBLIC_PROFILE_FIELDS",
+           "may_manage_profile", "may_cancel_download", "profile_view_for", "PUBLIC_PROFILE_FIELDS",
            "PAGE_EXCLUSIVE_APIS", "page_for_path", "page_denied"]

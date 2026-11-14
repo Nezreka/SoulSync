@@ -264,6 +264,22 @@ class MusicBrainzWorker:
         self._group_types_after = int(row[0])
         return {'type': 'album_types', 'id': row[0], 'name': row[1], 'group_id': row[2]}
 
+    def _album_track_titles(self, album_id) -> list:
+        """The album's own track titles, for checking a same-titled release
+        against when none was found under its artist (#2071)."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            return [row[0] for row in conn.execute(
+                "SELECT title FROM lib2_tracks WHERE album_id = ? AND COALESCE(title, '') <> ''",
+                (album_id,))]
+        except Exception as exc:
+            logger.debug("Track titles for album %s unavailable: %s", album_id, exc)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
         """Get next item to process from priority queue"""
         conn = None
@@ -458,7 +474,8 @@ class MusicBrainzWorker:
 
             elif item_type == 'album':
                 artist_name = item.get('artist')
-                result = self.mb_service.match_release(item_name, artist_name)
+                result = self.mb_service.match_release(
+                    item_name, artist_name, track_titles=self._album_track_titles(item_id))
                 if result and result.get('mbid'):
                     self.mb_service.update_album_mbid(
                         item_id, result['mbid'], 'matched',

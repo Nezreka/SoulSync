@@ -1392,52 +1392,47 @@
 /* ── the page header (dlh-*): side switch + actions, tabs + count chips,
       live strip. markup in -ui/dl-header.tsx ─────────────────────────── */
 
+/* the header is the page frame's (.pgf-* in style.css): the name, the status
+   line, the pills. what is left here is what only this page has */
 .dlh {
     display: flex;
     flex-direction: column;
+    gap: 20px;
     margin-bottom: 16px;
 }
 
-.dlh-top {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
+/* Music | Video: one capsule the height of the buttons beside it */
 .dlh-switch {
     display: inline-flex;
     padding: 3px;
-    border-radius: 11px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--white-a07);
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
 }
 
 .dlh-side {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 14px;
+    gap: 7px;
+    height: 28px;
+    padding: 0 12px;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
     background: none;
-    color: var(--white-a55);
+    color: var(--white-a65);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .dlh-side:hover {
-    color: #fff;
+    color: var(--text-1);
 }
 
 .dlh-side-on {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px var(--black-a45);
+    background: var(--white-a14);
+    color: var(--text-1);
 }
 
 .dlh-side:focus-visible {
@@ -1469,86 +1464,30 @@
     color: var(--white-a35);
 }
 
-.dlh-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.dlh-history {
-    height: 32px;
-}
-
 .dlh-history-n {
     font-size: 11px;
     color: var(--white-a45);
     font-variant-numeric: tabular-nums;
 }
 
-/* the header's ⋯ is always visible, unlike a row's */
+/* the header's ⋯ is always visible, unlike a row's, and matches the frame's
+   round button */
 .dlh-more .dlc-more {
     opacity: 1;
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--white-a08);
-    background: var(--white-a06);
-}
-
-.dlh-nav {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 18px;
-    border-bottom: 1px solid var(--white-a07);
-}
-
-.dlh-tabs {
-    display: flex;
-    gap: 24px;
-}
-
-.dlh-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 0 0 11px;
+    width: 34px;
+    height: 34px;
     border: 0;
-    background: none;
-    color: var(--white-a40);
-    font: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: color var(--dur-fast) ease;
+    border-radius: 50%;
+    background: var(--white-a10);
 }
 
-.dlh-tab:hover {
-    color: var(--white-a75);
-}
-
-.dlh-tab-on {
-    color: #fff;
-    box-shadow: inset 0 -2px 0 rgb(var(--accent-rgb));
-}
-
+/* how much is waiting on you: amber until the pill is the open one */
 .dlh-badge {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgba(251, 191, 36, 0.15);
     color: #fbbf24;
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
 }
 
 .dlh-chips {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
     gap: 4px;
-    padding-bottom: 8px;
 }
 
 .dlh-chip {
@@ -1608,7 +1547,6 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 22px;
     align-items: center;
-    margin-top: 16px;
     padding: 14px 18px;
     border-radius: var(--radius-card);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
@@ -1728,22 +1666,6 @@
     vector-effect: non-scaling-stroke;
 }
 
-.dlh-quiet {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 16px;
-    font-size: 13px;
-    color: var(--white-a45);
-}
-
-.dlh-quiet-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--white-a20);
-}
-
 @media (max-width: 760px) {
     .dlh-strip {
         grid-template-columns: minmax(0, 1fr);
@@ -1752,27 +1674,6 @@
 
     .dlh-spark {
         width: 100%;
-    }
-
-    .dlh-nav {
-        /* a wrapping column sizes each line to its content, which let the
-           tabs run wider than the phone. one line, stretched */
-        flex-direction: column;
-        flex-wrap: nowrap;
-        align-items: stretch;
-        border-bottom: 0;
-    }
-
-    .dlh-tabs {
-        gap: 18px;
-        overflow-x: auto;
-        scrollbar-width: none;
-        border-bottom: 1px solid var(--white-a07);
-    }
-
-    .dlh-tab {
-        flex-shrink: 0;
-        font-size: 14px;
     }
 
     .dlh-chips {

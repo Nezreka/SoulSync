@@ -82,7 +82,7 @@ export function VideoDownloadsView() {
   );
 
   return (
-    <div className="adl-layout" data-vdl-root>
+    <div className="pgf-page adl-layout" data-vdl-root>
       <div className="adl-main">
         <div className="adl-container">
           <VdlHeader

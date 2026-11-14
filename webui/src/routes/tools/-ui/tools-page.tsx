@@ -137,110 +137,112 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
 
   return (
     <div
-      className={`page-shell tools-page-container${video ? ' tools-page--video' : ''}`}
+      className={`page-shell pgf-shell tools-page-container${video ? ' tools-page--video' : ''}`}
       id="tools-page"
       data-tools-media={media}
     >
-      <div className="tools-top">
-        <div className="tools-top-text">
-          <h2 className="tools-title">Tools</h2>
-          <p className="tools-sub">
-            {/* Says what the Issues page ISN'T, so the two stop reading as
+      <div className="pgf-page">
+        <div className="tools-top">
+          <div className="tools-top-text">
+            <h1 className="pgf-title tools-title">Tools</h1>
+            <p className="pgf-status tools-sub">
+              {/* Says what the Issues page ISN'T, so the two stop reading as
                 duplicates of each other (#1210). */}
-            {video
-              ? 'Library maintenance, scans, backups and the studios. Hand-reported problems live on the Issues page.'
-              : 'Library maintenance, scans and backups. Hand-reported problems live on the Issues page.'}
-          </p>
+              {video
+                ? 'Library maintenance, scans, backups and the studios. Hand-reported problems live on the Issues page.'
+                : 'Library maintenance, scans and backups. Hand-reported problems live on the Issues page.'}
+            </p>
+          </div>
+          <div className="tools-top-actions" ref={setHeaderSlot} />
         </div>
-        <div className="tools-top-actions" ref={setHeaderSlot} />
-      </div>
 
-      {/* One page, four places. There used to be a Simple and an Advanced
+        {/* One page, four places. There used to be a Simple and an Advanced
           mode on top of two tabs: the findings only lived in Advanced, so
           every link in Simple quietly switched modes under you. Now each
           thing has one home and the pills say where. */}
-      <div className="tools-tabs" role="tablist" aria-label="Tools sections" ref={tabList}>
-        {tabs.map(([value, label]) => (
-          <button
-            type="button"
-            key={value}
-            role="tab"
-            id={`tools-tab-${value}`}
-            aria-selected={tab === value}
-            aria-controls={`tools-panel-${value}`}
-            className="tools-tab"
-            onClick={() => setTab(value)}
-          >
-            {label}
-            {value === 'findings' ? (
-              <span
-                className="tools-tab-count"
-                id="repair-findings-tab-badge"
-                style={{ display: pending > 0 ? '' : 'none' }}
-              >
-                {pending.toLocaleString()}
-              </span>
-            ) : null}
-          </button>
-        ))}
-      </div>
+        <div className="tools-tabs" role="tablist" aria-label="Tools sections" ref={tabList}>
+          {tabs.map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              role="tab"
+              id={`tools-tab-${value}`}
+              aria-selected={tab === value}
+              aria-controls={`tools-panel-${value}`}
+              className="tools-tab"
+              onClick={() => setTab(value)}
+            >
+              {label}
+              {value === 'findings' ? (
+                <span
+                  className="tools-tab-count"
+                  id="repair-findings-tab-badge"
+                  style={{ display: pending > 0 ? '' : 'none' }}
+                >
+                  {pending.toLocaleString()}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
 
-      {/* The maintenance panels stay MOUNTED, hidden with the hidden attribute
+        {/* The maintenance panels stay MOUNTED, hidden with the hidden attribute
           rather than unmounted. The surface polls job progress and holds the
           findings filter/page you were on; tearing it down on every pill
           would restart the polling and throw that state away. */}
-      {maintenance ? (
-        <MaintenanceHero
-          tab={tab}
-          onTab={setTab}
-          headerSlot={headerSlot}
-          onPendingChanged={setPending}
-        />
-      ) : (
-        <div className="tools-locked-note" role="note">
-          <strong>Admins only</strong>
-          <span>
-            Library maintenance changes the shared library, so it lives with the admin profile.
-          </span>
-        </div>
-      )}
-
-      <div
-        role="tabpanel"
-        id="tools-panel-tools"
-        aria-labelledby="tools-tab-tools"
-        hidden={tab !== 'tools'}
-      >
-        {video ? (
-          <>
-            <ToolsSection
-              title="Database &amp; Scanning"
-              blurb="Reading your media server into SoulSync, and keeping the two in step."
-            >
-              <VideoLibraryScanCard />
-              <VideoServerScanCard />
-            </ToolsSection>
-            {isAdmin ? (
-              <>
-                <ToolsSection
-                  title="Studios"
-                  blurb="The visual editors for posters and collections."
-                >
-                  <VideoStudioCards />
-                </ToolsSection>
-                <ToolsSection
-                  title="Management"
-                  blurb="Backups of the video database, and file names that follow your templates."
-                >
-                  <VideoBackupsCard />
-                  <VideoMassRenameCard />
-                </ToolsSection>
-              </>
-            ) : null}
-          </>
+        {maintenance ? (
+          <MaintenanceHero
+            tab={tab}
+            onTab={setTab}
+            headerSlot={headerSlot}
+            onPendingChanged={setPending}
+          />
         ) : (
-          <MusicToolSections />
+          <div className="tools-locked-note" role="note">
+            <strong>Admins only</strong>
+            <span>
+              Library maintenance changes the shared library, so it lives with the admin profile.
+            </span>
+          </div>
         )}
+
+        <div
+          role="tabpanel"
+          id="tools-panel-tools"
+          aria-labelledby="tools-tab-tools"
+          hidden={tab !== 'tools'}
+        >
+          {video ? (
+            <>
+              <ToolsSection
+                title="Database &amp; Scanning"
+                blurb="Reading your media server into SoulSync, and keeping the two in step."
+              >
+                <VideoLibraryScanCard />
+                <VideoServerScanCard />
+              </ToolsSection>
+              {isAdmin ? (
+                <>
+                  <ToolsSection
+                    title="Studios"
+                    blurb="The visual editors for posters and collections."
+                  >
+                    <VideoStudioCards />
+                  </ToolsSection>
+                  <ToolsSection
+                    title="Management"
+                    blurb="Backups of the video database, and file names that follow your templates."
+                  >
+                    <VideoBackupsCard />
+                    <VideoMassRenameCard />
+                  </ToolsSection>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <MusicToolSections />
+          )}
+        </div>
       </div>
     </div>
   );

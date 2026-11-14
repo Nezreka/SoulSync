@@ -1203,7 +1203,7 @@ class WebUIDownloadMonitor:
                             source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
-                            logger.error(f"Marked timeout source as used: {source_key}")
+                            logger.warning(f"Marked timeout source as used: {source_key}")
 
                         # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                         if username and filename:
@@ -1221,7 +1221,7 @@ class WebUIDownloadMonitor:
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
                         task['status_change_time'] = current_time
-                        logger.error(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for timeout retry")
+                        logger.warning(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for timeout retry")
 
                         # Defer worker restart to outside the lock
                         batch_id = task.get('batch_id')

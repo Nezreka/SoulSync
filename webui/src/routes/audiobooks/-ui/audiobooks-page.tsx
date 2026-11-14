@@ -1,6 +1,7 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, Skeleton } from '@/components/primitives';
 
 import type {
@@ -173,7 +174,69 @@ export function AudiobooksBrowsePage() {
 
   return (
     <div className={styles.browsePage}>
-      <div className={styles.browseTopRow}>
+      <div className={styles.browseHead}>
+        <PageHeader
+          title="Audiobooks"
+          subtitle="Browse and search the audiobook catalogue"
+          actions={
+            <>
+              <Link to="/wishlist" search={{ media: 'audiobooks' }} className="pgf-btn">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 20.5l-1.4-1.3C5.4 14.5 2 11.4 2 7.6 2 4.9 4.1 3 6.7 3c1.5 0 3 .7 3.9 1.9L12 6.2l1.4-1.3C14.3 3.7 15.8 3 17.3 3 19.9 3 22 4.9 22 7.6c0 3.8-3.4 6.9-8.6 11.6z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+                </svg>
+                Wishlist
+                {wishlistCounts.total > 0 && (
+                  <span className="pgf-pill-count">{wishlistCounts.total}</span>
+                )}
+              </Link>
+
+              {/* What you already have, beside what you want and what you refuse. */}
+              <Link
+                to="/audiobooks/library"
+                className="pgf-btn"
+                title="Audiobooks in your library folder"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M4 4h5v16H4zM11 4h4v16h-4zM17 5l3 15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Library
+              </Link>
+
+              {/* Beside the wishlist because they are two halves of the same idea:
+                what to fetch, and what never to fetch again. */}
+              <button
+                type="button"
+                className="pgf-btn"
+                onClick={() => setShowBlocklist(true)}
+                title="Deleted books you can still restore, and releases that will never be grabbed"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+                  <path d="M5.6 5.6l12.8 12.8" stroke="currentColor" strokeWidth="1.8" />
+                </svg>
+                Bin
+              </button>
+            </>
+          }
+        />
         <AudiobookSearchBar
           query={draft}
           searchType={searchType}
@@ -183,54 +246,6 @@ export function AudiobooksBrowsePage() {
           onSubmit={submitSearch}
           onClear={backToBrowse}
         />
-
-        <Link to="/wishlist" search={{ media: 'audiobooks' }} className={styles.wishlistLink}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M12 20.5l-1.4-1.3C5.4 14.5 2 11.4 2 7.6 2 4.9 4.1 3 6.7 3c1.5 0 3 .7 3.9 1.9L12 6.2l1.4-1.3C14.3 3.7 15.8 3 17.3 3 19.9 3 22 4.9 22 7.6c0 3.8-3.4 6.9-8.6 11.6z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            />
-          </svg>
-          Wishlist
-          {wishlistCounts.total > 0 && (
-            <span className={styles.wishlistLinkCount}>{wishlistCounts.total}</span>
-          )}
-        </Link>
-
-        {/* What you already have, beside what you want and what you refuse. */}
-        <Link
-          to="/audiobooks/library"
-          className={styles.wishlistLink}
-          title="Audiobooks in your library folder"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M4 4h5v16H4zM11 4h4v16h-4zM17 5l3 15"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-          Library
-        </Link>
-
-        {/* Beside the wishlist because they are two halves of the same idea:
-            what to fetch, and what never to fetch again. */}
-        <button
-          type="button"
-          className={styles.wishlistLink}
-          onClick={() => setShowBlocklist(true)}
-          title="Deleted books you can still restore, and releases that will never be grabbed"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M5.6 5.6l12.8 12.8" stroke="currentColor" strokeWidth="1.8" />
-          </svg>
-          Bin
-        </button>
       </div>
 
       {showBlocklist && <AudiobookReviewModal onClose={() => setShowBlocklist(false)} />}

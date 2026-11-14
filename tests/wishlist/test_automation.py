@@ -203,7 +203,9 @@ def test_process_wishlist_automatically_toggles_cycle_when_no_tracks_match_curre
     assert executor.submissions == []
     assert music_db.cycle_value == "singles"
     assert music_db.commits == 1
-    assert any("No albums tracks in wishlist" in msg for msg in logger.warning_messages)
+    # a cycle with nothing in it is routine too
+    assert any("No albums tracks in wishlist" in msg for msg in logger.info_messages)
+    assert not any("No albums tracks in wishlist" in msg for msg in logger.warning_messages)
     assert guard_events == ["enter", "exit"]
     assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10, 25, 40]
 
@@ -627,7 +629,9 @@ def test_process_wishlist_automatically_returns_early_when_no_tracks_are_availab
     assert music_db.duplicate_removals == []
     assert guard_events == ["enter", "exit"]
     assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
-    assert any("No tracks in wishlist for auto-processing" in msg for msg in logger.warning_messages)
+    # an empty wishlist is routine, so it is said at info, not as a warning
+    assert any("No tracks in wishlist for auto-processing" in msg for msg in logger.info_messages)
+    assert not any("No tracks in wishlist" in msg for msg in logger.warning_messages)
 
 
 def test_process_wishlist_automatically_skips_when_wishlist_batch_is_already_active():

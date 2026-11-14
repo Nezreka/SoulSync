@@ -1,0 +1,440 @@
+/** the video library manager's server calls (api/video/manager.py, bulk.py). */
+
+import type {
+  BulkAction,
+  BulkStatus,
+  Facets,
+  FileChange,
+  FilesPage,
+  Filters,
+  SavedView,
+  SeasonEpisodes,
+  Side,
+  Sort,
+  TitleKind,
+  TitlesPage,
+} from './types';
+
+export class ManagerError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function send<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+    },
+  });
+  let data: (T & { error?: string; success?: boolean; ok?: boolean }) | null = null;
+  try {
+    data = (await response.json()) as T & { error?: string; success?: boolean; ok?: boolean };
+  } catch {
+    data = null;
+  }
+  if (!response.ok || !data || data.error || data.success === false || data.ok === false) {
+    throw new ManagerError(data?.error || `Request failed (${response.status})`, response.status);
+  }
+  return data;
+}
+
+/** the filters as query parameters; empty ones are left out */
+export function filterParams(filters: Filters): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === 'needs') continue;
+    if (value) params.set(key, String(value));
+  }
+  if (filters.needs.length) params.set('needs', filters.needs.join(','));
+  return params;
+}
+
+function listParams(side: Side, filters: Filters, sort: Sort, page: number, limit: number) {
+  const params = filterParams(filters);
+  params.set('kind', side);
+  params.set('sort', sort.by);
+  params.set('dir', sort.dir);
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  return params;
+}
+
+export function fetchTitles(
+  side: Side,
+  filters: Filters,
+  sort: Sort,
+  page: number,
+  limit: number,
+): Promise<TitlesPage> {
+  return send<TitlesPage>(
+    `/api/video/manager/titles?${listParams(side, filters, sort, page, limit)}`,
+  );
+}
+
+export function fetchFiles(
+  side: Side,
+  filters: Filters,
+  sort: Sort,
+  page: number,
+  limit: number,
+  titleId?: number,
+): Promise<FilesPage> {
+  const params = listParams(side, filters, sort, page, limit);
+  if (titleId) params.set('title_id', String(titleId));
+  return send<FilesPage>(`/api/video/manager/files?${params}`);
+}
+
+export function fetchFacets(side: Side): Promise<Facets> {
+  return send<Facets>(`/api/video/manager/facets?kind=${side}`);
+}
+
+export function fetchMatchingIds(
+  side: Side,
+  filters: Filters,
+): Promise<{ ids: number[]; truncated: boolean }> {
+  const params = filterParams(filters);
+  params.set('kind', side);
+  return send<{ ids: number[]; truncated: boolean }>(`/api/video/manager/ids?${params}`);
+}
+
+export interface RenamePreview {
+  files: number;
+  to_rename: number;
+  already_named: number;
+  unreachable: number;
+  changes: { file_id: number; current: string; expected: string }[];
+  more: number;
+}
+
+export function fetchRenamePreview(kind: TitleKind, ids: number[]): Promise<RenamePreview> {
+  return send<RenamePreview>(`/api/video/manager/rename-preview?kind=${kind}&ids=${ids.join(',')}`);
+}
+
+export interface DeletePreview {
+  titles: number;
+  sample: string[];
+  files: number;
+  size_bytes: number;
+  blocked: { title: string; reason: string }[];
+}
+
+export function fetchDeletePreview(kind: TitleKind, ids: number[]): Promise<DeletePreview> {
+  return send<DeletePreview>(`/api/video/manager/delete-preview?kind=${kind}&ids=${ids.join(',')}`);
+}
+
+export function startBulk(
+  kind: TitleKind,
+  ids: number[],
+  action: BulkAction,
+  params: Record<string, unknown> = {},
+): Promise<{ ok: boolean; total?: number; label?: string; added?: number; skipped?: number }> {
+  return send('/api/video/bulk/start', {
+    method: 'POST',
+    body: JSON.stringify({ kind, ids, action, params }),
+  });
+}
+
+export async function fetchBulkStatus(): Promise<BulkStatus> {
+  const response = await fetch('/api/video/bulk/status', {
+    headers: { Accept: 'application/json' },
+  });
+  return (await response.json()) as BulkStatus;
+}
+
+export interface CollectionRef {
+  id: number;
+  name: string;
+  media_type: string;
+}
+
+export async function fetchCollections(kind: TitleKind): Promise<CollectionRef[]> {
+  const response = await fetch('/api/video/collections', {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return [];
+  const data = (await response.json()) as { collections?: CollectionRef[] };
+  return (data.collections ?? []).filter((c) => (c.media_type || 'movie') === kind);
+}
+
+/** the legacy list, for a profile the manager is not for (posters only) */
+export interface LegacyItem {
+  id: number | string;
+  title: string;
+  year?: number | null;
+  has_poster?: boolean;
+  resolution?: string | null;
+  status?: string | null;
+  episode_count?: number;
+  episode_owned?: number;
+  thumb_url?: string | null;
+  video_count?: number;
+}
+
+export async function fetchLegacyLibrary(
+  kind: 'movies' | 'shows' | 'channels',
+  search: string,
+  sort: string,
+  page: number,
+  limit: number,
+): Promise<{ items: LegacyItem[]; pagination: TitlesPage['pagination'] }> {
+  const params = new URLSearchParams({ kind, sort, page: String(page), limit: String(limit) });
+  if (search) params.set('search', search);
+  return send(`/api/video/library?${params}`);
+}
+
+export interface TitleDetail {
+  id: number;
+  title: string;
+  sort_title?: string | null;
+  year: number | null;
+  overview?: string | null;
+  tagline?: string | null;
+  content_rating?: string | null;
+  genres?: string[];
+  studio?: string | null;
+  network?: string | null;
+  locked_fields?: string[];
+  tmdb_id?: number | null;
+  quality_profile_id?: number | null;
+  series_type?: string | null;
+  /** the padlock */
+  hands_off?: boolean;
+}
+
+export function fetchTitleDetail(kind: TitleKind, id: number): Promise<TitleDetail> {
+  return send<TitleDetail>(`/api/video/detail/${kind}/${id}`);
+}
+
+export function saveTitleFields(
+  kind: TitleKind,
+  id: number,
+  changes: Record<string, unknown>,
+): Promise<{ ok: boolean; applied: string[]; locked: string[]; pushed: boolean }> {
+  return send(`/api/video/detail/${kind}/${id}/metadata`, {
+    method: 'PUT',
+    body: JSON.stringify({ changes }),
+  });
+}
+
+export function setFieldLock(
+  kind: TitleKind,
+  id: number,
+  field: string,
+  locked: boolean,
+): Promise<{ ok: boolean }> {
+  return send(`/api/video/detail/${kind}/${id}/lock`, {
+    method: 'POST',
+    body: JSON.stringify({ field, locked }),
+  });
+}
+
+export interface HistoryRow {
+  id: number;
+  title?: string | null;
+  release_title?: string | null;
+  /** completed | import_failed | failed | cancelled */
+  outcome?: string | null;
+  quality_label?: string | null;
+  resolution?: string | null;
+  source?: string | null;
+  size_bytes?: number | null;
+  season_number?: number | null;
+  episode_number?: number | null;
+  episode_title?: string | null;
+  error?: string | null;
+  grabbed_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+}
+
+export async function fetchTitleHistory(kind: TitleKind, id: number): Promise<HistoryRow[]> {
+  const data = await send<{ history: HistoryRow[] }>(`/api/video/detail/${kind}/${id}/history`);
+  return data.history ?? [];
+}
+
+/* ── move to another library ─────────────────────────────────────────────── */
+
+/** one folder a library keeps its titles in: a library can sit on many drives */
+export interface LibraryFolder {
+  path: string;
+  /** the folder new titles are filed into */
+  primary: boolean;
+  free_bytes: number | null;
+}
+
+export interface LibraryRef {
+  id: number;
+  name: string;
+  path: string;
+  is_default: boolean;
+  /** every folder of the library, the primary one first */
+  folders?: LibraryFolder[];
+}
+
+/** where a move goes: a library, and which of its folders */
+export interface MoveTarget {
+  libraryId: number;
+  /** absent for the library's primary folder */
+  folder?: string;
+}
+
+export async function fetchLibraries(kind: TitleKind): Promise<LibraryRef[]> {
+  const data = await send<{ libraries: LibraryRef[] }>(`/api/video/manager/libraries?kind=${kind}`);
+  return data.libraries ?? [];
+}
+
+export interface MovePreview {
+  files: number;
+  size_bytes: number;
+  /** what crosses to another drive, so is copied and takes room */
+  copy_bytes: number;
+  skipped: number;
+  /** the commonest reason a file is left where it is */
+  skipped_why?: string | null;
+  held: number;
+  free_bytes: number | null;
+  enough_room: boolean;
+  moves: { from: string; to: string }[];
+}
+
+export function fetchMovePreview(
+  kind: TitleKind,
+  ids: number[],
+  target: MoveTarget,
+  byHand = false,
+): Promise<MovePreview> {
+  const params = new URLSearchParams({
+    kind,
+    library_id: String(target.libraryId),
+    ids: ids.join(','),
+  });
+  if (target.folder) params.set('folder', target.folder);
+  if (byHand) params.set('by_hand', '1');
+  return send<MovePreview>(`/api/video/manager/move-preview?${params}`);
+}
+
+/* ── history and undo ────────────────────────────────────────────────────── */
+
+export function fetchChanges(
+  title?: { kind: TitleKind; id: number },
+  limit = 100,
+): Promise<{ items: FileChange[]; total: number }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (title) {
+    params.set('kind', title.kind);
+    params.set('id', String(title.id));
+  }
+  return send(`/api/video/manager/history?${params}`);
+}
+
+export function undoChange(id: number): Promise<{ success: boolean; message?: string }> {
+  return send(`/api/video/manager/history/${id}/undo`, { method: 'POST' });
+}
+
+export async function undoBatch(
+  batch: string,
+): Promise<{ undone: number; not_renamed: number; failed: { id: number; error: string }[] }> {
+  const response = await fetch('/api/video/manager/history/undo-batch', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch }),
+  });
+  const data = (await response.json()) as {
+    undone?: number;
+    not_renamed?: number;
+    failed?: { id: number; error: string }[];
+    error?: string;
+  };
+  if (!data.undone && !data.failed?.length)
+    throw new ManagerError(data.error || 'Nothing could be put back', response.status);
+  return {
+    undone: data.undone ?? 0,
+    not_renamed: data.not_renamed ?? 0,
+    failed: data.failed ?? [],
+  };
+}
+
+/* ── saved views ─────────────────────────────────────────────────────────── */
+
+export async function fetchViews(): Promise<SavedView[]> {
+  const data = await send<{ views: SavedView[] }>('/api/video/manager/views');
+  return data.views ?? [];
+}
+
+export async function saveViews(views: SavedView[]): Promise<SavedView[]> {
+  const data = await send<{ views: SavedView[] }>('/api/video/manager/views', {
+    method: 'PUT',
+    body: JSON.stringify({ views }),
+  });
+  return data.views ?? [];
+}
+
+/* ── episodes and renumbering ────────────────────────────────────────────── */
+
+export async function fetchEpisodes(showId: number): Promise<SeasonEpisodes[]> {
+  const data = await send<{ seasons: SeasonEpisodes[] }>(`/api/video/manager/episodes/${showId}`);
+  return data.seasons ?? [];
+}
+
+export interface RenumberPlan {
+  moves: { file_id: number; filename: string; from: string; to: string }[];
+  files: number;
+}
+
+export function planRenumber(
+  showId: number,
+  fileIds: number[],
+  season: number,
+  startEpisode: number,
+): Promise<RenumberPlan> {
+  return send<RenumberPlan>(`/api/video/manager/renumber/${showId}`, {
+    method: 'POST',
+    body: JSON.stringify({ file_ids: fileIds, season, start_episode: startEpisode }),
+  });
+}
+
+export function applyRenumber(
+  showId: number,
+  fileIds: number[],
+  season: number,
+  startEpisode: number,
+): Promise<{ moved: number; not_renamed: number; batch: string | null }> {
+  return send(`/api/video/manager/renumber/${showId}`, {
+    method: 'POST',
+    body: JSON.stringify({
+      file_ids: fileIds,
+      season,
+      start_episode: startEpisode,
+      apply: true,
+    }),
+  });
+}
+
+/* ── artwork ─────────────────────────────────────────────────────────────── */
+
+export interface PosterOption {
+  thumb: string;
+  full: string;
+  lang?: string | null;
+}
+
+export async function fetchPosterOptions(kind: TitleKind, tmdbId: number): Promise<PosterOption[]> {
+  const response = await fetch(`/api/video/poster/options/${kind}/${tmdbId}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return [];
+  const data = (await response.json()) as { posters?: PosterOption[] };
+  return (data.posters ?? []).filter((p) => p && p.full);
+}
+
+export function setPoster(kind: TitleKind, id: number, posterUrl: string): Promise<unknown> {
+  return send('/api/video/poster/set', {
+    method: 'POST',
+    body: JSON.stringify({ kind, id, poster_url: posterUrl }),
+  });
+}

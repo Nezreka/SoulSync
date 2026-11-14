@@ -60,7 +60,7 @@ async function loadMirroredPlaylists() {
         // Hydrate discovery states from backend (survives page refresh)
         await hydrateMirroredDiscoveryStates();
     } catch (err) {
-        container.innerHTML = `<div class="playlist-placeholder">Error loading mirrored playlists: ${err.message}</div>`;
+        container.innerHTML = `<div class="playlist-placeholder">Error loading mirrored playlists: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -2763,7 +2763,7 @@ function _showDeleteGroupDialog(groupName, count) {
         overlay.innerHTML = `
             <div class="delete-group-dialog">
                 <div class="delete-group-icon">🗑️</div>
-                <h3 class="delete-group-title">Delete Group "${groupName}"</h3>
+                <h3 class="delete-group-title">Delete Group "${escapeHtml(groupName)}"</h3>
                 <p class="delete-group-message">This group contains ${count} automation${count !== 1 ? 's' : ''}. What would you like to do?</p>
                 <div class="delete-group-actions">
                     <button class="delete-group-btn delete-group-keep" id="dg-ungroup">
@@ -3522,7 +3522,7 @@ function _promptNotifyConfig(groupName) {
         overlay.innerHTML = `
             <div style="background:var(--bg-secondary);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary);font-family:inherit;">
                 <h3 style="margin:0 0 6px;font-size:1.1em;">Configure Notifications</h3>
-                <p style="margin:0 0 18px;font-size:0.85em;opacity:0.5;">${groupName} includes notification steps. Choose how to get notified.</p>
+                <p style="margin:0 0 18px;font-size:0.85em;opacity:0.5;">${escapeHtml(groupName)} includes notification steps. Choose how to get notified.</p>
                 <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
                     <label style="font-size:0.85em;opacity:0.7;">Notification Type</label>
                     <select id="deploy-notify-type" style="padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.9em;">

@@ -457,10 +457,15 @@ def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
     download or an upgrade. ``server_path`` covers rows stored in the server's
     form of the path (#1573).
     """
-    if not path or cursor.execute(
-            "SELECT 1 FROM lib2_track_files WHERE path IN (?, ?)"
-            " AND COALESCE(file_state,'active')<>'deleted' LIMIT 1",
-            (path, server_path or path)).fetchone():
+    if not path:
+        return False
+    # every spelling of both paths: a file stored as H:/Music/a.flac was not
+    # found as H:\Music\a.flac and was adopted a second time
+    from core.library2.track_files import path_spellings
+    known = tuple(dict.fromkeys(path_spellings(path) + path_spellings(server_path or path)))
+    if cursor.execute(
+            f"SELECT 1 FROM lib2_track_files WHERE path IN ({','.join('?' * len(known))})"
+            " AND COALESCE(file_state,'active')<>'deleted' LIMIT 1", known).fetchone():
         return False
     from core.library2.library_roots import load_roots
     from core.library2.autolink import link_download_into_library_v2

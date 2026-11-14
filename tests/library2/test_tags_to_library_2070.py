@@ -74,7 +74,8 @@ def test_an_albums_year_and_genre_come_from_what_most_files_say(lib, monkeypatch
     assert {c["field"]: (c["library"], c["file"]) for c in album["changes"]} == {
         "year": (2022, 2005), "release_date": (None, "2005-04-12"),
         "genres": ([], ["Hard Rock", "Rock"])}
-    assert plan["counts"] == {"tracks": 3, "changed_tracks": 0, "moves": 0, "albums": 1, "unreadable": 0}
+    assert plan["counts"] == {"tracks": 3, "changed_tracks": 0, "moves": 0, "albums": 1,
+                              "unreadable": 0, "held": 0}
 
     done = tags_to_library.apply(lib["db"], ids, read_tags=read)
 
@@ -200,3 +201,96 @@ def test_a_different_artist_in_the_tag_is_said_not_done(lib, monkeypatch):
     notes = plan["tracks"][0]["notes"]
     assert any("album artist is Various Artists" in n for n in notes)
     assert plan["tracks"][0]["changes"] == []
+
+
+# --- #2084: more changes after the Library took its values from the files ----
+
+def test_files_naming_an_album_the_artist_already_has_move_onto_it(lib, monkeypatch):
+    # every file of the best-of names Nine Lives, and Nine Lives is in the
+    # Library: a rename would have made a second Nine Lives
+    conn = lib["conn"]
+    nine = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+                        "VALUES(?, 'Nine Lives', 'album')", (lib["artist"],)).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (nine, lib["artist"]))
+    conn.commit()
+    read = _reader({name: _best_of(title=name, album="nine lives") for name in lib["tracks"]},
+                   monkeypatch)
+    ids = list(lib["tracks"].values())
+
+    plan = tags_to_library.plan(lib["db"], ids, read_tags=read)
+    assert plan["albums"] == [] and plan["counts"]["moves"] == 3
+
+    done = tags_to_library.apply(lib["db"], ids, read_tags=read)
+    assert done["moved"] == 3 and done["albums_renamed"] == 0 and done["albums_created"] == 0
+    assert "title" not in get_field_overrides(conn, entity_type="release_group", entity_id=lib["album"])
+    assert conn.execute(
+        "SELECT COUNT(*) FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id "
+        "WHERE t.album_id=?", (nine,)).fetchone()[0] == 3
+
+
+def test_a_caller_that_knows_the_tracks_are_leaving_never_gets_a_rename(lib, monkeypatch):
+    read = _reader({name: _best_of(title=name, album="Greatest Hits 1973-1988")
+                    for name in lib["tracks"]}, monkeypatch)
+    ids = list(lib["tracks"].values())
+
+    plan = tags_to_library.plan(lib["db"], ids, read_tags=read, allow_rename=False)
+    assert plan["albums"] == [] and plan["counts"]["moves"] == 3
+
+    done = tags_to_library.apply(lib["db"], ids, read_tags=read, allow_rename=False)
+    assert done["moved"] == 3 and done["albums_renamed"] == 0
+
+
+def _take_from_files(lib, monkeypatch):
+    read = _reader({
+        "Pink": _best_of(title="Pink!", year="2005", genre="Rock", track_number="4"),
+        "Dream On": _best_of(title="Dream On", year="2005", genre="Rock", track_number="2"),
+        "Crazy": _best_of(title="Crazy", year="2005", genre="Rock", track_number="3"),
+    }, monkeypatch)
+    ids = list(lib["tracks"].values())
+    tags_to_library.apply(lib["db"], ids, read_tags=read)
+    return read, ids
+
+
+def test_the_plan_counts_the_values_already_taken_from_files(lib, monkeypatch):
+    read, ids = _take_from_files(lib, monkeypatch)
+    # Pink's title and number, the album's year and genre
+    assert tags_to_library.plan(lib["db"], ids, read_tags=read)["counts"]["held"] == 4
+    assert tags_to_library.plan(lib["db"], [lib["tracks"]["Crazy"]], read_tags=read)["counts"]["held"] == 2
+    assert tags_to_library.held_values(lib["conn"]) == 4
+
+
+def test_release_lets_go_of_file_tag_values_and_keeps_hand_edits(lib, monkeypatch):
+    from core.library2.metadata_overrides import set_field_override
+
+    _read, ids = _take_from_files(lib, monkeypatch)
+    conn = lib["conn"]
+    set_field_override(conn, entity_type="track", entity_id=lib["tracks"]["Crazy"],
+                       field_name="title", value="Crazy (my edit)", reason=None)
+    set_field_override(conn, entity_type="release_group", entity_id=lib["album"],
+                       field_name="release_date", value="2005-01-01", reason="edit dialog")
+    conn.commit()
+
+    # one track: its own values and its album's
+    assert tags_to_library.release(lib["db"], [lib["tracks"]["Dream On"]]) == {"released": 2}
+    assert set(get_field_overrides(conn, entity_type="release_group", entity_id=lib["album"])) == {
+        "release_date"}
+    assert set(get_field_overrides(conn, entity_type="track", entity_id=lib["tracks"]["Pink"])) == {
+        "title", "track_number"}
+
+    # the whole Library
+    assert tags_to_library.release(lib["db"]) == {"released": 2}
+    assert get_field_overrides(conn, entity_type="track", entity_id=lib["tracks"]["Pink"]) == {}
+    assert get_field_overrides(conn, entity_type="track", entity_id=lib["tracks"]["Crazy"])[
+        "title"].value == "Crazy (my edit)"
+    assert tags_to_library.release(lib["db"]) == {"released": 0}
+    assert tags_to_library.held_values(conn) == 0
+
+
+def test_release_is_the_admins_to_do(lib, monkeypatch):
+    from core.library2.metadata_overrides import MetadataOverrideError
+
+    _take_from_files(lib, monkeypatch)
+    monkeypatch.setattr("core.acquisition.requests.actor_is_admin", lambda conn, profile_id: False)
+    with pytest.raises(MetadataOverrideError):
+        tags_to_library.release(lib["db"], profile_id=7)
+    assert tags_to_library.held_values(lib["conn"]) == 4

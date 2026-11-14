@@ -243,7 +243,8 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
         if any(it.get("owned") for it in items):
             per_item = vpw._cutoff_rank_for_item if any(
                 it.get("quality_profile_id") for it in items) else None
-            items = vpw.annotate_upgrades(items, cutoff, cutoff_for=per_item)
+            items = vpw.annotate_upgrades(items, cutoff, cutoff_for=per_item,
+                                          held=vpw.held_titles(db))
         target = vpw._default_target_dir(media_type)
         if not target:
             continue

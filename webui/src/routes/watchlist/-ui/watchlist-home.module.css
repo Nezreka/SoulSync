@@ -16,19 +16,6 @@
   flex: 1 1 320px;
   min-width: 0;
 }
-.title {
-  margin: 0;
-  font-size: 48px;
-  font-weight: 800;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-  color: var(--text-1);
-}
-.sub {
-  margin: 8px 0 0;
-  color: var(--text-2);
-  font-size: 15px;
-}
 .topActions {
   display: flex;
   align-items: center;
@@ -105,6 +92,23 @@
 .ghostSm {
   height: 36px;
   padding: 0 16px;
+}
+/* in the page header the buttons are the page frame's: 34px capsules, the
+   filled white one for what the page is for, quiet ones for the rest */
+.topActions .cta,
+.topActions .ghost,
+.topActions .tools {
+  height: 34px;
+  padding: 0 16px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.topActions .cta {
+  background: var(--text-1);
+}
+.topActions .ghost {
+  border: 0;
+  background: var(--white-a10);
 }
 .tools {
   height: 44px;
@@ -1228,9 +1232,6 @@
   .search {
     flex: 1 1 100%;
     width: auto;
-  }
-  .title {
-    font-size: 34px;
   }
   .topActions > .ghost,
   .topActions > .cta {

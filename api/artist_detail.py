@@ -158,11 +158,14 @@ def _annotate_edition_preference(discography):
         releases = discography.get(bucket)
         if not isinstance(releases, list):
             continue
-        if preference == EDITION_PREFERENCE_ALL:
+        if preference == EDITION_PREFERENCE_ALL and not prefer_explicit:
             for release in releases:
                 if isinstance(release, dict):
                     release['edition_preferred'] = True
             continue
+        # with every edition wanted, the clean copy of an album listed
+        # uncensored too is still not pre-checked while explicit is preferred
+        # (#2081): reduce_edition_group leaves it out in any mode
         groups = {}
         for release in releases:
             if not isinstance(release, dict):
@@ -214,7 +217,7 @@ def _annotate_gap_edition_preference(base, gaps):
     def _title(release):
         return str(release.get('name') or release.get('title') or '')
 
-    if preference == EDITION_PREFERENCE_ALL:
+    if preference == EDITION_PREFERENCE_ALL and not prefer_explicit:
         for bucket in ('albums', 'eps', 'singles'):
             for release in _bucket(gaps, bucket):
                 if isinstance(release, dict):
@@ -2456,7 +2459,12 @@ def download_discography(artist_id):
                         # filters (live / remix / acoustic / instrumental)
                         # for one-off discography downloads too — same
                         # contract as the discography backfill repair job.
-                        skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
+                        # #2082: every release here is one the person picked,
+                        # so what the release itself is (a live album, a remix
+                        # album) is not a reason to skip its tracks. picking
+                        # MTV Unplugged with Live off added nothing
+                        skip_reason = content_type_skip_reason(
+                            track_name, album_name, content_settings, requested=True)
                         if skip_reason:
                             skipped_filter += 1
                             # name it: a count alone hid #1381's wrong skips

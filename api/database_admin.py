@@ -1159,6 +1159,7 @@ def backup_database_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/database/backups', methods=['GET'])
+@admin_only
 def list_backups_endpoint():
     """List all database backups with metadata."""
     try:
@@ -1333,6 +1334,7 @@ def restore_backup_endpoint(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/database/backups/<filename>/download', methods=['GET'])
+@admin_only
 def download_backup_endpoint(filename):
     """Download a specific database backup file."""
     try:
@@ -1436,6 +1438,7 @@ def database_vacuum():
 
 
 @bp.route('/api/database/maintenance/enable-incremental-vacuum', methods=['POST'])
+@admin_only
 def enable_incremental_vacuum():
     """Enable incremental auto_vacuum. Requires a full VACUUM to activate."""
     try:

@@ -356,12 +356,68 @@ def _spelling_key(text: Any) -> str:
     return plain[4:] if plain.startswith("the ") else plain
 
 
-def _same_act(artist: Any, other: Any) -> bool:
+_QUOTES = dict.fromkeys(map(ord, "\u2018\u2019\u201a\u201b\u2032\u00b4`\"\u201c\u201d\u201e\u2033\u00ab\u00bb"), "'")
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u30fc\uff0d"), "-")
+_INITIAL_DOT = _re.compile(r"(?<=\b\w)\.")
+_AROUND_MARKS = _re.compile(r"\s*([-(\[\])/])\s*")
+
+
+def _typography_key(text: Any) -> str:
+    """a name with the differences that are only how it was typed taken out:
+    which quote or dash character, "&" for "and", the dots of an initialism,
+    a space beside a bracket, a stray mark at either end ("George Gershwin-",
+    "Luce Twinkle Wink☆"). Punctuation INSIDE the name stays, so Attack
+    Attack! is still not Attack! Attack!."""
+    plain = _spelling_key(str(text or "").translate(_QUOTES).translate(_DASHES))
+    plain = _re.sub(r"\s*&\s*", " and ", plain)
+    plain = _AROUND_MARKS.sub(r"\1", _INITIAL_DOT.sub("", plain))
+    plain = _re.sub(r"^[\W_]+|[\W_]+$", "", plain)
+    return " ".join(plain.split())
+
+
+def _letters(text: Any) -> str:
+    return "".join(ch for ch in _typography_key(text) if ch.isalnum())
+
+
+def _one_letter_apart(a: str, b: str) -> bool:
+    """one letter added, dropped or swapped for another: a misspelling
+    ("Vicenzo Bellini"). Not for short names, where one letter is a different name."""
+    if a == b or min(len(a), len(b)) < 8 or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    for index in range(len(b)):
+        if index >= len(a) or a[index] != b[index]:
+            return a[index:] == b[index + 1:] if len(a) < len(b) else a[index + 1:] == b[index + 1:]
+    return False
+
+
+def _alias_names(raw: Any) -> List[str]:
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return []
+    return [str(name) for name in parsed or [] if isinstance(name, str) and name.strip()]
+
+
+def _same_act(artist: Any, other: Any, aliases: Iterable[str] = ()) -> bool:
     """is ``other`` this artist under another spelling, or this artist with
     company ("Gorillaz feat. D.R.A.M.", "Le Castle Vania, Addison"), or a
     short form of it ("Oliver" for Oliver Tree)? none of those is a second
-    artist whose albums were folded in."""
+    artist whose albums were folded in.
+
+    Nor is the same name typed another way, misspelled by a letter, or one of
+    the names the artist is already known by (``aliases``, the artist row's
+    own list: 宇多田ヒカル is Hikaru Utada). Those filled the review with one
+    artist written two ways (Nov 13 2026)."""
     if _spelling_key(artist) == _spelling_key(other):
+        return True
+    typed = _typography_key(other)
+    if typed and typed == _typography_key(artist):
+        return True
+    if any(typed == _typography_key(alias) for alias in aliases):
+        return True
+    if _one_letter_apart(_letters(artist), _letters(other)):
         return True
     a, b = _name_key(artist).split(), _name_key(other).split()
     if not a or not b:
@@ -394,7 +450,14 @@ def merged_by_mistake(conn: Any, read_album_artist: Any) -> List[Dict[str, Any]]
     ``read_album_artist(path)`` returns a file's album-artist tag or None.
     """
     from collections import Counter, defaultdict
-    names = {row[0]: row[1] for row in conn.execute("SELECT id, name FROM lib2_artists")}
+    names, known_as = {}, {}
+    try:
+        artist_rows = conn.execute("SELECT id, name, aliases FROM lib2_artists").fetchall()
+    except Exception:  # noqa: BLE001 - a library from before the aliases column
+        artist_rows = [(*row, None) for row in conn.execute("SELECT id, name FROM lib2_artists")]
+    for artist_id, artist_name, aliases in artist_rows:
+        names[artist_id] = artist_name
+        known_as[artist_id] = _alias_names(aliases)
     per_album: Dict[tuple, Counter] = defaultdict(Counter)
     sample: Dict[tuple, str] = {}
     for artist_id, album_id, path in conn.execute(
@@ -445,7 +508,7 @@ def merged_by_mistake(conn: Any, read_album_artist: Any) -> List[Dict[str, Any]]
                 tag = read_album_artist(sample[(artist_id, album_id, folder)])
                 # the files name someone who is not this artist, and the folder is theirs
                 if (tag and _exact_key(tag) != exact and _name_key(tag) == key
-                        and not _same_act(name, tag)):
+                        and not _same_act(name, tag, known_as.get(artist_id, ()))):
                     confirmed.append(album_id)
                     said[str(tag).strip()] += 1
             if not confirmed:

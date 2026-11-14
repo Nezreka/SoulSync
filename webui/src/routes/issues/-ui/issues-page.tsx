@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Select, TextInput } from '@/components/form';
-import { PageHeader } from '@/components/page-header';
+import { PageFrame, PageHeader } from '@/components/page-header';
 import { EmptyState, Show, Spinner } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -141,7 +141,7 @@ function IssueBoard() {
   };
 
   return (
-    <div className={styles.issuesContainer} data-testid="issues-board">
+    <PageFrame data-testid="issues-board">
       <IssueBoardHeader
         isAdmin={isAdmin}
         category={params.category}
@@ -229,7 +229,7 @@ function IssueBoard() {
           </button>
         </div>
       </Show>
-    </div>
+    </PageFrame>
   );
 }
 
@@ -392,22 +392,6 @@ function IssueBoardHeader({
   return (
     <PageHeader
       id="issues-header"
-      icon={
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ color: 'rgb(var(--accent-light-rgb))' }}
-          aria-hidden="true"
-        >
-          <path d="M9 3h6a2 2 0 0 1 2 2h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1a2 2 0 0 1 2-2Z" />
-          <path d="M9.5 3.6a1.8 1.8 0 0 0 0 3.4h5a1.8 1.8 0 0 0 0-3.4" />
-          <path d="M8.5 13.5l2 2 4-4" />
-        </svg>
-      }
       title="Issues"
       subtitle={
         // Named against Library Maintenance on purpose. These two look like the

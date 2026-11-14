@@ -142,7 +142,21 @@ def extract_external_ids(track: Any, source_hint: Optional[str] = None) -> Dict[
         if key and key not in ids:
             ids[key] = native_id
 
-    return ids
+    # A wishlist track's own id is its row key ("<track>::<album>"), and a file
+    # tagged before Nov 13 2026 can carry that key or a placeholder
+    # ('explicit_artist') as its provider id. Neither finds anything by id, so
+    # the owned check fell through to names. Only what a provider would know
+    # is kept; soul ids and isrcs are not provider-minted ids and stay as read.
+    from core.context_sentinels import provider_id
+    cleaned: Dict[str, str] = {}
+    for name, value in ids.items():
+        if name in ('soul_id', 'isrc') or not isinstance(value, str):
+            cleaned[name] = value
+            continue
+        bare = provider_id(value)
+        if bare:
+            cleaned[name] = bare
+    return cleaned
 
 
 def find_library_track_by_external_id(

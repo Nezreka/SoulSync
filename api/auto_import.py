@@ -43,6 +43,10 @@ def auto_import_status():
 
 @bp.route('/api/auto-import/toggle', methods=['POST'])
 def auto_import_toggle():
+    # install-wide settings: an admin's to change (Nov 13 2026). reading stays open
+    from core.profile_context import is_admin_request
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Admin access required"}), 403
     if not _auto_import_worker():
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
     data = request.get_json() or {}
@@ -84,6 +88,10 @@ def auto_import_settings():
             "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
             "clear_finished": bool(config_manager.get('import.clear_finished_from_staging', False)),
         })
+    # install-wide settings: an admin's to change (Nov 13 2026). reading stays open
+    from core.profile_context import is_admin_request
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Admin access required"}), 403
     data = request.get_json() or {}
     if 'quality_profile_id' in data:
         raw_profile_id = data.get('quality_profile_id')

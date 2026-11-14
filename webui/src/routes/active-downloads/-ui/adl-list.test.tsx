@@ -501,7 +501,9 @@ describe('AdlHeader', () => {
   it('hides the chips and the strip outside the Downloads view', () => {
     const review = render(<AdlHeader {...props} filter="unverified" />);
     expect(review.container.querySelector('#adl-filter-pills')).toBeNull();
-    expect(review.container.querySelector('.dlh-quiet')).toBeNull();
+    expect(review.container.querySelector('.dlh-strip')).toBeNull();
+    // the status line belongs to the page, so it stays on every view
+    expect(review.container.querySelector('.pgf-status')).not.toBeNull();
     expect(review.container.querySelector('.dlh-tab-on')?.textContent).toBe('Review');
     cleanup();
     const clients = render(<AdlHeader {...props} filter="clients" />);

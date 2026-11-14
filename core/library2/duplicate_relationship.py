@@ -150,6 +150,12 @@ def validate_duplicate_pair(
             "Source is already a canonical target and cannot become a duplicate"
         )
 
+    # Two tracks already linked as one recording do not have to prove it
+    # again to turn the link round: the tags that disagree (an Adam Levine
+    # single and the same song on a Maroon 5 album) disagreed when the link
+    # was made. Durations, hard ids and the link's shape are still checked.
+    confirmed_recording = confirmed_recording or bool(reverse_existing)
+
     source_artists = _artist_ids(
         conn, int(source["id"]), int(source["primary_artist_id"])
     )

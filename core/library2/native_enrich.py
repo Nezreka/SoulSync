@@ -1399,9 +1399,15 @@ def _clear_borrowed_identity(conn, artist_id: int, namespace: str,
         assignments.append("spotify_id=NULL")
     elif namespace == "musicbrainz":
         assignments.append("musicbrainz_id=NULL")
-    else:
-        assignments.append("external_ids=json_remove(external_ids, ?)")
-        params.append(f"$.{namespace}")
+    # every namespace, the two with a column of their own included: the same id
+    # is also kept in external_ids, and the pass reads it from there when the
+    # column is empty. Clearing only the column left the artist holding the
+    # id, so it was "taken back" again on every start and never was (30 rows
+    # on one library, Nov 13 2026).
+    assignments.append(
+        "external_ids=CASE WHEN json_valid(external_ids) "
+        "THEN json_remove(external_ids, ?) ELSE external_ids END")
+    params.append(f"$.{namespace}")
     row = conn.execute(
         "SELECT image_url, genres, art_locked, genres_locked FROM lib2_artists WHERE id=?",
         (int(artist_id),),
@@ -1475,7 +1481,10 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
                   if _artist_is_a_release_primary(conn, aid)]
         if len(owners) != 1:
             stats["ambiguous"] += 1
-            logger.info(
+            # one line each at debug: these groups are left as they are, so the
+            # same ones came back on every pass (304 info lines per start on
+            # one library). the pass says how many in one line below
+            logger.debug(
                 "borrowed identity %s/%s shared by %s and no catalogue owner",
                 namespace, value, artist_ids,
             )
@@ -1488,6 +1497,10 @@ def release_borrowed_artist_identities(conn) -> Dict[str, Any]:
             stats["released"] += 1
             if aid not in stats["artist_ids"]:
                 stats["artist_ids"].append(aid)
+    if stats["ambiguous"] or stats["released"]:
+        logger.info(
+            "borrowed identities: %d taken back, %d shared with no catalogue owner and left alone",
+            stats["released"], stats["ambiguous"])
     return stats
 
 

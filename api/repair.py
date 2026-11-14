@@ -20,6 +20,17 @@ logger = get_logger("api.repair")
 
 bp = Blueprint("repair", __name__)
 
+
+@bp.before_request
+def _admin_manages_this():
+    """Running repair jobs and acting on findings is the admin's to change (Nov 13 2026). Reading stays open: the
+    pages that show it are not admin pages."""
+    from flask import jsonify as _jsonify, request as _request
+    from core.profile_context import is_admin_request
+    if _request.method in ("POST", "PUT", "PATCH", "DELETE") and not is_admin_request():
+        return _jsonify({"success": False, "error": "Admin access required"}), 403
+    return None
+
 _worker_getter = lambda: None   # noqa: E731 - replaced by configure()
 # web_server helpers a couple of handlers call (injected — importing web_server
 # from here would be circular): artist-image URL fixup for findings artwork, and

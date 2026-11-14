@@ -31,6 +31,7 @@ from core.edition_grouping import (
     EDITION_PREFERENCE_ONE_COMPLETE,
     EDITION_PREFERENCE_ONE_STANDARD,
     EDITION_PREFERENCE_VALUES,
+    drop_clean_twins,
     edition_group_key,
     reduce_edition_group,
 )
@@ -261,6 +262,16 @@ def is_live_version(track_name: str, album_name: str = "") -> bool:
             return True
 
     return False
+
+def is_live_album(album_name: str) -> bool:
+    """Is the release itself a live recording, going by its title?
+
+    "MTV Unplugged", "Live at Wembley", "Alive in Concert". A studio album
+    with one "(Live)" bonus track is not: that is a live track (#2082), which
+    ``is_live_version(track_name)`` on the track's own title answers.
+    """
+    return bool(album_name) and is_live_version(album_name)
+
 
 def is_remix_version(track_name: str, album_name: str = "") -> bool:
     """
@@ -727,6 +738,19 @@ def _group_albums_by_edition(albums):
             index_by_key[key] = len(groups)
             groups.append([album])
     return groups
+
+
+def _without_clean_twins(albums, prefer_explicit_edition: bool):
+    """Every edition, less the clean copy of an album that is listed
+    uncensored too (#2081: "prefer explicit" only chose between editions once
+    one edition per album was on, so with All editions the "(Clean)" twin was
+    wished for next to the explicit one). Provider order is kept."""
+    albums = list(albums or [])
+    if not prefer_explicit_edition:
+        return albums
+    kept = {id(album) for group in _group_albums_by_edition(albums)
+            for album in drop_clean_twins(group)}
+    return [album for album in albums if id(album) in kept]
 
 
 def _edition_explicit_flag(album_data, tracks) -> bool:
@@ -1894,7 +1918,8 @@ class WatchlistScanner:
                 if edition_preference != EDITION_PREFERENCE_ALL:
                     album_units = _group_albums_by_edition(albums)
                 else:
-                    album_units = [[album] for album in albums]
+                    album_units = [[album] for album in _without_clean_twins(
+                        albums, prefer_explicit_edition)]
 
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
@@ -2820,27 +2845,20 @@ class WatchlistScanner:
                     logger.debug(f"Skipping compilation album: {album_name}")
                     return False
 
-            # Check track content type filters
-            if not include_live:
-                if is_live_version(track_name, album_name):
-                    logger.debug(f"Skipping live version: {track_name}")
-                    return False
-
-            if not include_remixes:
-                if is_remix_version(track_name, album_name):
-                    logger.debug(f"Skipping remix: {track_name}")
-                    return False
-
-            if not include_acoustic:
-                if is_acoustic_version(track_name, album_name):
-                    logger.debug(f"Skipping acoustic version: {track_name}")
-                    return False
-
-            # Check instrumental versions
-            if not include_instrumentals:
-                if is_instrumental_version(track_name, album_name):
-                    logger.debug(f"Skipping instrumental version: {track_name}")
-                    return False
+            # Check track content type filters. one rule set for the scanner,
+            # the Library's auto add and Download Discography (#2082: a live
+            # album and a live track on a studio album are two rules)
+            from core.metadata.discography_filters import content_type_skip_reason
+            skip_reason = content_type_skip_reason(track_name, album_name, {
+                'include_live': include_live,
+                'include_live_tracks': getattr(watchlist_artist, 'include_live_tracks', None),
+                'include_remixes': include_remixes,
+                'include_acoustic': include_acoustic,
+                'include_instrumentals': include_instrumentals,
+            })
+            if skip_reason:
+                logger.debug(f"Skipping {skip_reason} version: {track_name}")
+                return False
 
             # Check custom exclusion terms
             try:

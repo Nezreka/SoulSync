@@ -143,15 +143,18 @@ def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
     fn = _HELPERS_JS.split("function showLibraryDownloadsSection")[1].split("function createArtistBubbleCard")[0]
     assert "getElementById('library-artists-grid')" in fn
     assert "artistGrid.parentElement" in fn
-    # The ambiguity is still real: index.html carries the VIDEO library's
-    # .library-content, and a class query could still hit it. The music side is
-    # Library v2 now — it is CSS-module scoped and owns no global class at all,
-    # so the only safe anchor left is the data attribute asserted below.
+    # The class that caused it is gone from the page altogether. The music
+    # side is the Library (React, CSS-module scoped) and so, since 3.6.6, is the
+    # video library manager: neither owns a global .library-content any more.
+    # The only anchor is the data attribute asserted below, and a class query
+    # for the old name must stay out of the function for good.
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     react_page = (
         _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-v2-page.tsx"
     ).read_text(encoding="utf-8")
-    assert index.count('class="library-content"') >= 1, "video library lost its .library-content"
+    assert index.count('class="library-content"') == 0, (
+        "a global .library-content is back in the page: a class query could match the wrong library")
+    assert "data-video-manager-root" in index, "the video library manager lost its mount point"
     assert "data-library-downloads-host" in react_page, "music library lost the bubbles host"
 
     # The React library page renders a dedicated host and is preferred when

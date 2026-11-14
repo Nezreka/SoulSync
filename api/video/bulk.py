@@ -38,6 +38,18 @@ def register_routes(bp):
                 return jsonify({"ok": False, "error": "collection_id required"}), 400
             res = bulk_ops.add_to_collection(db, kind, ids, cid)
             return jsonify(res), (200 if res.get("ok") else 400)
+        # who asked: a wish lands on their wishlist, a delete is theirs
+        try:
+            from flask import g
+            params = dict(params, profile_id_of_user=int(getattr(g, "profile_id", 1) or 1))
+        except Exception:   # noqa: BLE001 - outside a profile: the admin
+            params = dict(params, profile_id_of_user=1)
+        if action == "quality_profile" and params.get("profile_id"):
+            named = db.get_named_quality_profile(params["profile_id"]) if isinstance(
+                params["profile_id"], int) else None
+            if not named:
+                return jsonify({"ok": False, "error": "That quality profile is gone."}), 400
+            params["profile_name"] = named.get("name")
         res = bulk_ops.start_bulk(db, kind, ids, action, params)
         if not res.get("ok"):
             busy = res.get("error") == "a bulk operation is already running"

@@ -571,8 +571,10 @@ class PlaylistSyncService:
         accept it — Plex/Jellyfin keep their existing signatures.
         """
         fn = getattr(client, 'reconcile_playlist', None)
+        # only a client that follows a playlist by id is ever handed one
+        id_kw = {'playlist_id': playlist_id} if playlist_id is not None else {}
         if fn is None:
-            return client.update_playlist(playlist_name, tracks)
+            return client.update_playlist(playlist_name, tracks, **id_kw)
         from core.navidrome_client import NavidromeClient
         if isinstance(client, NavidromeClient):
             # A refused/failed Navidrome write must not trigger another destructive attempt.
@@ -582,7 +584,7 @@ class PlaylistSyncService:
                 logger.error("Navidrome reconcile failed for %r: %s", playlist_name, exc)
                 return False
         try:
-            if fn(playlist_name, tracks):
+            if fn(playlist_name, tracks, **id_kw):
                 return True
             logger.warning(
                 "Reconcile sync failed for '%s' — falling back to replace "
@@ -590,7 +592,7 @@ class PlaylistSyncService:
         except Exception as e:
             logger.warning(
                 "Reconcile sync errored for '%s' (%s) — falling back to replace", playlist_name, e)
-        return client.update_playlist(playlist_name, tracks)
+        return client.update_playlist(playlist_name, tracks, **id_kw)
 
     def _resolve_mirrored_server_playlist_id(
         self,
@@ -920,9 +922,11 @@ class PlaylistSyncService:
                     # media server calls block, keep them off the shared loop.
                     # Only the Navidrome client accepts playlist_id; Plex /
                     # Jellyfin keep their existing signatures.
+                    from core.sync.mirrored_server_link import follows_by_id
                     _navidrome_id_kw = (
                         {'playlist_id': server_playlist_id}
-                        if server_type == 'navidrome' else {}
+                        if follows_by_id(server_type) and server_playlist_id is not None
+                        else {}
                     )
                     # what each source track matched, so append can drop an
                     # old wrong match the right track replaced (#1801)
@@ -960,7 +964,7 @@ class PlaylistSyncService:
                     sync_success, _write_skipped_ids = await run_blocking(
                         _dispatch_write)
 
-                    if (sync_success and server_type == 'navidrome'
+                    if (sync_success and follows_by_id(server_type)
                             and server_playlist_id is None and media_client is not None):
                         # Nothing was linked and the name-match found nothing,
                         # so the write above created the playlist — record its
@@ -1234,7 +1238,7 @@ class PlaylistSyncService:
                 # stringify past it instead of matching "unknown artist".
                 stub_artist = _artist_name((spotify_track.artists or [None])[0])
                 if is_stub_id(spotify_track.id) and not should_wishlist_stub(
-                    stub_artist, spotify_track.name,
+                    stub_artist, spotify_track.name, spotify_track.id,
                 ):
                     logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
                     drop_reasons["wing-it stub (ineligible)"] = drop_reasons.get("wing-it stub (ineligible)", 0) + 1

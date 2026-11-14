@@ -280,6 +280,24 @@ def _response_peer_is_public(response: Any) -> bool:
         return False
 
 
+# why the last fetch of a url failed, for the picker's error line. small and
+# best effort: a stubbed or concurrent fetch just leaves the generic message.
+_fetch_failures: dict = {}
+_FETCH_FAILURES_KEPT = 64
+
+
+def _note_fetch_failure(url: str, reason: str) -> None:
+    if len(_fetch_failures) >= _FETCH_FAILURES_KEPT:
+        _fetch_failures.clear()
+    _fetch_failures[str(url or "").strip()] = reason
+
+
+def remote_artwork_failure(url: str) -> Optional[str]:
+    """Why ``url`` could not be used as artwork, in words for the person who
+    pasted it. None when nothing more specific than "it failed" is known."""
+    return _fetch_failures.pop(str(url or "").strip(), None)
+
+
 def _download_remote_artwork(
     url: str,
     *,
@@ -288,38 +306,55 @@ def _download_remote_artwork(
     """Fetch public artwork with a bounded, revalidated redirect walk."""
     import requests
 
-    current = str(url or "").strip()
+    from utils.http_identity import APP_USER_AGENT
+
+    asked = str(url or "").strip()
+    current = asked
+    _fetch_failures.pop(asked, None)
     limit = max(1, int(max_bytes))
     for _redirect in range(MAX_ARTWORK_REDIRECTS + 1):
         if not _public_remote_artwork_url(current):
+            _note_fetch_failure(asked, "That link is not a public web address SoulSync can reach.")
             return None
         response = None
         try:
+            # a named client: image hosts (Discogs) answer 403 to the bare
+            # "python-requests" name, so every Discogs photo failed (#2079)
             response = requests.get(
                 current,
                 timeout=(3.05, 15),
                 stream=True,
                 allow_redirects=False,
-                headers={"Accept": "image/*"},
+                headers={"Accept": "image/*", "User-Agent": APP_USER_AGENT},
             )
             if not _response_peer_is_public(response):
+                _note_fetch_failure(asked, "That link is not a public web address SoulSync can reach.")
                 return None
             if response.status_code in {301, 302, 303, 307, 308}:
                 location = str(response.headers.get("Location") or "").strip()
                 if not location:
+                    _note_fetch_failure(asked, "That link redirects nowhere.")
                     return None
                 current = urljoin(current, location)
                 continue
             if response.status_code != 200:
+                _note_fetch_failure(
+                    asked, f"The site refused the download (HTTP {response.status_code}).")
                 return None
             content_type = str(response.headers.get("Content-Type") or "").lower()
             if not content_type.startswith("image/"):
+                _note_fetch_failure(
+                    asked,
+                    "That link opens a web page, not an image. Right-click the picture "
+                    "and copy the image address." if "html" in content_type
+                    else "That link is not an image.")
                 return None
             try:
                 declared_size = int(response.headers.get("Content-Length") or 0)
             except (TypeError, ValueError):
                 declared_size = 0
             if declared_size < 0 or declared_size > limit:
+                _note_fetch_failure(asked, "That image is too large.")
                 return None
             body = bytearray()
             for chunk in response.iter_content(chunk_size=64 * 1024):
@@ -327,14 +362,19 @@ def _download_remote_artwork(
                     continue
                 body.extend(chunk)
                 if len(body) > limit:
+                    _note_fetch_failure(asked, "That image is too large.")
                     return None
+            if not body:
+                _note_fetch_failure(asked, "The site sent an empty file.")
             return bytes(body) if body else None
         except Exception as exc:  # noqa: BLE001
             logger.debug("remote artwork fetch failed: %s", exc)
+            _note_fetch_failure(asked, "SoulSync could not reach that site.")
             return None
         finally:
             if response is not None:
                 response.close()
+    _note_fetch_failure(asked, "That link redirects too many times.")
     return None
 
 
@@ -603,7 +643,7 @@ def _stored_image(conn, kind: str, entity_id: int) -> Optional[bytes]:
         return None
     try:
         import requests
-        response = requests.get(absolute, timeout=10, stream=True)
+        response = requests.get(absolute, timeout=10, stream=True)  # the user's own media server
         if response.status_code != 200:
             return None
         data = response.raw.read(MAX_REMOTE_ARTWORK_BYTES + 1, decode_content=True)
@@ -1357,6 +1397,7 @@ def apply_manual_artwork(
         return False
     variants = _normalize_jpeg_variants(data)
     if not variants:
+        _note_fetch_failure(url, "That file is not an image SoulSync can read.")
         return False
     data, thumbnail = variants
 

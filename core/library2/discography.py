@@ -30,7 +30,7 @@ from __future__ import annotations
 import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -284,6 +284,8 @@ def _should_auto_monitor(
 
 
 _CONTENT_FILTER_DEFAULTS = {
+    # live albums. live tracks on other releases are include_live_tracks,
+    # which follows this one until it is set (#2082)
     "include_live": False,
     "include_remixes": False,
     "include_acoustic": False,
@@ -334,10 +336,14 @@ def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[s
             settings = get_artist_settings(conn, artist_id, profile_id=pid)
         except Exception:  # noqa: BLE001 - no row for this profile, try the next
             continue
-        return {
+        filters = {
             key: bool(settings.get(key, default))
             for key, default in _CONTENT_FILTER_DEFAULTS.items()
         }
+        live_tracks = settings.get("include_live_tracks")
+        filters["include_live_tracks"] = (
+            filters["include_live"] if live_tracks is None else bool(live_tracks))
+        return filters
     return dict(_CONTENT_FILTER_DEFAULTS)
 
 
@@ -854,36 +860,34 @@ def _uncredited_track_ids(conn, album_id: int, track_ids: List[int]) -> set:
 
 def _track_content_excluded(
     track_title: str, album_title: str, filters: Dict[str, bool],
+    *, requested: bool = False,
 ) -> bool:
     """True when ``track_title`` is a Live/Remix/Acoustic/Instrumental
     version the artist's watchlist settings don't opt into (review A3).
     Explicit params (not a closure) — this is called from inside a loop over
-    an album's tracks and must not depend on loop-variable capture."""
-    from core.watchlist_scanner import (
-        is_acoustic_version,
-        is_instrumental_version,
-        is_live_version,
-        is_remix_version,
-    )
+    an album's tracks and must not depend on loop-variable capture.
 
-    if not filters["include_live"] and is_live_version(track_title, album_title):
-        return True
-    if not filters["include_remixes"] and is_remix_version(track_title, album_title):
-        return True
-    if not filters["include_acoustic"] and is_acoustic_version(track_title, album_title):
-        return True
-    if not filters["include_instrumentals"] and is_instrumental_version(
-        track_title, album_title,
-    ):
-        return True
-    return False
+    The rules are the watchlist scanner's and Download Discography's, in one
+    place (#2082): a live album is one rule, a live track on another release
+    a second, and a release the person asked for (``requested``) is never
+    kept out by what the release itself is."""
+    from core.metadata.discography_filters import content_type_skip_reason
+
+    return content_type_skip_reason(
+        track_title, album_title, filters, requested=requested) is not None
 
 
-def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -> int:
+def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1,
+                    requested: bool = False) -> int:
     """Put one catalogue release on ``profile_id``'s wishlist: monitor it, queue
     its tracklist and wish for its tracks. What Fix on a discography finding
     does, and what the back catalogue's auto add does without the click.
-    Returns the tracks mirrored; raises LookupError when the album is gone."""
+    Returns the tracks mirrored; raises LookupError when the album is gone.
+
+    ``requested``: a person asked for this release (the Fix click). The
+    edition preference and the release's own kind then never keep it out:
+    asking for a live album with Live albums off wished for none of its
+    tracks (#2082)."""
     from contextlib import closing as _closing
 
     from core.library2 import ADMIN_PROFILE_ID
@@ -909,11 +913,13 @@ def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -
             record_rule(conn, "album", int(album_id), True, PROVENANCE_USER, profile_id=profile)
         conn.commit()
     return auto_monitor_releases(db, config_manager, [int(album_id)],
-                                 wishlist_profile_id=int(profile_id or 1))
+                                 wishlist_profile_id=int(profile_id or 1),
+                                 requested_ids={int(album_id)} if requested else None)
 
 
 def auto_monitor_releases(db, config_manager, album_ids: List[int],
-                          *, wishlist_profile_id: int = 1) -> int:
+                          *, wishlist_profile_id: int = 1,
+                          requested_ids: Optional[Iterable[int]] = None) -> int:
     """Make freshly discovered releases genuinely wanted.
 
     For each album: materialize its provider tracklist into real track rows,
@@ -929,9 +935,14 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     from core.library2.completeness import resolve_tracklist
 
     from core.library2.edition_selection import select_automatic_album_ids
+    # what a person asked for by name is not up to the edition preference
+    requested_set = {int(a) for a in (requested_ids or ())}
     with closing(db._get_connection()) as selection_conn:
-        album_ids = select_automatic_album_ids(selection_conn, album_ids, config_manager,
-                                              profile_id=wishlist_profile_id)
+        selected = set(select_automatic_album_ids(
+            selection_conn, [a for a in album_ids if int(a) not in requested_set],
+            config_manager, profile_id=wishlist_profile_id))
+        album_ids = [a for a in dict.fromkeys(int(a) for a in album_ids)
+                     if a in requested_set or a in selected]
     mirrored = 0
     filters_cache: Dict[int, Dict[str, bool]] = {}
     with closing(db._get_connection()) as conn:
@@ -1033,10 +1044,15 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
 
             if not filters.get("include_other_artists", False):
                 vetoed = set(vetoed) | _uncredited_track_ids(conn, album_id, album_track_ids)
+            # a release the person asked for, by the click that got us here
+            # (#2082). not read off the album's rule: the back catalogue's own
+            # auto add writes a user rule for a member's library too
+            asked_for = int(album_id) in requested_set
             auto_monitor_ids = [
                 r["id"] for r in album_tracks
                 if r["id"] not in vetoed
-                and not _track_content_excluded(r["title"] or "", album_title, filters)
+                and not _track_content_excluded(r["title"] or "", album_title, filters,
+                                                requested=asked_for)
             ]
             from core.library2 import ADMIN_PROFILE_ID
             if int(wishlist_profile_id) == ADMIN_PROFILE_ID:

@@ -374,3 +374,41 @@ def test_recording_identifier_lookups_do_not_scan_the_catalogue(env, monkeypatch
     monkeypatch.setattr(env.db, '_get_connection', counted_connection)
     assert not env.db.get_quarantine_library_candidates('Missing', [], {'spotify': 'absent', 'isrc': 'ABSENT'})
     assert steps < 20
+
+
+def test_the_artist_name_maps_are_kept_between_opens_of_the_list(env, monkeypatch):
+    """nov 13 2026: every open of the quarantine list read every artist and
+    every credited track to build two name maps (~3s of cpu on a 30k-artist
+    library). they are kept while no artist or file was added."""
+    monkeypatch.setattr(databases.MusicDatabase, '_QUARANTINE_NAME_MAPS_TTL', 300.0)
+    databases.MusicDatabase._quarantine_name_maps.clear()
+    candidate(env)
+
+    def ask(artist='Aphex Twin', title='Xtal'):
+        return env.db.get_quarantine_library_candidates(title, [artist], {}, 'soulsync')
+
+    reads = []
+    real = env.db._get_connection
+
+    def counting():
+        conn = real()
+        conn.set_trace_callback(lambda sql: reads.append(sql) if 'FROM lib2_artists' in sql and 'SELECT id,name' in sql else None)
+        return conn
+
+    monkeypatch.setattr(env.db, '_get_connection', counting)
+    assert len(ask()) == 1
+    assert len(ask()) == 1
+    assert len(reads) == 1
+
+    # a new artist and file: seen on the very next open
+    path = env.library / 'Other.flac'
+    path.write_bytes(b'audio')
+    from core.library2.importer import normalize_name
+    with real() as conn:
+        conn.execute('INSERT INTO lib2_artists(id,name,name_key) VALUES(2,?,?)', ('Boards of Canada', normalize_name('Boards of Canada')))
+        conn.execute("INSERT INTO lib2_albums(id,primary_artist_id,title) VALUES(2,2,'Geogaddi')")
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(2,'Julie and Candy')").lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,format) VALUES(?,?,1,'flac')", (track, str(path)))
+    assert len(ask('Boards of Canada', 'Julie and Candy')) == 1
+    assert len(reads) == 2
+    databases.MusicDatabase._quarantine_name_maps.clear()

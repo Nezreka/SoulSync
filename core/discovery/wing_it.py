@@ -84,9 +84,20 @@ def wishlist_guesses_enabled() -> bool:
         return False
 
 
-def should_wishlist_stub(artist_name: Any, track_name: Any) -> bool:
-    """The single gate every "skip wing-it tracks" site shares, so they agree."""
-    return wishlist_guesses_enabled() and stub_is_searchable(artist_name, track_name)
+def should_wishlist_stub(artist_name: Any, track_name: Any, stub_id: Any = None) -> bool:
+    """The single gate every "skip wing-it tracks" site shares, so they agree.
+
+    ``stub_id`` lets one playlist's stubs through without the app-wide
+    setting: a playlist that finds uncatalogued tracks (#2097,
+    core/playlists/uncatalogued.py) searches for its own."""
+    if not stub_is_searchable(artist_name, track_name):
+        return False
+    if wishlist_guesses_enabled():
+        return True
+    if stub_id:
+        from core.playlists.uncatalogued import is_allowed
+        return is_allowed(stub_id)
+    return False
 
 
 __all__ = [

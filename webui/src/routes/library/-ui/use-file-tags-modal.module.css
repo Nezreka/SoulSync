@@ -101,6 +101,37 @@
   font-size: 12.5px;
 }
 
+/* #2084: what is already held from file tags, and the way to let go of it */
+.held {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--white-a08);
+  border-radius: 12px;
+  background: var(--white-a03);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.heldAction {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--accent-light-rgb));
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.heldAction:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.heldAction:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 @media (max-width: 640px) {
   .row {
     grid-template-columns: minmax(0, 1fr);

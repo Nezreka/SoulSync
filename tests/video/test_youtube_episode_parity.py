@@ -137,7 +137,8 @@ def test_channel_season_bar_matches_tv_minus_manual_search():
     # The bar moved out of renderEpisodes into its own seasonActionsHtml() when it
     # grew the monitor + clear-failures actions, so the old comment anchor is gone.
     bar = _DETAIL_JS.split("function seasonActionsHtml(")[1].split("function renderEpisodes(")[0]
-    assert "isYt" in bar
+    # (Nov 2026: a TV season's bar is the React list's; this one is YouTube's only)
+    assert "data.source !== 'youtube') return ''" in bar
     # The year/season noun moved into grabScope() when the bar grew a
     # playlist scope ('all'); the labels are built from scope.word now.
     assert "var scope = grabScope()" in bar
@@ -146,10 +147,10 @@ def test_channel_season_bar_matches_tv_minus_manual_search():
     scope = _DETAIL_JS.split("function grabScope(")[1].split("function ytTagChips(")[0]
     assert "data.source === 'youtube') return { word: 'year'" in scope
     assert "return { word: 'season'" in scope
-    assert "canAcquire && !isYt ?" in bar              # manual search hidden for channels
+    assert "data-vd-season-search" not in bar          # no manual search for channels
     assert "ytFilter.q" in bar                         # a filtered view isn't "the season"
     # ...and a channel gets no library management: no episode rows to monitor.
-    assert "seasonManage = !isYt" in bar
+    assert "data-vd-season-monitor" not in bar
 
 
 def test_historic_completed_rows_do_not_hide_the_regrab_button():

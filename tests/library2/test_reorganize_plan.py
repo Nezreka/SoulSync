@@ -720,3 +720,36 @@ def test_reorganize_refuses_an_album_titled_with_an_id(imported_conn):
 
     assert _plan(conn, album_id, build)["status"] == "placeholder_metadata"
     assert seen == []
+
+
+# ── #2044 follow-up: Reorganize on a multi-track single ──────────────────────
+
+def test_reorganize_numbers_each_track_of_a_multi_track_single(imported_conn, monkeypatch, tmp_path):
+    """Ericsson's library, Nov 13 2026: "How You Love Me (remixes)", a 4-track
+    single, came out of a Reorganize as four files numbered 01 on his
+    customized Single Path Template. the download-side fix has its own test;
+    this is the same release through Reorganize, with his exact templates."""
+    from core.imports import paths
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {
+            "album_path": "$albumartist ($albumartistdisambiguation)/$albumtype/"
+                          "$albumartist - $album ($year)/$disc-$track - $title",
+            "single_path": "$albumartist ($albumartistdisambiguation)/$albumtype/"
+                           "$albumartist - $album ($year)/$track - $title",
+        },
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    titles = ("How You Love Me (Arston remix)", "How You Love Me (Kill FM)",
+              "How You Love Me (Lazy Rich remix)", "How You Love Me (Panda remix)")
+    _, album_id, _ = _seed(imported_conn, album_title="How You Love Me (remixes)", year=2014,
+                           album_type="single",
+                           tracks=tuple((title, n, 1) for n, title in enumerate(titles, 1)))
+
+    plan = reorganize_plan.plan_album_reorganize(
+        imported_conn, album_id, build_final_path_fn=paths.build_final_path_for_track,
+        transfer_dir=str(tmp_path), resolve_file_path_fn=lambda p: p)
+
+    names = sorted(os.path.basename(t["new_path_abs"]) for t in plan["tracks"])
+    assert names == [f"{n:02d} - {title}.flac" for n, title in enumerate(titles, 1)]

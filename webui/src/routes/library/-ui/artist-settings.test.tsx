@@ -59,6 +59,7 @@ const settings = {
   include_eps: true,
   include_singles: true,
   include_live: false,
+  include_live_tracks: false,
   include_remixes: false,
   include_acoustic: false,
   include_compilations: false,

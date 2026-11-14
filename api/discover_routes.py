@@ -1374,20 +1374,23 @@ def _bylt_owned_lookup(database, sections):
 
 
 def _owned_album_keys_for(conn, artist_names):
-    """(title, artist) of the albums you own by these artists, lowercased.
+    """album_presence_key of every album you own by these artists.
 
     the shelf only ever drops albums by its 25 top artists, so it asks for
     those artists' albums and not the whole library's: 70k album keys and an
     ownership check on each was 3.9s live (Nov 4 2026). names fold in python
     because sqlite's LOWER only folds ascii, and a listened "Björk" has to
-    meet the library's "BJÖRK". ownership is the asker's own library."""
+    meet the library's "BJÖRK" (and a "Bjork"). the key is the one the shelf
+    folds its candidates with, so punctuation and a pressing tag never make
+    an owned album look missing (#2083). ownership is the asker's own library."""
     from core.library2.sql_util import owned_sql
+    from core.wishlist.presence import album_presence_key, artist_presence_key
 
-    wanted = {str(n).lower().strip() for n in artist_names if n}
+    wanted = {artist_presence_key(n) for n in artist_names if n}
     if not wanted:
         return set()
     ids = [int(r[0]) for r in conn.execute("SELECT id, name FROM lib2_artists")
-           if r[1] and str(r[1]).lower().strip() in wanted]
+           if r[1] and artist_presence_key(r[1]) in wanted]
     keys = set()
     for start in range(0, len(ids), 500):
         chunk = ids[start:start + 500]
@@ -1399,7 +1402,7 @@ def _owned_album_keys_for(conn, artist_names):
                AND al.title IS NOT NULL
                AND {owned_sql('album', 'al')}
         """, chunk)
-        keys.update((str(t).lower().strip(), str(a).lower().strip()) for t, a in rows)
+        keys.update(album_presence_key(t, a) for t, a in rows)
     return keys
 
 

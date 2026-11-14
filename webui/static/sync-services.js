@@ -7420,12 +7420,12 @@ function generateTableRowsFromState(state, urlHash) {
 
             return `
             <tr id="discovery-row-${urlHash}-${result.index}">
-                <td class="yt-track">${trackName}</td>
-                <td class="yt-artist">${artistName}</td>
+                <td class="yt-track">${escapeHtml(trackName)}</td>
+                <td class="yt-artist">${escapeHtml(artistName)}</td>
                 <td class="discovery-status ${result.status_class}">${result.status}</td>
-                <td class="spotify-track">${result.spotify_track || '-'}</td>
-                <td class="spotify-artist">${result.spotify_artist || '-'}</td>
-                <td class="spotify-album">${result.spotify_album || '-'}</td>
+                <td class="spotify-track">${escapeHtml(result.spotify_track || '-')}</td>
+                <td class="spotify-artist">${escapeHtml(result.spotify_artist || '-')}</td>
+                <td class="spotify-album">${escapeHtml(result.spotify_album || '-')}</td>
                 <td class="discovery-actions">${generateDiscoveryActionButton(result, urlHash, platform)}</td>
             </tr>
         `;
@@ -7453,8 +7453,8 @@ function generateInitialTableRows(tracks, isTidal = false, urlHash = '', isBeatp
 
         return `
         <tr id="discovery-row-${urlHash}-${index}">
-            <td class="yt-track">${trackName}</td>
-            <td class="yt-artist">${artistName}</td>
+            <td class="yt-track">${escapeHtml(trackName)}</td>
+            <td class="yt-artist">${escapeHtml(artistName)}</td>
             <td class="discovery-status">🔍 Pending...</td>
             <td class="spotify-track">-</td>
             <td class="spotify-artist">-</td>
@@ -7555,7 +7555,7 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
             row = document.createElement('tr');
             row.id = `discovery-row-${urlHash}-${result.index}`;
             row.innerHTML =
-                `<td class="yt-track">${trackName}</td>` +
+                `<td class="yt-track">${escapeHtml(trackName)}</td>` +
                 '<td class="yt-artist"></td>' +
                 '<td class="discovery-status"></td>' +
                 '<td class="spotify-track">-</td>' +

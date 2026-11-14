@@ -186,3 +186,54 @@ def test_folder_guards_hold_on_full_paths(engine):
                  r"Music\Mr. Clean OST\01 - Theme.flac",
                  r"Music\DJ Clean - Mixtape\01 - Intro.flac"):
         assert engine.detect_version_type(path)[0] == 'original', path
+
+
+# ── #2081: never download clean versions ─────────────────────────────────────
+
+def test_a_clean_file_is_no_match_once_clean_versions_are_excluded(engine, monkeypatch):
+    # prefer-explicit only ranks: a clean rip still won when it was the best
+    # file on offer, which is how they "slipped through"
+    _set_config(monkeypatch, **{'content_filter.exclude_clean': True})
+    for name in ('Song Title (Clean).flac', 'Song Title [Clean Version].mp3',
+                 'Song Title (Censored).flac', 'Song Title (Radio Edit).flac'):
+        conf, why = _score(engine, name)
+        assert (conf, why) == (0.0, 'rejected_version_mismatch'), name
+    # the plain file and the explicit one are untouched
+    assert _score(engine, 'Song Title.flac')[0] == pytest.approx(0.80)
+    assert _score(engine, 'Song Title (Explicit).flac')[0] > 0.0
+
+
+def test_off_by_default_a_clean_file_still_matches(engine, monkeypatch):
+    _set_config(monkeypatch)
+    assert _score(engine, 'Song Title (Clean).flac')[0] > 0.0
+    _set_config(monkeypatch, **{'content_filter.prefer_explicit': True})
+    assert _score(engine, 'Song Title (Clean).flac')[0] > 0.0
+
+
+def test_a_track_that_is_the_clean_or_radio_cut_itself_still_downloads(engine, monkeypatch):
+    _set_config(monkeypatch, **{'content_filter.exclude_clean': True})
+    engine.calculate_slskd_match_confidence = lambda *_a, **_k: 0.80
+    for wanted, filename in (('Song Title (Radio Edit)', 'Song Title (Radio Edit).flac'),
+                             ('Song Title (Clean)', 'Song Title (Clean).flac')):
+        conf, _why = engine.calculate_slskd_match_confidence_enhanced(
+            SimpleNamespace(name=wanted), SimpleNamespace(filename=filename))
+        assert conf > 0.0, wanted
+
+
+def test_excluding_clean_means_nothing_while_explicit_is_blocked(engine, monkeypatch):
+    # with explicit content off, the clean cut is the one that is wanted
+    _set_config(monkeypatch, **{'content_filter.exclude_clean': True,
+                                'content_filter.allow_explicit': False})
+    assert _score(engine, 'Song Title (Clean).flac')[0] > 0.0
+
+
+def test_settings_ui_wires_never_download_clean():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
+    settings_js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+
+    assert 'id="exclude-clean"' in index
+    assert "exclude_clean: document.getElementById('exclude-clean').checked" in settings_js
+    assert "settings.content_filter?.exclude_clean === true" in settings_js
+    assert "'prefer-explicit', 'exclude-clean'" in settings_js   # greyed out with the parent

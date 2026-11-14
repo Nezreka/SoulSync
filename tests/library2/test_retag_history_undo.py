@@ -4,6 +4,7 @@ keeps what it changed, and can put it back."""
 import json
 from contextlib import closing
 
+import pytest
 from mutagen.flac import FLAC
 
 from core.library2 import retag
@@ -12,6 +13,14 @@ from core.tag_writer import read_number_pair, restore_tag_fields
 from tests.library2.test_metadata_consistency import (  # noqa: F401 - fixtures
     _no_cover_art_artist_name_search, library, observe,
 )
+
+
+@pytest.fixture(autouse=True)
+def _genre_and_year_differences_are_flagged(monkeypatch):
+    """these tests use a changed genre and year as their example of a tag that
+    differs. those two are only filed when the setting asks (off by default,
+    tests/library2/test_retag_fill_only.py), so here it asks."""
+    monkeypatch.setattr('core.library2.validation.quiet_differences', lambda config: frozenset())
 
 
 def _drift(path):
@@ -122,7 +131,10 @@ def test_restore_removes_a_tag_that_was_empty_before(library):
 # ── #2043: an unknown edition holds the numbers, not the whole fix ───────────
 
 def _retag_details(checks):
-    return {'validation': {'file_id': 1, 'track_id': 7, 'album_id': 1, 'source': 'scan',
+    # a person applying the finding in front of them: a bulk run only fills
+    # blank tags and would leave these differences alone
+    return {'_explicit_single_fix': True,
+            'validation': {'file_id': 1, 'track_id': 7, 'album_id': 1, 'source': 'scan',
                            'checks': {**checks, 'edition': 'unknown'}}}
 
 
@@ -197,6 +209,8 @@ def test_the_other_tags_are_still_written_when_no_cover_is_found(library, monkey
     audio = FLAC(path)
     audio['genre'] = ['Krautrock']
     audio.save()
+    # applied on the finding itself: replacing the genre is a person's call
+    details['_explicit_single_fix'] = True
     result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), details)
     assert result['success'] is True, result
     assert FLAC(path)['genre'] == ['Rock']

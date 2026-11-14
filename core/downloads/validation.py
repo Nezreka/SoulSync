@@ -454,7 +454,26 @@ def _select(results, spotify_track, query, profile_id, why):
 
     if p2p:
         accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id, why=why))
-    return accepted
+    return _keep_the_named_recording(accepted, spotify_track, why)
+
+
+def _keep_the_named_recording(accepted, spotify_track, why):
+    """a track no catalogue has (#2097) is only ever the file whose name says
+    so: the usual scoring would take the original for a remix of it."""
+    if not accepted:
+        return accepted
+    from core.playlists import uncatalogued
+    if not uncatalogued.track_is_uncatalogued(spotify_track):
+        return accepted
+    kept = uncatalogued.filter_candidates(accepted, spotify_track)
+    if why is not None:
+        kept_ids = {id(r) for r in kept}
+        for r in accepted:
+            if id(r) not in kept_ids:
+                _note(why, r, 'version_conflict',
+                      "its name doesn't say it is this recording",
+                      getattr(r, 'confidence', None))
+    return kept
 
 
 def _filter_prowlarr_by_quality(candidates, profile_id=None, why=None):

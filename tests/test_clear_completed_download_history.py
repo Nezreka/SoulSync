@@ -172,3 +172,21 @@ def test_clear_finished_keeps_an_origin_row_in_review_visible(tmp_path):
     assert db.clear_completed_download_history(keep_review=True) == 1
 
     assert [e["title"] for e in db.get_library_history_unverified()] == ["Waiting"]
+
+
+def test_the_dashboard_count_matches_the_full_stats(tmp_path):
+    """the 10s dashboard beat reads only the download count; it has to be the
+    same number the full stats give, cleared rows left out."""
+    import sqlite3
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "history.db"))
+    conn = sqlite3.connect(str(tmp_path / "history.db"))
+    for event_type, cleared in (("download", None), ("download", None), ("download", "2026-01-01"),
+                                ("import", None), ("podcast", None)):
+        conn.execute("INSERT INTO library_history(event_type, title, cleared_at) VALUES(?, 't', ?)",
+                     (event_type, cleared))
+    conn.commit()
+    conn.close()
+    assert db.count_library_history_downloads() == 2
+    assert db.get_library_history_stats()["downloads"] == 2

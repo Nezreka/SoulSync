@@ -1282,7 +1282,7 @@ def _prepare_and_run_manual_wishlist_batch(
         db = runtime.get_music_database()
         manual_profile_id = runtime.profile_id
 
-        logger.warning("[Manual-Wishlist] Cleaning duplicate tracks before download...")
+        logger.info("[Manual-Wishlist] Cleaning duplicate tracks before download...")
         duplicates_removed = db.remove_wishlist_duplicates(profile_id=manual_profile_id)
         if duplicates_removed > 0:
             logger.warning(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
@@ -1620,7 +1620,7 @@ def process_wishlist_automatically(
                 runtime.update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
                                                    log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
                 if count == 0:
-                    logger.warning("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
+                    logger.info("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                     return
 
                 logger.info(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
@@ -1645,7 +1645,7 @@ def process_wishlist_automatically(
                 music_database = runtime.get_music_database()
 
                 if not scoped:
-                    logger.warning("[Auto-Wishlist] Cleaning duplicate tracks before processing...")
+                    logger.info("[Auto-Wishlist] Cleaning duplicate tracks before processing...")
                     for profile in all_profiles:
                         duplicates_removed = music_database.remove_wishlist_duplicates(profile_id=profile['id'])
                         if duplicates_removed > 0:
@@ -1784,7 +1784,7 @@ def process_wishlist_automatically(
                         current_cycle = next_cycle
                         filtered_tracks = _other
                     else:
-                        logger.warning(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
+                        logger.info(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
                         set_wishlist_cycle(lambda: music_database, next_cycle)
                         logger.info(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
                         runtime.update_automation_progress(

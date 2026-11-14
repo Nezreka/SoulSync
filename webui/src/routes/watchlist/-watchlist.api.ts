@@ -172,6 +172,9 @@ export function withEditionDefaults(config: WatchlistGlobalConfig): WatchlistGlo
         ? (rawPreference as (typeof EDITION_PREFERENCES)[number])
         : 'all',
     prefer_explicit_edition: config.prefer_explicit_edition ?? true,
+    // #2082: an older server has one Live rule for albums and tracks
+    include_live_tracks:
+      (config as { include_live_tracks?: boolean }).include_live_tracks ?? config.include_live,
   };
 }
 
@@ -353,6 +356,8 @@ export interface WatchlistArtistConfigUpdate {
   include_eps: boolean;
   include_singles: boolean;
   include_live: boolean;
+  /** #2082: live versions on other releases. Left out, the server keeps it. */
+  include_live_tracks?: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;

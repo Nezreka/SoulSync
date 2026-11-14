@@ -78,17 +78,25 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     # library's copy too, and another library's file on the target refused it
     from core.library2.sql_util import owner_clause
     live_files += owner_clause(column="owner_profile_id")
+    # A `missing_confirmed` row is a file the scan has established is NOT on
+    # disk. It is not a file either: on the target it refused a move with
+    # "already has a file" over a path that no longer exists (a moved file's
+    # old record, Nov 13 2026), and a source holding nothing else has nothing
+    # to move. It still travels with the source's set, as history.
+    there = f"{live_files} AND COALESCE(file_state,'active') <> 'missing_confirmed'"
     file_rows = conn.execute(
-        f"SELECT id, path FROM lib2_track_files WHERE track_id=? AND {live_files} "
+        f"SELECT id, path, COALESCE(file_state,'active') AS file_state"
+        f" FROM lib2_track_files WHERE track_id=? AND {live_files} "
         f"ORDER BY {primary_order()}",
         (from_track_id,),
     ).fetchall()
-    if not file_rows or not any(str(row["path"] or "").strip() for row in file_rows):
+    if not any(str(row["path"] or "").strip() and row["file_state"] != "missing_confirmed"
+               for row in file_rows):
         raise MoveError("Source track has no file to move", status=409)
 
     target_has_file = conn.execute(
         f"SELECT 1 FROM lib2_track_files "
-        f"WHERE track_id=? AND {live_files} LIMIT 1",
+        f"WHERE track_id=? AND {there} LIMIT 1",
         (to_track_id,),
     ).fetchone()
     if target_has_file:

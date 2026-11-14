@@ -5,14 +5,9 @@
    ========================================================================== */
 
 /* ── 1. Discover Canvas & Dynamic Ambient Environment ────────────────────── */
+/* width and padding are the page frame's (.pgf-page in style.css) */
 .discover-container {
     position: relative;
-    width: 100%;
-    max-width: 1480px;
-    margin: 0 auto;
-    padding: 16px 28px 96px;
-    box-sizing: border-box;
-    background: transparent;
 }
 
 /* Ambient dynamic background lighting */
@@ -1784,10 +1779,6 @@
 
 /* ── 11. Responsive Mobile Adjustments (< 768px) ─────────────────────────── */
 @media (max-width: 768px) {
-    .discover-container {
-        padding: 12px 14px 72px !important;
-    }
-
     /* never a fixed height: 290px with overflow hidden clipped the title off
        the top and stacked the actions on the faces the moment a name wrapped */
     .discover-hero {
@@ -2926,16 +2917,13 @@
 
 /* ── 15. Greeting and the quick grid (spotify's home, with deezer's flow) ── */
 .dsc-greeting {
-    margin: 4px 0 24px;
+    margin: 0 0 24px;
 }
 
+/* the greeting is this page's title: the frame's type (.pgf-title), with room
+   under it for the tiles */
 .dsc-greeting-title {
     margin: 0 0 16px;
-    font-size: 2rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    line-height: 1.1;
-    color: #fff;
 }
 
 .dsc-quick-grid {
@@ -3117,9 +3105,6 @@
 }
 
 @media (max-width: 520px) {
-    .dsc-greeting-title {
-        font-size: 1.5rem;
-    }
     .dsc-quick-tile {
         height: 56px;
     }

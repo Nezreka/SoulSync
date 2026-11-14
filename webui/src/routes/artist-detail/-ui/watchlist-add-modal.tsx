@@ -23,6 +23,8 @@ export interface WatchlistAddSettings {
   include_eps: boolean;
   include_singles: boolean;
   include_live: boolean;
+  /** #2082: live versions on releases that are not live albums */
+  include_live_tracks: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;
@@ -37,6 +39,7 @@ export const WATCHLIST_ADD_DEFAULTS: WatchlistAddSettings = {
   include_eps: true,
   include_singles: true,
   include_live: false,
+  include_live_tracks: false,
   include_remixes: false,
   include_acoustic: false,
   include_compilations: false,
@@ -58,7 +61,8 @@ const RELEASE_TYPES: ReadonlyArray<readonly [WatchBoolKey, string]> = [
 ];
 
 const CONTENT_FILTERS: ReadonlyArray<readonly [WatchBoolKey, string]> = [
-  ['include_live', 'Live'],
+  ['include_live', 'Live albums'],
+  ['include_live_tracks', 'Live tracks'],
   ['include_remixes', 'Remixes'],
   ['include_acoustic', 'Acoustic'],
   ['include_compilations', 'Compilations'],
@@ -116,6 +120,7 @@ export async function addArtistToWatchlist(
         include_eps: settings.include_eps,
         include_singles: settings.include_singles,
         include_live: settings.include_live,
+        include_live_tracks: settings.include_live_tracks,
         include_remixes: settings.include_remixes,
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,

@@ -415,6 +415,9 @@ export interface FixResult {
   /** the fix was held back by design, not failed — e.g. an incomplete
    *  album whose only missing tracks are other artists', fixed in bulk. */
   skipped_by_design?: boolean;
+  /** a bulk re-tag filled the blank tags and left the ones that differ:
+   *  the finding is still open for those. */
+  partial?: boolean;
   /** tracks the album gate held back on this fix, including on a fix
    *  that otherwise succeeded. */
   other_artist_skipped?: number;

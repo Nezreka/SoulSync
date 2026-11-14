@@ -615,6 +615,78 @@ def _record_events(
     return len(subjects)
 
 
+def _drop_overrides(conn: Any, entity_type: str, entity_id: int) -> None:
+    """A deleted row's hand edits go with it: ids are reused, and the next
+    row to get this one would inherit them."""
+    try:
+        conn.execute("DELETE FROM lib2_metadata_overrides WHERE entity_type=? AND entity_id=?",
+                     (entity_type, int(entity_id)))
+    except Exception as exc:  # noqa: BLE001 - the table is made on the first edit
+        logger.debug("overrides of %s %s not cleared: %s", entity_type, entity_id, exc)
+
+
+def drop_unlisted_leftovers(database: Any, conn: Any, track_ids) -> Dict[str, int]:
+    """Take a removed track off an album no provider lists (#2086).
+
+    Removing a dead file leaves the track row behind, not owned and not
+    wanted. On a release a provider lists that is right: the row is part of
+    the album's tracklist, the way the Library's own Remove leaves it (#2012).
+    On an album that only ever came from the files, nothing lists the track
+    but the file that is gone, so the row is a stale entry that can never be
+    told from a real one. It goes, and the album with it once it is empty.
+
+    Only a track with no file left in any library, no provider identity of
+    its own, and nobody's wish for it. Does not commit.
+    """
+    from core.library2.completeness import _delete_track_row
+    from core.library2.provider_ids import external_provider_identity_sql
+
+    stats = {"tracks": 0, "albums": 0}
+    for track_id in sorted({int(t) for t in track_ids or ()}):
+        row = conn.execute(
+            f"""SELECT t.album_id FROM lib2_tracks t
+                  JOIN lib2_albums al ON al.id = t.album_id
+                 WHERE t.id = ?
+                   AND NULLIF(al.spotify_id, '') IS NULL
+                   AND NULLIF(al.musicbrainz_id, '') IS NULL
+                   AND NOT {external_provider_identity_sql('al')}
+                   AND NULLIF(t.spotify_id, '') IS NULL
+                   AND NULLIF(t.musicbrainz_id, '') IS NULL
+                   AND NOT {external_provider_identity_sql('t')}
+                   AND NOT EXISTS (SELECT 1 FROM lib2_track_files f
+                                    WHERE f.track_id = t.id
+                                      AND COALESCE(f.file_state, 'active') <> 'deleted')
+                   AND NOT EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                                    WHERE r.entity_type = 'track' AND r.entity_id = t.id
+                                      AND r.monitored = 1)
+                   AND NOT EXISTS (SELECT 1 FROM lib2_wanted_tracks w
+                                    WHERE w.track_id = t.id AND w.wanted = 1)""",
+            (track_id,)).fetchone()
+        if row is None:
+            continue
+        album_id = int(row[0])
+        conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (track_id,))
+        _delete_track_row(conn, track_id)
+        _drop_overrides(conn, "track", track_id)
+        stats["tracks"] += 1
+        if conn.execute("SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1",
+                        (album_id,)).fetchone():
+            continue
+        conn.execute(
+            "DELETE FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=?",
+            (album_id,))
+        conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (album_id,))
+        conn.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+        _drop_overrides(conn, "release_group", album_id)
+        stats["albums"] += 1
+        try:
+            from core.library2.artwork import invalidate_artwork
+            invalidate_artwork(database, "album", album_id)
+        except Exception as exc:  # noqa: BLE001 - a stale cover file is not a failed removal
+            logger.debug("cover of removed album %s not cleared: %s", album_id, exc)
+    return stats
+
+
 def sync_repair_change(
     database: Any,
     config_manager: Any,
@@ -798,6 +870,15 @@ def sync_repair_change(
         except Exception as exc:  # noqa: BLE001 - the removal itself is done
             logger.warning("leftover track rows not folded after a removal: %s", exc)
 
+    leftovers = {"tracks": 0, "albums": 0}
+    if repair_intent == "remove" and finding_type == "dead_file" and links["tracks"]:
+        try:
+            with closing(database._get_connection()) as conn:
+                leftovers = drop_unlisted_leftovers(database, conn, links["tracks"])
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001 - the removal itself is done
+            logger.warning("leftover rows not dropped after a dead file removal: %s", exc)
+
     with closing(database._get_connection()) as conn:
         events = _record_events(
             conn,
@@ -824,6 +905,7 @@ def sync_repair_change(
         "artwork_invalidated": artwork_invalidated,
         "wishlist_mirrored": mirrored,
         "repair_intent": repair_intent or None,
+        "leftovers_dropped": leftovers,
         "scan": scan_stats,
     }
 
@@ -831,6 +913,7 @@ def sync_repair_change(
 __all__ = [
     "LIB2_MAINTENANCE_EVENTS_DDL",
     "annotate_finding_details",
+    "drop_unlisted_leftovers",
     "ensure_maintenance_event_schema",
     "sync_repair_change",
 ]

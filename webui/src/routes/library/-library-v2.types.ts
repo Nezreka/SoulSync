@@ -355,6 +355,8 @@ export interface LibraryV2ArtistSettings {
   include_eps: boolean;
   include_singles: boolean;
   include_live: boolean;
+  /** #2082: live versions on releases that are not live albums */
+  include_live_tracks: boolean;
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;

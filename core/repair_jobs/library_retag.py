@@ -94,13 +94,21 @@ class LibraryRetagJob(RepairJob):
         "field deliberately. Fill missing keeps existing file values. Cover art "
         "can be replaced, filled only when absent, or skipped; lyrics fetch uses "
         "LRClib and existing sidecars. Full depth updates catalogue provider metadata "
-        "even when the run only creates findings. Source selects that provider's own IDs."
+        "even when the run only creates findings. Source selects that provider's own IDs.\n\n"
+        "A genre or a year in the file that differs from the library's is not filed as "
+        "something to fix unless Flag genre differences or Flag year differences is on: "
+        "the file is as often right as the catalogue. A blank tag is always filed. "
+        "Fix All only fills blank tags. It never replaces a tag a file already has; "
+        "replacing is done on the finding itself, where both values are shown."
     )
     icon = "repair-icon-retag"
     default_enabled = False
     default_interval_hours = 168
     default_settings = {'depth': 'light', 'mode': 'overwrite', 'cover_art': 'fill_missing',
-                        'lyrics': 'skip', 'source': 'auto', 'auto_apply': False}
+                        'lyrics': 'skip', 'source': 'auto', 'auto_apply': False,
+                        # a genre or a year that differs from the library's is
+                        # shown, and only filed as something to fix when asked
+                        'flag_genre_differences': False, 'flag_year_differences': False}
     setting_options = {'depth': ['light', 'full'], 'mode': ['overwrite', 'fill_missing'],
                        'cover_art': ['replace', 'fill_missing', 'skip'], 'lyrics': ['fetch', 'skip'],
                        'source': list(RETAG_SOURCES)}

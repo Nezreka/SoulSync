@@ -12,6 +12,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _JS = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+_LIST = (_ROOT / "webui" / "src" / "features" / "video-library" / "episode-list.tsx").read_text(
+    encoding="utf-8")   # a show's season and its rows are React now
 
 
 def test_title_level_links_still_present():
@@ -27,16 +29,16 @@ def test_letterboxd_is_added_for_movies_only():
 
 
 def test_per_episode_deeplinks():
-    assert "function episodeLinks(showTmdb, season, episode, ex)" in _JS
-    assert "https://www.themoviedb.org/tv/' + showTmdb + '/season/' + season + '/episode/' + episode" in _JS
+    # the opened episode is the React list's (episode-list.tsx) since Nov 2026
+    assert "https://www.themoviedb.org/tv/${show.tmdbId}/season/${season}/episode/${episode.episode_number}" in _LIST
     # IMDb episode link when the id is known
-    assert "ex && ex.imdb_id" in _JS
+    assert "extra.imdb_id" in _LIST and "https://www.imdb.com/title/${extra.imdb_id}/" in _LIST
     # rendered into the episode expand panel + styled
-    assert "episodeLinks(showTmdb, season, episode, ex)" in _JS
+    assert 'className="vd-ep-links"' in _LIST
     assert ".vd-ep-links" in _CSS
 
 
 def test_tmdb_preview_items_keep_everything_in_app():
     # both the title block and the episode links suppress for source==tmdb
     assert "d.source === 'tmdb'" in _JS
-    assert "if (data && data.source === 'tmdb') return '';" in _JS
+    assert "show.source === 'tmdb'\n      ? []" in _LIST

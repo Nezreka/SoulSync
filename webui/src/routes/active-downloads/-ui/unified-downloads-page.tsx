@@ -84,7 +84,7 @@ export function UnifiedDownloadsPage() {
 
   return (
     <DownloadsMediaContext.Provider value={value}>
-      <div className="adl-unified">
+      <div className="page-shell pgf-shell adl-unified">
         {media === 'video' ? <VideoDownloadsView /> : <ActiveDownloadsPage />}
       </div>
     </DownloadsMediaContext.Provider>

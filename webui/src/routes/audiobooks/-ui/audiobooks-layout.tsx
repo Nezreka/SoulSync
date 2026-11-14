@@ -20,7 +20,7 @@ export function AudiobooksLayout() {
 
   return (
     <div
-      className={`page-shell ${styles.audiobooksContainer} ${playback ? styles.audiobooksContainerWithPlayer : ''}`}
+      className={`page-shell pgf-shell ${styles.audiobooksContainer} ${playback ? styles.audiobooksContainerWithPlayer : ''}`}
     >
       {playback && (
         <MediaPlayerBar
@@ -38,7 +38,9 @@ export function AudiobooksLayout() {
           onClose={closePlayer}
         />
       )}
-      <Outlet />
+      <div className="pgf-page">
+        <Outlet />
+      </div>
     </div>
   );
 }

@@ -1455,13 +1455,19 @@ class MetadataCache:
                     ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
                     LIMIT 200
                 """, params)
+                from core.wishlist.presence import album_presence_key
                 results = []
+                # the owned keys, then each album already on the shelf: three
+                # pressings of one missing record are one suggestion (#2083)
+                seen = set(library_album_keys)
                 for row in cursor.fetchall():
-                    key = (row['name'].lower().strip(), row['artist_name'].lower().strip())
-                    if key not in library_album_keys:
-                        results.append(dict(row))
-                        if len(results) >= limit:
-                            break
+                    key = album_presence_key(row['name'], row['artist_name'])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    results.append(dict(row))
+                    if len(results) >= limit:
+                        break
                 return self._with_art(cursor, results, 'album')
             finally:
                 conn.close()

@@ -87,6 +87,34 @@ def _snapshot_namespace(
     return providers.pop() if len(providers) == 1 else None
 
 
+_SPOTIFY_URL_ID = re.compile(r"open\.spotify\.com/(?:intl-[a-z-]+/)?(?:album|track|artist)/([0-9A-Za-z]{22})")
+
+
+def _rehome_url_id(cursor: Any, lib2_table: str, row: Any, stored: str) -> int:
+    """a url in the spotify_id column: a spotify link gives up its id, a
+    last.fm page goes where last.fm links live, anything else is dropped"""
+    spotify = _SPOTIFY_URL_ID.search(stored)
+    if spotify:
+        cursor.execute(f"UPDATE {lib2_table} SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
+                       "WHERE id=?", (spotify.group(1), row["id"]))
+        return 1
+    try:
+        ids = json.loads(row["external_ids"] or "{}")
+    except (TypeError, ValueError):
+        ids = {}
+    if not isinstance(ids, dict):
+        ids = {}
+    if ids.get("spotify") == stored:
+        ids.pop("spotify")
+    if "last.fm/" in stored.lower():
+        ids.setdefault("lastfm", stored)
+    cursor.execute(
+        f"UPDATE {lib2_table} SET spotify_id=NULL, external_ids=?, "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (json.dumps(ids, sort_keys=True, separators=(",", ":")), row["id"]))
+    return 1
+
+
 def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
     """Clear foreign-shaped (numeric/UUID) values out of spotify_id columns.
 
@@ -108,10 +136,32 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
         rows = conn.execute(
             f"SELECT id, spotify_id, external_ids FROM {lib2_table} "
             "WHERE spotify_id IS NOT NULL AND spotify_id != '' AND "
-            "(spotify_id NOT GLOB '*[^0-9 ]*' OR spotify_id GLOB '*-*-*-*-*')").fetchall()
+            "(spotify_id NOT GLOB '*[^0-9 ]*' OR spotify_id GLOB '*-*-*-*-*' "
+            " OR instr(spotify_id, '::') > 0 OR instr(spotify_id, '://') > 0)").fetchall()
         for row in rows:
-            value = str(row["spotify_id"]).strip()
+            stored = str(row["spotify_id"]).strip()
+            if "://" in stored:
+                # a page address, not an id (#2094: a last.fm album page sat
+                # here, read as a spotify id that disagreed with the real one
+                # and kept the two rows of one album apart)
+                fixed += _rehome_url_id(cursor, lib2_table, row, stored)
+                continue
+            # a wishlist row key, "<track>::<album>", stored where the track
+            # id goes (imports wrote it until Nov 13 2026): the id is the
+            # part before the separator
+            value = stored.split("::", 1)[0].strip()
+            if stored != value and value and not looks_like_foreign_provider_id(value):
+                cursor.execute(
+                    f"UPDATE {lib2_table} SET spotify_id=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?", (value, row["id"]))
+                fixed += 1
+                continue
             if not looks_like_foreign_provider_id(value):
+                if stored != value:  # nothing before the separator: not an id at all
+                    cursor.execute(
+                        f"UPDATE {lib2_table} SET spotify_id=NULL, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE id=?", (row["id"],))
+                    fixed += 1
                 continue
             try:
                 ids = json.loads(row["external_ids"] or "{}")
@@ -149,6 +199,27 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
                 from core.library2.match_status import _sync_attempt_ledger
                 _sync_attempt_ledger(conn, _ENTITY_TYPE_BY_TABLE[lib2_table],
                                      int(row["id"]), "spotify", None, ask_again=True)
+            fixed += 1
+        # the same page address kept in the ids blob instead of the column
+        for row in conn.execute(
+                f"SELECT id, external_ids FROM {lib2_table} "
+                "WHERE external_ids LIKE '%\"spotify\"%://%'").fetchall():
+            try:
+                ids = json.loads(row["external_ids"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            value = str(ids.get("spotify") or "") if isinstance(ids, dict) else ""
+            if "://" not in value:
+                continue
+            spotify = _SPOTIFY_URL_ID.search(value)
+            ids.pop("spotify")
+            if spotify:
+                ids["spotify"] = spotify.group(1)
+            elif "last.fm/" in value.lower():
+                ids.setdefault("lastfm", value)
+            cursor.execute(
+                f"UPDATE {lib2_table} SET external_ids=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (json.dumps(ids, sort_keys=True, separators=(",", ":")), row["id"]))
             fixed += 1
     if fixed:
         logger.info("Re-homed %d foreign-shaped spotify_id values", fixed)
@@ -562,27 +633,54 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
     """
     from core.library2.mb_reconcile import _fold_duplicate
 
+    from core.library2.track_files import elect_primary_file, path_identity, path_spellings
+
     active = _active_server() or ""
     cursor = conn.cursor()
-    stats = {"shared_files_folded": 0, "server_albums_folded": 0}
-    rows = conn.execute(
-        """SELECT f.id AS file_id, f.path, t.id AS track_id, t.album_id,
-                  COALESCE(t.server_source, '') AS server_source
+    stats = {"shared_files_folded": 0, "server_albums_folded": 0, "file_rows_folded": 0}
+    select = """SELECT f.id AS file_id, f.path, t.id AS track_id, t.album_id,
+                  COALESCE(t.server_source, '') AS server_source,
+                  COALESCE(f.file_state, 'active') AS file_state
              FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id
-            WHERE COALESCE(f.file_state, 'active') <> 'deleted' AND f.path IN (
+            WHERE COALESCE(f.file_state, 'active') <> 'deleted' AND """
+    rows = conn.execute(
+        select + """f.path IN (
                   SELECT path FROM lib2_track_files
                    WHERE COALESCE(file_state, 'active') <> 'deleted'
                    GROUP BY path HAVING COUNT(DISTINCT track_id) > 1)"""
     ).fetchall()
+    # The same file under its other spelling (H:\Music\a.flac beside
+    # H:/Music/a.flac): the scan wrote the first, the import the second, and
+    # neither found the other. Only the rows written with a backslash are read,
+    # then each one's forward-slash partner through the path index.
+    backslashed = conn.execute(select + "instr(f.path, char(92)) > 0").fetchall()
+    partners: List[Any] = []
+    wanted = sorted({form for row in backslashed for form in path_spellings(row["path"])
+                     if form != row["path"]})
+    for start in range(0, len(wanted), 500):
+        part = wanted[start:start + 500]
+        partners.extend(conn.execute(
+            select + f"f.path IN ({','.join('?' * len(part))})", part).fetchall())
+    seen_files = set()
     groups: Dict[str, List[Any]] = {}
-    for row in rows:
-        groups.setdefault(row["path"], []).append(row)
+    for row in (*rows, *backslashed, *partners):
+        if row["file_id"] in seen_files:
+            continue
+        seen_files.add(row["file_id"])
+        groups.setdefault(path_identity(row["path"]), []).append(row)
     emptied: Dict[int, int] = {}
     for members in groups.values():
-        members.sort(key=lambda r: (r["server_source"] != active, int(r["track_id"])))
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda r: (r["server_source"] != active, int(r["track_id"]),
+                                    r["file_state"] != "active", int(r["file_id"])))
         keep = members[0]
         for dup in members[1:]:
             if dup["track_id"] == keep["track_id"]:
+                # the same file twice on one track: one row is enough
+                cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (dup["file_id"],))
+                elect_primary_file(conn, int(keep["track_id"]))
+                stats["file_rows_folded"] += 1
                 continue
             cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (dup["file_id"],))
             cursor.execute(
@@ -859,38 +957,95 @@ def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None)
     return stats
 
 
+_DASHES = re.compile(r"\s*[\u2010-\u2015\-:]\s+|\s+[\u2010-\u2015\-]\s*")
+# how far apart two rows of one song may say its length is
+_SAME_SONG_MS = 3000
+
+
+def _without_release_lead(title: Any, *leads: Any) -> str:
+    """the title key without its album or artist in front. a rip tagged
+    "Labor Days - Daylight" names the song Daylight (#2094)."""
+    from core.library2.recording_links import normalize_title
+    key = normalize_title(_DASHES.sub(" - ", str(title or "")))
+    lead_keys = [k for k in (normalize_title(_DASHES.sub(" - ", str(lead or ""))) for lead in leads) if k]
+    for _ in range(len(lead_keys)):
+        for lead in lead_keys:
+            if key.startswith(lead + " - ") and len(key) > len(lead) + 3:
+                key = key[len(lead) + 3:].strip()
+    return key
+
+
+def _same_song(leftover: Any, kept: Any, album_title: Any, artist_name: Any) -> bool:
+    """two rows at one position of one album are the same song: the same
+    title, or the same once the album or artist a rip put in front of it is
+    taken off, and then only when their lengths agree"""
+    from core.library2.recording_links import normalize_title
+    if normalize_title(leftover["title"] or "") == normalize_title(kept["title"] or ""):
+        return True
+    one = _without_release_lead(leftover["title"], album_title, artist_name)
+    two = _without_release_lead(kept["title"], album_title, artist_name)
+    if not one or one != two:
+        return False
+    try:
+        lengths = [int(row["duration"] or 0) for row in (leftover, kept)]
+    except (TypeError, ValueError, IndexError, KeyError):
+        return True
+    return not all(lengths) or abs(lengths[0] - lengths[1]) <= _SAME_SONG_MS
+
+
+def fold_leftover_rows(conn: Any) -> Dict[str, int]:
+    """every leftover row in the library, not only the ones a removal just
+    made. a file that moved to another row of its album (a retag, a
+    re-identify) left its old row behind with no removal to fold it, so the
+    album read 14 of 24 (#2094). Does not commit."""
+    live = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
+    ids = [int(r[0]) for r in conn.execute(
+        f"""SELECT t.id FROM lib2_tracks t
+             WHERE t.album_id IS NOT NULL AND t.track_number IS NOT NULL
+               AND NOT EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})
+               AND EXISTS(SELECT 1 FROM lib2_tracks o
+                           WHERE o.album_id=t.album_id AND o.id<>t.id
+                             AND o.track_number=t.track_number
+                             AND COALESCE(o.disc_number, 1)=COALESCE(t.disc_number, 1)
+                             AND EXISTS(SELECT 1 FROM lib2_track_files f
+                                         WHERE f.track_id=o.id AND {live}))""")]
+    return {"leftover_tracks_folded": fold_fileless_twins(conn, ids) if ids else 0}
+
+
 def fold_fileless_twins(conn: Any, track_ids) -> int:
     """A track that just lost its last file, and shares its album, title and
     position with a track that still has one, is that track's leftover row
     (#1985). Two copies of a song in one album are two track rows; removing
     one copy left its row behind as a "missing" track, so an album with 12
     songs read 12 of 24 and the artist's totals were off by every copy that
-    had ever been removed. The leftover goes: its plays and server mappings
+    had ever been removed. The same song also counts when one row's title
+    carries the album or artist in front ("Labor Days - Daylight" beside
+    "Daylight", #2094) and their lengths agree. The leftover goes: its plays and server mappings
     move to the track that has the file, its removed-file records travel
     along as history, and its wishes are withdrawn. A track with no such twin
     is a missing track and stays. Does not commit."""
-    from core.library2.recording_links import normalize_title
-
     live = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
     cursor = conn.cursor()
     folded = 0
     for track_id in sorted({int(t) for t in track_ids or ()}):
         row = conn.execute(
             f"""SELECT t.id, t.album_id, t.title, t.track_number, COALESCE(t.disc_number, 1) AS disc,
-                       COALESCE(t.play_count, 0) AS plays, t.last_played,
+                       COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration,
+                       (SELECT a.title FROM lib2_albums a WHERE a.id=t.album_id) AS album_title,
+                       (SELECT ar.name FROM lib2_albums a JOIN lib2_artists ar ON ar.id=a.primary_artist_id
+                         WHERE a.id=t.album_id) AS artist_name,
                        EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live}) AS has_file
                   FROM lib2_tracks t WHERE t.id=?""", (track_id,)).fetchone()
         if row is None or row["has_file"] or row["album_id"] is None or row["track_number"] is None:
             continue
-        key = normalize_title(row["title"] or "")
         twins = [t for t in conn.execute(
-            f"""SELECT t.id, t.title, COALESCE(t.play_count, 0) AS plays, t.last_played
+            f"""SELECT t.id, t.title, COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration
                   FROM lib2_tracks t
                  WHERE t.album_id=? AND t.id<>? AND t.track_number=?
                    AND COALESCE(t.disc_number, 1)=?
                    AND EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})""",
             (row["album_id"], track_id, row["track_number"], row["disc"])).fetchall()
-            if normalize_title(t["title"] or "") == key]
+            if _same_song(row, t, row["album_title"], row["artist_name"])]
         if len(twins) != 1:
             continue
         keep = twins[0]
@@ -1249,6 +1404,8 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         # Library-wide and cheap — the candidate query is a grouped index
         # read that finds nothing on a healthy catalogue.
         stats.update(fold_duplicate_track_rows(conn))
+        # and the row a moved file left behind at its own position (#2094)
+        stats.update(fold_leftover_rows(conn))
         conn.commit()
     if stats["albums_folded"]:
         # Deliver any wishlist un-mirrors the folds enqueued (best-effort).
@@ -1260,5 +1417,5 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
     return stats
 
 
-__all__ = ["fold_fileless_twins", "fold_server_twins", "merge_artist_twins",
+__all__ = ["fold_fileless_twins", "fold_leftover_rows", "fold_server_twins", "merge_artist_twins",
            "repair_duplicate_artists"]

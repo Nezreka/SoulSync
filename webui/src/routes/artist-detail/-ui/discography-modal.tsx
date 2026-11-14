@@ -434,7 +434,8 @@ export function DiscographyModal({
                 <FuturePillRow
                   label="Include"
                   options={[
-                    ['include_live', 'Live'],
+                    ['include_live', 'Live albums'],
+                    ['include_live_tracks', 'Live tracks'],
                     ['include_remixes', 'Remixes'],
                     ['include_acoustic', 'Acoustic'],
                     ['include_compilations', 'Compilations'],

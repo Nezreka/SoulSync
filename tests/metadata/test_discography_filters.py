@@ -224,6 +224,8 @@ class TestLoadGlobalSettings:
         result = load_global_content_filter_settings(cfg)
         assert result == {
             'include_live': True,
+            # #2082: never saved, so it follows the live albums rule
+            'include_live_tracks': True,
             'include_remixes': False,
             'include_acoustic': True,
             'include_instrumentals': False,
@@ -235,6 +237,7 @@ class TestLoadGlobalSettings:
         result = load_global_content_filter_settings(None)
         assert result == {
             'include_live': False,
+            'include_live_tracks': False,
             'include_remixes': False,
             'include_acoustic': False,
             'include_instrumentals': False,

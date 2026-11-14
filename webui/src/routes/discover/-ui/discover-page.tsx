@@ -1526,353 +1526,355 @@ export function DiscoverPage() {
       />
 
       {!vizOpen && (
-        <div
-          className="discover-container"
-          style={
-            heroGlow ? ({ '--discover-glow-rgb': heroGlow } as React.CSSProperties) : undefined
-          }
-        >
-          {(playingMixKey !== null || playingTrackIndex !== null) && (
-            <div className="discover-playback-pending" role="status">
-              <span>
-                Preparing {playingMixKey ? (registry[playingMixKey]?.title ?? 'mix') : 'track'}…
-                Checking your library and preparing audio.
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  beginPlayIntent();
-                  pendingPlay.current = null;
-                  setPlayingMixKey(null);
-                  setPlayingTrackIndex(null);
-                }}
-              >
-                Cancel playback
-              </button>
-            </div>
-          )}
-          <GreetingGrid
-            name={shellProfile?.name}
-            hour={new Date().getHours()}
-            tiles={tiles}
-            onOpenMix={modal.open}
-            onPlayMix={playMixFromCard}
-            onPlayFlow={playFlow}
-            flowBusy={flowBusy}
-            playingKey={playingMixKey}
-          />
-          <NowPlayingBanner
-            state={nowPlaying}
-            artistHref={
-              nowPlaying.track?.artist_id != null
-                ? detailPath(nowPlaying.track.artist_id, nowPlaying.track.artist_source ?? null)
-                : null
+        <div className="page-shell pgf-shell">
+          <div
+            className="pgf-page pgf-page--plain discover-container"
+            style={
+              heroGlow ? ({ '--discover-glow-rgb': heroGlow } as React.CSSProperties) : undefined
             }
-            onMoreLikeThis={(track) => {
-              if (!window.startArtistRadioById || track.artist_id == null) return;
-              void Promise.resolve(
-                window.startArtistRadioById(String(track.artist_id), track.artist ?? ''),
-              ).then((started) => {
-                if (started === false)
-                  toast(`Could not start ${track.artist ?? 'that'} radio`, 'error');
-              });
-            }}
-          />
-          <div className="discover-command-hero">
-            <DiscoverHero
-              artist={hero.artist}
-              loading={page.hero.isPending}
-              count={hero.artists.length}
-              index={hero.index}
-              watchlist={hero.watchlist}
-              watchAllPhase={hero.watchAllPhase}
-              discographyHref={
-                hero.artist?.artist_id != null
-                  ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
-                  : '#'
-              }
-              onNavigate={hero.navigate}
-              onJump={hero.jump}
-              onToggleWatchlist={() => void hero.toggleWatchlist()}
-              onWatchAll={() => void hero.watchAll()}
-              onViewRecommended={() => setRecModalKind('picks')}
-              onOpenBlacklist={blacklist.openModal}
-              artists={hero.artists}
-              onPauseChange={setHeroHovered}
-              glowRgb={heroGlow}
-              rootRef={heroVideo.ref}
-              videoId={heroVideo.videoId}
-              videoPlaying={heroVideo.playing}
-              preview={heroVideo.preview}
-              closing={heroVideo.closing}
-              videoLive={heroVideo.videoLive}
-              soundOn={heroVideo.soundOn}
-              onTogglePreview={heroVideo.togglePreview}
-              onUnplayable={heroVideo.onUnplayable}
-              onLiveChange={heroVideo.onLiveChange}
-            />
-          </div>
-          {week || gap ? (
-            <div className={`dsc-pulse-row${week && gap ? '' : ' dsc-pulse-row--single'}`}>
-              {week ? (
-                <WeekBanner week={week} onPlayTop={playTopTracks} playing={playingTop} />
-              ) : null}
-              {gap ? (
-                <TasteGapBanner gap={gap} onExplore={(g) => openDive(g.toLowerCase())} />
-              ) : null}
-            </div>
-          ) : null}
-          <DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />
-          <DiscoveryZone
-            id="discover-zone-for-you"
-            title="For You"
-            subtitle="Mixes, stations and artists picked from what you play."
-            tone="for-you"
           >
-            {renderForYouSections()}
-          </DiscoveryZone>
-
-          {spotlight || artistPick || (throwback && throwbackRow) ? (
-            <section
-              ref={bentoRef}
-              className={`dsc-bento dsc-reveal${bentoIn ? ' is-in' : ''}`}
-              aria-label="Spotlight"
+            {(playingMixKey !== null || playingTrackIndex !== null) && (
+              <div className="discover-playback-pending" role="status">
+                <span>
+                  Preparing {playingMixKey ? (registry[playingMixKey]?.title ?? 'mix') : 'track'}…
+                  Checking your library and preparing audio.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    beginPlayIntent();
+                    pendingPlay.current = null;
+                    setPlayingMixKey(null);
+                    setPlayingTrackIndex(null);
+                  }}
+                >
+                  Cancel playback
+                </button>
+              </div>
+            )}
+            <GreetingGrid
+              name={shellProfile?.name}
+              hour={new Date().getHours()}
+              tiles={tiles}
+              onOpenMix={modal.open}
+              onPlayMix={playMixFromCard}
+              onPlayFlow={playFlow}
+              flowBusy={flowBusy}
+              playingKey={playingMixKey}
+            />
+            <NowPlayingBanner
+              state={nowPlaying}
+              artistHref={
+                nowPlaying.track?.artist_id != null
+                  ? detailPath(nowPlaying.track.artist_id, nowPlaying.track.artist_source ?? null)
+                  : null
+              }
+              onMoreLikeThis={(track) => {
+                if (!window.startArtistRadioById || track.artist_id == null) return;
+                void Promise.resolve(
+                  window.startArtistRadioById(String(track.artist_id), track.artist ?? ''),
+                ).then((started) => {
+                  if (started === false)
+                    toast(`Could not start ${track.artist ?? 'that'} radio`, 'error');
+                });
+              }}
+            />
+            <div className="discover-command-hero">
+              <DiscoverHero
+                artist={hero.artist}
+                loading={page.hero.isPending}
+                count={hero.artists.length}
+                index={hero.index}
+                watchlist={hero.watchlist}
+                watchAllPhase={hero.watchAllPhase}
+                discographyHref={
+                  hero.artist?.artist_id != null
+                    ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
+                    : '#'
+                }
+                onNavigate={hero.navigate}
+                onJump={hero.jump}
+                onToggleWatchlist={() => void hero.toggleWatchlist()}
+                onWatchAll={() => void hero.watchAll()}
+                onViewRecommended={() => setRecModalKind('picks')}
+                onOpenBlacklist={blacklist.openModal}
+                artists={hero.artists}
+                onPauseChange={setHeroHovered}
+                glowRgb={heroGlow}
+                rootRef={heroVideo.ref}
+                videoId={heroVideo.videoId}
+                videoPlaying={heroVideo.playing}
+                preview={heroVideo.preview}
+                closing={heroVideo.closing}
+                videoLive={heroVideo.videoLive}
+                soundOn={heroVideo.soundOn}
+                onTogglePreview={heroVideo.togglePreview}
+                onUnplayable={heroVideo.onUnplayable}
+                onLiveChange={heroVideo.onLiveChange}
+              />
+            </div>
+            {week || gap ? (
+              <div className={`dsc-pulse-row${week && gap ? '' : ' dsc-pulse-row--single'}`}>
+                {week ? (
+                  <WeekBanner week={week} onPlayTop={playTopTracks} playing={playingTop} />
+                ) : null}
+                {gap ? (
+                  <TasteGapBanner gap={gap} onExplore={(g) => openDive(g.toLowerCase())} />
+                ) : null}
+              </div>
+            ) : null}
+            <DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />
+            <DiscoveryZone
+              id="discover-zone-for-you"
+              title="For You"
+              subtitle="Mixes, stations and artists picked from what you play."
+              tone="for-you"
             >
-              {spotlight ? (
-                <PromoBanner
-                  kind="release"
-                  size="feature"
-                  onHoverChange={releasePromo.setHover}
-                  soundOn={releasePromo.soundOn}
-                  onSoundChange={releasePromo.setSound}
-                  eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
-                  title={spotlight.album.album_name ?? ''}
-                  subtitle={
-                    <>
-                      <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
-                    </>
-                  }
-                  art={spotlight.album.album_cover_url ?? null}
-                  actions={
-                    <button
-                      type="button"
-                      className="dsc-pulse-btn primary"
-                      onClick={() =>
-                        void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
-                      }
-                    >
-                      Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
-                    </button>
-                  }
-                  glowRgb={releasePromo.glowRgb}
-                  rootRef={releasePromo.ref}
-                  videoId={releasePromo.videoId}
-                  playing={releasePromo.playing}
-                  onUnplayable={releasePromo.onUnplayable}
-                  videoToggle={videoToggle}
-                />
-              ) : null}
-              {artistPick ? (
-                <PromoBanner
-                  kind="artist"
-                  size="tile"
-                  onHoverChange={artistPromo.setHover}
-                  soundOn={artistPromo.soundOn}
-                  onSoundChange={artistPromo.setSound}
-                  eyebrow="An artist you should know"
-                  title={artistPick.artist_name ?? ''}
-                  subtitle={
-                    explanationLine(artistPick.explanation as never) || 'Picked from your library'
-                  }
-                  art={artistPick.image_url ?? null}
-                  round
-                  actions={
-                    <>
-                      <a
+              {renderForYouSections()}
+            </DiscoveryZone>
+
+            {spotlight || artistPick || (throwback && throwbackRow) ? (
+              <section
+                ref={bentoRef}
+                className={`dsc-bento dsc-reveal${bentoIn ? ' is-in' : ''}`}
+                aria-label="Spotlight"
+              >
+                {spotlight ? (
+                  <PromoBanner
+                    kind="release"
+                    size="feature"
+                    onHoverChange={releasePromo.setHover}
+                    soundOn={releasePromo.soundOn}
+                    onSoundChange={releasePromo.setSound}
+                    eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
+                    title={spotlight.album.album_name ?? ''}
+                    subtitle={
+                      <>
+                        <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
+                      </>
+                    }
+                    art={spotlight.album.album_cover_url ?? null}
+                    actions={
+                      <button
+                        type="button"
                         className="dsc-pulse-btn primary"
-                        href={detailPath(
-                          artistPick.artist_id ?? '',
-                          recSource(recPayload) || null,
-                          artistPick.artist_name,
-                        )}
+                        onClick={() =>
+                          void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
+                        }
                       >
-                        View artist
-                      </a>
-                      {artistPick.artist_id ? (
+                        Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
+                      </button>
+                    }
+                    glowRgb={releasePromo.glowRgb}
+                    rootRef={releasePromo.ref}
+                    videoId={releasePromo.videoId}
+                    playing={releasePromo.playing}
+                    onUnplayable={releasePromo.onUnplayable}
+                    videoToggle={videoToggle}
+                  />
+                ) : null}
+                {artistPick ? (
+                  <PromoBanner
+                    kind="artist"
+                    size="tile"
+                    onHoverChange={artistPromo.setHover}
+                    soundOn={artistPromo.soundOn}
+                    onSoundChange={artistPromo.setSound}
+                    eyebrow="An artist you should know"
+                    title={artistPick.artist_name ?? ''}
+                    subtitle={
+                      explanationLine(artistPick.explanation as never) || 'Picked from your library'
+                    }
+                    art={artistPick.image_url ?? null}
+                    round
+                    actions={
+                      <>
+                        <a
+                          className="dsc-pulse-btn primary"
+                          href={detailPath(
+                            artistPick.artist_id ?? '',
+                            recSource(recPayload) || null,
+                            artistPick.artist_name,
+                          )}
+                        >
+                          View artist
+                        </a>
+                        {artistPick.artist_id ? (
+                          <button
+                            type="button"
+                            className="dsc-pulse-btn"
+                            disabled={rec.watchingIds.has(String(artistPick.artist_id))}
+                            onClick={() =>
+                              void rec.toggleWatchlist(
+                                String(artistPick.artist_id),
+                                artistPick.artist_name ?? '',
+                              )
+                            }
+                          >
+                            {rec.watchingIds.has(String(artistPick.artist_id))
+                              ? 'On your watchlist'
+                              : 'Add to watchlist'}
+                          </button>
+                        ) : null}
+                      </>
+                    }
+                    glowRgb={artistPromo.glowRgb}
+                    rootRef={artistPromo.ref}
+                    videoId={artistPromo.videoId}
+                    playing={artistPromo.playing}
+                    onUnplayable={artistPromo.onUnplayable}
+                    videoToggle={videoToggle}
+                  />
+                ) : null}
+                {throwback && throwbackRow ? (
+                  <PromoBanner
+                    kind="throwback"
+                    size="tile"
+                    onHoverChange={throwbackPromo.setHover}
+                    soundOn={throwbackPromo.soundOn}
+                    onSoundChange={throwbackPromo.setSound}
+                    eyebrow="Throwback"
+                    title={throwback.name}
+                    subtitle={
+                      <>
+                        <strong>{throwback.artist}</strong> · you had this on repeat, then it went
+                        quiet
+                      </>
+                    }
+                    art={throwback.cover || null}
+                    actions={
+                      <>
+                        <button
+                          type="button"
+                          className="dsc-pulse-btn primary"
+                          onClick={() => {
+                            const intent = beginPlayIntent();
+                            void playTrackNow(throwbackRow, throwback.name, intent);
+                          }}
+                        >
+                          Play it
+                        </button>
                         <button
                           type="button"
                           className="dsc-pulse-btn"
-                          disabled={rec.watchingIds.has(String(artistPick.artist_id))}
-                          onClick={() =>
-                            void rec.toggleWatchlist(
-                              String(artistPick.artist_id),
-                              artistPick.artist_name ?? '',
-                            )
-                          }
+                          onClick={() => modal.open('repeat_rewind')}
                         >
-                          {rec.watchingIds.has(String(artistPick.artist_id))
-                            ? 'On your watchlist'
-                            : 'Add to watchlist'}
+                          Repeat Rewind
                         </button>
-                      ) : null}
-                    </>
-                  }
-                  glowRgb={artistPromo.glowRgb}
-                  rootRef={artistPromo.ref}
-                  videoId={artistPromo.videoId}
-                  playing={artistPromo.playing}
-                  onUnplayable={artistPromo.onUnplayable}
-                  videoToggle={videoToggle}
-                />
-              ) : null}
-              {throwback && throwbackRow ? (
-                <PromoBanner
-                  kind="throwback"
-                  size="tile"
-                  onHoverChange={throwbackPromo.setHover}
-                  soundOn={throwbackPromo.soundOn}
-                  onSoundChange={throwbackPromo.setSound}
-                  eyebrow="Throwback"
-                  title={throwback.name}
-                  subtitle={
-                    <>
-                      <strong>{throwback.artist}</strong> · you had this on repeat, then it went
-                      quiet
-                    </>
-                  }
-                  art={throwback.cover || null}
-                  actions={
-                    <>
-                      <button
-                        type="button"
-                        className="dsc-pulse-btn primary"
-                        onClick={() => {
-                          const intent = beginPlayIntent();
-                          void playTrackNow(throwbackRow, throwback.name, intent);
-                        }}
-                      >
-                        Play it
-                      </button>
-                      <button
-                        type="button"
-                        className="dsc-pulse-btn"
-                        onClick={() => modal.open('repeat_rewind')}
-                      >
-                        Repeat Rewind
-                      </button>
-                    </>
-                  }
-                  glowRgb={throwbackPromo.glowRgb}
-                  rootRef={throwbackPromo.ref}
-                  videoId={throwbackPromo.videoId}
-                  playing={throwbackPromo.playing}
-                  onUnplayable={throwbackPromo.onUnplayable}
-                  videoToggle={videoToggle}
-                />
-              ) : null}
-            </section>
-          ) : null}
+                      </>
+                    }
+                    glowRgb={throwbackPromo.glowRgb}
+                    rootRef={throwbackPromo.ref}
+                    videoId={throwbackPromo.videoId}
+                    playing={throwbackPromo.playing}
+                    onUnplayable={throwbackPromo.onUnplayable}
+                    videoToggle={videoToggle}
+                  />
+                ) : null}
+              </section>
+            ) : null}
 
-          <DiscoveryZone
-            id="discover-zone-new-missing"
-            title="New & Missing"
-            subtitle="Fresh releases, and the albums your collection is missing."
-            tone="new-missing"
-          >
-            {/* the inbox lives here now: releases and dates worth coming back
+            <DiscoveryZone
+              id="discover-zone-new-missing"
+              title="New & Missing"
+              subtitle="Fresh releases, and the albums your collection is missing."
+              tone="new-missing"
+            >
+              {/* the inbox lives here now: releases and dates worth coming back
                 to, which is what this zone is. it used to sit between the hero
                 and everything else, pushing the feed a screen down. */}
-            <div className="discovery-zone-section discovery-zone-section--inbox">
-              <DiscoveryInbox
-                onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
-                buildArtistPath={(item) => {
-                  const ref = inboxArtistRef(item);
-                  return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
-                }}
-              />
-            </div>
-            {renderZoneSections(newMissingIds)}
-          </DiscoveryZone>
-
-          <VideoRail
-            title="Watch"
-            subtitle="Artists picked for you, every one playing its video."
-            artists={railArtists}
-            videosOn={videosOn}
-          />
-
-          {libraryIds.length > 0 && (
-            <DiscoveryZone
-              id="discover-zone-library"
-              title="From Your Library"
-              subtitle="Your artists, your eras, your deep cuts."
-              tone="library"
-            >
-              {renderZoneSections(libraryIds)}
-            </DiscoveryZone>
-          )}
-
-          <PosterRow>
-            {[
-              concert && concertDay ? (
-                <ConcertPoster
-                  key="concert"
-                  artist={concert.item.artist_name ?? ''}
-                  day={concertDay}
-                  venue={(concert.item.payload as { venue?: string } | undefined)?.venue}
-                  city={(concert.item.payload as { city?: string } | undefined)?.city}
-                  url={concert.item.payload?.url}
-                  more={concert.more}
-                  photo={photoByName.get((concert.item.artist_name ?? '').toLowerCase()) ?? null}
+              <div className="discovery-zone-section discovery-zone-section--inbox">
+                <DiscoveryInbox
+                  onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
+                  buildArtistPath={(item) => {
+                    const ref = inboxArtistRef(item);
+                    return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
+                  }}
                 />
-              ) : null,
-              posterAlbum ? (
-                <AlbumPoster
-                  key="album"
-                  title={posterAlbum.album.album_name ?? ''}
-                  artist={posterAlbum.album.artist_name ?? ''}
-                  tag={releaseKind(posterAlbum.album.album_type as string | undefined)}
-                  art={posterAlbum.album.album_cover_url ?? ''}
-                  openLabel={`Open ${releaseKind(posterAlbum.album.album_type as string | undefined).replace('New ', '')}`}
-                  onOpen={() => void albumOpen.openRecentAlbum(posterAlbum.album)}
-                />
-              ) : null,
-              topArtist && (topArtist.play_count ?? 0) > 0 ? (
-                <ArtistPoster
-                  key="artist"
-                  name={topArtist.name}
-                  plays={topArtist.play_count ?? 0}
-                  photo={topArtist.image_url ?? null}
-                  href={
-                    topArtist.id != null
-                      ? detailPath(topArtist.id, 'library', topArtist.name)
-                      : null
-                  }
-                />
-              ) : null,
-            ]}
-          </PosterRow>
-
-          <DiscoveryZone
-            id="discover-zone-tools"
-            title="Explore & Build"
-            subtitle="Maps, genres, radio and playlist tools."
-            tone="tools"
-          >
-            <div className="discovery-zone-section discovery-zone-section--map-tools">
-              <div className="discover-hub-row discover-hub-row--tools">
-                <ArtistMapHub
-                  onOpenWatchlist={() => void map.openWatchlist()}
-                  onOpenGenre={() => void map.openGenre()}
-                  // Explorer asks for an artist FIRST (9633) — the prompt resolves
-                  // a real name, then the map explores it.
-                  onOpenExplorer={() => setExplorerPromptOpen(true)}
-                />
-                <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
               </div>
-            </div>
-            {renderZoneSections(zoneSections('tools'))}
-          </DiscoveryZone>
+              {renderZoneSections(newMissingIds)}
+            </DiscoveryZone>
+
+            <VideoRail
+              title="Watch"
+              subtitle="Artists picked for you, every one playing its video."
+              artists={railArtists}
+              videosOn={videosOn}
+            />
+
+            {libraryIds.length > 0 && (
+              <DiscoveryZone
+                id="discover-zone-library"
+                title="From Your Library"
+                subtitle="Your artists, your eras, your deep cuts."
+                tone="library"
+              >
+                {renderZoneSections(libraryIds)}
+              </DiscoveryZone>
+            )}
+
+            <PosterRow>
+              {[
+                concert && concertDay ? (
+                  <ConcertPoster
+                    key="concert"
+                    artist={concert.item.artist_name ?? ''}
+                    day={concertDay}
+                    venue={(concert.item.payload as { venue?: string } | undefined)?.venue}
+                    city={(concert.item.payload as { city?: string } | undefined)?.city}
+                    url={concert.item.payload?.url}
+                    more={concert.more}
+                    photo={photoByName.get((concert.item.artist_name ?? '').toLowerCase()) ?? null}
+                  />
+                ) : null,
+                posterAlbum ? (
+                  <AlbumPoster
+                    key="album"
+                    title={posterAlbum.album.album_name ?? ''}
+                    artist={posterAlbum.album.artist_name ?? ''}
+                    tag={releaseKind(posterAlbum.album.album_type as string | undefined)}
+                    art={posterAlbum.album.album_cover_url ?? ''}
+                    openLabel={`Open ${releaseKind(posterAlbum.album.album_type as string | undefined).replace('New ', '')}`}
+                    onOpen={() => void albumOpen.openRecentAlbum(posterAlbum.album)}
+                  />
+                ) : null,
+                topArtist && (topArtist.play_count ?? 0) > 0 ? (
+                  <ArtistPoster
+                    key="artist"
+                    name={topArtist.name}
+                    plays={topArtist.play_count ?? 0}
+                    photo={topArtist.image_url ?? null}
+                    href={
+                      topArtist.id != null
+                        ? detailPath(topArtist.id, 'library', topArtist.name)
+                        : null
+                    }
+                  />
+                ) : null,
+              ]}
+            </PosterRow>
+
+            <DiscoveryZone
+              id="discover-zone-tools"
+              title="Explore & Build"
+              subtitle="Maps, genres, radio and playlist tools."
+              tone="tools"
+            >
+              <div className="discovery-zone-section discovery-zone-section--map-tools">
+                <div className="discover-hub-row discover-hub-row--tools">
+                  <ArtistMapHub
+                    onOpenWatchlist={() => void map.openWatchlist()}
+                    onOpenGenre={() => void map.openGenre()}
+                    // Explorer asks for an artist FIRST (9633) — the prompt resolves
+                    // a real name, then the map explores it.
+                    onOpenExplorer={() => setExplorerPromptOpen(true)}
+                  />
+                  <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+                </div>
+              </div>
+              {renderZoneSections(zoneSections('tools'))}
+            </DiscoveryZone>
+          </div>
         </div>
       )}
 

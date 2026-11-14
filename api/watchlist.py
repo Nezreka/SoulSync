@@ -143,8 +143,12 @@ def register_routes(bp):
 
         Body: {"include_albums": true, "include_live": false, ...}
         Accepts any combination of: include_albums, include_eps, include_singles,
-        include_live, include_remixes, include_acoustic, include_compilations,
-        follow_defaults.
+        include_live, include_live_tracks, include_remixes, include_acoustic,
+        include_compilations, follow_defaults.
+
+        include_live is about live albums, include_live_tracks about a live
+        version on any other release. Until include_live_tracks is sent once
+        it follows include_live (#2082).
 
         follow_defaults true puts the artist back on the watchlist defaults.
         Sending release rules for an artist that follows the defaults gives it
@@ -155,7 +159,8 @@ def register_routes(bp):
 
         allowed_fields = {
             "include_albums", "include_eps", "include_singles",
-            "include_live", "include_remixes", "include_acoustic", "include_compilations",
+            "include_live", "include_live_tracks", "include_remixes", "include_acoustic",
+            "include_compilations",
         }
         # Only fields the client actually SENT are touched — this is a real
         # partial PATCH, unlike the legacy full-form endpoint (P2-03).
@@ -200,11 +205,16 @@ def register_routes(bp):
                         updates = {**{k: v for k, v in default_values(config_manager).items()
                                       if k not in updates}, **updates}
                         updates["follow_defaults"] = False
+                        # a client that sets Live and has never heard of live
+                        # tracks means both, as it always did (#2082): NULL
+                        # follows include_live
+                        if "include_live" in body and "include_live_tracks" not in body:
+                            updates["include_live_tracks"] = None
 
                 # Build SET clause
                 set_parts = [f"{k} = ?" for k in updates]
                 values = [
-                    int(v) if key == "quality_profile_id" else int(bool(v))
+                    None if v is None else int(v) if key == "quality_profile_id" else int(bool(v))
                     for key, v in updates.items()
                 ]
 

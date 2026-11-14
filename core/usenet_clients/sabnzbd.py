@@ -185,7 +185,7 @@ class SABnzbdAdapter:
     async def add_nzb(
         self,
         url_or_bytes: Union[str, bytes],
-        category: str = "soulsync",
+        category: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> Optional[str]:
         # its own pool: an add can be held for minutes (ADD_TIMEOUT)
@@ -195,9 +195,12 @@ class SABnzbdAdapter:
     def _add_nzb_sync(
         self,
         url_or_bytes: Union[str, bytes],
-        category: str,
+        category: Optional[str],
         save_path: Optional[str],
     ) -> Optional[str]:
+        # no category asked for: the one set in Settings. the parameter used to
+        # default to "soulsync", so this fallback never ran and a music grab
+        # arrived under a category the client did not have (#2096)
         cat = category or self._category
         # #2030: a url is fetched here and sent as the file (addfile), never
         # as addurl, so sab's queue never shows the prowlarr link and its api

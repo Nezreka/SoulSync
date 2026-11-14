@@ -19,7 +19,7 @@ from core.imports.context import (
     get_import_context_album,
     get_import_original_search,
     get_import_source,
-    get_import_source_ids,
+    get_provider_source_ids,
     get_import_track_info,
     get_source_tag_names,
     has_real_album_name,
@@ -2402,7 +2402,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     album_ctx = get_import_context_album(context)
     track_info = get_import_track_info(context)
     source = get_import_source(context)
-    source_ids = get_import_source_ids(context)
+    # provider ids, never the pipeline's own keys: these go into the file's
+    # tags and to the provider (a wishlist row key was written as the track id)
+    source_ids = get_provider_source_ids(context)
 
     artist_dict = artist if isinstance(artist, dict) else {
         "name": extract_artist_name(artist),

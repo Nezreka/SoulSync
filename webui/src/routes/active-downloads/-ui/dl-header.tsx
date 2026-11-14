@@ -1,8 +1,9 @@
 /**
- * The downloads page header, one for both sides. Three tiers by weight:
- * the Music | Video switch with the actions, then the view tabs with the
- * filter chips (the counts live on the chips now), then a live strip while
- * anything moves, or one quiet line when nothing does.
+ * The downloads page header, one for both sides, drawn in the page frame
+ * (components/page-header): the page name with one line that says where
+ * things stand, and the Music | Video switch with the actions beside it;
+ * then the views as pills with the filter chips at the end of the row; then
+ * a live strip while anything moves.
  */
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
@@ -292,13 +293,44 @@ export function DlHeader({
   const ctx = useContext(DownloadsMediaContext);
   return (
     <div className="dlh">
-      <div className="dlh-top">
-        {ctx ? <MediaSwitch ctx={ctx} /> : <span />}
-        <div className="dlh-actions" id="adl-actions">
+      <header className="pgf-head">
+        <div className="pgf-head-main">
+          <h1 className="pgf-title">Downloads</h1>
+          {live ? (
+            <p className="pgf-status">
+              <b>{live.downloading}</b> downloading
+              {live.speedText ? (
+                <>
+                  {' at '}
+                  <b>{live.speedText}</b>
+                </>
+              ) : null}
+              {live.queued ? (
+                <>
+                  {', '}
+                  <b>{live.queued}</b> queued
+                </>
+              ) : null}
+              {live.failed ? (
+                <>
+                  {', '}
+                  <b>{live.failed}</b> failed
+                </>
+              ) : null}
+            </p>
+          ) : quiet ? (
+            // the quiet line is the status when nothing moves
+            <p className="pgf-status dlh-quiet" id="adl-count">
+              {quiet}
+            </p>
+          ) : null}
+        </div>
+        <div className="pgf-actions dlh-actions" id="adl-actions">
+          {ctx ? <MediaSwitch ctx={ctx} /> : null}
           {onOpenHistory ? (
             <button
               type="button"
-              className="dlc-btn dlh-history"
+              className="pgf-btn dlh-history"
               title="Download history"
               onClick={onOpenHistory}
             >
@@ -315,29 +347,29 @@ export function DlHeader({
             <DlMore items={menu} label="Download actions" />
           </span>
         </div>
-      </div>
+      </header>
 
-      <div className="dlh-nav">
-        <div className="dlh-tabs" id="adl-view-tabs" role="tablist">
+      <div className="pgf-bar dlh-nav">
+        <div className="pgf-pills dlh-tabs" id="adl-view-tabs" role="tablist">
           {tabs.map((tab) => (
             <button
               key={tab.value}
               type="button"
               role="tab"
               aria-selected={view === tab.value}
-              className={`dlh-tab${view === tab.value ? ' dlh-tab-on' : ''}`}
+              className={`pgf-pill dlh-tab${view === tab.value ? ' dlh-tab-on' : ''}`}
               data-filter={tab.dataFilter}
               title={tab.title}
               onClick={() => onView(tab.value)}
             >
               {tab.label}
               {/* how much is waiting, so a full queue doesn't look like an empty one */}
-              {tab.badge ? <span className="dlh-badge">{tab.badge}</span> : null}
+              {tab.badge ? <span className="pgf-pill-count dlh-badge">{tab.badge}</span> : null}
             </button>
           ))}
         </div>
         {chips ? (
-          <div className="dlh-chips" id="adl-filter-pills">
+          <div className="pgf-bar-end dlh-chips" id="adl-filter-pills">
             {chips.map((chip) => (
               <button
                 key={chip.value}
@@ -355,16 +387,7 @@ export function DlHeader({
         ) : null}
       </div>
 
-      {chips ? (
-        live ? (
-          <LiveStrip live={live} />
-        ) : quiet ? (
-          <div className="dlh-quiet" id="adl-count">
-            <span className="dlh-quiet-dot" aria-hidden="true" />
-            {quiet}
-          </div>
-        ) : null
-      ) : null}
+      {chips && live ? <LiveStrip live={live} /> : null}
     </div>
   );
 }

@@ -196,6 +196,12 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_air      ON episodes(air_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_wanted   ON episodes(monitored, has_file);
+-- what the library manager sums a show up from (v72): how many episodes it
+-- has, owns and is missing, and which episode each file is. with every column
+-- in the index neither one ever
+-- touches the episode rows themselves, which carry each episode's overview:
+-- reading 224k of them to count took 5 seconds, the index takes half of one.
+CREATE INDEX IF NOT EXISTS idx_episodes_summary ON episodes(show_id, season_number, episode_number, has_file, monitored, air_date);
 
 -- ── Genres (normalised many-to-many; no comma-blob) ─────────────────────────
 CREATE TABLE IF NOT EXISTS genres (
@@ -1123,6 +1129,20 @@ CREATE TABLE IF NOT EXISTS tvdb_episode_cache (
     PRIMARY KEY (tvdb_id, season_number)
 );
 
+-- the number the scene, the indexers and the subtitle sites use for an episode
+-- of a season SoulSync keeps the way the media server numbers it. Jujutsu
+-- Kaisen is one TMDB season of 59; a server that numbers its files that way
+-- keeps the one season, and S01E48 is still only ever released as S03E01
+-- (Thibs). written by the episode sync, read by search and subtitles.
+CREATE TABLE IF NOT EXISTS episode_scene_numbers (
+    show_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    scene_season INTEGER NOT NULL,
+    scene_episode INTEGER NOT NULL,
+    PRIMARY KEY (show_id, season_number, episode_number)
+);
+
 -- ── series type for shows not in any library yet ──
 -- a show's series type normally comes from its library row (set by hand, or
 -- the show sits in a library marked anime). a show that is followed, wished
@@ -1167,4 +1187,42 @@ CREATE TABLE IF NOT EXISTS video_watch_state (
     last_viewed_at TEXT,
     view_offset_ms INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (profile_id, kind, item_id)
+);
+
+-- ── file changes (the library manager's history and undo) ──
+-- one row per file a person renamed, moved, deleted or filed under another
+-- episode. enough is kept to put it back: where it was, where the recycle
+-- folder holds it, and the library row a delete dropped.
+CREATE TABLE IF NOT EXISTS video_file_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL DEFAULT (datetime('now')),
+    action TEXT NOT NULL,            -- rename | move | delete | reassign
+    kind TEXT,                       -- movie | show
+    item_id INTEGER,                 -- movies.id | shows.id
+    title TEXT,
+    label TEXT,                      -- S01E02, or the file name
+    file_id INTEGER,
+    from_path TEXT,
+    to_path TEXT,
+    from_stored TEXT,                -- the server's view of from_path
+    to_stored TEXT,                  -- the server's view of where the change left it
+    trash_path TEXT,                 -- a delete: where the recycle folder holds it
+    from_episode_id INTEGER,
+    to_episode_id INTEGER,
+    snapshot TEXT,                   -- a delete: the media_files row, as json
+    batch TEXT,                      -- one bulk run, undone together
+    undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vfc_title ON video_file_changes(kind, item_id, id);
+
+-- When each source was last asked about one title (v71). A title's page reads
+-- from this database, then asks the sources that have gone stale: the media
+-- server for its files and watch state, the metadata provider for what changed
+-- since it was matched, and the ratings. One row per title per source.
+CREATE TABLE IF NOT EXISTS video_title_freshness (
+    kind        TEXT NOT NULL,            -- movie | show
+    item_id     INTEGER NOT NULL,
+    source      TEXT NOT NULL,            -- server | metadata | ratings
+    checked_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, source)
 );

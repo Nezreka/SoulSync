@@ -19,7 +19,7 @@ export function PodcastsLayout() {
 
   return (
     <div
-      className={`page-shell ${styles.podcastsContainer} ${activePlayback ? styles.podcastsContainerWithTopPlayer : ''}`}
+      className={`page-shell pgf-shell ${styles.podcastsContainer} ${activePlayback ? styles.podcastsContainerWithTopPlayer : ''}`}
     >
       {/* Top Floating Audio Player Bar — shared with the audiobooks page. */}
       {activePlayback && (
@@ -38,7 +38,9 @@ export function PodcastsLayout() {
         />
       )}
 
-      <Outlet />
+      <div className="pgf-page">
+        <Outlet />
+      </div>
     </div>
   );
 }

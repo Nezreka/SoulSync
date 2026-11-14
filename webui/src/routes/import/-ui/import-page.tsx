@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { useState } from 'react';
 
 import { Button } from '@/components/form/form';
-import { PageHeader } from '@/components/page-header';
+import { PageFrame, PageHeader } from '@/components/page-header';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ImportQueueEntry } from '../-import.types';
@@ -29,10 +29,9 @@ export function ImportPage() {
   const { refresh, refreshing } = useInboxRefresh();
 
   return (
-    <div id="import-page" data-testid="import-page">
-      <div className={styles.page}>
+    <>
+      <PageFrame id="import-page" data-testid="import-page">
         <PageHeader
-          icon={<img src="/static/import.png" alt="" />}
           title="Import"
           subtitle="What is in your import folder, and what to do about it"
           actions={
@@ -62,9 +61,9 @@ export function ImportPage() {
         />
         <ImportJobs />
         <Outlet />
-      </div>
+      </PageFrame>
       <SettingsDrawer open={settingsOpen} onOpenChange={setSettingsOpen} />
-    </div>
+    </>
   );
 }
 

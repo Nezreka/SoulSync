@@ -335,6 +335,11 @@ def test_remove_only_suppresses_wanted_even_for_monitored_track(legacy_db):
         "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
     ).fetchone()
     conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (native["track_id"],))
+    # a release a provider lists: the track stays on its tracklist. (an
+    # album nothing lists loses the row altogether, #2086, tested below.)
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id='sp-album' WHERE id="
+        "(SELECT album_id FROM lib2_tracks WHERE id=?)", (native["track_id"],))
     record_rule(conn, "track", native["track_id"], True, PROVENANCE_USER)
     conn.commit()
     conn.close()
@@ -1740,3 +1745,130 @@ def test_a_subject_that_cannot_have_a_catalogue_row_never_probes(tmp_path):
     assert _may_have_catalogue_row("track", "lib2:5") is True
     # ...and so does a bare legacy back-reference, which may resolve.
     assert _may_have_catalogue_row("file", "123") is True
+
+
+# --- #2086: removing a dead file's entry -------------------------------------
+
+def _remove_dead_file(legacy_db, native):
+    from core.library2.maintenance_sync import sync_repair_change
+
+    return sync_repair_change(
+        legacy_db, _Config(True), job_id="dead_file_cleaner",
+        finding_type="dead_file", action="removed", entity_type="track",
+        entity_id=f"lib2:{native['track_id']}", file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_id": native["track_id"], "track_ids": [native["track_id"]],
+            "file_id": native["file_id"], "file_ids": [native["file_id"]],
+        }},
+        result={"library_v2_file_deleted": True, "repair_intent": "remove"},
+    )
+
+
+def _native_100(legacy_db, *, listed):
+    """legacy track 100 in the Library, its album and track stripped of every
+    provider id, or the album given one."""
+    _import(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        native = dict(conn.execute(
+            "SELECT t.id AS track_id, t.album_id, f.id AS file_id FROM lib2_tracks t "
+            "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+        ).fetchone())
+        conn.execute(
+            "UPDATE lib2_tracks SET spotify_id=NULL, musicbrainz_id=NULL, external_ids='{}' "
+            "WHERE album_id=?", (native["album_id"],))
+        conn.execute(
+            "UPDATE lib2_albums SET spotify_id=?, musicbrainz_id=NULL, external_ids='{}' "
+            "WHERE id=?", ("sp-album" if listed else None, native["album_id"]))
+        native["siblings"] = [r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=? AND id<>?",
+            (native["album_id"], native["track_id"]))]
+        conn.commit()
+    return native
+
+
+def test_removing_a_dead_file_takes_its_row_off_an_album_no_provider_lists(legacy_db):
+    native = _native_100(legacy_db, listed=False)
+
+    outcome = _remove_dead_file(legacy_db, native)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?",
+                            (native["track_id"],)).fetchone() is None
+        assert conn.execute("SELECT 1 FROM lib2_track_files WHERE id=?",
+                            (native["file_id"],)).fetchone() is None
+        left = conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?",
+                            (native["album_id"],)).fetchone()[0]
+        album = conn.execute("SELECT 1 FROM lib2_albums WHERE id=?",
+                             (native["album_id"],)).fetchone()
+    assert left == len(native["siblings"])
+    # the album stays while another track is on it, and goes with its last one
+    assert bool(album) == bool(native["siblings"])
+    assert outcome["leftovers_dropped"] == {
+        "tracks": 1, "albums": 0 if native["siblings"] else 1}
+
+
+def test_the_last_track_takes_an_unlisted_album_with_it(legacy_db):
+    native = _native_100(legacy_db, listed=False)
+    with closing(legacy_db._get_connection()) as conn:
+        for sibling in native["siblings"]:
+            conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (sibling,))
+            conn.execute("DELETE FROM lib2_tracks WHERE id=?", (sibling,))
+        conn.commit()
+
+    outcome = _remove_dead_file(legacy_db, native)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?",
+                            (native["album_id"],)).fetchone() is None
+    assert outcome["leftovers_dropped"] == {"tracks": 1, "albums": 1}
+
+
+def test_a_listed_album_keeps_the_removed_track_on_its_tracklist(legacy_db):
+    native = _native_100(legacy_db, listed=True)
+
+    outcome = _remove_dead_file(legacy_db, native)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                            (native["track_id"],)).fetchone()[0] == 0
+        assert conn.execute("SELECT file_state FROM lib2_track_files WHERE id=?",
+                            (native["file_id"],)).fetchone()[0] == "deleted"
+    assert outcome["leftovers_dropped"] == {"tracks": 0, "albums": 0}
+
+
+@pytest.mark.parametrize("keep", ["other_file", "track_id", "someone_wants_it"])
+def test_a_row_something_else_stands_on_is_left_alone(legacy_db, keep):
+    from core.library2.maintenance_sync import drop_unlisted_leftovers
+
+    native = _native_100(legacy_db, listed=False)
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE id=?",
+                     (native["file_id"],))
+        if keep == "other_file":
+            conn.execute(
+                "INSERT INTO lib2_track_files(track_id, path, file_state) VALUES(?,?,?)",
+                (native["track_id"], "/m/other.mp3", "missing_confirmed"))
+        elif keep == "track_id":
+            conn.execute("UPDATE lib2_tracks SET external_ids=? WHERE id=?",
+                         ('{"deezer": "123"}', native["track_id"]))
+        else:
+            conn.execute(
+                "INSERT INTO lib2_monitor_rules(profile_id, entity_type, entity_id, monitored,"
+                " provenance) VALUES(2, 'track', ?, 1, 'user_explicit')", (native["track_id"],))
+        assert drop_unlisted_leftovers(legacy_db, conn, [native["track_id"]]) == {
+            "tracks": 0, "albums": 0}
+        assert conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?",
+                            (native["track_id"],)).fetchone()
+
+
+def test_a_dropped_rows_hand_edits_go_with_it(legacy_db):
+    from core.library2.metadata_overrides import get_field_overrides, set_field_override
+
+    native = _native_100(legacy_db, listed=False)
+    with closing(legacy_db._get_connection()) as conn:
+        set_field_override(conn, entity_type="track", entity_id=native["track_id"],
+                           field_name="title", value="Mine", reason=None)
+        conn.commit()
+    _remove_dead_file(legacy_db, native)
+    with closing(legacy_db._get_connection()) as conn:
+        assert get_field_overrides(conn, entity_type="track", entity_id=native["track_id"]) == {}

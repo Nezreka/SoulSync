@@ -64,6 +64,17 @@ def resolve_command(*candidates: str) -> str | None:
     return None
 
 
+# Folders that never hold backend source. The watcher used to walk all of
+# them once a second: ~360,000 entries on a working checkout (scrap/, the
+# database's artwork and sample folders, storage/, the virtualenv), which kept
+# this launcher at a full CPU core for as long as it ran (Nov 13 2026).
+EXCLUDED_TOP_LEVEL = {
+    'logs', 'scrap', 'storage', 'downloads', 'Transfer', 'Staging', 'Stream',
+    'lib2_artwork', 'shots', 'node_modules', 'tests',
+}
+EXCLUDED_ANYWHERE = {'__pycache__', 'node_modules'}
+
+
 def is_excluded(path: Path) -> bool:
     try:
         relative = path.relative_to(ROOT_DIR)
@@ -74,12 +85,15 @@ def is_excluded(path: Path) -> bool:
     if not parts:
         return False
 
-    if any(part == '__pycache__' for part in parts):
+    if any(part in EXCLUDED_ANYWHERE for part in parts):
         return True
-    if parts[0] in {'.git', 'logs'}:
+    # .git, .venv, .tmp, .ruff_cache and the like
+    if parts[0].startswith('.') or parts[0] in EXCLUDED_TOP_LEVEL:
         return True
-    if len(parts) >= 2 and parts[0] == 'webui' and parts[1] == 'node_modules':
-        return True
+    # database/ holds the modules next to the data: its files are source, its
+    # folders (backups, artwork, sample stems) are not
+    if len(parts) >= 2 and parts[0] == 'database':
+        return (ROOT_DIR / parts[0] / parts[1]).is_dir()
     if len(parts) >= 3 and parts[0] == 'webui' and parts[1] == 'static' and parts[2] == 'dist':
         return True
     return False
@@ -198,26 +212,27 @@ def cleanup() -> None:
 
 def compute_backend_watch_state() -> str:
     rows: list[str] = []
+    pending = [ROOT_DIR]
 
-    for dirpath, dirnames, filenames in os.walk(ROOT_DIR):
-        current_dir = Path(dirpath)
-        if is_excluded(current_dir):
-            dirnames[:] = []
+    while pending:
+        current_dir = pending.pop()
+        try:
+            entries = list(os.scandir(current_dir))
+        except OSError:
             continue
-
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if not is_excluded(current_dir / name) and name != '__pycache__'
-        ]
-
-        for filename in filenames:
-            path = current_dir / filename
-            if path.suffix not in INCLUDED_SUFFIXES:
-                continue
+        for entry in entries:
+            path = Path(entry.path)
             try:
-                stat = path.stat()
-            except FileNotFoundError:
+                if entry.is_dir(follow_symlinks=False):
+                    if not is_excluded(path):
+                        pending.append(path)
+                    continue
+                if path.suffix not in INCLUDED_SUFFIXES:
+                    continue
+                # the directory listing already carries the times on Windows:
+                # no second trip to the disk per file
+                stat = entry.stat()
+            except OSError:
                 continue
             rows.append(f'{stat.st_mtime_ns} {path}')
 

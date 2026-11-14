@@ -75,6 +75,11 @@ export interface MirroredPlaylistRow {
    */
   rotating?: boolean;
   /**
+   * find uncatalogued tracks (#2097): a track no catalog has is searched for
+   * by this playlist's own artist and title instead of waiting in the pool.
+   */
+  allow_uncatalogued?: boolean;
+  /**
    * this playlist's own sync mode (#1704). null = the global Settings mode,
    * so an append-only mirror can live next to a Daily Mix that reconciles.
    */

@@ -377,7 +377,9 @@ const WRITERS: Record<string, Writer> = {
     title: s.track || withoutPrefix(finding.title),
     sub: joinSub(s.artist, s.album),
     problem: 'The library lists this track, but its file is gone.',
-    fix: redownload(verb),
+    fix: [redownload(verb), 'Remove takes the track out of your library and downloads nothing.']
+      .filter(Boolean)
+      .join(' '),
   }),
 
   library_unreachable: (finding, d, _s, verb) => {

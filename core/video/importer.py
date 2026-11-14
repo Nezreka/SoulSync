@@ -164,6 +164,19 @@ def _user_replace_policy(dl: dict) -> bool:
     return str(ctx.get("import_policy") or "").lower() == "user_replace"
 
 
+def title_locked(db, dl: dict) -> bool:
+    """the download's title is padlocked in the library (reviewed and locked:
+    automation leaves its files alone)"""
+    try:
+        kind = "movie" if _scope_of(dl) == "movie" else "show"
+        item = int(str((dl or {}).get("media_id") or "").strip())
+        if str((dl or {}).get("media_source") or "tmdb") == "library":
+            return bool(db.is_hands_off(kind, item))
+        return item in db.hands_off_tmdb_ids()[kind]
+    except Exception:   # noqa: BLE001 - no id or no answer means not locked
+        return False
+
+
 def _unique_dest(dest: dict, names: list[str]) -> dict:
     existing = {str(n).casefold() for n in (names or [])}
     filename = str(dest.get("filename") or "")
@@ -280,7 +293,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 settings: dict | None = None, force: bool = False,
                 override: dict | None = None, library_dir: str | None = None,
                 expected_duration_sec: float | None = None,
-                ids: dict | None = None, series_name: str | None = None) -> dict:
+                ids: dict | None = None, series_name: str | None = None,
+                locked: bool = False) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -511,6 +525,10 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                     "artwork_dir": artwork_dir}
         if not settings.get("replace_existing", True):
             return _reject("Already in the library (%s) - replace is turned off" % existing)
+        if locked:
+            # the padlock: only a replace the user asked for (forced, or their
+            # own grab above) takes the copy a locked title has
+            return _reject("This title is locked, so the copy it has (%s) is kept" % existing)
         if new_score > old_score:
             return {"action": "upgrade", "dest": dest, "quality_label": quality,
                     "replace_path": os.path.join(dest["dir"], existing), "artwork_dir": artwork_dir}
@@ -553,7 +571,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                recycle: Callable | None = None,
                expected_duration_sec: float | None = None,
                plan: dict | None = None, ids: dict | None = None,
-               series_name: str | None = None) -> dict:
+               series_name: str | None = None, locked: bool = False) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -587,7 +605,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
         plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=force, override=override,
                            library_dir=library_dir, expected_duration_sec=expected_duration_sec,
-                           ids=ids, series_name=series_name)
+                           ids=ids, series_name=series_name, locked=locked)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells

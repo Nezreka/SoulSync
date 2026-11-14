@@ -225,6 +225,7 @@ def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
         "quality": _quality_block(db, detail.get("quality_profile_id"), best),
         "copies": _copies(files),
         "files": files,
+        "locked": db.is_hands_off("movie", movie_id),
         "recycle": _recycle_on(db),
     }
 
@@ -420,6 +421,7 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
         "extra_copies": _extras(files_by_ep.values()),
         "seasons": season_list,
         "detail_season": season,
+        "locked": db.is_hands_off("show", show_id),
         "recycle": _recycle_on(db),
     }
 

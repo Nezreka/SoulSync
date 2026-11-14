@@ -31,12 +31,13 @@ function renderMenu(canWrite = true, canWish = false) {
 }
 
 describe('the library More menu', () => {
-  it('lists the three library-wide jobs, each saying what it does', () => {
+  it('lists the library-wide jobs, each saying what it does', () => {
     const items = renderMenu();
     expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).toEqual([
       'Automatic Search',
       'Watch All',
       'Export artists',
+      'Release file tag values',
     ]);
     for (const i of items) expect(i.querySelector('.sync-more-desc')?.textContent).toBeTruthy();
   });
@@ -47,6 +48,8 @@ describe('the library More menu', () => {
     expect(items[1]).toBeDisabled();
     // export only reads
     expect(items[2]).toBeEnabled();
+    // #2084: releasing what Use File Tags saved changes the library
+    expect(items[3]).toBeDisabled();
   });
 
   it('a household member watches all on their own watchlist, without the admin-only search', () => {

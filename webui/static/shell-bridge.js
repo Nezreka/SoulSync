@@ -39,6 +39,14 @@ function setActivePageChrome(pageId) {
             libraryBtn.classList.add('active');
             libraryBtn.setAttribute('aria-current', 'page');
         }
+    } else if (pageId === 'playlist-explorer') {
+        // The explorer opens from the Playlists page and has no sidebar entry of
+        // its own, so the sidebar stays on Playlists while it is open.
+        const playlistsBtn = document.querySelector('.nav-button[data-page="sync"]');
+        if (playlistsBtn) {
+            playlistsBtn.classList.add('active');
+            playlistsBtn.setAttribute('aria-current', 'page');
+        }
     }
     currentPage = pageId;
     if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();

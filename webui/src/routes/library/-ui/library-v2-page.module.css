@@ -42,18 +42,22 @@
   gap: 12px;
 }
 
+/* the page frame's title and status line (.pgf-title, .pgf-status), written
+   out here because this page is full bleed and does not sit in the frame */
 .title {
   margin: 0;
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-1);
-  letter-spacing: -0.3px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .subtitle {
-  margin: 0;
-  color: var(--white-a55);
-  font-size: 13px;
+  margin: 4px 0 0;
+  color: var(--white-a65);
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .genres {

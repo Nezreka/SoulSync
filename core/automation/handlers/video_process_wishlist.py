@@ -168,8 +168,30 @@ def reset_source_cooldowns() -> None:
         _SOURCE_COOLDOWNS.clear()
 
 
+def held_titles(db) -> Optional[Callable[[Dict[str, Any]], bool]]:
+    """says whether a wishlist row's title is padlocked (reviewed and locked in
+    the library manager), or None when nothing is. a padlocked title keeps the
+    copy it has: no automatic upgrade replaces it."""
+    try:
+        ids = db.hands_off_tmdb_ids()
+    except Exception:   # noqa: BLE001 - no answer means nothing is held
+        return None
+    if not ids.get("movie") and not ids.get("show"):
+        return None
+
+    def held(item: Dict[str, Any]) -> bool:
+        show = "show_tmdb_id" in item
+        try:
+            tmdb = int(item.get("show_tmdb_id" if show else "tmdb_id"))
+        except (TypeError, ValueError):
+            return False
+        return tmdb in ids["show" if show else "movie"]
+    return held
+
+
 def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int,
-                      cutoff_for: Optional[Callable[[Dict[str, Any]], int]] = None) -> List[Dict[str, Any]]:
+                      cutoff_for: Optional[Callable[[Dict[str, Any]], int]] = None,
+                      held: Optional[Callable[[Dict[str, Any]], bool]] = None) -> List[Dict[str, Any]]:
     """Upgrade-until-cutoff eligibility over the wishlist rows (pure).
 
     Unowned items pass through untouched. Owned items (the queries annotate
@@ -185,12 +207,17 @@ def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int,
 
     ``cutoff_for`` (P2, per-title profiles): when given, each owned item is
     judged against ITS OWN profile's cutoff instead of the global
-    ``cutoff_rank``. Still pure — the callable is injected."""
+    ``cutoff_rank``. Still pure — the callable is injected.
+
+    ``held``: says an owned item's title is padlocked. it is skipped, the
+    copy it has stays."""
     from core.video.quality_eval import resolution_rank
     out = []
     for it in items or []:
         if not it.get("owned"):
             out.append(it)
+            continue
+        if held is not None and held(it):
             continue
         rks = [resolution_rank(r) for r in str(it.get("owned_resolutions") or "").split(",")
                if r.strip()]
@@ -1418,7 +1445,9 @@ def auto_video_process_wishlist(
             # stays on the single global read)
             per_item = _cutoff_rank_for_item if any(
                 it.get("quality_profile_id") for it in items) else None
-            items = annotate_upgrades(items, cutoff_rank, cutoff_for=per_item)
+            from api.video import get_video_db as _held_db
+            items = annotate_upgrades(items, cutoff_rank, cutoff_for=per_item,
+                                      held=held_titles(_held_db()))
         active = set(active_keys(media_type) or set())
         todo = [it for it in items if item_key(it, media_type) not in active]
         if media_type == "episode":

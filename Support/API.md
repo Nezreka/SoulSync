@@ -1180,7 +1180,8 @@ List all watched artists for the current profile.
 | `include_albums` | bool | Monitor for new albums |
 | `include_eps` | bool | Monitor for new EPs |
 | `include_singles` | bool | Monitor for new singles |
-| `include_live` | bool | Include live recordings |
+| `include_live` | bool | Include live albums (concert recordings, unplugged sets) |
+| `include_live_tracks` | bool | Include a live version on any other release, like a live bonus track. Follows `include_live` until it is set once |
 | `include_remixes` | bool | Include remixes |
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
@@ -1209,7 +1210,7 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
 
 Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 
@@ -2439,6 +2440,32 @@ Named movie and TV libraries, each with its own folder (#2029). The main and 4K 
 - `PUT /api/video/libraries/folders/<id>`: change `name`, `rules`, `options`, and for a custom library `path` and `enabled`. A builtin's folder is changed in its own setting (`400`). `is_default: true` makes it the default.
 - `POST /api/video/libraries/folders/<id>/default`: the default for its kind (needs a folder and to be on).
 - `DELETE /api/video/libraries/folders/<id>`: remove a custom library. Its files stay; titles picked for it go back to the rules and the default; a removed default hands the kind to the main library. The builtins can't be removed (`400`).
+
+**The library manager** (admin, the web UI's own routes under `/api/video/manager`):
+
+- `GET /titles?kind=movies|shows&page=&limit=&sort=&dir=` and `GET /files`: one page of rows. Filters: `search`, `needs` (comma list of `missing`, `below_cutoff`, `copies`, `unmatched`, `no_subtitles`, `unprobed`, `unmonitored`, `unwatched`, `not_owned`), `status`, `monitored`, `locked`, `resolution`, `codec`, `hdr`, `audio_language`, `subtitle_language`, `drive`, `genre`, `video_library`, `quality_profile`, `year_from`, `year_to`. `GET /ids` returns every id the filters match, `GET /facets` what there is to filter by.
+- `GET /rename-preview`, `GET /delete-preview`, `GET /move-preview?kind=&ids=&library_id=`: what the operation would do. Nothing is changed.
+- `POST /api/video/bulk/start` body `{kind, ids, action, params}` runs one in the background; `GET /api/video/bulk/status` follows it. Actions: `monitored`, `watched`, `content_rating`, `genre_add`, `genre_remove`, `refresh_art`, `quality_profile`, `rename`, `wish` (`mode`: `missing` / `upgrade`), `subtitles`, `rematch`, `series_type`, `lock` (`value`: true / false), `move` (`library_id`), `delete` (`confirm`: the number of ids). The status carries `held` (padlocked titles left alone) and `batch` (the file changes of a rename or move, for undo).
+- `GET /history?kind=&id=&limit=&offset=`: file changes, newest first, for one title or all. `POST /history/<id>/undo` puts one back; `POST /history/undo-batch` body `{batch}` puts back a whole run. `409` with a plain reason when it can't be (the file moved on, the old path is taken, the recycle folder was emptied).
+- `GET /views` and `PUT /views` body `{views: [{name, state}]}`: the saved views.
+- `GET /libraries?kind=`: each usable library with `folders: [{path, primary, free_bytes}]`. A library can sit on many drives: the main library is its own folder plus the additional folders and the mapped server folders of its kind, its own folder first. `GET /move-preview` and the `move` action take `folder` (one of that library's folders, `409` otherwise) to move to that drive; without it the library's own folder is used.
+- `GET /move-preview` takes `by_hand=1`, and the `move` action takes `params.by_hand: true`, for one title moved from its own page: a padlock holds a sweep, not that.
+- `GET /episodes/<show_id>`: seasons, episodes and the files under each. `POST /renumber/<show_id>` body `{file_ids, season, start_episode, apply?}`: files the chosen files under consecutive episodes of that season. Without `apply` it answers with the plan.
+
+**Keeping a title current** (any profile that can see the title; `force` is admin only):
+
+- `POST /api/video/detail/<movie|show>/<id>/freshen` body `{force?}`: asks the sources whose answer has gone stale and returns `{changed, asked: [source...], notes: {source: reason}, gone, moved_to, sources: {server|metadata|ratings: {age_seconds, ttl_seconds, stale}}}`. `server` re-reads that one title from the media server (files, watch state), `metadata` asks the provider for what changes after a match, `ratings` asks for the scores. `changed` is true only when something the page shows moved. `gone` means the media server no longer has the title; nothing is removed (`POST .../sync` does that). `moved_to` is the title's new row when the server re-keyed it. A second call while one is running answers `running: true` and asks nothing.
+- `GET` on the same path: `{sources}` only.
+- Clocks: the server every 10 minutes; metadata daily and ratings every 3 days for a show that has not ended or a movie within 90 days of its release, otherwise 14 and 30 days. A source that could not answer waits out its clock, unless a library scan or a spent ratings quota was in the way.
+
+**Managing files from a title's page** (admin):
+
+- `GET /api/video/files/rename-preview?file_ids=1,2,3`: `{files, to_rename, already_named, unreachable, changes: [{file_id, current, expected}], more}`. Nothing is renamed.
+- `GET /api/video/files/delete-preview?file_ids=1,2,3`: `{files, size_bytes, unreachable, emptied, recycle, items: [{file_id, label, filename, size_bytes, reachable}], more}`. `emptied` is how many episodes or movies would be left with no copy. A file SoulSync can't reach is listed and is not counted as going.
+- `POST /api/video/files/bulk` body `{action: rename|delete, file_ids, kind, id?, stop_hunting?}`: answers with `batch` (what `POST /api/video/manager/history/undo-batch` puts back). With `stop_hunting` on a delete, the episodes left with no copy stop being monitored, and `unmonitored` says how many.
+- `POST /api/video/files/<id>/rename`, `/delete` (body `{stop_hunting?}`) and `/reassign` answer with `batch` too, when something changed that can be put back.
+- `POST /api/video/detail/show/<id>/episodes/monitor` body `{episode_ids, monitored}`: hunt, or stop hunting, a picked set of that show's episodes. `404` when none of them are that show's.
+- `POST /api/video/detail/<movie|show>/<id>/padlock` body `{locked}`: the padlock on one title. `GET /api/video/detail/<kind>/<id>/library` carries `locked`.
 
 Which library a new title files into: a library picked for the grab (`video_library_id` on `POST /api/video/downloads/grab` and the manual import), else one picked for the title, else the 4K library when its quality profile saves to 4K, else the first library whose rules match its genres or TMDB keywords (a keyword also matches inside its name), else the kind's default. The anime folder still takes anime shows unless a library was picked for the title.
 

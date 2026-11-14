@@ -567,7 +567,9 @@ def test_worker_resolves_only_after_the_file_actually_changes(library, write, mo
         monkeypatch.setattr(worker, '_execute_fix', lambda *args: {'success': True})
     with closing(db._get_connection()) as conn:
         fid = conn.execute('SELECT id FROM repair_findings').fetchone()[0]
-    result = worker.fix_finding(fid)
+    # applied on the finding itself: a bulk run would leave a number that
+    # differs for a person (tests/library2/test_retag_fill_only.py)
+    result = worker.fix_finding(fid, explicit=True)
     assert result['success'] is write
     with closing(db._get_connection()) as conn:
         assert conn.execute('SELECT status FROM repair_findings WHERE id=?', (fid,)).fetchone()[0] == ('resolved' if write else 'pending')

@@ -18,7 +18,11 @@ _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="re
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
 _INIT_JS = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
 _DASH_DIR = _ROOT / "webui" / "src" / "routes" / "dashboard" / "-video"
-_LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
+# the library page is React since Nov 13 2026 (webui/src/features/video-manager):
+# every source file of the manager, as one string
+_MGR_DIR = _ROOT / "webui" / "src" / "features" / "video-manager"
+_MGR = "\n".join(f.read_text(encoding="utf-8") for f in sorted(_MGR_DIR.glob("*.ts*"))
+                 if ".test." not in f.name)
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
 _VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
@@ -197,30 +201,29 @@ def test_video_dashboard_has_placeholder_slot_for_unbuilt_pages():
 def test_video_library_subpage_present():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-library"', "</section>")
-    # Reuses the music library structure verbatim (no reinvented markup).
-    assert "library-container" in block
-    assert "library-search-input" in block          # search bar
-    assert "alphabet-selector" in block             # A–Z selector
-    assert "library-artists-grid" in block          # the music card grid
-    assert "data-video-lib-grid" in block
-    assert 'data-video-lib-tab="movies"' in block and 'data-video-lib-tab="shows"' in block
-    assert "data-video-scan-mode" in block          # the Scan button
-    # Server-side paging + sort/filter controls (music parity).
-    assert "data-video-lib-pagination" in block and "data-video-lib-next" in block
-    assert "data-video-lib-sort" in block and "data-video-lib-status" in block
-    assert "onclick" not in block                   # data-attr wired, no inline handlers
+    # the page is one mount point: the manager draws everything inside it
+    assert 'id="video-library-page"' in block and "data-video-manager-root" in block
+    assert "onclick" not in block
+    # and what the old markup carried is the manager's now
+    assert "soulsync:video-scan-start" in _MGR          # the Scan button
+    for view in ("'posters'", "'table'", "'files'"):
+        assert view in _MGR, view
+    assert "pagination" in _MGR and "PageSearch" in _MGR
 
 
 def test_video_library_module_referenced_and_isolated():
-    assert "video/video-library.js" in _INDEX
-    stripped = _LIB_JS.strip()
-    assert stripped.startswith("/*") or stripped.startswith("(function")
-    assert "(function" in _LIB_JS and "})();" in _LIB_JS
-    assert "soulsync:video-page-shown" in _LIB_JS  # decoupled via the event
-    # Cards/poster URLs use the SINGULAR kind (movie/show); the API uses plural.
-    assert "cardKind" in _LIB_JS and "apiKind" in _LIB_JS
-    assert "addEventListener" in _LIB_JS
-    assert _window_isolated(_LIB_JS)        # only sibling-video handles + DOM APIs
+    # the vanilla script is gone; the manager mounts from the app bundle the
+    # first time the page is shown
+    assert "video/video-library.js" not in _INDEX
+    assert not (_ROOT / "webui" / "static" / "video" / "video-library.js").exists()
+    main = (_ROOT / "webui" / "src" / "app" / "main.tsx").read_text(encoding="utf-8")
+    assert "mountVideoLibraryManagerHost()" in main
+    host = (_MGR_DIR / "host.tsx").read_text(encoding="utf-8")
+    assert "soulsync:video-page-shown" in host           # decoupled via the event
+    # rows carry the SINGULAR kind (movie/show); the lists are asked for in plural
+    assert "'movie' | 'show'" in _MGR and "'movies' | 'shows'" in _MGR
+    # the manager talks to the video api only
+    assert "/api/video/" in _MGR and "/api/library/" not in _MGR
 
 
 def test_video_tools_page_has_three_scan_modes():
@@ -414,13 +417,11 @@ def test_movie_detail_subpage_present():
 
 
 def test_library_cards_are_real_detail_links():
-    # Cards are genuine <a href="/video-detail/library/<kind>/<id>"> (parity with
-    # the music artist cards) so reload / new-tab / Back work.
-    assert 'data-video-card-open="' in _LIB_JS
-    assert "/video-detail/library/" in _LIB_JS
-    assert "kind === 'show' ?" not in _LIB_JS      # the old show-only gate is gone
+    # Cards and table rows are genuine <a href="/video-detail/library/<kind>/<id>">
+    # (parity with the music artist cards) so reload / new-tab / Back work.
+    assert "/video-detail/library/${row.kind}/${row.id}" in _MGR
     # Modifier-clicks fall through to the real href (open in new tab).
-    assert "metaKey" in _LIB_JS and "ctrlKey" in _LIB_JS
+    assert "metaKey" in _MGR and "ctrlKey" in _MGR
 
 
 def test_video_side_has_real_url_routing():
@@ -521,9 +522,7 @@ def test_detail_keeps_preview_items_in_app():
 
 
 def test_library_cards_open_detail():
-    src = _LIB_JS
-    assert "soulsync:video-open-detail" in src          # show cards drill in
-    assert "data-video-card-open" in src
+    assert "soulsync:video-open-detail" in _MGR          # cards and rows drill in
 
 
 def test_video_side_registers_detail_pages_and_open_event():
@@ -569,32 +568,27 @@ def test_controller_is_isolated_iife_with_no_globals():
 # ── library page: rating/watched/genre filters + card enrichments (overnight pass) ──
 
 def test_library_toolbar_has_rating_sort_watched_filter_and_genre_dropdown():
-    assert '<option value="rating">Rating</option>' in _INDEX
-    assert '<option value="watched">Watched</option>' in _INDEX
-    assert '<option value="unwatched">Unwatched</option>' in _INDEX
-    assert 'data-video-lib-genre' in _INDEX
-    # the JS wires + sends them
-    assert "state.genre" in _LIB_JS
-    assert "/api/video/library/genres?kind=" in _LIB_JS
+    # rating is a sortable column, unwatched a "needs a look" filter, genre a
+    # filter read from the manager's own facets
+    assert "sort: 'rating'" in _MGR
+    assert "unwatched" in _MGR
+    assert "facets.genres" in _MGR and "filters.genre" in _MGR
 
 
 def test_library_cards_show_rating_show_progress_and_status_badge():
-    assert "vlib-rate" in _LIB_JS                      # ★ rating in the stat line
-    assert "vlib-watched" in _LIB_JS                   # watched tick on movie cards
-    # Airing/Ended/Upcoming moved to the POSTER CORNER (Boulder: the stat line
-    # is too tight on small cards to fit it after year/★/eps/size)
-    assert "function showStatusBadge(" in _LIB_JS
-    assert 'video-card-badge video-card-badge--airing' in _LIB_JS
-    assert "showStatusChip" not in _LIB_JS             # the stat-line chip is gone
-    assert "vlib-prog" in _LIB_JS                      # owned-episodes progress line
+    # a show card and a show row carry owned-of-total episodes with a progress line
+    assert "episodes_owned" in _MGR and "s.progress" in _MGR
+    # the poster corner carries the resolution (or Wanted for a title with no file)
+    assert "s.cardRes" in _MGR and "Wanted" in _MGR
+    # the status badge classes are still in the sheet: the watchlist and search cards use them
     css = _CSS_PATH.read_text(encoding="utf-8")
-    for cls in (".vlib-rate", ".video-card-badge--airing", ".video-card-badge--ended",
-                ".video-card-badge--upcoming", ".vlib-prog-fill"):
+    for cls in (".video-card-badge--airing", ".video-card-badge--ended", ".video-card-badge--upcoming"):
         assert cls in css, cls
 
 
 def test_library_pagination_shows_item_range():
-    assert "' of ' + p.total_count" in _LIB_JS
+    # the result line says how many match; the pager says which page of how many
+    assert "totals.count.toLocaleString()" in _MGR and "totals.pages" in _MGR
 
 
 def test_video_side_remembers_per_page_scroll():

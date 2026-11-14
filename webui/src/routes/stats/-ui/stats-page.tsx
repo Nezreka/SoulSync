@@ -247,220 +247,222 @@ export function StatsPage() {
     playStatsTrack(bridge, track);
 
   return (
-    <div id="stats-container" className={styles.page} data-testid="stats-page">
-      <header className={styles.head}>
-        <div className={styles.headMain}>
-          <h1>Stats</h1>
-          <p className={styles.headSub}>
-            {tab === 'library'
-              ? 'What is in your library today'
-              : hasData
-                ? `${(overview.total_plays ?? 0).toLocaleString('en-US')} plays ${statsRangePhrase(range)}`
-                : 'Your listening, once there is some'}
-          </p>
-        </div>
-        <div className={styles.headActs}>
-          {/* The story is a listening fact, so it does not belong on the
+    <div className="page-shell pgf-shell">
+      <div id="stats-container" className={`pgf-page ${styles.page}`} data-testid="stats-page">
+        <header className={styles.head}>
+          <div className={styles.headMain}>
+            <h1 className="pgf-title">Stats</h1>
+            <p className={styles.headSub}>
+              {tab === 'library'
+                ? 'What is in your library today'
+                : hasData
+                  ? `${(overview.total_plays ?? 0).toLocaleString('en-US')} plays ${statsRangePhrase(range)}`
+                  : 'Your listening, once there is some'}
+            </p>
+          </div>
+          <div className={styles.headActs}>
+            {/* The story is a listening fact, so it does not belong on the
               Library tab where nothing else is about the person. */}
-          {tab === 'listening' ? (
-            <button
-              type="button"
-              className={styles.cap}
-              onClick={openStory}
-              data-testid="stats-year-button"
-            >
-              Your Year
-            </button>
-          ) : null}
-          {/* Library stats are not range-scoped: disk usage is what it is
+            {tab === 'listening' ? (
+              <button
+                type="button"
+                className={styles.cap}
+                onClick={openStory}
+                data-testid="stats-year-button"
+              >
+                Your Year
+              </button>
+            ) : null}
+            {/* Library stats are not range-scoped: disk usage is what it is
               today, so the picker is hidden rather than left inert. */}
-          <div
-            id="stats-time-range"
-            className={styles.seg}
-            role="group"
-            aria-label="Listening stats range"
-            hidden={tab !== 'listening'}
-          >
-            {(['7d', '30d', '12m', 'all'] as const).map((option) => (
+            <div
+              id="stats-time-range"
+              className={styles.seg}
+              role="group"
+              aria-label="Listening stats range"
+              hidden={tab !== 'listening'}
+            >
+              {(['7d', '30d', '12m', 'all'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={styles.segButton}
+                  aria-pressed={range === option}
+                  onClick={() => onRangeChange(option)}
+                >
+                  {getStatsRangeLabel(option)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <div className={styles.subBar}>
+          <div className={styles.seg} role="tablist" aria-label="Stats section">
+            {STATS_TAB_VALUES.map((option) => (
               <button
                 key={option}
                 type="button"
+                role="tab"
+                aria-selected={tab === option}
                 className={styles.segButton}
-                aria-pressed={range === option}
-                onClick={() => onRangeChange(option)}
+                onClick={() => onTabChange(option)}
               >
-                {getStatsRangeLabel(option)}
+                {option === 'listening' ? 'Listening' : 'Library'}
               </button>
             ))}
           </div>
-        </div>
-      </header>
 
-      <div className={styles.subBar}>
-        <div className={styles.seg} role="tablist" aria-label="Stats section">
-          {STATS_TAB_VALUES.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="tab"
-              aria-selected={tab === option}
-              className={styles.segButton}
-              onClick={() => onTabChange(option)}
-            >
-              {option === 'listening' ? 'Listening' : 'Library'}
-            </button>
-          ))}
-        </div>
-
-        <div className={styles.sync}>
-          {isStandalone ? (
-            <span
-              className={styles.syncItem}
-              role="note"
-              title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
-            >
-              Standalone mode: manual sync unavailable
-            </span>
-          ) : (
-            <span className={styles.syncItem}>
-              <span className={styles.syncDot} aria-hidden="true" />
-              <span>{lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}</span>
-              <button
-                id="stats-sync-btn"
-                type="button"
-                className={styles.linkButton}
-                onClick={() => syncMutation.mutate()}
-                disabled={syncing}
-                aria-label="Sync listening stats"
-                title="Sync now"
+          <div className={styles.sync}>
+            {isStandalone ? (
+              <span
+                className={styles.syncItem}
+                role="note"
+                title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
               >
-                {syncing ? 'Syncing…' : 'Sync now'}
-              </button>
-            </span>
-          )}
-          {isImportCardYours(lastfmImportQuery.data) ? (
-            <LastfmImportControl
-              status={lastfmImportQuery.data}
-              onRun={() => lastfmMutation.mutate()}
-              running={lastfmMutation.isPending}
-            />
-          ) : null}
-          {isImportCardYours(listenbrainzImportQuery.data) ? (
-            <ListenbrainzImportControl
-              status={listenbrainzImportQuery.data}
-              onRun={() => listenbrainzMutation.mutate()}
-              running={listenbrainzMutation.isPending}
-            />
-          ) : null}
+                Standalone mode: manual sync unavailable
+              </span>
+            ) : (
+              <span className={styles.syncItem}>
+                <span className={styles.syncDot} aria-hidden="true" />
+                <span>{lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}</span>
+                <button
+                  id="stats-sync-btn"
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncing}
+                  aria-label="Sync listening stats"
+                  title="Sync now"
+                >
+                  {syncing ? 'Syncing…' : 'Sync now'}
+                </button>
+              </span>
+            )}
+            {isImportCardYours(lastfmImportQuery.data) ? (
+              <LastfmImportControl
+                status={lastfmImportQuery.data}
+                onRun={() => lastfmMutation.mutate()}
+                running={lastfmMutation.isPending}
+              />
+            ) : null}
+            {isImportCardYours(listenbrainzImportQuery.data) ? (
+              <ListenbrainzImportControl
+                status={listenbrainzImportQuery.data}
+                onRun={() => listenbrainzMutation.mutate()}
+                running={listenbrainzMutation.isPending}
+              />
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      {story === 'year' ? <YearStory onClose={closeStory} /> : null}
+        {story === 'year' ? <YearStory onClose={closeStory} /> : null}
 
-      {cachedStatsQuery.isPending ? (
-        <SectionLoadingState />
-      ) : cachedStatsQuery.error ? (
-        <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
-      ) : tab === 'library' ? (
-        /* Operational facts. Deliberately NOT range-scoped: disk usage and
+        {cachedStatsQuery.isPending ? (
+          <SectionLoadingState />
+        ) : cachedStatsQuery.error ? (
+          <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
+        ) : tab === 'library' ? (
+          /* Operational facts. Deliberately NOT range-scoped: disk usage and
            database size are what they are right now. */
-        <div className={styles.view}>
-          <StatsLibraryHealth
-            health={cachedStats?.health ?? {}}
-            databaseBytes={dbStorageQuery.data?.total_file_size}
-          />
-          <div className={styles.two}>
-            <StatsSectionCard title="Library disk usage">
-              <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
-            </StatsSectionCard>
-            <StatsSectionCard title="Database storage">
-              <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
-            </StatsSectionCard>
-          </div>
-        </div>
-      ) : hasData ? (
-        <div className={styles.view}>
-          <section className={`${styles.card} ${styles.hero}`} aria-label="This period">
-            <HeroArtist artist={topArtist} />
-            <div className={styles.heroBody}>
-              {sentence.length ? (
-                <p className={styles.heroSay}>
-                  {sentence.map((part, index) =>
-                    part.strong ? <b key={index}>{part.text}</b> : part.text,
-                  )}
-                </p>
-              ) : null}
-              <OverviewFigures
-                overview={overview}
-                previous={cachedStats?.previous ?? null}
-                periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
-              />
+          <div className={styles.view}>
+            <StatsLibraryHealth
+              health={cachedStats?.health ?? {}}
+              databaseBytes={dbStorageQuery.data?.total_file_size}
+            />
+            <div className={styles.two}>
+              <StatsSectionCard title="Library disk usage">
+                <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
+              </StatsSectionCard>
+              <StatsSectionCard title="Database storage">
+                <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
+              </StatsSectionCard>
             </div>
-          </section>
-
-          <div className={styles.two}>
-            <StatsSectionCard
-              title="Listening activity"
-              note="Plays over time. Click a bar to see what you played."
-            >
-              <StatsActivityChart
-                timeline={cachedStats?.timeline ?? []}
-                busiest={cachedStats?.rhythm?.busiest_day}
-                onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
-              />
-            </StatsSectionCard>
-            <StatsSectionCard title="When you listen" note="Hour by weekday">
-              <StatsListeningClock
-                clock={cachedStats?.clock}
-                rhythm={cachedStats?.rhythm}
-                onCellSelect={(weekday, hour) =>
-                  setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
-                }
-              />
-            </StatsSectionCard>
           </div>
+        ) : hasData ? (
+          <div className={styles.view}>
+            <section className={`${styles.card} ${styles.hero}`} aria-label="This period">
+              <HeroArtist artist={topArtist} />
+              <div className={styles.heroBody}>
+                {sentence.length ? (
+                  <p className={styles.heroSay}>
+                    {sentence.map((part, index) =>
+                      part.strong ? <b key={index}>{part.text}</b> : part.text,
+                    )}
+                  </p>
+                ) : null}
+                <OverviewFigures
+                  overview={overview}
+                  previous={cachedStats?.previous ?? null}
+                  periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
+                />
+              </div>
+            </section>
 
-          <StatsTopArtists artists={cachedStats?.top_artists ?? []} />
-          <StatsTopAlbums albums={cachedStats?.top_albums ?? []} />
+            <div className={styles.two}>
+              <StatsSectionCard
+                title="Listening activity"
+                note="Plays over time. Click a bar to see what you played."
+              >
+                <StatsActivityChart
+                  timeline={cachedStats?.timeline ?? []}
+                  busiest={cachedStats?.rhythm?.busiest_day}
+                  onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
+                />
+              </StatsSectionCard>
+              <StatsSectionCard title="When you listen" note="Hour by weekday">
+                <StatsListeningClock
+                  clock={cachedStats?.clock}
+                  rhythm={cachedStats?.rhythm}
+                  onCellSelect={(weekday, hour) =>
+                    setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
+                  }
+                />
+              </StatsSectionCard>
+            </div>
 
-          <div className={styles.two}>
-            <StatsTopTracks tracks={cachedStats?.top_tracks ?? []} onPlay={play} />
-            <StatsSectionCard
-              title="What you own and what you play"
-              note="By genre, as a share of each"
-            >
-              <StatsOwnVsPlayCard
-                rows={cachedStats?.own_vs_play ?? []}
-                genres={cachedStats?.genres ?? []}
-              />
-            </StatsSectionCard>
+            <StatsTopArtists artists={cachedStats?.top_artists ?? []} />
+            <StatsTopAlbums albums={cachedStats?.top_albums ?? []} />
+
+            <div className={styles.two}>
+              <StatsTopTracks tracks={cachedStats?.top_tracks ?? []} onPlay={play} />
+              <StatsSectionCard
+                title="What you own and what you play"
+                note="By genre, as a share of each"
+              >
+                <StatsOwnVsPlayCard
+                  rows={cachedStats?.own_vs_play ?? []}
+                  genres={cachedStats?.genres ?? []}
+                />
+              </StatsSectionCard>
+            </div>
+
+            <div className={styles.two}>
+              <StatsSectionCard title="Recently played">
+                <StatsRecentPlays tracks={cachedStats?.recent ?? []} onPlay={play} />
+              </StatsSectionCard>
+              <StatsSectionCard
+                title="Never played"
+                note="The biggest albums you own and have not started"
+              >
+                <StatsNeverPlayed albums={cachedStats?.neglected ?? []} />
+              </StatsSectionCard>
+            </div>
           </div>
-
-          <div className={styles.two}>
-            <StatsSectionCard title="Recently played">
-              <StatsRecentPlays tracks={cachedStats?.recent ?? []} onPlay={play} />
-            </StatsSectionCard>
-            <StatsSectionCard
-              title="Never played"
-              note="The biggest albums you own and have not started"
-            >
-              <StatsNeverPlayed albums={cachedStats?.neglected ?? []} />
-            </StatsSectionCard>
-          </div>
-        </div>
-      ) : (
-        <StatsEmptyState />
-      )}
-      {listeningDetailFilter ? (
-        <StatsListeningDetailModal
-          payload={listeningDetailsQuery.data}
-          filter={listeningDetailFilter}
-          loading={listeningDetailsQuery.isPending && !listeningDetailsQuery.data}
-          error={listeningDetailsQuery.error}
-          onClose={() => setListeningDetailFilter(null)}
-          onPlay={play}
-        />
-      ) : null}
+        ) : (
+          <StatsEmptyState />
+        )}
+        {listeningDetailFilter ? (
+          <StatsListeningDetailModal
+            payload={listeningDetailsQuery.data}
+            filter={listeningDetailFilter}
+            loading={listeningDetailsQuery.isPending && !listeningDetailsQuery.data}
+            error={listeningDetailsQuery.error}
+            onClose={() => setListeningDetailFilter(null)}
+            onPlay={play}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

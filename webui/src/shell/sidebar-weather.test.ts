@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw';
 
 import {
+  liteDevice,
   bootSidebarWeather,
   currentHoliday,
   closePopover,
@@ -394,6 +395,96 @@ describe('the particle scene', () => {
     hiddenFlag = false;
     document.dispatchEvent(new Event('visibilitychange'));
     expect(raf.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('stops drawing while the sidebar is off screen (a phone with its menu closed)', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext()) as never;
+    let nextId = 1;
+    const raf = vi.fn(() => nextId++);
+    const caf = vi.fn();
+    Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: raf });
+    Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: caf });
+    let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+          seen = cb;
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+
+    await bootSidebarWeather();
+    const scheduled = raf.mock.results[0].value as number;
+    expect(seen).not.toBeNull();
+    // the drawer slides off to the left: nothing is drawn for nobody
+    seen!([{ isIntersecting: false }]);
+    expect(caf).toHaveBeenCalledWith(scheduled);
+    const before = raf.mock.calls.length;
+    // a tab coming back does not restart a sky that is still off screen
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(raf.mock.calls.length).toBe(before);
+    // the menu opens: the sky runs again
+    seen!([{ isIntersecting: true }]);
+    expect(raf.mock.calls.length).toBe(before + 1);
+    vi.unstubAllGlobals();
+  });
+
+  it('draws every other frame and fewer pixels on a phone', async () => {
+    const ctx = fake2dContext();
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ctx) as never;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (q: string) => ({
+        matches: q === '(max-width: 768px)',
+        media: q,
+        addEventListener() {},
+        removeEventListener() {},
+      }),
+    });
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 3 });
+    expect(liteDevice()).toBe(true);
+    const frames: ((now: number) => void)[] = [];
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (cb: (now: number) => void) => frames.push(cb),
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: vi.fn() });
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+
+    await bootSidebarWeather();
+    const canvas = document.getElementById('sidebar-weather-scene') as HTMLCanvasElement;
+    // 1.5x at most, where a desktop gets 2x
+    expect(canvas.width).toBe(Math.round(280 * 1.5));
+    const loop = frames[0];
+    const drawn = () => (ctx.clearRect as ReturnType<typeof vi.fn>).mock?.calls.length ?? 0;
+    const start = drawn();
+    loop(1016); // 16ms on: skipped
+    expect(drawn()).toBe(start);
+    loop(1034); // 34ms on: drawn
+    expect(drawn()).toBeGreaterThan(start);
+    now.mockRestore();
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1 });
+  });
+
+  it('a desktop is not a lite device', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (q: string) => ({
+        matches: false,
+        media: q,
+        addEventListener() {},
+        removeEventListener() {},
+      }),
+    });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { configurable: true, value: 12 });
+    expect(liteDevice()).toBe(false);
+    document.body.classList.add('max-performance');
+    expect(liteDevice()).toBe(true);
+    document.body.classList.remove('max-performance');
   });
 
   it('renders nothing at all when the snapshot is null (the backend never emits a null scene with a snapshot)', async () => {

@@ -1045,3 +1045,255 @@ def test_a_stub_with_another_track_count_is_no_ones_twin(repair_db):
 
     assert stats["albums_folded"] == 0
     assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (stub,)).fetchone()
+
+
+def test_sanitize_repairs_a_wishlist_row_key_stored_as_the_track_id(repair_db):
+    """nov 13 2026, found on a real library: a wishlist download's row key
+    ("<track>::<album>") was stored in lib2_tracks.spotify_id. a deezer key
+    goes home to deezer, a spotify key keeps the spotify id."""
+    legacy_db, conn = repair_db
+    artist = _artist(conn, "Dove Cameron")
+    album = _album(conn, artist, "Silver Screen Baby")
+    rows = {}
+    for name, spotify_id, external in (
+            ("deezer key", "4386979091::1137050721", {"deezer": "4386979091", "tidal": "575382648"}),
+            ("spotify key", "6rqhFgbbKwnb9MLmUQDhG6::2noRn2Aes5aoNVsU6iWThc", {}),
+            ("untouched", "0VjIjW4GlUZAMYd2vXMi3b", {})):
+        rows[name] = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) VALUES(?,?,?,?)",
+            (album, name, spotify_id, json.dumps(external))).lastrowid
+    conn.commit()
+
+    repair_duplicate_artists(legacy_db)
+
+    def read(name):
+        row = conn.execute("SELECT spotify_id, external_ids FROM lib2_tracks WHERE id=?",
+                           (rows[name],)).fetchone()
+        return row["spotify_id"], json.loads(row["external_ids"] or "{}")
+
+    spotify_id, ids = read("deezer key")
+    assert spotify_id is None
+    assert ids["deezer"] == "4386979091" and ids["tidal"] == "575382648"
+    assert not any("::" in str(v) for v in ids.values())
+    assert read("spotify key")[0] == "6rqhFgbbKwnb9MLmUQDhG6"
+    assert read("untouched")[0] == "0VjIjW4GlUZAMYd2vXMi3b"
+    # and a second pass has nothing left to do
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE spotify_id LIKE '%::%'").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# One file, one path, however it was written (Nov 13 2026)
+# ---------------------------------------------------------------------------
+
+WIN_FWD = "H:/Music/Maroon 5/Lost Stars/01 - Lost Stars.flac"
+WIN_BACK = "H:\\Music\\Maroon 5\\Lost Stars\\01 - Lost Stars.flac"
+
+
+def test_a_windows_path_has_two_spellings_and_a_linux_path_has_one():
+    from core.library2.track_files import path_identity, path_spellings
+
+    assert set(path_spellings(WIN_FWD)) == set(path_spellings(WIN_BACK)) == {WIN_FWD, WIN_BACK}
+    assert path_spellings(WIN_BACK)[0] == WIN_BACK            # the given one first
+    assert path_identity(WIN_FWD) == path_identity(WIN_BACK) == WIN_FWD
+    assert set(path_spellings("\\\\nas\\share\\a.flac")) == {"\\\\nas\\share\\a.flac", "//nas/share/a.flac"}
+    # on linux a backslash is part of a name, never a separator
+    linux = "/app/Transfer/AC\\DC/Back in Black/01.flac"
+    assert path_spellings(linux) == (linux,) and path_identity(linux) == linux
+    assert path_spellings("") == () and path_spellings(None) == ()
+
+
+def test_a_file_is_found_under_its_other_spelling(repair_db):
+    from core.library2.track_files import stored_spelling, track_id_for_path
+
+    _legacy_db, conn = repair_db
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost Stars')",
+                         (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)", (track, WIN_FWD))
+    conn.commit()
+    assert stored_spelling(conn, WIN_BACK) == WIN_FWD
+    assert stored_spelling(conn, WIN_FWD) == WIN_FWD
+    assert stored_spelling(conn, "H:\\Music\\new.flac") == "H:\\Music\\new.flac"   # unknown: as given
+    assert track_id_for_path(conn, WIN_BACK, basename=False) == track
+
+
+def test_the_scan_does_not_adopt_a_file_it_holds_under_the_other_spelling(repair_db, monkeypatch):
+    """the scan resolved the server's path with backslashes, did not find the
+    forward-slash row, and brought the file in a second time: a second file
+    row, or a second track, and the song twice in Songs."""
+    from core.library2 import autolink, media_server_sync
+
+    _legacy_db, conn = repair_db
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost Stars')",
+                         (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)", (track, WIN_FWD))
+    conn.commit()
+    linked = []
+    monkeypatch.setattr(autolink, "link_download_into_library_v2",
+                        lambda context, **kw: linked.append(context) or 1)
+    monkeypatch.setattr(media_server_sync.os.path, "isfile", lambda p: True)
+    adopted = media_server_sync.adopt_scanned_file(
+        conn.cursor(), WIN_BACK, "/data/music/Maroon 5/Lost Stars/01 - Lost Stars.flac", "plex",
+        server_info={"name": "Lost Stars", "artist": "Maroon 5"})
+    assert adopted is False and linked == []
+
+
+def _file_row(conn, track, path, **columns):
+    names = ", ".join(("track_id", "path", *columns))
+    return conn.execute(f"INSERT INTO lib2_track_files({names}) VALUES({','.join('?' * (2 + len(columns)))})",
+                        (track, path, *columns.values())).lastrowid
+
+
+def test_twin_tracks_of_one_file_under_two_spellings_fold_into_one(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    album = _album(conn, _artist(conn, "Maroon 5"), "Lost Stars")
+    plex = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+                        "VALUES(?, 'Lost Stars', 15, 'plex')", (album,)).lastrowid
+    twin = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                        "VALUES(?, 'Lost Stars', 15)", (album,)).lastrowid
+    _file_row(conn, plex, WIN_BACK)
+    _file_row(conn, twin, WIN_FWD)
+    # an unrelated file written with backslashes, and a linux name holding one
+    other = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                         "VALUES(?, 'Other', 2)", (album,)).lastrowid
+    _file_row(conn, other, "H:\\Music\\Maroon 5\\Lost Stars\\02 - Other.flac")
+    linux_a = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'A', 3)",
+                           (album,)).lastrowid
+    linux_b = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'B', 4)",
+                           (album,)).lastrowid
+    _file_row(conn, linux_a, "/music/AC\\DC.flac")
+    _file_row(conn, linux_b, "/music/AC/DC.flac")
+    conn.commit()
+
+    files_before = conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0]
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["shared_files_folded"] == 1
+    tracks = [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE title='Lost Stars'")]
+    assert tracks == [plex]                                   # the server's row keeps the file
+    assert [r[0] for r in conn.execute("SELECT path FROM lib2_track_files WHERE track_id=?", (plex,))] == [WIN_BACK]
+    # one row gone: the twin's. nothing else was touched
+    assert conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == files_before - 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE id IN (?,?,?)",
+                        (other, linux_a, linux_b)).fetchone()[0] == 3
+    # and nothing more to do
+    again = fold_shared_file_tracks(conn)
+    assert (again["shared_files_folded"], again["file_rows_folded"]) == (0, 0)
+
+
+def test_one_file_twice_on_one_track_keeps_one_row(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    album = _album(conn, _artist(conn, "21 Savage"), "american dream")
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+                         "VALUES(?, 'redrum', 3, 'plex')", (album,)).lastrowid
+    first = _file_row(conn, track, "H:/Music/21 Savage/american dream/03 - redrum.flac", size=28734963)
+    _file_row(conn, track, "H:\\Music\\21 Savage\\american dream\\03 - redrum.flac", size=28734963)
+    conn.commit()
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["file_rows_folded"] == 1
+    rows = conn.execute("SELECT id, is_primary FROM lib2_track_files WHERE track_id=?", (track,)).fetchall()
+    assert [(r[0], r[1]) for r in rows] == [(first, 1)]       # the older row, and it is the primary
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE id=?", (track,)).fetchone()[0] == 1
+
+
+# ── #2094: a rip's "Album - Title" row is the leftover of the retagged song ──
+
+def _labor_days(conn, *, leftover_ms=152000, kept_ms=153000, leftover_title="Labor Days - Labor"):
+    artist = _artist(conn, "Aesop Rock")
+    album = _album(conn, artist, "Labor Days")
+    leftover = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, duration, play_count) "
+        "VALUES(?, ?, 1, 1, ?, 2)", (album, leftover_title, leftover_ms)).lastrowid
+    kept = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, duration, play_count) "
+        "VALUES(?, 'Labor', 1, 1, ?, 5)", (album, kept_ms)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/Aesop Rock/Labor Days/01 - Labor.flac')",
+                 (kept,))
+    conn.commit()
+    return album, leftover, kept
+
+
+def test_a_row_titled_with_its_album_in_front_folds_into_the_song(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, leftover, kept = _labor_days(conn)
+    assert fold_fileless_twins(conn, [leftover]) == 1
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE album_id=?", (album,))] == [kept]
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?", (kept,)).fetchone()[0] == 7
+
+
+@pytest.mark.parametrize("title", [
+    "Aesop Rock - Labor", "Aesop Rock - Labor Days - Labor", "labor days – labor", "Labor Days: Labor"])
+def test_the_artist_in_front_and_other_dashes_read_the_same(repair_db, title):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    _album_id, leftover, _kept = _labor_days(conn, leftover_title=title)
+    assert fold_fileless_twins(conn, [leftover]) == 1
+
+
+def test_a_prefixed_title_of_another_length_is_another_recording(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, leftover, _kept = _labor_days(conn, leftover_ms=152000, kept_ms=240000)
+    assert fold_fileless_twins(conn, [leftover]) == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,)).fetchone()[0] == 2
+
+
+def test_a_different_song_at_that_position_is_never_folded(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    _album_id, leftover, _kept = _labor_days(conn, leftover_title="Labor Days - Daylight")
+    assert fold_fileless_twins(conn, [leftover]) == 0
+    # and a song whose own name starts with the album's is left whole
+    _a2, other, _k2 = _labor_days(conn, leftover_title="Labor Days")
+    assert fold_fileless_twins(conn, [other]) == 0
+
+
+def test_the_sweep_finds_leftovers_no_removal_reported(repair_db):
+    """the retag moved the file to another row: nothing was removed, so
+    nothing ever asked for the old row to be folded"""
+    from core.library2.dedup_repair import fold_leftover_rows
+    _legacy_db, conn = repair_db
+    album, _leftover, kept = _labor_days(conn)
+    # a missing track with no twin, and a filed track, are not touched
+    missing = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+                           "VALUES(?, 'Daylight', 2, 1)", (album,)).lastrowid
+    conn.commit()
+    assert fold_leftover_rows(conn) == {"leftover_tracks_folded": 1}
+    assert [r[0] for r in conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY id", (album,))] == [kept, missing]
+    assert fold_leftover_rows(conn) == {"leftover_tracks_folded": 0}
+
+
+def test_a_page_address_is_not_a_spotify_id(repair_db):
+    """a last.fm page stored as the spotify id read as an id that disagreed
+    with the real one, and kept two rows of one album apart"""
+    from core.library2.dedup_repair import _sanitize_provider_namespaces
+    _legacy_db, conn = repair_db
+    artist = _artist(conn, "Aesop Rock")
+    page = "https://www.last.fm/music/Aesop+Rock/Labor+Days"
+    column = _album(conn, artist, "Labor Days", spotify_id=page)
+    blob = _album(conn, artist, "Float", external_ids=json.dumps({"spotify": page, "deezer": "9"}))
+    link = _album(conn, artist, "Bazooka Tooth",
+                  spotify_id="https://open.spotify.com/album/3zJMNOxnbHWG2rZwswnSM2?si=x")
+    real = _album(conn, artist, "None Shall Pass", spotify_id="3zJMNOxnbHWG2rZwswnSM2")
+    conn.commit()
+    assert _sanitize_provider_namespaces(conn, conn.cursor()) == 3
+    row = lambda pk: conn.execute(  # noqa: E731
+        "SELECT spotify_id, external_ids FROM lib2_albums WHERE id=?", (pk,)).fetchone()
+    assert row(column)["spotify_id"] is None
+    assert json.loads(row(column)["external_ids"]) == {"lastfm": page}
+    assert json.loads(row(blob)["external_ids"]) == {"deezer": "9", "lastfm": page}
+    assert row(link)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
+    assert row(real)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
+    assert _sanitize_provider_namespaces(conn, conn.cursor()) == 0

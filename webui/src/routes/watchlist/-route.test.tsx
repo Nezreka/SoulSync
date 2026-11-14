@@ -32,6 +32,7 @@ function artistRow(overrides: Record<string, unknown> = {}) {
     include_eps: false,
     include_singles: true,
     include_live: false,
+    include_live_tracks: false,
     include_remixes: false,
     include_acoustic: false,
     include_compilations: false,
@@ -134,6 +135,7 @@ function stubFetch(options: StubOptions = {}) {
             include_eps: true,
             include_singles: true,
             include_live: false,
+            include_live_tracks: false,
             include_remixes: false,
             include_acoustic: false,
             include_compilations: false,
@@ -182,6 +184,7 @@ function stubFetch(options: StubOptions = {}) {
             include_eps: false,
             include_singles: true,
             include_live: false,
+            include_live_tracks: false,
             include_remixes: false,
             include_acoustic: false,
             include_compilations: false,
@@ -198,6 +201,7 @@ function stubFetch(options: StubOptions = {}) {
               include_eps: true,
               include_singles: true,
               include_live: false,
+              include_live_tracks: false,
               include_remixes: false,
               include_acoustic: false,
               include_compilations: false,
@@ -1046,7 +1050,7 @@ describe('watchlist route', () => {
     expect(follow).toBeChecked();
     expect(screen.getByText('Defaults')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Live albums' }));
     expect(follow).not.toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 

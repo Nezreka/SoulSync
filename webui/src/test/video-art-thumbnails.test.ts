@@ -86,7 +86,10 @@ describe('the grids use it', () => {
   it("the detail page's season rail and episode thumbs are sized", () => {
     const text = source(FILES.detail);
     expect(text).toContain('src="\' + sizedArt(art, 342)');
-    expect(text).toContain('src="\' + sizedArt(stillSrc, 342)');
+    // the episode rows are React now: the same sizing, in the list's own file
+    expect(source('src/features/video-library/episode-list.tsx')).toContain(
+      'src={sizedArt(stillSrc, 342)}',
+    );
   });
 
   it('no video grid asks for an unsized proxy poster in an <img>', () => {

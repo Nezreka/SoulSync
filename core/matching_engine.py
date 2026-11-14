@@ -1456,6 +1456,14 @@ class MusicMatchingEngine:
                 # Reject: Soulseek has instrumental but Spotify wants original
                 return 0.0, 'rejected_version_mismatch'
 
+        elif version_type in ('clean', 'radio') and not _wanted_on_purpose:
+            # #2081 "Never download clean versions": prefer-explicit only
+            # ranks, so a clean or radio edit still won when it was the best
+            # file on offer. with this on it is not a match at all, unless the
+            # wanted track is that cut itself ("Song (Radio Edit)").
+            if self._exclude_clean_enabled() and _wanted_version != version_type:
+                return 0.0, 'rejected_version_mismatch'
+
         # Apply version penalty (for matching versions, slight penalty for quality differences)
         if version_type != 'original':
             effective_penalty = penalty * 0.5  # Reduced penalty since it's a match
@@ -1594,6 +1602,18 @@ class MusicMatchingEngine:
             except Exception:
                 continue
         return matches
+
+    @staticmethod
+    def _exclude_clean_enabled() -> bool:
+        """The 'Never download clean versions' sub-setting (#2081). Like its
+        sibling it only means something while explicit content is allowed:
+        with explicit blocked, the clean cut is the one that is wanted.
+        Never raises (config trouble = feature off)."""
+        try:
+            return bool(config_manager.get('content_filter.exclude_clean', False)) and \
+                bool(config_manager.get('content_filter.allow_explicit', True))
+        except Exception:
+            return False
 
     @staticmethod
     def _prefer_explicit_enabled() -> bool:

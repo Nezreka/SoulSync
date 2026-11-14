@@ -114,7 +114,7 @@ export function GreetingGrid({
   const first = (name ?? '').trim().split(/\s+/)[0];
   return (
     <section className="dsc-greeting" aria-label="Jump back in">
-      <h1 className="dsc-greeting-title">
+      <h1 className="pgf-title dsc-greeting-title">
         {greeting(hour)}
         {first ? `, ${first}` : ''}
       </h1>

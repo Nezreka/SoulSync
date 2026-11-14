@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { type UseFileTagsPlan, UseFileTagsModal, describeApplied } from './use-file-tags-modal';
+import {
+  type UseFileTagsPlan,
+  UseFileTagsModal,
+  describeApplied,
+  releaseConfirmMessage,
+  releaseLibraryFileTagValues,
+} from './use-file-tags-modal';
 
 /**
  * #2070: the Library takes what the files themselves say. The window always
@@ -65,6 +71,7 @@ function mount(onClose = vi.fn()) {
 
 afterEach(() => {
   delete window.showToast;
+  delete window.showConfirmDialog;
 });
 
 describe('UseFileTagsModal', () => {
@@ -167,5 +174,92 @@ describe('describeApplied', () => {
         failed: [],
       }),
     ).toBe('Nothing needed changing');
+  });
+});
+
+/**
+ * #2084 (wolf39us): values taken from file tags are kept as edits, and there
+ * was no way to let go of them again short of clearing each field by hand.
+ */
+describe('releasing file tag values', () => {
+  const held = (n: number): UseFileTagsPlan => ({
+    ...PLAN,
+    counts: { ...PLAN.counts, held: n },
+  });
+
+  it('says nothing about held values when there are none', async () => {
+    server.use(http.get('/api/library/v2/albums/9/use-file-tags', () => HttpResponse.json(PLAN)));
+    mount();
+    await screen.findByText('1 track moves to the album its tag names');
+    expect(screen.queryByRole('button', { name: 'Release' })).toBeNull();
+  });
+
+  it('counts what is held and releases it only after a yes', async () => {
+    let released = 0;
+    server.use(
+      http.get('/api/library/v2/albums/9/use-file-tags', () => HttpResponse.json(held(3))),
+      http.delete('/api/library/v2/albums/9/use-file-tags', () => {
+        released += 1;
+        return HttpResponse.json({ success: true, released: 3 });
+      }),
+    );
+    const toast = vi.fn();
+    window.showToast = toast;
+    let answer = false;
+    const confirm = vi.fn(async () => answer);
+    window.showConfirmDialog = confirm as never;
+    const onClose = mount();
+
+    expect(await screen.findByText(/3 values here were already taken from file tags/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(released).toBe(0);
+    expect(onClose).not.toHaveBeenCalled();
+
+    answer = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('3 values released', 'success'));
+    expect(released).toBe(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('the confirm says what stays: hand edits and the files', () => {
+    const message = releaseConfirmMessage(1, 'your library');
+    expect(message).toContain('1 value in your library was taken from file tags');
+    expect(message).toContain('Edits you typed in yourself stay, and no file is changed');
+    expect(releaseConfirmMessage(2, 'Nine Lives')).toContain('2 values in Nine Lives were taken');
+  });
+
+  it('the library-wide release says so when nothing is held, and asks before it deletes', async () => {
+    let heldNow = 0;
+    let released = 0;
+    server.use(
+      http.get('/api/library/v2/use-file-tags', () =>
+        HttpResponse.json({ success: true, held: heldNow }),
+      ),
+      http.delete('/api/library/v2/use-file-tags', () => {
+        released += 1;
+        return HttpResponse.json({ success: true, released: heldNow });
+      }),
+    );
+    const toast = vi.fn();
+    window.showToast = toast;
+    let answer = false;
+    window.showConfirmDialog = vi.fn(async () => answer) as never;
+    const queryClient = createTestQueryClient();
+
+    await releaseLibraryFileTagValues(queryClient);
+    expect(toast).toHaveBeenCalledWith('Nothing in your library is held from file tags', 'info');
+    expect(window.showConfirmDialog).not.toHaveBeenCalled();
+
+    heldNow = 1204;
+    await releaseLibraryFileTagValues(queryClient);
+    expect(window.showConfirmDialog).toHaveBeenCalledTimes(1);
+    expect(released).toBe(0);
+
+    answer = true;
+    await releaseLibraryFileTagValues(queryClient);
+    expect(released).toBe(1);
+    expect(toast).toHaveBeenCalledWith('1,204 values released', 'success');
   });
 });

@@ -2,15 +2,6 @@
    the rest of the react pages (rgba white surfaces on the dark ground,
    accent from --accent-rgb / --accent-light-rgb). */
 
-.page {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 24px 32px 48px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 /* ── header strip ─────────────────────────────────────────────── */
 
 .strip {
@@ -1430,10 +1421,6 @@
 /* ── responsive ───────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
-  .page {
-    padding: 16px 16px 40px;
-  }
-
   .matcher {
     grid-template-columns: 1fr;
   }

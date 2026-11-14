@@ -4,10 +4,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px 32px 100px;
   box-sizing: border-box;
   color: #ffffff;
   position: relative;
@@ -62,70 +60,6 @@
 }
 
 /* ── Top Header & Search Bar ────────────────────────────────────────────── */
-
-.heroHeader {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 18px;
-  flex-shrink: 0;
-}
-
-.heroHeaderTitleRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.pageTitleGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.pageTitle {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.pageTitleIcon {
-  color: rgb(var(--accent-rgb));
-  display: inline-flex;
-  align-items: center;
-}
-
-.pageSubtitle {
-  font-size: 14px;
-  color: var(--white-a65);
-  margin: 0;
-}
-
-.downloadsBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-  color: rgb(var(--accent-rgb));
-  padding: 6px 14px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--dur-base) ease;
-}
-
-.downloadsBadge:hover {
-  background: rgba(var(--accent-rgb), 0.2);
-  border-color: rgba(var(--accent-rgb), 0.5);
-  transform: translateY(-1px);
-}
 
 .searchBarWrapper {
   position: relative;
@@ -194,20 +128,11 @@
   color: #ffffff;
 }
 
-/* ── Category Pills (Never Squooshed) ───────────────────────────────────── */
+/* ── Category Pills ─────────────────────────────────────────────────────── */
 
 .categoryPills {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-wrap: nowrap;
   overflow-x: auto;
-  overflow-y: hidden;
-  flex-shrink: 0 !important;
-  min-height: 52px;
-  height: 52px;
-  margin: 6px 0 24px 0;
-  padding: 4px 2px 8px 2px;
-  box-sizing: border-box;
   scrollbar-width: none;
 }
 
@@ -216,45 +141,7 @@
 }
 
 .categoryPill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 38px;
-  min-height: 38px;
-  flex-shrink: 0 !important;
-  padding: 0 18px;
-  background: var(--white-a05);
-  border: 1px solid var(--white-a09);
-  border-radius: 9999px;
-  color: var(--white-a80);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 36px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--dur-moderate) var(--ease-emphasized);
-  box-sizing: border-box;
-}
-
-.categoryPill:hover {
-  background: rgba(255, 255, 255, 0.11);
-  color: #ffffff;
-  border-color: rgba(var(--accent-rgb), 0.35);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px var(--black-a25);
-}
-
-.categoryPillActive {
-  background: linear-gradient(
-    135deg,
-    rgb(var(--accent-rgb)),
-    rgba(var(--accent-rgb), 0.82)
-  ) !important;
-  border-color: var(--white-a25) !important;
-  color: #ffffff !important;
-  font-weight: 700;
-  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.45);
+  flex-shrink: 0;
 }
 
 /* ── Spotlight Hero Card (Apple / Netflix Style) ────────────────────────── */
@@ -2017,19 +1904,6 @@
   animation-play-state: paused !important;
 }
 
-.allCategoriesBtn {
-  background: rgba(var(--accent-rgb), 0.12) !important;
-  border-color: rgba(var(--accent-rgb), 0.35) !important;
-  color: rgb(var(--accent-rgb)) !important;
-  font-weight: 700 !important;
-}
-
-.allCategoriesBtn:hover {
-  background: rgba(var(--accent-rgb), 0.22) !important;
-  border-color: rgba(var(--accent-rgb), 0.6) !important;
-  transform: translateY(-1px);
-}
-
 .spotlightIndexBadge {
   font-size: 11px;
   font-weight: 700;
@@ -2566,10 +2440,6 @@
 
 /* Tier 1: Small Laptops & Compact Desktops (1024px – 1200px) */
 @media (max-width: 1200px) {
-  .podcastsContainer {
-    padding: 20px 24px 80px;
-  }
-
   .podcastsContainerWithTopPlayer {
     padding-top: 105px !important;
   }
@@ -2650,10 +2520,6 @@
 
 /* Tier 2: Tablets Landscape & Netbooks (768px – 1024px) */
 @media (max-width: 1024px) {
-  .podcastsContainer {
-    padding: 18px 20px 80px;
-  }
-
   .podcastsContainerWithTopPlayer {
     padding-top: 110px !important;
   }
@@ -2771,60 +2637,14 @@
 
 /* Tier 3: Tablets Portrait & Mobile Devices (≤ 768px) */
 @media (max-width: 768px) {
-  .podcastsContainer {
-    padding: 72px 14px 84px;
-  }
-
   .podcastsContainerWithTopPlayer {
     padding-top: 185px !important;
-  }
-
-  /* Header & Search */
-  .heroHeader {
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-
-  .heroHeaderTitleRow {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .pageTitle {
-    font-size: 22px;
-    gap: 8px;
-  }
-
-  .pageSubtitle {
-    font-size: 12.5px;
-  }
-
-  .downloadsBadge {
-    padding: 5px 11px;
-    font-size: 11px;
   }
 
   .searchInput {
     height: 42px;
     font-size: 14px;
     padding: 0 38px 0 40px;
-  }
-
-  /* Category Pills */
-  .categoryPills {
-    margin: 4px 0 18px 0;
-    min-height: 44px;
-    height: 44px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .categoryPill {
-    height: 34px;
-    min-height: 34px;
-    padding: 0 14px;
-    font-size: 12px;
-    line-height: 32px;
   }
 
   /* Spotlight Hero Card */
@@ -3324,40 +3144,6 @@
 /* -------------------------------------------------------------------------- */
 /* Header Action Buttons (Add RSS, OPML)                                     */
 /* -------------------------------------------------------------------------- */
-
-.headerButtonGroup {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.headerActionBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 14px;
-  border-radius: 9999px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #e2e8f0;
-  background: var(--white-a06);
-  border: 1px solid var(--white-a12);
-  cursor: pointer;
-  transition: all var(--dur-quick) ease;
-  white-space: nowrap;
-}
-
-.headerActionBtn:hover {
-  background: var(--white-a12);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
-  transform: translateY(-1px);
-}
-
-.headerActionBtn:active {
-  transform: translateY(0);
-}
 
 /* -------------------------------------------------------------------------- */
 /* Modals: Common Backdrop & Dialog                                           */
