@@ -8435,9 +8435,7 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
     font-size: 13px; color: var(--white-a55);
 }
-.vd-page .vd-libselect { position: sticky; top: 8px; z-index: 5; }
-.vd-page .vd-libselect:empty, .vd-page .vd-libfoot:empty, .vd-page .vd-libline:empty { display: none; }
-.vd-page .vd-libselect > * { margin-bottom: 10px; }
+.vd-page .vd-libfoot:empty, .vd-page .vd-libline:empty { display: none; }
 .vd-page .vd-libfoot { margin-top: 36px; }
 @media (max-width: 720px) { .vd-page .vd-ep-files { padding: 4px 0 0; } }
 

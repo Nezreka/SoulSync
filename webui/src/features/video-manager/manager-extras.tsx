@@ -385,12 +385,15 @@ export function MoveDialog({
   kind,
   side,
   ids,
+  byHand = false,
   onClose,
   onRun,
 }: {
   kind: TitleKind;
   side: Side;
   ids: number[];
+  /** one title moved from its own page: a padlock does not hold it */
+  byHand?: boolean;
   onClose: () => void;
   onRun: (libraryId: number) => void;
 }) {
@@ -414,7 +417,7 @@ export function MoveDialog({
     let live = true;
     setPlan(null);
     setError(null);
-    fetchMovePreview(kind, ids, picked)
+    fetchMovePreview(kind, ids, picked, byHand)
       .then((p) => live && setPlan(p))
       .catch((e: Error) => live && setError(e.message));
     return () => {
@@ -540,14 +543,20 @@ const code = (season: number, episode: number) =>
 export function EpisodesTab({
   showId,
   onChanged,
+  startSeason,
+  startPicked,
 }: {
   showId: number;
   onChanged: (undoable?: Undoable) => void;
+  /** the season to open on (the show page opens it on the one in view) */
+  startSeason?: number;
+  /** files ticked from the start (the ones picked on the show page) */
+  startPicked?: number[];
 }) {
   const [seasons, setSeasons] = useState<SeasonEpisodes[] | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
-  const [picked, setPicked] = useState<Set<number>>(() => new Set());
-  const [toSeason, setToSeason] = useState('');
+  const [open, setOpen] = useState<number | null>(startSeason ?? null);
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(startPicked ?? []));
+  const [toSeason, setToSeason] = useState(startSeason != null ? String(startSeason) : '');
   const [toEpisode, setToEpisode] = useState('1');
   const [plan, setPlan] = useState<RenumberPlan | null>(null);
   const [error, setError] = useState<string | null>(null);

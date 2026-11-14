@@ -289,9 +289,11 @@ export function fetchMovePreview(
   kind: TitleKind,
   ids: number[],
   libraryId: number,
+  byHand = false,
 ): Promise<MovePreview> {
   return send<MovePreview>(
-    `/api/video/manager/move-preview?kind=${kind}&library_id=${libraryId}&ids=${ids.join(',')}`,
+    `/api/video/manager/move-preview?kind=${kind}&library_id=${libraryId}&ids=${ids.join(',')}` +
+      (byHand ? '&by_hand=1' : ''),
   );
 }
 

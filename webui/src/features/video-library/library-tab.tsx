@@ -31,10 +31,8 @@ import type {
 
 import {
   type AcquisitionState,
-  bulkFiles,
   type ConsolidateState,
   fetchAcquisition,
-  deleteFile,
   fetchConsolidateState,
   fetchTitleLibrary,
   releaseIdentity,
@@ -57,37 +55,43 @@ import {
   subtitleLabels,
 } from './format';
 import { ConsolidateDialog, CopiesDialog } from './library-dialogs';
-import { invalidate, onInvalidate } from './library-store';
+import { invalidate, onCommand, onInvalidate, type PageCommand, showData } from './library-store';
+import {
+  announce,
+  DeleteDialog,
+  MoveTitleDialog,
+  PadlockButton,
+  RenameDialog,
+  TitleHistoryDialog,
+  UndoToast,
+} from './manage-dialogs';
 import s from './video-library.module.css';
 
 /** the page's own flows, which the tab borrows instead of re-implementing. */
 export interface VideoDetailBridge {
   manualSearch?: (scope: 'movie' | 'season' | 'episode', season?: number, episode?: number) => void;
-  grabSeason?: (season: number) => void;
+  grabSeason?: (season: number) => Promise<unknown> | undefined;
   wishlistSeason?: (season: number) => void;
   clearSeasonFailures?: (season: number) => void;
   subtitleSearch?: (kind: 'movie' | 'episode', id: number, title: string, label: string) => void;
   openManage?: () => void;
   /** the title changed under the page (fixed match, deleted the last file). */
   reloadPage?: () => void;
-  /** the show's library data, for the page's own episode list to draw from */
-  onLibrary?: (data: ShowLibrary) => void;
-  /** the picked episodes were acted on: untick them */
-  clearSelection?: () => void;
+  /* the episode list is React now and borrows these from the page, which
+     owns the show's data and the grab engine */
+  grabEpisode?: (episode: number) => void;
+  wishEpisode?: (episode: number) => void;
+  setWatched?: (kind: 'episode' | 'season', id: number, watched: boolean) => void;
+  setSeasonMonitored?: (season: number, monitored: boolean) => Promise<unknown> | undefined;
 }
 
 /** where the page wants each part of the library island (video-detail.js) */
 export interface PageSlots {
   /** the library line, in the hero */
   hero?: HTMLElement | null;
-  /** the bar for the episodes picked in the page's list, above that list */
-  select?: HTMLElement | null;
   /** where it lives, under the episode list */
   foot?: HTMLElement | null;
 }
-
-/** the page's episode list says which episodes are ticked */
-export const SELECTION_EVENT = 'soulsync:video-ep-selection';
 
 declare global {
   interface Window {
@@ -513,7 +517,8 @@ export function FileCards({
 
 /* ── shared action handlers ───────────────────────────────────────────────── */
 
-export function useFileActions(reload: () => void, kind: TitleKind) {
+export function useFileActions(reload: () => void, kind: TitleKind, titleId: number) {
+  const [deleting, setDeleting] = useState<LibraryFile | null>(null);
   const onRename = useCallback(
     async (f: LibraryFile) => {
       const want = f.naming?.expected_name;
@@ -528,37 +533,31 @@ export function useFileActions(reload: () => void, kind: TitleKind) {
       try {
         const res = await renameFile(f.id);
         toast(res.message || 'Renamed');
+        announce({ kind, id: titleId, text: 'Renamed 1 file' }, res.batch);
         reload();
       } catch (e) {
         toast((e as Error).message || 'Rename failed', 'error');
       }
     },
-    [reload],
+    [reload, kind, titleId],
   );
-  const onDelete = useCallback(
-    async (f: LibraryFile, recycle: boolean, last: boolean) => {
-      const what = kind === 'movie' ? 'movie' : 'episode';
-      const ok = await confirm({
-        title: recycle ? 'Move to the recycle bin?' : 'Delete this file for good?',
-        message:
-          `“${f.filename}” ${recycle ? 'moves to the recycle bin, where it can be restored until it expires.' : 'is deleted permanently. Recycling is turned off in your library settings.'}` +
-          (last ? ` It’s the only copy, so the ${what} will show as missing.` : ''),
-        confirmText: recycle ? 'Move to recycle bin' : 'Delete',
-        destructive: true,
-      });
-      if (!ok) return;
-      try {
-        const res = await deleteFile(f.id);
-        toast(res.recycled ? 'Moved to the recycle bin' : 'File deleted');
+  const onDelete = useCallback((f: LibraryFile) => setDeleting(f), []);
+  // the delete shows what goes and what is left before anything is removed
+  const dialogs = deleting ? (
+    <DeleteDialog
+      kind={kind}
+      titleId={titleId}
+      fileIds={[deleting.id]}
+      scope={deleting.filename}
+      onClose={() => setDeleting(null)}
+      onDone={(emptied) => {
+        setDeleting(null);
         reload();
-        if (res.remaining === 0) bridge().reloadPage?.();
-      } catch (e) {
-        toast((e as Error).message || 'Delete failed', 'error');
-      }
-    },
-    [kind, reload],
-  );
-  return { onRename, onDelete };
+        if (emptied) bridge().reloadPage?.();
+      }}
+    />
+  ) : null;
+  return { onRename, onDelete, dialogs };
 }
 
 function useIdentity(kind: TitleKind, id: number, reload: () => void) {
@@ -581,31 +580,56 @@ function useIdentity(kind: TitleKind, id: number, reload: () => void) {
   return { fixing, setFixing, onRelease };
 }
 
-/** rename a set of files after one confirm, and say what happened to each */
-async function renameMany(files: LibraryFile[], kind: TitleKind, reload: () => void) {
-  const ok = await confirm({
-    title: `Rename ${plural(files.length, 'file')} to your template?`,
-    message:
-      'Each file is renamed where it sits, its subtitles and sidecars move with it, and nothing is overwritten. A file that would collide is skipped.',
-    confirmText: `Rename ${files.length}`,
-  });
-  if (!ok) return;
-  try {
-    const res = await bulkFiles(
-      'rename',
-      files.map((f) => f.id),
-      kind,
-    );
-    toast(
-      res.failed
-        ? `Renamed ${res.done}, ${res.failed} couldn’t be renamed`
-        : `Renamed ${plural(res.done, 'file')}`,
-      res.failed ? 'warning' : 'success',
-    );
-  } catch (e) {
-    toast((e as Error).message || 'Rename failed', 'error');
-  }
-  reload();
+/** what the page's More menu asked for: history, a move, a rename of every file */
+function usePageCommands(): [PageCommand | null, (next: PageCommand | null) => void] {
+  const [open, setOpen] = useState<PageCommand | null>(null);
+  useEffect(() => onCommand(setOpen), []);
+  return [open, setOpen];
+}
+
+/** the title-wide dialogs, the same for a movie and a show */
+function TitleDialogs({
+  kind,
+  id,
+  fileIds,
+  open,
+  setOpen,
+  reload,
+}: {
+  kind: TitleKind;
+  id: number;
+  fileIds: number[];
+  open: PageCommand | null;
+  setOpen: (next: PageCommand | null) => void;
+  reload: () => void;
+}) {
+  const close = () => setOpen(null);
+  const changed = () => {
+    reload();
+    bridge().reloadPage?.();
+  };
+  return (
+    <>
+      {open === 'history' ? (
+        <TitleHistoryDialog kind={kind} id={id} onClose={close} onChanged={changed} />
+      ) : null}
+      {open === 'move' ? <MoveTitleDialog kind={kind} id={id} onClose={close} /> : null}
+      {open === 'rename' && fileIds.length ? (
+        <RenameDialog
+          kind={kind}
+          titleId={id}
+          fileIds={fileIds}
+          scope={kind === 'movie' ? 'Every file of this movie' : 'Every file of this show'}
+          onClose={close}
+          onDone={() => {
+            close();
+            reload();
+          }}
+        />
+      ) : null}
+      <UndoToast kind={kind} id={id} />
+    </>
+  );
 }
 
 /* ── movie ────────────────────────────────────────────────────────────────── */
@@ -619,8 +643,9 @@ function MovieView({
   reload: () => void;
   heroSlot?: HTMLElement | null;
 }) {
-  const { onRename, onDelete } = useFileActions(reload, 'movie');
+  const { onRename, onDelete, dialogs: fileDialogs } = useFileActions(reload, 'movie', data.id);
   const { fixing, setFixing, onRelease } = useIdentity('movie', data.id, reload);
+  const [command, setCommand] = usePageCommands();
   const [copies, setCopies] = useState(false);
   const [busy, setBusy] = useState(false);
   const best = data.files.find((f) => f.best) ?? data.files[0];
@@ -630,7 +655,7 @@ function MovieView({
     canManage: data.can_manage,
     recycle: data.recycle,
     onRename,
-    onDelete: (f) => onDelete(f, data.recycle, data.files.length === 1),
+    onDelete,
     onSubtitles: b.subtitleSearch
       ? () => b.subtitleSearch?.('movie', data.id, data.title, '')
       : undefined,
@@ -738,9 +763,7 @@ function MovieView({
         ? {
             label: drifted.length === 1 ? 'Rename' : 'Rename all',
             onClick: () =>
-              drifted.length === 1 && drifted[0]
-                ? onRename(drifted[0])
-                : void renameMany(drifted, 'movie', reload),
+              drifted.length === 1 && drifted[0] ? onRename(drifted[0]) : setCommand('rename'),
           }
         : undefined,
     });
@@ -782,6 +805,12 @@ function MovieView({
       {data.identity.fixed ? <Chip tone="ok">Fixed by you</Chip> : null}
       {data.can_manage ? (
         <span className={s.libLinks}>
+          <PadlockButton
+            kind="movie"
+            id={data.id}
+            locked={Boolean(data.locked)}
+            onChanged={reload}
+          />
           {b.openManage ? (
             <button type="button" className={s.linkBtn} onClick={() => b.openManage?.()}>
               Quality and download settings
@@ -789,6 +818,9 @@ function MovieView({
           ) : null}
           <button type="button" className={s.linkBtn} onClick={() => setFixing(true)}>
             {data.identity.tmdb_id ? 'Fix match' : 'Find the right title'}
+          </button>
+          <button type="button" className={s.linkBtn} onClick={() => setCommand('history')}>
+            File history
           </button>
           {data.identity.fixed ? (
             <button type="button" className={s.linkBtn} onClick={onRelease}>
@@ -811,18 +843,35 @@ function MovieView({
           <h3 className={s.sectionTitle}>
             Files <span className={s.count}>{data.files.length}</span>
           </h3>
-          {b.manualSearch ? (
-            <button
-              type="button"
-              className={q.meets === false ? s.btnPrimary : s.btn}
-              onClick={() => b.manualSearch?.('movie')}
-            >
-              {q.meets === false ? 'Find an upgrade' : 'Search releases'}
-            </button>
-          ) : null}
+          <span className={s.headActions}>
+            {data.can_manage && data.files.length ? (
+              <button type="button" className={s.quietBtn} onClick={() => setCommand('move')}>
+                Move to another library…
+              </button>
+            ) : null}
+            {b.manualSearch ? (
+              <button
+                type="button"
+                className={q.meets === false ? s.btnPrimary : s.btn}
+                onClick={() => b.manualSearch?.('movie')}
+              >
+                {q.meets === false ? 'Find an upgrade' : 'Search releases'}
+              </button>
+            ) : null}
+          </span>
         </div>
         <FileCards files={data.files} actions={actions} label="File" />
       </section>
+
+      {fileDialogs}
+      <TitleDialogs
+        kind="movie"
+        id={data.id}
+        fileIds={data.files.map((f) => f.id)}
+        open={command}
+        setOpen={setCommand}
+        reload={reload}
+      />
 
       {fixing ? (
         <FixMatchDialog
@@ -942,105 +991,22 @@ function ShowView({
     setBusy(null);
   };
 
-  // the page's own episode list hands over what is ticked there, and the
-  // library data goes back so each of its rows can show its file
-  const [pickedIds, setPickedIds] = useState<number[]>([]);
+  // the episode list is a React root of its own: it reads the show from here
   useEffect(() => {
-    const onPick = (event: Event) => {
-      const detail = (event as CustomEvent<{ showId?: number; episodeIds?: number[] }>).detail;
-      if (detail?.showId === data.id) setPickedIds(detail.episodeIds ?? []);
-    };
-    document.addEventListener(SELECTION_EVENT, onPick);
-    return () => document.removeEventListener(SELECTION_EVENT, onPick);
-  }, [data.id]);
-  useEffect(() => {
-    bridge().onLibrary?.(data);
+    showData.set(data);
   }, [data]);
-  const picked = useMemo(() => {
-    const want = new Set(pickedIds);
-    return data.seasons.flatMap((season) =>
-      season.episodes
-        .filter((ep) => want.has(ep.id) && ep.files.length)
-        .map((ep) => ({ season, ep })),
-    );
-  }, [data, pickedIds]);
-  const clearPicked = () => {
-    setPickedIds([]);
-    bridge().clearSelection?.();
-  };
-  const pickedFiles = picked.flatMap(({ ep }) => ep.files);
-  const upgradePicked = async () => {
-    setBusy('bulk');
-    await wish(
-      picked.map(({ season, ep }) => wishOf(data.id, season, ep)),
-      'A better copy replaces the file when it lands.',
-    );
-    setBusy(null);
-    clearPicked();
-  };
-  const renamePicked = async () => {
-    // the names were only checked for a season that was opened, so every file
-    // is offered and the server leaves the ones already named right alone
-    const ok = await confirm({
-      title: `Rename ${plural(pickedFiles.length, 'file')} to your template?`,
-      message:
-        'Each file is renamed where it sits, its subtitles and sidecars move with it, and nothing is overwritten. A file already named by your template, or one SoulSync can’t reach, is left as it is.',
-      confirmText: 'Rename',
-    });
-    if (!ok) return;
-    setBusy('bulk');
-    try {
-      const res = await bulkFiles(
-        'rename',
-        pickedFiles.map((f) => f.id),
-        'show',
-      );
-      toast(
-        res.failed
-          ? `Renamed ${res.done}, ${res.failed} couldn’t be renamed`
-          : res.done
-            ? `Renamed ${plural(res.done, 'file')}`
-            : 'Every file was already named by your template',
-        res.failed ? 'warning' : 'success',
-      );
-    } catch (e) {
-      toast((e as Error).message || 'Rename failed', 'error');
-    }
-    setBusy(null);
-    clearPicked();
-    reload();
-  };
-  const deletePicked = async () => {
-    const ok = await confirm({
-      title: data.recycle
-        ? `Move ${plural(pickedFiles.length, 'file')} to the recycle bin?`
-        : `Delete ${plural(pickedFiles.length, 'file')} for good?`,
-      message: `Every file of the ${plural(picked.length, 'episode')} you picked ${data.recycle ? 'moves to the recycle bin, where it can be restored until it expires' : 'is deleted permanently. Recycling is turned off in your library settings'}. Those episodes will show as missing. A file only your media server can see is left alone.`,
-      confirmText: data.recycle ? 'Move to recycle bin' : 'Delete',
-      destructive: true,
-    });
-    if (!ok) return;
-    setBusy('bulk');
-    try {
-      const res = await bulkFiles(
-        'delete',
-        pickedFiles.map((f) => f.id),
-        'show',
-      );
-      toast(
-        res.failed
-          ? `Removed ${res.done}, ${res.failed} couldn’t be removed`
-          : `Removed ${plural(res.done, 'file')}`,
-        res.failed ? 'warning' : 'success',
-      );
-    } catch (e) {
-      toast((e as Error).message || 'Delete failed', 'error');
-    }
-    setBusy(null);
-    clearPicked();
-    reload();
-    bridge().reloadPage?.();
-  };
+  useEffect(
+    () => () => {
+      if (showData.get()?.id === data.id) showData.set(null);
+    },
+    [data.id],
+  );
+  const [command, setCommand] = usePageCommands();
+  const allFiles = useMemo(
+    () =>
+      data.seasons.flatMap((season) => season.episodes.flatMap((ep) => ep.files.map((f) => f.id))),
+    [data],
+  );
 
   // grabs that are running or stuck (the page's old second block)
   const [acq, setAcq] = useState<AcquisitionState | null>(null);
@@ -1155,9 +1121,14 @@ function ShowView({
   const folders =
     data.can_manage && sm.folders.length ? (
       <section>
-        <h3 className={s.sectionTitle}>
-          Where it lives <span className={s.count}>{sm.folders.length}</span>
-        </h3>
+        <div className={s.sectionHead}>
+          <h3 className={s.sectionTitle}>
+            Where it lives <span className={s.count}>{sm.folders.length}</span>
+          </h3>
+          <button type="button" className={s.btn} onClick={() => setCommand('move')}>
+            Move to another library…
+          </button>
+        </div>
         <ul className={s.folders}>
           {sm.folders.map((fo) => (
             <li key={fo.path ?? ''} className={s.folder}>
@@ -1227,6 +1198,12 @@ function ShowView({
       {data.identity.fixed ? <Chip tone="ok">Fixed by you</Chip> : null}
       {data.can_manage ? (
         <span className={s.libLinks}>
+          <PadlockButton
+            kind="show"
+            id={data.id}
+            locked={Boolean(data.locked)}
+            onChanged={reload}
+          />
           {bridge().openManage ? (
             <button type="button" className={s.linkBtn} onClick={() => bridge().openManage?.()}>
               Quality and download settings
@@ -1234,6 +1211,9 @@ function ShowView({
           ) : null}
           <button type="button" className={s.linkBtn} onClick={() => setFixing(true)}>
             {tmdb ? 'Fix match' : 'Find the right title'}
+          </button>
+          <button type="button" className={s.linkBtn} onClick={() => setCommand('history')}>
+            File history
           </button>
           {data.identity.fixed ? (
             <button type="button" className={s.linkBtn} onClick={onRelease}>
@@ -1293,52 +1273,20 @@ function ShowView({
     </>
   );
 
-  const selectBar = picked.length ? (
-    <div className={s.selectBar} data-active="yes">
-      <span className={s.selectAll}>
-        {plural(picked.length, 'episode')} selected
-        <button type="button" className={s.linkBtn} onClick={clearPicked}>
-          Clear
-        </button>
-      </span>
-      <div className={s.selectActions}>
-        {tmdb ? (
-          <button
-            type="button"
-            className={s.btn}
-            disabled={busy === 'bulk'}
-            onClick={() => void upgradePicked()}
-          >
-            Look for upgrades
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className={s.btn}
-          disabled={busy === 'bulk'}
-          onClick={() => void renamePicked()}
-        >
-          Rename to template
-        </button>
-        <button
-          type="button"
-          className={s.btnDanger}
-          disabled={busy === 'bulk'}
-          onClick={() => void deletePicked()}
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  ) : null;
-
   return (
     <div className={s.tab} data-layout="page">
       {page.hero ? createPortal(line, page.hero) : line}
       <Attention issues={issues} />
-      {page.select && selectBar ? createPortal(selectBar, page.select) : selectBar}
       {page.foot ? createPortal(folders, page.foot) : folders}
       {dialogs}
+      <TitleDialogs
+        kind="show"
+        id={data.id}
+        fileIds={allFiles}
+        open={command}
+        setOpen={setCommand}
+        reload={reload}
+      />
     </div>
   );
 }

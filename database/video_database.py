@@ -9414,6 +9414,39 @@ class VideoDatabase:
                 return row
         return None
 
+    def library_file_rows(self, file_ids) -> dict:
+        """{file id: its library_title_files row} for many files at once.
+        each title is read one time however many of its files were asked
+        for (library_file_row reads the whole title per file)."""
+        try:
+            ids = sorted({int(i) for i in (file_ids or [])})
+        except (TypeError, ValueError):
+            return {}
+        owners: set = set()
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                for r in conn.execute(
+                        "SELECT f.movie_id, e.show_id FROM media_files f LEFT JOIN episodes e "
+                        f"ON e.id = f.episode_id WHERE f.id IN ({','.join('?' * len(chunk))})",
+                        chunk):
+                    if r[0] is not None:
+                        owners.add(("movie", int(r[0])))
+                    elif r[1] is not None:
+                        owners.add(("show", int(r[1])))
+        except sqlite3.Error:
+            logger.exception("library_file_rows failed")
+            return {}
+        finally:
+            conn.close()
+        want, out = set(ids), {}
+        for kind, owner in owners:
+            for row in self.library_title_files(kind, owner):
+                if row["file_id"] in want:
+                    out[row["file_id"]] = row
+        return out
+
     def library_move_file(self, file_id, episode_id) -> dict | None:
         """hand one stored file to another episode of the SAME show: the fix
         for a file filed under the wrong episode. both episodes' has_file

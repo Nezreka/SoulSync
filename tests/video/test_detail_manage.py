@@ -49,6 +49,17 @@ def test_the_delete_preview_adds_up_the_files_and_counts_what_goes_missing(db, t
     assert both["emptied"] == 2
 
 
+def test_a_file_out_of_reach_stays_and_never_counts_as_the_last_copy_going(db, tmp_path):
+    import os
+    sid, eps, a, b = _season_one(db, tmp_path)
+    os.remove(tmp_path / "TV/Breaking Bad/Season 01/bb.101.mkv")      # soulsync can't reach it
+    client = _client(db)
+    out = client.get("/api/video/files/delete-preview?file_ids=%d,%d" % (a, b)).get_json()
+    assert (out["files"], out["unreachable"], out["emptied"]) == (2, 1, 1)
+    assert {i["file_id"]: i["reachable"] for i in out["items"]} == {a: False, b: True}
+    assert out["size_bytes"] == 300
+
+
 def test_a_movies_delete_preview_knows_its_last_copy(db, tmp_path):
     mid = _movie(db)
     a = _add_file(db, movie_id=mid, size=900, path=tmp_path / "Movies/Dune (2021)/a.mkv")

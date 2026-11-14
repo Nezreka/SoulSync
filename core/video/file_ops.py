@@ -213,12 +213,14 @@ def _locate(db, row: dict, resolve: Optional[Callable] = None) -> Optional[str]:
                    size_bytes=row.get("size_bytes"))
 
 
-def rename_plan(db, file_id, *, resolve: Optional[Callable] = None) -> Dict[str, Any]:
+def rename_plan(db, file_id, *, resolve: Optional[Callable] = None,
+                row: Optional[dict] = None) -> Dict[str, Any]:
     """{current, expected, conforms} for one stored file, or {error}. the
-    preview the library tab shows before anything moves."""
+    preview the library tab shows before anything moves. ``row``: the file's
+    row when the caller already read it (a preview of many files)."""
     from core.video import organization
     from core.video.library_roots import library_roots
-    row = db.library_file_row(file_id)
+    row = row or db.library_file_row(file_id)
     if not row:
         return {"error": "That file isn't in the library any more."}
     real = _locate(db, row, resolve)

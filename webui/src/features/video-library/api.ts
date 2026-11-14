@@ -47,17 +47,14 @@ export interface FileActionResult {
   message?: string;
   recycled?: boolean;
   remaining?: number;
+  /** what Undo reverses; absent when nothing changed or it can't come back */
+  batch?: string | null;
+  /** episodes that stopped being hunted with the delete */
+  unmonitored?: number;
 }
 
 export function renameFile(fileId: number): Promise<FileActionResult> {
   return send<FileActionResult>(`/api/video/files/${fileId}/rename`, {
-    method: 'POST',
-    body: '{}',
-  });
-}
-
-export function deleteFile(fileId: number): Promise<FileActionResult> {
-  return send<FileActionResult>(`/api/video/files/${fileId}/delete`, {
     method: 'POST',
     body: '{}',
   });
@@ -85,6 +82,10 @@ export interface BulkResult {
   unchanged: number;
   failed: number;
   errors: { file_id: number; error: string }[];
+  /** what Undo reverses */
+  batch?: string | null;
+  /** episodes that stopped being hunted with the delete */
+  unmonitored?: number;
 }
 
 /** rename to the template, or recycle, a chosen set of files */
@@ -92,11 +93,105 @@ export function bulkFiles(
   action: 'rename' | 'delete',
   fileIds: number[],
   kind: TitleKind,
+  options: { titleId?: number; stopHunting?: boolean } = {},
 ): Promise<BulkResult> {
   return send<BulkResult>('/api/video/files/bulk', {
     method: 'POST',
-    body: JSON.stringify({ action, file_ids: fileIds, kind }),
+    body: JSON.stringify({
+      action,
+      file_ids: fileIds,
+      kind,
+      id: options.titleId,
+      stop_hunting: options.stopHunting || undefined,
+    }),
   });
+}
+
+export interface RenamePreview {
+  files: number;
+  to_rename: number;
+  already_named: number;
+  unreachable: number;
+  changes: { file_id: number; current: string; expected: string }[];
+  more: number;
+}
+
+/** what Rename would do to these files, before anything moves */
+export function fetchRenamePreview(fileIds: number[]): Promise<RenamePreview> {
+  return send<RenamePreview>(`/api/video/files/rename-preview?file_ids=${fileIds.join(',')}`);
+}
+
+export interface DeletePreview {
+  files: number;
+  size_bytes: number;
+  unreachable: number;
+  /** episodes or movies that would be left with no copy at all */
+  emptied: number;
+  recycle: boolean;
+  items: {
+    file_id: number;
+    label: string;
+    filename: string;
+    size_bytes: number;
+    reachable: boolean;
+  }[];
+  more: number;
+}
+
+/** what deleting these files would take */
+export function fetchDeletePreview(fileIds: number[]): Promise<DeletePreview> {
+  return send<DeletePreview>(`/api/video/files/delete-preview?file_ids=${fileIds.join(',')}`);
+}
+
+/** hunt, or stop hunting, a picked set of one show's episodes */
+export function setEpisodesMonitored(
+  showId: number,
+  episodeIds: number[],
+  monitored: boolean,
+): Promise<{ success: boolean; episodes: number }> {
+  return send(`/api/video/detail/show/${showId}/episodes/monitor`, {
+    method: 'POST',
+    body: JSON.stringify({ episode_ids: episodeIds, monitored }),
+  });
+}
+
+/** the padlock: automation leaves a locked title and its files alone */
+export function setPadlock(
+  kind: TitleKind,
+  id: number,
+  locked: boolean,
+): Promise<{ success: boolean; locked: boolean }> {
+  return send(`/api/video/detail/${kind}/${id}/padlock`, {
+    method: 'POST',
+    body: JSON.stringify({ locked }),
+  });
+}
+
+export interface EpisodeExtra {
+  overview?: string | null;
+  still_url?: string | null;
+  imdb_id?: string | null;
+  guest_stars?: {
+    name: string;
+    character?: string | null;
+    photo?: string | null;
+    tmdb_id?: number | null;
+  }[];
+}
+
+/** an episode's guest stars and still, from TMDB */
+export async function fetchEpisodeExtra(
+  tmdbId: number,
+  season: number,
+  episode: number,
+): Promise<EpisodeExtra> {
+  const response = await fetch(`/api/video/episode/${tmdbId}/${season}/${episode}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const data = (response.ok ? await response.json().catch(() => null) : null) as
+    | (EpisodeExtra & { error?: string })
+    | null;
+  return data && !data.error ? data : {};
 }
 
 export interface ReassignResult {
@@ -105,6 +200,7 @@ export interface ReassignResult {
   renamed: boolean;
   rename_note?: string;
   message?: string;
+  batch?: string | null;
 }
 
 /** file one episode's file under another episode of the same show */

@@ -2448,7 +2448,17 @@ Named movie and TV libraries, each with its own folder (#2029). The main and 4K 
 - `POST /api/video/bulk/start` body `{kind, ids, action, params}` runs one in the background; `GET /api/video/bulk/status` follows it. Actions: `monitored`, `watched`, `content_rating`, `genre_add`, `genre_remove`, `refresh_art`, `quality_profile`, `rename`, `wish` (`mode`: `missing` / `upgrade`), `subtitles`, `rematch`, `series_type`, `lock` (`value`: true / false), `move` (`library_id`), `delete` (`confirm`: the number of ids). The status carries `held` (padlocked titles left alone) and `batch` (the file changes of a rename or move, for undo).
 - `GET /history?kind=&id=&limit=&offset=`: file changes, newest first, for one title or all. `POST /history/<id>/undo` puts one back; `POST /history/undo-batch` body `{batch}` puts back a whole run. `409` with a plain reason when it can't be (the file moved on, the old path is taken, the recycle folder was emptied).
 - `GET /views` and `PUT /views` body `{views: [{name, state}]}`: the saved views.
+- `GET /move-preview` takes `by_hand=1`, and the `move` action takes `params.by_hand: true`, for one title moved from its own page: a padlock holds a sweep, not that.
 - `GET /episodes/<show_id>`: seasons, episodes and the files under each. `POST /renumber/<show_id>` body `{file_ids, season, start_episode, apply?}`: files the chosen files under consecutive episodes of that season. Without `apply` it answers with the plan.
+
+**Managing files from a title's page** (admin):
+
+- `GET /api/video/files/rename-preview?file_ids=1,2,3`: `{files, to_rename, already_named, unreachable, changes: [{file_id, current, expected}], more}`. Nothing is renamed.
+- `GET /api/video/files/delete-preview?file_ids=1,2,3`: `{files, size_bytes, unreachable, emptied, recycle, items: [{file_id, label, filename, size_bytes, reachable}], more}`. `emptied` is how many episodes or movies would be left with no copy. A file SoulSync can't reach is listed and is not counted as going.
+- `POST /api/video/files/bulk` body `{action: rename|delete, file_ids, kind, id?, stop_hunting?}`: answers with `batch` (what `POST /api/video/manager/history/undo-batch` puts back). With `stop_hunting` on a delete, the episodes left with no copy stop being monitored, and `unmonitored` says how many.
+- `POST /api/video/files/<id>/rename`, `/delete` (body `{stop_hunting?}`) and `/reassign` answer with `batch` too, when something changed that can be put back.
+- `POST /api/video/detail/show/<id>/episodes/monitor` body `{episode_ids, monitored}`: hunt, or stop hunting, a picked set of that show's episodes. `404` when none of them are that show's.
+- `POST /api/video/detail/<movie|show>/<id>/padlock` body `{locked}`: the padlock on one title. `GET /api/video/detail/<kind>/<id>/library` carries `locked`.
 
 Which library a new title files into: a library picked for the grab (`video_library_id` on `POST /api/video/downloads/grab` and the manual import), else one picked for the title, else the 4K library when its quality profile saves to 4K, else the first library whose rules match its genres or TMDB keywords (a keyword also matches inside its name), else the kind's default. The anime folder still takes anime shows unless a library was picked for the title.
 

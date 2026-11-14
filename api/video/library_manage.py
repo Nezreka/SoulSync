@@ -246,9 +246,11 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "file_ids is required"}), 400
         db = get_video_db()
         changes, conforming, unreachable = [], 0, 0
+        rows = db.library_file_rows(ids)          # each title read once
         for file_id in ids:
             try:
-                plan = file_ops.rename_plan(db, file_id) or {}
+                plan = (file_ops.rename_plan(db, file_id, row=rows[file_id])
+                        if file_id in rows else {"error": "gone"}) or {}
             except Exception:   # noqa: BLE001 - one unreadable file never ends the preview
                 plan = {"error": "could not be read"}
             if plan.get("error"):
@@ -276,16 +278,20 @@ def register_routes(bp):
         if not ids:
             return jsonify({"success": False, "error": "file_ids is required"}), 400
         db = get_video_db()
-        picked, items, size, unreachable = set(ids), [], 0, 0
+        # only a file soulsync can reach is deleted, so only those count
+        # toward leaving an episode with no copy
+        picked, items, size, unreachable = set(), [], 0, 0
         owners: set = set()
+        rows = db.library_file_rows(ids)          # each title read once
         for file_id in ids:
-            row = db.library_file_row(file_id)
+            row = rows.get(file_id)
             if not row:
                 continue
             real = file_ops._locate(db, row)
             if not real:
                 unreachable += 1
             else:
+                picked.add(file_id)
                 size += int(row.get("size_bytes") or 0)
             owners.add((row.get("scope"), row.get("item_id")))
             items.append({"file_id": file_id, "label": library_actions._label(row),
