@@ -588,6 +588,36 @@ def library_for_path(db, path: Any, kind: Any = None,
     return best
 
 
+def library_folders(db, lib: Optional[Dict[str, Any]]) -> List[str]:
+    """every folder a library keeps its titles in, the one new titles are
+    filed into first.
+
+    a library can sit on many drives. the main library is its own folder,
+    plus the additional folders and the server's folders SoulSync was told
+    how to reach (Settings > Folders > Video > Your library's folders):
+    those are the same library on other drives. a folder that is another
+    library's, or sits inside one, is that library's and is left out. the
+    4K and custom libraries keep one folder each."""
+    if not lib or not lib.get("usable"):
+        return []
+    own = str(lib.get("path") or "").strip()
+    if lib.get("builtin") != "main":
+        return [own] if own else []
+    from core.video.library_roots import _mapped_folders, additional_paths, normalize_paths
+    scope = "movie" if lib["kind"] == "movie" else "episode"
+    extra = additional_paths(db, _MAIN_KEYS[lib["kind"]].replace("_path", "_additional_paths"))
+    extra += _mapped_folders(db, scope)
+    others = [x for x in list_libraries(db, lib["kind"]) if x["id"] != lib["id"] and x.get("path")]
+    out = [own] if own else []
+    for folder in normalize_paths(extra):
+        if any(_same(folder, have) for have in out):
+            continue
+        if library_for_path(db, folder, lib["kind"], libs=others):
+            continue
+        out.append(folder)
+    return out
+
+
 def folder_for(lib: Optional[Dict[str, Any]], fallback: str = "") -> str:
     """The folder a chosen library files into ('' falls back)."""
     return str((lib or {}).get("path") or "") or fallback

@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 70   # v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 71   # v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -746,6 +746,24 @@ def real_episode_title(title) -> bool:
     one is known ("TBA", "Episode 2"): neither belongs in a file name."""
     text = str(title or "").strip()
     return bool(text) and not _PLACEHOLDER_TITLE.match(text)
+
+
+def _placeholder_title(title) -> bool:
+    """an episode title a provider hands out before the real one is known"""
+    text = str(title or "").strip()
+    return not text or text.upper() in ("TBA", "TBD") or bool(re.fullmatch(r"Episode \d+", text))
+
+
+# what a metadata provider knows better tomorrow than today. a refresh
+# overwrites these (everything else it writes only fills a blank): none of
+# them is a field a person edits, so no lock is in the way
+_VOLATILE_COLS = {
+    "movies": ("status", "release_date", "tmdb_collection_id", "tmdb_collection_name"),
+    "shows": ("status", "last_air_date", "airs_time"),
+}
+
+# how often a title's page asks each source again, in seconds
+_FRESH_SOURCES = ("server", "metadata", "ratings")
 
 
 class VideoDatabase:
@@ -2388,6 +2406,64 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def refresh_volatile(self, kind: str, item_id: int, metadata: dict | None) -> int:
+        """overwrite the facts that change after a title is first matched: a
+        show that ended or came back, its last air date, a movie's release
+        date or the collection it joined. a blank from the provider never
+        blanks what is stored. returns how many columns changed."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or not metadata:
+            return 0
+        changed = 0
+        conn = self._get_connection()
+        try:
+            for col in _VOLATILE_COLS[table]:
+                val = metadata.get(col)
+                if val is None or val == "":
+                    continue
+                cur = conn.execute(
+                    f"UPDATE {table} SET {col}=? WHERE id=? AND ({col} IS NULL OR {col} != ?)",
+                    (val, int(item_id), val))
+                changed += int(cur.rowcount or 0)
+            conn.commit()
+        except sqlite3.Error:
+            logger.exception("refresh_volatile failed for %s %s", kind, item_id)
+        finally:
+            conn.close()
+        return changed
+
+    def freshness(self, kind: str, item_id) -> dict:
+        """{source: seconds since it was last asked about this title}; a
+        source never asked is absent"""
+        out: dict = {}
+        conn = self._get_connection()
+        try:
+            for r in conn.execute(
+                    "SELECT source, CAST((julianday('now') - julianday(checked_at)) * 86400 AS INTEGER) "
+                    "FROM video_title_freshness WHERE kind=? AND item_id=?", (kind, int(item_id))):
+                out[r[0]] = max(0, int(r[1] or 0))
+        except (sqlite3.Error, TypeError, ValueError):
+            pass
+        finally:
+            conn.close()
+        return out
+
+    def mark_fresh(self, kind: str, item_id, source: str) -> None:
+        """this source was asked about this title just now"""
+        if source not in _FRESH_SOURCES:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO video_title_freshness (kind, item_id, source, checked_at) "
+                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(kind, item_id, source) "
+                "DO UPDATE SET checked_at=CURRENT_TIMESTAMP", (kind, int(item_id), source))
+            conn.commit()
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.debug("mark_fresh failed for %s %s %s", kind, item_id, source, exc_info=True)
+        finally:
+            conn.close()
+
     def ratings_next(self) -> dict | None:
         """Next library item that needs OMDb ratings (has an imdb_id, not synced).
         Drives the OMDb worker's background pass. Returns {kind, id, title, imdb_id}."""
@@ -2939,6 +3015,12 @@ class VideoDatabase:
                             continue
                         if overwrite_air_date and col == "air_date" and e[col]:
                             sets.append("air_date=?")
+                        elif col == "title" and not _placeholder_title(e[col]):
+                            # "Episode 5" and "TBA" are what a provider says before
+                            # an episode has a name: the real one replaces them
+                            sets.append("title=CASE WHEN title IS NULL OR title='' OR "
+                                        "title GLOB 'Episode [0-9]*' OR UPPER(title) IN ('TBA','TBD') "
+                                        "THEN ? ELSE title END")
                         else:
                             sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
                         params.append(e[col])
@@ -5218,7 +5300,18 @@ class VideoDatabase:
         """Replace the media_files row(s) for one owner — EVERY version the
         server reported (multiple copies/editions each get a row). Accepts a
         single file dict (legacy callers) or a list. owner_col is internal
-        ('movie_id'|'episode_id'|'video_id'), never user input."""
+        ('movie_id'|'episode_id'|'video_id'), never user input.
+
+        a file the server still reports at the same path keeps its row id and
+        the date it was added. the rows are rewritten, but a page that holds
+        a file's id (its menu, an open preview, an undo) still points at that
+        file after a scan or a refresh of the title."""
+        kept = {r[1]: (r[0], r[2]) for r in conn.execute(
+            f"SELECT id, relative_path, added_at FROM media_files WHERE {owner_col} = ?",
+            (owner_id,))}
+        # a new file is numbered past every row there was, so it never takes
+        # the id of a file this same rewrite just dropped
+        next_id = (conn.execute("SELECT MAX(id) FROM media_files").fetchone()[0] or 0) + 1
         conn.execute(f"DELETE FROM media_files WHERE {owner_col} = ?", (owner_id,))
         if not files:
             return
@@ -5240,12 +5333,16 @@ class VideoDatabase:
                     audio_langs = probed["audio_languages"]
                     sub_langs = probed["subtitle_languages"] if sub_langs is None else sub_langs
                     channels = channels or probed["audio_channels"]
+            # two copies reported at one path would both claim the id: the first keeps it
+            old_id, old_added = kept.pop(path, (None, None))
+            if old_id is None:
+                old_id, next_id = next_id, next_id + 1
             conn.execute(
-                f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
+                f"INSERT INTO media_files (id, added_at, {owner_col}, relative_path, size_bytes, resolution, "
                 "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
                 "audio_channels, dynamic_range, atmos, audio_languages, subtitle_languages) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (owner_id, path,
+                "VALUES (?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (old_id, old_added, owner_id, path,
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
                  file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),

@@ -414,9 +414,9 @@ Tick titles in any view (or **Select all** to take everything the filters match)
 - **Monitor** / stop monitoring
 - **Get missing** and **Look for upgrades**: adds to the Wishlist, which does the searching
 - **Rename**: shows every file's old and new name first, then renames to your template
-- **More**: quality profile, fetch missing subtitles, series type, add or remove a genre, content rating, add to a collection, refresh artwork, identify again, **move to another library**, lock or unlock, mark watched, and delete
+- **More**: quality profile, fetch missing subtitles, series type, add or remove a genre, content rating, add to a collection, refresh artwork, identify again, **move to another drive or library**, lock or unlock, mark watched, and delete
 
-**Move to another library** shows what would move and how much crosses to another drive before anything is touched. Files land where your naming template puts them under that library's folder, with their subtitles, and the title is filed there so later downloads land beside them.
+**Move to another drive or library** lists each library with every drive it sits on. It shows what would move and how much crosses to another drive before anything is touched. Files land where your naming template puts them under that library's folder, with their subtitles, and the title is filed there so later downloads land beside them.
 
 **Delete** lists what goes and asks you to type the number of titles. Files go to the recycle folder.
 
@@ -495,6 +495,16 @@ A title in your library is one page, with no tabs: what you own and what you can
 
 Under the buttons in the hero, one line says what you have. For a **movie**: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to. For a **show**: how many aired episodes you have, their size, the quality mix, the target and the match. **Quality and download settings**, **Fix match** and **File history** sit at the end of the line, after the **Lock** button.
 
+The line ends with **Up to date** and **Refresh**. The page opens from what SoulSync already knows, then asks whichever source has gone stale, in the background, and redraws in place only if something moved:
+
+| Asked | For | How often |
+|-------|-----|-----------|
+| Your media server | This one title's files and watch state | Every 10 minutes |
+| The metadata provider | A show that ended or came back, new and renamed episodes, moved air dates, a movie's release date or collection | Daily for a show still running or a movie within 90 days of release, otherwise every 14 days |
+| Ratings | The scores | Every 3 days while a title is new or running, otherwise every 30 days |
+
+Point at **Up to date** to see when each was last asked. **Refresh** asks all three now. A refresh only fills blanks and moves the facts that change; it never overwrites a detail you edited. If your media server no longer has the title, the page says so under **Needs attention** and removes nothing: **Sync with server**, in the **More** menu, does that.
+
 **Lock** is the [padlock](#vlib-manage): once a title is the way you want it, lock it and maintenance jobs, mass rename, automatic upgrades and scans leave it and its files alone. What you do on this page still goes through, and new episodes still arrive.
 
 **File history** lists every rename, move and delete made by hand to this title's files, newest first, each with **Undo**. A deleted file comes back while the recycle bin still holds it.
@@ -544,7 +554,7 @@ Tick episodes (the box under an episode's number, shown when you point at a row)
 
 **Hunting one episode.** A monitored season hunts every missing episode in it. To leave one out, open the episode's menu and pick **Stop hunting this episode**; the row then says *Not hunted*. **Hunt this episode** turns it back on. Nothing on disk changes either way.
 
-**Move to another library…** (in the page's **More** menu, beside a movie's files, and over **Where it lives**) moves the title's files to another library's folder, named by your template, and files the title there so later downloads land beside them. It shows how many files move, how much has to be copied to another drive and whether there is room, before anything moves. **More** also has **Rename files…** for every file of the title.
+**Move to another drive or library…** (in the page's **More** menu, beside a movie's files, and over **Where it lives**) moves the title's files, named by your template. A library can sit on many drives: the main library is its own folder plus your additional folders and the server folders you mapped under Settings > Folders > Video. The window lists each library with every drive it has and the free space on each. Pick another drive of the same library to shift the title there, or another library to move it and file it under that library. New episodes of a show follow it to wherever its files are. It shows how many files move, how much has to be copied to another drive and whether there is room, before anything moves. **More** also has **Rename files…** for every file of the title.
 
 **Where it lives** lists the folders the show's files are in, each with its drive, file count and size. When a show is split, part of it forked off somewhere else, usually an upgrade that couldn't find the original. **Bring together…** asks which folder to keep and shows what would move before anything does: how many files, how much has to be copied because it sits on another drive, and the free space there. Files keep their names and land in that folder's season folders, subtitles go along, and nothing is overwritten. A copy to another drive only takes its real name once it is complete, so a move that is interrupted leaves the original where it was. The move runs in the background; you can close the window, come back to its progress, or stop it after the current file.
 

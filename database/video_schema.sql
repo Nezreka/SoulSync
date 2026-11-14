@@ -1208,3 +1208,15 @@ CREATE TABLE IF NOT EXISTS video_file_changes (
     undone_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_vfc_title ON video_file_changes(kind, item_id, id);
+
+-- When each source was last asked about one title (v71). A title's page reads
+-- from this database, then asks the sources that have gone stale: the media
+-- server for its files and watch state, the metadata provider for what changed
+-- since it was matched, and the ratings. One row per title per source.
+CREATE TABLE IF NOT EXISTS video_title_freshness (
+    kind        TEXT NOT NULL,            -- movie | show
+    item_id     INTEGER NOT NULL,
+    source      TEXT NOT NULL,            -- server | metadata | ratings
+    checked_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, source)
+);
