@@ -681,7 +681,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
+| Nov 15 | `514559393` (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
 | Nov 15 | `0fa4dc784` (step 7e) | **HiFi panel is React.** Details under "Completed steps". |
 | Nov 15 | `bdd472a63` (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
 | Nov 15 | `788691ef4` (step 7c) | **Deezer, SoundCloud and Lidarr panels are React.** New: `tabs/source-panels.tsx` and its test; `SecretInput` in `parts.tsx`; `SoulSyncSettings.set`. React panels portal into the modal. Details under "Completed steps". |
