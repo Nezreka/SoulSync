@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getRouteApi } from '@tanstack/react-router';
+import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { apiClient, readJson } from '@/app/api-client';
@@ -431,6 +431,24 @@ export function LibraryRadioButton() {
       onClick={() => void window.startLibraryRadio?.()}
     >
       <LineIcon name="radio" /> Radio
+    </button>
+  );
+}
+
+/** #2128: the recycle bin was three clicks deep in Downloads. this goes
+ *  straight to it (Downloads, Review, Deleted). */
+export function LibraryRecycleBinButton({ media = 'music' }: { media?: 'music' | 'video' }) {
+  const navigate = useNavigate();
+  const label = 'Recycle bin: deleted files you can still restore';
+  return (
+    <button
+      type="button"
+      className={`${styles.btnGhost} ${extras.iconButton}`}
+      title={label}
+      aria-label="Recycle bin"
+      onClick={() => void navigate({ to: '/active-downloads', search: { media, open: 'recycle' } })}
+    >
+      <LineIcon name="trash" />
     </button>
   );
 }

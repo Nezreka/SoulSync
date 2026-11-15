@@ -368,6 +368,30 @@ export function ManagerPage() {
         subtitle={status}
         actions={
           <>
+            {restricted ? null : (
+              <button
+                type="button"
+                className="pgf-btn"
+                title="Recycle bin: deleted files you can still restore"
+                aria-label="Recycle bin"
+                onClick={() => window.videoOpenRecycleBin?.()}
+              >
+                {/* #2128: the bin was three clicks deep in Downloads */}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
             {restricted || tab === 'channels' ? null : (
               <button
                 type="button"

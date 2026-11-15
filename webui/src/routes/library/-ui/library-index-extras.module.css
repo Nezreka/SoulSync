@@ -376,3 +376,11 @@
     flex: 0 0 auto;
   }
 }
+
+/* #2128: an icon-only header button, the same height as Radio beside it */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 11px;
+}

@@ -249,7 +249,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 
 - **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade.
 - **Verification**: AcoustID fingerprinting, real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
-- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention.
+- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
 - **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends). Every template shows the path it makes right under it as you type.
@@ -450,7 +450,7 @@ Plus a background YouTube upload-date enricher.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.
 - **Failed download handling**: a release SABnzbd or the torrent client fails is blocklisted and the next one your profile ranks is grabbed right away, with a notification only when nothing else could be taken.
-- **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
+- **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin** (the trash icon at the top of the video Library opens it).
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management, the same setup as the music side.
 
 ## Video quality profiles

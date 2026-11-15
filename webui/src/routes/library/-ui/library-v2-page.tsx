@@ -239,6 +239,7 @@ import {
   LibraryActiveFilters,
   LibraryAlphabetBar,
   LibraryRadioButton,
+  LibraryRecycleBinButton,
   LibrarySearchFallback,
   LibrarySearchInput,
   LibraryFilterMenu,
@@ -4990,6 +4991,7 @@ function ArtistIndexView() {
         </div>
         <div className={styles.headerActions}>
           <LibraryRadioButton />
+          {canWrite ? <LibraryRecycleBinButton /> : null}
           <LibraryMoreMenu />
           <ImportButton
             hasArtists={
@@ -5178,6 +5180,7 @@ function AlbumIndexView() {
         </div>
         <div className={styles.headerActions}>
           <LibraryRadioButton />
+          {canWrite ? <LibraryRecycleBinButton /> : null}
         </div>
       </header>
 
@@ -5500,6 +5503,7 @@ function SongIndexView() {
         </div>
         <div className={styles.headerActions}>
           <LibraryRadioButton />
+          {canWrite ? <LibraryRecycleBinButton /> : null}
         </div>
       </header>
 
