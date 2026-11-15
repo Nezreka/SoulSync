@@ -931,6 +931,8 @@ def _run_db_update_task(full_refresh, server_type, run_epoch=None):
         media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
         media_client = media_server_engine.client('navidrome')
+    elif server_type == "music_assistant":
+        media_client = media_server_engine.client('music_assistant')
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -988,6 +990,8 @@ def _run_deep_scan_task(server_type, run_epoch=None):
         media_client = media_server_engine.client('jellyfin')
     elif server_type == "navidrome":
         media_client = media_server_engine.client('navidrome')
+    elif server_type == "music_assistant":
+        media_client = media_server_engine.client('music_assistant')
     elif server_type == "soulsync":
         # SoulSync standalone deep scan: find untracked files → move to Staging,
         # remove stale DB records where files no longer exist on disk
