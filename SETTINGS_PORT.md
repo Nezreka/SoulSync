@@ -44,6 +44,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 3. **Order:** Appearance, Logs, Discovery, Downloads, Quality, Sources, Library, System, Connections. Video hooks move with each tab; video-only panels last.
 4. **Per tab, before it merges:** parity tests against the frozen vanilla, the artefact-diff sweep (classes, ids, globals and strings compared with the old markup), before/after screenshots that match, `npm run build`, the whole `src/test` folder, and the Python tests that read `index.html`.
 5. **Last:** flip the route to `kind: 'react'`, delete `settings.js` and `video-settings.js`, remove their `<script>` tags.
+6. **Pace (from step 7f on, Nov 15, after Boulder asked why each step took ~2 hours):** bigger steps (a whole tab or the rest of one); per step only the step's parity and behaviour tests, lint, and the Python files that pin the moved code; the full Python run (101 files, ~23 min) and the whole frontend folders once per tab before its last commit; a browser comparison only where behaviour is tricky (sign-ins, drag lists, secrets, odd saves); short tracker entries.
 
 ## Status
 
@@ -53,7 +54,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | **tiles, modal, 6 of 11 panels** (steps 7a-7e below) | The tiles, the modal, and the Deezer, SoundCloud, Lidarr, Tidal, Qobuz and HiFi panels are React. Left: Soulseek, YouTube (with yt-dlp), Prowlarr, torrent, usenet. |
+| Tab: Sources | **tiles, modal, 7 of 11 panels** (steps 7a-7f below) | The tiles, the modal, and the Deezer, SoundCloud, Lidarr, Tidal, Qobuz, HiFi and Soulseek panels are React. Left: YouTube (with yt-dlp), Prowlarr, torrent, usenet. |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
@@ -68,8 +69,8 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 11,069 |
-| `webui/static/settings.js` | 10,187 | 6,525 |
+| `webui/index.html` | 12,823 | 10,955 |
+| `webui/static/settings.js` | 10,187 | 6,474 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -664,12 +665,23 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 | Python, the 101 files | 2,436 passed |
 | **Browser** (open; Check All; toggle; drag; a bad url, a duplicate, a new one; remove; restore) | every state of the list and the report with its colours, the alerts, the toast, the saved order: **identical**. Screenshots: 0 pixels at open, 6 (a toast's bar) at the end. |
 
+### Step 7f: the Soulseek source panel (Nov 15 2026)
+
+**What.** `SoulseekPanel` (slot `sources`/`soulseek`): URL with Auto-detect, API key (`SecretInput`), the search, peer, observed-speed, timeout and cleanup settings, Test Soulseek Connection. Each value loads and saves with the old parsing (`|| 60`, `?? 0`, `_cfgInt(…, 250)`, the timeout stored in seconds and shown in minutes). Test lands a waiting change first, then calls the vanilla `testConnection('soulseek')` (Connections still uses it).
+
+**Bug fixed.** One Auto-detect click ran detection twice: the button's `onclick` and a listener `initializeSettings` added on every Settings visit. The browser confirmed 2 calls before, 1 now; the listener is gone.
+
+**Removed.** `autoDetectSlskd`, its listener, the 12 load lines, the soulseek keys in the collector (the three Library keys `download_path`, `transfer_path`, `min_free_disk_gb` stay).
+
+**Checked.** Parity; `source-panels.test.tsx` +4 (load rules, save parsing, detect once); `soulseek-observed-speed-settings.test.ts` → `.tsx` (same 6 cases on the panel); Python repointed: `test_soulseek_observed_speed.py` (1), `test_video_download_config.py` (the video slskd form's fields each still have a music counterpart, now in the panel); full Python run 2,434 + those 2; browser: values, detection, saves and save-before-test order identical, 44 pixels (the help button).
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
 | Nov 15 | `0fa4dc784` (step 7e) | **HiFi panel is React.** Details under "Completed steps". |
 | Nov 15 | `bdd472a63` (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
 | Nov 15 | `788691ef4` (step 7c) | **Deezer, SoundCloud and Lidarr panels are React.** New: `tabs/source-panels.tsx` and its test; `SecretInput` in `parts.tsx`; `SoulSyncSettings.set`. React panels portal into the modal. Details under "Completed steps". |
@@ -1030,19 +1042,19 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| url | `soulseek-url` | slskd URL: | both | no |
+| url | `soulseek-url` | slskd URL: | both | yes (step 7f) |
 | button |  | Auto-detect | both | no |
-| password | `soulseek-api-key` | API Key: | both | no |
-| number | `soulseek-search-timeout` | Search Timeout (seconds): | both | no |
-| number | `soulseek-search-timeout-buffer` | Search Timeout Buffer (seconds): | both | no |
-| number | `soulseek-search-min-delay-seconds` | Minimum Delay Between Searches (seconds): | both | no |
-| select | `soulseek-min-peer-speed` | Minimum Peer Upload Speed: {Any speed / 1 Mbps / 2 Mbps / 3 Mbps / 4 Mbps / 5 Mbps / 10 Mbps} | both | no |
-| select | `soulseek-max-peer-queue` | Max Peer Queue Length: {No limit / 5 / 10 / 20 / 50 / 100} | both | no |
+| password | `soulseek-api-key` | API Key: | both | yes (step 7f) |
+| number | `soulseek-search-timeout` | Search Timeout (seconds): | both | yes (step 7f) |
+| number | `soulseek-search-timeout-buffer` | Search Timeout Buffer (seconds): | both | yes (step 7f) |
+| number | `soulseek-search-min-delay-seconds` | Minimum Delay Between Searches (seconds): | both | yes (step 7f) |
+| select | `soulseek-min-peer-speed` | Minimum Peer Upload Speed: {Any speed / 1 Mbps / 2 Mbps / 3 Mbps / 4 Mbps / 5 Mbps / 10 Mbps} | both | yes (step 7f) |
+| select | `soulseek-max-peer-queue` | Max Peer Queue Length: {No limit / 5 / 10 / 20 / 50 / 100} | both | yes (step 7f) |
 | checkbox | `soulseek-observed-speed-fallback-enabl` | Retry slow Soulseek downloads | both | no |
-| number | `soulseek-min-observed-download-speed` | Minimum Observed Download Speed (KB/s): | both | no |
-| number | `soulseek-download-timeout` | Download Timeout (minutes): | both | no |
-| checkbox | `soulseek-auto-clear-searches` | Auto-clear slskd search history | both | no |
-| select | `soulseek-cleanup-scope` | slskd Cleanup Scope: {Only SoulSync's own transfers / Everything in slskd} | both | no |
+| number | `soulseek-min-observed-download-speed` | Minimum Observed Download Speed (KB/s): | both | yes (step 7f) |
+| number | `soulseek-download-timeout` | Download Timeout (minutes): | both | yes (step 7f) |
+| checkbox | `soulseek-auto-clear-searches` | Auto-clear slskd search history | both | yes (step 7f) |
+| select | `soulseek-cleanup-scope` | slskd Cleanup Scope: {Only SoulSync's own transfers / Everything in slskd} | both | yes (step 7f) |
 | button |  | Test Soulseek Connection | both | no |
 | button | `tidal-download-auth-btn` | Link Tidal Account | both | yes (step 7d) |
 | button |  | Disconnect | both | yes (step 7d) |
@@ -2137,7 +2149,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `loadMusicAssistantSources` | 7907 | no |
 | `selectMusicAssistantSource` | 7935 | no |
 | `autoDetectNavidrome` | 7951 | no |
-| `autoDetectSlskd` | 7978 | no |
+| `autoDetectSlskd` | 7978 | yes (step 7f) |
 | `cancelDetection` | 8005 | no |
 | `updateStatusDisplays` | 8011 | no |
 | `authenticateSpotify` | 8023 | no |

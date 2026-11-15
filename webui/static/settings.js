@@ -486,10 +486,8 @@ function initializeSettings() {
     }
 
     // Auto-detect buttons
-    const detectSlskdBtn = document.querySelector('#soulseek-url + .detect-button');
-    if (detectSlskdBtn) {
-        detectSlskdBtn.addEventListener('click', autoDetectSlskd);
-    }
+    // (slskd's Auto-detect is in the React Soulseek panel. this listener and
+    // the button's own onclick both ran it, twice per click)
     const detectPlexBtn = document.querySelector('#plex-container .detect-button');
     if (detectPlexBtn) {
         detectPlexBtn.addEventListener('click', autoDetectPlex);
@@ -2184,18 +2182,7 @@ async function loadSettingsData() {
         }
 
         // Populate Soulseek settings
-        document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
-        document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
-        document.getElementById('soulseek-search-timeout').value = settings.soulseek?.search_timeout || 60;
-        document.getElementById('soulseek-search-timeout-buffer').value = settings.soulseek?.search_timeout_buffer || 15;
-        document.getElementById('soulseek-search-min-delay-seconds').value = settings.soulseek?.search_min_delay_seconds ?? 0;
-        document.getElementById('soulseek-min-peer-speed').value = settings.soulseek?.min_peer_upload_speed || 0;
-        document.getElementById('soulseek-max-peer-queue').value = settings.soulseek?.max_peer_queue || 0;
-        document.getElementById('soulseek-observed-speed-fallback-enabled').checked = settings.soulseek?.observed_speed_fallback_enabled === true;
-        document.getElementById('soulseek-min-observed-download-speed').value = settings.soulseek?.min_observed_download_speed_kbps ?? 250;
-        document.getElementById('soulseek-download-timeout').value = Math.round((settings.soulseek?.download_timeout || 600) / 60);
-        document.getElementById('soulseek-auto-clear-searches').checked = settings.soulseek?.auto_clear_searches !== false;
-        document.getElementById('soulseek-cleanup-scope').value = settings.soulseek?.cleanup_scope === 'all' ? 'all' : 'own';
+        // the rest of soulseek.*: its Sources panel is React (source-panels.tsx)
 
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
@@ -4060,22 +4047,12 @@ async function saveSettings(quiet = false) {
             password: document.getElementById('navidrome-password').value
         },
         soulseek: {
-            slskd_url: document.getElementById('soulseek-url').value,
-            api_key: document.getElementById('soulseek-api-key').value,
+            // slskd_url, api_key and the search, peer, timeout and cleanup
+            // keys: the Soulseek source panel is React (source-panels.tsx)
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
             min_free_disk_gb: _cfgFloat('min-free-disk-gb', 0),
-            search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
-            search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
-            search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
-            min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
-            max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
-            observed_speed_fallback_enabled: document.getElementById('soulseek-observed-speed-fallback-enabled').checked,
-            min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 250),
             // preferred_version: the Downloads tab (Filtering) is React
-            download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
-            auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked,
-            cleanup_scope: document.getElementById('soulseek-cleanup-scope').value === 'all' ? 'all' : 'own'
         },
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
@@ -4975,33 +4952,6 @@ async function autoDetectNavidrome() {
         hideLoadingOverlay();
     }
 }
-
-async function autoDetectSlskd() {
-    try {
-        showLoadingOverlay('Auto-detecting Soulseek (slskd) server...');
-
-        const response = await fetch('/api/detect-soulseek', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            document.getElementById('soulseek-url').value = result.found_url;
-            showToast(`Soulseek server detected: ${result.found_url}`, 'success');
-        } else {
-            showToast(result.error, 'error');
-        }
-
-    } catch (error) {
-        console.error('Error auto-detecting Soulseek:', error);
-        showToast('Failed to auto-detect Soulseek server', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
 
 function cancelDetection(service) {
     const progressDiv = document.getElementById(`${service}-detection-progress`);

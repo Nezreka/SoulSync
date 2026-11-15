@@ -221,13 +221,14 @@ def test_the_video_slskd_form_is_a_retired_duplicate():
 
     # every video field must still have a music counterpart, or hiding it loses a setting
     vjs = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    mjs = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
+    # the music Soulseek panel is React now (SETTINGS_PORT.md step 7f)
+    panel = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels.tsx").read_text(encoding="utf-8")
     video = {i for i in re.findall(r"'(video-slskd-[a-z-]+)'", vjs) if not i.endswith("container")}
     alias = {"search-min-delay": "search-min-delay-seconds", "auto-clear": "auto-clear-searches"}
     for vid in sorted(video):
         stem = vid[len("video-slskd-"):]
         music = "soulseek-" + alias.get(stem, stem)
-        assert f"'{music}'" in mjs, f"{vid} has no music counterpart ({music}) - hiding it loses that setting"
+        assert f'id="{music}"' in panel, f"{vid} has no music counterpart ({music}) - hiding it loses that setting"
 
 
 def test_the_downloads_tab_holds_only_download_settings():

@@ -15,6 +15,7 @@ import {
   HifiPanel,
   LidarrPanel,
   QobuzPanel,
+  SoulseekPanel,
   SoundcloudPanel,
   SourcePanels,
   TidalPanel,
@@ -96,6 +97,107 @@ describe('the Tidal and Qobuz panels are the markup they replaced', () => {
     const want = shape(vanilla('panels-tidal-qobuz.vanilla.html'));
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
+  });
+});
+
+describe('Soulseek', () => {
+  it('is the markup it replaced', () => {
+    const { container } = render(
+      <SourcePanels store={store} part="soulseek" opened={0} active={false} />,
+    );
+    const got = shape(container);
+    const want = shape(vanilla('panel-soulseek.vanilla.html'));
+    expect(got.elements).toEqual(want.elements);
+    expect(got.text).toBe(want.text);
+  });
+
+  it('reads saved values as loadSettingsData did', () => {
+    act(() => store.hydrate({}));
+    render(<SoulseekPanel store={store} />);
+    const v = (id: string) => input(id).value;
+    expect(v('soulseek-search-timeout')).toBe('60');
+    expect(v('soulseek-search-timeout-buffer')).toBe('15');
+    expect(v('soulseek-search-min-delay-seconds')).toBe('0');
+    expect(v('soulseek-min-peer-speed')).toBe('0');
+    expect(v('soulseek-max-peer-queue')).toBe('0');
+    expect(input('soulseek-observed-speed-fallback-enabled').checked).toBe(false);
+    expect(v('soulseek-min-observed-download-speed')).toBe('250');
+    expect(v('soulseek-download-timeout')).toBe('10');
+    expect(input('soulseek-auto-clear-searches').checked).toBe(true);
+    expect(v('soulseek-cleanup-scope')).toBe('own');
+    act(() =>
+      store.hydrate({
+        soulseek: {
+          download_timeout: 900,
+          min_observed_download_speed_kbps: 0,
+          search_min_delay_seconds: 3,
+          cleanup_scope: 'all',
+        },
+      }),
+    );
+    expect(v('soulseek-download-timeout')).toBe('15');
+    expect(v('soulseek-min-observed-download-speed')).toBe('0');
+    expect(v('soulseek-search-min-delay-seconds')).toBe('3');
+    expect(v('soulseek-cleanup-scope')).toBe('all');
+  });
+
+  it('saves each key the way the collector parsed it', async () => {
+    act(() => store.hydrate({ soulseek: {} }));
+    render(<SoulseekPanel store={store} />);
+    fireEvent.change(input('soulseek-url'), { target: { value: 'http://slskd:5030' } });
+    fireEvent.change(input('soulseek-search-timeout'), { target: { value: '' } });
+    fireEvent.change(input('soulseek-download-timeout'), { target: { value: '12' } });
+    fireEvent.change(input('soulseek-min-observed-download-speed'), { target: { value: '' } });
+    fireEvent.change(input('soulseek-min-peer-speed'), { target: { value: '5' } });
+    fireEvent.click(input('soulseek-auto-clear-searches'));
+    fireEvent.change(input('soulseek-cleanup-scope'), { target: { value: 'all' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({
+      soulseek: {
+        slskd_url: 'http://slskd:5030',
+        search_timeout: 60,
+        download_timeout: 720,
+        min_observed_download_speed_kbps: 250,
+        min_peer_upload_speed: 5,
+        auto_clear_searches: false,
+        cleanup_scope: 'all',
+      },
+    });
+    // what was typed stays on screen
+    expect(input('soulseek-search-timeout').value).toBe('');
+  });
+
+  it('auto-detect fills the url once per click', async () => {
+    shell.showToast = vi.fn();
+    shell.showLoadingOverlay = vi.fn();
+    shell.hideLoadingOverlay = vi.fn();
+    const order: string[] = [];
+    shell.testConnection = vi.fn(() => {
+      order.push('test');
+      return Promise.resolve();
+    });
+    routes['POST /api/detect-soulseek'] = () => ({ success: true, found_url: 'http://found:5030' });
+    const slow = createSettingsStore({
+      post: () => {
+        order.push('save');
+        return Promise.resolve({ success: true });
+      },
+      delay: 60_000,
+    });
+    act(() => slow.hydrate({ soulseek: {} }));
+    render(<SoulseekPanel store={slow} />);
+    fireEvent.click(document.querySelector('.detect-button')!);
+    await waitFor(() => expect(input('soulseek-url').value).toBe('http://found:5030'));
+    expect(calls.filter((c) => c.url === '/api/detect-soulseek')).toHaveLength(1);
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Soulseek server detected: http://found:5030',
+      'success',
+    );
+    expect(shell.hideLoadingOverlay).toHaveBeenCalledOnce();
+    // (test-after-save ordering uses the page's own store: checked in the browser)
+    expect(order).toEqual([]);
+    for (const k of ['showToast', 'showLoadingOverlay', 'hideLoadingOverlay', 'testConnection'])
+      delete shell[k];
   });
 });
 

@@ -8,13 +8,15 @@
  * data-react-panel so the modal and the page autosave leave it alone.
  */
 
+import type React from 'react';
+
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { SettingsTabProps } from '../host';
-import type { SettingsStore } from '../settings-store';
 
-import { REDACTED_SECRET_SENTINEL, SecretInput } from './parts';
+import { type SettingsStore, settingsStore } from '../settings-store';
+import { REDACTED_SECRET_SENTINEL, SecretInput, useDraft } from './parts';
 import { SOURCE_CONFIG_ID_BY_SRC, type SourcesModel, sourcesModel } from './sources-model';
 
 function useSettings(store: SettingsStore) {
@@ -1020,8 +1022,275 @@ export function HifiPanel({
   );
 }
 
+// ── Soulseek ──
+
+type ShellTools = Window & {
+  testConnection?: (service: string) => Promise<void>;
+  showLoadingOverlay?: (message: string) => void;
+  hideLoadingOverlay?: () => void;
+  _settingsAutosaveOff?: boolean;
+};
+
+/** a number field that shows what is typed and saves what it parses to,
+ *  reset by each settings load */
+function NumberField({
+  store,
+  id,
+  value,
+  save,
+  ...rest
+}: {
+  store: SettingsStore;
+  id: string;
+  value: string;
+  save: (raw: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'id'>) {
+  const draft = useDraft(value, save);
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input
+      {...rest}
+      type="number"
+      id={id}
+      value={draft.value}
+      onChange={(event) => draft.onChange(event.target.value)}
+    />
+  );
+}
+
+const int = (raw: string, fallback: number) => parseInt(raw, 10) || fallback;
+
+export function SoulseekPanel({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const s = (settings.soulseek || {}) as Record<string, unknown>;
+  const set = (key: string, value: unknown) => store.set('soulseek', key, value);
+  const num = (value: unknown, fallback: number, keepZero = false) => {
+    const n = keepZero ? (value ?? fallback) : value || fallback;
+    return text(n);
+  };
+
+  async function detect() {
+    const w = window as ShellTools;
+    try {
+      w.showLoadingOverlay?.('Auto-detecting Soulseek (slskd) server...');
+      const result = await json('/api/detect-soulseek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (result.success) {
+        set('slskd_url', text(result.found_url));
+        toast(`Soulseek server detected: ${text(result.found_url)}`, 'success');
+      } else {
+        toast(text(result.error), 'error');
+      }
+    } catch (error) {
+      console.error('Error auto-detecting Soulseek:', error);
+      toast('Failed to auto-detect Soulseek server', 'error');
+    } finally {
+      w.hideLoadingOverlay?.();
+    }
+  }
+
+  async function test() {
+    const w = window as ShellTools;
+    // a change still waiting on autosave goes out first, so the server tests
+    // what is on screen (testConnection does the same for the page's own save)
+    if (w._settingsAutosaveOff !== true && settingsStore.hasPending()) await settingsStore.flush();
+    await w.testConnection?.('soulseek');
+  }
+
+  const hint = (children: ReactNode) => <small className="settings-hint">{children}</small>;
+
+  return (
+    <Panel id="soulseek-settings-container">
+      <div className="form-group">
+        <label>slskd URL:</label>
+        <div className="path-input-group">
+          <input
+            type="url"
+            id="soulseek-url"
+            placeholder="http://localhost:5030"
+            value={text(s.slskd_url)}
+            onChange={(event) => set('slskd_url', event.target.value)}
+          />
+          <button className="detect-button" onClick={() => void detect()}>
+            Auto-detect
+          </button>
+        </div>
+      </div>
+      <div className="form-group">
+        <label>API Key:</label>
+        <SecretInput
+          id="soulseek-api-key"
+          placeholder="Slskd API Key"
+          value={text(s.api_key)}
+          onChange={(value) => set('api_key', value)}
+        />
+      </div>
+      <div className="form-group">
+        <label>Search Timeout (seconds):</label>
+        <NumberField
+          store={store}
+          id="soulseek-search-timeout"
+          placeholder="60"
+          min="15"
+          max="300"
+          value={num(s.search_timeout, 60)}
+          save={(raw) => set('search_timeout', int(raw, 60))}
+        />
+        {hint('How long to search for tracks (15-300 seconds)')}
+      </div>
+      <div className="form-group">
+        <label>Search Timeout Buffer (seconds):</label>
+        <NumberField
+          store={store}
+          id="soulseek-search-timeout-buffer"
+          placeholder="15"
+          min="5"
+          max="60"
+          value={num(s.search_timeout_buffer, 15)}
+          save={(raw) => set('search_timeout_buffer', int(raw, 15))}
+        />
+        {hint('Extra time to wait for late results (5-60 seconds)')}
+      </div>
+      <div className="form-group">
+        <label>Minimum Delay Between Searches (seconds):</label>
+        <NumberField
+          store={store}
+          id="soulseek-search-min-delay-seconds"
+          placeholder="0"
+          min="0"
+          max="60"
+          value={num(s.search_min_delay_seconds, 0, true)}
+          save={(raw) => set('search_min_delay_seconds', int(raw, 0))}
+        />
+        {hint(
+          'Forces a gap between consecutive searches. Smooths burst patterns that trip ISP anti-abuse (e.g. Bell Canada cuts the WAN after rapid peer-connection spikes). 0 disables.',
+        )}
+      </div>
+      <div className="form-group">
+        <label>Minimum Peer Upload Speed:</label>
+        <select
+          id="soulseek-min-peer-speed"
+          value={num(s.min_peer_upload_speed, 0)}
+          onChange={(event) => set('min_peer_upload_speed', int(event.target.value, 0))}
+        >
+          <option value="0">Any speed</option>
+          <option value="1">1 Mbps</option>
+          <option value="2">2 Mbps</option>
+          <option value="3">3 Mbps</option>
+          <option value="4">4 Mbps</option>
+          <option value="5">5 Mbps</option>
+          <option value="10">10 Mbps</option>
+        </select>
+        {hint('Ignore search results from peers with upload speed below this threshold')}
+      </div>
+      <div className="form-group">
+        <label>Max Peer Queue Length:</label>
+        <select
+          id="soulseek-max-peer-queue"
+          value={num(s.max_peer_queue, 0)}
+          onChange={(event) => set('max_peer_queue', int(event.target.value, 0))}
+        >
+          <option value="0">No limit</option>
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        {hint(
+          'Skip peers with a queue longer than this (prefers peers with shorter queues regardless)',
+        )}
+      </div>
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            id="soulseek-observed-speed-fallback-enabled"
+            checked={s.observed_speed_fallback_enabled === true}
+            onChange={(event) => set('observed_speed_fallback_enabled', event.target.checked)}
+          />
+          Retry slow Soulseek downloads
+        </label>
+        {hint(
+          'Off by default. Applies to automatic tracks and album bundles when another eligible peer is available; not manually chosen files.',
+        )}
+      </div>
+      <div className="form-group">
+        <label>Minimum Observed Download Speed (KB/s):</label>
+        <NumberField
+          store={store}
+          id="soulseek-min-observed-download-speed"
+          placeholder="250"
+          min="0"
+          step="50"
+          value={num(s.min_observed_download_speed_kbps, 250, true)}
+          save={(raw) => {
+            // _cfgInt: blank or junk saves the default, 0 stays 0
+            const n = parseInt(raw, 10);
+            set('min_observed_download_speed_kbps', Number.isFinite(n) ? n : 250);
+          }}
+        />
+        {hint(
+          "When enabled, try the next Soulseek candidate after roughly one minute below this observed speed. Uses actual byte progress rather than the peer's advertised speed. The final available candidate is always allowed to continue. 0 also disables.",
+        )}
+      </div>
+      <div className="form-group">
+        <label>Download Timeout (minutes):</label>
+        <NumberField
+          store={store}
+          id="soulseek-download-timeout"
+          placeholder="10"
+          min="2"
+          max="60"
+          value={text(Math.round((Number(s.download_timeout) || 600) / 60))}
+          // stored in seconds, shown in minutes
+          save={(raw) => set('download_timeout', int(raw, 10) * 60)}
+        />
+        {hint('Abandon stuck downloads after this many minutes')}
+      </div>
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            id="soulseek-auto-clear-searches"
+            checked={s.auto_clear_searches !== false}
+            onChange={(event) => set('auto_clear_searches', event.target.checked)}
+          />
+          Auto-clear slskd search history
+        </label>
+        {hint(
+          "Automatically cleans old searches from slskd when over 200 entries. Disable if you want to keep manual searches in slskd's queue.",
+        )}
+      </div>
+      <div className="form-group">
+        <label>slskd Cleanup Scope:</label>
+        <select
+          id="soulseek-cleanup-scope"
+          value={s.cleanup_scope === 'all' ? 'all' : 'own'}
+          onChange={(event) => set('cleanup_scope', event.target.value === 'all' ? 'all' : 'own')}
+        >
+          <option value="own">Only SoulSync's own transfers</option>
+          <option value="all">Everything in slskd</option>
+        </select>
+        {hint(
+          'Which transfers and searches cleanup removes. Leave on "own" if other apps (Lidarr, another SoulSync, slskd\'s own UI) share this slskd. "Everything" clears all clients\' finished downloads and is only safe when SoulSync is the only user.',
+        )}
+      </div>
+      <div className="form-actions" style={{ marginTop: '8px' }}>
+        <button className="test-button" onClick={() => void test()}>
+          Test Soulseek Connection
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
 /** the panels of one slot in #source-config-home, by part */
 export function SourcePanels({ store, part }: SettingsTabProps) {
+  if (part === 'soulseek') return <SoulseekPanel store={store} />;
   if (part === 'hifi') return <HifiPanel store={store} />;
   if (part === 'tidal-qobuz') {
     return (
