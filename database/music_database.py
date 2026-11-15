@@ -24614,6 +24614,17 @@ class MusicDatabase:
                            "WHERE event_type = 'download' AND origin IS NOT NULL "
                            "AND cleared_at IS NULL" + keep)
             removed += cursor.rowcount
+            if not keep_review:
+                # the list also shows any row still waiting for review, an
+                # import included, and nothing above takes those: they sat in
+                # Downloads for months with no way to clear them (Storm, Nov 14
+                # 2026). the row is the import's own history, so it stays; only
+                # the review flag that put it on the Downloads page goes
+                cursor.execute(
+                    "UPDATE library_history SET verification_status = NULL "
+                    "WHERE event_type NOT IN ('download', 'podcast') "
+                    "AND verification_status IN ('unverified', 'force_imported')")
+                removed += cursor.rowcount
             conn.commit()
             if keep_review:
                 return removed
