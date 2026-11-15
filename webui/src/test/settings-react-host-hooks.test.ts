@@ -79,7 +79,7 @@ describe('settings.js hands over to the React tabs', () => {
     const flush = save.indexOf('reactSaved = await window.SoulSyncSettings.flush()');
     const failed = save.indexOf('if (result.success && !reactSaved) {');
     const saved = save.indexOf(
-      '} else if (result.success && qualityProfileSaved && lookbackSaved) {',
+      '} else if (result.success && qualityProfileSaved) {',
     );
     expect(flush).toBeGreaterThan(
       save.indexOf('const qualityProfileSaved = await saveQualityProfile();'),

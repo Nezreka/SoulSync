@@ -22,8 +22,8 @@ Corpus (where settings labels reach the DOM):
   - webui/index.html — static settings markup (labels, headings, buttons).
   - webui/static/settings.js — renders some labels dynamically (e.g. the
     "Incremental Vacuum" button text), so it is part of the corpus.
-  Settings labels do NOT live in webui/src (that tree is the newer
-  shell; the settings page itself is still index.html + static/settings.js).
+  - webui/src/features/settings/tabs/*.ts(x) — the Settings tabs ported to
+    React (SETTINGS_PORT.md). A ported tab's labels moved there, verbatim.
 
 Robustness:
   - Comparison is case-insensitive with punctuation/whitespace collapsed.
@@ -49,8 +49,15 @@ _REACT_SERVER_CARDS = (
     _ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "server-cards.tsx"
 ).read_text(encoding="utf-8")
 
+# The Settings tabs already ported to React render their labels from here.
+_REACT_SETTINGS_TABS = "\n".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted((_ROOT / "webui" / "src" / "features" / "settings" / "tabs").glob("*.ts*"))
+    if ".test." not in p.name
+)
+
 # Where settings labels can appear in the rendered UI.
-_CORPUS = "\n".join((_INDEX, _SETTINGS_JS))
+_CORPUS = "\n".join((_INDEX, _SETTINGS_JS, _REACT_SETTINGS_TABS))
 
 
 def _norm(text: str) -> str:

@@ -1,0 +1,78 @@
+<div
+  class="settings-section-header collapsed"
+  data-stg="discovery"
+  data-music-only
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>Discovery Pool Settings</h3>
+  <span class="settings-section-hint">Lookback &amp; hemisphere</span>
+</div>
+<div class="settings-section-body collapsed" data-stg="discovery" data-music-only>
+  <div class="settings-group" data-stg="discovery" data-music-only>
+    <div class="form-group">
+      <label>Lookback Period:</label>
+      <select id="discovery-lookback-period" class="form-select">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days (Default)</option>
+        <option value="90">Last 90 days</option>
+        <option value="180">Last 6 months</option>
+        <option value="all">Entire discography</option>
+      </select>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+      <div class="setting-help-text setting-help-body" hidden>
+        Controls how far back to scan when adding new artists or refreshing discovery pool. Once
+        scanned, artists are kept updated with new releases only.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Hemisphere:</label>
+      <select id="discovery-hemisphere" class="form-select">
+        <option value="northern">Northern Hemisphere</option>
+        <option value="southern">Southern Hemisphere</option>
+      </select>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+      <div class="setting-help-text setting-help-body" hidden>
+        Adjusts seasonal playlists on the Discover page to match your region. Southern hemisphere
+        flips seasons (e.g. December = Summer, June = Winter). Holidays like Christmas and Halloween
+        stay calendar-fixed.
+      </div>
+    </div>
+  </div>
+</div>
+<!-- end Discovery Pool Settings body -->

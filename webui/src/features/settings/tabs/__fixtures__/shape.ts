@@ -38,12 +38,35 @@ export function shape(root: Element) {
   return { elements, text };
 }
 
-/** the frozen vanilla markup, parsed */
-export function vanilla(name: string): Element {
+/**
+ * The frozen vanilla markup, parsed. `afterInit` runs settings.js's own
+ * initSettingHelpLines over it first: that is what the live page looked like,
+ * with the first line of each help under its setting.
+ */
+export function vanilla(name: string, { afterInit = false } = {}): Element {
   const host = document.createElement('div');
   host.innerHTML = readFileSync(
     resolve(process.cwd(), 'src/features/settings/tabs/__fixtures__', name),
     'utf8',
   );
+  if (afterInit) helpLines()(host);
   return host;
+}
+
+function helpLines(): (root: Element) => void {
+  const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
+  const fn = (name: string) => {
+    const start = source.indexOf(`function ${name}(`);
+    let depth = 0;
+    for (let i = source.indexOf('{', start); i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      if (source[i] === '}' && (depth -= 1) === 0) return source.slice(start, i + 1);
+    }
+    throw new Error(`${name} not found in settings.js`);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function(
+    'document',
+    `${fn('settingHelpFirstLine')}\n${fn('_settingHelpBody')}\n${fn('initSettingHelpLines')}\nreturn initSettingHelpLines;`,
+  )(document) as (root: Element) => void;
 }

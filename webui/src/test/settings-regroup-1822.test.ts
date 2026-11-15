@@ -22,10 +22,6 @@ describe('where sections live', () => {
   it.each([
     ['MetaSync', 'connections'],
     ['Notifications', 'connections'],
-    ['Discovery', 'discovery'],
-    ['Playlists', 'discovery'],
-    ['Listening Stats', 'discovery'],
-    ['Discovery Pool Settings', 'discovery'],
     ['Import Lists', 'discovery'],
     ['Filtering', 'downloads'],
     ['Video Quality', 'quality'],
@@ -39,8 +35,9 @@ describe('where sections live', () => {
   it('has a tab for every section tag and no tab left empty', () => {
     const tabs = [...doc.querySelectorAll('.stg-tab')].map((t) => t.getAttribute('data-tab'));
     // a tab ported to React has slots where its sections were: the blocks
-    // themselves are rendered into them (SETTINGS_PORT.md). Sidebar Weather,
-    // on Appearance, is one: src/features/settings/tabs/appearance.test.tsx
+    // themselves are rendered into them (SETTINGS_PORT.md). Sidebar Weather
+    // (Appearance) and Playlists, Listening Stats, Discovery and Discovery Pool
+    // Settings (Discovery) are: src/features/settings/tabs/*.test.tsx
     const used = new Set(
       [...doc.querySelectorAll('#settings-page [data-stg], #settings-page [data-stg-react]')].map(
         (el) => el.getAttribute('data-stg') ?? el.getAttribute('data-stg-react'),

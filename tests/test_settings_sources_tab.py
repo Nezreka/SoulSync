@@ -888,7 +888,19 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
         kind of drift twice (the download-mode select, the slskd form).
     """
     slots = re.findall(r'<span[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
-    assert len(slots) >= 8, f"only {len(slots)} headers report live values"
+    # the tabs ported to React render their headers themselves, from the same
+    # state their controls render from, so the two cannot disagree either
+    # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
+    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
+    react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
+    react_slots = re.findall(r'summaryKey="([^"]+)"', react)
+    assert len(slots) + len(react_slots) >= 8, f"only {len(slots) + len(react_slots)} headers report live values"
+    assert not set(slots) & set(react_slots), "a summary is on the page twice"
+    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
+    assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
+    for key in react_slots:
+        block = react.split(f'summaryKey="{key}"', 1)[1][:200]
+        assert "summary={" in block, f"React header {key} has no summary"
 
     for m in re.finditer(r'<span[^>]*data-stg-summary="[^"]+"[^>]*>', index):
         assert 'data-stg-fallback="' in m.group(0), (

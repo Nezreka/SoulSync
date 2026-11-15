@@ -25,6 +25,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
+import { DiscoveryTab } from './tabs/discovery-tab';
 import { LogsTab } from './tabs/logs-tab';
 
 export type SettingsTabKey =
@@ -66,6 +67,7 @@ declare global {
 /** A tab is added here in the change that ports it. */
 export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
   appearance: AppearanceTab,
+  discovery: DiscoveryTab,
   logs: LogsTab,
 };
 

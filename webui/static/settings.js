@@ -1098,23 +1098,8 @@ const LIBRARY_SUMMARIES = {
         if (genre?.checked) bits.push('genre whitelist on');
         return bits.join(' · ');
     },
-    'library-playlists': () => {
-        const bits = [];
-        if (document.getElementById('m3u-export-enabled')?.checked) bits.push('M3U export');
-        if (document.getElementById('library-m3u-enabled')?.checked) bits.push('library M3U');
-        return bits.length ? bits.join(' · ') : 'off';
-    },
-    'library-stats': () => {
-        const el = document.getElementById('listening-stats-enabled');
-        if (!el) return '';
-        return el.checked ? 'collecting play history' : 'off';
-    },
-    'library-discovery': () => {
-        const v = document.getElementById('discover-adventurousness')?.value;
-        if (v === undefined || v === null || v === '') return '';
-        const n = Number(v);
-        return n <= 25 ? 'plays it safe' : n <= 60 ? 'balanced' : 'adventurous';
-    },
+    // library-playlists, library-stats and library-discovery: the Discovery
+    // tab is React and renders its own summaries (tabs/discovery.ts)
     'library-video-prefs': () => {
         const region = document.getElementById('video-watch-region');
         const label = region?.selectedOptions?.[0]?.textContent?.trim();
@@ -3841,14 +3826,7 @@ async function loadSettingsData() {
         const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
         if (_wlWingIt) _wlWingIt.checked = settings.wishlist?.wing_it_guesses === true;
 
-        // Populate Playlist Sync settings
-        document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
-        const _syncModeEl = document.getElementById('playlist-sync-mode');
-        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'reconcile';
-        // #1455: default ON — older installs come back undefined and read as
-        // today's behavior (wishlist missing tracks during sync).
-        document.getElementById('playlist-sync-wishlist-missing').checked =
-            settings.playlist_sync?.wishlist_missing_tracks !== false;
+        // Playlist Sync is on the Discovery tab, which is React (discovery-tab.tsx)
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -3865,16 +3843,7 @@ async function loadSettingsData() {
         // Defaults ON — an absent value means "recover", not "quarantine".
         if (_atomicRecover) _atomicRecover.checked = settings.album_downloads?.atomic_recover_orphans !== false;
 
-        // Populate Listening Stats settings
-        document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
-        document.getElementById('listening-stats-interval').value = settings.listening_stats?.poll_interval || 30;
-        const _advEl = document.getElementById('discover-adventurousness');
-        if (_advEl) {
-            const _adv = settings.discover?.adventurousness;
-            _advEl.value = (typeof _adv === 'number') ? _adv : 0.3;
-            const _advVal = document.getElementById('discover-adventurousness-val');
-            if (_advVal) _advVal.textContent = parseFloat(_advEl.value).toFixed(2);
-        }
+        // Listening Stats and Discovery are on the Discovery tab, which is React
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
@@ -3930,17 +3899,13 @@ async function loadSettingsData() {
         const _transferPermEl = document.getElementById('import-transfer-permanent');
         if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent !== false;
 
-        // Populate M3U Export settings
-        document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
+        // Populate M3U Export settings (the export and whole-library switches
+        // and folder are on the Discovery tab, which is React)
         const _m3uRelEl = document.getElementById('m3u-relative-paths');
         if (_m3uRelEl) _m3uRelEl.checked = settings.m3u_export?.relative_paths === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
         document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
         document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
-        const _libM3uEn = document.getElementById('library-m3u-enabled');
-        if (_libM3uEn) _libM3uEn.checked = settings.m3u_export?.library_enabled === true;
-        const _libM3uPath = document.getElementById('library-m3u-path');
-        if (_libM3uPath) _libM3uPath.value = settings.m3u_export?.library_path || '';
 
         // UI Appearance is React now: opening Settings applies the saved accent,
         // visualizer and effect switches from src/features/settings/tabs/appearance.ts
@@ -3961,27 +3926,7 @@ async function loadSettingsData() {
         if (logLevelSelect) logLevelSelect.value = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
 
-        // Load Discovery Lookback Period setting
-        try {
-            const lookbackResponse = await fetch('/api/discovery/lookback-period');
-            const lookbackData = await lookbackResponse.json();
-            if (lookbackData.period) {
-                document.getElementById('discovery-lookback-period').value = lookbackData.period;
-            }
-        } catch (error) {
-            console.error('Error loading discovery lookback period:', error);
-        }
-
-        // Load Hemisphere setting
-        try {
-            const hemiResponse = await fetch('/api/discovery/hemisphere');
-            const hemiData = await hemiResponse.json();
-            if (hemiData.hemisphere) {
-                document.getElementById('discovery-hemisphere').value = hemiData.hemisphere;
-            }
-        } catch (error) {
-            console.error('Error loading hemisphere setting:', error);
-        }
+        // (the discovery lookback and hemisphere load with their React tab)
 
         // Load current log level
         try {
@@ -6989,11 +6934,8 @@ async function saveSettings(quiet = false) {
                 _cfgInt('wishlist-ignore-ttl', 30))),
             wing_it_guesses: document.getElementById('wishlist-wing-it-guesses').checked,
         },
-        playlist_sync: {
-            create_backup: document.getElementById('create-backup').checked,
-            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' }),
-            wishlist_missing_tracks: document.getElementById('playlist-sync-wishlist-missing').checked
-        },
+        // playlist_sync, listening_stats and discover: the Discovery tab is
+        // React and saves its own keys
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
             prefer_explicit: document.getElementById('prefer-explicit').checked,
@@ -7119,25 +7061,12 @@ async function saveSettings(quiet = false) {
             atomic_publish: _cfgBool('album-atomic-publish'),
             atomic_recover_orphans: _cfgBool('album-atomic-recover')
         },
-        listening_stats: {
-            enabled: document.getElementById('listening-stats-enabled').checked,
-            poll_interval: parseInt(document.getElementById('listening-stats-interval').value) || 30,
-        },
-        discover: {
-            // Adventurousness dial (0 safe .. 1 obscure) — drives the Discover popularity penalty.
-            // Use the slider's value directly (0 is valid; don't `|| 0.3` it away).
-            adventurousness: document.getElementById('discover-adventurousness')
-                ? parseFloat(document.getElementById('discover-adventurousness').value)
-                : 0.3,
-        },
         m3u_export: {
-            enabled: document.getElementById('m3u-export-enabled').checked,
+            // enabled, library_enabled and library_path: the Discovery tab
             relative_paths: _cfgBool('m3u-relative-paths'),
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
-            rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
-            library_enabled: _cfgBool('library-m3u-enabled'),
-            library_path: _cfgStr('library-m3u-path')
+            rewrite_to: document.getElementById('m3u-rewrite-to').value || ''
         },
         ui_appearance: {
             // the Appearance tab is React and saves its own keys of this
@@ -7255,45 +7184,15 @@ async function saveSettings(quiet = false) {
             reactSaved = false;
         }
 
-        // Save discovery lookback period
-        let lookbackSaved = true;
-        try {
-            const lookbackPeriod = document.getElementById('discovery-lookback-period').value;
-            const lookbackResponse = await fetch('/api/discovery/lookback-period', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ period: lookbackPeriod })
-            });
-            const lookbackResult = await lookbackResponse.json();
-            lookbackSaved = lookbackResult.success === true;
-        } catch (error) {
-            console.error('Error saving discovery lookback period:', error);
-            lookbackSaved = false;
-        }
-
-        // Save hemisphere setting
-        try {
-            const hemisphere = document.getElementById('discovery-hemisphere').value;
-            await fetch('/api/discovery/hemisphere', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hemisphere })
-            });
-        } catch (error) {
-            console.error('Error saving hemisphere setting:', error);
-        }
+        // (the discovery lookback and hemisphere are saved by their React tab,
+        // when they change, through SoulSyncSettings.flush above)
 
         if (result.success && !reactSaved) {
             setSettingsSaveState('error');
             showToast('Some settings failed to save', 'error', 'set-services');
-        } else if (result.success && qualityProfileSaved && lookbackSaved) {
+        } else if (result.success && qualityProfileSaved) {
             // the button says Saved, a toast on every keystroke was noise
             setSettingsSaveState('saved');
-            _forceServiceStatusRefresh();
-            _stgRefreshAfterSave();
-        } else if (result.success && qualityProfileSaved && !lookbackSaved) {
-            setSettingsSaveState('saved');
-            showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && !qualityProfileSaved) {

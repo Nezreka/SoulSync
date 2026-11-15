@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 15 2026 (steps 1 to 3 done: the scaffold, Appearance, Logs)
+- **Last updated:** Nov 15 2026 (steps 1 to 4 done: the scaffold, Appearance, Logs, Discovery)
 
 ## Goal
 
@@ -57,19 +57,19 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Downloads | not started | 32 controls and buttons |
 | Tab: Quality | not started | 67 controls and buttons |
 | Tab: Library | not started | 236 controls and buttons |
-| Tab: Discovery | not started | 12 controls and buttons |
+| Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 2 of 9 tabs, 24 of 678 controls, 20 of 333 `settings.js` functions removed, 1 of 83 tests repointed.
+**Progress:** 3 of 9 tabs (Discovery without its video-only section), 35 of 678 controls, 20 of 333 `settings.js` functions removed, 3 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 12,627 |
-| `webui/static/settings.js` | 10,187 | 9,824 |
+| `webui/index.html` | 12,823 | 12,405 |
+| `webui/static/settings.js` | 10,187 | 9,723 |
 | `webui/static/init.js` | 5,264 | 5,208 |
 
 ## Completed steps
@@ -307,12 +307,66 @@ Exactly the four socket calls the vanilla viewer made.
 
 **Not checked in a browser:** live lines. The sandbox has no socket server, on either page. Both halves are unit-tested (the tab against a fake bridge, the bridge against a fake socket), and the bridge makes the same four calls the old code made.
 
+### Step 4: the Discovery tab, music side (Nov 15 2026)
+
+**What it is.** The "Discovery & playlists" group, Playlists (M3U export, whole-library M3U, sync mode, wishlist missing tracks, backup copy), Listening Stats, the Discovery dial, and Discovery Pool Settings (lookback, hemisphere, music only). **Import Lists**, the tab's video-only section, is still vanilla: `video-settings.js` owns it and it moves in the video pass.
+
+**Where the markup was.** Two runs: the group and three sections in the second column (180 lines), and Discovery Pool Settings in the third column (49 lines). Replaced by slots `discovery`/`main` and `discovery`/`pool`. Frozen as `__fixtures__/discovery-main.vanilla.html` and `discovery-pool.vanilla.html`.
+
+**New shared pieces (`tabs/parts.tsx`), for every tab from here on.** This tab is the first with the page's two DOM-rewriting mechanisms, and React can't share nodes with code that rewrites them, so the React tab renders the finished result and owns the behaviour:
+
+| Mechanism | What `settings.js` did | What `parts.tsx` does |
+|---|---|---|
+| Section summaries (`data-stg-summary`) | `refreshLibrarySummaries()` rewrote the header hint with a live summary on every change, falling back to `data-stg-fallback`, and toggled `is-live`. | `Section` renders the summary it is given (or the fallback) and the class. The three summaries this tab had (`library-playlists`, `library-stats`, `library-discovery`) were taken out of `LIBRARY_SUMMARIES`, so `settings.js` never touches React's text. |
+| Help lines (#1822) | `initSettingHelpLines()` added a `<small class="stg-help-line">` with the help's first sentence to each form-group, and moved the "i" into it when there was more to read, else hid it. | `helpBits()` renders the same `<small>` and puts the "i" in the same place (`helpFirstLine` is `settingHelpFirstLine`, ported). React icons have no inline `onclick`, so `initSettingHelpLines` (which matches `[onclick*="toggleSettingHelp"]`) never picks them up. |
+| The "i" (`toggleSettingHelp`) | Toggled the help body's `hidden` and the icon's `open` class. | `useHelp()`: the body's `hidden` and the icon's `open` follow React state. Enter and Space work as before. |
+| Collapsible tiles | inline `onclick` | `toggleSection` (moved here from the Appearance tab). |
+
+Also `useDraft()`: a number field shows what is being typed and saves what it parses to (Poll Interval: emptied, it shows empty and saves 30, as the collector's `parseInt(...) || 30` did).
+
+**Store changes**
+
+- **Values with their own endpoint** (`setExtra(key, value, save)`). Lookback and hemisphere are not `/api/settings` keys; `saveSettings` posted them to `/api/discovery/lookback-period` and `/api/discovery/hemisphere` on every page save. Now a change queues its own saver under the same rules as any other change (the 2 s wait, autosave off, the load guards), and `flush()` runs it. A failed saver stays pending and the save shows the error state. A saver that only warned keeps doing so: a failed lookback still shows "Settings saved, but discovery lookback period failed to save"; a failed hemisphere is still only logged.
+- **`loads` counter.** Goes up with each good payload. The Pool part re-reads lookback and hemisphere on each, as `loadSettingsData` did on every visit to Settings.
+
+**Removed from `settings.js`**
+
+| What | Lines |
+|---|---|
+| The three summaries from `LIBRARY_SUMMARIES` | 17 |
+| `loadSettingsData`: playlist sync (3 controls), listening stats and the dial, M3U export and whole-library M3U | 9 + 10 + 2 + 4 |
+| `loadSettingsData`: the lookback and hemisphere fetches | 22 |
+| Collector: `playlist_sync`, `listening_stats`, `discover`, and three keys of `m3u_export` (`enabled`, `library_enabled`, `library_path`; the other four keys belong to the Library tab and stay) | 18 |
+| `saveSettings`: the lookback and hemisphere posts, and the `lookbackSaved` branch of the outcome ladder | 38 |
+
+**Bug found, ported as it was, not fixed.** The Discovery section's summary compares the dial (0 to 1) with 25 and 60, so it always reads "plays it safe". Same on dev (seen in the browser at 0.60 on both pages). A one-line fix (`n <= 0.25 … n <= 0.6`) for Boulder to decide; a 1:1 port does not change it.
+
+**Differences from the old page, all deliberate**
+
+| What | Before | Now |
+|---|---|---|
+| Saving lookback and hemisphere | Posted with every page save, changed or not. | Posted when changed. |
+| What a change saves | Every value on the page. | Only the keys that changed. |
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity with the frozen markup **after** `settings.js`'s own `initSettingHelpLines` has run on it (the shared helper now runs the real function) | Same elements, ids, classes, `hidden`, `min`/`max`/`step`, `data-stg-summary`/`fallback`, `data-music-only`, help lines and text, both parts. The first try caught two help bodies the markup keeps inside their form-group. |
+| Behaviour tests (`discovery.test.tsx`) | 11 more: resolving saved values, summaries (the bug included), fixed hints until load then live, the first-sentence cut, every control saving only its key, the emptied interval, the "i" opening only its own help (click and Enter), the Pool loading with each settings load and not before, the Pool saving through its own endpoints under autosave-off, the lookback failure warning. |
+| Repointed | `settings-regroup-1822.test.ts` (four "is on discovery" rows now covered by the parity test; Import Lists stays), `settings-react-host-hooks.test.ts` (the new outcome ladder), and two Python tests: `tests/test_docs_settings_labels.py` (the docs-named labels are looked for in the React tabs too; three had moved there) and `tests/test_settings_sources_tab.py::test_library_headers_report_what_is_set_not_what_is_inside` (counts React summaries, checks each has its summary and the shared fallback, and that none is on the page twice). |
+| Python tests that read the settings markup, scripts or these controls (90 files) | First run: 2,403 passed, 4 failed, all four the two tests above reading moved labels and summaries. After repointing them: 151 of 151 in those two files pass. |
+| `src/features/settings` + `src/test` | 59 + 1,209 pass |
+| `tsc --noEmit` / `oxlint` / build | clean / 0 warnings / builds |
+| **Browser, old page vs ported page** (sandbox stubs `/api/discovery/*` and logs posts; settings with Discovery values) | Values, summaries (live), section headers, help lines, two opened helps, search for "hemisphere": **identical**. All four sections open: **0 pixels differ**. Changing four settings: the old page sent a full save, lookback and hemisphere (3 requests); the ported page sent one settings save with exactly the four changed keys, and the lookback (2 requests). Same resulting values. |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | step 4 | **Discovery tab ported (music).** New: `tabs/parts.tsx` (shared sections, summaries, help lines), `tabs/discovery.ts`, `tabs/discovery-tab.tsx`, their test, two fixtures. Store: values with their own endpoints, and a load counter. Markup replaced by two slots; the tab's summaries, load, save, lookback and hemisphere code removed from `settings.js`. Details under "Completed steps". |
 | Nov 15 | `f1b9ccf3f` (step 3) | **Logs tab ported.** New: `tabs/logs.ts`, `tabs/logs-tab.tsx`, their test, a frozen fixture, and the shared test helper `tabs/__fixtures__/shape.ts`. Markup replaced by one slot; the 12 `_log*` functions and the tab-switch hook removed from `settings.js`; a socket bridge added to `core.js`. Host: every tab is told which tab is open (`active`). Details under "Completed steps". |
 | Nov 15 | `d58589201` (step 2) | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
 | Nov 14 | `5f5a2717a` (step 1) | **Scaffold.** New: `settings-store.ts`, `host.tsx` and their tests, `settings-react-host-hooks.test.ts`. Changed: `main.tsx` (mounts the host), `settings.js` (three hooks: `switchSettingsTab`, `loadSettingsData`, `saveSettings`). No markup changed, no tab ported. Details under "Completed steps". |
@@ -1288,38 +1342,38 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `m3u-export-enabled` | Auto-save M3U file when downloading playlists | both | no |
-| checkbox | `library-m3u-enabled` | Auto-generate a whole-library M3U (updates on every scan) | both | no |
-| text | `library-m3u-path` | Whole-library M3U output folder: | both | no |
-| select | `playlist-sync-mode` | Sync mode: {Replace — recreate the playlist each sync / Reconcile — edit in place, keep image & description (d | both | no |
-| checkbox | `playlist-sync-wishlist-missing` | Add missing tracks to the wishlist during sync | both | no |
-| checkbox | `create-backup` | Keep a "<name> Backup" copy on the server before a Replace sync | both | no |
+| checkbox | `m3u-export-enabled` | Auto-save M3U file when downloading playlists | both | yes (step 4) |
+| checkbox | `library-m3u-enabled` | Auto-generate a whole-library M3U (updates on every scan) | both | yes (step 4) |
+| text | `library-m3u-path` | Whole-library M3U output folder: | both | yes (step 4) |
+| select | `playlist-sync-mode` | Sync mode: {Replace — recreate the playlist each sync / Reconcile — edit in place, keep image & description (d | both | yes (step 4) |
+| checkbox | `playlist-sync-wishlist-missing` | Add missing tracks to the wishlist during sync | both | yes (step 4) |
+| checkbox | `create-backup` | Keep a "<name> Backup" copy on the server before a Replace sync | both | yes (step 4) |
 
 **Listening Stats** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `listening-stats-enabled` | Enable listening stats collection from media server | both | no |
-| number | `listening-stats-interval` | Poll Interval (minutes): | both | no |
+| checkbox | `listening-stats-enabled` | Enable listening stats collection from media server | both | yes (step 4) |
+| number | `listening-stats-interval` | Poll Interval (minutes): | both | yes (step 4) |
 
 **Discovery** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| range | `discover-adventurousness` | Adventurousness | both | no |
+| range | `discover-adventurousness` | Adventurousness | both | yes (step 4) |
 
 **Discovery Pool Settings** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `discovery-lookback-period` | Lookback Period: {Last 7 days / Last 30 days (Default) / Last 90 days / Last 6 months / Entire discography} | music only | no |
-| select | `discovery-hemisphere` | Hemisphere: {Northern Hemisphere / Southern Hemisphere} | music only | no |
+| select | `discovery-lookback-period` | Lookback Period: {Last 7 days / Last 30 days (Default) / Last 90 days / Last 6 months / Entire discography} | music only | yes (step 4) |
+| select | `discovery-hemisphere` | Hemisphere: {Northern Hemisphere / Southern Hemisphere} | music only | yes (step 4) |
 
 **Import Lists** (video only, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | + Add list | video only | no |
+| button |  | + Add list | video only | no (video pass) |
 
 ### Appearance (14)
 
@@ -1880,7 +1934,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_cleanup_protected_roots.py` | no |
 | `tests/test_config_persistence.py` | no |
 | `tests/test_dashboard_seam.py` | no |
-| `tests/test_docs_settings_labels.py` | no |
+| `tests/test_docs_settings_labels.py` | yes (step 4) |
 | `tests/test_download_chain_widget.py` | no |
 | `tests/test_explicit_preference.py` | no |
 | `tests/test_hybrid_source_unready_ui.py` | no |
@@ -1897,7 +1951,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_script_split_integrity.py` | no |
 | `tests/test_settings_never_wipes.py` | no |
 | `tests/test_settings_persist_whitelist.py` | no |
-| `tests/test_settings_sources_tab.py` | no |
+| `tests/test_settings_sources_tab.py` | yes (step 4) |
 | `tests/test_settings_subtitles_section.py` | no |
 | `tests/test_settings_templates_exposed.py` | no |
 | `tests/test_settings_textarea_autosave.py` | no |
@@ -1935,7 +1989,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/settings-library-tabs.test.ts` | no |
 | `webui/src/test/settings-load-element-drift.test.ts` | no |
 | `webui/src/test/settings-navigation.test.ts` | no |
-| `webui/src/test/settings-regroup-1822.test.ts` | yes (step 2) |
+| `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |
 | `webui/src/test/settings-source-autotest.test.ts` | no |
 | `webui/src/test/settings-source-tiles-chains.test.ts` | no |
