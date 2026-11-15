@@ -28,6 +28,7 @@ import {
   vdlFmtElapsed,
   vdlFmtEta,
   vdlFmtRuntime,
+  vdlLangLabel,
   vdlFmtSize,
   vdlFmtSpeed,
   vdlFmtViews,
@@ -200,6 +201,7 @@ function VdlCard({
   const downloading = d.status === 'downloading';
   const sub = rowSub(d, importElapsed, Boolean(inGroup));
   const tag = formatTag(d.quality_label);
+  const langs = vdlLangLabel(d.release_langs);
   const when = d.status === 'completed' ? clockTime(parseStamp(d.completed_at)) : '';
 
   const title = inGroup && ctx.episode != null ? `Episode ${ctx.episode}` : vdlCardTitle(d);
@@ -284,8 +286,18 @@ function VdlCard({
           ) : null}
         </div>
         <div className="dlc-meta">
-          {tag ? (
-            <span className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}>{tag}</span>
+          {tag || langs ? (
+            // the languages sit under the quality tag (#2120)
+            <span className="dlc-tags">
+              {tag ? (
+                <span className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}>{tag}</span>
+              ) : null}
+              {langs ? (
+                <span className="dlc-tag dlc-tag-lang" title="Languages the release name tags">
+                  {langs}
+                </span>
+              ) : null}
+            </span>
           ) : null}
           {downloading ? (
             <>
@@ -566,6 +578,7 @@ function VdlSheet({
         ['Source', [d.username, d.source].filter(Boolean).join(' · ')],
         ['Format', [d.resolution, d.codec].filter(Boolean).join(' · ')],
         ['Target', d.quality_label || ''],
+        ['Languages', vdlLangLabel(d.release_langs)],
         ['Size', d.size_bytes ? vdlFmtSize(d.size_bytes) : ''],
         ['Peer', availability],
         ['Backups', backups ? `${backups} release${backups === 1 ? '' : 's'} to fall back on` : ''],

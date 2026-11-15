@@ -461,6 +461,19 @@
     white-space: nowrap;
 }
 
+/* quality tag with the release's languages under it (#2120) */
+.dlc-tags {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+}
+
+.dlc-tag-lang {
+    font-weight: 500;
+    color: var(--white-a45);
+}
+
 .dlc-tag-hq {
     background: rgba(var(--accent-rgb), 0.14);
     color: rgb(var(--accent-light-rgb));
@@ -1334,6 +1347,11 @@
         justify-content: flex-start;
         flex-wrap: wrap;
         gap: 4px 10px;
+    }
+
+    .dlc-row .dlc-tags {
+        flex-direction: row;
+        gap: 6px;
     }
 
     .dlc-row .dlc-acts {

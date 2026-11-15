@@ -229,6 +229,20 @@ _SLSKD_KEYS = {
 }
 
 
+def annotate_release_languages(rows) -> None:
+    """``release_langs`` on each download row: the audio, multi and subtitle tags
+    its release name carries, so the downloads page can show them (#2120).
+    a youtube grab has no scene tags, so it gets none."""
+    from core.video.release_parse import release_languages
+    for r in rows or []:
+        try:
+            if str(r.get("source") or "").lower() == "youtube" or not r.get("release_title"):
+                continue
+            r["release_langs"] = release_languages(r.get("release_title"))
+        except Exception:   # noqa: BLE001 - one odd row must not blank the page
+            logger.debug("release language annotation failed", exc_info=True)
+
+
 def _parse_text(hit) -> str:
     """What the release parser should read for a hit. Soulseek hits are grouped by
     FOLDER — the folder title carries the show/release name, but on library-style
@@ -1974,6 +1988,7 @@ def register_routes(bp):
         _annotate_libraries(db, rows)
         _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
+        annotate_release_languages(rows)
         return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])
