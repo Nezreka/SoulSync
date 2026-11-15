@@ -2351,6 +2351,9 @@ def download_discography(artist_id):
         # them back with everything the client needs to retry the release.
         failed_releases = []
 
+        from core.metadata import deezer_credits
+        deezer_album_credits = {}
+
         def generate_ndjson():
             nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
 
@@ -2451,7 +2454,14 @@ def download_discography(artist_id):
                         # artist isn't in the track's artists list
                         # (cross-artist compilation / appears_on
                         # contamination). Keeps features.
-                        if not track_artist_matches(track_artists, hint_artist):
+                        if not track_artist_matches(track_artists, hint_artist) and not (
+                                # deezer's tracklist names only a track's first
+                                # artist; a co-main artist is on the album's or
+                                # the track's own credits (#2104)
+                                resolved_source == 'deezer'
+                                and deezer_credits.credits_artist(
+                                    hint_artist, album_id=resolved_album_id,
+                                    track_id=track_id, memo=deezer_album_credits)):
                             skipped_artist += 1
                             continue
 

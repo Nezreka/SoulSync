@@ -2922,7 +2922,27 @@ class WatchlistScanner:
         if not names:
             logger.debug("track has no artist credits; including (fail open)")
             return True
-        return track_artist_matches(names, artist_name)
+        if track_artist_matches(names, artist_name):
+            return True
+        return self._deezer_credits_watched_artist(track, album_data, artist_name)
+
+    @staticmethod
+    def _deezer_credits_watched_artist(track, album_data, artist_name) -> bool:
+        """Deezer's tracklist names only a track's first artist, so a release
+        the watched artist co-leads read as someone else's. Ask the album's
+        and the track's own credits before dropping it (#2104)."""
+        def _field(obj, key):
+            return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+        if 'deezer' not in (_field(track, '_source'), _field(album_data, '_source')):
+            return False
+        try:
+            from core.metadata import deezer_credits
+            return deezer_credits.credits_artist(
+                artist_name, album_id=_field(album_data, 'id'), track_id=_field(track, 'id'))
+        except Exception as e:
+            logger.debug(f"deezer credits check failed ({e}); track stays dropped")
+            return False
 
     def is_track_missing_from_library(self, track, album_name: str = None,
                                       edition_preference: str = None) -> bool:
