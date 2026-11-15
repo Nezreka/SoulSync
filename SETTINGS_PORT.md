@@ -707,7 +707,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
+| Nov 15 | `ffc31675c` (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
 | Nov 15 | `93742a5b7` (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
 | Nov 15 | `514559393` (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
 | Nov 15 | `0fa4dc784` (step 7e) | **HiFi panel is React.** Details under "Completed steps". |
