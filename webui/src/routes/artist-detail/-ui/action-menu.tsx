@@ -36,6 +36,8 @@ interface Props {
 }
 
 const MENU_GAP = 6;
+/** how close the menu may come to the window edge. */
+const MENU_EDGE = 8;
 
 /**
  * a small dropdown menu that lives at body level.
@@ -69,21 +71,32 @@ export function ActionMenu({
 
   const triggerRef = useRef<HTMLElement | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    up: boolean;
+    maxHeight?: number;
+  } | null>(null);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const popup = popupRef.current;
-    const height = popup?.offsetHeight ?? 0;
+    const height = popup?.scrollHeight || popup?.offsetHeight || 0;
     const width = popup?.offsetWidth ?? 0;
     const viewportH = window.innerHeight || 800;
     const viewportW = window.innerWidth || 1200;
-    const up = rect.bottom + MENU_GAP + height > viewportH && rect.top - MENU_GAP - height > 0;
-    const top = up ? rect.top - MENU_GAP - height : rect.bottom + MENU_GAP;
+    const below = viewportH - MENU_EDGE - rect.bottom - MENU_GAP;
+    const above = rect.top - MENU_GAP - MENU_EDGE;
+    // down when it fits, up when only that fits, else the roomier side and the
+    // menu scrolls, so no item ends up off screen (#2124)
+    const up = height > below && (height <= above || above > below);
+    const room = Math.max(0, up ? above : below);
+    const shown = Math.min(height, room);
+    const top = up ? rect.top - MENU_GAP - shown : rect.bottom + MENU_GAP;
     let left = align === 'right' ? rect.right - width : rect.left;
-    left = Math.max(8, Math.min(left, viewportW - width - 8));
-    setPos({ top, left, up });
+    left = Math.max(MENU_EDGE, Math.min(left, viewportW - width - MENU_EDGE));
+    setPos({ top, left, up, maxHeight: height > room ? room : undefined });
   }, [open, align, items.length]);
 
   useEffect(() => {
@@ -157,6 +170,7 @@ export function ActionMenu({
               top: pos?.top ?? -9999,
               left: pos?.left ?? -9999,
               visibility: pos ? 'visible' : 'hidden',
+              ...(pos?.maxHeight != null ? { maxHeight: pos.maxHeight, overflowY: 'auto' } : {}),
             }}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {

@@ -1190,18 +1190,64 @@
 
     function moreCount(html) { return (html.match(/<button/g) || []).length; }
 
+    // where the More menu goes. btn is the button's rect, size the menu's natural
+    // size, area the part of the screen you can see. it opens up when it fits
+    // (the hero has the room), else down, else on the roomier side and scrolls
+    // inside, so its first item is never off screen (#2124).
+    function moreMenuPlacement(btn, size, area) {
+        var gap = 6;
+        var above = Math.max(0, btn.top - gap - area.top);
+        var below = Math.max(0, area.bottom - btn.bottom - gap);
+        var up = size.height <= above || (size.height > below && above > below);
+        var height = Math.min(size.height, up ? above : below);
+        var top = up ? btn.top - gap - height : btn.bottom + gap;
+        var width = Math.min(size.width, area.right - area.left);
+        var left = Math.max(area.left, Math.min(btn.left, area.right - width));
+        return { top: Math.round(top), left: Math.round(left), maxHeight: Math.floor(height), up: up };
+    }
+    // the part of the page you can see: the window, cut to the scrolling content
+    // area so the menu never slides under the sidebar or past the top of the page.
+    function moreMenuArea(el) {
+        var pad = 8;
+        var area = { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth };
+        var sc = el.closest('.main-content');
+        if (sc) {
+            var r = sc.getBoundingClientRect();
+            area = {
+                top: Math.max(area.top, r.top), left: Math.max(area.left, r.left),
+                bottom: Math.min(area.bottom, r.bottom), right: Math.min(area.right, r.right),
+            };
+        }
+        return { top: area.top + pad, left: area.left + pad, bottom: area.bottom - pad, right: area.right - pad };
+    }
+    // fixed, so the billboard's overflow (it clips the ken burns backdrop) and the
+    // scroll edge can't cut it off.
+    function placeMoreMenu(btn, menu) {
+        menu.classList.add('vd-more-menu--placed');
+        menu.style.maxHeight = 'none';
+        var natural = { height: menu.scrollHeight, width: menu.offsetWidth };
+        var spot = moreMenuPlacement(btn.getBoundingClientRect(), natural, moreMenuArea(btn));
+        menu.style.top = spot.top + 'px';
+        menu.style.left = spot.left + 'px';
+        menu.style.maxHeight = spot.maxHeight + 'px';
+    }
     function toggleMoreMenu(btn) {
         var wrap = btn.closest('[data-vd-more]');
         var menu = wrap && wrap.querySelector('[data-vd-more-menu]');
         if (!menu) return;
         var open = menu.hidden;
         menu.hidden = !open;
+        // lifts the hero over the sticky back button while it's open
+        wrap.classList.toggle('vd-more--open', open);
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) placeMoreMenu(btn, menu);
     }
     function closeMoreMenu() {
         var menu = q('[data-vd-more-menu]');
         if (menu && !menu.hidden) {
             menu.hidden = true;
+            var wrap = menu.closest('[data-vd-more]');
+            if (wrap) wrap.classList.remove('vd-more--open');
             var b = q('[data-vd-more] .vd-more-btn');
             if (b) b.setAttribute('aria-expanded', 'false');
         }
@@ -4760,6 +4806,14 @@
         window.SoulSyncVideoDetail = detailBridge;
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
+        // the More menu is pinned to the screen, so it can't follow the page:
+        // a scroll or resize closes it (scrolling the menu itself doesn't).
+        document.addEventListener('scroll', function (e) {
+            var t = e.target;
+            if (t && t.closest && t.closest('[data-vd-more-menu]')) return;
+            closeMoreMenu();
+        }, true);
+        window.addEventListener('resize', function () { closeMoreMenu(); });
         // Channel search (debounced) + sort — only act on the youtube controls.
         document.addEventListener('input', function (e) {
             var inp = e.target && e.target.closest && e.target.closest('[data-vd-yt-search]');
@@ -4829,7 +4883,7 @@
             if (bg && !data.has_backdrop) bg.style.backgroundImage = "url('" + (window.SoulSyncURL?.resolve('/api/video/poster/') || '/api/video/poster/') + data.kind + '/' + libId + '?' + cb + "')";
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') { closePops(); closeTrailer(); closeLightbox(); closeCastModal(); }
+            if (e.key === 'Escape') { closeMoreMenu(); closePops(); closeTrailer(); closeLightbox(); closeCastModal(); }
             else if (lightboxOpen()) {
                 if (e.key === 'ArrowLeft') lightboxStep(-1);
                 else if (e.key === 'ArrowRight') lightboxStep(1);
