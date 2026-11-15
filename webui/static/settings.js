@@ -9110,9 +9110,22 @@ async function rebuildPlaylistFolders() {
         });
         if (status) {
             status.style.color = '#4caf50';
-            status.textContent = (n === 0)
-                ? 'No "organize by playlist" playlists to rebuild yet.'
-                : `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`;
+            if (n === 0) {
+                // the switch lives on each playlist, not here, and people
+                // looked for it in this panel (#2112)
+                status.textContent = 'No playlists have Organize by playlist on yet. Turn it on per playlist: ';
+                const link = document.createElement('a');
+                link.href = '/sync';
+                link.textContent = 'Playlists';
+                link.addEventListener('click', (ev) => {
+                    if (typeof navigateToPage !== 'function') return;
+                    ev.preventDefault();
+                    navigateToPage('sync');
+                });
+                status.append(link, ', open a playlist\'s ⋯ menu, Settings.');
+            } else {
+                status.textContent = `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`;
+            }
         }
         if (typeof showToast === 'function') showToast('Playlist folders rebuilt', 'success');
     } catch (e) {
