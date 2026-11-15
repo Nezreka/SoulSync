@@ -266,7 +266,7 @@ function fileMenu(f: LibraryFile, a: FileActions): ActionMenuItem[] {
   if (a.onUpgrade) {
     items.push({
       key: 'upgrade',
-      label: f.below_cutoff ? 'Find an upgrade' : 'Search releases',
+      label: f.below_cutoff ? 'Find an upgrade' : 'Manual search',
       onSelect: () => a.onUpgrade?.(f),
     });
   }
@@ -816,7 +816,7 @@ function MovieView({
       title: stuck === 1 ? 'A download for this movie is stuck' : `${stuck} downloads are stuck`,
       detail: 'The last tries failed. Search again to pick another release.',
       action: b.manualSearch
-        ? { label: 'Search releases', onClick: () => b.manualSearch?.('movie') }
+        ? { label: 'Manual search', onClick: () => b.manualSearch?.('movie') }
         : undefined,
     });
   } else if (moving) {
@@ -968,7 +968,7 @@ function MovieView({
                 className={q.meets === false ? s.btnPrimary : s.btn}
                 onClick={() => b.manualSearch?.('movie')}
               >
-                {q.meets === false ? 'Find an upgrade' : 'Search releases'}
+                {q.meets === false ? 'Find an upgrade' : 'Manual search'}
               </button>
             ) : null}
           </span>

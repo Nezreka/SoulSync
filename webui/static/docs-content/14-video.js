@@ -483,6 +483,8 @@ A show's numbers count like you'd read them: **Specials** and episodes that have
 
 If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
 
+A movie has **Manual search…** in its **⋯** menu, in your library or not: the same release picker an episode has, for when you want one particular version.
+
 On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures. **Grab season** searches and grabs each missing episode on its own with the show's quality profile, so every episode is tracked separately and one that fails or times out doesn't stop the rest. To grab the whole season as one pack instead, use the season's search and pick a pack from the results.
 `
         },
@@ -526,7 +528,7 @@ Point at **Up to date** to see when each was last asked. **Refresh** asks all th
 
 | Action | What it does |
 |--------|--------------|
-| **Find an upgrade / Search releases** | The manual search for that movie or that one episode. |
+| **Find an upgrade / Manual search** | The manual search for that movie or that one episode. |
 | **Move to another episode…** | For a file filed under the wrong episode. Pick the right one; where SoulSync can reach the file it is renamed for the new episode so your media server agrees. |
 | **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
 | **Search subtitles** | The manual subtitle search, for that file. |
