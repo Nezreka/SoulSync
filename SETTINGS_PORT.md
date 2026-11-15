@@ -243,7 +243,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | step 2 | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
+| Nov 15 | `d58589201` (step 2) | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
 | Nov 14 | `5f5a2717a` (step 1) | **Scaffold.** New: `settings-store.ts`, `host.tsx` and their tests, `settings-react-host-hooks.test.ts`. Changed: `main.tsx` (mounts the host), `settings.js` (three hooks: `switchSettingsTab`, `loadSettingsData`, `saveSettings`). No markup changed, no tab ported. Details under "Completed steps". |
 | Nov 14 | `2dbd3fb90` | Tracker created. No code changed. |
 
