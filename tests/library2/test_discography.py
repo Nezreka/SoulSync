@@ -1744,7 +1744,7 @@ def test_release_credits_never_resolve_the_primary_artist_again(imported_conn, m
 
 # --- #2082: a live album you ask for, and the edition you ask for ------------
 
-def _live_album(legacy_db, monkeypatch, *, title="MTV Unplugged"):
+def _live_album(legacy_db, monkeypatch, *, title="MTV Unplugged", born_monitored=0):
     conn = legacy_db._get_connection()
     artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Alice in Chains')").lastrowid
     album = conn.execute(
@@ -1758,7 +1758,7 @@ def _live_album(legacy_db, monkeypatch, *, title="MTV Unplugged"):
         for number, name in enumerate(("Nutshell", "Rooster (Live)", "Would? (Remix)"), 1):
             track = conn.execute(
                 "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
-                "VALUES(?, ?, ?, 0)", (target_album_id, name, number)).lastrowid
+                "VALUES(?, ?, ?, ?)", (target_album_id, name, number, born_monitored)).lastrowid
             conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)",
                          (track, artist))
         return [{"title": "Nutshell", "track_number": 1}]
@@ -1783,6 +1783,33 @@ def test_a_live_album_nobody_asked_for_stays_out_with_live_albums_off(imported_c
     album = _live_album(legacy_db, monkeypatch)
     D.auto_monitor_releases(legacy_db, None, [album])
     assert _monitored(legacy_db, album) == []
+
+
+def test_a_live_album_is_not_wanted_when_its_tracks_are_born_monitored(
+        imported_conn, legacy_db, monkeypatch):
+    """#2117: brandy clark's "live from los angeles" came down with Live albums
+    off. the real tracklist lays tracks down monitored off the monitored
+    album, and the album's new_release rule made every one wanted, so the
+    filter that only skipped the monitored flip did nothing."""
+    album = _live_album(legacy_db, monkeypatch, title="Live from Los Angeles",
+                        born_monitored=1)
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _monitored(legacy_db, album) == []
+    conn = legacy_db._get_connection()
+    try:
+        wanted = [r[0] for r in conn.execute(
+            "SELECT t.title FROM lib2_wanted_tracks w JOIN lib2_tracks t ON t.id = w.track_id "
+            "WHERE t.album_id=? AND w.profile_id=1 AND w.wanted=1", (album,))]
+    finally:
+        conn.close()
+    assert wanted == []
+
+
+def test_a_live_album_is_not_auto_added_as_a_new_release():
+    """#2117: the release itself is judged before it is monitored."""
+    filters = dict(D._CONTENT_FILTER_DEFAULTS, include_live_tracks=False)
+    assert D._track_content_excluded("Live from Los Angeles", "Live from Los Angeles", filters)
+    assert not D._track_content_excluded("Your Life Is a Record", "Your Life Is a Record", filters)
 
 
 def test_a_live_album_you_ask_for_brings_its_tracks(imported_conn, legacy_db, monkeypatch):

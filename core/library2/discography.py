@@ -671,6 +671,11 @@ def _expand_artist_discography(
 
                 if is_compilation_album(title):
                     auto_monitor_release = False
+            # a live album with Live albums off is not a new release to want,
+            # the same release rule the discography refresh job reads (#2117)
+            if (auto_monitor_release and content_filters is not None
+                    and _track_content_excluded(title or "", title or "", content_filters)):
+                auto_monitor_release = False
 
             existing = _match_existing(index, title=title, album_type=album_type,
                                        provider_id=provider_id, source=source,
@@ -1062,6 +1067,28 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                         f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
                         auto_monitor_ids,
                     )
+                # #2117: skipping the flip was not enough. the tracks were born
+                # monitored off the album, and the album's new_release rule
+                # made every one of them wanted, so a live album came down
+                # with Live albums off. what the filters leave out gets a rule
+                # saying so, unless the user picked or wished that track
+                left_out = [t for t in album_track_ids
+                            if t not in set(auto_monitor_ids)]
+                if left_out:
+                    marks = ",".join("?" for _ in left_out)
+                    user_set = {r[0] for r in conn.execute(
+                        f"SELECT entity_id FROM lib2_monitor_rules WHERE entity_type='track' "
+                        f"AND profile_id=? AND provenance IN ('user_explicit','wishlist_import') "
+                        f"AND entity_id IN ({marks})",
+                        (ADMIN_PROFILE_ID, *left_out))}
+                    left_out = [t for t in left_out if t not in user_set]
+                if left_out:
+                    marks = ",".join("?" for _ in left_out)
+                    conn.execute(
+                        f"UPDATE lib2_tracks SET monitored=0 WHERE id IN ({marks})", left_out)
+                    for track_id in left_out:
+                        record_rule(conn, "track", track_id, False, PROVENANCE_NEW_RELEASE,
+                                    profile_id=ADMIN_PROFILE_ID)
             else:
                 # P2D-6: lib2_tracks.monitored is the shared library's. another
                 # profile's want is its own track rules, and what its filters
