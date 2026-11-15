@@ -72,6 +72,28 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | `webui/static/settings.js` | 10,187 | 8,226 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
+## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
+
+Read before starting: `settings.js` lines ~1750-3165 (the chain, the tiles, the modal, status and Test all, the legacy hybrid list, `loadHybridSourceOrder`), the per-source functions (~5780-7740: Tidal, Qobuz, Deezer, HiFi instances, Lidarr, Prowlarr, the torrent and usenet clients, slskd auto-detect, yt-dlp), and the Sources markup (`index.html` ~4040-5167: eleven `src-config-panel`s, `#source-config-home`, `#source-config-modal`).
+
+**Why the chain and the Sources tab go together.** They share one set of module state in `settings.js`: `_hybridSourceOrder` / `_hybridSourceEnabled` (the music chain), `_hybridSourceUnready` (from `settings._source_status`), `_hybridSourceStatus` / `_ssLastTestMessage` / `_ssLastTestWarned` (the dots and the last test's words), `_videoChainOrder` (read from `/api/video/downloads/config`). The tiles show where each source sits in every chain and its dot; the chain writes the order the tiles read; Test all (Downloads tab, React since step 5, calls `window.testAllSources`) writes the dots both show. Porting one half would leave React and vanilla writing each other's state.
+
+**Why the modal and every panel go together.** `openSourceModal` MOVES a panel's DOM node into the modal body and `closeSourceModal` moves it back to `#source-config-home`. React cannot share nodes that vanilla code moves, so the modal, the tiles and all eleven panels are rendered by React at once.
+
+**Seams that stay vanilla until their own step**
+
+| What | Owner until | Seam |
+|---|---|---|
+| The audiobook chain (`_audiobookHybrid`, `#audiobook-download-mode`, `#audiobook-hybrid-rows`) | Library (step 8) | `settings.js` exposes `getAudiobookChain()` / `setAudiobookChain(order)` and dispatches a `soulsync:audiobook-chain` event when its rows change; the React chain's Audiobooks tab reads and writes through them, and the tiles listen. |
+| Video ids inside the torrent and usenet panels: `video-redownload-failed`, `video-seed-idx-refresh`, `video-seed-idx-rows`, `video-seed-mode`, `video-seed-remove-data`, `video-usenet-remove-completed` | the video pass | React renders these elements with the same ids and never touches their children or values after mount; `video-settings.js` keeps filling and saving them. |
+| `helper.js` popovers keyed by selector | n/a | matched at click time, nothing to do (checked in step 6). |
+
+**Order inside the step** (each a commit, each with parity, behaviour tests and a browser comparison):
+
+1. **7a, the sources model**: a store (`tabs/sources-model.ts`) for the music order and enabled set, unready, status, last messages, the video order; `loadHybridSourceOrder`'s rules (retired sources dropped, the legacy primary/secondary fallback, unready kept enabled); Test all and the per-source probes (`HYBRID_SOURCE_PROBE`, `_ssTestConn`, the Prowlarr pre-probe, the video and audiobook sources, the connections sweep, the toast). `window.testAllSources` and `window.autoTestSourcesOnce` keep working, now calling the model.
+2. **7b, the chain** (Downloads > Source Settings): the widget (`#download-chain-widget`: kind tabs, pool groups with filter, steps with ▲ ▼ ×, the end slot, drag between pool and chain), its three kinds, the music save keys (`download_source.mode`, `hybrid_primary`, `hybrid_secondary`, `hybrid_order`: the hidden selects go), Download Behaviour hidden under the video and audiobook chains.
+3. **7c, the Sources tab**: the tiles (In use / Available / Indexers), the modal (title, hint, icon, dot, Test with its result, Escape, focus the first field, close lands a pending save), the filesystem-access hint, and the eleven panels with every field's load and save key, auth flows (Tidal device auth, Qobuz login and token, Deezer ARL test, HiFi instance list with drag, Lidarr, Prowlarr indexers, torrent and usenet client tests, slskd auto-detect, YouTube cookies with the Windows App-Bound warning, yt-dlp status and update), the torrent stall keys the collector reads from the torrent panel.
+
 ## Completed steps
 
 Each finished step, in order, with exactly what was added, changed and checked.
