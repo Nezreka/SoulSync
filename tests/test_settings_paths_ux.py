@@ -76,8 +76,11 @@ def test_podcasts_folder_field_present():
 
 
 def test_podcast_path_template_field_present():
-    assert "Podcast Path Template:" in _INDEX
-    assert 'id="template-podcast-path"' in _INDEX
-    assert 'placeholder="$show/Season $season/$title"' in _INDEX
+    # the Organization card is React (SETTINGS_PORT.md step 8b)
+    card = (Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
+            / "library-organization.tsx").read_text(encoding="utf-8")
+    assert "<label>Podcast Path Template:</label>" in card
+    assert 'id="template-podcast-path"' in card
+    assert 'placeholder="$show/Season $season/$title"' in card
 
 

@@ -154,12 +154,21 @@ def test_settings_js_reads_and_writes_the_input(settings_js, element_id):
 
 def test_settings_js_persists_the_audiobook_fields(settings_js):
     assert "audiobooks_path:" in settings_js
-    assert "audiobook_path:" in settings_js
+    # saved alone as a dotted key: the Organization card (React, step 8b)
+    # saves the other templates, and a whole templates dict would wipe them
+    assert "'templates.audiobook_path':" in settings_js
 
 
 def test_the_template_reset_covers_audiobooks(settings_js):
     # "Reset to defaults" that skips a field leaves a stale template behind.
-    assert "defaults.audiobook" in settings_js
+    # the button is the Organization card's (React, step 8b); the audiobook
+    # template is still the vanilla panel's, which Reset writes too
+    from pathlib import Path
+    tabs = Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
+    card = (tabs / "library-organization.tsx").read_text(encoding="utf-8")
+    rules = (tabs / "organization.ts").read_text(encoding="utf-8")
+    assert "audiobook.value = RESET_AUDIOBOOK_TEMPLATE;" in card
+    assert "RESET_AUDIOBOOK_TEMPLATE = '$author/$series/$seriespos - $title'" in rules
 
 
 # ---------------------------------------------------------------------------
@@ -328,8 +337,10 @@ def test_the_two_downloader_categories_stay_in_step(settings_js):
 def test_the_audiobook_group_is_labelled_on_the_page(index_html):
     # these knobs used to sit in the music section under a heading, and the
     # next reader took them for global settings. they have their own tab now.
+    # the panel is still vanilla, parked for the React Organization card
+    # (step 8b); the video panel is parked right after it
     start = index_html.index('id="organization-audiobooks-panel"')
-    end = index_html.index('id="organization-podcasts-panel"')
+    end = index_html.index('id="organization-video-panel"')
     panel = index_html[start:end]
     for knob in ('template-audiobook-path', 'audiobook-marketplace', 'audiobook-write-nfo'):
         assert f'id="{knob}"' in panel

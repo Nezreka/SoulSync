@@ -77,7 +77,10 @@ describe('the Folders card is the markup it replaced', () => {
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    expect(document.getElementById('library-parked-panels')!.children).toHaveLength(0);
+    // the Organization card's two wait there for it (step 8b)
+    expect(
+      [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
+    ).toEqual(['organization-audiobooks-panel', 'organization-video-panel']);
   });
 });
 

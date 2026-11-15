@@ -14,22 +14,17 @@
  * its status line with it, as before.
  */
 
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
+import { LIBRARY_TAB, LibrarySection, useMediaTabs, useParkedPanels } from './library-card';
+import { OrganizationCard } from './library-organization';
 import { helpBits, useHelp } from './parts';
 import { NumberField, text } from './source-panels';
 
-const TAB = 'library';
+const TAB = LIBRARY_TAB;
 
 type ShellTools = Window & {
   SoulSyncFolderCheck?: { refresh: (group: string) => void };
@@ -301,27 +296,14 @@ export function FoldersCard({ store }: SettingsTabProps) {
   const out = transfer.trim();
   const defaultOut = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
 
-  // ── media tabs ──
-  const [media, setMedia] = useState<'music' | 'audiobooks' | 'podcasts' | 'video'>('music');
+  // ── media tabs, and the parked vanilla panels between React's own ──
+  const { media, tabs } = useMediaTabs('folders', 'Folders media type');
   const musicPanel = useRef<HTMLDivElement>(null);
   const podcastsPanel = useRef<HTMLDivElement>(null);
-  // the vanilla panels, placed back between React's own, in their old order
-  useEffect(() => {
-    const books = document.getElementById('folders-audiobooks-panel');
-    const video = document.getElementById('folders-video-panel');
-    if (books && musicPanel.current) musicPanel.current.after(books);
-    if (video && podcastsPanel.current) podcastsPanel.current.after(video);
-    return () => {
-      const park = document.getElementById('library-parked-panels');
-      if (park) for (const node of [books, video]) if (node) park.appendChild(node);
-    };
-  }, []);
-  useEffect(() => {
-    const books = document.getElementById('folders-audiobooks-panel');
-    const video = document.getElementById('folders-video-panel');
-    if (books) books.hidden = media !== 'audiobooks';
-    if (video) video.hidden = media !== 'video';
-  }, [media]);
+  useParkedPanels(media, [
+    { id: 'folders-audiobooks-panel', after: musicPanel, media: 'audiobooks' },
+    { id: 'folders-video-panel', after: podcastsPanel, media: 'video' },
+  ]);
   // the vanilla panels' own deployment guides (the video one has a pair):
   // applyPathsEnvironment toggled every guide on the page
   useEffect(() => {
@@ -332,27 +314,6 @@ export function FoldersCard({ store }: SettingsTabProps) {
     for (const el of guides)
       el.classList.toggle('hidden', (el.getAttribute('data-paths-guide') === 'docker') !== docker);
   }, [loads, docker]);
-
-  const tabs: Array<[typeof media, string]> = [
-    ['music', 'Music'],
-    ['audiobooks', 'Audiobooks'],
-    ['podcasts', 'Podcasts'],
-    ['video', 'Video'],
-  ];
-  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const onKey = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const current = tabs.findIndex(([k]) => k === media);
-    const index =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? tabs.length - 1
-          : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-    event.preventDefault();
-    setMedia(tabs[index][0]);
-    tabRefs.current[tabs[index][0]]?.focus();
-  };
 
   const summary = loads
     ? pathsSummary([download, transfer, podcasts, audiobooksPath(settings)])
@@ -416,27 +377,8 @@ export function FoldersCard({ store }: SettingsTabProps) {
         <span className="stg-cardgroup-label">Files &amp; folders</span>
         <span className="stg-cardgroup-sub">Where things live on disk, and how they get named</span>
       </div>
-      <FoldersSection>
-        <div className="stg-media-switcher" role="tablist" aria-label="Folders media type">
-          {tabs.map(([key, label]) => (
-            <button
-              key={key}
-              ref={(el) => {
-                tabRefs.current[key] = el;
-              }}
-              type="button"
-              id={`folders-${key}-tab`}
-              role="tab"
-              aria-selected={media === key ? 'true' : 'false'}
-              aria-controls={`folders-${key}-panel`}
-              tabIndex={media === key ? 0 : -1}
-              onClick={() => setMedia(key)}
-              onKeyDown={onKey}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <LibrarySection title="Folders" hint="Downloads and library locations">
+        {tabs}
         <div
           ref={musicPanel}
           id="folders-music-panel"
@@ -786,41 +728,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             </div>
           </div>
         </div>
-      </FoldersSection>
-    </>
-  );
-}
-
-/** the Folders section: header and body, the body a media card */
-function FoldersSection({ children }: { children: ReactNode }) {
-  return (
-    <>
-      <div
-        className="settings-section-header collapsed"
-        data-stg={TAB}
-        onClick={(event) => {
-          const header = event.currentTarget;
-          header.classList.toggle('collapsed');
-          const body = header.nextElementSibling as HTMLElement | null;
-          if (!body) return;
-          body.classList.toggle('collapsed');
-          body.style.display = body.classList.contains('collapsed') ? 'none' : '';
-        }}
-        role="button"
-        tabIndex={0}
-        aria-expanded="false"
-      >
-        <span className="settings-section-arrow">&#9660;</span>
-        <h3>Folders</h3>
-        <span className="settings-section-hint">Downloads and library locations</span>
-      </div>
-      <div
-        className="settings-section-body collapsed stg-media-card"
-        data-stg={TAB}
-        style={{ display: 'none' }}
-      >
-        {children}
-      </div>
+      </LibrarySection>
     </>
   );
 }
@@ -828,5 +736,6 @@ function FoldersSection({ children }: { children: ReactNode }) {
 /** the Library tab, part by part */
 export function LibraryTab(props: SettingsTabProps) {
   if (props.part === 'folders') return <FoldersCard {...props} />;
+  if (props.part === 'organization') return <OrganizationCard {...props} />;
   return null;
 }

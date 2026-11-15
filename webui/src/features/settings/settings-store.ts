@@ -61,7 +61,9 @@ export interface SettingsStore {
   subscribe: (listener: (state: SettingsState) => void) => () => void;
   /** a fresh payload from GET /api/settings. Edits not saved yet stay on top of it. */
   hydrate: (payload: unknown) => void;
-  /** one key changed by the person. Saves on its own unless autosave is off. */
+  /** one key changed by the person. Saves on its own unless autosave is off.
+   *  A dotted key ('templates.album_path') is one key of a dict inside the
+   *  section: it is saved alone, the rest of the dict kept. */
   set: (section: string, key: string, value: unknown) => void;
   /** several keys of one section at once */
   patch: (section: string, values: SettingsSection) => void;
@@ -75,6 +77,10 @@ export interface SettingsStore {
   /** save what is pending now. true when nothing was pending or the save worked. */
   flush: () => Promise<boolean>;
   hasPending: () => boolean;
+  /** a rule that holds every save back while it says so (a naming template
+   *  that would not work: the old page refused the whole save). Returns the
+   *  way to take it off. */
+  block: (holds: () => boolean) => () => void;
   /** stop a queued autosave (the page is going away) */
   cancel: () => void;
 }
@@ -91,6 +97,35 @@ function merge(base: SettingsPayload, over: SettingsPayload): SettingsPayload {
   const out: SettingsPayload = { ...base };
   for (const [section, values] of Object.entries(over)) {
     out[section] = { ...out[section], ...values };
+  }
+  return out;
+}
+
+/**
+ * `over` laid onto `base` the way the server stores it. The save route stores
+ * each key of a section whole, so a dict one level down (file_organization's
+ * templates, metadata_enhancement's tags) is posted as dotted keys
+ * ('templates.album_path'), which it stores at that path. Here they land
+ * nested, where the tabs read them.
+ */
+function apply(base: SettingsPayload, over: SettingsPayload): SettingsPayload {
+  const out: SettingsPayload = { ...base };
+  for (const [section, values] of Object.entries(over)) {
+    const target: SettingsSection = { ...out[section] };
+    for (const [key, value] of Object.entries(values || {})) {
+      const path = key.split('.');
+      let node = target;
+      for (const part of path.slice(0, -1)) {
+        const next = node[part];
+        node[part] =
+          next && typeof next === 'object' && !Array.isArray(next)
+            ? { ...(next as SettingsSection) }
+            : {};
+        node = node[part] as SettingsSection;
+      }
+      node[path[path.length - 1]] = value;
+    }
+    out[section] = target;
   }
   return out;
 }
@@ -113,6 +148,7 @@ export function createSettingsStore({
   let extras: Record<string, { value: unknown; save: ExtraSaver }> = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saving: Promise<boolean> | null = null;
+  const blocks = new Set<() => boolean>();
 
   const show = (state: SaveState) => shell().setSettingsSaveState?.(state);
   const hasPending = () =>
@@ -130,6 +166,8 @@ export function createSettingsStore({
     if (!hasPending()) return true;
     // #879: the page is showing defaults, not the real config
     if (shell()._settingsLoadFailed) return false;
+    // nothing goes out, and nothing is lost: the change waits, still pending
+    if ([...blocks].some((holds) => holds())) return false;
     const body = store.getState().pending;
     const sending = extras;
     store.setState({ pending: {} });
@@ -143,7 +181,7 @@ export function createSettingsStore({
           if (result?.success !== true) throw new Error(result?.error || 'Settings save failed');
           const payload = shell()._settingsPayload;
           // settings.js and the shared helpers read this copy
-          if (payload) shell()._settingsPayload = merge(payload, body);
+          if (payload) shell()._settingsPayload = apply(payload, body);
         } catch (error) {
           // put the keys back under anything changed since, so a retry sends them
           store.setState((state) => ({ pending: merge(body, state.pending) }));
@@ -181,7 +219,7 @@ export function createSettingsStore({
 
   function changed(section: string, values: SettingsSection) {
     store.setState((state) => ({
-      settings: merge(state.settings, { [section]: values }),
+      settings: apply(state.settings, { [section]: values }),
       pending: merge(state.pending, { [section]: values }),
     }));
     queue();
@@ -204,7 +242,7 @@ export function createSettingsStore({
     hydrate(payload) {
       if (!isPayload(payload)) return;
       store.setState((state) => ({
-        settings: merge(payload, state.pending),
+        settings: apply(payload, state.pending),
         loaded: true,
         loads: state.loads + 1,
       }));
@@ -224,6 +262,10 @@ export function createSettingsStore({
     },
     flush,
     hasPending,
+    block(holds) {
+      blocks.add(holds);
+      return () => blocks.delete(holds);
+    },
     cancel,
   };
 }

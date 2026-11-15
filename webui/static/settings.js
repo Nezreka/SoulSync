@@ -511,189 +511,9 @@ function initializeSettings() {
     }
 }
 
-function resetFileOrganizationTemplates() {
-    // Reset templates to defaults
-    const defaults = {
-        album: '$albumartist/$albumartist - $album/$track - $title',
-        single: '$artist/$artist - $title/$title',
-        playlist: '$playlist/$artist - $title',
-        video: '$artist/$title-video',
-        podcast: '$show/Season $season/$title',
-        audiobook: '$author/$series/$seriespos - $title',
-        sample: '$artist/$track - $chop'
-    };
-
-    document.getElementById('template-album-path').value = defaults.album;
-    document.getElementById('template-single-path').value = defaults.single;
-    document.getElementById('template-playlist-path').value = defaults.playlist;
-    document.getElementById('template-video-path').value = defaults.video;
-    document.getElementById('template-podcast-path').value = defaults.podcast;
-    document.getElementById('template-audiobook-path').value = defaults.audiobook;
-    document.getElementById('template-sample-path').value = defaults.sample;
-
-    debouncedAutoSaveSettings();
-    refreshPathPreview(0);
-}
-
-function validateFileOrganizationTemplates() {
-    const errors = [];
-
-    // Valid variables for each template type
-    const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$discalways', '$discnumalways', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistcomposite', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistcomposite', '$artistclash'],
-        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistcomposite', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistcomposite', '$artistclash'],
-        playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
-        video: ['$artist', '$artistletter', '$title', '$year'],
-        podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
-        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin'],
-        sample: ['$artist', '$track', '$album', '$chop', '$stem']
-    };
-
-    // Get template values
-    const albumPath = document.getElementById('template-album-path').value.trim();
-    const singlePath = document.getElementById('template-single-path').value.trim();
-    const playlistPath = document.getElementById('template-playlist-path').value.trim();
-    const podcastPath = document.getElementById('template-podcast-path').value.trim();
-    const samplePath = document.getElementById('template-sample-path').value.trim();
-
-    // Validate album template
-    if (albumPath) {
-        if (albumPath.endsWith('/')) {
-            errors.push('Album template cannot end with /');
-        }
-        if (albumPath.startsWith('/')) {
-            errors.push('Album template cannot start with /');
-        }
-        if (!albumPath.includes('/')) {
-            errors.push('Album template must include at least one folder (use / separator)');
-        }
-        if (albumPath.includes('//')) {
-            errors.push('Album template cannot have consecutive slashes //');
-        }
-        // Check for likely typos of valid variables (case-insensitive to catch $Album, $ARTIST, etc.)
-        const albumVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
-        const foundVars = albumPath.match(albumVarPattern) || [];
-        foundVars.forEach(v => {
-            // Normalize ${var} to $var for validation
-            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
-            const lowerVar = normalized.toLowerCase();
-            // Check if lowercase version exists in valid vars
-            const isValid = validVars.album.some(validVar => validVar.toLowerCase() === lowerVar);
-            if (!isValid) {
-                errors.push(`Invalid variable "${normalized}" in album template. Valid: ${validVars.album.join(', ')}`);
-            } else if (normalized !== lowerVar && validVars.album.includes(lowerVar)) {
-                // Variable is valid but has wrong case
-                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
-            }
-        });
-    }
-
-    // Validate single template
-    if (singlePath) {
-        if (singlePath.endsWith('/')) {
-            errors.push('Single template cannot end with /');
-        }
-        if (singlePath.startsWith('/')) {
-            errors.push('Single template cannot start with /');
-        }
-        // Note: single template is allowed to have no slash (flat file: "$artist - $title")
-        if (singlePath.includes('//')) {
-            errors.push('Single template cannot have consecutive slashes //');
-        }
-        const singleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
-        const foundVars = singlePath.match(singleVarPattern) || [];
-        foundVars.forEach(v => {
-            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
-            const lowerVar = normalized.toLowerCase();
-            const isValid = validVars.single.some(validVar => validVar.toLowerCase() === lowerVar);
-            if (!isValid) {
-                errors.push(`Invalid variable "${normalized}" in single template. Valid: ${validVars.single.join(', ')}`);
-            } else if (normalized !== lowerVar && validVars.single.includes(lowerVar)) {
-                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
-            }
-        });
-    }
-
-    // Validate playlist template
-    if (playlistPath) {
-        if (playlistPath.endsWith('/')) {
-            errors.push('Playlist template cannot end with /');
-        }
-        if (playlistPath.startsWith('/')) {
-            errors.push('Playlist template cannot start with /');
-        }
-        if (!playlistPath.includes('/')) {
-            errors.push('Playlist template must include at least one folder (use / separator)');
-        }
-        if (playlistPath.includes('//')) {
-            errors.push('Playlist template cannot have consecutive slashes //');
-        }
-        const playlistVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
-        const foundVars = playlistPath.match(playlistVarPattern) || [];
-        foundVars.forEach(v => {
-            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
-            const lowerVar = normalized.toLowerCase();
-            const isValid = validVars.playlist.some(validVar => validVar.toLowerCase() === lowerVar);
-            if (!isValid) {
-                errors.push(`Invalid variable "${normalized}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
-            } else if (normalized !== lowerVar && validVars.playlist.includes(lowerVar)) {
-                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
-            }
-        });
-    }
-
-    // Validate podcast template
-    if (podcastPath) {
-        if (podcastPath.endsWith('/')) {
-            errors.push('Podcast template cannot end with /');
-        }
-        if (podcastPath.startsWith('/')) {
-            errors.push('Podcast template cannot start with /');
-        }
-        if (podcastPath.includes('//')) {
-            errors.push('Podcast template cannot have consecutive slashes //');
-        }
-        const podcastVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
-        const foundVars = podcastPath.match(podcastVarPattern) || [];
-        foundVars.forEach(v => {
-            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
-            const lowerVar = normalized.toLowerCase();
-            const isValid = validVars.podcast.some(validVar => validVar.toLowerCase() === lowerVar);
-            if (!isValid) {
-                errors.push(`Invalid variable "${normalized}" in podcast template. Valid: ${validVars.podcast.join(', ')}`);
-            } else if (normalized !== lowerVar && validVars.podcast.includes(lowerVar)) {
-                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
-            }
-        });
-    }
-
-    // Validate sample template
-    if (samplePath) {
-        if (samplePath.endsWith('/')) {
-            errors.push('Sample template cannot end with /');
-        }
-        if (samplePath.startsWith('/')) {
-            errors.push('Sample template cannot start with /');
-        }
-        if (samplePath.includes('//')) {
-            errors.push('Sample template cannot have consecutive slashes //');
-        }
-        const sampleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
-        const foundVars = samplePath.match(sampleVarPattern) || [];
-        foundVars.forEach(v => {
-            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
-            const lowerVar = normalized.toLowerCase();
-            const isValid = validVars.sample.some(validVar => validVar.toLowerCase() === lowerVar);
-            if (!isValid) {
-                errors.push(`Invalid variable "${normalized}" in sample template. Valid: ${validVars.sample.join(', ')}`);
-            } else if (normalized !== lowerVar && validVars.sample.includes(lowerVar)) {
-                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
-            }
-        });
-    }
-
-    return errors;
-}
+// resetFileOrganizationTemplates and validateFileOrganizationTemplates: the
+// Library tab's Organization card is React (library-organization.tsx,
+// organization.ts)
 
 // ── Connections: services as tiles ─────────────────────────────────────────
 //
@@ -999,15 +819,7 @@ document.addEventListener('keydown', (e) => {
 //     a summary that can disagree with the field below it is a bug generator.
 const LIBRARY_SUMMARIES = {
     // 'library-paths': the Folders card is React (library-folders.tsx)
-    'library-music-org': () => {
-        const on = document.getElementById('file-organization-enabled');
-        if (!on) return '';
-        if (!on.checked) return 'organizing off';
-        const tpl = (document.getElementById('template-album-path')?.value || '').trim();
-        // the template itself is the most useful thing to show - it is what the
-        // user is actually deciding here - but it is long, so show its shape
-        return tpl ? tpl.split('/').slice(-2).join('/') : 'organizing on';
-    },
+    // 'library-music-org': the Organization card is React (library-organization.tsx)
     'library-video-folders': () => {
         const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
             .filter(id => (document.getElementById(id)?.value || '').trim()).length;
@@ -1092,28 +904,8 @@ document.addEventListener('click', (e) => {
     });
 });
 
-// Media tabs keep both panels mounted, preserving unsaved values and listeners.
-function switchLibraryMediaTab(tab) {
-    const card = tab.closest('.stg-media-card');
-    if (!card) return;
-    card.querySelectorAll('[role="tab"]').forEach(button => {
-        const selected = button === tab;
-        button.setAttribute('aria-selected', String(selected));
-        button.tabIndex = selected ? 0 : -1;
-        const panel = document.getElementById(button.getAttribute('aria-controls'));
-        if (panel) panel.hidden = !selected;
-    });
-}
-function handleLibraryMediaTabKey(event) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const tabs = Array.from(event.currentTarget.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
-    const current = tabs.indexOf(event.currentTarget);
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-        : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-    event.preventDefault();
-    switchLibraryMediaTab(tabs[index]);
-    tabs[index].focus();
-}
+// switchLibraryMediaTab and handleLibraryMediaTabKey: both Library media cards
+// are React (library-card.tsx)
 
 // Settings redesign — tab switching + service accordions
 function switchSettingsTab(tab) {
@@ -1231,7 +1023,8 @@ function filterSettings(query) {
             const mediaPanel = matchingLabel?.closest('[role="tabpanel"]');
             if (mediaPanel) {
                 const mediaTab = document.querySelector('[aria-controls="' + mediaPanel.id + '"]');
-                if (mediaTab) switchLibraryMediaTab(mediaTab);
+                // the Library media cards are React: a click moves their own state
+                if (mediaTab) mediaTab.click();
             }
             section.tabIndex = -1;
             section.focus({ preventScroll: true });
@@ -1297,198 +1090,8 @@ if (document.readyState === 'loading') {
     initSettingHelpLines();
 }
 
-// #1868: what each naming template makes, under it, as you type. the server
-// renders it through the real path builder against a made-up release, so the
-// preview is what the importer would write, not a guess made in here.
-const PATH_PREVIEW_FIELDS = {
-    'template-album-path': 'album_path',
-    'template-compilation-path': 'compilation_path',
-    'template-single-path': 'single_path',
-    'template-playlist-item': 'playlist_item',
-    'template-video-path': 'video_path',
-    'template-sample-path': 'sample_path',
-    'disc-label': 'disc_label',
-};
-const PATH_PREVIEW_TOGGLES = ['auto-disambiguation', 'collab-artist-mode',
-    'artistletter-symbol-fallback', 'unicode-substitution', 'file-organization-enabled'];
-const PATH_PREVIEW_SCENARIOS = [
-    ['standard', 'Standard'],
-    ['explicit', 'Explicit'],
-    ['multidisc', 'Multi-disc'],
-    ['samename', 'Shared artist name'],
-];
-let _pathPreviewScenario = 'standard';
-let _pathPreviewTimer = null;
-let _pathPreviewSeq = 0;
-
-try {
-    const saved = localStorage.getItem('soulsync.pathPreviewScenario');
-    if (PATH_PREVIEW_SCENARIOS.some(([key]) => key === saved)) _pathPreviewScenario = saved;
-} catch (e) { /* storage blocked, standard it is */ }
-
-function _pathPreviewSlot(id) {
-    const input = document.getElementById(id);
-    const group = input?.closest('.form-group');
-    if (!group) return null;
-    let slot = group.querySelector(':scope > .path-preview');
-    if (!slot) {
-        slot = document.createElement('div');
-        slot.className = 'path-preview';
-        slot.setAttribute('aria-live', 'polite');
-        input.after(slot);
-    }
-    return slot;
-}
-
-function initPathPreview() {
-    const album = document.getElementById('template-album-path');
-    const group = album?.closest('.form-group');
-    if (!group || document.getElementById('path-preview-scenarios')) return;
-    const bar = document.createElement('div');
-    bar.id = 'path-preview-scenarios';
-    bar.className = 'path-preview-scenarios';
-    bar.setAttribute('role', 'radiogroup');
-    bar.setAttribute('aria-label', 'Example release your templates are filled in with');
-    const label = document.createElement('span');
-    label.className = 'path-preview-scenarios-label';
-    label.textContent = 'Your templates, filled in with an example release:';
-    bar.append(label);
-    PATH_PREVIEW_SCENARIOS.forEach(([key, text]) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.dataset.scenario = key;
-        button.setAttribute('role', 'radio');
-        button.textContent = text;
-        button.addEventListener('click', () => {
-            _pathPreviewScenario = key;
-            try { localStorage.setItem('soulsync.pathPreviewScenario', key); } catch (e) { /* fine */ }
-            refreshPathPreview(0);
-        });
-        bar.append(button);
-    });
-    group.before(bar);
-    Object.keys(PATH_PREVIEW_FIELDS).forEach(_pathPreviewSlot);
-}
-window.initPathPreview = initPathPreview;
-
-function refreshPathPreview(delay = 250) {
-    clearTimeout(_pathPreviewTimer);
-    _pathPreviewTimer = setTimeout(_fetchPathPreview, delay);
-}
-window.refreshPathPreview = refreshPathPreview;
-
-async function _fetchPathPreview() {
-    const bar = document.getElementById('path-preview-scenarios');
-    if (!bar) return;
-    bar.querySelectorAll('button').forEach(button => {
-        button.setAttribute('aria-checked', String(button.dataset.scenario === _pathPreviewScenario));
-    });
-    const on = document.getElementById('file-organization-enabled')?.checked !== false;
-    bar.hidden = !on;
-    Object.keys(PATH_PREVIEW_FIELDS).forEach(id => {
-        const slot = _pathPreviewSlot(id);
-        if (slot) slot.hidden = !on;
-    });
-    if (!on) return;
-
-    const value = (id) => document.getElementById(id)?.value ?? '';
-    const checked = (id) => document.getElementById(id)?.checked === true;
-    const body = {
-        scenario: _pathPreviewScenario,
-        templates: {
-            album_path: value('template-album-path'),
-            compilation_path: value('template-compilation-path'),
-            single_path: value('template-single-path'),
-            playlist_item: value('template-playlist-item'),
-            video_path: value('template-video-path'),
-            sample_path: value('template-sample-path'),
-        },
-        settings: {
-            auto_disambiguation: checked('auto-disambiguation'),
-            collab_artist_mode: value('collab-artist-mode') || 'first',
-            artistletter_symbol_fallback: checked('artistletter-symbol-fallback'),
-            unicode_substitution: checked('unicode-substitution'),
-            disc_label: value('disc-label') || 'Disc',
-        },
-    };
-    const seq = ++_pathPreviewSeq;
-    let data;
-    try {
-        const response = await fetch('/api/settings/path-preview', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
-    } catch (e) {
-        if (seq !== _pathPreviewSeq) return;
-        Object.keys(PATH_PREVIEW_FIELDS).forEach(id => {
-            _renderPathPreview(_pathPreviewSlot(id), { error: `Preview unavailable: ${e.message}` });
-        });
-        return;
-    }
-    // a slower answer to an older keystroke never paints over a newer one
-    if (seq !== _pathPreviewSeq) return;
-    Object.entries(PATH_PREVIEW_FIELDS).forEach(([id, key]) => {
-        const slot = _pathPreviewSlot(id);
-        let note = '';
-        if (key === 'disc_label') {
-            note = data.disc_label_used
-                ? 'Disc 2 of a two-disc album'
-                : 'Not used: your album template places the disc itself';
-        }
-        _renderPathPreview(slot, data.paths?.[key], note);
-        if (key === 'single_path' && data.paths?.single_as_album) {
-            _renderPathPreview(slot, data.paths.single_as_album,
-                'A release the source calls a single uses the album template until you change this one',
-                true);
-        }
-    });
-}
-
-function _renderPathPreview(slot, result, note = '', append = false) {
-    if (!slot) return;
-    if (!append) slot.replaceChildren();
-    const row = document.createElement('div');
-    row.className = 'path-preview-row';
-    if (!result || typeof result === 'object') {
-        row.classList.add('path-preview-error');
-        row.textContent = result?.error || 'Nothing to preview';
-        slot.append(row);
-        return;
-    }
-    const path = document.createElement('code');
-    path.className = 'path-preview-path';
-    const parts = String(result).split('/');
-    parts.forEach((part, index) => {
-        if (index) {
-            const sep = document.createElement('span');
-            sep.className = 'path-preview-sep';
-            sep.textContent = '/';
-            path.append(sep);
-        }
-        const seg = document.createElement('span');
-        seg.className = index === parts.length - 1 ? 'path-preview-file' : 'path-preview-folder';
-        seg.textContent = part;
-        path.append(seg);
-    });
-    path.title = result;
-    row.append(path);
-    if (note) {
-        const small = document.createElement('span');
-        small.className = 'path-preview-note';
-        small.textContent = note;
-        row.append(small);
-    }
-    slot.append(row);
-}
-
-document.addEventListener('input', (e) => {
-    if (PATH_PREVIEW_FIELDS[e.target.id]) refreshPathPreview();
-});
-document.addEventListener('change', (e) => {
-    if (PATH_PREVIEW_FIELDS[e.target.id] || PATH_PREVIEW_TOGGLES.includes(e.target.id)) refreshPathPreview(0);
-});
+// #1868, the naming templates' live preview: the Organization card is React
+// (library-organization.tsx)
 
 // Ctrl/Cmd+K jumps to settings search while the settings page is open
 document.addEventListener('keydown', (e) => {
@@ -2314,32 +1917,9 @@ async function loadSettingsData() {
         });
         document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
 
-        // Populate File Organization settings
-        document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
-        document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
-        // compilations have their own template; it was never shown, so an album
-        // template change silently skipped every soundtrack (#1385)
-        document.getElementById('template-compilation-path').value = settings.file_organization?.templates?.compilation_path || 'Compilations/$album/$track - $artist - $title';
-        // $albumartist honors the Collaborative Album Artist mode; the old
-        // $artist default filed multi-artist singles under "A, B & C". A
-        // stored old-default upgrades server-side too (core/imports/paths.py).
-        {
-            const _sp = settings.file_organization?.templates?.single_path;
-            document.getElementById('template-single-path').value =
-                (!_sp || _sp === '$artist/$artist - $title/$title')
-                    ? '$albumartist/$albumartist - $title/$title' : _sp;
-        }
-        document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
-        document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
-        document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
-        document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
+        // File Organization and the podcast template: the Organization card is
+        // React (library-organization.tsx). The audiobook template is still here
         document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
-        document.getElementById('template-sample-path').value = settings.file_organization?.templates?.sample_path || '$artist/$track - $chop';
-        const podcastFormatEl = document.getElementById('podcast-media-format');
-        if (podcastFormatEl) {
-            podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
-        }
-
         // Audiobook settings. Every read carries an explicit default: there is no
         // deep merge of new defaults into an existing config row, so a key added
         // after an install was set up comes back undefined, and a bare ?? here
@@ -2407,30 +1987,12 @@ async function loadSettingsData() {
             abq.allow_dramatized);
         abChecked(document.getElementById('audiobook-recycle-deletes'), ab.recycle_deletes);
         abVal(document.getElementById('audiobook-recycle-keep-days'), ab.recycle_keep_days ?? 7);
-        document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
-        document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
-        document.getElementById('artistletter-symbol-fallback').checked = settings.file_organization?.artistletter_symbol_fallback === true;
-        document.getElementById('unicode-substitution').checked = settings.file_organization?.unicode_substitution === true;
-        // !== false, not === true: the backend default is ON, so an install
-        // that has never saved this key must show it ON or the checkbox lies
-        // about what the importer is doing.
-        document.getElementById('detect-multi-artist-compilations').checked = settings.file_organization?.detect_multi_artist_compilations !== false;
-        // !== false, not === true: same default-ON convention — the importer
-        // auto-adds the disambiguation unless the key was explicitly saved off.
-        document.getElementById('auto-disambiguation').checked = settings.file_organization?.auto_disambiguation !== false;
-        document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
-        document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
-        document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
-        document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        // the naming options, tag options and wishlist rules: the Organization card is React
         const _lcOn = document.getElementById('lidarr-compat-enabled');
         if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
         loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
         const _mcpOn = document.getElementById('mcp-enabled');
         if (_mcpOn) _mcpOn.checked = settings.mcp?.enabled === true;
-        const _wlTtl = document.getElementById('wishlist-ignore-ttl');
-        if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
-        const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
-        if (_wlWingIt) _wlWingIt.checked = settings.wishlist?.wing_it_guesses === true;
 
         // Playlist Sync is on the Discovery tab, which is React (discovery-tab.tsx)
 
@@ -2444,17 +2006,7 @@ async function loadSettingsData() {
         renderAudiobookExtraPaths(settings.library?.audiobooks_additional_paths || []);
 
 
-        // Library Organize: preserve the user's casing (default on)
-        const _pcEl = document.getElementById('reorganize-preserve-casing');
-        if (_pcEl) _pcEl.checked = settings.library?.reorganize_preserve_casing !== false;
-
-        // #1449: write artist.nfo into new artist folders (default off)
-        const _nfoEl = document.getElementById('write-artist-nfo');
-        if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
-
-        // Library v2: re-download files deleted outside SoulSync (default on)
-        const _redlEl = document.getElementById('redownload-externally-deleted');
-        if (_redlEl) _redlEl.checked = settings.library?.redownload_externally_deleted !== false;
+        // Library Organize and re-download deleted files: the Organization card is React
 
         // Filtering (explicit content, preferred version, size cap, genre
         // whitelist): the Downloads tab is React
@@ -2632,11 +2184,6 @@ async function loadSettingsData() {
         // their static descriptions rather than reporting an empty form as
         // "nothing enabled".
         if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
-        // the template previews render the loaded values, same reason
-        if (typeof initPathPreview === 'function') {
-            initPathPreview();
-            refreshPathPreview(0);
-        }
         // the service tiles report which credentials are actually filled in, so
         // they are only truthful once the form holds them. same reason as above:
         // summarising an empty form would report every service as "not set up".
@@ -3643,8 +3190,9 @@ async function saveSettings(quiet = false) {
         return;
     }
 
-    // Validate file organization templates before saving
-    const validationErrors = validateFileOrganizationTemplates();
+    // a naming template that would not work refuses the save. the templates
+    // are the Organization card's (React), which holds its own saves back too
+    const validationErrors = window.SoulSyncSettings?.templateErrors?.() || [];
     if (validationErrors.length > 0) {
         if (!quiet) showToast('Template validation failed: ' + validationErrors.join(', '), 'error');
         return;
@@ -3867,13 +3415,11 @@ async function saveSettings(quiet = false) {
             album_art_order: getArtOrder(),
             single_to_album: document.getElementById('single-to-album-enabled').checked,
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
-            tags: {
-                quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
-                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge'),
-                artist_separator: document.getElementById('artist-separator').value,
-                write_multi_artist: document.getElementById('write-multi-artist').checked,
-                feat_in_title: document.getElementById('feat-in-title').checked
-            }
+            // one key of the tags dict each: the server stores a dotted key at
+            // its path, so the Organization card's three tag options (React)
+            // are kept. a whole tags dict here would wipe them
+            'tags.quality_tag': _getTagConfig('metadata_enhancement.tags.quality_tag'),
+            'tags.genre_merge': _getTagConfig('metadata_enhancement.tags.genre_merge'),
         },
         musicbrainz: {
             ...musicBrainzServerSettings,
@@ -3892,25 +3438,11 @@ async function saveSettings(quiet = false) {
             embed_tags: document.getElementById('embed-audiodb').checked,
             tags: _collectServiceTags('audiodb')
         },
+        // the Organization card (React) saves the rest of file_organization.
+        // the audiobook template is the Audiobooks panel's, saved alone as a
+        // dotted key so the card's templates are kept
         file_organization: {
-            enabled: document.getElementById('file-organization-enabled').checked,
-            auto_disambiguation: document.getElementById('auto-disambiguation').checked,
-            disc_label: document.getElementById('disc-label').value,
-            collab_artist_mode: document.getElementById('collab-artist-mode').value,
-            artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
-            unicode_substitution: document.getElementById('unicode-substitution').checked,
-            detect_multi_artist_compilations: document.getElementById('detect-multi-artist-compilations').checked,
-            templates: {
-                album_path: document.getElementById('template-album-path').value,
-                compilation_path: document.getElementById('template-compilation-path').value,
-                single_path: document.getElementById('template-single-path').value,
-                playlist_path: document.getElementById('template-playlist-path').value,
-                playlist_item: document.getElementById('template-playlist-item').value,
-                video_path: document.getElementById('template-video-path').value,
-                podcast_path: document.getElementById('template-podcast-path').value,
-                audiobook_path: document.getElementById('template-audiobook-path').value,
-                sample_path: document.getElementById('template-sample-path').value
-            }
+            'templates.audiobook_path': document.getElementById('template-audiobook-path')?.value,
         },
         mcp: {
             enabled: _cfgBool('mcp-enabled'),
@@ -3919,12 +3451,7 @@ async function saveSettings(quiet = false) {
             enabled: _cfgBool('lidarr-compat-enabled'),
             profile_id: _cfgInt('lidarr-compat-profile', _lidarrCompatProfileId),
         },
-        wishlist: {
-            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
-            ignore_ttl_days: Math.max(1, Math.min(365,
-                _cfgInt('wishlist-ignore-ttl', 30))),
-            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses').checked,
-        },
+        // wishlist: the Organization card is React
         // playlist_sync, listening_stats and discover: the Discovery tab is
         // React and saves its own keys
         // content_filter and genre_whitelist: the Downloads tab is React
@@ -3939,14 +3466,11 @@ async function saveSettings(quiet = false) {
             // Folders card is React (library-folders.tsx)
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             audiobooks_additional_paths: collectAudiobookExtraPaths(),
-            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
-            write_artist_nfo: _cfgBool('write-artist-nfo'),
-            redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
+            // reorganize_preserve_casing, write_artist_nfo,
+            // redownload_externally_deleted: the Organization card is React
         },
-        podcasts: {
-            // download_path: the Folders card is React
-            media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
-        },
+        // podcasts (download_path, media_format): the Folders and Organization
+        // cards are React
         audiobooks: {
             marketplace: _cfgStr('audiobook-marketplace', { fallback: 'us' }),
             download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),

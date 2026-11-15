@@ -820,16 +820,22 @@ def test_an_inverted_mark_is_not_then_dimmed_into_grey():
 
 def _library_cards(markup):
     """the Library tab's card titles and group labels in page order. the
-    Folders card and its group are React (SETTINGS_PORT.md step 8a): its slot
-    stands in for them, and the component is checked to render both."""
-    folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
-    assert "const TAB = 'library';" in folders
-    assert '<h3>Folders</h3>' in folders
-    assert re.search(r'className="settings-section-header collapsed"\s+data-stg=\{TAB\}', folders)
+    Folders and Organization cards are React (SETTINGS_PORT.md steps 8a, 8b):
+    each slot stands in for its card, and the components are checked to
+    render them (the Files & folders group label comes with Folders)."""
+    tabs = "webui/src/features/settings/tabs/"
+    shell = _read(tabs + "library-card.tsx")
+    assert "export const LIBRARY_TAB = 'library';" in shell
+    assert re.search(r'className="settings-section-header collapsed"\s+data-stg=\{LIBRARY_TAB\}', shell)
+    assert "<h3>{title}</h3>" in shell
+    folders = _read(tabs + "library-folders.tsx")
+    assert '<LibrarySection title="Folders"' in folders
     assert re.search(r'className="stg-cardgroup" data-stg=\{TAB\}>\s*'
                      r'<span className="stg-cardgroup-label">Files &amp; folders</span>', folders)
+    assert '<LibrarySection title="Organization"' in _read(tabs + "library-organization.tsx")
     slot = markup.index('<div data-stg-react="library" data-stg-part="folders"')
-    titles, groups = [(slot, "Folders")], [(slot, "Files &amp; folders")]
+    org = markup.index('<div data-stg-react="library" data-stg-part="organization"')
+    titles, groups = [(slot, "Folders"), (org, "Organization")], [(slot, "Files &amp; folders")]
     for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
         if t:
@@ -1035,11 +1041,20 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
     react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
     react_slots = re.findall(r'summaryKey="([^"]+)"', react)
+    # the Library tab's media cards (steps 8a, 8b) render their summary span
+    # themselves, with the same fallback attribute the markup had
+    cards = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("library-*.tsx")
+                      if not p.name.endswith(".test.tsx"))
+    card_slots = re.findall(r'data-stg-summary="([^"]+)"', cards)
+    for key in card_slots:
+        block = cards.split(f'data-stg-summary="{key}"', 1)[1][:120]
+        assert "data-stg-fallback={fallback}" in block, f"React summary {key} has no fallback"
+    react_slots += card_slots
     assert len(slots) + len(react_slots) >= 8, f"only {len(slots) + len(react_slots)} headers report live values"
     assert not set(slots) & set(react_slots), "a summary is on the page twice"
     parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
     assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
-    for key in react_slots:
+    for key in set(react_slots) - set(card_slots):
         block = react.split(f'summaryKey="{key}"', 1)[1][:200]
         assert "summary={" in block, f"React header {key} has no summary"
 
@@ -1091,17 +1106,12 @@ def test_the_two_sides_name_their_sections_the_same_way():
 
     for noun in ("Folders", "Organization"):
         assert titles.count(noun) == 1, f"expected one shared {noun} card"
-        if noun == "Folders":
-            # React card: music in the component, video in its parked panel
-            folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
-            assert "<strong>Music folders</strong>" in folders
-            parked = markup.split('<div id="library-parked-panels" hidden>', 1)[1]
-            assert "<strong>Video folders</strong>" in parked.split('id="folders-video-panel"', 1)[1]
-            continue
-        card = re.split(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"',
-                        markup.split(f'<h3>{noun}</h3>', 1)[1], maxsplit=1)[0]
-        for media in ("Music", "Video"):
-            assert f'<strong>{media} {noun.lower()}</strong>' in card
+        # React cards (steps 8a, 8b): music in the component, video in its
+        # parked panel
+        card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
+        assert f"<strong>Music {noun.lower()}</strong>" in card
+        parked = markup.split('<div id="library-parked-panels" hidden>', 1)[1]
+        assert f"<strong>Video {noun.lower()}</strong>" in parked.split(f'id="{noun.lower()}-video-panel"', 1)[1]
 
     # Folder locations and naming rules remain separate subjects.
     assert "Paths &amp; Organization" not in titles

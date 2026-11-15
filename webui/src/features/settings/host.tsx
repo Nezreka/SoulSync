@@ -29,6 +29,7 @@ import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';
 import { LogsTab } from './tabs/logs-tab';
+import { templateErrors } from './tabs/organization';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
 import { SourcesTab } from './tabs/sources-tab';
@@ -64,6 +65,9 @@ export interface SoulSyncSettingsApi {
   /** a vanilla field that writes a React tab's key (the Connections tab's
    *  Deezer ARL mirrors the Deezer source panel's) */
   set: (section: string, key: string, value: unknown) => void;
+  /** what is wrong with the naming templates (the Library tab's
+   *  Organization card): the page save refuses while any is set, and says so */
+  templateErrors: () => string[];
 }
 
 declare global {
@@ -105,6 +109,10 @@ export function createSettingsHost({
   documentRef?: Document;
 } = {}): SoulSyncSettingsApi {
   const opened: Record<string, number> = {};
+  // a naming template that would not work holds every save back, as the old
+  // page refused its whole save (validateFileOrganizationTemplates)
+  const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
+  store.block(() => errors().length > 0);
 
   function show(tab: string) {
     if (tabs[tab]) opened[tab] = (opened[tab] ?? 0) + 1;
@@ -159,6 +167,7 @@ export function createSettingsHost({
     hasPending: () => store.hasPending(),
     ported: () => Object.keys(tabs),
     set: (section, key, value) => store.set(section, key, value),
+    templateErrors: errors,
   };
 }
 

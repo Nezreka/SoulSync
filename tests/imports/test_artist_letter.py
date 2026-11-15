@@ -99,11 +99,12 @@ def test_all_call_sites_use_the_shared_helper():
 
 
 def test_settings_ui_round_trip_wiring():
-    js = (_ROOT / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
-    html = (_ROOT / 'webui' / 'index.html').read_text(encoding='utf-8')
-    assert 'id="artistletter-symbol-fallback"' in html
-    assert "artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked" in js
-    assert "settings.file_organization?.artistletter_symbol_fallback === true" in js
+    # the Organization card is React (SETTINGS_PORT.md step 8b): it shows the
+    # key off unless saved on, and saves it under file_organization
+    card = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "library-organization.tsx").read_text(encoding="utf-8")
+    assert "'artistletter-symbol-fallback'," in card
+    assert "org.artistletter_symbol_fallback === true," in card
+    assert "setOrg('artistletter_symbol_fallback', v, 0)" in card
 
 
 # ── the '#' folder can't poison m3u playlists ───────────────────────────────

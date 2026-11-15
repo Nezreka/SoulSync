@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
-| Tab: Library | **in progress** (step 8a below) | 26 of 236: the Folders card (music and podcasts; the Audiobooks and Video panels stay vanilla, parked). Next: Organization (8b), Audiobooks (8c), Post-Processing and Import (8d). |
+| Tab: Library | **in progress** (steps 8a, 8b below) | 56 of 236: the Folders and Organization cards (music and podcasts; their Audiobooks and Video panels stay vanilla, parked). Next: Audiobooks (8c), Post-Processing and Import (8d). |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 184 of 678 controls, 151 of 333 `settings.js` functions removed, 27 of 83 tests repointed (step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 214 of 678 controls, 160 of 333 `settings.js` functions removed, 31 of 83 tests repointed (step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 10,058 |
-| `webui/static/settings.js` | 10,187 | 5,799 |
+| `webui/index.html` | 12,823 | 9,539 |
+| `webui/static/settings.js` | 10,187 | 5,349 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -701,12 +701,35 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity (with the parked panels in place); `library-folders.test.tsx`, 8; two vitest and 6 Python files repointed (the card is a slot now; `_library_cards` in `test_settings_sources_tab.py` reads the slot in page order, 2 negative checks); the Python files on the moved code pass; browser: the four tabs show the same panels, read-only fields and checks; Video pixels match after the guide fix, Music boxes all identical (text antialiasing only).
 
+### Step 8b: the Library Organization card (Nov 15 2026)
+
+**What.** `tabs/library-organization.tsx` (slot `library` / `organization`) and its rules in `tabs/organization.ts`: the card and its tabs, the Music panel (File Organization: every naming template, the naming and tag options, the wishlist rules, Reset to Defaults; Library Organize: preserve casing, artist.nfo) and the Podcasts panel (template, media format, re-download deleted files). The #1868 path preview is React: the scenario bar, a slot under each template, the 250 ms wait while typing, newest answer wins, hidden while organizing is off, the scenario remembered in localStorage. The music summary is rendered by the card. The Audiobooks and Video panels stay vanilla, parked like 8a's.
+
+**Shared now.** `tabs/library-card.tsx`: the section, the media tabs and the parked panels, used by both cards (Folders moved onto it).
+
+**Nested dicts.** The server stores each key of a section whole, so posting `file_organization.templates` or `metadata_enhancement.tags` with one key would wipe the rest. The store now takes dotted keys (`templates.album_path`): posted as written (`ConfigManager.set` stores them at that path), kept nested in its own copy and in `_settingsPayload`. The vanilla collector does the same for what it still owns (`templates.audiobook_path`, `tags.quality_tag`, `tags.genre_merge`).
+
+**The template check.** `validateFileOrganizationTemplates` is `templateErrors` in `organization.ts`. The host registers it on the store with the new `block()`: while a template would not work, no save goes out (React or vanilla) and the changes wait, as the old page refused its whole save. `saveSettings` asks `SoulSyncSettings.templateErrors()` for its toast.
+
+**Fixed (from 8a).** The settings search switched a card's tabs with the vanilla `switchLibraryMediaTab`, which React undid on its next render. No vanilla media card is left, so that function and `handleLibraryMediaTabKey` are gone and the search clicks the tab.
+
+**Removed.** 9 functions (marked), the path preview's consts, listeners and load call, the `library-music-org` summary, the load lines, the collector's `file_organization` (but the audiobook template), `wishlist`, the three `library` keys and `podcasts`.
+
+**Differences.**
+- Saves send only what changed (as every React tab), so keys never touched stay unsaved and keep their defaults; the old page wrote the whole form. The single template's stored old default is therefore no longer rewritten as the upgraded one on any save (the server upgrades it on read).
+- Reset writes the current single default (`$albumartist/...`), not the old `$artist/...` one it wrote before (the server and the next load upgraded that one anyway).
+- After Reset the card summary follows; the old one stayed stale (values were set without a change event).
+- A template change no longer fetches the preview a second time on blur (same values, same answer).
+
+**Checked.** Parity against a fixture frozen with the preview drawn (`library-organization.vanilla.html`), the parked panels with their help lines (`withHelpLines` in `shape.ts`); help words and tick-box labels compared with their spaces (**found two lost spaces in the browser**: the space between a tick box and its words; JSX drops the markup's line break; now tested); `library-organization.test.tsx` 13, store 12, `settings-library-tabs.test.tsx` rewritten for the two React cards; 6 Python files repointed, 407 pass, 9 negative checks caught; browser: every loaded value, the preview in two scenarios and after typing, the four tabs, the refused save and its toast, the saved server state (dotted keys applied), Reset, organizing off. Pixels: Audiobooks and Video 0; Music the checkbox fill caught mid-transition (computed styles identical); Podcasts the floating buttons.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
 | Nov 15 | `ffc31675c` (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
 | Nov 15 | `93742a5b7` (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
 | Nov 15 | `514559393` (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
@@ -1460,43 +1483,43 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `organization-music-tab` | Music | both | no |
-| button | `organization-audiobooks-tab` | Audiobooks | both | no |
-| button | `organization-podcasts-tab` | Podcasts | both | no |
-| button | `organization-video-tab` | Video | both | no |
+| button | `organization-music-tab` | Music | both | yes (step 8b) |
+| button | `organization-audiobooks-tab` | Audiobooks | both | yes (step 8b) |
+| button | `organization-podcasts-tab` | Podcasts | both | yes (step 8b) |
+| button | `organization-video-tab` | Video | both | yes (step 8b) |
 
 **File Organization** (both, 21)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `file-organization-enabled` | Enable custom file organization templates | both | no |
-| checkbox | `auto-disambiguation` | Automatically add disambiguation to folder and filenames | both | no |
-| text | `template-album-path` | Album Path Template: | both | no |
-| checkbox | `detect-multi-artist-compilations` | Detect multi-artist compilations | both | no |
-| text | `template-compilation-path` | Compilation Path Template: | both | no |
-| text | `template-single-path` | Single Path Template: | both | no |
-| text | `template-playlist-path` | Playlist Path Template: | both | no |
-| text | `template-playlist-item` | Playlist File Naming: | both | no |
-| text | `template-video-path` | Music Video Path Template: | both | no |
-| text | `template-sample-path` | Sample Path Template: | both | no |
-| select | `disc-label` | Multi-Disc Folder Label: {Disc (e.g., Disc 1/) / CD (e.g., CD 1/)} | both | no |
-| select | `collab-artist-mode` | Collaborative Album Artist: {First Listed Artist (recommended) / All Artists Combined} | both | no |
-| checkbox | `artistletter-symbol-fallback` | Group numbers & symbols under "#" | both | no |
-| checkbox | `unicode-substitution` | Keep symbols in names with lookalike characters | both | no |
-| select | `artist-separator` | Artist Tag Separator: {, (comma) / ; (semicolon) / / (slash) / & (ampersand)} | both | no |
-| checkbox | `write-multi-artist` | Write multi-value ARTISTS and GENRE tags | both | no |
-| checkbox | `feat-in-title` | Move featured artists to title | both | no |
-| checkbox | `allow-duplicate-tracks` | Allow duplicate tracks across albums | both | no |
-| checkbox | `wishlist-wing-it-guesses` | Search Wing It guesses as wishlist tracks | both | no |
-| number | `wishlist-ignore-ttl` | Removed-track re-try window (days) | both | no |
-| button |  | 🔄 Reset to Defaults | both | no |
+| checkbox | `file-organization-enabled` | Enable custom file organization templates | both | yes (step 8b) |
+| checkbox | `auto-disambiguation` | Automatically add disambiguation to folder and filenames | both | yes (step 8b) |
+| text | `template-album-path` | Album Path Template: | both | yes (step 8b) |
+| checkbox | `detect-multi-artist-compilations` | Detect multi-artist compilations | both | yes (step 8b) |
+| text | `template-compilation-path` | Compilation Path Template: | both | yes (step 8b) |
+| text | `template-single-path` | Single Path Template: | both | yes (step 8b) |
+| text | `template-playlist-path` | Playlist Path Template: | both | yes (step 8b) |
+| text | `template-playlist-item` | Playlist File Naming: | both | yes (step 8b) |
+| text | `template-video-path` | Music Video Path Template: | both | yes (step 8b) |
+| text | `template-sample-path` | Sample Path Template: | both | yes (step 8b) |
+| select | `disc-label` | Multi-Disc Folder Label: {Disc (e.g., Disc 1/) / CD (e.g., CD 1/)} | both | yes (step 8b) |
+| select | `collab-artist-mode` | Collaborative Album Artist: {First Listed Artist (recommended) / All Artists Combined} | both | yes (step 8b) |
+| checkbox | `artistletter-symbol-fallback` | Group numbers & symbols under "#" | both | yes (step 8b) |
+| checkbox | `unicode-substitution` | Keep symbols in names with lookalike characters | both | yes (step 8b) |
+| select | `artist-separator` | Artist Tag Separator: {, (comma) / ; (semicolon) / / (slash) / & (ampersand)} | both | yes (step 8b) |
+| checkbox | `write-multi-artist` | Write multi-value ARTISTS and GENRE tags | both | yes (step 8b) |
+| checkbox | `feat-in-title` | Move featured artists to title | both | yes (step 8b) |
+| checkbox | `allow-duplicate-tracks` | Allow duplicate tracks across albums | both | yes (step 8b) |
+| checkbox | `wishlist-wing-it-guesses` | Search Wing It guesses as wishlist tracks | both | yes (step 8b) |
+| number | `wishlist-ignore-ttl` | Removed-track re-try window (days) | both | yes (step 8b) |
+| button |  | 🔄 Reset to Defaults | both | yes (step 8b) |
 
 **Library Organize** (both, 5)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `reorganize-preserve-casing` | Preserve my casing, year & disc layout | both | no |
-| checkbox | `write-artist-nfo` | Write artist.nfo (Jellyfin / Kodi / Emby) | both | no |
+| checkbox | `reorganize-preserve-casing` | Preserve my casing, year & disc layout | both | yes (step 8b) |
+| checkbox | `write-artist-nfo` | Write artist.nfo (Jellyfin / Kodi / Emby) | both | yes (step 8b) |
 | text | `template-audiobook-path` | Audiobook Path Template: | both | no |
 | checkbox | `audiobook-recycle-deletes` | Recycle deleted audiobooks | both | no |
 | number | `audiobook-recycle-keep-days` | Empty The Recycle Bin After: | both | no |
@@ -1535,9 +1558,9 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | checkbox | `audiobook-embed-artwork` | Embed cover art in audiobook files | both | no |
 | checkbox | `audiobook-save-artwork` | Save cover.jpg beside audiobooks | both | no |
 | checkbox | `audiobook-write-nfo` | Write audiobook metadata sidecars | both | no |
-| text | `template-podcast-path` | Podcast Path Template: | both | no |
-| select | `podcast-media-format` | Podcast Media Format: {Audio Only (MP3 / M4A) — Default / Video Only (MP4 with static artwork for TV media ser | both | no |
-| checkbox | `redownload-externally-deleted` | Re-download files deleted outside SoulSync | both | no |
+| text | `template-podcast-path` | Podcast Path Template: | both | yes (step 8b) |
+| select | `podcast-media-format` | Podcast Media Format: {Audio Only (MP3 / M4A) — Default / Video Only (MP4 with static artwork for TV media ser | both | yes (step 8b) |
+| checkbox | `redownload-externally-deleted` | Re-download files deleted outside SoulSync | both | yes (step 8b) |
 | text | `vo-movie-template` | Movie Path Template: | both | no |
 | text | `vo-episode-template` | Episode Path Template: | both | no |
 | select | `vo-colon-replacement` | Colons in titles: {Delete (Dexter Resurrection) / Smart (Dexter - Resurrection, 12:30 becomes 12-30) / Space d | both | no |
@@ -1958,8 +1981,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `handleMetadataSourceChange` | 441 | no |
 | `_markCredentialFieldsNoAutofill` | 460 | no |
 | `initializeSettings` | 474 | no |
-| `resetFileOrganizationTemplates` | 572 | no |
-| `validateFileOrganizationTemplates` | 596 | no |
+| `resetFileOrganizationTemplates` | 572 | yes (step 8b) |
+| `validateFileOrganizationTemplates` | 596 | yes (step 8b) |
 | `_svcSyncKindToSide` | 847 | no |
 | `_svcFrames` | 853 | no |
 | `_svcMeta` | 864 | no |
@@ -1969,17 +1992,17 @@ Every top-level function, with its line today. A function is removed when the la
 | `openServiceModal` | 983 | no |
 | `closeServiceModal` | 1009 | no |
 | `refreshLibrarySummaries` | 1123 | no |
-| `switchLibraryMediaTab` | 1183 | no |
-| `handleLibraryMediaTabKey` | 1194 | no |
+| `switchLibraryMediaTab` | 1183 | yes (step 8b) |
+| `handleLibraryMediaTabKey` | 1194 | yes (step 8b) |
 | `switchSettingsTab` | 1206 | no |
 | `filterSettings` | 1304 | no |
 | `settingHelpFirstLine` | 1362 | no |
 | `initSettingHelpLines` | 1374 | no |
-| `_pathPreviewSlot` | 1441 | no |
-| `initPathPreview` | 1455 | no |
-| `refreshPathPreview` | 1486 | no |
-| `_fetchPathPreview` | 1492 | no |
-| `_renderPathPreview` | 1561 | no |
+| `_pathPreviewSlot` | 1441 | yes (step 8b) |
+| `initPathPreview` | 1455 | yes (step 8b) |
+| `refreshPathPreview` | 1486 | yes (step 8b) |
+| `_fetchPathPreview` | 1492 | yes (step 8b) |
+| `_renderPathPreview` | 1561 | yes (step 8b) |
 | `applyServiceStatusGradients` | 1627 | no |
 | `syncSpotifySettingsAuthState` | 1656 | no |
 | `_stgSetCheckingState` | 1681 | no |
@@ -2274,14 +2297,14 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/downloads/test_seeding.py` | yes (step 7g) |
 | `tests/downloads/test_usenet_remove_completed_music.py` | yes (step 7g) |
 | `tests/downloads/test_youtube_audio_quality.py` | yes (step 7g) |
-| `tests/imports/test_artist_letter.py` | no |
-| `tests/imports/test_compilation_album_artist.py` | no |
+| `tests/imports/test_artist_letter.py` | yes (step 8b) |
+| `tests/imports/test_compilation_album_artist.py` | yes (step 8b) |
 | `tests/imports/test_configured_root_folders.py` | no |
-| `tests/imports/test_unicode_substitution_1867.py` | no |
+| `tests/imports/test_unicode_substitution_1867.py` | yes (step 8b) |
 | `tests/quality/test_lossless.py` | yes (step 6) |
 | `tests/quality/test_quality_profiles_crud.py` | no |
 | `tests/test_amazon_retired.py` | yes (step 7a) |
-| `tests/test_audiobook_settings.py` | no |
+| `tests/test_audiobook_settings.py` | yes (step 8b) |
 | `tests/test_cleanup_protected_roots.py` | no |
 | `tests/test_config_persistence.py` | no |
 | `tests/test_dashboard_seam.py` | no |

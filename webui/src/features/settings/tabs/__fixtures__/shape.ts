@@ -53,6 +53,13 @@ export function vanilla(name: string, { afterInit = false } = {}): Element {
   return host;
 }
 
+/** settings.js's initSettingHelpLines over `root`, as the page runs it over
+ *  everything at start (the parked vanilla panels included) */
+export function withHelpLines(root: Element): Element {
+  helpLines()(root);
+  return root;
+}
+
 function helpLines(): (root: Element) => void {
   const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
   const fn = (name: string) => {

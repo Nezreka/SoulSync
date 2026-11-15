@@ -169,6 +169,54 @@ describe('the settings store', () => {
     });
   });
 
+  it('a dotted key saves one key of a dict inside the section, and reads back nested', async () => {
+    const store = make();
+    shell._settingsPayload = {
+      file_organization: { enabled: true, templates: { album_path: 'a', audiobook_path: 'b' } },
+    };
+    store.hydrate(shell._settingsPayload);
+    store.set('file_organization', 'templates.album_path', 'x/y');
+    expect(store.getState().settings.file_organization).toEqual({
+      enabled: true,
+      templates: { album_path: 'x/y', audiobook_path: 'b' },
+    });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    // posted as written: the server stores it at that path
+    expect(posted).toEqual([{ file_organization: { 'templates.album_path': 'x/y' } }]);
+    expect(shell._settingsPayload?.file_organization).toEqual({
+      enabled: true,
+      templates: { album_path: 'x/y', audiobook_path: 'b' },
+    });
+    // an edit not saved yet stays on top of a reload, nested
+    shell._settingsAutosaveOff = true;
+    store.set('file_organization', 'templates.album_path', 'z');
+    store.hydrate({ file_organization: { templates: { album_path: 'old', audiobook_path: 'b' } } });
+    expect(store.getState().settings.file_organization?.templates).toEqual({
+      album_path: 'z',
+      audiobook_path: 'b',
+    });
+  });
+
+  it('a block holds every save back, the changes kept, until it lets go', async () => {
+    const store = make();
+    let bad = true;
+    const off = store.block(() => bad);
+    store.set('ui_appearance', 'sidebar_visualizer', 'wave');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(posted).toEqual([]);
+    expect(await store.flush()).toBe(false);
+    expect(store.hasPending()).toBe(true);
+    expect(states).toEqual(['pending']);
+    bad = false;
+    expect(await store.flush()).toBe(true);
+    expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
+    bad = true;
+    off();
+    store.set('ui_appearance', 'sidebar_visualizer', 'bars');
+    expect(await store.flush()).toBe(true);
+    expect(posted).toHaveLength(2);
+  });
+
   it('flush with nothing pending posts nothing', async () => {
     const store = make();
     expect(await store.flush()).toBe(true);
