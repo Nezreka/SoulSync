@@ -228,6 +228,23 @@ describe('AdlClientsTab', () => {
     expect(await menuItem('someone.elses.iso', 'Resume')).toBeTruthy();
   });
 
+  it('a finished torrent you paused reads paused and offers resume (#2125)', async () => {
+    mockAll({
+      torrent: {
+        ...TORRENT_OK,
+        items: [{ ...TORRENT_OK.items[0], state: 'completed', progress: 1, paused: true }],
+      },
+    });
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(container, 'torrent'));
+    await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
+    // it used to read Complete and keep offering Pause, which had nothing to pause
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+    expect(container.querySelector('.dlc-client-row')?.textContent).toContain('Paused');
+  });
+
   it('remove asks about the files and carries the answer', async () => {
     mockAll();
     let body: unknown;

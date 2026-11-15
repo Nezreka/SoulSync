@@ -286,6 +286,7 @@ class TransmissionAdapter:
             error=item.get('errorString') or None,
             category=_first_label(item.get('labels')),
             tracker=tracker_host(item.get('trackers')),
+            paused=status_code == 0,
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

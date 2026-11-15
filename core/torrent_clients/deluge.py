@@ -283,6 +283,7 @@ class DelugeAdapter:
             error=item.get('tracker_status') if 'Error' in (item.get('state') or '') else None,
             category=str(item.get('label') or '') or None,
             tracker=tracker_host(item.get('tracker_host')),
+            paused=(item.get('state') or '') == 'Paused',
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

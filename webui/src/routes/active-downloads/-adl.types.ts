@@ -304,6 +304,8 @@ export interface ClientTorrentItem {
   category?: string | null;
   /** the tracker's host, never its announce url (#2123). */
   tracker?: string | null;
+  /** the client has it stopped, even when state says completed (#2125). */
+  paused?: boolean;
   error?: string | null;
   /** present when SoulSync itself dispatched this item; indexer = the grab's indexer. */
   soulsync?: { kind?: string; title?: string; indexer?: string };

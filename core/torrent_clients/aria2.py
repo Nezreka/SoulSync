@@ -181,6 +181,7 @@ class Aria2Adapter:
             error=item.get('errorMessage') or None,
             # aria2's id is a gid, so the hash rides separately
             info_hash=str(item.get('infoHash') or '').lower() or None,
+            paused=status == 'paused',
         )
 
     # ── remove / pause / resume ──

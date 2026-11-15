@@ -115,6 +115,11 @@ class TorrentStatus:
     # the tracker's host (never the announce url, which carries a private
     # tracker's passkey). None when the client doesn't say (aria2) (#2123).
     tracker: Optional[str] = None
+    # the client has it stopped. separate from ``state`` because a finished
+    # torrent you pause still reads ``completed`` (the monitor imports on it),
+    # and without this the clients tab offered Pause again on a torrent that
+    # was already paused, so the button did nothing (#2125).
+    paused: bool = False
 
 
 class AdoptedRef(str):

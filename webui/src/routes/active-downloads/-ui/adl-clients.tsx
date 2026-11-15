@@ -873,13 +873,21 @@ export function trackerName(item: Pick<ClientTorrentItem, 'soulsync' | 'tracker'
   return item.soulsync?.indexer || item.tracker || '';
 }
 
+/** The state a row shows and filters by. A finished torrent you pause still
+ * says completed (the client calls it pausedUP / stoppedUP), so the paused
+ * flag wins: the row read Complete and kept offering Pause, which did nothing
+ * (#2125). */
+export function clientState(item: { state: string; paused?: boolean | null }): string {
+  return item.paused ? 'paused' : item.state;
+}
+
 /** Pause or resume, then remove (which asks about the files). */
 function clientActions(
-  item: { id: string; name: string; state: string },
+  item: { id: string; name: string; state: string; paused?: boolean | null },
   onAction: (id: string, action: ClientAction, deleteFiles: boolean) => void,
 ): MenuAction[] {
   // an errored download restarts the same way a paused one does
-  const paused = ['paused', 'error'].includes(stateBucket(item.state));
+  const paused = ['paused', 'error'].includes(stateBucket(clientState(item)));
   return [
     {
       label: paused ? 'Resume' : 'Pause',
@@ -1038,7 +1046,7 @@ export function AdlClientsTab() {
       speed: (t) => t.download_speed,
       size: (t) => t.size,
       progress: (t) => t.progress,
-      state: (t) => t.state,
+      state: clientState,
     },
   );
   const usenetVisible = applyView(
@@ -1170,8 +1178,8 @@ export function AdlClientsTab() {
         name={item.name}
         title={item.soulsync?.title || undefined}
         kind={item.soulsync?.kind}
-        state={item.state}
-        label={stateWords(item.state, item.progress, item.download_speed)}
+        state={clientState(item)}
+        label={stateWords(clientState(item), item.progress, item.download_speed)}
         error={item.error}
         progress={item.progress}
         detail={detail}
@@ -1282,7 +1290,7 @@ export function AdlClientsTab() {
       : tab === 'torrent'
         ? byCategory(torrent.overview?.items ?? [], activeCategory)
         : (usenet.overview?.items ?? []);
-  const stateCounts = bucketCounts(activeAll as { state: string }[], (item) => item.state);
+  const stateCounts = bucketCounts(activeAll as { state: string; paused?: boolean }[], clientState);
   const owned = (activeAll as { soulsync?: unknown }[]).filter((item) => item.soulsync).length;
   const ownerCounts: Record<OwnerFilter, number> = {
     all: activeAll.length,
