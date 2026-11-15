@@ -932,9 +932,7 @@ function switchSettingsTab(tab) {
     // DB maintenance info loads itself on arriving at System (system-tab.tsx)
     // (the yt-dlp tile loads itself in the React YouTube panel: on arriving at
     // Sources and on opening YouTube)
-    if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
-        try { loadImageCacheStatus(); } catch (e) { }
-    }
+    // the artwork cache status loads itself on arriving at System (system-tab.tsx)
     // #1822: MetaSync lives on Connections. (sidebar weather, on Appearance,
     // reloads itself each time its React tab is opened)
     if (tab === 'connections' && typeof loadMetaSyncSettings === 'function') {
@@ -1657,11 +1655,7 @@ async function loadSettingsData() {
         // (library-organization.tsx, library-audiobooks.tsx)
         // the audiobook settings: the Organization card is React (library-audiobooks.tsx)
         // the naming options, tag options and wishlist rules: the Organization card is React
-        const _lcOn = document.getElementById('lidarr-compat-enabled');
-        if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
-        loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
-        const _mcpOn = document.getElementById('mcp-enabled');
-        if (_mcpOn) _mcpOn.checked = settings.mcp?.enabled === true;
+        // MCP and the Lidarr compatible API: the System tab is React (system-tab.tsx)
 
         // Playlist Sync is on the Discovery tab, which is React (discovery-tab.tsx)
 
@@ -1804,9 +1798,8 @@ async function loadSettingsData() {
             const devData = await devResponse.json();
             if (devData.enabled) {
                 // Re-broadcast for the React dashboard's Hydrabase orb.
+                // (the System tab's dev mode status follows it too, system-tab.tsx)
                 window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
-                document.getElementById('dev-mode-status').textContent = 'Active';
-                document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
                 document.getElementById('hydrabase-nav').style.display = '';
                 // The Hydrabase ORB is React-rendered since the dashboard flip
                 // and shows on the dispatch above; the old container write
@@ -2322,31 +2315,7 @@ async function toggleHydrabaseFromSettings() {
 
 // Database Maintenance: the System tab is React (system-tab.tsx)
 
-async function activateDevMode() {
-    const password = document.getElementById('dev-mode-password').value;
-    try {
-        const response = await fetch('/api/dev-mode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password })
-        });
-        const data = await response.json();
-        if (data.success) {
-            // Re-broadcast for the React dashboard's Hydrabase orb.
-            window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
-            document.getElementById('dev-mode-status').textContent = 'Active';
-            document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
-            document.getElementById('hydrabase-nav').style.display = '';
-            // Orb visibility rides the dispatch (React-owned since the flip).
-            document.getElementById('dev-mode-password').value = '';
-            showToast('Dev mode activated', 'success');
-        } else {
-            showToast('Invalid password', 'error');
-        }
-    } catch (e) {
-        showToast('Failed to activate dev mode', 'error');
-    }
-}
+// activateDevMode: the System tab is React (system-tab.tsx)
 
 // ── Hydrabase Functions ──
 
@@ -2407,12 +2376,8 @@ async function hydrabaseDisconnect() {
     // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
     window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
     document.getElementById('hydrabase-nav').style.display = 'none';
-    // Orb visibility rides the dispatch (React-owned since the flip).
-    const devStatus = document.getElementById('dev-mode-status');
-    if (devStatus) {
-        devStatus.textContent = 'Inactive';
-        devStatus.style.color = '#888';
-    }
+    // Orb visibility rides the dispatch (React-owned since the flip), and so
+    // does the System tab's dev mode status (system-tab.tsx)
     showToast('Disconnected — dev mode disabled', 'success');
     navigateToPage('settings');
 }
@@ -2739,12 +2704,7 @@ async function saveSettings(quiet = false) {
             jiosaavn_enabled: _cfgBool('experimental-jiosaavn-enabled'),
             bandcamp_enabled: _cfgBool('experimental-bandcamp-enabled'),
         },
-        image_cache: {
-            // Server-side resizing is opt-in; the cache itself keeps whatever
-            // it was already set to (on, for every install since it shipped).
-            thumbnails: _cfgBool('imgcache-thumbnails'),
-            max_cache_mb: _cfgInt('imgcache-max-mb', 0),
-        },
+        // image_cache: the System tab is React (system-tab.tsx)
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
             api_key: document.getElementById('hydrabase-api-key').value,
@@ -2783,13 +2743,7 @@ async function saveSettings(quiet = false) {
         },
         // audiodb (embed_tags, tags): the Post-Processing card is React
         // file_organization: the Organization card is React
-        mcp: {
-            enabled: _cfgBool('mcp-enabled'),
-        },
-        lidarr_compat: {
-            enabled: _cfgBool('lidarr-compat-enabled'),
-            profile_id: _cfgInt('lidarr-compat-profile', _lidarrCompatProfileId),
-        },
+        // mcp and lidarr_compat: the System tab is React (system-tab.tsx)
         // wishlist: the Organization card is React
         // playlist_sync, listening_stats and discover: the Discovery tab is
         // React and saves its own keys
@@ -3038,155 +2992,7 @@ async function clearQuarantine() {
 
 // ======================== API Key Management ========================
 
-// the saved profile, so a save before the list loads keeps it
-let _lidarrCompatProfileId = 1;
-
-async function loadLidarrCompatProfiles(selectedId) {
-    _lidarrCompatProfileId = parseInt(selectedId, 10) || 1;
-    const select = document.getElementById('lidarr-compat-profile');
-    if (!select) return;
-    try {
-        const response = await fetch('/api/profiles');
-        const data = await response.json();
-        const profiles = data.profiles || [];
-        if (!profiles.length) return;
-        select.innerHTML = profiles.map(p => {
-            const note = p.can_download === false ? ' (needs approval)' : '';
-            return `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name || 'Profile ' + p.id)}${note}</option>`;
-        }).join('');
-        select.value = String(_lidarrCompatProfileId);
-        if (select.value !== String(_lidarrCompatProfileId)) select.value = '1';
-    } catch (e) {
-        console.debug('lidarr profile list failed', e);
-    }
-}
-
-async function loadApiKeys() {
-    const container = document.getElementById('api-keys-list');
-    if (!container) return;
-
-    try {
-        const response = await fetch('/api/v1/api-keys-internal');
-        if (response.ok) {
-            const data = await response.json();
-            renderApiKeys(data.data?.keys || []);
-        } else {
-            container.innerHTML = '<div style="color: #666; font-size: 13px;">No API keys configured.</div>';
-        }
-    } catch (e) {
-        container.innerHTML = '<div style="color: #666; font-size: 13px;">No API keys configured.</div>';
-    }
-}
-
-function renderApiKeys(keys) {
-    const container = document.getElementById('api-keys-list');
-    if (!container) return;
-
-    if (!keys || keys.length === 0) {
-        container.innerHTML = '<div style="color: #666; font-size: 13px; padding: 4px 0;">No API keys yet. Generate one below.</div>';
-        return;
-    }
-
-    container.innerHTML = keys.map(k => `
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
-            <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}
-                    <span style="margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${k.scope === 'read' ? 'background: rgba(100,255,218,0.12); color: #64ffda;' : 'background: rgba(255,171,64,0.12); color: #ffab40;'}">${k.scope === 'read' ? 'Read-only' : 'Admin'}</span>
-                </div>
-                <div style="font-size: 11px; color: #666; margin-top: 2px;">
-                    <code>${escapeHtml(k.key_prefix || 'sk_...')}...</code>
-                    &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
-                    ${k.last_used_at ? '&middot; Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
-                </div>
-            </div>
-            <button class="revoke-api-key-btn" data-key-id="${escapeHtml(k.id)}" data-key-label="${escapeHtml(k.label || 'this key')}"
-                style="padding: 4px 10px; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: #ff5252; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">
-                Revoke
-            </button>
-        </div>
-    `).join('');
-    _initApiKeyClickHandler();
-}
-
-function _initApiKeyClickHandler() {
-    const container = document.getElementById('api-keys-list');
-    if (!container) return;
-    container.onclick = (e) => {
-        const btn = e.target.closest('.revoke-api-key-btn');
-        if (btn) {
-            e.preventDefault();
-            revokeApiKey(btn.dataset.keyId, btn.dataset.keyLabel);
-        }
-    };
-}
-
-async function generateApiKey() {
-    const labelInput = document.getElementById('api-key-label');
-    const label = labelInput ? labelInput.value.trim() : '';
-    const scopeInput = document.getElementById('api-key-scope');
-    const scope = scopeInput && scopeInput.value === 'admin' ? 'admin' : 'read';
-
-    try {
-        const response = await fetch('/api/v1/api-keys-internal/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: label || 'Default', scope })
-        });
-        const data = await response.json();
-
-        if (data.success && data.data?.key) {
-            const keyDisplay = document.getElementById('api-key-generated');
-            const keyValue = document.getElementById('api-key-value');
-            if (keyDisplay && keyValue) {
-                keyValue.textContent = data.data.key;
-                keyDisplay.style.display = 'block';
-            }
-            if (labelInput) labelInput.value = '';
-            showToast('API key generated! Copy it now.', 'success');
-            loadApiKeys();
-        } else {
-            showToast(data.error?.message || 'Failed to generate API key', 'error');
-        }
-    } catch (error) {
-        console.error('Error generating API key:', error);
-        showToast('Failed to generate API key', 'error');
-    }
-}
-
-function copyApiKey() {
-    const keyValue = document.getElementById('api-key-value');
-    if (keyValue) {
-        navigator.clipboard.writeText(keyValue.textContent).then(() => {
-            showToast('API key copied to clipboard', 'success');
-        }).catch(() => {
-            // Fallback for older browsers
-            const range = document.createRange();
-            range.selectNode(keyValue);
-            window.getSelection().removeAllRanges();
-            window.getSelection().addRange(range);
-            document.execCommand('copy');
-            showToast('API key copied', 'success');
-        });
-    }
-}
-
-async function revokeApiKey(keyId, label) {
-    if (!await showConfirmDialog({ title: 'Revoke API Key', message: `Revoke API key "${label}"? Any apps using this key will stop working.`, confirmText: 'Revoke', destructive: true })) return;
-
-    try {
-        const response = await fetch(`/api/v1/api-keys-internal/revoke/${keyId}`, { method: 'DELETE' });
-        const data = await response.json();
-        if (data.success) {
-            showToast('API key revoked', 'success');
-            loadApiKeys();
-        } else {
-            showToast(data.error?.message || 'Failed to revoke key', 'error');
-        }
-    } catch (error) {
-        console.error('Error revoking API key:', error);
-        showToast('Failed to revoke key', 'error');
-    }
-}
+// the Lidarr profile list and the API keys: the System tab is React (system-tab.tsx)
 
 // Dashboard-specific test functions that create activity items
 async function testDashboardConnection(service) {
@@ -4140,109 +3946,7 @@ async function selectNavidromeMusicFolder() {
 // One cache serves album covers on the music side and posters on the video
 // side, so this panel is deliberately not marked video-only.
 
-function _imgCacheBytes(n) {
-    if (!n) return '0 MB';
-    const mb = n / (1024 * 1024);
-    return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
-}
-
-function _imgCacheStatus(message, tone) {
-    const el = document.getElementById('imgcache-status');
-    if (!el) return;
-    el.textContent = message;
-    el.style.display = 'block';
-    el.style.background = tone === 'error' ? 'rgba(255,80,80,.12)' : 'rgba(80,255,150,.10)';
-    el.style.color = tone === 'error' ? '#ff9a9a' : '#8ee7b0';
-}
-
-function onImageCacheSettingChanged() {
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-async function loadImageCacheStatus() {
-    try {
-        const resp = await fetch('/api/image-cache/status');
-        const data = await resp.json();
-        if (!data.success) return;
-        const entries = document.getElementById('imgcache-entries');
-        const size = document.getElementById('imgcache-size');
-        if (entries) {
-            // A "pending" row is a registered URL nothing ever loaded. When it
-            // dominates the count, the URLs being handed out are changing
-            // between renders (a media-server auth salt used to rotate on every
-            // call), and the entry count alone hides that completely.
-            const pending = data.pending || 0;
-            entries.textContent = pending
-                ? `${(data.entries || 0).toLocaleString()} (${pending.toLocaleString()} pending)`
-                : (data.entries || 0).toLocaleString();
-        }
-        if (size) {
-            size.textContent = data.max_bytes
-                ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`
-                : `${_imgCacheBytes(data.bytes)} (no limit)`;
-        }
-        // Reflect saved config without clobbering something the user is editing.
-        const maxEl = document.getElementById('imgcache-max-mb');
-        if (maxEl && document.activeElement !== maxEl) {
-            maxEl.value = Math.round((data.max_bytes || 0) / (1024 * 1024));
-        }
-        const thumbEl = document.getElementById('imgcache-thumbnails');
-        if (thumbEl) thumbEl.checked = data.thumbnails === true;
-    } catch (e) {
-        console.error('image cache status failed', e);
-    }
-}
-
-async function runImageCachePrune() {
-    const btn = document.getElementById('imgcache-prune-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Reclaiming...'; }
-    try {
-        const resp = await fetch('/api/image-cache/prune', { method: 'POST' });
-        const data = await resp.json();
-        if (data.success) {
-            const freed = (data.expired || 0) + (data.evicted || 0);
-            _imgCacheStatus(freed
-                ? `Removed ${freed} cached image${freed === 1 ? '' : 's'}.`
-                : 'Nothing to reclaim — the cache is already within its limits.', 'ok');
-            loadImageCacheStatus();
-        } else {
-            _imgCacheStatus(data.error || 'Could not reclaim space.', 'error');
-        }
-    } catch (e) {
-        _imgCacheStatus('Could not reclaim space: ' + e.message, 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Reclaim space now'; }
-    }
-}
-
-async function runImageCacheClear() {
-    const ok = await showConfirmDialog({
-        title: 'Clear the artwork cache?',
-        message: 'Every cached cover and poster is removed. Nothing is lost permanently — '
-               + 'images are downloaded again as pages need them, so the only cost is a '
-               + 'slower first load.',
-        confirmText: 'Clear cache',
-        cancelText: 'Cancel'
-    });
-    if (!ok) return;
-
-    const btn = document.getElementById('imgcache-clear-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Clearing...'; }
-    try {
-        const resp = await fetch('/api/image-cache/clear', { method: 'POST' });
-        const data = await resp.json();
-        if (data.success) {
-            _imgCacheStatus(`Cleared ${data.removed || 0} cached image${data.removed === 1 ? '' : 's'}.`, 'ok');
-            loadImageCacheStatus();
-        } else {
-            _imgCacheStatus(data.error || 'Could not clear the cache.', 'error');
-        }
-    } catch (e) {
-        _imgCacheStatus('Could not clear the cache: ' + e.message, 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Clear cache'; }
-    }
-}
+// the artwork cache: the System tab is React (system-tab.tsx)
 
 // Sidebar Weather is React now: src/features/settings/tabs/appearance-tab.tsx
 

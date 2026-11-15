@@ -183,6 +183,7 @@ describe('the window contract', () => {
       'disconnectMyAccount',
       'getWeatherPreview',
       'initSidebarWeather',
+      'initWeatherPreviewSettings',
       'navigateToArtistDetail',
       'onBlocklistSearchInput',
       'openBlocklistModal',

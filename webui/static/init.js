@@ -4886,7 +4886,7 @@ async function loadPageData(pageId) {
                     await loadSettingsData();
                     // the quality profile loads with the settings: the Quality
                     // tab is React (src/features/settings/tabs/quality-tab.tsx)
-                    loadApiKeys();
+                    // (the API keys load with the System tab, system-tab.tsx)
                     loadBlacklistCount();
                 } finally {
                     window._suppressSettingsAutoSave = false;

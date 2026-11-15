@@ -154,6 +154,9 @@ export const SHELL_WINDOW_EXPORTS = {
   getWeatherPreview,
   setWeatherPreview,
   weatherPreviewPresets,
+  // ...whose controls the React System tab renders and wires through this
+  // (the shell is its own bundle: an import would be a second weather state)
+  initWeatherPreviewSettings,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

@@ -60,17 +60,17 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
-| Tab: System | **in progress** (step 9a below) | 5 of 63: Saving, Database Settings, Database Maintenance, Logging. Next: SoulSync API, Developer Mode, Artwork Cache, Developer, Experimental (9b); Security & Access (9c). |
+| Tab: System | **in progress** (steps 9a, 9b below) | 25 of 63: Saving, Database Settings, Database Maintenance, Logging, SoulSync API, Developer Mode, Artwork Cache, Developer. Next: Security & Access (9c). Experimental (2) goes with Connections (step 10): the metadata source picker reads it. |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts) and System started, 339 of 678 controls, 184 of 333 `settings.js` functions removed, 33 of 83 tests repointed (step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts) and System started, 359 of 678 controls, 198 of 333 `settings.js` functions removed, 34 of 83 tests repointed (step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 8,342 |
-| `webui/static/settings.js` | 10,187 | 4,581 |
+| `webui/index.html` | 12,823 | 8,029 |
+| `webui/static/settings.js` | 10,187 | 4,285 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -774,12 +774,29 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity of both slots against frozen fixtures; `system-tab.test.tsx` 7 (the switch's own save and the change it carries, holding while off, workers, maintenance on arrival, the confirm, the incremental button, the log level); `settings-autosave-toggle` and `settings-regroup-1822` repointed; the Python files near it pass. Browser: values, the switch saving `false`, a change held while off and saved by the button; pixels 0 on all four.
 
+### Step 9b: System, part two: SoulSync API, Developer Mode, Artwork Cache, Developer (Nov 15 2026)
+
+**What.** Two more slots in `system-tab.tsx`: `tools` (SoulSync API with the key list, generate, copy and revoke, the inbound endpoint, MCP and the Lidarr compatible API with its profile list; Developer Mode; Artwork Cache) and `developer` (the weather and setup previews, and the "Experimental" break).
+
+**Dev mode status** follows `ss:dev-mode`, which every switch of dev mode already sends (the load check in `loadSettingsData`, Activate, Hydrabase's disconnect); those two vanilla places no longer write the status line.
+
+**The previews, and a bug caught in the browser.** The weather and setup previews were already TypeScript that wire their controls by id; the section renders the same markup and runs both on mount (both are safe to run again). The first version imported the weather preview's module, and in the browser picking a holiday said the sidebar weather was off: the shell is a separate bundle, so the import was a second copy of the weather state. The shell now hands its own `initWeatherPreviewSettings` over on window (`SHELL_WINDOW_EXPORTS`), and the section calls that.
+
+**Experimental is not here.** Its two switches are read by the vanilla metadata source picker and its confirm modal (Connections); they move with step 10.
+
+**Removed.** 14 functions (marked), the API keys call in `init.js`, the image cache hook in `switchSettingsTab`, the MCP and Lidarr load lines, the collector's `mcp`, `lidarr_compat` and `image_cache`.
+
+**Differences.** None seen.
+
+**Checked.** Parity of both slots (the developer one with its lists filled the way the page filled them); `system-tab.test.tsx` now 14; the shell contract test; `test_dashboard_seam` repointed (Activate dispatches from React); the Python files near it pass. Browser: every loaded value, the key list, the profiles, the cache, the weather preview from the page and the setup preview opening; pixels 0 on all four.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 9b) | **System: SoulSync API, Developer Mode, Artwork Cache and Developer are React.** The shell hands the weather preview init over on window. |
 | Nov 15 | `31099f899` (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
 | Nov 15 | `ec8e0b660` (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
 | Nov 15 | `96ecf1d44` (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
@@ -1916,51 +1933,51 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `api-key-label` | New Key Label: | both | no |
-| select | `api-key-scope` | Access: {Read-only (stats and library, for dashboards) / Admin (can change settings and everything else)} | both | no |
-| button |  | 🔑 Generate API Key | both | no |
-| button |  | Copy | both | no |
+| text | `api-key-label` | New Key Label: | both | yes (step 9b) |
+| select | `api-key-scope` | Access: {Read-only (stats and library, for dashboards) / Admin (can change settings and everything else)} | both | yes (step 9b) |
+| button |  | 🔑 Generate API Key | both | yes (step 9b) |
+| button |  | Copy | both | yes (step 9b) |
 
 **MCP for AI Clients** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `mcp-enabled` | Answer MCP requests at /mcp | both | no |
+| checkbox | `mcp-enabled` | Answer MCP requests at /mcp | both | yes (step 9b) |
 
 **Lidarr Compatible API** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `lidarr-compat-enabled` | Answer as Lidarr at /lidarr | both | no |
-| select | `lidarr-compat-profile` | Requests go to profile: {Loading...} | both | no |
+| checkbox | `lidarr-compat-enabled` | Answer as Lidarr at /lidarr | both | yes (step 9b) |
+| select | `lidarr-compat-profile` | Requests go to profile: {Loading...} | both | yes (step 9b) |
 
 **Developer Mode** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `dev-mode-password` | Password: | both | no |
-| button |  | Activate | both | no |
+| password | `dev-mode-password` | Password: | both | yes (step 9b) |
+| button |  | Activate | both | yes (step 9b) |
 
 **Artwork Cache** (both, 4)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| number | `imgcache-max-mb` | Size limit (MB): | both | no |
-| checkbox | `imgcache-thumbnails` | Serve resized thumbnails | both | no |
-| button | `imgcache-prune-btn` | Reclaim space now | both | no |
-| button | `imgcache-clear-btn` | Clear cache | both | no |
+| number | `imgcache-max-mb` | Size limit (MB): | both | yes (step 9b) |
+| checkbox | `imgcache-thumbnails` | Serve resized thumbnails | both | yes (step 9b) |
+| button | `imgcache-prune-btn` | Reclaim space now | both | yes (step 9b) |
+| button | `imgcache-clear-btn` | Clear cache | both | yes (step 9b) |
 
 **Developer** (both, 7)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `sw-preview-preset` | Weather preview: {Live weather} | both | no |
-| select | `sw-preview-holiday` | Weather preview: {Holiday by date / No holiday} | both | no |
-| date | `sw-preview-date` | Weather preview: | both | no |
-| button | `sw-preview-reset` | Back to live | both | no |
-| select | `ob-preview-step` | Setup preview: {Start at Welcome / Your account / What it's for / Media server / Folders / Download sources /  | both | no |
-| select | `ob-preview-env` | Setup preview: {Detect for real / Pretend Docker / Pretend bare metal / Pretend nothing found} | both | no |
-| button | `ob-preview-open` | Open preview | both | no |
+| select | `sw-preview-preset` | Weather preview: {Live weather} | both | yes (step 9b) |
+| select | `sw-preview-holiday` | Weather preview: {Holiday by date / No holiday} | both | yes (step 9b) |
+| date | `sw-preview-date` | Weather preview: | both | yes (step 9b) |
+| button | `sw-preview-reset` | Back to live | both | yes (step 9b) |
+| select | `ob-preview-step` | Setup preview: {Start at Welcome / Your account / What it's for / Media server / Folders / Download sources /  | both | yes (step 9b) |
+| select | `ob-preview-env` | Setup preview: {Detect for real / Pretend Docker / Pretend bare metal / Pretend nothing found} | both | yes (step 9b) |
+| button | `ob-preview-open` | Open preview | both | yes (step 9b) |
 
 **Experimental** (music only, 2)
 
@@ -2221,7 +2238,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `loadDbMaintenanceInfo` | 6482 | yes (step 9a) |
 | `runDatabaseVacuum` | 6505 | yes (step 9a) |
 | `enableIncrementalVacuum` | 6532 | yes (step 9a) |
-| `activateDevMode` | 6560 | no |
+| `activateDevMode` | 6560 | yes (step 9b) |
 | `hydrabaseToggleConnection` | 6590 | no |
 | `hydrabaseConnect` | 6598 | no |
 | `hydrabaseDisconnect` | 6634 | no |
@@ -2240,13 +2257,13 @@ Every top-level function, with its line today. A function is removed when the la
 | `testConnection` | 7554 | no |
 | `testDeezerConnection` | 7599 | no |
 | `clearQuarantine` | 7630 | no |
-| `loadLidarrCompatProfiles` | 7654 | no |
-| `loadApiKeys` | 7674 | no |
-| `renderApiKeys` | 7691 | no |
-| `_initApiKeyClickHandler` | 7721 | no |
-| `generateApiKey` | 7733 | no |
-| `copyApiKey` | 7766 | no |
-| `revokeApiKey` | 7783 | no |
+| `loadLidarrCompatProfiles` | 7654 | yes (step 9b) |
+| `loadApiKeys` | 7674 | yes (step 9b) |
+| `renderApiKeys` | 7691 | yes (step 9b) |
+| `_initApiKeyClickHandler` | 7721 | yes (step 9b) |
+| `generateApiKey` | 7733 | yes (step 9b) |
+| `copyApiKey` | 7766 | yes (step 9b) |
+| `revokeApiKey` | 7783 | yes (step 9b) |
 | `testDashboardConnection` | 7802 | no |
 | `autoDetectPlex` | 7834 | no |
 | `autoDetectJellyfin` | 7861 | no |
@@ -2311,12 +2328,12 @@ Every top-level function, with its line today. A function is removed when the la
 | `selectNavidromeMusicFolder` | 9478 | no |
 | `loadYtdlpStatus` | 9512 | yes (step 7g) |
 | `runYtdlpUpdate` | 9551 | yes (step 7g) |
-| `_imgCacheBytes` | 9606 | no |
-| `_imgCacheStatus` | 9612 | no |
-| `onImageCacheSettingChanged` | 9621 | no |
-| `loadImageCacheStatus` | 9625 | no |
-| `runImageCachePrune` | 9659 | no |
-| `runImageCacheClear` | 9681 | no |
+| `_imgCacheBytes` | 9606 | yes (step 9b) |
+| `_imgCacheStatus` | 9612 | yes (step 9b) |
+| `onImageCacheSettingChanged` | 9621 | yes (step 9b) |
+| `loadImageCacheStatus` | 9625 | yes (step 9b) |
+| `runImageCachePrune` | 9659 | yes (step 9b) |
+| `runImageCacheClear` | 9681 | yes (step 9b) |
 | `_swApi` | 9715 | yes (step 2) |
 | `_swStatus` | 9724 | yes (step 2) |
 | `_swRebootSidebar` | 9729 | yes (step 2) |
@@ -2361,7 +2378,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_audiobook_settings.py` | yes (step 8b) |
 | `tests/test_cleanup_protected_roots.py` | no |
 | `tests/test_config_persistence.py` | no |
-| `tests/test_dashboard_seam.py` | no |
+| `tests/test_dashboard_seam.py` | yes (step 9b) |
 | `tests/test_docs_settings_labels.py` | yes (step 4) |
 | `tests/test_download_chain_widget.py` | yes (steps 5, 7a) |
 | `tests/test_explicit_preference.py` | yes (step 5) |

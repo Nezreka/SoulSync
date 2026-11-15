@@ -186,9 +186,13 @@ def test_dev_mode_writers_dispatch() -> None:
     settings = (STATIC / "settings.js").read_text(encoding="utf-8")
     enabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: true } })")
     disabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
-    assert enabled == 2, (
-        f"expected the dev-mode ENABLE dispatch at both write sites (initial "
-        f"check + activateDevMode), found {enabled}"
+    assert enabled == 1, (
+        f"expected the dev-mode ENABLE dispatch at the initial check, found {enabled}"
+    )
+    # activateDevMode is React (SETTINGS_PORT.md step 9b) and dispatches too
+    system = (STATIC.parent / "src/features/settings/tabs/system-tab.tsx").read_text(encoding="utf-8")
+    assert "new CustomEvent('ss:dev-mode', { detail: { enabled: true } })" in system, (
+        "the System tab's Activate no longer dispatches the dev-mode event"
     )
     assert disabled == 1, (
         f"expected the dev-mode DISABLE dispatch at the hydra disconnect site, found {disabled}"

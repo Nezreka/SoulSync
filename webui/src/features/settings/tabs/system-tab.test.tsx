@@ -7,6 +7,8 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { initWeatherPreviewSettings } from '@/shell/weather-preview-settings';
+
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
 import { SystemTab } from './system-tab';
@@ -46,6 +48,33 @@ beforeEach(() => {
     }),
     'GET /api/settings/log-level': () => ({ success: true, level: 'DEBUG' }),
     'POST /api/settings/log-level': () => ({ success: true }),
+    'GET /api/v1/api-keys-internal': () => ({
+      data: {
+        keys: [
+          { id: 'k1', label: 'Bot', scope: 'read', key_prefix: 'sk_ab', created_at: '2026-11-01' },
+          { id: 'k2', scope: 'admin', key_prefix: 'sk_cd' },
+        ],
+      },
+    }),
+    'POST /api/v1/api-keys-internal/generate': () => ({ success: true, data: { key: 'sk_new' } }),
+    'DELETE /api/v1/api-keys-internal/revoke/k1': () => ({ success: true }),
+    'GET /api/profiles': () => ({
+      profiles: [
+        { id: 1, name: 'Admin' },
+        { id: 4, name: 'Kid', can_download: false },
+      ],
+    }),
+    'POST /api/dev-mode': () => ({ success: true }),
+    'GET /api/image-cache/status': () => ({
+      success: true,
+      entries: 1200,
+      pending: 30,
+      bytes: 3 * 1024 * 1024 * 1024,
+      max_bytes: 0,
+      thumbnails: true,
+    }),
+    'POST /api/image-cache/prune': () => ({ success: true, expired: 1, evicted: 0 }),
+    'POST /api/image-cache/clear': () => ({ success: true, removed: 5 }),
   };
   vi.stubGlobal(
     'fetch',
@@ -82,9 +111,29 @@ describe('the sections are the markup they replaced', () => {
   it.each([
     ['saving', 'system-saving.vanilla.html'],
     ['database', 'system-database.vanilla.html'],
+    ['tools', 'system-tools.vanilla.html'],
   ])('%s', (name, fixture) => {
     const { container } = part(name);
     expect(shape(container)).toEqual(shape(vanilla(fixture, { afterInit: true })));
+  });
+});
+
+describe('Developer', () => {
+  it('is the markup it replaced, its lists filled as the page filled them', () => {
+    // the live page ran the weather preview's init over the old markup at start
+    const old = vanilla('system-developer.vanilla.html', { afterInit: true });
+    document.body.append(old);
+    initWeatherPreviewSettings();
+    const want = shape(old);
+    old.remove();
+    // the shell hands its own copy over on window (a separate bundle)
+    shell.initWeatherPreviewSettings = initWeatherPreviewSettings;
+    const { container } = part('developer');
+    expect(shape(container)).toEqual(want);
+    expect(
+      (document.getElementById('sw-preview-preset') as HTMLSelectElement).options.length,
+    ).toBeGreaterThan(1);
+    delete shell.initWeatherPreviewSettings;
   });
 });
 
@@ -182,5 +231,100 @@ describe('Database and Logging', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ level: 'ERROR' });
     // not a settings key: nothing goes through the page save
     expect(store.hasPending()).toBe(false);
+  });
+});
+
+describe('SoulSync API, Developer Mode, Artwork Cache', () => {
+  it('lists the keys, generates one to copy, and revokes after asking', async () => {
+    shell.showConfirmDialog = vi.fn(() => Promise.resolve(true));
+    const { container } = part('tools');
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(container.querySelectorAll('.revoke-api-key-btn')).toHaveLength(2));
+    const rows = [...container.querySelectorAll('#api-keys-list > div')].map((d) =>
+      (d.textContent || '').replace(/\s+/g, ' ').trim(),
+    );
+    expect(rows[0]).toContain('Bot Read-only');
+    expect(rows[1]).toContain('Unnamed Admin');
+    fireEvent.change(input('api-key-label'), { target: { value: ' Home ' } });
+    fireEvent.change(input('api-key-scope'), { target: { value: 'admin' } });
+    fireEvent.click(container.querySelector('.auth-button')!);
+    await waitFor(() => expect(input('api-key-value').textContent).toBe('sk_new'));
+    expect(input('api-key-generated').style.display).toBe('block');
+    expect(input('api-key-label').value).toBe('');
+    expect(calls.find((c) => c.url.endsWith('/generate'))?.body).toEqual({
+      label: 'Home',
+      scope: 'admin',
+    });
+    fireEvent.click(container.querySelector('.revoke-api-key-btn')!);
+    await waitFor(() => expect(shell.showToast).toHaveBeenCalledWith('API key revoked', 'success'));
+    expect(shell.showConfirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Revoke API key "Bot"? Any apps using this key will stop working.',
+      }),
+    );
+    delete shell.showConfirmDialog;
+  });
+
+  it('MCP and Lidarr load and save; the profile list marks request-only profiles', async () => {
+    act(() => store.hydrate({ mcp: { enabled: true }, lidarr_compat: { profile_id: 4 } }));
+    part('tools');
+    expect(input('mcp-enabled').checked).toBe(true);
+    expect(input('lidarr-compat-enabled').checked).toBe(false);
+    await waitFor(() => expect(input('lidarr-compat-profile').value).toBe('4'));
+    expect(
+      [...document.querySelectorAll('#lidarr-compat-profile option')].map((o) => o.textContent),
+    ).toEqual(['Admin', 'Kid (needs approval)']);
+    fireEvent.click(input('lidarr-compat-enabled'));
+    fireEvent.change(input('lidarr-compat-profile'), { target: { value: '1' } });
+    fireEvent.click(input('mcp-enabled'));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({
+      lidarr_compat: { enabled: true, profile_id: 1 },
+      mcp: { enabled: false },
+    });
+  });
+
+  it('dev mode: activates, and the status follows every switch of it', async () => {
+    part('tools');
+    const nav = document.createElement('div');
+    nav.id = 'hydrabase-nav';
+    nav.style.display = 'none';
+    document.body.append(nav);
+    expect(input('dev-mode-status').textContent).toBe('Inactive');
+    fireEvent.change(input('dev-mode-password'), { target: { value: 'pw' } });
+    fireEvent.click(input('dev-mode-password').nextElementSibling!);
+    await waitFor(() => expect(input('dev-mode-status').textContent).toBe('Active'));
+    expect(nav.style.display).toBe('');
+    expect(input('dev-mode-password').value).toBe('');
+    // Hydrabase's disconnect turns it off by the same event
+    act(() => {
+      window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
+    });
+    expect(input('dev-mode-status').textContent).toBe('Inactive');
+    nav.remove();
+  });
+
+  it('the artwork cache: status on arrival, settings saved, reclaim and clear', async () => {
+    shell.showConfirmDialog = vi.fn(() => Promise.resolve(true));
+    part('tools', { opened: 1, active: true });
+    await waitFor(() =>
+      expect(input('imgcache-entries').textContent).toBe(`${(1200).toLocaleString()} (30 pending)`),
+    );
+    expect(input('imgcache-size').textContent).toBe('3.00 GB (no limit)');
+    expect(input('imgcache-max-mb').value).toBe('0');
+    expect(input('imgcache-thumbnails').checked).toBe(true);
+    fireEvent.change(input('imgcache-max-mb'), { target: { value: '2048' } });
+    fireEvent.click(input('imgcache-thumbnails'));
+    fireEvent.click(input('imgcache-prune-btn'));
+    await waitFor(() =>
+      expect(input('imgcache-status').textContent).toBe('Removed 1 cached image.'),
+    );
+    fireEvent.click(input('imgcache-clear-btn'));
+    await waitFor(() =>
+      expect(input('imgcache-status').textContent).toBe('Cleared 5 cached images.'),
+    );
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ image_cache: { max_cache_mb: 2048, thumbnails: false } });
+    delete shell.showConfirmDialog;
   });
 });
