@@ -4857,6 +4857,14 @@ body[data-side="video"] #gsearch-aura {
 .vms-sub { font-size: 12px; color: var(--white-a45); margin-top: 8px; }
 .vms-prof { margin-top: 10px; }
 .vms-prof[hidden] { display: none; }
+/* the editable query, prefilled with what the search starts from (#2121) */
+.vms-query { display: flex; gap: 8px; margin-top: 12px; }
+.vms-query-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: var(--radius-md);
+    border: 1px solid var(--white-a12); background: var(--white-a06); color: var(--text-1); font: inherit; font-size: 13.5px; }
+.vms-query-input:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 1px; }
+.vms-query-btn { flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--white-a12);
+    background: var(--white-a10); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.vms-query-btn:hover { background: var(--white-a14); }
 /* the title's quality profile picker (Get + Manual search) */
 .vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
