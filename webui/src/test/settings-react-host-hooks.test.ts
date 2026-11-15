@@ -1,0 +1,91 @@
+/**
+ * The three places settings.js hands over to the React Settings tabs while
+ * the page is being ported (SETTINGS_PORT.md): the settings it loaded, the tab
+ * that was opened, and its save.
+ */
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { extractFunction } from './vanilla-extract';
+
+const SETTINGS = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8').replace(
+  /\r\n/g,
+  '\n',
+);
+
+afterEach(() => {
+  document.body.innerHTML = '';
+});
+
+describe('settings.js hands over to the React tabs', () => {
+  it('opening a tab shows its React slot, and a failing mount does not break the switch', () => {
+    document.body.innerHTML = `<div id="settings-page">
+      <button class="stg-tab" data-tab="appearance"></button>
+      <button class="stg-tab" data-tab="logs"></button>
+      <div data-stg="appearance" data-stg-react="appearance"></div>
+      <div data-stg="logs"></div></div>`;
+    const shown: string[] = [];
+    const win = {
+      SoulSyncSettings: {
+        show: (tab: string) => {
+          shown.push(tab);
+          if (tab === 'logs') throw new Error('boom');
+        },
+      },
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // the function also starts the log viewer, the db info and other loaders:
+    // every name it does not get here is a no-op
+    const scope = new Proxy(
+      { window: win, document, console, CustomEvent, Array } as Record<string, unknown>,
+      {
+        has: () => true,
+        get: (target, key) =>
+          key === Symbol.unscopables ? undefined : key in target ? target[key as string] : () => {},
+      },
+    );
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const switchTab = new Function(
+      'scope',
+      `with (scope) { ${extractFunction('switchSettingsTab', SETTINGS)}\nreturn switchSettingsTab; }`,
+    )(scope) as (tab: string) => void;
+    switchTab('appearance');
+    expect(shown).toEqual(['appearance']);
+    expect(
+      (document.querySelector('[data-stg-react="appearance"]') as HTMLElement).style.display,
+    ).toBe('');
+    expect((document.querySelector('[data-stg="logs"]') as HTMLElement).style.display).toBe('none');
+    expect(() => switchTab('logs')).not.toThrow();
+    expect(document.querySelector('.stg-tab[data-tab="logs"]')!.classList.contains('active')).toBe(
+      true,
+    );
+    error.mockRestore();
+  });
+
+  it('the settings it loads reach the React store, after the failed-load guard', () => {
+    const load = extractFunction('loadSettingsData', SETTINGS);
+    const guard = load.indexOf('window._settingsLoadFailed = true');
+    const good = load.indexOf('window._settingsPayload = settings;');
+    const hydrate = load.indexOf('window.SoulSyncSettings.hydrate(settings)');
+    expect(guard).toBeGreaterThan(-1);
+    expect(good).toBeGreaterThan(guard);
+    expect(hydrate).toBeGreaterThan(good);
+  });
+
+  it('its save flushes the React tabs, and their failure wins over "saved"', () => {
+    const save = extractFunction('saveSettings', SETTINGS);
+    const flush = save.indexOf('reactSaved = await window.SoulSyncSettings.flush()');
+    const failed = save.indexOf('if (result.success && !reactSaved) {');
+    const saved = save.indexOf(
+      '} else if (result.success && qualityProfileSaved && lookbackSaved) {',
+    );
+    expect(flush).toBeGreaterThan(
+      save.indexOf('const qualityProfileSaved = await saveQualityProfile();'),
+    );
+    expect(failed).toBeGreaterThan(flush);
+    expect(saved).toBeGreaterThan(failed);
+    expect(save.slice(failed, saved)).toContain("setSettingsSaveState('error')");
+  });
+});

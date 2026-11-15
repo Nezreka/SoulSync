@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 14 2026 (tracker created, nothing ported yet)
+- **Last updated:** Nov 14 2026 (step 1, the scaffold, is done; no tab is ported yet)
 
 ## Goal
 
@@ -51,7 +51,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 |---|---|---|
 | Branch and worktree | done | `node_modules` is a Windows junction to the main checkout's. Tests run in the worktree. |
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
-| Scaffold (host, store, save status) | not started | |
+| Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
 | Tab: Sources | not started | 80 controls and buttons |
 | Tab: Downloads | not started | 32 controls and buttons |
@@ -64,13 +64,86 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
+## Completed steps
+
+Each finished step, in order, with exactly what was added, changed and checked.
+
+### Step 1: the scaffold (Nov 14 2026)
+
+**What it is.** The pieces every ported tab will use, with no tab in them yet. The Settings page is unchanged for the person using it.
+
+**The problem it solves.** The page has one save: `saveSettings()` in `settings.js` reads every control on the page by id and posts the lot. A tab rendered by React has no vanilla controls for that function to read, and `loadSettingsData()` fills controls by setting `.value` on DOM nodes, which a React input ignores. So a ported tab needs its own copy of the settings and its own save, and the two saves must not overwrite each other.
+
+**Why two saves are safe.** Checked in `web_server.py` (the `/api/settings` POST): for each known section present in the body it calls `config_manager.set(f'{section}.{key}', value)` per key. Sections that are absent are skipped, and keys that are absent inside a section are left alone. So the React store posts only the keys that changed, and the vanilla save posts what it still owns.
+
+**Files added**
+
+| File | What it does |
+|---|---|
+| `webui/src/features/settings/settings-store.ts` | The settings a React tab reads and changes. `createSettingsStore()` and the page's one instance, `settingsStore`. |
+| `webui/src/features/settings/host.tsx` | `window.SoulSyncSettings`, the door between `settings.js` and the React tabs. Holds the registry `SETTINGS_TABS` (empty for now). |
+| `webui/src/features/settings/settings-store.test.ts` | 10 tests for the store. |
+| `webui/src/features/settings/host.test.tsx` | 4 tests for the host. |
+| `webui/src/test/settings-react-host-hooks.test.ts` | 3 tests for the hooks in `settings.js`. |
+
+**Files changed**
+
+| File | Change |
+|---|---|
+| `webui/src/app/main.tsx` | Imports and calls `mountSettingsHost()` beside the other hosts. |
+| `webui/static/settings.js` | Three hooks, listed below. Nothing removed. |
+
+**The store (`settings-store.ts`)**
+
+- State: `settings` (the server's payload with this session's edits on top), `loaded`, `pending` (changed keys not saved yet, by section), `error`.
+- `hydrate(payload)`: takes what `GET /api/settings` returned. An error body is ignored. Edits not saved yet stay on top of the new payload.
+- `set(section, key, value)` / `patch(section, values)`: a change by the person. It updates `settings` and `pending`, shows the save button as pending, and queues a save after `AUTOSAVE_DELAY_MS` (2000 ms, the same wait `debouncedAutoSaveSettings` uses).
+- The queued save is **not** started when `window._settingsAutosaveOff` is true (the System > Saving switch), when `window._settingsLoadFailed` is true (#879), or while `window._suppressSettingsAutoSave` is true (the form is being filled on open).
+- `flush()`: posts `pending` to `/api/settings` now. One save at a time: a change made while a save is in the air goes out in the next one. On failure the keys go back into `pending` (under anything changed since) and the button shows the error state. Returns false without posting when the settings load failed.
+- After a good save it merges the saved keys into `window._settingsPayload`, the copy `settings.js` and `shared-helpers.js` read.
+- The save status button is still the vanilla one during the port: the store calls `window.setSettingsSaveState(state)`.
+
+**The host (`host.tsx`)**
+
+- A ported tab's markup will be replaced in `index.html` by one empty slot: `<div data-stg="<tab>" data-stg-react="<tab>">`. `switchSettingsTab` already shows and hides every `[data-stg]` block, so the slot follows its tab with no extra code.
+- `window.SoulSyncSettings.show(tab)`: if the tab is in `SETTINGS_TABS`, renders it into its slot. One React root per slot for the life of the page, so a tab keeps its state across tab switches. A tab that is not registered, or has no slot, is a no-op.
+- `hydrate(settings)`, `flush()`, `hasPending()` pass through to the store. `ported()` lists the registered tabs.
+- The React bundle is a deferred module, so `settings.js` can have loaded the settings and opened a tab before it runs. `mountSettingsHost()` catches up: it hydrates from `window._settingsPayload` if present and shows the tab whose button is active.
+
+**The three hooks in `settings.js`**
+
+| Function | Hook | Why |
+|---|---|---|
+| `switchSettingsTab(tab)` | After the `[data-stg]` show/hide loop: `window.SoulSyncSettings.show(tab)` inside a try/catch. | Opens the React tab. A mount that throws must not break the tab switch. |
+| `loadSettingsData()` | Right after `window._settingsPayload = settings`: `window.SoulSyncSettings.hydrate(settings)`. | One fetch feeds both. It sits after the #879 failed-load guard, so an error body never reaches the store. |
+| `saveSettings(quiet)` | After `saveQualityProfile()`: `reactSaved = await window.SoulSyncSettings.flush()` in a try/catch. The outcome ladder starts with a new branch: `if (result.success && !reactSaved)` → error state and the toast "Some settings failed to save". | The save button (and the vanilla autosave) reaches the React tabs. This is how a React tab's changes are saved when autosave is off. A React failure must win over "saved". |
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| New tests (`src/features/settings`, `settings-react-host-hooks.test.ts`) | 20 pass |
+| Whole `src/test` folder | 109 files, 1,207 tests pass |
+| `tsc --noEmit` | clean |
+| `oxlint` on the new and changed files | 0 errors. 2 warnings, both in code that was already in `main.tsx` |
+| `oxfmt` on the files touched | applied |
+| `npm run build` | builds; `SoulSyncSettings` is in the main bundle |
+
+**Not checked:** in a browser. Nothing visible changed, and no tab uses the scaffold yet; the first real exercise of it is the Appearance tab (step 2).
+
+**What the next step can rely on**
+
+- To port a tab: write its component, add it to `SETTINGS_TABS`, replace its markup with the slot, and delete its fields from `loadSettingsData` and the `saveSettings` collector.
+- Read a value with the store's `settings[section][key]`; change it with `store.set(section, key, value)`. Saving, the autosave switch, the load guards and the save button are handled.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 14 | (this commit) | Tracker created. No code changed. |
+| Nov 14 | step 1 | **Scaffold.** New: `settings-store.ts`, `host.tsx` and their tests, `settings-react-host-hooks.test.ts`. Changed: `main.tsx` (mounts the host), `settings.js` (three hooks: `switchSettingsTab`, `loadSettingsData`, `saveSettings`). No markup changed, no tab ported. Details under "Completed steps". |
+| Nov 14 | `2dbd3fb90` | Tracker created. No code changed. |
 
 ## Inventory by tab
 

@@ -1,0 +1,175 @@
+/**
+ * The settings a React tab reads and changes, while the Settings page is being
+ * ported from vanilla (SETTINGS_PORT.md).
+ *
+ * The page has one save for everything: settings.js reads every control by id
+ * and posts the lot. A ported tab has no controls for it to read, so the tab
+ * keeps its values here and posts only the keys that changed. The save route
+ * takes a partial settings object and stores each key on its own, so the two
+ * saves never overwrite one another.
+ *
+ * Until the page is all React, the vanilla shell still owns three things and
+ * this store follows them:
+ *  - the save status button (window.setSettingsSaveState),
+ *  - the autosave switch (window._settingsAutosaveOff, System > Saving),
+ *  - the guards that stop a save: a failed settings load (#879) and the form
+ *    being filled on open (window._suppressSettingsAutoSave).
+ */
+
+import { createStore } from 'zustand/vanilla';
+
+import { apiClient, readJson } from '@/app/api-client';
+
+export type SettingsSection = Record<string, unknown>;
+export type SettingsPayload = Record<string, SettingsSection | undefined>;
+export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+
+/** the same wait settings.js gives a change before it saves */
+export const AUTOSAVE_DELAY_MS = 2000;
+
+type ShellWindow = Window & {
+  _settingsPayload?: SettingsPayload;
+  _settingsAutosaveOff?: boolean;
+  _settingsLoadFailed?: boolean;
+  _suppressSettingsAutoSave?: boolean;
+  setSettingsSaveState?: (state: SaveState) => void;
+};
+
+export interface SettingsState {
+  /** what the server holds, with this session's edits applied */
+  settings: SettingsPayload;
+  /** true once a good payload has arrived; tabs render nothing before it */
+  loaded: boolean;
+  /** changed keys not saved yet, by section */
+  pending: SettingsPayload;
+  /** the last save's error text, cleared by the next good save */
+  error: string | null;
+}
+
+export interface SettingsStore {
+  getState: () => SettingsState;
+  subscribe: (listener: (state: SettingsState) => void) => () => void;
+  /** a fresh payload from GET /api/settings. Edits not saved yet stay on top of it. */
+  hydrate: (payload: unknown) => void;
+  /** one key changed by the person. Saves on its own unless autosave is off. */
+  set: (section: string, key: string, value: unknown) => void;
+  /** several keys of one section at once */
+  patch: (section: string, values: SettingsSection) => void;
+  /** save what is pending now. true when nothing was pending or the save worked. */
+  flush: () => Promise<boolean>;
+  hasPending: () => boolean;
+  /** stop a queued autosave (the page is going away) */
+  cancel: () => void;
+}
+
+function shell(): ShellWindow {
+  return window as ShellWindow;
+}
+
+function isPayload(value: unknown): value is SettingsPayload {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && !('error' in value);
+}
+
+function merge(base: SettingsPayload, over: SettingsPayload): SettingsPayload {
+  const out: SettingsPayload = { ...base };
+  for (const [section, values] of Object.entries(over)) {
+    out[section] = { ...out[section], ...values };
+  }
+  return out;
+}
+
+export function createSettingsStore({
+  post = (body: SettingsPayload) =>
+    readJson<{ success?: boolean; error?: string }>(apiClient.post('settings', { json: body })),
+  delay = AUTOSAVE_DELAY_MS,
+}: {
+  post?: (body: SettingsPayload) => Promise<{ success?: boolean; error?: string }>;
+  delay?: number;
+} = {}): SettingsStore {
+  const store = createStore<SettingsState>(() => ({
+    settings: {},
+    loaded: false,
+    pending: {},
+    error: null,
+  }));
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let saving: Promise<boolean> | null = null;
+
+  const show = (state: SaveState) => shell().setSettingsSaveState?.(state);
+  const hasPending = () => Object.keys(store.getState().pending).length > 0;
+  const cancel = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+
+  async function flush(): Promise<boolean> {
+    cancel();
+    // one save at a time: a change made while a save is in the air goes out
+    // in the next one, never in a second request racing the first
+    if (saving) await saving;
+    if (!hasPending()) return true;
+    // #879: the page is showing defaults, not the real config
+    if (shell()._settingsLoadFailed) return false;
+    const body = store.getState().pending;
+    store.setState({ pending: {} });
+    show('saving');
+    saving = (async () => {
+      try {
+        const result = await post(body);
+        if (result?.success !== true) throw new Error(result?.error || 'Settings save failed');
+        store.setState({ error: null });
+        const payload = shell()._settingsPayload;
+        // settings.js and the shared helpers read this copy
+        if (payload) shell()._settingsPayload = merge(payload, body);
+        show(hasPending() ? 'pending' : 'saved');
+        return true;
+      } catch (error) {
+        // put the keys back under anything changed since, so a retry sends them
+        store.setState((state) => ({
+          pending: merge(body, state.pending),
+          error: error instanceof Error ? error.message : 'Settings save failed',
+        }));
+        show('error');
+        return false;
+      } finally {
+        saving = null;
+      }
+    })();
+    return saving;
+  }
+
+  function changed(section: string, values: SettingsSection) {
+    store.setState((state) => ({
+      settings: merge(state.settings, { [section]: values }),
+      pending: merge(state.pending, { [section]: values }),
+    }));
+    cancel();
+    show('pending');
+    const w = shell();
+    // autosave off: the change waits for the save button, which calls flush
+    if (w._settingsAutosaveOff === true || w._settingsLoadFailed || w._suppressSettingsAutoSave) {
+      return;
+    }
+    timer = setTimeout(() => void flush(), delay);
+  }
+
+  return {
+    getState: store.getState,
+    subscribe: (listener) => store.subscribe(listener),
+    hydrate(payload) {
+      if (!isPayload(payload)) return;
+      store.setState((state) => ({
+        settings: merge(payload, state.pending),
+        loaded: true,
+      }));
+    },
+    set: (section, key, value) => changed(section, { [key]: value }),
+    patch: (section, values) => changed(section, values),
+    flush,
+    hasPending,
+    cancel,
+  };
+}
+
+/** the page's one store */
+export const settingsStore = createSettingsStore();

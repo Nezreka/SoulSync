@@ -5,6 +5,7 @@ import { mountCandidateInspectorHost } from '@/features/downloads/inspector-moda
 import { mountFeaturePickerHost } from '@/features/feature-picker/host';
 import { mountOnboardingHost } from '@/features/onboarding/host';
 import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
+import { mountSettingsHost } from '@/features/settings/host';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
 import { mountVideoLibraryTabHost } from '@/features/video-library/host';
 import { mountVideoLibraryManagerHost } from '@/features/video-manager/host';
@@ -80,4 +81,6 @@ mountVideoLibraryTabHost();
 mountVideoLibraryManagerHost();
 // make soulsync yours (#1909): window.openFeaturePicker
 mountFeaturePickerHost();
+// the Settings tabs ported to React (SETTINGS_PORT.md): window.SoulSyncSettings
+mountSettingsHost();
 void bootstrapApp();

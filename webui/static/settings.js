@@ -1220,6 +1220,11 @@ function switchSettingsTab(tab) {
     document.querySelectorAll('#settings-page [data-stg]').forEach(g => {
         g.style.display = g.dataset.stg === tab ? '' : 'none';
     });
+    // a tab ported to React fills its slot ([data-stg-react]) the first time
+    // it is opened (src/features/settings/host.tsx, SETTINGS_PORT.md)
+    if (window.SoulSyncSettings) {
+        try { window.SoulSyncSettings.show(tab); } catch (e) { console.error('settings tab mount failed', e); }
+    }
     // Re-apply collapsed state on section bodies (tab switch resets inline display)
     document.querySelectorAll('#settings-page .settings-section-body.collapsed').forEach(b => {
         b.style.display = 'none';
@@ -3296,6 +3301,8 @@ async function loadSettingsData() {
         }
         window._settingsLoadFailed = false;  // good load → saving is safe again
         window._settingsPayload = settings;
+        // the tabs ported to React read the same payload from their own store
+        if (window.SoulSyncSettings) window.SoulSyncSettings.hydrate(settings);
 
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
@@ -7478,6 +7485,17 @@ async function saveSettings(quiet = false) {
         // Save quality profile
         const qualityProfileSaved = await saveQualityProfile();
 
+        // The tabs ported to React hold their own values and save only what
+        // changed. This is how the save button reaches them, and how their
+        // changes go out with autosave switched off (SETTINGS_PORT.md).
+        let reactSaved = true;
+        try {
+            if (window.SoulSyncSettings) reactSaved = await window.SoulSyncSettings.flush();
+        } catch (error) {
+            console.error('Error saving React settings tabs:', error);
+            reactSaved = false;
+        }
+
         // Save discovery lookback period
         let lookbackSaved = true;
         try {
@@ -7506,7 +7524,10 @@ async function saveSettings(quiet = false) {
             console.error('Error saving hemisphere setting:', error);
         }
 
-        if (result.success && qualityProfileSaved && lookbackSaved) {
+        if (result.success && !reactSaved) {
+            setSettingsSaveState('error');
+            showToast('Some settings failed to save', 'error', 'set-services');
+        } else if (result.success && qualityProfileSaved && lookbackSaved) {
             // the button says Saved, a toast on every keystroke was noise
             setSettingsSaveState('saved');
             _forceServiceStatusRefresh();
