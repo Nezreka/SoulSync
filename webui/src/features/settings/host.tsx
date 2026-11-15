@@ -28,6 +28,7 @@ import { AppearanceTab } from './tabs/appearance-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LogsTab } from './tabs/logs-tab';
+import { QualityTab } from './tabs/quality-tab';
 
 export type SettingsTabKey =
   | 'connections'
@@ -71,6 +72,7 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
   logs: LogsTab,
+  quality: QualityTab,
 };
 
 /** What opening Settings applies whatever tab it opens on. settings.js did

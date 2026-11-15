@@ -24,7 +24,6 @@ describe('where sections live', () => {
     ['Notifications', 'connections'],
     ['Import Lists', 'discovery'],
     ['Video Quality', 'quality'],
-    ['Album Releases', 'quality'],
     ['Video Preferences', 'library'],
     ['Database Maintenance', 'advanced'],
   ])('%s is on %s', (heading, tab) => {
@@ -35,8 +34,9 @@ describe('where sections live', () => {
     const tabs = [...doc.querySelectorAll('.stg-tab')].map((t) => t.getAttribute('data-tab'));
     // a tab ported to React has slots where its sections were: the blocks
     // themselves are rendered into them (SETTINGS_PORT.md). Sidebar Weather
-    // (Appearance) and Playlists, Listening Stats, Discovery and Discovery Pool
-    // Settings (Discovery) are: src/features/settings/tabs/*.test.tsx
+    // (Appearance), Playlists, Listening Stats, Discovery and Discovery Pool
+    // Settings (Discovery) and the music Quality sections, Album Releases among
+    // them, are: src/features/settings/tabs/*.test.tsx
     const used = new Set(
       [...doc.querySelectorAll('#settings-page [data-stg], #settings-page [data-stg-react]')].map(
         (el) => el.getAttribute('data-stg') ?? el.getAttribute('data-stg-react'),

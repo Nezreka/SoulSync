@@ -78,12 +78,10 @@ describe('settings.js hands over to the React tabs', () => {
     const save = extractFunction('saveSettings', SETTINGS);
     const flush = save.indexOf('reactSaved = await window.SoulSyncSettings.flush()');
     const failed = save.indexOf('if (result.success && !reactSaved) {');
-    const saved = save.indexOf(
-      '} else if (result.success && qualityProfileSaved) {',
-    );
-    expect(flush).toBeGreaterThan(
-      save.indexOf('const qualityProfileSaved = await saveQualityProfile();'),
-    );
+    const saved = save.indexOf('} else if (result.success) {');
+    // the quality profile is a React tab now: no save of its own in here
+    expect(save).not.toContain('saveQualityProfile');
+    expect(flush).toBeGreaterThan(save.indexOf('body: JSON.stringify(settings)'));
     expect(failed).toBeGreaterThan(flush);
     expect(saved).toBeGreaterThan(failed);
     expect(save.slice(failed, saved)).toContain("setSettingsSaveState('error')");
@@ -94,7 +92,6 @@ describe('settings.js hands over to the React tabs', () => {
       <input id="spotify-client-id"></div>`;
     const timers: unknown[] = [];
     const deps = `let settingsAutoSaveTimer = null;
-const _qpHandleProfileControlChange = () => false;
 const _isVideoOwnedField = () => false;
 const setSettingsSaveState = () => {};
 ${extractFunction('debouncedAutoSaveSettings', SETTINGS)}

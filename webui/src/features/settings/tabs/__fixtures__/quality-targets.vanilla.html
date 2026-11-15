@@ -1,0 +1,26 @@
+<div id="ranked-targets-list" class="ranked-targets-list"><div class="ranked-target-row" draggable="true" data-index="0">
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">1</span>
+            <span class="rt-label">FLAC 24-bit</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(0, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(0, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(0)">🗑</button>
+        </div><div class="ranked-target-row" draggable="true" data-index="1">
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">2</span>
+            <span class="rt-label">FLAC</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(1, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(1, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(1)">🗑</button>
+        </div><div class="ranked-target-row" draggable="true" data-index="2">
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">3</span>
+            <span class="rt-label">MP3 ≥320kbps</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(2, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(2, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(2)">🗑</button>
+        </div></div>
+<select id="quality-upgrade-cutoff" onchange="debouncedSaveQualityProfile()"><option value="0">1. FLAC 24-bit</option><option value="1">2. FLAC</option><option value="2">3. MP3 ≥320kbps</option></select>

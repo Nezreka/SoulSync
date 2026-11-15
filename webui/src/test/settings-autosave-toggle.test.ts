@@ -6,7 +6,9 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createSettingsStore } from '@/features/settings/settings-store';
 
 import { extractFunction } from './vanilla-extract';
 
@@ -29,20 +31,13 @@ function page(autosaveOff: boolean | undefined) {
   if (autosaveOff !== undefined) win._settingsAutosaveOff = autosaveOff;
   const timers: unknown[] = [];
   const deps = `let settingsAutoSaveTimer = null;
-let qualityProfileAutoSaveTimer = null;
 let _settingsSavedTimer = null;
-let _qpEditingProfileId = null;
-const _qpHandleProfileControlChange = () => false;
-const _qpDefaultProfileId = () => 1;
-const collectFullQualityBundleFromUI = () => ({});
-const saveQualityProfile = () => {};
 ${labels()}
 ${extractFunction('setSettingsSaveState', SETTINGS)}
 ${extractFunction('_isVideoOwnedField', SETTINGS)}
 ${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
 ${extractFunction('handleSettingsAutosaveToggle', SETTINGS)}
-${extractFunction('debouncedSaveQualityProfile', SETTINGS)}
-return { debouncedAutoSaveSettings, handleSettingsAutosaveToggle, debouncedSaveQualityProfile };`;
+return { debouncedAutoSaveSettings, handleSettingsAutosaveToggle };`;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const fns = new Function('window', 'setTimeout', 'clearTimeout', 'saveSettings', deps)(
     win,
@@ -55,7 +50,6 @@ return { debouncedAutoSaveSettings, handleSettingsAutosaveToggle, debouncedSaveQ
   ) as {
     debouncedAutoSaveSettings: (event?: { target: Element | null }) => void;
     handleSettingsAutosaveToggle: (event: { target: { checked: boolean } }) => void;
-    debouncedSaveQualityProfile: () => void;
   };
   const change = (id: string) => {
     timers.length = 0;
@@ -88,17 +82,30 @@ describe('the settings autosave switch', () => {
     expect(btn().title).toContain('Autosave is off');
   });
 
-  it('holds a quality profile change too', () => {
-    const { timers, fns } = page(true);
-    fns.debouncedSaveQualityProfile();
-    expect(timers.length).toBe(0);
-    expect(btn().dataset.state).toBe('pending');
+  // the quality profile is saved by the React Quality tab, through the
+  // settings store (SETTINGS_PORT.md step 6), which follows the same switch
+  it('holds a quality profile change too', async () => {
+    const shell = window as unknown as Record<string, unknown>;
+    const save = vi.fn(() => Promise.resolve(true));
+    try {
+      shell._settingsAutosaveOff = true;
+      const store = createSettingsStore({ delay: 0 });
+      store.setExtra('quality.profile.1', {}, save);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(save).not.toHaveBeenCalled();
+      expect(store.hasPending()).toBe(true);
+      await store.flush();
+      expect(save).toHaveBeenCalledOnce();
+    } finally {
+      delete shell._settingsAutosaveOff;
+    }
   });
 
-  it('still saves the quality profile on its own while the switch is on', () => {
-    const { timers, fns } = page(false);
-    fns.debouncedSaveQualityProfile();
-    expect(timers.length).toBe(1);
+  it('still saves the quality profile on its own while the switch is on', async () => {
+    const save = vi.fn(() => Promise.resolve(true));
+    const store = createSettingsStore({ delay: 0 });
+    store.setExtra('quality.profile.1', {}, save);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
   });
 
   it('the switch itself always saves, so it can be turned back on', () => {

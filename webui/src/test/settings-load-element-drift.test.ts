@@ -28,7 +28,14 @@ describe('settings load element drift guard', () => {
   });
 
   it('pins the verify-flac-decode checkbox regression', () => {
-    expect(html.includes('id="verify-flac-decode"')).toBe(true);
-    expect(loadSettingsIds()).toContain('verify-flac-decode');
+    // the checkbox moved to the React Quality tab (SETTINGS_PORT.md step 6),
+    // which renders it and reads it from the same key
+    const tab = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/quality-tab.tsx'),
+      'utf8',
+    );
+    expect(tab).toContain('id="verify-flac-decode"');
+    expect(tab).toContain('state.settings.post_processing?.verify_flac_decode === true');
+    expect(loadSettingsIds()).not.toContain('verify-flac-decode');
   });
 });

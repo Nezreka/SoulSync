@@ -67,6 +67,11 @@ export interface SettingsStore {
   patch: (section: string, values: SettingsSection) => void;
   /** a value with its own endpoint, saved with the same autosave rules */
   setExtra: (key: string, value: unknown, save: ExtraSaver) => void;
+  /** true while a value whose key starts with `prefix` waits to be saved */
+  hasExtra: (prefix: string) => boolean;
+  /** forget the values waiting under `prefix` (a quality preset switch
+   *  replaces the profile they were edits of) */
+  dropExtras: (prefix: string) => void;
   /** save what is pending now. true when nothing was pending or the save worked. */
   flush: () => Promise<boolean>;
   hasPending: () => boolean;
@@ -209,6 +214,13 @@ export function createSettingsStore({
     setExtra(key, value, save) {
       extras[key] = { value, save };
       queue();
+    },
+    hasExtra: (prefix) => Object.keys(extras).some((key) => key.startsWith(prefix)),
+    dropExtras(prefix) {
+      for (const key of Object.keys(extras)) if (key.startsWith(prefix)) delete extras[key];
+      // the save status stays as it is: the vanilla page may have its own
+      // save waiting, and the preset switch saves on the server anyway
+      if (!hasPending()) cancel();
     },
     flush,
     hasPending,

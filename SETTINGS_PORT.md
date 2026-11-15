@@ -34,7 +34,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 - **Autosave.** Every input is wired to `debouncedAutoSaveSettings` (2s debounce). Quality profile controls go to `debouncedSaveQualityProfile` (800ms). The switch `settings-autosave-enabled` (System > Saving, added Nov 14, stored as `ui_appearance.settings_autosave`) turns both off so changes wait for the save button.
 - **Save status button** `#save-settings` with states idle / pending / saving / saved / error (`setSettingsSaveState`).
 - **Guards that must survive:** no save while `window._settingsLoadFailed` (#879), no autosave on the Logs tab (#827), no autosave while the form is being filled (`window._suppressSettingsAutoSave`), video-owned fields skip the music save.
-- **Loaded on every visit:** `initializeSettings` → `switchSettingsTab('connections')` → `loadSettingsData` → `loadQualityProfile` → `loadApiKeys` → `loadBlacklistCount` (init.js, case `settings`).
+- **Loaded on every visit:** `initializeSettings` → `switchSettingsTab('connections')` → `loadSettingsData` → `loadQualityProfile` → `loadApiKeys` → `loadBlacklistCount` (init.js, case `settings`). (Since step 6 the quality profile loads in the React Quality tab, on the same visit, from `loadSettingsData`'s hydrate.)
 - **Inline handlers:** 398 `onclick` / `onchange` / `oninput` attributes in the settings markup call global functions, so those globals must exist until their markup is gone.
 
 ## Method
@@ -55,7 +55,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Connections | not started | 160 controls and buttons |
 | Tab: Sources | not started | 80 controls and buttons |
 | Tab: Downloads | **done except the chain** (step 5 below) | 19 of 32 ported: Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: Source Settings (the download chain, 4 controls), which moves with the Sources tab; the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from one listed quirk. |
-| Tab: Quality | not started | 67 controls and buttons |
+| Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
@@ -64,13 +64,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 4 of 9 tabs (Discovery without its video-only section, Downloads without the chain and its video-only form), 54 of 678 controls, 28 of 333 `settings.js` functions removed, 9 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`).
+**Progress:** 5 of 9 tabs (Discovery and Quality without their video-only sections, Downloads without the chain and its video-only form), 81 of 678 controls, 76 of 333 `settings.js` functions removed, 14 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 12,022 |
-| `webui/static/settings.js` | 10,187 | 9,539 |
-| `webui/static/init.js` | 5,264 | 5,208 |
+| `webui/index.html` | 12,823 | 11,411 |
+| `webui/static/settings.js` | 10,187 | 8,226 |
+| `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Completed steps
 
@@ -432,12 +432,79 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Learned.** Restart the sandboxes before each comparison: a failed run leaves its saves in the server's memory, and the two pages then start from different settings. And never wait on a background run with `pgrep -f <its args>`: the waiting loop's own command line matches, so it never ends (it cost half an hour here).
 
+### Step 6: the Quality tab, music side (Nov 15 2026)
+
+**What it is.** Everything on the music Quality tab, as one piece: the Music Quality tile (Quick Presets, Reset to defaults, the ranked target list with drag, ▲ ▼ and 🗑, "+ Add target", Upgrade until and its cutoff, Search strategy, Rank-based download order, the fallback switch), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles side panel (rows, rename in place, save now, Auto-Import, delete, "+ New profile", the editing banner) and the Manage overview it opens. It looks and behaves as before, with the deliberate differences listed below.
+
+**Why it could not be split.** Every control on the tab but one belongs to the quality profile open in the side panel, not to config: the five tiles are one save (`collectFullQualityBundleFromUI`), and the page-wide save had a special block to keep them from overwriting the live default. Porting a tile without the panel would have split one save across React and vanilla.
+
+**What is not in it, and why.** Video Quality, Custom Formats and YouTube Quality (40 controls, video only, `video-settings.js`): the video pass.
+
+**Where the markup was.** One run of 614 lines (`<div class="qp-layout">`, the tiles and the side panel), replaced by one slot, `quality`/`profiles`. Fixture: `quality.vanilla.html`. Three more fixtures freeze what settings.js **drew** at run time, made by running its own `renderRankedTargets`, `renderUpgradeCutoffOptions`, `renderCustomQualityProfiles`, `qpManagerOverlay` and `renderQualityProfileManager` once over test data before they were deleted: `quality-targets.vanilla.html` (target rows and cutoff options), `quality-profiles.vanilla.html` (two rows, one open, one on Auto-Import), `quality-manager.vanilla.html` (the overview).
+
+**How saving works now**
+
+| What | Before | Now |
+|---|---|---|
+| An edit to any profile control (the ladder or the eight bundle controls) | `_qpHandleProfileControlChange` routed it to `debouncedSaveQualityProfile`, which captured the profile on screen and the whole bundle, and posted it 800 ms later to `/api/quality-profile/custom/<id>/update` (or `/api/quality-profile` with no profile list) | The same post, same body, same route, through the settings store: `store.setExtra('quality.profile.<id>', {target, bundle}, saveProfile)`. The key has the profile id in it, so an edit still goes to the profile it was made on after another is opened, as before. It follows the store's 2 s autosave, the autosave switch and the save button. |
+| Verify FLAC decode | A plain config key in the page-wide save | `store.set('post_processing', 'verify_flac_decode', …)`, only when it changes |
+| The page-wide save | Sent `acoustid.require_verified`, `post_processing.audio_completeness_check`, `import.replace_lower_quality` and all of `lossy_copy` from the controls, and while another profile was open swapped in the default's values so the server's config→default mirror could not overwrite the default; then called `saveQualityProfile()` with a warning toast of its own | Sends none of those keys. The server copies the default profile into config itself when the default is saved (`update_custom_quality_profile` → `apply_quality_profile_to_settings`), and its config→default mirror after any other save reads config that already matches. The profile save goes out in `SoulSyncSettings.flush()`; a failed one shows "Some settings failed to save" like any React tab. |
+| Load | `loadSettingsData` set the eight bundle controls from config, then `init.js` called `loadQualityProfile()`, which put the default profile over them and loaded the profile list | The tab loads the default profile and the list each time the settings load (the store's `loads` counter), so on every visit as before. Until the profile arrives the eight controls show the config values, as before. |
+| Presets on the default | POST `/preset/<name>` (or `/reset`), cleared the queued saves | Same routes. Queued profile saves are dropped (`store.dropExtras`), as before, so an edit of the old list never lands after the switch. |
+| Presets on another profile | Loaded `/presets`, kept the search and upgrade choices, saved to that profile | Same. |
+| Set default, rename, new, save now, delete, Auto-Import, Manage | The routes and confirms (`showConfirmDialog`) and toasts above | Same routes, bodies, confirms and toast texts. `invalidatePlaylistQualityProfiles()` still runs every time the list changes (R2-11). |
+
+**Store additions** (`settings-store.ts`): `hasExtra(prefix)` and `dropExtras(prefix)`.
+
+**Shared change (`parts.tsx`).** `HelpIcon` is exported (the target list's and the Manage overview's "i" have no help line, as before: `initSettingHelpLines` only gave lines to form-groups on the page). `Section` takes a `badge` (the "Profile" badge between the title and the hint). `textOf` reads a `<br>` as a space: in the html it sat on its own line, so the first-sentence split saw whitespace there; JSX drops it.
+
+**Removed**
+
+| Where | What | Lines (net, about) |
+|---|---|---|
+| `index.html` | the `qp-layout` block | 614 |
+| `index.html` | the AcoustID switch's `onchange` that called `syncAcoustidRequireVerifiedVisibility` (a no-op) | 1 |
+| `settings.js` | the whole QUALITY PROFILE FUNCTIONS block: 45 functions, their state and the Manage overview (kept: `_settingHelpBody` and `toggleSettingHelp`, which every vanilla tab still uses) | 1,210 |
+| `settings.js` | `syncAcoustidRequireVerifiedVisibility`, `_QP_BUNDLE_CONTROL_IDS`, `_QP_PROFILE_CONTROL_IDS`, `_qpHandleProfileControlChange` and its call in the page autosave, `updateLossyBitrateOptions` | 54 |
+| `settings.js` | `loadSettingsData`: the eight bundle controls, verify FLAC, the lossy options' display | 15 |
+| `settings.js` | the collector's five quality keys and `lossy_copy`; the default-profile mirror block; `saveQualityProfile` and its "quality profile failed to save" branch in `saveSettings`; the quality timer in `handleManualSaveClick`; the tile gate in `updateDownloadSourceUI` | 52 |
+| `init.js` | `await loadQualityProfile()` | 1 |
+
+48 functions in all (the functions table is marked).
+
+**Differences from the old page, all deliberate**
+
+| What | Before | Now | Why |
+|---|---|---|---|
+| **An edit before the profile has loaded, or after it failed to load** | Saved the page to the profile: with no profile loaded the target list on the page was empty, so this posted `ranked_targets: []` over the real one | Not saved. The control changes on screen and the next load replaces it. | Data loss on dev, small window but real when `/api/quality-profile` errors. |
+| A profile edit's wait | 800 ms | 2 s, the store's, like every other setting | One autosave rule for the page. |
+| A new visit with an unsaved profile edit (autosave off) | The edit was overwritten on screen by the server's copy and lost | The edit stays on screen and is still saved by the save button; only the list reloads | Losing an edit nobody saved yet is not behaviour to keep. |
+| A profile key missing from the server's answer (the legacy single-profile shape) | Its control was set to `undefined`: a tick box went off, a select went blank | The control keeps the config value it was loaded with | Same values in every real case; no blank select in the legacy one. |
+| The Save button with nothing changed | Always posted the profile again | Posts nothing for the profile | Only changes are saved, as on every ported tab. |
+| The hidden editing banner's name | After going back to the default it kept the last profile's name, hidden | Reads "this profile", hidden | Never on screen either way. |
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity: the whole tab against the frozen markup after `settings.js`'s own help lines | Same elements, ids, classes, attributes and text. The first run differed only in the help lines of three settings (Upgrade until, Rank-based download order, the fallback switch) whose first sentence ends right before a line break (the `textOf` fix above). |
+| Parity of what settings.js drew: target rows + cutoff options, profile rows (one open, one on Auto-Import), the Manage overview | Same. |
+| Behaviour tests (`quality.test.tsx`, 29) | values: labels, populate rules (`until_top`, clamped cutoff, a missing cutoff keeps the one on screen), the cutoff kept in range as targets come and go, group adds without duplicates, summaries, config fallback, the bundle. Saves: an edit posts the whole profile to the default and nothing to `/api/settings`; Verify FLAC is a plain setting; an edit goes to the profile it was made on after another is opened (autosave off, then the save button); nothing saved before a profile loads; a revisit reloads unless an edit waits. Controls: Best quality hides rank-based order, the cutoff shows only for "selected target", Opus greys out 320 and falls to 256, add/move/drag/remove, the empty list. Presets: on the default (and a queued edit never lands after), on another profile, reset refused on another profile. Panel: set default only after the confirm, rename (Enter, Escape), new profile, save now, delete (back to the default, the last one cannot be deleted), Auto-Import on and off. All pass twice. |
+| Repointed (frontend) | `quality-release-import-mode.test.ts` → `.tsx`: the same five checks through the real tab. `settings-autosave-toggle`: the two quality checks now run the store with the switch off and on. `settings-load-element-drift`: the verify-flac pin reads the tab. `settings-react-host-hooks`: no `saveQualityProfile` in the page save. `settings-regroup-1822`: Album Releases moves to the parity test. |
+| Repointed (Python) | `test_quality_profile_preview_nudge.py` (31): every contract kept, now on `quality-tab.tsx`/`quality.ts` (each bundle control saves through `editExtras`, each key is in `collectBundle`, each ladder control through `editLadder`, the target is taken at edit time and keyed per profile, the update route and the cache drop, a visit resets to the default, the named-profile preset path, the banner, the conversion copy), plus the page-wide save sending no profile key. **Negative-checked**: five broken copies of the source (a control unwired, a key dropped, the target taken at save time, the page save sending `lossy_copy`, a ladder control unwired) each fail their guard. `quality/test_lossless.py` (2): the lossless list and dropdown read the tab. `test_settings_sources_tab.py::test_no_two_cards_share_a_name`: card titles now include the React tabs' (it lost Music Quality otherwise). |
+| `src/features/settings` + `src/test` | 1,309 pass |
+| Python tests that read the markup, scripts or quality settings (27 files) | 928 passed before repointing, 34 failed, all pins on moved code; after repointing all pass. |
+| `oxlint --type-check` / ruff / build | 0 warnings (4 fixed: `String()` of unknown values) / clean / builds |
+| **Browser, old page vs ported page** (sandbox with two profiles, one on Auto-Import, lossy copy on) | From clean servers: every control's value, the shown/hidden groups, Opus 320, presets, target rows, cutoff options, profile rows, headers and help lines, closed and open; after Best quality on the default; after opening Strict; after editing Strict and going back and adding an Opus target; the Manage overview open and closed: **identical** (the row texts differ only in whitespace between flex items, which does not render). Writes: the same three profile updates with the same bodies to the same profiles; Verify FLAC sent `{post_processing: {verify_flac_decode}}` where the old page posted every setting. Screenshots: **0 pixels** differ by more than the noise threshold (the Manage one: 1 pixel, the help button). |
+| `helper.js` popovers on `.preset-button`, `.ranked-targets-editor`, `#lossy-copy-enabled` | matched with `element.matches()` at click time, so they find the React markup |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 6) | **Quality tab ported (music).** New: `tabs/quality.ts`, `tabs/quality-tab.tsx`, their test, four fixtures (one frozen from the markup, three from what settings.js drew). Store: `hasExtra`, `dropExtras`. `parts.tsx`: `HelpIcon` exported, `Section` badge, `<br>` reads as a space. Markup replaced by one slot; the quality profile block (48 functions), its load, collector keys, default-profile mirror and save branch removed from `settings.js`, the profile load from `init.js`. Details under "Completed steps". |
 | Nov 15 | `57ade5bed` (step 5) | **Downloads tab ported, without the chain.** New: `tabs/downloads.ts`, `tabs/downloads-tab.tsx`, their test, three fixtures. `parts.tsx`: help lines read formatted help. Markup replaced by three slots (Behaviour inside the vanilla `#dlchain-behaviour` wrapper); the four sections' helpers, summary, load, save and the genre whitelist removed from `settings.js`. Test stores now save into their own lists. Details under "Completed steps". |
 | Nov 15 | `2802c8ed0` (step 4) | **Discovery tab ported (music).** New: `tabs/parts.tsx` (shared sections, summaries, help lines), `tabs/discovery.ts`, `tabs/discovery-tab.tsx`, their test, two fixtures. Store: values with their own endpoints, and a load counter. Markup replaced by two slots; the tab's summaries, load, save, lookback and hemisphere code removed from `settings.js`. Details under "Completed steps". |
 | Nov 15 | `f1b9ccf3f` (step 3) | **Logs tab ported.** New: `tabs/logs.ts`, `tabs/logs-tab.tsx`, their test, a frozen fixture, and the shared test helper `tabs/__fixtures__/shape.ts`. Markup replaced by one slot; the 12 `_log*` functions and the tab-switch hook removed from `settings.js`; a socket bridge added to `core.js`. Host: every tab is told which tab is open (`active`). Details under "Completed steps". |
@@ -1018,58 +1085,58 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | 🎧 Audiophile | both | no |
-| button |  | ⚖️ Balanced | both | no |
-| button |  | 💾 Space Saver | both | no |
-| button |  | ↺ Reset to defaults | both | no |
-| select | `rt-add-format` | {All lossless / FLAC / ALAC / WAV / AIFF / DSD (DSF / DFF) / All lossy / MP3 …} | both | no |
-| select | `rt-add-bitdepth` | {Any bit depth / 16-bit / 24-bit} | both | no |
-| select | `rt-add-samplerate` | {Any sample rate / ≥ 44.1 kHz / ≥ 48 kHz / ≥ 96 kHz / ≥ 192 kHz} | both | no |
-| select | `rt-add-bitrate` | {Any bitrate / ≥ 96 kbps / ≥ 128 kbps / ≥ 192 kbps / ≥ 256 kbps / ≥ 320 kbps / Custom…} | both | no |
-| number | `rt-add-bitrate-custom` | ≥ kbps | both | no |
-| button |  | + Add target | both | no |
-| select | `quality-upgrade-policy` | Upgrade until {No upgrades / Any accepted target / Selected target or better} | both | no |
-| select | `quality-upgrade-cutoff` | Upgrade until {} | both | no |
-| select | `quality-search-mode` | Search strategy {Source priority — fast (use the first source that has it) / Best quality — thorough (check ev | both | no |
-| checkbox | `quality-rank-candidates` | Rank-based download order | both | no |
-| checkbox | `quality-fallback-enabled` | Accept off-list quality when nothing in the list is available | both | no |
+| button |  | 🎧 Audiophile | both | yes (step 6) |
+| button |  | ⚖️ Balanced | both | yes (step 6) |
+| button |  | 💾 Space Saver | both | yes (step 6) |
+| button |  | ↺ Reset to defaults | both | yes (step 6) |
+| select | `rt-add-format` | {All lossless / FLAC / ALAC / WAV / AIFF / DSD (DSF / DFF) / All lossy / MP3 …} | both | yes (step 6) |
+| select | `rt-add-bitdepth` | {Any bit depth / 16-bit / 24-bit} | both | yes (step 6) |
+| select | `rt-add-samplerate` | {Any sample rate / ≥ 44.1 kHz / ≥ 48 kHz / ≥ 96 kHz / ≥ 192 kHz} | both | yes (step 6) |
+| select | `rt-add-bitrate` | {Any bitrate / ≥ 96 kbps / ≥ 128 kbps / ≥ 192 kbps / ≥ 256 kbps / ≥ 320 kbps / Custom…} | both | yes (step 6) |
+| number | `rt-add-bitrate-custom` | ≥ kbps | both | yes (step 6) |
+| button |  | + Add target | both | yes (step 6) |
+| select | `quality-upgrade-policy` | Upgrade until {No upgrades / Any accepted target / Selected target or better} | both | yes (step 6) |
+| select | `quality-upgrade-cutoff` | Upgrade until {} | both | yes (step 6) |
+| select | `quality-search-mode` | Search strategy {Source priority — fast (use the first source that has it) / Best quality — thorough (check ev | both | yes (step 6) |
+| checkbox | `quality-rank-candidates` | Rank-based download order | both | yes (step 6) |
+| checkbox | `quality-fallback-enabled` | Accept off-list quality when nothing in the list is available | both | yes (step 6) |
 
 **Quality on Import** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `import-replace-lower-quality` | Replace lower quality files on import | both | no |
+| checkbox | `import-replace-lower-quality` | Replace lower quality files on import | both | yes (step 6) |
 
 **Album Releases** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `quality-release-import-mode` | Import from album releases {Requested tracks only (default) / Also the album's other tracks that pass} | both | no |
+| select | `quality-release-import-mode` | Import from album releases {Requested tracks only (default) / Also the album's other tracks that pass} | both | yes (step 6) |
 
 **Post-Download Conversion** (both, 5)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `downsample-hires` | Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz) | both | no |
-| checkbox | `lossy-copy-enabled` | Create lossy copy of downloaded FLAC files | both | no |
-| select | `lossy-copy-codec` | Codec: {MP3 / Opus / AAC (M4A)} | both | no |
-| select | `lossy-copy-bitrate` | Bitrate: {320 kbps / 256 kbps / 192 kbps / 128 kbps} | both | no |
-| checkbox | `lossy-copy-delete-original` | Keep lossy output only — delete the lossless source after conversion | both | no |
+| checkbox | `downsample-hires` | Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz) | both | yes (step 6) |
+| checkbox | `lossy-copy-enabled` | Create lossy copy of downloaded FLAC files | both | yes (step 6) |
+| select | `lossy-copy-codec` | Codec: {MP3 / Opus / AAC (M4A)} | both | yes (step 6) |
+| select | `lossy-copy-bitrate` | Bitrate: {320 kbps / 256 kbps / 192 kbps / 128 kbps} | both | yes (step 6) |
+| checkbox | `lossy-copy-delete-original` | Keep lossy output only — delete the lossless source after conversion | both | yes (step 6) |
 
 **Audio Verification** (both, 3)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `acoustid-require-verified` | Only allow AcoustID-verified tracks for imports and downloads | both | no |
-| checkbox | `audio-completeness-check` | Verify real audio with ffmpeg | both | no |
-| checkbox | `verify-flac-decode` | Verify FLAC decode with flac -t | both | no |
+| checkbox | `acoustid-require-verified` | Only allow AcoustID-verified tracks for imports and downloads | both | yes (step 6) |
+| checkbox | `audio-completeness-check` | Verify real audio with ffmpeg | both | yes (step 6) |
+| checkbox | `verify-flac-decode` | Verify FLAC decode with flac -t | both | yes (step 6) |
 
 **Quality Profiles** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Manage | both | no |
-| button | `qp-profile-new-btn` | + New profile | both | no |
+| button |  | Manage | both | yes (step 6) |
+| button | `qp-profile-new-btn` | + New profile | both | yes (step 6) |
 
 ### Library (236)
 
@@ -1656,11 +1723,11 @@ Every top-level function, with its line today. A function is removed when the la
 | `showSupportModal` | 4 | no |
 | `closeSupportModal` | 9 | no |
 | `copyAddress` | 14 | no |
-| `syncAcoustidRequireVerifiedVisibility` | 46 | no |
+| `syncAcoustidRequireVerifiedVisibility` | 46 | yes (step 6) |
 | `syncPreferExplicitState` | 55 | yes (step 5) |
 | `syncRetryConditionalRows` | 72 | yes (step 5) |
 | `syncOidcProviderBlock` | 89 | no |
-| `_qpHandleProfileControlChange` | 116 | no |
+| `_qpHandleProfileControlChange` | 116 | yes (step 6) |
 | `_isVideoOwnedField` | 125 | no |
 | `debouncedAutoSaveSettings` | 131 | no |
 | `handleSettingsAutosaveToggle` | 167 | no |
@@ -1761,7 +1828,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `getArtOrder` | 3150 | no |
 | `loadArtSourceOrder` | 3154 | no |
 | `loadHybridSourceOrder` | 3194 | no |
-| `updateLossyBitrateOptions` | 3236 | no |
+| `updateLossyBitrateOptions` | 3236 | yes (step 6) |
 | `updateYoutubeTranscodeBitrateOptions` | 3250 | no |
 | `updatePlexConfigurationButtons` | 3263 | no |
 | `loadSettingsData` | 3282 | no |
@@ -1784,53 +1851,53 @@ Every top-level function, with its line today. A function is removed when the la
 | `toggleServer` | 4547 | no |
 | `updateDownloadSourceUI` | 4581 | no |
 | `updateHybridSecondaryOptions` | 4628 | no |
-| `_qpDefaultProfileId` | 4673 | no |
-| `debouncedSaveQualityProfile` | 4680 | no |
-| `loadQualityProfile` | 4700 | no |
-| `rtLabel` | 4722 | no |
-| `populateQualityProfileUI` | 4733 | no |
-| `onSearchModeChange` | 4771 | no |
-| `renderUpgradeCutoffOptions` | 4777 | no |
-| `onUpgradePolicyChange` | 4794 | no |
+| `_qpDefaultProfileId` | 4673 | yes (step 6) |
+| `debouncedSaveQualityProfile` | 4680 | yes (step 6) |
+| `loadQualityProfile` | 4700 | yes (step 6) |
+| `rtLabel` | 4722 | yes (step 6) |
+| `populateQualityProfileUI` | 4733 | yes (step 6) |
+| `onSearchModeChange` | 4771 | yes (step 6) |
+| `renderUpgradeCutoffOptions` | 4777 | yes (step 6) |
+| `onUpgradePolicyChange` | 4794 | yes (step 6) |
 | `_settingHelpBody` | 4805 | no |
 | `toggleSettingHelp` | 4828 | no |
-| `renderRankedTargets` | 4840 | no |
-| `reorderRankedTarget` | 4884 | no |
-| `moveRankedTarget` | 4891 | no |
-| `deleteRankedTarget` | 4899 | no |
-| `rtSelectionIsLossless` | 4914 | no |
-| `onRtAddFormatChange` | 4918 | no |
-| `onRtBitrateChange` | 4928 | no |
-| `addRankedTarget` | 4935 | no |
-| `applyQualityPreset` | 4973 | no |
-| `resetActiveQualityPreset` | 5047 | no |
-| `collectQualityProfileFromUI` | 5088 | no |
-| `saveQualityProfile` | 5115 | no |
-| `_qpSetProfileRows` | 5182 | no |
-| `normalizeQualityProfileId` | 5189 | no |
-| `loadCustomQualityProfiles` | 5197 | no |
-| `qpProfileSummary` | 5220 | no |
-| `renderCustomQualityProfiles` | 5251 | no |
-| `qpStartRename` | 5394 | no |
-| `qpShowNewProfileInput` | 5455 | no |
-| `qpResetNewProfileControl` | 5487 | no |
-| `collectFullQualityBundleFromUI` | 5498 | no |
-| `applyFullQualityBundleToDom` | 5517 | no |
-| `saveCurrentAsQualityProfile` | 5537 | no |
-| `updateCustomQualityProfile` | 5581 | no |
-| `applyCustomQualityProfile` | 5610 | no |
-| `confirmSetDefaultQualityProfile` | 5647 | no |
-| `confirmSetDefaultQualityProfileById` | 5660 | no |
-| `previewQualityProfile` | 5669 | no |
-| `qpShowEditingBanner` | 5705 | no |
-| `qpHideEditingBanner` | 5720 | no |
-| `deleteCustomQualityProfile` | 5725 | no |
-| `toggleAutoImportQualityProfile` | 5764 | no |
-| `qpManagerOverlay` | 5796 | no |
-| `renderQualityProfileManager` | 5847 | no |
-| `clearAutoImportQualityProfileFromManager` | 5891 | no |
-| `openQualityProfileManager` | 5895 | no |
-| `closeQualityProfileManager` | 5907 | no |
+| `renderRankedTargets` | 4840 | yes (step 6) |
+| `reorderRankedTarget` | 4884 | yes (step 6) |
+| `moveRankedTarget` | 4891 | yes (step 6) |
+| `deleteRankedTarget` | 4899 | yes (step 6) |
+| `rtSelectionIsLossless` | 4914 | yes (step 6) |
+| `onRtAddFormatChange` | 4918 | yes (step 6) |
+| `onRtBitrateChange` | 4928 | yes (step 6) |
+| `addRankedTarget` | 4935 | yes (step 6) |
+| `applyQualityPreset` | 4973 | yes (step 6) |
+| `resetActiveQualityPreset` | 5047 | yes (step 6) |
+| `collectQualityProfileFromUI` | 5088 | yes (step 6) |
+| `saveQualityProfile` | 5115 | yes (step 6) |
+| `_qpSetProfileRows` | 5182 | yes (step 6) |
+| `normalizeQualityProfileId` | 5189 | yes (step 6) |
+| `loadCustomQualityProfiles` | 5197 | yes (step 6) |
+| `qpProfileSummary` | 5220 | yes (step 6) |
+| `renderCustomQualityProfiles` | 5251 | yes (step 6) |
+| `qpStartRename` | 5394 | yes (step 6) |
+| `qpShowNewProfileInput` | 5455 | yes (step 6) |
+| `qpResetNewProfileControl` | 5487 | yes (step 6) |
+| `collectFullQualityBundleFromUI` | 5498 | yes (step 6) |
+| `applyFullQualityBundleToDom` | 5517 | yes (step 6) |
+| `saveCurrentAsQualityProfile` | 5537 | yes (step 6) |
+| `updateCustomQualityProfile` | 5581 | yes (step 6) |
+| `applyCustomQualityProfile` | 5610 | yes (step 6) |
+| `confirmSetDefaultQualityProfile` | 5647 | yes (step 6) |
+| `confirmSetDefaultQualityProfileById` | 5660 | yes (step 6) |
+| `previewQualityProfile` | 5669 | yes (step 6) |
+| `qpShowEditingBanner` | 5705 | yes (step 6) |
+| `qpHideEditingBanner` | 5720 | yes (step 6) |
+| `deleteCustomQualityProfile` | 5725 | yes (step 6) |
+| `toggleAutoImportQualityProfile` | 5764 | yes (step 6) |
+| `qpManagerOverlay` | 5796 | yes (step 6) |
+| `renderQualityProfileManager` | 5847 | yes (step 6) |
+| `clearAutoImportQualityProfileFromManager` | 5891 | yes (step 6) |
+| `openQualityProfileManager` | 5895 | yes (step 6) |
+| `closeQualityProfileManager` | 5907 | yes (step 6) |
 | `toggleHydrabaseFromSettings` | 5915 | no |
 | `renderMusicPaths` | 5981 | no |
 | `addMusicPathRow` | 6000 | no |
@@ -2000,7 +2067,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/imports/test_compilation_album_artist.py` | no |
 | `tests/imports/test_configured_root_folders.py` | no |
 | `tests/imports/test_unicode_substitution_1867.py` | no |
-| `tests/quality/test_lossless.py` | no |
+| `tests/quality/test_lossless.py` | yes (step 6) |
 | `tests/quality/test_quality_profiles_crud.py` | no |
 | `tests/test_amazon_retired.py` | no |
 | `tests/test_audiobook_settings.py` | no |
@@ -2020,7 +2087,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_preferred_version.py` | yes (step 5) |
 | `tests/test_prowlarr_throttle.py` | no |
 | `tests/test_quality_panel_layout.py` | no |
-| `tests/test_quality_profile_preview_nudge.py` | no |
+| `tests/test_quality_profile_preview_nudge.py` | yes (step 6) |
 | `tests/test_script_split_integrity.py` | no |
 | `tests/test_settings_never_wipes.py` | no |
 | `tests/test_settings_persist_whitelist.py` | no |
@@ -2057,10 +2124,10 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/musicbrainz-settings.test.ts` | no |
 | `webui/src/test/oidc-provider-block-toggle.test.ts` | no |
 | `webui/src/test/outside-text-is-escaped.test.ts` | no |
-| `webui/src/test/quality-release-import-mode.test.ts` | no |
-| `webui/src/test/settings-autosave-toggle.test.ts` | no |
+| `webui/src/test/quality-release-import-mode.test.ts` | yes (step 6, now `.tsx`) |
+| `webui/src/test/settings-autosave-toggle.test.ts` | yes (step 6) |
 | `webui/src/test/settings-library-tabs.test.ts` | no |
-| `webui/src/test/settings-load-element-drift.test.ts` | no |
+| `webui/src/test/settings-load-element-drift.test.ts` | yes (step 6) |
 | `webui/src/test/settings-navigation.test.ts` | no |
 | `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4, 5) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |

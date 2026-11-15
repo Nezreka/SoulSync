@@ -50,10 +50,13 @@ export function Section({
   summary,
   side,
   bodyStyle,
+  badge,
   children,
 }: {
   tab: string;
   title: string;
+  /** what sits between the title and the hint (the Quality tab's "Profile") */
+  badge?: ReactNode;
   /** the fixed description, shown until (and whenever) there is no summary */
   hint: string;
   /** data-stg-summary: the hint shows `summary` once it is not empty */
@@ -77,6 +80,7 @@ export function Section({
       >
         <span className="settings-section-arrow">&#9660;</span>
         <h3>{title}</h3>
+        {badge}
         {summaryKey ? (
           <span
             className={live ? 'settings-section-hint is-live' : 'settings-section-hint'}
@@ -120,7 +124,7 @@ export function useHelp() {
   return { open, toggle };
 }
 
-function HelpIcon({
+export function HelpIcon({
   open,
   toggle,
   hidden,
@@ -156,6 +160,8 @@ export function textOf(node: ReactNode): string {
   let out = '';
   Children.forEach(node, (child) => {
     if (typeof child === 'string' || typeof child === 'number') out += String(child);
+    // a <br> sat on its own line in the html, so the text read a space there
+    else if (isValidElement(child) && child.type === 'br') out += ' ';
     else if (isValidElement<{ children?: ReactNode }>(child)) out += textOf(child.props.children);
   });
   return out;

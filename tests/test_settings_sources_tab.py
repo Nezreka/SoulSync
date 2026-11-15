@@ -1025,6 +1025,17 @@ def test_no_two_cards_share_a_name():
         if t:
             titles.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", t.group(1))).strip())
 
+    # the tabs ported to React render their cards themselves (SETTINGS_PORT.md):
+    # a Section's title, or a header written out by hand (Music Quality)
+    tabs = Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
+    for tsx in sorted(tabs.glob("*-tab.tsx")):
+        text = tsx.read_text(encoding="utf-8")
+        titles += re.findall(r'<Section\b[^<]*?\btitle="([^"]+)"', text, re.S)
+        for m in re.finditer(r'className="settings-section-header[^"]*"', text):
+            t = re.search(r"<h3>([^<{]+)</h3>", text[m.end():m.end() + 900])
+            if t:
+                titles.append(re.sub(r"\s+", " ", t.group(1)).strip())
+
     dupes = [t for t, n in Counter(titles).items() if n > 1]
     assert not dupes, f"more than one card claims this title: {dupes}"
 

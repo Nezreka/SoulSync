@@ -4884,7 +4884,8 @@ async function loadPageData(pageId) {
                     initializeSettings();
                     switchSettingsTab('connections');
                     await loadSettingsData();
-                    await loadQualityProfile();
+                    // the quality profile loads with the settings: the Quality
+                    // tab is React (src/features/settings/tabs/quality-tab.tsx)
                     loadApiKeys();
                     loadBlacklistCount();
                 } finally {
