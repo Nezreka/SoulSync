@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | **tiles, modal, 3 of 11 panels** (steps 7a-7c below) | The tiles, the modal, and the Deezer, SoundCloud and Lidarr panels are React. Left: Soulseek, YouTube (with yt-dlp), Tidal, Qobuz, HiFi, Prowlarr, torrent, usenet, one or a few per commit. |
+| Tab: Sources | **tiles, modal, 5 of 11 panels** (steps 7a-7d below) | The tiles, the modal, and the Deezer, SoundCloud, Lidarr, Tidal and Qobuz panels are React. Left: Soulseek, YouTube (with yt-dlp), HiFi, Prowlarr, torrent, usenet. |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
@@ -64,12 +64,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 5 of 9 tabs, and the Sources tiles, modal and 3 panels (Discovery, Quality and Downloads without their video-only sections), 91 of 678 controls, 112 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 5 of 9 tabs, and the Sources tiles, modal and 5 panels (Discovery, Quality and Downloads without their video-only sections), 98 of 678 controls, 116 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 11,187 |
-| `webui/static/settings.js` | 10,187 | 6,962 |
+| `webui/index.html` | 12,823 | 11,113 |
+| `webui/static/settings.js` | 10,187 | 6,780 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -624,12 +624,35 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 | Python, the 101 files | 2,433 passed, 3 failed (those three, repointed; the file then 98 pass) |
 | **Browser** (a masked ARL and Lidarr key; Test with the mask, focus, typed token and Test; SoundCloud opened and tested; Lidarr URL edited and tested) | values, the mask, status words and colours, the Connections field following the ARL, the saved ARL and URL, the tests sent: **identical**. Screenshots: **0 pixels** differ on all three. |
 
+### Step 7d: the Tidal and Qobuz source panels (Nov 15 2026)
+
+**What it is.** `TidalPanel` and `QobuzPanel` in `tabs/source-panels.tsx` (slot `sources`/`tidal-qobuz`). Tidal: its status on open ("Authenticated" / "Not authenticated"), and the device link ("Starting..." → the link and code → "Waiting for approval..." polled every 3 s → linked or failed, each with its toast). Qobuz: email and password sign-in, token sign-in, the signed-in line with Disconnect; the warnings for empty fields; each failure's words in red and as a toast.
+
+**The Qobuz status lives with the Connections tab.** `checkQobuzAuthStatus` (settings.js) also drives the Connections tab's Qobuz card, still vanilla, and is what Connections' own sign-ins, its Disconnect and the panel's open probe call. It stays; it no longer writes the panel's DOM, it dispatches `soulsync:qobuz-auth` with what the server said, and the panel renders from that. The panel's sign-ins call it afterwards, so both places update, as before. The email, password and token are not settings (never saved): they are the panel's own state.
+
+**Removed from settings.js**: `checkTidalDownloadAuthStatus`, `startTidalDownloadAuth` and its poll timer, `loginQobuz`, `loginQobuzWithTokenFromDownloads`, the panel half of `checkQobuzAuthStatus`, Tidal's open probe (the panel checks itself). `logoutQobuz` stays (Connections' Disconnect).
+
+**Found by the browser check, fixed.** The email and password fields sat 4px further right: the two are inline-blocks, and the newline between them in the old markup counted as a space in the flex row's width (349.4 vs 345px, measured). JSX drops it; the space is back, with a comment. **Trap for every later panel: whitespace between inline-blocks is layout.**
+
+**Differences from the old page.** Hidden elements no longer keep stale text (the Tidal code after linking, the Qobuz name after disconnecting); never visible. The sign-in fields no longer start a full-page autosave as they are typed into (they were never saved).
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity | the two panels against the frozen markup. |
+| Behaviour (`source-panels.test.tsx` +4) | Tidal: the check on open with its colour, the device link with the code and its link, polling until completed, then no more polling, the toast; a failed start's toast and button. Qobuz: empty fields refused, a failed sign-in's words, colour and toast with a trimmed email, the token sign-in clearing its field and asking settings.js to refresh, the signed-in line from the event. |
+| `src/test` + `src/features/settings` + `src/shell` | 1,631 pass |
+| Python, the 101 files | 2,436 passed |
+| **Browser** (Tidal: open, link, polled to linked; Qobuz: open, empty sign-in, failed sign-in, token sign-in, disconnect) | every visible state, label, colour and toast, and the Connections Qobuz card following along: **identical**. Screenshots after the space fix: Tidal 0 pixels, Qobuz 24 (a toast's moving progress bar). |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
 | Nov 15 | `788691ef4` (step 7c) | **Deezer, SoundCloud and Lidarr panels are React.** New: `tabs/source-panels.tsx` and its test; `SecretInput` in `parts.tsx`; `SoulSyncSettings.set`. React panels portal into the modal. Details under "Completed steps". |
 | Nov 15 | `690b8f7fa` (step 7b) | **The source modal is React**, hosting the still-vanilla panels. The page autosave guard lets those panels save (found in the browser). The registry left settings.js; the shell imports it. Details under "Completed steps". |
 | Nov 15 | `723dfd54b` (step 7a) | **The download chain, the Sources tiles and the sources model are React.** New: `tabs/sources-model.ts`, `tabs/sources-tab.tsx`, their test, six fixtures (one frozen markup, five drawn by settings.js). The behaviour wrapper moved into `downloads-tab.tsx`. 33 functions and the hidden transport removed; bridges for the vanilla modal and the Library tab's audiobook chain. Details under "Completed steps". |
@@ -1002,13 +1025,13 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | checkbox | `soulseek-auto-clear-searches` | Auto-clear slskd search history | both | no |
 | select | `soulseek-cleanup-scope` | slskd Cleanup Scope: {Only SoulSync's own transfers / Everything in slskd} | both | no |
 | button |  | Test Soulseek Connection | both | no |
-| button | `tidal-download-auth-btn` | Link Tidal Account | both | no |
-| button |  | Disconnect | both | no |
-| email | `qobuz-email` | Qobuz Account: | both | no |
-| password | `qobuz-password` | Qobuz Account: | both | no |
-| button | `qobuz-login-btn` | Connect Qobuz | both | no |
-| password | `qobuz-download-token` | Qobuz Account: | both | no |
-| button | `qobuz-download-token-btn` | Connect with Token | both | no |
+| button | `tidal-download-auth-btn` | Link Tidal Account | both | yes (step 7d) |
+| button |  | Disconnect | both | yes (step 7d) |
+| email | `qobuz-email` | Qobuz Account: | both | yes (step 7d) |
+| password | `qobuz-password` | Qobuz Account: | both | yes (step 7d) |
+| button | `qobuz-login-btn` | Connect Qobuz | both | yes (step 7d) |
+| password | `qobuz-download-token` | Qobuz Account: | both | yes (step 7d) |
+| button | `qobuz-download-token-btn` | Connect with Token | both | yes (step 7d) |
 | button | `hifi-test-btn` | Test Connection | both | no |
 | url | `hifi-new-instance` | API Instances: | both | no |
 | button |  | Add | both | no |
@@ -2127,13 +2150,13 @@ Every top-level function, with its line today. A function is removed when the la
 | `removeHiFiInstance` | 8641 | no |
 | `checkHiFiInstances` | 8657 | no |
 | `testDeezerDownloadConnection` | 8696 | yes (step 7c) |
-| `checkTidalDownloadAuthStatus` | 8726 | no |
-| `startTidalDownloadAuth` | 8748 | no |
+| `checkTidalDownloadAuthStatus` | 8726 | yes (step 7d) |
+| `startTidalDownloadAuth` | 8748 | yes (step 7d) |
 | `checkQobuzAuthStatus` | 8819 | no |
 | `loginQobuzFromConnections` | 8857 | no |
 | `loginQobuzWithToken` | 8900 | no |
-| `loginQobuzWithTokenFromDownloads` | 8940 | no |
-| `loginQobuz` | 8980 | no |
+| `loginQobuzWithTokenFromDownloads` | 8940 | yes (step 7d) |
+| `loginQobuz` | 8980 | yes (step 7d) |
 | `logoutQobuz` | 9025 | no |
 | `applyPathsEnvironment` | 9052 | no |
 | `togglePathLock` | 9069 | no |
@@ -2276,6 +2299,8 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/video-tools-shared-page.test.ts` | no |
 
 ## Known traps
+
+- **Whitespace between inline-block elements is layout.** JSX drops the newlines the html had between tags; where two inline-blocks sit side by side, or in a flex item's intrinsic width, that space mattered (step 7d, 4px). Put `{' '}` back and say why. The pixel diff finds it.
 
 - **Run every Python file that reads the settings frontend**, not a hand-picked list: `grep -rlE "index\.html|settings\.js|src/features/settings" tests --include=*.py` (101 files, ~23 minutes). Step 5 missed one by picking.
 

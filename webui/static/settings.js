@@ -1837,7 +1837,7 @@ window.toggleSourceCard = toggleSourceCard;
 // Live auth/connection checks, run when a source is opened rather than on every
 // settings redraw. Best-effort: a probe that throws must not stop the modal.
 const SOURCE_OPEN_PROBE = {
-    tidal: () => checkTidalDownloadAuthStatus(),
+    // tidal checks itself when its modal opens (source-panels.tsx)
     qobuz: () => checkQobuzAuthStatus(),
     hifi: () => testHiFiConnection(),
     // soundcloud checks itself when its modal opens (source-panels.tsx)
@@ -5641,94 +5641,6 @@ async function checkHiFiInstances() {
     }
 }
 
-async function checkTidalDownloadAuthStatus() {
-    const statusEl = document.getElementById('tidal-download-auth-status');
-    const btn = document.getElementById('tidal-download-auth-btn');
-    try {
-        const resp = await fetch('/api/tidal/download/auth/status');
-        const data = await resp.json();
-        if (data.authenticated) {
-            statusEl.textContent = 'Authenticated';
-            statusEl.style.color = '#4caf50';
-            btn.textContent = 'Re-link Tidal Account';
-        } else {
-            statusEl.textContent = 'Not authenticated';
-            statusEl.style.color = '#ff9800';
-            btn.textContent = 'Link Tidal Account';
-        }
-    } catch (e) {
-        statusEl.textContent = '';
-    }
-}
-
-let _tidalAuthPollTimer = null;
-
-async function startTidalDownloadAuth() {
-    const btn = document.getElementById('tidal-download-auth-btn');
-    const statusEl = document.getElementById('tidal-download-auth-status');
-    const codeEl = document.getElementById('tidal-download-auth-code');
-
-    btn.disabled = true;
-    btn.textContent = 'Starting...';
-    statusEl.textContent = '';
-
-    try {
-        const resp = await fetch('/api/tidal/download/auth/start', { method: 'POST' });
-        const data = await resp.json();
-
-        if (!resp.ok || !data.success) {
-            throw new Error(data.error || 'Failed to start auth');
-        }
-
-        // Show the link/code to the user
-        const uri = data.verification_uri || '';
-        const code = data.user_code || '';
-        codeEl.style.display = 'block';
-        codeEl.innerHTML = `Go to <a href="${uri}" target="_blank" style="color:rgb(var(--accent-rgb));">${uri}</a> and enter code: <strong>${code}</strong>`;
-        btn.textContent = 'Waiting for approval...';
-        statusEl.textContent = 'Waiting...';
-        statusEl.style.color = '#ff9800';
-
-        // Poll for completion
-        if (_tidalAuthPollTimer) clearInterval(_tidalAuthPollTimer);
-        _tidalAuthPollTimer = setInterval(async () => {
-            try {
-                const checkResp = await fetch('/api/tidal/download/auth/check');
-                const checkData = await checkResp.json();
-
-                if (checkData.status === 'completed') {
-                    clearInterval(_tidalAuthPollTimer);
-                    _tidalAuthPollTimer = null;
-                    codeEl.style.display = 'none';
-                    statusEl.textContent = 'Authenticated';
-                    statusEl.style.color = '#4caf50';
-                    btn.disabled = false;
-                    btn.textContent = 'Re-link Tidal Account';
-                    showToast('Tidal download account linked successfully', 'success');
-                } else if (checkData.status === 'error') {
-                    clearInterval(_tidalAuthPollTimer);
-                    _tidalAuthPollTimer = null;
-                    codeEl.style.display = 'none';
-                    statusEl.textContent = 'Auth failed';
-                    statusEl.style.color = '#f44336';
-                    btn.disabled = false;
-                    btn.textContent = 'Link Tidal Account';
-                    showToast('Tidal auth failed: ' + (checkData.message || 'Unknown error'), 'error');
-                }
-                // status === 'pending' — keep polling
-            } catch (pollErr) {
-                console.error('Tidal auth poll error:', pollErr);
-            }
-        }, 3000);
-
-    } catch (error) {
-        console.error('Tidal download auth error:', error);
-        showToast('Failed to start Tidal auth: ' + error.message, 'error');
-        btn.disabled = false;
-        btn.textContent = 'Link Tidal Account';
-        codeEl.style.display = 'none';
-    }
-}
 
 // ===============================
 // QOBUZ AUTH FUNCTIONS
@@ -5739,10 +5651,8 @@ async function checkQobuzAuthStatus() {
         const resp = await fetch('/api/qobuz/auth/status');
         const data = await resp.json();
 
-        // Update downloads tab section
-        const formEl = document.getElementById('qobuz-auth-form');
-        const loggedInEl = document.getElementById('qobuz-auth-logged-in');
-        const userInfoEl = document.getElementById('qobuz-auth-user-info');
+        // the Qobuz source panel is React (source-panels.tsx): it hears this
+        window.dispatchEvent(new CustomEvent('soulsync:qobuz-auth', { detail: data }));
 
         // Update connections tab section
         const connFormEl = document.getElementById('qobuz-connection-form');
@@ -5753,17 +5663,10 @@ async function checkQobuzAuthStatus() {
             const user = data.user || {};
             const label = `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`;
 
-            if (userInfoEl) { userInfoEl.textContent = label; }
-            if (loggedInEl) loggedInEl.style.display = 'flex';
-            if (formEl) formEl.style.display = 'none';
-
             if (connUserInfoEl) { connUserInfoEl.textContent = label; }
             if (connLoggedInEl) connLoggedInEl.style.display = 'flex';
             if (connFormEl) connFormEl.style.display = 'none';
         } else {
-            if (loggedInEl) loggedInEl.style.display = 'none';
-            if (formEl) formEl.style.display = 'block';
-
             if (connLoggedInEl) connLoggedInEl.style.display = 'none';
             if (connFormEl) connFormEl.style.display = 'block';
         }
@@ -5852,91 +5755,6 @@ async function loginQobuzWithToken() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Connect with Token';
-    }
-}
-
-async function loginQobuzWithTokenFromDownloads() {
-    const btn = document.getElementById('qobuz-download-token-btn');
-    const statusEl = document.getElementById('qobuz-download-token-status');
-    const token = document.getElementById('qobuz-download-token').value.trim();
-
-    if (!token) {
-        showToast('Please paste your Qobuz auth token', 'warning');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Connecting...';
-    if (statusEl) statusEl.textContent = '';
-
-    try {
-        const resp = await fetch('/api/qobuz/auth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token }),
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            showToast('Qobuz connected via token!', 'success');
-            document.getElementById('qobuz-download-token').value = '';
-            checkQobuzAuthStatus();
-        } else {
-            if (statusEl) { statusEl.textContent = data.error || 'Token login failed'; statusEl.style.color = '#ff5555'; }
-            showToast(data.error || 'Qobuz token login failed', 'error');
-        }
-    } catch (error) {
-        console.error('Qobuz token login error:', error);
-        if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.style.color = '#ff5555'; }
-        showToast('Failed to connect to Qobuz', 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Connect with Token';
-    }
-}
-
-async function loginQobuz() {
-    const btn = document.getElementById('qobuz-login-btn');
-    const statusEl = document.getElementById('qobuz-auth-status');
-    const email = document.getElementById('qobuz-email').value.trim();
-    const password = document.getElementById('qobuz-password').value;
-
-    if (!email || !password) {
-        showToast('Please enter your Qobuz email and password', 'warning');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Connecting...';
-    statusEl.textContent = '';
-
-    try {
-        const resp = await fetch('/api/qobuz/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
-        });
-
-        const data = await resp.json();
-
-        if (data.success) {
-            showToast('Qobuz connected successfully!', 'success');
-            // Clear password field
-            document.getElementById('qobuz-password').value = '';
-            checkQobuzAuthStatus();
-        } else {
-            statusEl.textContent = data.error || 'Login failed';
-            statusEl.style.color = '#ff5555';
-            showToast(data.error || 'Qobuz login failed', 'error');
-        }
-    } catch (error) {
-        console.error('Qobuz login error:', error);
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#ff5555';
-        showToast('Failed to connect to Qobuz', 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Connect Qobuz';
     }
 }
 

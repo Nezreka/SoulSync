@@ -8,7 +8,7 @@
  * data-react-panel so the modal and the page autosave leave it alone.
  */
 
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { SettingsTabProps } from '../host';
@@ -294,8 +294,372 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
   );
 }
 
+const toast = (message: string, type: string) => window.showToast?.(message, type);
+
+/** opening this source's modal runs its check, as probeSourceOnOpen did */
+function useOnOpen(model: SourcesModel, id: string, check: () => void) {
+  const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
+  useEffect(() => {
+    if (open === id) check();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+// ── Tidal ──
+
+export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
+  const [status, setStatus] = useState<Status>({ text: '' });
+  const [button, setButton] = useState({ text: 'Link Tidal Account', disabled: false });
+  const [code, setCode] = useState<{ uri: string; code: string } | null>(null);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(
+    () => () => {
+      if (poll.current) clearInterval(poll.current);
+    },
+    [],
+  );
+
+  async function check() {
+    try {
+      const data = await json('/api/tidal/download/auth/status');
+      if (data.authenticated) {
+        setStatus({ text: 'Authenticated', color: OK });
+        setButton({ text: 'Re-link Tidal Account', disabled: false });
+      } else {
+        setStatus({ text: 'Not authenticated', color: WARN });
+        setButton({ text: 'Link Tidal Account', disabled: false });
+      }
+    } catch {
+      setStatus((s) => ({ ...s, text: '' }));
+    }
+  }
+  useOnOpen(model, 'tidal', () => void check());
+
+  async function start() {
+    setButton({ text: 'Starting...', disabled: true });
+    setStatus((s) => ({ ...s, text: '' }));
+    try {
+      const response = await fetch('/api/tidal/download/auth/start', { method: 'POST' });
+      const data = (await response.json()) as Record<string, unknown>;
+      if (!response.ok || !data.success)
+        throw new Error(text(data.error) || 'Failed to start auth');
+      // the link and code to enter there
+      setCode({ uri: text(data.verification_uri), code: text(data.user_code) });
+      setButton({ text: 'Waiting for approval...', disabled: true });
+      setStatus({ text: 'Waiting...', color: WARN });
+      if (poll.current) clearInterval(poll.current);
+      poll.current = setInterval(() => {
+        void (async () => {
+          try {
+            const done = await json('/api/tidal/download/auth/check');
+            if (done.status === 'completed') {
+              if (poll.current) clearInterval(poll.current);
+              poll.current = null;
+              setCode(null);
+              setStatus({ text: 'Authenticated', color: OK });
+              setButton({ text: 'Re-link Tidal Account', disabled: false });
+              toast('Tidal download account linked successfully', 'success');
+            } else if (done.status === 'error') {
+              if (poll.current) clearInterval(poll.current);
+              poll.current = null;
+              setCode(null);
+              setStatus({ text: 'Auth failed', color: BAD });
+              setButton({ text: 'Link Tidal Account', disabled: false });
+              toast('Tidal auth failed: ' + (text(done.message) || 'Unknown error'), 'error');
+            }
+            // pending: keep polling
+          } catch (error) {
+            console.error('Tidal auth poll error:', error);
+          }
+        })();
+      }, 3000);
+    } catch (error) {
+      console.error('Tidal download auth error:', error);
+      toast(
+        'Failed to start Tidal auth: ' + (error instanceof Error ? error.message : String(error)),
+        'error',
+      );
+      setButton({ text: 'Link Tidal Account', disabled: false });
+      setCode(null);
+    }
+  }
+
+  return (
+    <Panel id="tidal-download-settings-container" model={model}>
+      <div className="form-group">
+        <label>Tidal Download Auth:</label>
+        <div className="form-actions" style={{ marginTop: '4px' }}>
+          <button
+            className="auth-button"
+            id="tidal-download-auth-btn"
+            disabled={button.disabled}
+            onClick={() => void start()}
+          >
+            {button.text}
+          </button>
+          <span
+            id="tidal-download-auth-status"
+            className="setting-help-text"
+            style={{ marginLeft: '8px', ...(status.color ? { color: status.color } : {}) }}
+          >
+            {status.text}
+          </span>
+        </div>
+        <div
+          id="tidal-download-auth-code"
+          style={{ display: code ? 'block' : 'none', marginTop: '8px' }}
+          className="setting-help-text"
+        >
+          {code ? (
+            <>
+              Go to{' '}
+              <a href={code.uri} target="_blank" style={{ color: 'rgb(var(--accent-rgb))' }}>
+                {code.uri}
+              </a>{' '}
+              and enter code: <strong>{code.code}</strong>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+// ── Qobuz ──
+
+/** what checkQobuzAuthStatus (settings.js) last heard: it still updates the
+ *  Connections tab's Qobuz card too, and tells this panel by an event */
+interface QobuzAuth {
+  authenticated?: boolean;
+  user?: { display_name?: string; subscription?: string };
+}
+
+const QOBUZ_ERR = '#ff5555';
+
+function refreshQobuz() {
+  (window as Window & { checkQobuzAuthStatus?: () => void }).checkQobuzAuthStatus?.();
+}
+
+export function QobuzPanel() {
+  const [auth, setAuth] = useState<QobuzAuth | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [token, setToken] = useState('');
+  const [login, setLogin] = useState({ busy: false, status: { text: '' } as Status });
+  const [byToken, setByToken] = useState({ busy: false, status: { text: '' } as Status });
+
+  useEffect(() => {
+    const heard = (event: Event) => setAuth((event as CustomEvent<QobuzAuth>).detail || {});
+    window.addEventListener('soulsync:qobuz-auth', heard);
+    return () => window.removeEventListener('soulsync:qobuz-auth', heard);
+  }, []);
+
+  async function connect() {
+    if (!email.trim() || !password) {
+      toast('Please enter your Qobuz email and password', 'warning');
+      return;
+    }
+    setLogin({ busy: true, status: { text: '' } });
+    let status: Status = { text: '' };
+    try {
+      const data = await json('/api/qobuz/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      if (data.success) {
+        toast('Qobuz connected successfully!', 'success');
+        setPassword('');
+        refreshQobuz();
+      } else {
+        status = { text: text(data.error) || 'Login failed', color: QOBUZ_ERR };
+        toast(text(data.error) || 'Qobuz login failed', 'error');
+      }
+    } catch (error) {
+      console.error('Qobuz login error:', error);
+      status = { text: 'Connection error', color: QOBUZ_ERR };
+      toast('Failed to connect to Qobuz', 'error');
+    }
+    setLogin({ busy: false, status });
+  }
+
+  async function connectToken() {
+    if (!token.trim()) {
+      toast('Please paste your Qobuz auth token', 'warning');
+      return;
+    }
+    setByToken({ busy: true, status: { text: '' } });
+    let status: Status = { text: '' };
+    try {
+      const data = await json('/api/qobuz/auth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+      if (data.success) {
+        toast('Qobuz connected via token!', 'success');
+        setToken('');
+        refreshQobuz();
+      } else {
+        status = { text: text(data.error) || 'Token login failed', color: QOBUZ_ERR };
+        toast(text(data.error) || 'Qobuz token login failed', 'error');
+      }
+    } catch (error) {
+      console.error('Qobuz token login error:', error);
+      status = { text: 'Connection error', color: QOBUZ_ERR };
+      toast('Failed to connect to Qobuz', 'error');
+    }
+    setByToken({ busy: false, status });
+  }
+
+  async function disconnect() {
+    try {
+      await fetch('/api/qobuz/auth/logout', { method: 'POST' });
+      toast('Qobuz disconnected', 'success');
+      refreshQobuz();
+    } catch (error) {
+      console.error('Qobuz logout error:', error);
+    }
+  }
+
+  const user = auth?.user || {};
+  const loggedIn = !!auth?.authenticated;
+  const statusStyle = (status: Status) => ({
+    marginLeft: '8px',
+    ...(status.color ? { color: status.color } : {}),
+  });
+
+  return (
+    <Panel id="qobuz-settings-container">
+      <div className="form-group">
+        <label>Qobuz Account:</label>
+        <div
+          id="qobuz-auth-logged-in"
+          style={{ display: auth === null ? 'none' : loggedIn ? 'flex' : 'none', marginTop: '4px' }}
+        >
+          <span id="qobuz-auth-user-info" className="setting-help-text" style={{ color: OK }}>
+            {loggedIn
+              ? `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`
+              : ''}
+          </span>
+          <button
+            className="auth-button"
+            onClick={() => void disconnect()}
+            style={{ marginLeft: '8px' }}
+          >
+            Disconnect
+          </button>
+        </div>
+        <div
+          id="qobuz-auth-form"
+          style={{ display: loggedIn ? 'none' : 'block', marginTop: '4px' }}
+        >
+          <input
+            type="email"
+            id="qobuz-email"
+            className="form-input"
+            placeholder="Qobuz email"
+            autoComplete="email"
+            style={{ marginBottom: '8px' }}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          {/* the two fields are inline-blocks: the space the old markup had
+              between them counts in the flex row's width (measured, 4px) */}{' '}
+          <input
+            type="password"
+            id="qobuz-password"
+            className="form-input"
+            placeholder="Qobuz password"
+            autoComplete="current-password"
+            style={{ marginBottom: '8px' }}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <div className="form-actions">
+            <button
+              className="auth-button"
+              id="qobuz-login-btn"
+              disabled={login.busy}
+              onClick={() => void connect()}
+            >
+              {login.busy ? 'Connecting...' : 'Connect Qobuz'}
+            </button>
+            <span
+              id="qobuz-auth-status"
+              className="setting-help-text"
+              style={statusStyle(login.status)}
+            >
+              {login.status.text}
+            </span>
+          </div>
+        </div>
+        <div className="setting-help-text" style={{ marginTop: '6px' }}>
+          Requires a paid Qobuz subscription. Streams are DRM-free.
+        </div>
+        <div
+          className="callback-info"
+          style={{
+            marginTop: '10px',
+            borderTop: '1px solid rgba(255,255,255,0.05)',
+            paddingTop: '10px',
+          }}
+        >
+          <div className="callback-help" style={{ marginBottom: '8px' }}>
+            <strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA),
+            paste your token directly:
+          </div>
+        </div>
+        <input
+          type="password"
+          id="qobuz-download-token"
+          className="form-input"
+          placeholder="Paste your Qobuz auth token here"
+          style={{ marginBottom: '8px' }}
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+        />
+        <div className="form-actions">
+          <button
+            className="auth-button"
+            id="qobuz-download-token-btn"
+            disabled={byToken.busy}
+            onClick={() => void connectToken()}
+          >
+            {byToken.busy ? 'Connecting...' : 'Connect with Token'}
+          </button>
+          <span
+            id="qobuz-download-token-status"
+            className="setting-help-text"
+            style={statusStyle(byToken.status)}
+          >
+            {byToken.status.text}
+          </span>
+        </div>
+        <div className="callback-info">
+          <div className="callback-help">
+            To get your token: log into{' '}
+            <a href="https://play.qobuz.com" target="_blank" style={{ color: '#4285f4' }}>
+              play.qobuz.com
+            </a>{' '}
+            → DevTools (F12) → Network tab → find any request to <code>www.qobuz.com/api.json</code>{' '}
+            → look for <code>X-User-Auth-Token</code> in the request headers → copy that value.
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /** the panels of one slot in #source-config-home, by part */
 export function SourcePanels({ store, part }: SettingsTabProps) {
+  if (part === 'tidal-qobuz') {
+    return (
+      <>
+        <TidalPanel />
+        <QobuzPanel />
+      </>
+    );
+  }
   if (part === 'deezer-soundcloud-lidarr') {
     return (
       <>

@@ -4098,84 +4098,10 @@
                                             </div>
 
                                             <!-- Tidal Download Settings (shown only when tidal mode is selected) -->
-                                            <div id="tidal-download-settings-container" class="src-config-panel">
-                                                <div class="form-group">
-                                                    <label>Tidal Download Auth:</label>
-                                                    <div class="form-actions" style="margin-top: 4px;">
-                                                        <button class="auth-button" id="tidal-download-auth-btn"
-                                                            onclick="startTidalDownloadAuth()">
-                                                            Link Tidal Account
-                                                        </button>
-                                                        <span id="tidal-download-auth-status" class="setting-help-text"
-                                                            style="margin-left: 8px;"></span>
-                                                    </div>
-                                                    <div id="tidal-download-auth-code"
-                                                        style="display: none; margin-top: 8px;"
-                                                        class="setting-help-text">
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Qobuz Settings (shown only when qobuz mode is selected) -->
-                                            <div id="qobuz-settings-container" class="src-config-panel">
-                                                <div class="form-group">
-                                                    <label>Qobuz Account:</label>
-                                                    <div id="qobuz-auth-logged-in"
-                                                        style="display: none; margin-top: 4px;">
-                                                        <span id="qobuz-auth-user-info" class="setting-help-text"
-                                                            style="color: #4caf50;"></span>
-                                                        <button class="auth-button" onclick="logoutQobuz()"
-                                                            style="margin-left: 8px;">
-                                                            Disconnect
-                                                        </button>
-                                                    </div>
-                                                    <div id="qobuz-auth-form" style="margin-top: 4px;">
-                                                        <input type="email" id="qobuz-email" class="form-input"
-                                                            placeholder="Qobuz email" autocomplete="email"
-                                                            style="margin-bottom: 8px;">
-                                                        <input type="password" id="qobuz-password" class="form-input"
-                                                            placeholder="Qobuz password" autocomplete="current-password"
-                                                            style="margin-bottom: 8px;">
-                                                        <div class="form-actions">
-                                                            <button class="auth-button" id="qobuz-login-btn"
-                                                                onclick="loginQobuz()">
-                                                                Connect Qobuz
-                                                            </button>
-                                                            <span id="qobuz-auth-status" class="setting-help-text"
-                                                                style="margin-left: 8px;"></span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="setting-help-text" style="margin-top: 6px;">
-                                                        Requires a paid Qobuz subscription. Streams are DRM-free.
-                                                    </div>
-                                                    <div class="callback-info"
-                                                        style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
-                                                        <div class="callback-help" style="margin-bottom: 8px;">
-                                                            <strong>Alternative: Auth Token</strong> — If email/password
-                                                            login fails (CAPTCHA), paste your token directly:</div>
-                                                    </div>
-                                                    <input type="password" id="qobuz-download-token" class="form-input"
-                                                        placeholder="Paste your Qobuz auth token here"
-                                                        style="margin-bottom: 8px;">
-                                                    <div class="form-actions">
-                                                        <button class="auth-button" id="qobuz-download-token-btn"
-                                                            onclick="loginQobuzWithTokenFromDownloads()">
-                                                            Connect with Token
-                                                        </button>
-                                                        <span id="qobuz-download-token-status" class="setting-help-text"
-                                                            style="margin-left: 8px;"></span>
-                                                    </div>
-                                                    <div class="callback-info">
-                                                        <div class="callback-help">To get your token: log into <a
-                                                                href="https://play.qobuz.com" target="_blank"
-                                                                style="color: #4285f4;">play.qobuz.com</a>
-                                                            → DevTools (F12) → Network tab → find any request to
-                                                            <code>www.qobuz.com/api.json</code>
-                                                            → look for <code>X-User-Auth-Token</code> in the request
-                                                            headers → copy that value.</div>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            <!-- Tidal and Qobuz are React: source-panels.tsx (SETTINGS_PORT.md
+                                                 step 7d) -->
+                                            <div data-stg-react="sources" data-stg-part="tidal-qobuz"
+                                                style="display: contents"></div>
 
                                             <!-- HiFi Download Settings (shown only when hifi mode is selected) -->
                                             <div id="hifi-download-settings-container" class="src-config-panel">

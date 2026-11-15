@@ -10,7 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
 import { REDACTED_SECRET_SENTINEL } from './parts';
-import { DeezerPanel, LidarrPanel, SoundcloudPanel, SourcePanels } from './source-panels';
+import {
+  DeezerPanel,
+  LidarrPanel,
+  QobuzPanel,
+  SoundcloudPanel,
+  SourcePanels,
+  TidalPanel,
+} from './source-panels';
 import { createSourcesModel, type SourcesModel } from './sources-model';
 import { SourceModal } from './sources-tab';
 
@@ -44,7 +51,7 @@ beforeEach(() => {
       calls.push({ url, method, body });
       const route = routes[`${method} ${url}`];
       if (!route) return Promise.reject(new Error('down'));
-      return Promise.resolve({ json: () => Promise.resolve(route(body)) } as Response);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(route(body)) } as Response);
     }),
   );
 });
@@ -76,6 +83,145 @@ describe('the panels are the markup they replaced', () => {
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
     expect(container.querySelectorAll('[data-react-panel]')).toHaveLength(3);
+  });
+});
+
+describe('the Tidal and Qobuz panels are the markup they replaced', () => {
+  it('Tidal, Qobuz', () => {
+    const { container } = render(
+      <SourcePanels store={store} part="tidal-qobuz" opened={0} active={false} />,
+    );
+    const got = shape(container);
+    const want = shape(vanilla('panels-tidal-qobuz.vanilla.html'));
+    expect(got.elements).toEqual(want.elements);
+    expect(got.text).toBe(want.text);
+  });
+});
+
+describe('Tidal', () => {
+  it('checks itself when opened, and links an account by device code', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    shell.showToast = vi.fn();
+    document.body.insertAdjacentHTML('beforeend', '<div id="source-config-home" hidden></div>');
+    routes['GET /api/tidal/download/auth/status'] = () => ({ authenticated: false });
+    routes['POST /api/tidal/download/auth/start'] = () => ({
+      success: true,
+      verification_uri: 'https://link.tidal.com/ABCDE',
+      user_code: 'ABCDE',
+    });
+    let state = 'pending';
+    routes['GET /api/tidal/download/auth/check'] = () => ({ status: state });
+    render(
+      <>
+        <SourceModal model={model} />
+        <TidalPanel model={model} />
+      </>,
+    );
+    act(() => model.openModal('tidal'));
+    await waitFor(() =>
+      expect(status('tidal-download-auth-status').textContent).toBe('Not authenticated'),
+    );
+    expect(status('tidal-download-auth-status').style.color).toBe('rgb(255, 152, 0)');
+    fireEvent.click(document.getElementById('tidal-download-auth-btn')!);
+    await waitFor(() =>
+      expect(document.getElementById('tidal-download-auth-btn')!.textContent).toBe(
+        'Waiting for approval...',
+      ),
+    );
+    const code = document.getElementById('tidal-download-auth-code')!;
+    expect(code.style.display).toBe('block');
+    expect(code.textContent).toBe('Go to https://link.tidal.com/ABCDE and enter code: ABCDE');
+    expect(code.querySelector('a')!.getAttribute('href')).toBe('https://link.tidal.com/ABCDE');
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(code.style.display).toBe('block');
+    state = 'completed';
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await waitFor(() =>
+      expect(status('tidal-download-auth-status').textContent).toBe('Authenticated'),
+    );
+    expect(code.style.display).toBe('none');
+    expect(document.getElementById('tidal-download-auth-btn')!.textContent).toBe(
+      'Re-link Tidal Account',
+    );
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Tidal download account linked successfully',
+      'success',
+    );
+    const checks = calls.filter((c) => c.url === '/api/tidal/download/auth/check').length;
+    await act(() => vi.advanceTimersByTimeAsync(9000));
+    expect(calls.filter((c) => c.url === '/api/tidal/download/auth/check').length).toBe(checks);
+    vi.useRealTimers();
+    act(() => model.closeModal());
+    document.getElementById('source-config-home')?.remove();
+    delete shell.showToast;
+  });
+
+  it('a start that fails says so and resets the button', async () => {
+    shell.showToast = vi.fn();
+    routes['POST /api/tidal/download/auth/start'] = () => ({
+      success: false,
+      error: 'no client id',
+    });
+    render(<TidalPanel model={model} />);
+    fireEvent.click(document.getElementById('tidal-download-auth-btn')!);
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith(
+        'Failed to start Tidal auth: no client id',
+        'error',
+      ),
+    );
+    expect(document.getElementById('tidal-download-auth-btn')!.textContent).toBe(
+      'Link Tidal Account',
+    );
+    delete shell.showToast;
+  });
+});
+
+describe('Qobuz', () => {
+  it('shows what checkQobuzAuthStatus heard, and its sign-ins refresh it', async () => {
+    shell.showToast = vi.fn();
+    shell.checkQobuzAuthStatus = vi.fn();
+    routes['POST /api/qobuz/auth/login'] = () => ({ success: false, error: 'captcha' });
+    routes['POST /api/qobuz/auth/token'] = () => ({ success: true });
+    render(<QobuzPanel />);
+    expect(document.getElementById('qobuz-auth-logged-in')!.style.display).toBe('none');
+    // empty fields are refused before anything is sent
+    fireEvent.click(document.getElementById('qobuz-login-btn')!);
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Please enter your Qobuz email and password',
+      'warning',
+    );
+    fireEvent.change(input('qobuz-email'), { target: { value: ' me@x.com ' } });
+    fireEvent.change(input('qobuz-password'), { target: { value: 'pw' } });
+    fireEvent.click(document.getElementById('qobuz-login-btn')!);
+    await waitFor(() => expect(status('qobuz-auth-status').textContent).toBe('captcha'));
+    expect(calls.find((c) => c.url === '/api/qobuz/auth/login')!.body).toEqual({
+      email: 'me@x.com',
+      password: 'pw',
+    });
+    expect(status('qobuz-auth-status').style.color).toBe('rgb(255, 85, 85)');
+    expect(shell.showToast).toHaveBeenCalledWith('captcha', 'error');
+    fireEvent.change(input('qobuz-download-token'), { target: { value: ' tok ' } });
+    fireEvent.click(document.getElementById('qobuz-download-token-btn')!);
+    await waitFor(() => expect(shell.checkQobuzAuthStatus).toHaveBeenCalledOnce());
+    expect(calls.find((c) => c.url === '/api/qobuz/auth/token')!.body).toEqual({ token: 'tok' });
+    expect(input('qobuz-download-token').value).toBe('');
+    // settings.js heard the server: signed in
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('soulsync:qobuz-auth', {
+          detail: {
+            authenticated: true,
+            user: { display_name: 'Boulder', subscription: 'Studio' },
+          },
+        }),
+      );
+    });
+    expect(document.getElementById('qobuz-auth-logged-in')!.style.display).toBe('flex');
+    expect(document.getElementById('qobuz-auth-form')!.style.display).toBe('none');
+    expect(status('qobuz-auth-user-info').textContent).toBe('Connected: Boulder (Studio)');
+    delete shell.showToast;
+    delete shell.checkQobuzAuthStatus;
   });
 });
 
