@@ -3606,6 +3606,11 @@ function npStopVisualizerLoop() {
 
 let sidebarVizAnimFrame = null;
 let sidebarVisualizerType = 'bars'; // bars | wave | spectrum | mirror | equalizer | none
+// The saved type, set when Settings loads. It is a `let`, which code outside
+// this script cannot assign, so the React Appearance tab goes through this.
+function setSidebarVisualizerType(type) {
+    sidebarVisualizerType = type;
+}
 const SIDEBAR_VIZ_BAR_COUNT = 32;
 
 let _sidebarVizBuiltType = null;

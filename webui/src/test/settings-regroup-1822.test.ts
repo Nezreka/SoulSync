@@ -27,7 +27,6 @@ describe('where sections live', () => {
     ['Listening Stats', 'discovery'],
     ['Discovery Pool Settings', 'discovery'],
     ['Import Lists', 'discovery'],
-    ['Sidebar Weather', 'appearance'],
     ['Filtering', 'downloads'],
     ['Video Quality', 'quality'],
     ['Album Releases', 'quality'],
@@ -39,9 +38,12 @@ describe('where sections live', () => {
 
   it('has a tab for every section tag and no tab left empty', () => {
     const tabs = [...doc.querySelectorAll('.stg-tab')].map((t) => t.getAttribute('data-tab'));
+    // a tab ported to React has slots where its sections were: the blocks
+    // themselves are rendered into them (SETTINGS_PORT.md). Sidebar Weather,
+    // on Appearance, is one: src/features/settings/tabs/appearance.test.tsx
     const used = new Set(
-      [...doc.querySelectorAll('#settings-page [data-stg]')].map((el) =>
-        el.getAttribute('data-stg'),
+      [...doc.querySelectorAll('#settings-page [data-stg], #settings-page [data-stg-react]')].map(
+        (el) => el.getAttribute('data-stg') ?? el.getAttribute('data-stg-react'),
       ),
     );
     expect([...used].every((tag) => tabs.includes(tag))).toBe(true);
@@ -136,16 +138,14 @@ describe('loaders follow their sections', () => {
   );
   const g = globalThis as Record<string, unknown>;
   beforeEach(() => {
-    g.loadSidebarWeatherSettings = vi.fn();
     g.loadMetaSyncSettings = vi.fn();
     document.body.innerHTML = '<div id="settings-page"></div>';
   });
   afterEach(() => {
-    delete g.loadSidebarWeatherSettings;
     delete g.loadMetaSyncSettings;
   });
 
-  it('loads the weather on Appearance and MetaSync on Connections', () => {
+  it('hands Appearance to the React tab and loads MetaSync on Connections', () => {
     const nav = new Function(
       'document',
       'window',
@@ -153,12 +153,18 @@ describe('loaders follow their sections', () => {
       '_logViewerInit',
       `${navBlock}; return switchSettingsTab;`,
     )(document, window, vi.fn(), vi.fn()) as (tab: string) => void;
+    // Appearance is React: opening it is handed to the host, and the weather
+    // tile reloads itself from there (appearance.test.tsx)
+    const show = vi.fn();
+    const shell = window as unknown as { SoulSyncSettings?: { show: (tab: string) => void } };
+    shell.SoulSyncSettings = { show };
     nav('appearance');
-    expect(g.loadSidebarWeatherSettings).toHaveBeenCalledOnce();
+    expect(show).toHaveBeenLastCalledWith('appearance');
     expect(g.loadMetaSyncSettings).not.toHaveBeenCalled();
     nav('connections');
     expect(g.loadMetaSyncSettings).toHaveBeenCalledOnce();
     nav('advanced');
-    expect(g.loadSidebarWeatherSettings).toHaveBeenCalledOnce();
+    expect(g.loadMetaSyncSettings).toHaveBeenCalledOnce();
+    delete shell.SoulSyncSettings;
   });
 });

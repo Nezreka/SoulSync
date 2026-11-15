@@ -141,61 +141,8 @@ function applyWorkerOrbsSetting(enabled) {
     if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
 }
 
-function initAccentColorListeners() {
-    const presetSelect = document.getElementById('accent-preset');
-    const customGroup = document.getElementById('custom-color-group');
-    const customPicker = document.getElementById('accent-custom-color');
-    if (!presetSelect) return;
-
-    presetSelect.addEventListener('change', () => {
-        const val = presetSelect.value;
-        if (val === 'custom') {
-            if (customGroup) customGroup.style.display = '';
-            if (customPicker) applyAccentColor(customPicker.value);
-        } else {
-            if (customGroup) customGroup.style.display = 'none';
-            applyAccentColor(val);
-        }
-    });
-
-    if (customPicker) {
-        customPicker.addEventListener('input', () => {
-            applyAccentColor(customPicker.value);
-        });
-    }
-
-    // Particles toggle — apply immediately on change
-    const particlesCheckbox = document.getElementById('particles-enabled');
-    if (particlesCheckbox) {
-        particlesCheckbox.addEventListener('change', () => {
-            applyParticlesSetting(particlesCheckbox.checked);
-        });
-    }
-
-    // Worker orbs toggle — apply immediately on change
-    const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
-    if (workerOrbsCheckbox) {
-        workerOrbsCheckbox.addEventListener('change', () => {
-            applyWorkerOrbsSetting(workerOrbsCheckbox.checked);
-        });
-    }
-
-    // Reduce effects toggle — apply immediately on change
-    const reduceEffectsCheckbox = document.getElementById('reduce-effects-enabled');
-    if (reduceEffectsCheckbox) {
-        reduceEffectsCheckbox.addEventListener('change', () => {
-            applyReduceEffects(reduceEffectsCheckbox.checked);
-        });
-    }
-
-    // Max Performance toggle — apply immediately on change
-    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
-    if (maxPerfCheckbox) {
-        maxPerfCheckbox.addEventListener('change', () => {
-            applyMaxPerformance(maxPerfCheckbox.checked);
-        });
-    }
-}
+// (initAccentColorListeners lived here. The Appearance tab is React now and
+// calls applyAccentColor and the four appliers itself: appearance-tab.tsx)
 
 function applyReduceEffects(enabled) {
     if (enabled) {

@@ -5,7 +5,7 @@
  */
 
 import { act } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost, mountSettingsHost, type SettingsTabProps } from './host';
 import { createSettingsStore } from './settings-store';
@@ -31,7 +31,7 @@ describe('the settings host', () => {
   it('fills a ported tab once and leaves other tabs to the vanilla page', async () => {
     page(['appearance', 'logs']);
     const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
-    const host = createSettingsHost({ tabs: { appearance: Appearance }, store });
+    const host = createSettingsHost({ tabs: { appearance: Appearance }, store, effects: [] });
     host.hydrate({ ui_appearance: { sidebar_visualizer: 'wave' } });
     await act(async () => host.show('appearance'));
     const slot = document.querySelector('[data-stg-react="appearance"]')!;
@@ -42,6 +42,45 @@ describe('the settings host', () => {
     await act(async () => host.show('logs'));
     expect(document.querySelector('[data-stg-react="logs"]')!.innerHTML).toBe('');
     expect(host.ported()).toEqual(['appearance']);
+  });
+
+  it('a tab with several slots gets each its part, and every ported tab is on the page', async () => {
+    document.body.innerHTML = `<div id="settings-page">
+      <div data-stg-react="appearance" data-stg-part="ui"></div>
+      <div data-stg-react="appearance" data-stg-part="weather"></div>
+      <div data-stg-react="logs"></div></div>`;
+    const Part = ({ part, opened }: SettingsTabProps) => <p>{`${part ?? 'whole'} ${opened}`}</p>;
+    const host = createSettingsHost({ tabs: { appearance: Part, logs: Part }, effects: [] });
+    // opening Logs puts Appearance on the page too: the settings search reads
+    // every tab, and settings.js is about to hide what is not the open tab
+    host.show('logs');
+    const text = () =>
+      [...document.querySelectorAll('[data-stg-react]')].map((el) => el.textContent);
+    expect(text()).toEqual(['ui 0', 'weather 0', 'whole 1']);
+    // opening a tab again tells it so (the weather tile reloads on arrival)
+    await act(async () => host.show('appearance'));
+    expect(text()).toEqual(['ui 1', 'weather 1', 'whole 1']);
+  });
+
+  it('loading the settings runs what opening Settings applies, once the payload is good', () => {
+    const seen: unknown[] = [];
+    const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
+    const host = createSettingsHost({
+      tabs: {},
+      store,
+      effects: [
+        () => {
+          throw new Error('one effect failing does not stop the next');
+        },
+        (settings) => seen.push(settings.ui_appearance),
+      ],
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    host.hydrate({ error: 'HTTP 500' });
+    expect(seen).toEqual([]);
+    host.hydrate({ ui_appearance: { accent_preset: '#8b5cf6' } });
+    expect(seen).toEqual([{ accent_preset: '#8b5cf6' }]);
+    error.mockRestore();
   });
 
   it('a tab with no slot on the page is not an error', () => {
@@ -76,7 +115,7 @@ describe('the settings host', () => {
     };
     mountSettingsHost();
     expect(window.SoulSyncSettings).toBeDefined();
-    expect(window.SoulSyncSettings!.ported()).toEqual([]);
+    expect(window.SoulSyncSettings!.ported()).toContain('appearance');
     const again = window.SoulSyncSettings;
     mountSettingsHost();
     expect(window.SoulSyncSettings).toBe(again);

@@ -133,6 +133,11 @@ function debouncedAutoSaveSettings(event) {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // A tab ported to React saves its own controls, and only the keys that
+    // changed (src/features/settings/settings-store.ts). Its controls are in
+    // the page when initializeSettings wires every input, so without this one
+    // change sent two saves: the tab's own and a full-page one (SETTINGS_PORT.md)
+    if (event?.target?.closest?.('[data-stg-react]')) return;
     if (_qpHandleProfileControlChange(event)) return;
     // On the video side, a VIDEO field (TMDB key, region, autoplay...) saves
     // itself via /api/video/*, so it must not also fire this full save. Every
@@ -481,9 +486,6 @@ function initializeSettings() {
 
     // Re-tag in case any inputs were added dynamically since page load.
     _markCredentialFieldsNoAutofill(document.getElementById('settings-page'));
-
-    // Accent color listeners (live preview + custom picker toggle)
-    initAccentColorListeners();
 
     // Main save button (manual save, non-quiet)
     // Uses named function reference so addEventListener deduplicates across repeated calls
@@ -1216,15 +1218,16 @@ function switchSettingsTab(tab) {
         if (active) t.setAttribute('aria-current', 'page');
         else t.removeAttribute('aria-current');
     });
+    // The tabs ported to React render their [data-stg] blocks into their slots
+    // ([data-stg-react]) here, before the blocks are shown and hidden by tab
+    // just below (src/features/settings/host.tsx, SETTINGS_PORT.md)
+    if (window.SoulSyncSettings) {
+        try { window.SoulSyncSettings.show(tab); } catch (e) { console.error('settings tab mount failed', e); }
+    }
     // Show/hide settings groups and section headers by data-stg attribute
     document.querySelectorAll('#settings-page [data-stg]').forEach(g => {
         g.style.display = g.dataset.stg === tab ? '' : 'none';
     });
-    // a tab ported to React fills its slot ([data-stg-react]) the first time
-    // it is opened (src/features/settings/host.tsx, SETTINGS_PORT.md)
-    if (window.SoulSyncSettings) {
-        try { window.SoulSyncSettings.show(tab); } catch (e) { console.error('settings tab mount failed', e); }
-    }
     // Re-apply collapsed state on section bodies (tab switch resets inline display)
     document.querySelectorAll('#settings-page .settings-section-body.collapsed').forEach(b => {
         b.style.display = 'none';
@@ -1253,10 +1256,8 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
         try { loadImageCacheStatus(); } catch (e) { }
     }
-    // #1822: sidebar weather lives on Appearance, MetaSync on Connections
-    if (tab === 'appearance' && typeof loadSidebarWeatherSettings === 'function') {
-        try { loadSidebarWeatherSettings(); } catch (e) { }
-    }
+    // #1822: MetaSync lives on Connections. (sidebar weather, on Appearance,
+    // reloads itself each time its React tab is opened)
     if (tab === 'connections' && typeof loadMetaSyncSettings === 'function') {
         try { loadMetaSyncSettings(); } catch (e) { }
     }
@@ -3945,75 +3946,9 @@ async function loadSettingsData() {
         const _libM3uPath = document.getElementById('library-m3u-path');
         if (_libM3uPath) _libM3uPath.value = settings.m3u_export?.library_path || '';
 
-        // Populate UI Appearance settings
-        const accentPreset = settings.ui_appearance?.accent_preset || '#1db954';
-        const accentCustom = settings.ui_appearance?.accent_color || '#1db954';
-        const presetSelect = document.getElementById('accent-preset');
-        const customPicker = document.getElementById('accent-custom-color');
-        const customGroup = document.getElementById('custom-color-group');
-        if (presetSelect) {
-            // Check if the saved preset matches a dropdown option
-            const presetOptions = Array.from(presetSelect.options).map(o => o.value);
-            if (presetOptions.includes(accentPreset)) {
-                presetSelect.value = accentPreset;
-            } else {
-                presetSelect.value = 'custom';
-            }
-            if (presetSelect.value === 'custom') {
-                if (customGroup) customGroup.style.display = '';
-                if (customPicker) customPicker.value = accentCustom;
-                applyAccentColor(accentCustom);
-            } else {
-                if (customGroup) customGroup.style.display = 'none';
-                applyAccentColor(accentPreset);
-            }
-        }
-
-        // Sidebar visualizer type
-        const vizType = settings.ui_appearance?.sidebar_visualizer || 'bars';
-        const vizSelect = document.getElementById('sidebar-visualizer-type');
-        if (vizSelect) vizSelect.value = vizType;
-        sidebarVisualizerType = vizType;
-
-        // Background particles toggle
-        const particlesEnabled = settings.ui_appearance?.particles_enabled === true; // default OFF (GPU cost)
-        const particlesCheckbox = document.getElementById('particles-enabled');
-        if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
-        applyParticlesSetting(particlesEnabled);
-
-        // Worker orbs toggle. When the user hasn't saved a preference, reflect the
-        // server-decided browser-aware default (window._workerOrbsEnabled — OFF on
-        // Firefox for perf) so saving settings doesn't silently flip a first-time
-        // Firefox user's orbs back on. An explicit saved config value always wins.
-        const _orbsCfg = settings.ui_appearance?.worker_orbs_enabled;
-        const workerOrbsEnabled = (_orbsCfg === undefined || _orbsCfg === null)
-            ? (window._workerOrbsEnabled !== false)
-            : (_orbsCfg !== false);
-        const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
-        if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
-        applyWorkerOrbsSetting(workerOrbsEnabled);
-
-        // Reduce effects toggle. This flag is device-scoped: localStorage (set by the
-        // live toggle and by weak-hardware auto-detect) is the source of truth for THIS
-        // machine; the server value is only the cross-device default used when this
-        // device has never chosen. Prefer localStorage when present so opening Settings
-        // doesn't clobber an auto-enabled (or manually-set) per-device choice.
-        const serverReduce = settings.ui_appearance?.reduce_effects === true; // default false
-        const localReduce = localStorage.getItem('soulsync-reduce-effects'); // '1' | '0' | null
-        const reduceEffects = localReduce !== null ? (localReduce === '1') : serverReduce;
-        const reduceCheckbox = document.getElementById('reduce-effects-enabled');
-        if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
-        applyReduceEffects(reduceEffects);
-
-        // Max Performance — same device-scoped resolution as reduce-effects:
-        // localStorage is the per-device truth, server value the cross-device default.
-        // Applied last so it can lock/override the dependent toggles above when on.
-        const serverMaxPerf = settings.ui_appearance?.max_performance === true; // default false
-        const localMaxPerf = localStorage.getItem('soulsync-max-performance'); // '1' | '0' | null
-        const maxPerf = localMaxPerf !== null ? (localMaxPerf === '1') : serverMaxPerf;
-        const maxPerfCheckbox = document.getElementById('max-performance-enabled');
-        if (maxPerfCheckbox) maxPerfCheckbox.checked = maxPerf;
-        applyMaxPerformance(maxPerf);
+        // UI Appearance is React now: opening Settings applies the saved accent,
+        // visualizer and effect switches from src/features/settings/tabs/appearance.ts
+        // (applyAppearanceOnLoad, called by SoulSyncSettings.hydrate above)
 
         // autosave switch, on unless switched off. the form was just reloaded,
         // so an unsaved mark left over from a manual-save visit is stale
@@ -7373,16 +7308,8 @@ async function saveSettings(quiet = false) {
             library_path: _cfgStr('library-m3u-path')
         },
         ui_appearance: {
-            accent_preset: _cfgStr('accent-preset', { fallback: '#1db954' }),
-            accent_color: _cfgStr('accent-custom-color', { fallback: '#1db954' }),
-            sidebar_visualizer: _cfgStr('sidebar-visualizer-type', { fallback: 'bars' }),
-            // Read the runtime flags / localStorage, not the checkboxes: while Max
-            // Performance is on it locks those boxes visually-off, but the user's real
-            // saved prefs live in the flags — so saving must not clobber them.
-            particles_enabled: window._particlesEnabled !== false,
-            worker_orbs_enabled: window._workerOrbsEnabled !== false,
-            reduce_effects: window._reduceEffectsActive === true,
-            max_performance: window._maxPerfActive === true,
+            // the Appearance tab is React and saves its own keys of this
+            // section (accent, visualizer, the four effect switches)
             settings_autosave: _cfgBool('settings-autosave-enabled') !== false
         },
         youtube: {
@@ -9728,150 +9655,7 @@ async function runImageCacheClear() {
     }
 }
 
-// == SIDEBAR WEATHER (Advanced tab)               ==
-// Opt-in weather line / forecast popover / particle scene in the sidebar.
-// No API keys: the server geocodes the location once and caches Open-Meteo
-// snapshots for 30 minutes.
-
-async function _swApi(method, path, body) {
-    const resp = await fetch('/api/weather' + path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    return resp.json();
-}
-
-function _swStatus(text) {
-    const el = document.getElementById('sw-status');
-    if (el) el.textContent = text;
-}
-
-function _swRebootSidebar() {
-    // the shell bundle exports bootSidebarWeather on window; re-run it so the
-    // sidebar line/popover/scene pick up the change without a page reload
-    if (typeof window.bootSidebarWeather === 'function') {
-        try {
-            // bootSidebarWeather is async: a .catch keeps a rejected promise
-            // from surfacing as an unhandled rejection
-            Promise.resolve(window.bootSidebarWeather()).catch(function (e) {
-                console.warn('sidebar weather re-boot failed', e);
-            });
-        } catch (e) {
-            console.warn('sidebar weather re-boot failed', e);
-        }
-    } else {
-        console.warn('sidebar weather re-boot skipped: bootSidebarWeather is not on window');
-    }
-}
-
-async function loadSidebarWeatherSettings() {
-    try {
-        const data = await _swApi('GET', '');
-        // GET /api/weather always answers success:true. A missing snapshot just
-        // means no forecast is cached yet — the sidebar stays empty until then.
-        if (!data || data.success !== true) {
-            _swStatus('Could not load weather settings');
-            return;
-        }
-        const loc = document.getElementById('sw-location');
-        if (loc && document.activeElement !== loc) loc.value = data.location ? data.location.query || '' : '';
-        const en = document.getElementById('sw-enabled');
-        if (en) en.checked = data.enabled !== false;
-        const c = document.getElementById('sw-celsius');
-        if (c) c.checked = data.units === 'celsius';
-        if (data.location && data.snapshot) {
-            const cur = data.snapshot.current;
-            const t = cur && typeof cur.temp === 'number' ? Math.round(cur.temp) : null;
-            const unit = data.units === 'celsius' ? '°C' : '°F';
-            _swStatus(t === null
-                ? `${data.location.name} — waiting for first forecast`
-                : `${data.location.name} — ${t}${unit}, updated ${data.snapshot.fetched_at || 'recently'}`);
-        } else if (data.location) {
-            // enabled=false also yields a null snapshot — say so instead of
-            // implying a fetch failure
-            _swStatus(data.enabled === false
-                ? `${data.location.name} — weather display off`
-                : `${data.location.name} — forecast unavailable right now`);
-        } else {
-            _swStatus('Off — set a location to turn it on');
-        }
-    } catch (e) {
-        console.error('sidebar weather settings failed', e);
-        _swStatus('Could not load weather settings');
-    }
-}
-
-async function saveSidebarWeatherLocation() {
-    const input = document.getElementById('sw-location');
-    const location = input ? input.value.trim() : '';
-    if (!location) {
-        if (typeof showToast === 'function') showToast('Enter a ZIP or city first', 'error');
-        return;
-    }
-    try {
-        const data = await _swApi('PUT', '/location', { location });
-        if (data.success) {
-            if (typeof showToast === 'function') showToast(`Weather location set to ${data.location.name}`, 'success');
-            loadSidebarWeatherSettings();
-            _swRebootSidebar();
-        } else if (typeof showToast === 'function') {
-            showToast(data.error || 'Could not resolve that location', 'error');
-        }
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Could not save location: ' + e.message, 'error');
-    }
-}
-
-async function clearSidebarWeatherLocation() {
-    try {
-        const data = await _swApi('PUT', '/location', { location: '' });
-        if (data.success) {
-            if (typeof showToast === 'function') showToast('Sidebar weather turned off', 'success');
-            const input = document.getElementById('sw-location');
-            if (input) input.value = '';
-            loadSidebarWeatherSettings();
-            _swRebootSidebar();
-        } else if (typeof showToast === 'function') {
-            showToast(data.error || 'Could not clear the location', 'error');
-        }
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Could not clear location: ' + e.message, 'error');
-    }
-}
-
-async function toggleSidebarWeatherEnabled() {
-    const el = document.getElementById('sw-enabled');
-    const enabled = el ? el.checked : true;
-    try {
-        const data = await _swApi('PUT', '/display', { enabled });
-        if (data.success) {
-            if (typeof showToast === 'function') showToast(enabled ? 'Sidebar weather on' : 'Sidebar weather off', 'success');
-            _swRebootSidebar();
-        } else if (typeof showToast === 'function') {
-            showToast(data.error || 'Could not update the setting', 'error');
-        }
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Could not update the setting: ' + e.message, 'error');
-    }
-}
-
-async function saveSidebarWeatherUnits() {
-    const el = document.getElementById('sw-celsius');
-    const use_celsius = el ? el.checked : false;
-    try {
-        const data = await _swApi('PUT', '/units', { use_celsius });
-        if (data.success) {
-            if (typeof showToast === 'function') showToast(`Using °${use_celsius ? 'C' : 'F'}`, 'success');
-            loadSidebarWeatherSettings();
-            _swRebootSidebar();
-        } else if (typeof showToast === 'function') {
-            showToast(data.error || 'Could not update units', 'error');
-        }
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Could not update units: ' + e.message, 'error');
-    }
-}
+// Sidebar Weather is React now: src/features/settings/tabs/appearance-tab.tsx
 
 // == METASYNC (Advanced tab)               ==
 // Connection to the local MetaSync node: pairing (or a pasted local API

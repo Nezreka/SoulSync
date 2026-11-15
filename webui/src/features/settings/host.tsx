@@ -3,13 +3,15 @@
  * (SETTINGS_PORT.md).
  *
  * The page stays vanilla until its last tab is ported. A ported tab's markup
- * is replaced in index.html by one empty slot, `<div data-stg="<tab>"
- * data-stg-react="<tab>">`, which settings.js shows and hides with the tab
- * like any other block. This fills the slot.
+ * is replaced in index.html by empty slots, `<div data-stg-react="<tab>"
+ * data-stg-part="<part>" style="display: contents">`, one where each run of
+ * its blocks sat. The tab renders the same `[data-stg]` blocks into them, so
+ * settings.js shows and hides them with the tab, and its search reads them,
+ * as it always did.
  *
  * settings.js calls in through window.SoulSyncSettings:
  *  - hydrate(settings) when it has loaded the settings,
- *  - show(tab) when a tab is opened,
+ *  - show(tab) when a tab is opened, before it shows and hides the blocks,
  *  - flush() from its own save, so the save button saves a React tab's
  *    changes too,
  *  - hasPending() to know a React tab has something unsaved.
@@ -17,9 +19,12 @@
 
 import type { ComponentType } from 'react';
 
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { settingsStore, type SettingsStore } from './settings-store';
+import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
+import { applyAppearanceOnLoad } from './tabs/appearance';
+import { AppearanceTab } from './tabs/appearance-tab';
 
 export type SettingsTabKey =
   | 'connections'
@@ -34,6 +39,10 @@ export type SettingsTabKey =
 
 export interface SettingsTabProps {
   store: SettingsStore;
+  /** which of the tab's slots this is (data-stg-part) */
+  part?: string;
+  /** goes up each time the tab is opened, for what reloads on arrival */
+  opened: number;
 }
 
 export interface SoulSyncSettingsApi {
@@ -52,36 +61,73 @@ declare global {
 }
 
 /** A tab is added here in the change that ports it. */
-export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {};
+export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
+  appearance: AppearanceTab,
+};
+
+/** What opening Settings applies whatever tab it opens on. settings.js did
+ *  these inside loadSettingsData; each moves here with its tab. */
+export const SETTINGS_LOAD_EFFECTS: Array<(settings: SettingsPayload) => void> = [
+  applyAppearanceOnLoad,
+];
 
 const roots = new WeakMap<Element, Root>();
 
 export function createSettingsHost({
   tabs = SETTINGS_TABS,
+  effects = SETTINGS_LOAD_EFFECTS,
   store = settingsStore,
   documentRef = document,
 }: {
   tabs?: Partial<Record<string, ComponentType<SettingsTabProps>>>;
+  effects?: Array<(settings: SettingsPayload) => void>;
   store?: SettingsStore;
   documentRef?: Document;
 } = {}): SoulSyncSettingsApi {
+  const opened: Record<string, number> = {};
+
   function show(tab: string) {
-    const Tab = tabs[tab];
-    if (!Tab) return;
-    for (const slot of documentRef.querySelectorAll(
-      `#settings-page [data-stg-react="${CSS.escape(tab)}"]`,
+    if (tabs[tab]) opened[tab] = (opened[tab] ?? 0) + 1;
+    // every ported tab is on the page, not just the open one: the settings
+    // search reads the blocks of all of them, and settings.js is about to
+    // show and hide them by tab
+    for (const slot of documentRef.querySelectorAll<HTMLElement>(
+      '#settings-page [data-stg-react]',
     )) {
+      const key = slot.dataset.stgReact ?? '';
+      const Tab = tabs[key];
+      if (!Tab) continue;
       // one root per slot for the life of the page: a tab keeps its state
       // (an open section, a half-typed field) across tab switches
-      if (roots.has(slot)) continue;
-      const root = createRoot(slot);
-      roots.set(slot, root);
-      root.render(<Tab store={store} />);
+      let root = roots.get(slot);
+      const first = !root;
+      if (!root) {
+        root = createRoot(slot);
+        roots.set(slot, root);
+      } else if (key !== tab) {
+        continue;
+      }
+      const render = () =>
+        root.render(<Tab store={store} part={slot.dataset.stgPart} opened={opened[key] ?? 0} />);
+      // the first paint has to be in the DOM before settings.js goes on to
+      // hide the other tabs' blocks and any column left with nothing to show
+      if (first) flushSync(render);
+      else render();
     }
   }
 
   return {
-    hydrate: (settings) => store.hydrate(settings),
+    hydrate(settings) {
+      store.hydrate(settings);
+      if (!store.getState().loaded) return;
+      for (const effect of effects) {
+        try {
+          effect(store.getState().settings);
+        } catch (error) {
+          console.error('settings load effect failed', error);
+        }
+      }
+    },
     show,
     flush: () => store.flush(),
     hasPending: () => store.hasPending(),
@@ -98,5 +144,11 @@ export function mountSettingsHost(): void {
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;
   if (payload) host.hydrate(payload);
   const open = document.querySelector<HTMLElement>('#settings-page .stg-tab.active')?.dataset.tab;
-  if (open) host.show(open);
+  if (!open) return;
+  // through settings.js's own tab switch, which mounts the tabs and then
+  // shows and hides every block for the open one
+  const switchTab = (window as Window & { switchSettingsTab?: (tab: string) => void })
+    .switchSettingsTab;
+  if (typeof switchTab === 'function') switchTab(open);
+  else host.show(open);
 }

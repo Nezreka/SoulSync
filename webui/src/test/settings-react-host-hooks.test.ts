@@ -88,4 +88,35 @@ describe('settings.js hands over to the React tabs', () => {
     expect(saved).toBeGreaterThan(failed);
     expect(save.slice(failed, saved)).toContain("setSettingsSaveState('error')");
   });
+  it("the page autosave leaves a React tab's controls to the tab", () => {
+    document.body.innerHTML = `<div id="settings-page">
+      <div data-stg-react="appearance"><select id="sidebar-visualizer-type"></select></div>
+      <input id="spotify-client-id"></div>`;
+    const timers: unknown[] = [];
+    const deps = `let settingsAutoSaveTimer = null;
+const _qpHandleProfileControlChange = () => false;
+const _isVideoOwnedField = () => false;
+const setSettingsSaveState = () => {};
+${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
+return debouncedAutoSaveSettings;`;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const autosave = new Function(
+      'window',
+      'document',
+      'setTimeout',
+      'clearTimeout',
+      'saveSettings',
+      deps,
+    )(
+      {},
+      document,
+      (cb: unknown) => timers.push(cb),
+      () => undefined,
+      () => undefined,
+    ) as (event: { target: Element | null }) => void;
+    autosave({ target: document.getElementById('sidebar-visualizer-type') });
+    expect(timers).toHaveLength(0);
+    autosave({ target: document.getElementById('spotify-client-id') });
+    expect(timers).toHaveLength(1);
+  });
 });

@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 14 2026 (step 1, the scaffold, is done; no tab is ported yet)
+- **Last updated:** Nov 15 2026 (steps 1 and 2 done: the scaffold, and the Appearance tab)
 
 ## Goal
 
@@ -58,11 +58,19 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Quality | not started | 67 controls and buttons |
 | Tab: Library | not started | 236 controls and buttons |
 | Tab: Discovery | not started | 12 controls and buttons |
-| Tab: Appearance | not started | 14 controls and buttons |
+| Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
 | Tab: Logs | not started | 10 controls and buttons |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
+
+**Progress:** 1 of 9 tabs, 14 of 678 controls, 8 of 333 `settings.js` functions removed, 1 of 83 tests repointed.
+
+| File | At the start | Now |
+|---|---|---|
+| `webui/index.html` | 12,823 | 12,671 |
+| `webui/static/settings.js` | 10,187 | 9,992 |
+| `webui/static/init.js` | 5,264 | 5,208 |
 
 ## Completed steps
 
@@ -136,12 +144,106 @@ Each finished step, in order, with exactly what was added, changed and checked.
 - To port a tab: write its component, add it to `SETTINGS_TABS`, replace its markup with the slot, and delete its fields from `loadSettingsData` and the `saveSettings` collector.
 - Read a value with the store's `settings[section][key]`; change it with `store.set(section, key, value)`. Saving, the autosave switch, the load guards and the save button are handled.
 
+### Step 2: the Appearance tab (Nov 15 2026)
+
+**What it is.** The first tab that React renders. Everything on Appearance: Show only what you use, UI Appearance (accent colour, sidebar visualizer, the four effect switches) and the Sidebar Weather tile. It looks and behaves as before.
+
+**Why Appearance first.** It is small (14 controls), its settings are in one section (`ui_appearance`) plus the weather endpoints, and it has the trickiest per-device state on the page (the effect switches), so it tests the scaffold properly.
+
+**Where the markup was.** Two places in `index.html`, because the page lays its blocks out in columns: the two `settings-group` blocks at the top of the third column (89 lines) and the Sidebar Weather tile further down (73 lines). Each run was replaced by one slot:
+
+```html
+<div data-stg-react="appearance" data-stg-part="ui" style="display: contents"></div>
+<div data-stg-react="appearance" data-stg-part="weather" style="display: contents"></div>
+```
+
+`display: contents` means the slot draws no box of its own, so the blocks React puts in it sit in the column exactly as before. The removed markup is kept verbatim as test fixtures: `webui/src/features/settings/tabs/__fixtures__/appearance-ui.vanilla.html` and `appearance-weather.vanilla.html`.
+
+**Files added**
+
+| File | What it does |
+|---|---|
+| `webui/src/features/settings/tabs/appearance.ts` | The logic, no React: the option lists, `resolveAppearance()` (saved settings to what shows, the way `loadSettingsData` did it), `applyAppearanceOnLoad()`, `effectFlags()`, `savedEffectValue()`. |
+| `webui/src/features/settings/tabs/appearance-tab.tsx` | The tab: `AppearanceTab` renders the `ui` or `weather` part. Same tags, ids, classes, labels and help text as the old markup. |
+| `webui/src/features/settings/tabs/appearance.test.tsx` | 18 tests, described under Checked. |
+| the two fixtures above | The old markup, frozen. |
+
+**Files changed**
+
+| File | Change |
+|---|---|
+| `webui/index.html` | The two runs of Appearance markup replaced by the two slots (−162 lines). |
+| `webui/static/settings.js` | Removed: the UI Appearance block of `loadSettingsData` (70 lines), the appearance keys of the `saveSettings` collector (only `settings_autosave` is left in `ui_appearance`), the whole SIDEBAR WEATHER section (8 functions, 145 lines), the weather load in `switchSettingsTab`, and the `initAccentColorListeners()` call in `initializeSettings`. Moved: the `SoulSyncSettings.show(tab)` hook now runs **before** the show/hide loop. Added: the autosave guard (below). |
+| `webui/static/init.js` | Removed `initAccentColorListeners()` (56 lines). The appliers it called (`applyAccentColor`, `applyParticlesSetting`, `applyWorkerOrbsSetting`, `applyReduceEffects`, `applyMaxPerformance`) stay: the dashboard's quick settings strip uses them too. |
+| `webui/static/media-player.js` | Added `setSidebarVisualizerType(type)`. `sidebarVisualizerType` is a top-level `let`, which another script cannot assign; settings.js used to assign it directly. |
+| `webui/src/shell/weather-preview-settings.ts` | Removed `wireHolidaysToggle()`: the holiday decorations switch is the React tab's now. |
+| `webui/src/features/settings/host.tsx` | Extended, see below. |
+| `webui/src/test/settings-regroup-1822.test.ts` | Repointed, see below. |
+| `webui/src/features/settings/host.test.tsx`, `webui/src/test/settings-react-host-hooks.test.ts` | New tests for the host changes and the autosave guard. |
+
+**Host changes made for this tab**
+
+- **Several slots per tab.** A tab gets one slot per run of its markup, told apart by `data-stg-part`, passed to the component as `part`.
+- **Every ported tab is on the page.** `show(tab)` mounts the slots of **all** ported tabs on first call, not just the opened one. The settings search (`filterSettings`) reads the text of every tab's blocks, so a tab that only appeared when opened would vanish from search. A slot that is already mounted re-renders only when its own tab is opened.
+- **The first paint is synchronous** (`flushSync`), so the blocks exist before `switchSettingsTab` goes on to hide the other tabs' blocks and any column left empty. That is also why the hook moved before the show/hide loop.
+- **`opened` counter.** Each time a tab is opened its count goes up and the tab gets it as a prop. The weather tile reloads on each opening, as the old page did, and not before the first one.
+- **Load effects.** `SETTINGS_LOAD_EFFECTS` run on every good `hydrate`, whatever tab is open. Opening Settings has always applied the saved accent, visualizer and effect switches; that code moved out of `loadSettingsData` into `applyAppearanceOnLoad`. One effect throwing does not stop the next.
+- **Catch-up.** When the bundle runs after settings.js has opened a tab, it now goes through `window.switchSettingsTab(open)`, so the show/hide pass runs after the mount.
+
+**How each control works now**
+
+| Control | Before | Now |
+|---|---|---|
+| Accent Color (`#accent-preset`) | `initAccentColorListeners` applied it live; `saveSettings` read the select | `onChange` calls `applyAccentColor` and saves `ui_appearance.accent_preset`. "Custom" shows `#custom-color-group` and applies the custom colour. |
+| Custom Color (`#accent-custom-color`) | same | `onChange` applies it and saves `ui_appearance.accent_color` |
+| Sidebar Visualizer | `media-player.js` listens for `change` on `document`; `saveSettings` read the select | Saves `ui_appearance.sidebar_visualizer`. React's change event still reaches `media-player.js`'s document listener (tested). |
+| Background Particles, Worker Orbs, Reduce Visual Effects, Max Performance | `initAccentColorListeners` called the appliers; `saveSettings` read the window flags | `onChange` calls the same applier, then saves what the flag says (`savedEffectValue`). Checked state is read from the flags, so Max Performance locking the other three (off, disabled, `setting-overridden`) and giving them back works as before. |
+| Customize SoulSync | inline `onclick` | `onClick` calls `window.openFeaturePicker` |
+| Sidebar Weather: Location, Save, Clear, Show weather, °C | inline handlers calling the SIDEBAR WEATHER functions | Same requests (`/api/weather`, `PUT /location`, `/display`, `/units`), same toasts, same status line, same sidebar re-boot. |
+| Holiday decorations | `wireHolidaysToggle` in the shell bundle | Same request (`PUT /api/weather/holidays`), state from the same `GET /api/weather`. |
+
+**Differences from the old page, all deliberate**
+
+| What | Before | Now | Why |
+|---|---|---|---|
+| Saves per change | One full-page save (every section). | One save with only the keys that changed. | The point of the store. The server stores per key, so the result is the same. |
+| A React control and the page autosave | (no React controls) | `debouncedAutoSaveSettings` returns early for any control inside `[data-stg-react]`. | `initializeSettings` wires every input it finds, and the React controls are already on the page then. Without the guard one change sent two saves (found in the browser check). Side effect: typing a weather location no longer sends a full-page save of everything else, which it did before for no reason. |
+| When weather loads | When Appearance is opened. | When Appearance is opened. | Same. (A first version loaded it whenever Settings opened; fixed before commit.) |
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity: the React tab against the frozen old markup | Same elements in the same order, same ids, classes and the attributes the CSS and scripts use (`data-stg`, `type`, `placeholder`, `for`, `role`, `tabindex`), same text. 2 tests. |
+| Behaviour tests (`appearance.test.tsx`) | 16 more: resolving saved values (Custom for an unknown colour, the server's orb default, this device's choice winning), the load order with Max Performance last, preset/custom/visualizer/effect changes and what each saves, the Max Performance lock and release, the feature picker, the weather status line in its 5 states, loading only once opened and again on each opening, the tile opening and closing, Save/empty Save/Clear/the three switches and their requests and toasts. |
+| Host tests | 7 (3 new: several slots and every tab on the page, load effects with a failing one, catch-up). |
+| Autosave guard | 1 new test. **Negative-checked:** with the guard removed the test fails, with it restored it passes, and the restore was confirmed by grep. |
+| Repointed test | `src/test/settings-regroup-1822.test.ts`: "Sidebar Weather is on appearance" dropped (the heading is rendered by React now, covered by the parity test); "no tab left empty" counts `[data-stg-react]` slots too; the loaders test now checks Appearance is handed to `SoulSyncSettings.show`. |
+| Whole frontend suite (`vitest run src`, 729 files, 12,271 tests) | 12,250 passed, 21 failed, **none in Settings code**. 16 were 15-second timeouts from running every file at once: they pass when their files are rerun. The other 5, all library page tests (`art-picker-modal`, `artist-settings`, `history-modal`, `reorganize-modal`, `retag-modal`), are **pre-existing**: the same 15 files on dev (`52f2190d7`, no port) fail 6, four of them the same tests. The fifth, `art-picker-modal`, passed on dev in that run but passes on the branch run on its own, twice. Not touched here; listed under Known traps. |
+| `tsc --noEmit` | clean |
+| `oxlint` on the files touched | 0 errors, 0 warnings in new code (2 pre-existing warnings in `settings-regroup-1822.test.ts` for `new Function`) |
+| Python tests that read `index.html` or the vanilla scripts (107 files) | 2,544 passed, 1 skipped |
+| `npm run build` | builds |
+| **Browser, old page vs ported page**, real `index.html` and real bundle in two sandboxes (`scrap/stgsbx/launch.py` in the main checkout, ports 8791 and 8792, stubbed settings and weather, every POST logged) | Appearance closed: the settings area is **pixel-identical** (all differing pixels are in the animated sidebar). Weather tile open: identical except 26 pixels where the floating help button's dot pulses. Same values shown, same accent applied (`139, 92, 246`), the tab's blocks hidden on System, search for "holiday" lists "Appearance — Sidebar Weather" on both. |
+| Browser, weather requests | `GET /api/weather` counted on both pages at boot, on opening Settings, on opening Appearance and on reopening it: **identical counts** on the old page and the ported one. |
+| Browser, saving | Two changes inside the wait: **one** save, `{"ui_appearance": {"particles_enabled": true, "sidebar_visualizer": "spectrum"}}`. Autosave off: no save after a change, the button read "Save changes", clicking it sent the change. |
+
+**Not checked:** on a real server with real settings. Only in the sandbox.
+
+**Learned for the next tabs**
+
+- Put **every** ported tab on the page at once, or it drops out of the settings search.
+- After a tab is ported, look for its controls in `initializeSettings`' wiring and in the shell bundle (`src/shell`), not only in `settings.js`.
+- A vanilla `let` can't be set from React: expose a setter on the script that owns it.
+- Run the browser before/after check with every POST logged. The double save was invisible to every unit test.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | step 2 | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
 | Nov 14 | `5f5a2717a` (step 1) | **Scaffold.** New: `settings-store.ts`, `host.tsx` and their tests, `settings-react-host-hooks.test.ts`. Changed: `main.tsx` (mounts the host), `settings.js` (three hooks: `switchSettingsTab`, `loadSettingsData`, `saveSettings`). No markup changed, no tab ported. Details under "Completed steps". |
 | Nov 14 | `2dbd3fb90` | Tracker created. No code changed. |
 
@@ -1154,30 +1256,30 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `settings-open-feature-picker` | Customize SoulSync | both | no |
+| button | `settings-open-feature-picker` | Customize SoulSync | both | yes (step 2) |
 
 **UI Appearance** (both, 7)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `accent-preset` | Accent Color: {Spotify Green / Ocean Blue / Purple / Boulder Purple / Sunset Orange / Rose / Teal …} | both | no |
-| color | `accent-custom-color` | Custom Color: | both | no |
-| select | `sidebar-visualizer-type` | Sidebar Visualizer: {Bars / Wave / Spectrum / Mirror / Equalizer / None} | both | no |
-| checkbox | `particles-enabled` | Background Particles | both | no |
-| checkbox | `worker-orbs-enabled` | Worker Orbs | both | no |
-| checkbox | `reduce-effects-enabled` | Reduce Visual Effects | both | no |
-| checkbox | `max-performance-enabled` | Max Performance | both | no |
+| select | `accent-preset` | Accent Color: {Spotify Green / Ocean Blue / Purple / Boulder Purple / Sunset Orange / Rose / Teal …} | both | yes (step 2) |
+| color | `accent-custom-color` | Custom Color: | both | yes (step 2) |
+| select | `sidebar-visualizer-type` | Sidebar Visualizer: {Bars / Wave / Spectrum / Mirror / Equalizer / None} | both | yes (step 2) |
+| checkbox | `particles-enabled` | Background Particles | both | yes (step 2) |
+| checkbox | `worker-orbs-enabled` | Worker Orbs | both | yes (step 2) |
+| checkbox | `reduce-effects-enabled` | Reduce Visual Effects | both | yes (step 2) |
+| checkbox | `max-performance-enabled` | Max Performance | both | yes (step 2) |
 
 **Sidebar Weather** (both, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `sw-location` | Location: | both | no |
-| button |  | Save | both | no |
-| button |  | Clear | both | no |
-| checkbox | `sw-enabled` | Show weather in the sidebar | both | no |
-| checkbox | `sw-holidays` | Holiday decorations | both | no |
-| checkbox | `sw-celsius` | Use °C instead of °F | both | no |
+| text | `sw-location` | Location: | both | yes (step 2) |
+| button |  | Save | both | yes (step 2) |
+| button |  | Clear | both | yes (step 2) |
+| checkbox | `sw-enabled` | Show weather in the sidebar | both | yes (step 2) |
+| checkbox | `sw-holidays` | Holiday decorations | both | yes (step 2) |
+| checkbox | `sw-celsius` | Use °C instead of °F | both | yes (step 2) |
 
 ### System (63)
 
@@ -1662,14 +1764,14 @@ Every top-level function, with its line today. A function is removed when the la
 | `loadImageCacheStatus` | 9625 | no |
 | `runImageCachePrune` | 9659 | no |
 | `runImageCacheClear` | 9681 | no |
-| `_swApi` | 9715 | no |
-| `_swStatus` | 9724 | no |
-| `_swRebootSidebar` | 9729 | no |
-| `loadSidebarWeatherSettings` | 9747 | no |
-| `saveSidebarWeatherLocation` | 9784 | no |
-| `clearSidebarWeatherLocation` | 9805 | no |
-| `toggleSidebarWeatherEnabled` | 9822 | no |
-| `saveSidebarWeatherUnits` | 9838 | no |
+| `_swApi` | 9715 | yes (step 2) |
+| `_swStatus` | 9724 | yes (step 2) |
+| `_swRebootSidebar` | 9729 | yes (step 2) |
+| `loadSidebarWeatherSettings` | 9747 | yes (step 2) |
+| `saveSidebarWeatherLocation` | 9784 | yes (step 2) |
+| `clearSidebarWeatherLocation` | 9805 | yes (step 2) |
+| `toggleSidebarWeatherEnabled` | 9822 | yes (step 2) |
+| `saveSidebarWeatherUnits` | 9838 | yes (step 2) |
 | `_msApi` | 9863 | no |
 | `_msStatus` | 9872 | no |
 | `_msDetail` | 9877 | no |
@@ -1762,7 +1864,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/settings-library-tabs.test.ts` | no |
 | `webui/src/test/settings-load-element-drift.test.ts` | no |
 | `webui/src/test/settings-navigation.test.ts` | no |
-| `webui/src/test/settings-regroup-1822.test.ts` | no |
+| `webui/src/test/settings-regroup-1822.test.ts` | yes (step 2) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |
 | `webui/src/test/settings-source-autotest.test.ts` | no |
 | `webui/src/test/settings-source-tiles-chains.test.ts` | no |
@@ -1782,6 +1884,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 ## Known traps
 
 - A tab's sections are scattered through `index.html`; find them by `data-stg`, not by position.
+- **The whole frontend suite is not green on dev either.** Run on its own, `vitest run src` takes about 15 minutes, times out up to ~16 tests under load, and has ~5 library page tests (`src/routes/library/-ui/`) that fail intermittently on dev. Compare a failure against dev before blaming the port. Do not put a 580-second `timeout` on the whole suite: it gets killed (exit 143).
 - `tests/static/*.mjs` and source-pin tests read vanilla files by path and fail honestly when code moves.
 - `test_script_split_integrity.py` keeps registries of the vanilla scripts (`SPLIT_MODULES`, `NON_SPLIT_JS`).
 - The CSS budget test: no new `<link>` sheet, no new hex or `rgb()` literals, no new `!important`. Run `src/test` after any CSS change.

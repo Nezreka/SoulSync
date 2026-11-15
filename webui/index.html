@@ -9438,94 +9438,11 @@
 
                                 <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                                 <div class="settings-third-column">
-                                    <!-- what shows in the app (#1909). per profile, so it lives in
-                                         the picker, this is just a door to it -->
-                                    <div class="settings-group" data-stg="appearance">
-                                        <h3>Show only what you use</h3>
-                                        <div class="form-group">
-                                            <small class="settings-hint">Hide the parts of SoulSync you don't use,
-                                                like podcasts, audiobooks or the video side. They keep working and
-                                                come back with one switch. Each profile picks its own.</small>
-                                            <button type="button" class="test-button" id="settings-open-feature-picker"
-                                                onclick="window.openFeaturePicker && window.openFeaturePicker()">Customize
-                                                SoulSync</button>
-                                        </div>
-                                    </div>
-
-                                    <!-- UI Appearance -->
-                                    <div class="settings-group" data-stg="appearance">
-                                        <h3>UI Appearance</h3>
-                                        <div class="form-group">
-                                            <label>Accent Color:</label>
-                                            <div class="accent-color-selector">
-                                                <select id="accent-preset" class="form-select">
-                                                    <option value="#1db954">Spotify Green</option>
-                                                    <option value="#1d8ab9">Ocean Blue</option>
-                                                    <option value="#a78bfa">Purple</option>
-                                                    <option value="#8b5cf6">Boulder Purple</option>
-                                                    <option value="#f59e0b">Sunset Orange</option>
-                                                    <option value="#f43f5e">Rose</option>
-                                                    <option value="#14b8a6">Teal</option>
-                                                    <option value="custom">Custom</option>
-                                                </select>
-                                                <div class="accent-preview-swatch" id="accent-preview-swatch"></div>
-                                            </div>
-                                            <small class="settings-hint">Changes the accent color across the entire
-                                                UI</small>
-                                        </div>
-                                        <div class="form-group" id="custom-color-group" style="display:none;">
-                                            <label>Custom Color:</label>
-                                            <input type="color" id="accent-custom-color" value="#1db954">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Sidebar Visualizer:</label>
-                                            <select id="sidebar-visualizer-type" class="form-select">
-                                                <option value="bars">Bars</option>
-                                                <option value="wave">Wave</option>
-                                                <option value="spectrum">Spectrum</option>
-                                                <option value="mirror">Mirror</option>
-                                                <option value="equalizer">Equalizer</option>
-                                                <option value="none">None</option>
-                                            </select>
-                                            <small class="settings-hint">Audio-reactive visualizer on the sidebar edge
-                                                when music is playing</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="particles-enabled">
-                                                Background Particles
-                                            </label>
-                                            <small class="settings-hint">Animated particle effects behind each page. Off
-                                                by default — enable for the eye candy (uses GPU).</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="worker-orbs-enabled" checked>
-                                                Worker Orbs
-                                            </label>
-                                            <small class="settings-hint">Dashboard header buttons animate as floating
-                                                orbs. Hover the header to expand. Desktop only.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="reduce-effects-enabled">
-                                                Reduce Visual Effects
-                                            </label>
-                                            <small class="settings-hint">Disables backdrop blur and shadows (the
-                                                GPU-heavy bits). Keeps functional motion like loading spinners. Good for
-                                                low-end devices.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="max-performance-enabled">
-                                                Max Performance
-                                            </label>
-                                            <small class="settings-hint">Nuclear low-power mode for software-rendered /
-                                                no-GPU setups (e.g. Docker, remote desktop). Turns off Worker Orbs,
-                                                Particles, all blur/shadows AND every animation &amp; transition
-                                                (loading spinners go static). Overrides the three options above.</small>
-                                        </div>
-                                    </div>
+                                    <!-- Appearance: "Show only what you use" and "UI Appearance" are
+                                         React now (src/features/settings/tabs/appearance-tab.tsx,
+                                         SETTINGS_PORT.md step 2). It renders the same blocks here. -->
+                                    <div data-stg-react="appearance" data-stg-part="ui"
+                                        style="display: contents"></div>
 
                                     <!-- Database Settings -->
                                     <!-- Database Settings (collapsible tile) -->
@@ -9898,79 +9815,10 @@
                                         </div>
                                     </div><!-- end Artwork Cache body -->
 
-                                    <!-- Sidebar Weather (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="appearance"
-                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
-                                        role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">&#9660;</span>
-                                        <h3>Sidebar Weather</h3>
-                                        <span class="settings-section-hint">Time, temp &amp; forecast line</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed" data-stg="appearance">
-                                        <div class="settings-group" data-stg="appearance">
-
-                                            <div class="form-group">
-                                                <label>Location:</label>
-                                                <div style="display: flex; gap: 8px;">
-                                                    <input type="text" id="sw-location"
-                                                        placeholder="ZIP or city, e.g. 97501 or Medford">
-                                                    <button class="test-button"
-                                                        onclick="saveSidebarWeatherLocation()">Save</button>
-                                                    <button class="test-button"
-                                                        onclick="clearSidebarWeatherLocation()">Clear</button>
-                                                </div>
-                                                <div class="help-text">
-                                                    No API keys, no setup beyond this — the server looks up the
-                                                    location and fetches the forecast (Open-Meteo, cached 30 min).
-                                                    Clear to turn the feature off.
-                                                </div>
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label for="sw-enabled"
-                                                    style="display:flex;align-items:center;gap:8px;">
-                                                    <input type="checkbox" id="sw-enabled" checked
-                                                        onchange="toggleSidebarWeatherEnabled()">
-                                                    Show weather in the sidebar
-                                                </label>
-                                            </div>
-                                            <div class="help-text">
-                                                Master switch for the weather line, forecast popover and particle
-                                                scene. The scene also respects your OS "reduce motion" setting.
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label for="sw-holidays"
-                                                    style="display:flex;align-items:center;gap:8px;">
-                                                    <input type="checkbox" id="sw-holidays" checked>
-                                                    Holiday decorations
-                                                </label>
-                                            </div>
-                                            <div class="help-text">
-                                                Halloween, Thanksgiving, Christmas, New Year's and Lunar New Year
-                                                in the sidebar around each, by your location's date. Christmas Day
-                                                always snows.
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label for="sw-celsius"
-                                                    style="display:flex;align-items:center;gap:8px;">
-                                                    <input type="checkbox" id="sw-celsius"
-                                                        onchange="saveSidebarWeatherUnits()">
-                                                    Use &deg;C instead of &deg;F
-                                                </label>
-                                            </div>
-                                            <div class="help-text">
-                                                Auto-detected from the location (&deg;F for US, &deg;C elsewhere) —
-                                                flip it here if you prefer the other.
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label>Status:</label>
-                                                <span id="sw-status" class="readonly-field">Loading...</span>
-                                            </div>
-                                        </div>
-                                    </div><!-- end Sidebar Weather body -->
+                                    <!-- Appearance: the Sidebar Weather tile is React now
+                                         (appearance-tab.tsx, SETTINGS_PORT.md step 2) -->
+                                    <div data-stg-react="appearance" data-stg-part="weather"
+                                        style="display: contents"></div>
 
                                     <!-- MetaSync (collapsible tile) -->
                                     <div class="settings-section-header collapsed" data-stg="connections"
