@@ -750,7 +750,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
+| Nov 15 | `96ecf1d44` (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
 | Nov 15 | `44daafab3` (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
 | Nov 15 | `ffc31675c` (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
 | Nov 15 | `93742a5b7` (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
