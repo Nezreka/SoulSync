@@ -364,9 +364,10 @@ def test_the_ytdlp_card_loads_where_it_actually_lives():
     assert "'sources'" in trigger.group(0), (
         "the loader still only fires on Advanced, where the tile no longer is"
     )
-    # and opening the YouTube card refreshes it
-    opener = js.split("function openSourceModal(", 1)[1].split("\n}", 1)[0]
-    assert "loadYtdlpStatus" in opener
+    # and opening the YouTube card refreshes it (the modal is React, step 7b)
+    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
+    opener = tab.split("export function SourceModal(", 1)[1].split("return () => {", 1)[0]
+    assert "if (id === 'youtube')" in opener and "loadYtdlpStatus?.()" in opener
 
 
 

@@ -71,14 +71,14 @@ def test_boot_asks_the_gate():
 
 
 def test_amazon_is_not_a_pickable_download_source():
-    # the registry and the pool's groups are React now (SETTINGS_PORT.md step
-    # 7a); settings.js keeps a copy of the registry for the source modal
+    # the registry and the pool's groups are React now (SETTINGS_PORT.md
+    # steps 7a and 7b); settings.js no longer has a copy
     model = _read("webui/src/features/settings/tabs/sources-model.ts")
     js = _read("webui/static/settings.js")
     index = _read("webui/index.html")
-    for text in (model, js):
-        hybrid = re.findall(r"id: '([a-z_]+)'", text.split("HYBRID_SOURCES", 1)[1].split("];", 1)[0])
-        assert hybrid and "amazon" not in hybrid
+    assert "const HYBRID_SOURCES" not in js
+    hybrid = re.findall(r"id: '([a-z_]+)'", model.split("HYBRID_SOURCES", 1)[1].split("];", 1)[0])
+    assert hybrid and "amazon" not in hybrid
     groups = model.split("export const DLCHAIN_GROUPS", 1)[1].split("];", 1)[0]
     assert "'amazon'" not in groups
     # the legacy primary/secondary pair only ever offered these

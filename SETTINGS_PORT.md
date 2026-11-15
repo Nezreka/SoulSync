@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | **tiles done** (step 7a below) | The tiles (In use / Available / Indexers, dots, chips) are React and read the sources model. Left for 7b: the eleven config panels and the modal a tile opens (80 controls). |
+| Tab: Sources | **tiles and modal done** (steps 7a, 7b below) | The tiles and the modal a tile opens are React. Left: the eleven config panels (80 controls), one at a time; the modal moves each still-vanilla panel in and out. |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
@@ -88,7 +88,7 @@ Read before starting: `settings.js` lines ~1750-3165 (the chain, the tiles, the 
 | Video ids inside the torrent and usenet panels: `video-redownload-failed`, `video-seed-idx-refresh`, `video-seed-idx-rows`, `video-seed-mode`, `video-seed-remove-data`, `video-usenet-remove-completed` | the video pass | React renders these elements with the same ids and never touches their children or values after mount; `video-settings.js` keeps filling and saving them. |
 | `helper.js` popovers keyed by selector | n/a | matched at click time, nothing to do (checked in step 6). |
 
-**Order inside the step** (each a commit, each with parity, behaviour tests and a browser comparison). *Done: 7a took the model, the chain and the tiles together (one shared state, so one commit; see step 7a below). Next: 7b, the eleven panels and the modal, as planned under 7c here.*
+**Order inside the step** (each a commit, each with parity, behaviour tests and a browser comparison). *Done: 7a took the model, the chain and the tiles together (one shared state, so one commit); 7b the modal alone, able to host vanilla panels. Next: the eleven panels, one per commit (7c on), each marked `data-react-panel` when it is React.*
 
 1. **7a, the sources model**: a store (`tabs/sources-model.ts`) for the music order and enabled set, unready, status, last messages, the video order; `loadHybridSourceOrder`'s rules (retired sources dropped, the legacy primary/secondary fallback, unready kept enabled); Test all and the per-source probes (`HYBRID_SOURCE_PROBE`, `_ssTestConn`, the Prowlarr pre-probe, the video and audiobook sources, the connections sweep, the toast). `window.testAllSources` and `window.autoTestSourcesOnce` keep working, now calling the model.
 2. **7b, the chain** (Downloads > Source Settings): the widget (`#download-chain-widget`: kind tabs, pool groups with filter, steps with ▲ ▼ ×, the end slot, drag between pool and chain), its three kinds, the music save keys (`download_source.mode`, `hybrid_primary`, `hybrid_secondary`, `hybrid_order`: the hidden selects go), Download Behaviour hidden under the video and audiobook chains.
@@ -575,12 +575,39 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 | oxlint / ruff / build | 0 / clean / builds |
 | **Browser, old page vs ported page** (sandbox: music chain soulseek, youtube, qobuz with qobuz unready; video usenet, torrent; audiobooks torrent, soulseek; stubbed tests with a ⚠ youtube and a failing torrent and tidal) | From clean servers: the three chains, the filter, an add/move/remove, the Test all toast, the tiles, the vanilla modal opened from a React tile and its Test result, the tiles after it: **identical**. The same connection tests ran in the same order. Writes: the same chain values; the old page also posted its quality profile and discovery values with each full save. Tiles screenshot: 0 pixels differ; chain screenshot: the 8px strip above. |
 
+### Step 7b: the source settings modal (Nov 15 2026)
+
+**What it is.** The modal a tile opens (`SourceModal` in `tabs/sources-tab.tsx`, slot `sources`/`modal`): the brand mark (its emoji when the image fails), the name (Prowlarr, not in the registry, is titled by its id as before), the hint (`SOURCE_CARD_HINTS`, moved), the dot, Test with its result line (`role="status"`, the last result carried in when the dot is not grey), Escape and a click outside to close, the first field focused after 40 ms, `src-modal-open` on the body, YouTube asking for its yt-dlp status, the per-source probe on open (`probeSourceOnOpen`, still in settings.js). Open state is in the sources model (`open`, `openModal`, `closeModal`); `window.openSourceModal` / `closeSourceModal` call it.
+
+**Why the modal alone, before the panels.** The old modal MOVED the panel node in and back to `#source-config-home`. The React modal does the same with a body React renders without children, so it can host panels that are still vanilla, and each panel can then be ported on its own.
+
+**Closing lands a pending save**, as before: `window.landPendingSettingsSave()` (new in settings.js) clears the page's autosave timer and saves; a React tab's pending change is flushed through the store (not when autosave is off).
+
+**Removed**: `testOneSource`, `openSourceModal`, `closeSourceModal`, the Escape listener, `_openSourceModalId`, and the settings.js copies of `HYBRID_SOURCES` and `SOURCE_CARD_HINTS` (`src/shell/service-switch.ts` now imports the registry from `sources-model.ts` instead of reading the global). The modal markup in `index.html` is a slot. The three entry points left in settings.js (`toggleSourceCard`, the chain cog `toggleHybridSourceConfig`, `openSourceConfig`) call `window.openSourceModal?.()`.
+
+**Bug found by the browser check, fixed before commit.** Editing a field in a panel opened in the React modal saved nothing: `debouncedAutoSaveSettings` returned early for any control inside a `[data-stg-react]` slot (step 2's guard against double saves), and the modal body is inside one. The guard now skips only React controls: a control inside a `.src-config-panel` that is not marked `data-react-panel` still saves. Tested both ways in `settings-react-host-hooks.test.ts`.
+
+**Differences from the old page.** The closed, hidden modal no longer keeps the last source's title and dot (never visible).
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity | the closed modal against the frozen markup (`source-modal.vanilla.html`). |
+| Behaviour (`sources.test.tsx` +5) | the panel moved in and back, never two with one id, the probe, focus, Escape; Prowlarr's title and a click outside landing a pending save; Test's words and dot, carried into the next open; a source without a panel on the page does not open. |
+| Repointed Python | 13 in `test_settings_sources_tab.py` (moved not cloned, put back on close, lands a pending save, Escape, dialog, per-source test, its words, the dot, no-probe message, the carried result, the announced line, the cog, not gated on the chain), 1 in `test_video_download_config.py` (YouTube's yt-dlp status on open), `test_amazon_retired.py` (no copy of the registry left in settings.js), the guard line in `test_quality_profile_preview_nudge.py`. 4 negative checks fail on broken copies. |
+| `test_vanilla_globals_resolve.py` | caught the bare `openSourceModal(` calls (set by the host on `window`): now `window.openSourceModal?.()`. |
+| `src/test` + `src/features/settings` + `src/shell` | 1,620 pass |
+| Python, the 101 files | 2,434 passed, 2 failed (the two above, fixed, their files rerun: 162 pass) |
+| **Browser** (Soulseek, YouTube, Indexers, Torrent opened from their tiles; an edit then a click outside) | title, hint, icon, dot, Test, result, the panel in the body, focus, panels left at home: **identical**. The edit is saved at once on both. Screenshots: **0 pixels** differ on all four. |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7b) | **The source modal is React**, hosting the still-vanilla panels. The page autosave guard lets those panels save (found in the browser). The registry left settings.js; the shell imports it. Details under "Completed steps". |
 | Nov 15 | `723dfd54b` (step 7a) | **The download chain, the Sources tiles and the sources model are React.** New: `tabs/sources-model.ts`, `tabs/sources-tab.tsx`, their test, six fixtures (one frozen markup, five drawn by settings.js). The behaviour wrapper moved into `downloads-tab.tsx`. 33 functions and the hidden transport removed; bridges for the vanilla modal and the Library tab's audiobook chain. Details under "Completed steps". |
 | Nov 15 | `fe7c38f78` (step 6) | **Quality tab ported (music).** New: `tabs/quality.ts`, `tabs/quality-tab.tsx`, their test, four fixtures (one frozen from the markup, three from what settings.js drew). Store: `hasExtra`, `dropExtras`. `parts.tsx`: `HelpIcon` exported, `Section` badge, `<br>` reads as a space. Markup replaced by one slot; the quality profile block (48 functions), its load, collector keys, default-profile mirror and save branch removed from `settings.js`, the profile load from `init.js`. Details under "Completed steps". |
 | Nov 15 | `57ade5bed` (step 5) | **Downloads tab ported, without the chain.** New: `tabs/downloads.ts`, `tabs/downloads-tab.tsx`, their test, three fixtures. `parts.tsx`: help lines read formatted help. Markup replaced by three slots (Behaviour inside the vanilla `#dlchain-behaviour` wrapper); the four sections' helpers, summary, load, save and the genre whitelist removed from `settings.js`. Test stores now save into their own lists. Details under "Completed steps". |
@@ -1882,9 +1909,9 @@ Every top-level function, with its line today. A function is removed when the la
 | `_srcTileMarkup` | 2435 | yes (step 7a) |
 | `buildSourceTiles` | 2478 | yes (step 7a) |
 | `probeSourceOnOpen` | 2531 | no |
-| `testOneSource` | 2547 | no |
-| `openSourceModal` | 2581 | no |
-| `closeSourceModal` | 2635 | no |
+| `testOneSource` | 2547 | yes (step 7b) |
+| `openSourceModal` | 2581 | yes (step 7b) |
+| `closeSourceModal` | 2635 | yes (step 7b) |
 | `toggleHybridSourceConfig` | 2696 | no |
 | `openSourceConfig` | 2706 | no |
 | `markUnsupportedCookieBrowsers` | 2726 | no |

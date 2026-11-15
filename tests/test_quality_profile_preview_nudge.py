@@ -115,7 +115,10 @@ def test_the_full_bundle_is_included_in_profile_autosave(tab):
 def test_the_settings_autosave_leaves_quality_changes_to_the_tab(settings_js):
     start = settings_js.index("function debouncedAutoSaveSettings(event)")
     body = settings_js[start:settings_js.index("\n}", start)]
-    assert "if (event?.target?.closest?.('[data-stg-react]')) return" in body
+    # a React control returns here; a vanilla source panel moved into the
+    # React modal does not (step 7b)
+    assert "if (_t?.closest?.('[data-stg-react]')" in body
+    assert "!_t.closest('.src-config-panel:not([data-react-panel])')) return;" in body
     assert "_qpHandleProfileControlChange" not in settings_js
 
 

@@ -77,6 +77,11 @@ def tab():
     return _read(_TABS + "sources-tab.tsx")
 
 
+def _modal(tab: str) -> str:
+    """the React source modal (step 7b)"""
+    return tab.split("export function SourceModal(", 1)[1].split("\nexport function", 1)[0]
+
+
 def _tiles(tab: str) -> str:
     """the SourceTiles component"""
     return tab.split("export function SourceTiles(", 1)[1].split("export function SourcesTab(", 1)[0]
@@ -174,7 +179,7 @@ def test_no_source_config_is_left_behind_on_downloads(index):
         assert index.count(f'id="{cid}"') == 1, f"{cid} appears more than once"
 
 
-def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab):
+def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab, model):
     """The regression that matters. If anything goes back to driving these
     containers off the active-source set, configuring a source you have not
     switched on becomes impossible again. updateDownloadSourceUI, which once
@@ -185,11 +190,13 @@ def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab):
         for m in re.finditer(re.escape(f"getElementById('{cid}')"), js):
             assert "style.display" not in js[m.end():m.end() + 120], \
                 f"something sets display on {cid} again"
-    opener = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    for gate in ("getHybridOrder", "music", "hybrid_order"):
+    # opening asks only whether the source has a panel (step 7b)
+    opener = model.split("    openModal(id) {", 1)[1].split("\n    },", 1)[0]
+    for gate in ("music", "order", "hybrid_order", "unready"):
         assert gate not in opener, f"opening a source depends on the chain ({gate})"
+    assert "SOURCE_CONFIG_ID_BY_SRC[id]" in opener
     # every configurable source gets a tile, in a chain or not
-    assert "onClick={() =>" in _tile(tab) and "openSourceModal?.(src.id)" in _tile(tab)
+    assert "onClick={() => model.openModal(src.id)}" in _tile(tab)
 
 
 def test_the_chain_widget_stayed_on_downloads(index, tab):
@@ -207,7 +214,7 @@ def test_the_chain_widget_stayed_on_downloads(index, tab):
 def test_the_cog_crosses_to_the_tab(js):
     fn = js.split("function toggleHybridSourceConfig(", 1)[1].split("\n}", 1)[0]
     assert "switchSettingsTab('sources')" in fn
-    assert "openSourceModal(" in fn
+    assert "window.openSourceModal?.(" in fn  # set by the React modal host (step 7b)
 
 
 def test_the_tiles_refresh_with_the_chain(model, tab):
@@ -232,38 +239,44 @@ def test_every_source_has_a_tile(tab):
     assert "src-tile-name" in markup and "src-tile-art" in markup
 
 
-def test_the_panel_is_moved_not_cloned(js):
+def test_the_panel_is_moved_not_cloned(tab):
     """Cloning would put a second element with the same id in the document, and
     every getElementById in saveSettings would then read whichever one the
     browser returned first — silently saving the copy nobody typed into."""
-    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "appendChild(panel)" in fn
+    fn = _modal(tab)
+    assert "body.current.appendChild(panel)" in fn
     assert "cloneNode" not in fn
 
 
-def test_closing_puts_the_panel_back(js):
+def test_closing_puts_the_panel_back(tab):
     """It has to go home before the overlay hides, or the next open would move
-    a node that is already inside the hidden modal."""
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "home.appendChild(panel)" in fn
-    assert fn.index("home.appendChild(panel)") < fn.index("overlay.hidden = true")
+    a node that is already inside the hidden modal. The effect's cleanup runs
+    when `open` changes, before the hidden modal renders."""
+    fn = _modal(tab)
+    cleanup = fn.split("return () => {", 1)[1].split("};", 1)[0]
+    assert "getElementById('source-config-home')?.appendChild(panel)" in cleanup
 
 
-def test_closing_lands_a_pending_autosave(js):
+def test_closing_lands_a_pending_autosave(js, tab):
     """The page auto-saves 2s after a change. Edit a field, close the modal, and
     the timer would otherwise still be counting with nothing on screen to say
-    anything was pending."""
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "settingsAutoSaveTimer" in fn and "saveSettings(" in fn
+    anything was pending. The vanilla timer is landed through a bridge, a React
+    tab's pending change through the store."""
+    close = _modal(tab).split("function close() {", 1)[1].split("\n  }", 1)[0]
+    assert "landPendingSettingsSave?.()" in close
+    assert "settingsStore.flush()" in close and "_settingsAutosaveOff !== true" in close
+    bridge = js.split("window.landPendingSettingsSave = () => {", 1)[1].split("};", 1)[0]
+    assert "settingsAutoSaveTimer" in bridge and "saveSettings(true)" in bridge
 
 
-def test_escape_closes_it(js):
-    assert "e.key === 'Escape'" in js and "closeSourceModal()" in js
+def test_escape_closes_it(tab):
+    fn = _modal(tab)
+    assert "event.key === 'Escape'" in fn and "close()" in fn
 
 
-def test_the_modal_is_a_dialog(index):
-    block = index.split('id="source-config-modal"', 1)[1].split("</div>", 6)[0]
-    assert 'role="dialog"' in block and 'aria-modal="true"' in block
+def test_the_modal_is_a_dialog(tab):
+    fn = _modal(tab)
+    assert 'role="dialog"' in fn and 'aria-modal="true"' in fn
 
 
 def test_the_panels_park_in_a_hidden_home(index):
@@ -276,13 +289,11 @@ def test_the_panels_park_in_a_hidden_home(index):
 
 
 def test_the_tiles_refresh_when_the_modal_closes(js, tab):
-    # Changing a setting can change "needs setup" or the chain chip. the modal
-    # used to redraw the tiles on close; they redraw themselves from the model
-    # now, so the close no longer needs to, and must not call the removed
-    # vanilla renderer (it would throw before the save below it)
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "buildSourceTiles" not in fn
-    assert "saveSettings(true)" in fn
+    # Changing a setting can change "needs setup" or the chain chip. the tiles
+    # redraw themselves from the model, so the close does not need to, and
+    # the removed vanilla renderer is not called from anywhere
+    assert "buildSourceTiles" not in js
+    assert "buildSourceTiles" not in _modal(tab)
     assert "const state = useModel(model);" in _tiles(tab)
 
 
@@ -474,45 +485,48 @@ def test_a_small_group_does_not_stretch_across_the_page():
     assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
 
 
-def test_there_is_a_per_source_test_button(index, js):
+def test_there_is_a_per_source_test_button(tab):
     """The summary toast gave a count and the dot gave a colour. Neither told
     you WHAT was wrong with a source you could see was unhappy."""
-    assert 'id="src-modal-test"' in index
-    assert 'id="src-modal-result"' in index
-    assert "function testOneSource(" in js
+    fn = _modal(tab)
+    assert 'id="src-modal-test"' in fn
+    assert 'id="src-modal-result"' in fn
+    assert "async function test() {" in fn
 
 
-def test_the_test_shows_what_the_server_said(js):
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "model.getState().said[srcId]" in fn
-    assert "out.textContent = said ||" in fn
+def test_the_test_shows_what_the_server_said(tab):
+    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
+    assert "model.getState().said[id]" in fn
+    assert "text: said ||" in fn
 
 
-def test_the_test_updates_the_dot_and_the_tiles(js, model):
+def test_the_test_updates_the_dot_and_the_tiles(tab, model):
     # the modal's test runs through the model, which sets the dot the tiles read
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "await model.testOne(srcId)" in fn
-    assert "hss-${state}" in fn
+    fn = _modal(tab)
+    assert "await model.testOne(id)" in fn
+    assert "hss-${dot}" in fn
     one = model.split("async function testOne(", 1)[1].split("\n  }", 1)[0]
     assert "setStatus(id, state)" in one
 
 
-def test_a_source_with_no_probe_says_so_rather_than_failing(js):
+def test_a_source_with_no_probe_says_so_rather_than_failing(tab):
     """YouTube used to be `() => Promise.resolve(true)`; a source with nothing
     to test must not read as a source that failed a test."""
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
     assert "no connection test" in fn.lower()
 
 
-def test_opening_a_source_carries_its_last_result_in(js):
+def test_opening_a_source_carries_its_last_result_in(tab):
     # An amber tile should still explain itself once you are inside.
-    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "src-modal-result" in fn
+    fn = _modal(tab)
+    opening = fn.split("useEffect(() => {", 1)[1].split("return () => {", 1)[0]
+    assert "said && dot !== 'unknown'" in opening and "src-modal-result is-${dot}" in opening
 
 
-def test_the_result_line_is_announced(index):
-    block = index.split('id="src-modal-result"', 1)[0][-160:]
-    assert 'role="status"' in index.split('id="src-modal-result"', 1)[1][:120] or 'role="status"' in block
+def test_the_result_line_is_announced(tab):
+    fn = _modal(tab)
+    line = fn.split('id="src-modal-result"', 1)[1][:80]
+    assert 'role="status"' in line and 'aria-live="polite"' in line
 
 
 # ---------------------------------------------------------------------------

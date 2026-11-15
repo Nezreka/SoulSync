@@ -7,10 +7,18 @@
  * vanilla until step 7b: a tile calls window.openSourceModal.
  */
 
-import { type DragEvent, type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  type DragEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import type { SettingsTabProps } from '../host';
 
+import { settingsStore } from '../settings-store';
 import {
   CHAIN_KINDS,
   type ChainKind,
@@ -491,9 +499,7 @@ export function SourceTiles({
         className={used ? 'src-tile is-active' : 'src-tile'}
         data-source-id={src.id}
         title={`Configure ${src.name}`}
-        onClick={() =>
-          (window as Window & { openSourceModal?: (id: string) => void }).openSourceModal?.(src.id)
-        }
+        onClick={() => model.openModal(src.id)}
       >
         <span className={`src-tile-dot hss-${dot}`} title={String(dotLabel)} />
         <span className="src-tile-art">
@@ -526,7 +532,196 @@ export function SourceTiles({
   );
 }
 
-/** the Sources tab: only its tiles are React until step 7b */
+// ── the modal a tile opens ──
+
+/** what each source's modal says under its name */
+export const SOURCE_CARD_HINTS: Record<string, string> = {
+  soulseek: 'slskd connection, timeouts, peers',
+  youtube: 'Cookies, transcoding, rate limit',
+  tidal: 'Account and stream quality',
+  qobuz: 'Account and stream quality',
+  hifi: 'Public API instances',
+  deezer_dl: 'ARL token',
+  soundcloud: 'Anonymous — nothing to set up',
+  lidarr: 'URL and API key',
+  torrent: 'Runs on Prowlarr plus a torrent client',
+  usenet: 'Runs on Prowlarr plus a usenet client',
+  prowlarr: 'Prowlarr — searched by both torrent and usenet',
+};
+
+type ShellFns = Window & {
+  loadYtdlpStatus?: () => void;
+  probeSourceOnOpen?: (id: string) => void;
+  landPendingSettingsSave?: () => void;
+  _settingsAutosaveOff?: boolean;
+};
+
+/**
+ * One source's settings, over the page. The panels are still vanilla markup
+ * parked in #source-config-home (until each is ported): the open one is MOVED
+ * into the modal body and back on close, never copied, so every id stays one
+ * element and the page save keeps reading the field the person typed in.
+ */
+export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) {
+  const state = useModel(model);
+  const id = state.open;
+  const body = useRef<HTMLDivElement>(null);
+  const [result, setResult] = useState<{ cls: string; text: string }>({
+    cls: 'src-modal-result',
+    text: '',
+  });
+  const [testing, setTesting] = useState(false);
+  const [broken, setBroken] = useState(false);
+
+  // open: the panel moves in, what is known is shown, the source is probed
+  useEffect(() => {
+    if (!id) return;
+    const panel = document.getElementById(SOURCE_CONFIG_ID_BY_SRC[id] || '');
+    if (!panel || !body.current) {
+      model.closeModal();
+      return;
+    }
+    const w = window as ShellFns;
+    // opening YouTube is the moment its yt-dlp version matters
+    if (id === 'youtube') {
+      try {
+        w.loadYtdlpStatus?.();
+      } catch {
+        // the modal still opens
+      }
+    }
+    const known = model.getState();
+    const dot = known.status[id] || 'unknown';
+    const said = known.said[id];
+    // an amber dot on the tile still explains itself once inside
+    setResult(
+      said && dot !== 'unknown'
+        ? { cls: `src-modal-result is-${dot}`, text: said }
+        : { cls: 'src-modal-result', text: '' },
+    );
+    setTesting(false);
+    setBroken(false);
+    body.current.appendChild(panel);
+    document.body.classList.add('src-modal-open');
+    try {
+      w.probeSourceOnOpen?.(id);
+    } catch {
+      // a probe that throws must not stop the modal
+    }
+    const focus = setTimeout(() => {
+      body.current
+        ?.querySelector<HTMLElement>('input:not([type=hidden]), select, textarea')
+        ?.focus();
+    }, 40);
+    return () => {
+      clearTimeout(focus);
+      // back home before the modal hides, so a later open never moves a
+      // node that is still sitting in a hidden modal
+      document.getElementById('source-config-home')?.appendChild(panel);
+      document.body.classList.remove('src-modal-open');
+    };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!id) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function close() {
+    model.closeModal();
+    // a field edited seconds before closing would sit on the 2 s autosave
+    // with the modal gone and nothing saying so: land it now
+    const w = window as ShellFns;
+    w.landPendingSettingsSave?.();
+    if (w._settingsAutosaveOff !== true && settingsStore.hasPending()) void settingsStore.flush();
+  }
+
+  async function test() {
+    if (!id) return;
+    if (!model.canTest(id)) {
+      setResult({ cls: 'src-modal-result is-na', text: 'This source has no connection test.' });
+      return;
+    }
+    setTesting(true);
+    setResult({ cls: 'src-modal-result is-testing', text: 'Testing…' });
+    const dot = (await model.testOne(id)) || 'fail';
+    const good = dot === 'ok' || dot === 'warn';
+    const said = model.getState().said[id];
+    setResult({
+      cls: `src-modal-result is-${dot}`,
+      text: said || (good ? 'Connected.' : 'Connection failed.'),
+    });
+    setTesting(false);
+  }
+
+  // a source not in the registry (Prowlarr) is named by its id, as before
+  const src = (id && HYBRID_SOURCES.find((x) => x.id === id)) || {
+    id: id || '',
+    name: id || 'Source',
+    emoji: '🎵',
+    icon: null,
+  };
+  const dot = (id && state.status[id]) || 'unknown';
+
+  return (
+    <div
+      id="source-config-modal"
+      className="src-modal-overlay"
+      hidden={!id}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <div className="src-modal" role="dialog" aria-modal="true" aria-labelledby="src-modal-title">
+        <div className="src-modal-header">
+          <span className="src-modal-icon" id="src-modal-icon">
+            {id ? (
+              src.icon && !broken ? (
+                <img src={src.icon} alt="" onError={() => setBroken(true)} />
+              ) : (
+                <span className="emoji-icon">{src.emoji}</span>
+              )
+            ) : null}
+          </span>
+          <div className="src-modal-titles">
+            <h3 id="src-modal-title">{id ? src.name : 'Source'}</h3>
+            <span className="src-modal-sub" id="src-modal-sub">
+              {id ? SOURCE_CARD_HINTS[id] || '' : ''}
+            </span>
+          </div>
+          <span className="src-modal-meta" id="src-modal-meta">
+            {id ? <span className={`src-tile-dot hss-${dot}`} /> : null}
+          </span>
+          <button
+            type="button"
+            className="src-modal-test"
+            id="src-modal-test"
+            disabled={testing}
+            style={id && !model.canTest(id) ? { display: 'none' } : undefined}
+            onClick={() => void test()}
+          >
+            {testing ? 'Testing…' : 'Test'}
+          </button>
+          <button type="button" className="src-modal-close" aria-label="Close" onClick={close}>
+            &times;
+          </button>
+        </div>
+        <div className={result.cls} id="src-modal-result" role="status" aria-live="polite">
+          {result.text}
+        </div>
+        {/* the open panel is moved in here by hand: React renders no children */}
+        <div className="src-modal-body" id="src-modal-body" ref={body} />
+      </div>
+    </div>
+  );
+}
+
+/** the Sources tab: the tiles and the modal (its panels are still vanilla) */
 export function SourcesTab(props: SettingsTabProps) {
+  if (props.part === 'modal') return <SourceModal />;
   return <SourceTiles opened={props.opened} active={props.active} />;
 }

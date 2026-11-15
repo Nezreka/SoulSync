@@ -166,6 +166,8 @@ export function mountSettingsHost(): void {
   shell.SoulSyncSources = sourcesModel;
   shell.testAllSources = (opts?: { silent?: boolean }) => sourcesModel.testAll(opts);
   shell.switchDownloadChain = (kind: string) => sourcesModel.switchChain(kind);
+  shell.openSourceModal = (id: string) => sourcesModel.openModal(id);
+  shell.closeSourceModal = () => sourcesModel.closeModal();
   // this bundle is a deferred module: settings.js may have loaded the settings
   // and opened a tab before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;

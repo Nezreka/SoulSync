@@ -17,7 +17,7 @@ import {
   legacyPair,
   musicFromSettings,
 } from './sources-model';
-import { ChainWidget, SourceTiles } from './sources-tab';
+import { ChainWidget, SourceModal, SourceTiles } from './sources-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -173,9 +173,9 @@ describe('the tiles are the markup settings.js drew', () => {
     });
     const { container } = render(<SourceTiles model={model} opened={0} active={false} />);
     expect(shape(container)).toEqual(shape(vanilla('chain-tiles.vanilla.html')));
-    // a tile opens the (still vanilla) source modal
+    // a tile opens its source's modal
     fireEvent.click(container.querySelector('[data-source-id="tidal"]')!);
-    expect(shell.openSourceModal).toHaveBeenCalledWith('tidal');
+    expect(model.getState().open).toBe('tidal');
   });
 });
 
@@ -437,5 +437,94 @@ describe('Test all sources', () => {
       '⚠ the cookie file is old',
     );
     expect(tile.querySelector('.src-tile-chip')!.textContent).toBe('needs setup');
+  });
+});
+
+describe('the source modal', () => {
+  const home = () => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `<div id="source-config-home" hidden>
+        <div id="tidal-download-settings-container" class="src-config-panel"><input id="tidal-field"></div>
+        <div id="prowlarr-settings-container" class="src-config-panel"><select id="prowlarr-field"></select></div>
+      </div>`,
+    );
+  };
+  afterEach(() => {
+    document.getElementById('source-config-home')?.remove();
+    document.body.classList.remove('src-modal-open');
+    delete shell.probeSourceOnOpen;
+    delete shell.landPendingSettingsSave;
+    delete shell.loadYtdlpStatus;
+  });
+
+  it('closed, it is the markup it replaced', () => {
+    const { container } = render(<SourceModal model={model} />);
+    expect(shape(container)).toEqual(shape(vanilla('source-modal.vanilla.html')));
+    expect(document.getElementById('source-config-modal')!.hidden).toBe(true);
+  });
+
+  it('moves the panel in and back out, never a copy, and probes the source', async () => {
+    home();
+    shell.probeSourceOnOpen = vi.fn();
+    render(<SourceModal model={model} />);
+    act(() => model.openModal('tidal'));
+    const body = document.getElementById('src-modal-body')!;
+    expect(body.querySelector('#tidal-download-settings-container')).not.toBeNull();
+    expect(document.querySelectorAll('#tidal-download-settings-container')).toHaveLength(1);
+    expect(document.getElementById('source-config-modal')!.hidden).toBe(false);
+    expect(document.body.classList.contains('src-modal-open')).toBe(true);
+    expect(document.getElementById('src-modal-title')!.textContent).toBe('Tidal');
+    expect(document.getElementById('src-modal-sub')!.textContent).toBe(
+      'Account and stream quality',
+    );
+    expect(shell.probeSourceOnOpen).toHaveBeenCalledWith('tidal');
+    await waitFor(() => expect(document.activeElement?.id).toBe('tidal-field'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(model.getState().open).toBeNull();
+    expect(
+      document
+        .getElementById('source-config-home')!
+        .querySelector('#tidal-download-settings-container'),
+    ).not.toBeNull();
+    expect(document.body.classList.contains('src-modal-open')).toBe(false);
+  });
+
+  it('Prowlarr is titled by its id, as before; a click outside closes and lands a pending save', () => {
+    home();
+    shell.landPendingSettingsSave = vi.fn();
+    render(<SourceModal model={model} />);
+    act(() => model.openModal('prowlarr'));
+    expect(document.getElementById('src-modal-title')!.textContent).toBe('prowlarr');
+    fireEvent.click(document.getElementById('source-config-modal')!);
+    expect(model.getState().open).toBeNull();
+    expect(shell.landPendingSettingsSave).toHaveBeenCalledOnce();
+  });
+
+  it('Test shows what the server said and colours the dot', async () => {
+    home();
+    routes['POST /api/test-connection'] = () => ({ success: false, message: 'token expired' });
+    render(<SourceModal model={model} />);
+    act(() => model.openModal('tidal'));
+    fireEvent.click(document.getElementById('src-modal-test')!);
+    await waitFor(() =>
+      expect(document.getElementById('src-modal-result')!.textContent).toBe('token expired'),
+    );
+    expect(document.getElementById('src-modal-result')!.className).toBe('src-modal-result is-fail');
+    expect(document.querySelector('#src-modal-meta .src-tile-dot')!.className).toBe(
+      'src-tile-dot hss-fail',
+    );
+    // reopened, the last result is still there
+    act(() => model.closeModal());
+    act(() => model.openModal('tidal'));
+    expect(document.getElementById('src-modal-result')!.textContent).toBe('token expired');
+  });
+
+  it('a source without a panel on the page does not open', () => {
+    render(<SourceModal model={model} />);
+    act(() => model.openModal('tidal'));
+    expect(model.getState().open).toBeNull();
+    act(() => model.openModal('nonsense'));
+    expect(model.getState().open).toBeNull();
   });
 });

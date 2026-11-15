@@ -74,7 +74,12 @@ function debouncedAutoSaveSettings(event) {
     // changed (src/features/settings/settings-store.ts). Its controls are in
     // the page when initializeSettings wires every input, so without this one
     // change sent two saves: the tab's own and a full-page one (SETTINGS_PORT.md)
-    if (event?.target?.closest?.('[data-stg-react]')) return;
+    // A vanilla source panel opened in the React source modal sits inside a
+    // React slot but is still vanilla: it saves here, as it always did. A
+    // panel ported to React carries data-react-panel (step 7b).
+    const _t = event?.target;
+    if (_t?.closest?.('[data-stg-react]')
+        && !_t.closest('.src-config-panel:not([data-react-panel])')) return;
     // On the video side, a VIDEO field (TMDB key, region, autoplay...) saves
     // itself via /api/video/*, so it must not also fire this full save. Every
     // other field on the page - the shared tabs, System, Security - has no
@@ -1817,44 +1822,15 @@ function onAudiobookModeChange() {
     if (mode === 'hybrid') renderAudiobookHybrid();
 }
 
-// HYBRID_SOURCES stays here until the Sources modal is React (step 7b): the
-// modal reads its names and logos, and src/shell/service-switch.ts reads the
-// global. The React copy is in sources-model.ts.
-const HYBRID_SOURCES = [
-    { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
-    { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
-    { id: 'tidal', name: 'Tidal', icon: '/static/img/brands/tidal.svg', emoji: '🌊' },
-    { id: 'qobuz', name: 'Qobuz', icon: '/static/img/brands/qobuz.svg', emoji: '🎧' },
-    { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
-    { id: 'deezer_dl', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
-    { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
-    { id: 'soundcloud', name: 'SoundCloud', icon: '/static/img/brands/soundcloud.png', emoji: '☁️' },
-    { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
-    { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
-];
-
 // ── Sources tab ─────────────────────────────────────────────────────────────
-// The cards are rendered from HYBRID_SOURCES, the same registry the chain rows
-// on the Downloads tab read. One list of names, icons and ids for both views,
-// so the two cannot drift into disagreeing about what a source is called or
-// what its logo is.
-const SOURCE_CARD_HINTS = {
-    soulseek: 'slskd connection, timeouts, peers',
-    youtube: 'Cookies, transcoding, rate limit',
-    tidal: 'Account and stream quality',
-    qobuz: 'Account and stream quality',
-    hifi: 'Public API instances',
-    deezer_dl: 'ARL token',
-    soundcloud: 'Anonymous — nothing to set up',
-    lidarr: 'URL and API key',
-    torrent: 'Runs on Prowlarr plus a torrent client',
-    usenet: 'Runs on Prowlarr plus a usenet client',
-    prowlarr: 'Prowlarr — searched by both torrent and usenet',
-};
+// The source registry, the tiles and the modal they open are React
+// (src/features/settings/tabs/sources-model.ts and sources-tab.tsx). What stays
+// here: the entry points older markup and other tabs call, and the panels'
+// own code, until each panel is ported (SETTINGS_PORT.md step 7).
 
 function toggleSourceCard(header) {
     // kept so an older cached page cannot throw; tiles replaced the row cards.
-    if (header && header.dataset) openSourceModal(header.dataset.sourceId);
+    if (header && header.dataset) window.openSourceModal?.(header.dataset.sourceId);
 }
 window.toggleSourceCard = toggleSourceCard;
 
@@ -1873,127 +1849,21 @@ function probeSourceOnOpen(srcId) {
     try { probe(); } catch (e) { /* the modal still opens */ }
 }
 
-let _openSourceModalId = null;
+// The modal a tile opens is React (src/features/settings/tabs/sources-tab.tsx,
+// SETTINGS_PORT.md step 7b): window.openSourceModal and closeSourceModal are
+// set by its host. It still MOVES the vanilla panel parked in
+// #source-config-home into its body and back, never copies it, so every id
+// here stays one element. probeSourceOnOpen above is what it calls on open.
 
-// The panel is MOVED into the modal rather than copied. Cloning would put a
-// second element with the same id in the document, and every getElementById in
-// saveSettings would then read whichever one the browser handed back first —
-// silently saving the copy the user never typed into.
-// Test one source from its own modal and SHOW what the server said. The
-// summary toast only ever gave a count, and the tile dot only a colour, so a
-// source that was amber for a reason you could act on had no way of telling
-// you what the reason was.
-async function testOneSource(srcId) {
-    const btn = document.getElementById('src-modal-test');
-    const out = document.getElementById('src-modal-result');
-    // the dots and the tests are in the React sources model (step 7a)
-    const model = window.SoulSyncSources;
-    if (!out) return;
-    if (!model || !model.canTest(srcId)) {
-        out.className = 'src-modal-result is-na';
-        out.textContent = 'This source has no connection test.';
-        return;
-    }
-    if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
-    out.className = 'src-modal-result is-testing';
-    out.textContent = 'Testing…';
-    const state = await model.testOne(srcId);
-    const good = state === 'ok' || state === 'warn';
-    const said = model.getState().said[srcId];
-    out.className = `src-modal-result is-${state}`;
-    out.textContent = said || (good ? 'Connected.' : 'Connection failed.');
-    document.getElementById('src-modal-meta').innerHTML =
-        `<span class="src-tile-dot hss-${state}"></span>`;
-    if (btn) { btn.disabled = false; btn.textContent = 'Test'; }
-}
-window.testOneSource = testOneSource;
-
-function openSourceModal(srcId) {
-    // opening the YouTube card is the moment its yt-dlp version matters
-    if (srcId === 'youtube' && typeof loadYtdlpStatus === 'function') {
-        try { loadYtdlpStatus(); } catch (e) { }
-    }
-    const containerId = SOURCE_CONFIG_ID_BY_SRC[srcId];
-    const overlay = document.getElementById('source-config-modal');
-    const body = document.getElementById('src-modal-body');
-    const panel = containerId && document.getElementById(containerId);
-    if (!overlay || !body || !panel) return;
-
-    const src = HYBRID_SOURCES.find(x => x.id === srcId) || { name: srcId, emoji: '🎵', icon: null };
-    document.getElementById('src-modal-title').textContent = src.name;
-    document.getElementById('src-modal-sub').textContent = SOURCE_CARD_HINTS[srcId] || '';
-    const iconEl = document.getElementById('src-modal-icon');
-    iconEl.innerHTML = src.icon
-        ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
-        : `<span class="emoji-icon">${src.emoji}</span>`;
-    const known = window.SoulSyncSources ? window.SoulSyncSources.getState() : null;
-    const state = (known && known.status[srcId]) || 'unknown';
-    document.getElementById('src-modal-meta').innerHTML = `<span class="src-tile-dot hss-${state}"></span>`;
-
-    const testBtn = document.getElementById('src-modal-test');
-    if (testBtn) {
-        testBtn.disabled = false;
-        testBtn.textContent = 'Test';
-        testBtn.style.display = window.SoulSyncSources?.canTest(srcId) ? '' : 'none';
-        testBtn.onclick = () => testOneSource(srcId);
-    }
-    // Carry the last result in rather than showing a blank slate: an amber dot
-    // on the tile should still explain itself once you are inside.
-    const out = document.getElementById('src-modal-result');
-    if (out) {
-        const said = known && known.said[srcId];
-        if (said && state !== 'unknown') {
-            out.className = `src-modal-result is-${state}`;
-            out.textContent = said;
-        } else {
-            out.className = 'src-modal-result';
-            out.textContent = '';
-        }
-    }
-
-    body.appendChild(panel);
-    overlay.hidden = false;
-    document.body.classList.add('src-modal-open');
-    _openSourceModalId = containerId;
-    probeSourceOnOpen(srcId);
-    setTimeout(() => {
-        const first = body.querySelector('input:not([type=hidden]), select, textarea');
-        if (first) first.focus();
-    }, 40);
-}
-window.openSourceModal = openSourceModal;
-
-function closeSourceModal() {
-    const overlay = document.getElementById('source-config-modal');
-    const home = document.getElementById('source-config-home');
-    if (!overlay) return;
-    // Put the panel back before hiding, so its id never sits inside a hidden
-    // modal where a later open would move an already-moved node.
-    if (_openSourceModalId && home) {
-        const panel = document.getElementById(_openSourceModalId);
-        if (panel) home.appendChild(panel);
-    }
-    _openSourceModalId = null;
-    overlay.hidden = true;
-    document.body.classList.remove('src-modal-open');
-    // A field edited seconds before closing would otherwise sit on the 2s
-    // auto-save timer with the modal already gone and nothing on screen saying
-    // anything is pending. Land it now.
-    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+// a field edited seconds before the modal closed would sit on the autosave
+// timer with nothing on screen saying so: the modal lands it through this
+window.landPendingSettingsSave = () => {
+    if (settingsAutoSaveTimer) {
         clearTimeout(settingsAutoSaveTimer);
         settingsAutoSaveTimer = null;
         saveSettings(true);
     }
-}
-window.closeSourceModal = closeSourceModal;
-
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        const overlay = document.getElementById('source-config-modal');
-        if (overlay && !overlay.hidden) closeSourceModal();
-    }
-});
-
+};
 
 // src id -> the config panel that belongs to it. Only sources with a panel get
 // a tile; torrent and usenet share one, and it is filed under torrent.
@@ -2015,7 +1885,7 @@ const SOURCE_CONFIG_ID_BY_SRC = {
 function toggleHybridSourceConfig(srcId) {
     if (typeof switchSettingsTab === 'function') switchSettingsTab('sources');
     // torrent and usenet share one panel
-    openSourceModal(srcId === 'usenet' ? 'torrent' : srcId);
+    window.openSourceModal?.(srcId === 'usenet' ? 'torrent' : srcId);
 }
 
 // Open one source's accordion on the Sources tab and scroll it into view.
@@ -2025,7 +1895,7 @@ function toggleHybridSourceConfig(srcId) {
 function openSourceConfig(containerId) {
     const srcId = Object.keys(SOURCE_CONFIG_ID_BY_SRC)
         .find(k => SOURCE_CONFIG_ID_BY_SRC[k] === containerId);
-    if (srcId) openSourceModal(srcId);
+    if (srcId) window.openSourceModal?.(srcId);
 }
 window.openSourceConfig = openSourceConfig;
 

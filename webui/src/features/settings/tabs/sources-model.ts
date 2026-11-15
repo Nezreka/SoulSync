@@ -165,6 +165,8 @@ export interface SourcesState {
   order: string[];
   /** Test all is running from its button */
   testingAll: boolean;
+  /** the source whose settings are open in the modal */
+  open: string | null;
 }
 
 type ShellWindow = Window & {
@@ -253,6 +255,9 @@ export interface SourcesModel {
   testAll: (opts?: { silent?: boolean }) => Promise<void>;
   autoTestOnce: () => void;
   setStatus: (id: string, state: SourceState) => void;
+  /** open a source's settings in the modal (a tile, a chain cog) */
+  openModal: (id: string) => void;
+  closeModal: () => void;
 }
 
 export function createSourcesModel({
@@ -273,6 +278,7 @@ export function createSourcesModel({
     kindChosen: false,
     order: [],
     testingAll: false,
+    open: null,
   }));
   let autoTested = false;
 
@@ -609,6 +615,12 @@ export function createSourcesModel({
       }, autoTestDelay);
     },
     setStatus,
+    openModal(id) {
+      // only a source with a settings panel opens
+      if (!SOURCE_CONFIG_ID_BY_SRC[id]) return;
+      set({ open: id });
+    },
+    closeModal: () => set({ open: null }),
   };
 }
 

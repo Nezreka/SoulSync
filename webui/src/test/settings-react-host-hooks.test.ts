@@ -89,6 +89,10 @@ describe('settings.js hands over to the React tabs', () => {
   it("the page autosave leaves a React tab's controls to the tab", () => {
     document.body.innerHTML = `<div id="settings-page">
       <div data-stg-react="appearance"><select id="sidebar-visualizer-type"></select></div>
+      <div data-stg-react="sources"><div id="src-modal-body">
+        <div class="src-config-panel" id="soulseek-settings-container"><input id="soulseek-url"></div>
+        <div class="src-config-panel" data-react-panel id="tidal-download-settings-container"><input id="tidal-x"></div>
+      </div></div>
       <input id="spotify-client-id"></div>`;
     const timers: unknown[] = [];
     const deps = `let settingsAutoSaveTimer = null;
@@ -115,6 +119,13 @@ return debouncedAutoSaveSettings;`;
     expect(timers).toHaveLength(0);
     autosave({ target: document.getElementById('spotify-client-id') });
     expect(timers).toHaveLength(1);
+    // a vanilla panel moved into the React source modal still saves here
+    // (step 7b: it saved nothing until the guard knew about it)
+    autosave({ target: document.getElementById('soulseek-url') });
+    expect(timers).toHaveLength(2);
+    // a panel ported to React does not
+    autosave({ target: document.getElementById('tidal-x') });
+    expect(timers).toHaveLength(2);
   });
 });
 
