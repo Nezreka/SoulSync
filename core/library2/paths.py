@@ -47,6 +47,68 @@ def resolve_lib2_path(file_path: Any, config_manager: Any = None) -> Optional[st
         return file_path if os.path.exists(file_path) else None
 
 
+def _path_where_found(stored: str, found: str) -> list:
+    """How the record that really holds ``found`` would have stored it: the
+    stored path with its album folder and filename swapped for the found
+    file's, in the same root spelling, and the found path itself."""
+    normalized = stored.replace("\\", "/")
+    head = normalized.rsplit("/", 2)[0] if normalized.count("/") >= 2 else ""
+    tail = [part for part in found.replace("\\", "/").split("/") if part][-2:]
+    swapped = "/".join(([head] if head or normalized.startswith("/") else []) + tail)
+    spellings = {swapped, found, found.replace("\\", "/")}
+    if "\\" in stored:
+        spellings.add(swapped.replace("/", "\\"))
+    spellings.discard(stored)
+    return sorted(spelling for spelling in spellings if spelling)
+
+
+def held_by_another_record(stored: str, found: str) -> bool:
+    """Whether the file found for a stored path is another record's file.
+
+    The shared resolver has last resorts for a stored path whose album folder
+    or filename is wrong: it looks through the artist's other album folders
+    for the file. That is right for a path a media server made up from tags,
+    and wrong for the old record of a file that moved. The record of
+    ``2015 - V (Deluxe)/01 - Lost Stars.flac``, a folder that was gone, was
+    handed ``2014 - Lost Stars/01 - Lost Stars.flac``, the file another record
+    holds at exactly that path. So every scan measured and verified the dead
+    record as that file, Dead File Cleaner never saw it missing, and a delete
+    or retag of the dead record would have acted on the other track's file
+    (wolf39us, Nov 14 2026).
+
+    Asked by the resolver itself, for a file its last resorts found, so every
+    caller is covered: the Library's operations and the jobs and routes that
+    call the resolver directly.
+
+    True only when ``stored`` is a record's path and a different live record
+    in the same library holds the found file at its own stored path. A path no
+    record holds, and a file no record holds exactly, resolve as before.
+    Never raises."""
+    if not isinstance(stored, str) or not isinstance(found, str):
+        return False
+    spellings = _path_where_found(stored, found)
+    if not spellings:
+        return False
+    try:
+        from contextlib import closing
+
+        from database.music_database import get_database
+        marks = ",".join("?" for _ in spellings)
+        with closing(get_database()._get_connection()) as conn:
+            return conn.execute(
+                f"""SELECT 1 FROM lib2_track_files s
+                      JOIN lib2_track_files o
+                        ON o.path IN ({marks}) AND o.id<>s.id
+                       AND COALESCE(o.file_state,'active')='active'
+                       AND o.owner_profile_id IS s.owner_profile_id
+                     WHERE s.path=? LIMIT 1""",
+                [*spellings, stored],
+            ).fetchone() is not None
+    except Exception as exc:  # noqa: BLE001 - no catalogue to ask, so no claim
+        logger.debug("holder check failed for %s: %s", stored, exc)
+        return False
+
+
 def resolve_lib2_directory(file_path: Any, config_manager: Any = None) -> Optional[str]:
     """Resolve the directory that *would* hold a stored path, or ``None``.
 
@@ -276,6 +338,7 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
 
 
 __all__ = [
+    "held_by_another_record",
     "library_relative_path",
     "missing_path_root_is_healthy",
     "resolve_lib2_ancestor",

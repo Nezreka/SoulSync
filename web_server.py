@@ -10532,7 +10532,9 @@ def _resolve_library_file_path(file_path):
     # which is why the same library resolved from a repair job and failed here.
     try:
         from core.library.path_resolver import resolve_via_last_resort_fallbacks
-        interior = resolve_via_last_resort_fallbacks(clean_rel, abs_bases)
+        # the path as stored, not clean_rel: the fallback asks whether another
+        # record holds the file it finds, and looks this one up by stored path
+        interior = resolve_via_last_resort_fallbacks(file_path, abs_bases)
         if interior:
             logger.debug("[PathResolve] interior-segment fallback: %r → %r", file_path, interior)
             return interior
