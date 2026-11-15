@@ -9,6 +9,7 @@ import { ReidentifyModal } from './reidentify-modal';
  */
 
 afterEach(() => {
+  localStorage.clear();
   vi.unstubAllGlobals();
   delete window.showToast;
   cleanup();
@@ -113,6 +114,46 @@ describe('ReidentifyModal', () => {
       ),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('#2114: the move-the-file choice is remembered for the next modal', async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/sources')) {
+          return new Response(JSON.stringify({ sources: [{ source: 'spotify', active: true }] }));
+        }
+        if (url.includes('/search')) {
+          return new Response(
+            JSON.stringify({
+              results: [
+                { track_title: 'Xtal', album_name: 'SAW', source: 'spotify', track_id: 't1' },
+              ],
+            }),
+          );
+        }
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ success: true, album_name: 'SAW' }));
+      }),
+    );
+    window.showToast = vi.fn() as never;
+    mount();
+    await screen.findByText('SAW');
+    const box = document.getElementById('reid-replace') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    expect(box.checked).toBe(false);
+    cleanup();
+
+    const { onClose } = mount();
+    await screen.findByText('SAW');
+    expect((document.getElementById('reid-replace') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(document.querySelector('.reid-result') as HTMLElement);
+    fireEvent.click(document.getElementById('reid-confirm-btn') as HTMLButtonElement);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bodies[0]).toMatchObject({ replace: false });
   });
 
   it('no configured sources → the empty state, no search', async () => {
