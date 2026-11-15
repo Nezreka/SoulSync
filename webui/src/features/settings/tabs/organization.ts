@@ -184,6 +184,18 @@ export function templateErrors(settings: SettingsPayload): string[] {
   ];
 }
 
+/** the Playlist File Naming rule saveSettings checked on its own: a file
+ *  name, so no folder separator, and it must include $title. Empty is off */
+export function playlistItemError(settings: SettingsPayload): string | null {
+  const item = templatesOf(settings).playlist_item.trim();
+  if (!item) return null;
+  if (item.includes('/') || item.includes('\\'))
+    return "Playlist File Naming can't contain a folder separator ( / or \\ ) — it names the file, not a path.";
+  if (!item.includes('$title'))
+    return 'Playlist File Naming must include $title so every file has a name.';
+  return null;
+}
+
 /** LIBRARY_SUMMARIES['library-music-org'] */
 export function musicOrgSummary(enabled: boolean, album: string): string {
   if (!enabled) return 'organizing off';

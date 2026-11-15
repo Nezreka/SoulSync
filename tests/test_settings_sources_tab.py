@@ -835,7 +835,14 @@ def _library_cards(markup):
     assert '<LibrarySection title="Organization"' in _read(tabs + "library-organization.tsx")
     slot = markup.index('<div data-stg-react="library" data-stg-part="folders"')
     org = markup.index('<div data-stg-react="library" data-stg-part="organization"')
-    titles, groups = [(slot, "Folders"), (org, "Organization")], [(slot, "Files &amp; folders")]
+    processing = _read(tabs + "library-processing.tsx")
+    assert 'title="Post-Processing"' in processing and 'title="Import"' in processing
+    assert processing.index('title="Post-Processing"') < processing.index('title="Import"')
+    assert '<span className="stg-cardgroup-label">Processing</span>' in processing
+    proc = markup.index('<div data-stg-react="library" data-stg-part="processing"')
+    titles = [(slot, "Folders"), (org, "Organization"),
+              (proc, "Post-Processing"), (proc + 1, "Import")]
+    groups = [(slot, "Files &amp; folders"), (proc, "Processing")]
     for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
         if t:

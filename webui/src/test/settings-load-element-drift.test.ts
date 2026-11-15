@@ -13,6 +13,8 @@ const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 function loadSettingsIds(): string[] {
   const start = source.indexOf('async function loadSettingsData()');
   const end = source.indexOf('// Mirrors ConfigManager.REDACTED_SENTINEL');
+  // both markers found, in order: a missing one would slice nothing and pass
+  if (start < 0 || end <= start) throw new Error('loadSettingsData markers moved');
   const body = source.slice(start, end);
   const ids = new Set<string>();
   for (const m of body.matchAll(/getElementById\(['"]([^'"]+)['"]\)/g)) ids.add(m[1]);
@@ -22,7 +24,8 @@ function loadSettingsIds(): string[] {
 describe('settings load element drift guard', () => {
   it('every id loadSettingsData touches exists in index.html', () => {
     const ids = loadSettingsIds();
-    expect(ids.length).toBeGreaterThan(100);
+    // the load still touches fields (fewer as tabs move to React, SETTINGS_PORT.md)
+    expect(ids.length).toBeGreaterThan(20);
     const missing = ids.filter((id) => !html.includes(`id="${id}"`));
     expect(missing).toEqual([]);
   });

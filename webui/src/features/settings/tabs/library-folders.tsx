@@ -29,6 +29,7 @@ import {
   useParkedPanels,
 } from './library-card';
 import { OrganizationCard } from './library-organization';
+import { ProcessingCards } from './library-processing';
 import { helpBits, useHelp } from './parts';
 import { NumberField, text } from './source-panels';
 
@@ -682,5 +683,6 @@ export function FoldersCard({ store }: SettingsTabProps) {
 export function LibraryTab(props: SettingsTabProps) {
   if (props.part === 'folders') return <FoldersCard {...props} />;
   if (props.part === 'organization') return <OrganizationCard {...props} />;
+  if (props.part === 'processing') return <ProcessingCards {...props} />;
   return null;
 }

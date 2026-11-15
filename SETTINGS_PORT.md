@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
-| Tab: Library | **in progress** (steps 8a-8c below) | 87 of 236: the Folders and Organization cards, music, audiobooks and podcasts (their Video panels stay vanilla, parked, until the video pass). Next: Post-Processing and Import (8d). |
+| Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 245 of 678 controls, 170 of 333 `settings.js` functions removed, 31 of 83 tests repointed (step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts), 334 of 678 controls, 179 of 333 `settings.js` functions removed, 33 of 83 tests repointed (step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 9,085 |
-| `webui/static/settings.js` | 10,187 | 4,967 |
+| `webui/index.html` | 12,823 | 8,487 |
+| `webui/static/settings.js` | 10,187 | 4,711 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -744,12 +744,29 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity of both panels against fixtures frozen from the markup, help words and tick-box spaces (9 boxes); both cards' parity with the React panels in place; `library-audiobooks.test.tsx` 8; `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains` now hold the chain in a store; `test_audiobook_settings.py` (wiring pins rewritten against the panel and the model) and `test_download_chain_widget.py`: 558 pass across 14 files, 7 negative checks caught. Browser: every loaded value, the routes list and removing one, 15 changes saved to the same server state (untouched keys aside), the chain's audiobook tab and its save; pixels 0 and 0.
 
+### Step 8d: the Library Post-Processing and Import cards; Library done (Nov 15 2026)
+
+**What.** `tabs/library-processing.tsx`, one slot (`library` / `processing`) for the "Processing" group, the Post-Processing card (the master switch hiding its options, core features, the preferred album-art sources, the tag groups per source with their master switches, MusicBrainz's original-date row, Beatport's look-up-everything switch, General) and the Import card. The card summary is rendered by the card.
+
+**Keys inside other sections.** A source's `embed_tags`, `tags.*`, `search_all_tracks` and `use_original_date_for_date` sit beside credentials the Connections tab (vanilla) saves. Each is saved alone (tags as dotted keys), and the vanilla collector no longer sends them, so neither save wipes the other's.
+
+**The album-art sources.** Saved order first (known sources only, available or not), then each connected source not in it, switched off; a move or a switch saves the switched-on sources in the shown order (`loadArtSourceOrder`, `getArtOrder`).
+
+**Found by the full run: a template rule I missed in 8b.** `saveSettings` also checked Playlist File Naming (no folder separator, must include `$title`) by reading the field, which only held the vanilla save back; React would save a bad value. It is `playlistItemError` in `organization.ts` now: the store's block holds every save, and `saveSettings` shows its toast as before (always, as it did).
+
+**Removed.** 9 functions (marked), the summary entry, the Post-Processing and Import load lines (`loadMusicBrainzServerSettings` stays), the collector's `metadata_enhancement`, `post_processing` and `import` blocks and every source's `embed_tags` / `tags`.
+
+**Differences.** Saves send only what changed. The hidden `tag-service-count` words stay as they were ("19 tags" on MusicBrainz's 25).
+
+**Checked.** Parity of the whole slot against a frozen fixture, help words and the toggle row's space; `library-processing.test.tsx` 8; the playlist rule in `library-organization.test.tsx`. The whole frontend suite: 6 failures, 5 of them timeouts under load that pass alone, 1 the drift guard's id floor (now a marker check). The full Python run (94 files): 2,293 pass and 5 pins repointed (the playlist rule above, two count floors, the hifi save, the template wiring, the card order). Browser: every switch and its greyed state, the duration, the art list, the summary, 10 changes saved to the same server state (untouched keys aside), post-processing off; pixels 0.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
 | Nov 15 | `96ecf1d44` (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
 | Nov 15 | `44daafab3` (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
 | Nov 15 | `ffc31675c` (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
@@ -1624,100 +1641,100 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `metadata-enabled` | Enable post-processing on downloaded files | both | no |
-| checkbox | `embed-album-art` | Embed album art into file | both | no |
-| checkbox | `cover-art-download` | Download cover.jpg to album folder | both | no |
-| checkbox | `prefer-caa-art` | Use MusicBrainz Cover Art Archive for album art | both | no |
-| checkbox | `single-to-album-enabled` | Match singles to their parent album | both | no |
-| checkbox | `lrclib-enabled` | Generate .lrc lyrics files (LRClib) | both | no |
-| checkbox | `replaygain-enabled` | Apply ReplayGain tags after download | both | no |
-| number | `duration-tolerance-seconds` | Duration tolerance (seconds) | both | no |
-| checkbox | `embed-spotify` | Spotify | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | Album ID | both | no |
-| checkbox | `embed-itunes` | iTunes | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | Album ID | both | no |
-| checkbox | `embed-musicbrainz` | MusicBrainz | both | no |
-| checkbox |  | Recording ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | Release ID | both | no |
-| checkbox |  | Release Comment | both | no |
-| checkbox |  | Recording Comment | both | no |
-| checkbox |  | Release Group ID | both | no |
-| checkbox |  | Album Artist ID | both | no |
-| checkbox |  | Release Track ID | both | no |
-| checkbox |  | Release Type | both | no |
-| checkbox |  | Release Date | both | no |
-| checkbox |  | Original Date / Year | both | no |
-| checkbox |  | Artist Sort Order | both | no |
-| checkbox |  | Album Artist Sort Order | both | no |
-| checkbox |  | Artists | both | no |
-| checkbox |  | Record Label | both | no |
-| checkbox |  | Release Status | both | no |
-| checkbox |  | Release Country | both | no |
-| checkbox |  | Barcode | both | no |
-| checkbox |  | Media | both | no |
-| checkbox |  | Total Discs | both | no |
-| checkbox |  | Catalog Number | both | no |
-| checkbox |  | Script | both | no |
-| checkbox |  | ASIN | both | no |
-| checkbox |  | ISRC | both | no |
-| checkbox |  | Genres | both | no |
-| checkbox | `mb-use-original-date-for-date` | Use original release date for DATE | both | no |
-| checkbox | `embed-deezer` | Deezer | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | BPM | both | no |
-| checkbox |  | ISRC | both | no |
-| checkbox | `embed-audiodb` | AudioDB | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Mood | both | no |
-| checkbox |  | Style | both | no |
-| checkbox |  | Genre | both | no |
-| checkbox | `embed-tidal` | Tidal | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | ISRC | both | no |
-| checkbox |  | Copyright | both | no |
-| checkbox |  | BPM | both | no |
-| checkbox | `embed-qobuz` | Qobuz | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | ISRC | both | no |
-| checkbox |  | Copyright | both | no |
-| checkbox |  | Label | both | no |
-| checkbox | `embed-lastfm` | Last.fm | both | no |
-| checkbox |  | Genres | both | no |
-| checkbox |  | URL | both | no |
-| checkbox | `embed-genius` | Genius | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | URL | both | no |
-| checkbox | `embed-hifi` | HiFi | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox |  | Artist ID | both | no |
-| checkbox |  | ISRC | both | no |
-| checkbox |  | BPM | both | no |
-| checkbox |  | Copyright | both | no |
-| checkbox | `embed-beatport` | Beatport | both | no |
-| checkbox |  | BPM | both | no |
-| checkbox |  | Key | both | no |
-| checkbox |  | Label | both | no |
-| checkbox |  | Catalog number | both | no |
-| checkbox |  | Genre | both | no |
-| checkbox |  | Track ID | both | no |
-| checkbox | `beatport-search-all` | Look up every track, not just electronic ones Slower: one Beatport req | both | no |
-| checkbox |  | Quality Audio quality (e.g. FLAC, MP3-320) | both | no |
-| checkbox |  | Genre Merging Merge genres from Spotify + enabled sources | both | no |
+| checkbox | `metadata-enabled` | Enable post-processing on downloaded files | both | yes (step 8d) |
+| checkbox | `embed-album-art` | Embed album art into file | both | yes (step 8d) |
+| checkbox | `cover-art-download` | Download cover.jpg to album folder | both | yes (step 8d) |
+| checkbox | `prefer-caa-art` | Use MusicBrainz Cover Art Archive for album art | both | yes (step 8d) |
+| checkbox | `single-to-album-enabled` | Match singles to their parent album | both | yes (step 8d) |
+| checkbox | `lrclib-enabled` | Generate .lrc lyrics files (LRClib) | both | yes (step 8d) |
+| checkbox | `replaygain-enabled` | Apply ReplayGain tags after download | both | yes (step 8d) |
+| number | `duration-tolerance-seconds` | Duration tolerance (seconds) | both | yes (step 8d) |
+| checkbox | `embed-spotify` | Spotify | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | Album ID | both | yes (step 8d) |
+| checkbox | `embed-itunes` | iTunes | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | Album ID | both | yes (step 8d) |
+| checkbox | `embed-musicbrainz` | MusicBrainz | both | yes (step 8d) |
+| checkbox |  | Recording ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | Release ID | both | yes (step 8d) |
+| checkbox |  | Release Comment | both | yes (step 8d) |
+| checkbox |  | Recording Comment | both | yes (step 8d) |
+| checkbox |  | Release Group ID | both | yes (step 8d) |
+| checkbox |  | Album Artist ID | both | yes (step 8d) |
+| checkbox |  | Release Track ID | both | yes (step 8d) |
+| checkbox |  | Release Type | both | yes (step 8d) |
+| checkbox |  | Release Date | both | yes (step 8d) |
+| checkbox |  | Original Date / Year | both | yes (step 8d) |
+| checkbox |  | Artist Sort Order | both | yes (step 8d) |
+| checkbox |  | Album Artist Sort Order | both | yes (step 8d) |
+| checkbox |  | Artists | both | yes (step 8d) |
+| checkbox |  | Record Label | both | yes (step 8d) |
+| checkbox |  | Release Status | both | yes (step 8d) |
+| checkbox |  | Release Country | both | yes (step 8d) |
+| checkbox |  | Barcode | both | yes (step 8d) |
+| checkbox |  | Media | both | yes (step 8d) |
+| checkbox |  | Total Discs | both | yes (step 8d) |
+| checkbox |  | Catalog Number | both | yes (step 8d) |
+| checkbox |  | Script | both | yes (step 8d) |
+| checkbox |  | ASIN | both | yes (step 8d) |
+| checkbox |  | ISRC | both | yes (step 8d) |
+| checkbox |  | Genres | both | yes (step 8d) |
+| checkbox | `mb-use-original-date-for-date` | Use original release date for DATE | both | yes (step 8d) |
+| checkbox | `embed-deezer` | Deezer | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | BPM | both | yes (step 8d) |
+| checkbox |  | ISRC | both | yes (step 8d) |
+| checkbox | `embed-audiodb` | AudioDB | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Mood | both | yes (step 8d) |
+| checkbox |  | Style | both | yes (step 8d) |
+| checkbox |  | Genre | both | yes (step 8d) |
+| checkbox | `embed-tidal` | Tidal | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | ISRC | both | yes (step 8d) |
+| checkbox |  | Copyright | both | yes (step 8d) |
+| checkbox |  | BPM | both | yes (step 8d) |
+| checkbox | `embed-qobuz` | Qobuz | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | ISRC | both | yes (step 8d) |
+| checkbox |  | Copyright | both | yes (step 8d) |
+| checkbox |  | Label | both | yes (step 8d) |
+| checkbox | `embed-lastfm` | Last.fm | both | yes (step 8d) |
+| checkbox |  | Genres | both | yes (step 8d) |
+| checkbox |  | URL | both | yes (step 8d) |
+| checkbox | `embed-genius` | Genius | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | URL | both | yes (step 8d) |
+| checkbox | `embed-hifi` | HiFi | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox |  | Artist ID | both | yes (step 8d) |
+| checkbox |  | ISRC | both | yes (step 8d) |
+| checkbox |  | BPM | both | yes (step 8d) |
+| checkbox |  | Copyright | both | yes (step 8d) |
+| checkbox | `embed-beatport` | Beatport | both | yes (step 8d) |
+| checkbox |  | BPM | both | yes (step 8d) |
+| checkbox |  | Key | both | yes (step 8d) |
+| checkbox |  | Label | both | yes (step 8d) |
+| checkbox |  | Catalog number | both | yes (step 8d) |
+| checkbox |  | Genre | both | yes (step 8d) |
+| checkbox |  | Track ID | both | yes (step 8d) |
+| checkbox | `beatport-search-all` | Look up every track, not just electronic ones Slower: one Beatport req | both | yes (step 8d) |
+| checkbox |  | Quality Audio quality (e.g. FLAC, MP3-320) | both | yes (step 8d) |
+| checkbox |  | Genre Merging Merge genres from Spotify + enabled sources | both | yes (step 8d) |
 
 **Import** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `import-folder-artist-override` | Use the top Staging folder as the artist | both | no |
-| checkbox | `import-transfer-permanent` | Music Library is my permanent library — never move files out | both | no |
+| checkbox | `import-folder-artist-override` | Use the top Staging folder as the artist | both | yes (step 8d) |
+| checkbox | `import-transfer-permanent` | Music Library is my permanent library — never move files out | both | yes (step 8d) |
 
 **Detail Pages** (both, 2)
 
@@ -2078,11 +2095,11 @@ Every top-level function, with its line today. A function is removed when the la
 | `_syncHybridOrderFromDOM` | 3058 | yes (step 7a) |
 | `_syncHybridHiddenSelects` | 3072 | yes (step 7a) |
 | `getHybridOrder` | 3080 | yes (step 7a) |
-| `buildArtSourceList` | 3096 | no |
-| `moveArtSource` | 3133 | no |
-| `toggleArtSource` | 3143 | no |
-| `getArtOrder` | 3150 | no |
-| `loadArtSourceOrder` | 3154 | no |
+| `buildArtSourceList` | 3096 | yes (step 8d) |
+| `moveArtSource` | 3133 | yes (step 8d) |
+| `toggleArtSource` | 3143 | yes (step 8d) |
+| `getArtOrder` | 3150 | yes (step 8d) |
+| `loadArtSourceOrder` | 3154 | yes (step 8d) |
 | `loadHybridSourceOrder` | 3194 | yes (step 7a) |
 | `updateLossyBitrateOptions` | 3236 | yes (step 6) |
 | `updateYoutubeTranscodeBitrateOptions` | 3250 | yes (step 7g) |
@@ -2195,10 +2212,10 @@ Every top-level function, with its line today. A function is removed when the la
 | `hydrabaseDisconnect` | 6634 | no |
 | `loadHydrabaseComparisons` | 6655 | no |
 | `hydrabaseSendRaw` | 6695 | no |
-| `toggleTagGroup` | 6743 | no |
-| `toggleServiceTags` | 6755 | no |
-| `_collectServiceTags` | 6773 | no |
-| `_getTagConfig` | 6782 | no |
+| `toggleTagGroup` | 6743 | yes (step 8d) |
+| `toggleServiceTags` | 6755 | yes (step 8d) |
+| `_collectServiceTags` | 6773 | yes (step 8d) |
+| `_getTagConfig` | 6782 | yes (step 8d) |
 | `_cfgStr` | 6803 | no |
 | `_cfgFloat` | 6812 | no |
 | `_cfgInt` | 6822 | no |
@@ -2346,10 +2363,10 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_quality_profile_preview_nudge.py` | yes (step 6) |
 | `tests/test_script_split_integrity.py` | no |
 | `tests/test_settings_never_wipes.py` | yes (step 7g) |
-| `tests/test_settings_persist_whitelist.py` | no |
+| `tests/test_settings_persist_whitelist.py` | yes (step 8d) |
 | `tests/test_settings_sources_tab.py` | yes (steps 4, 6, 7a) |
 | `tests/test_settings_subtitles_section.py` | no |
-| `tests/test_settings_templates_exposed.py` | no |
+| `tests/test_settings_templates_exposed.py` | yes (step 8d) |
 | `tests/test_settings_textarea_autosave.py` | yes (step 7g) |
 | `tests/test_sidebar_icon_parity.py` | no |
 | `tests/test_soulseek_observed_speed.py` | no |

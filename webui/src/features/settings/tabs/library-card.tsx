@@ -195,12 +195,15 @@ export function HintGroup({
   help,
   preview,
   hidden,
+  after,
 }: {
   children: ReactNode;
   help: ReactNode;
   /** the path preview slot, right after the field (_pathPreviewSlot) */
   preview?: ReactNode;
   hidden?: boolean;
+  /** what sits after the help body, before the help line (a list) */
+  after?: ReactNode;
 }) {
   const state = useHelp();
   const bits = helpBits(help, state);
@@ -212,6 +215,7 @@ export function HintGroup({
       <small className="settings-hint setting-help-body" hidden={!state.open}>
         {help}
       </small>
+      {after}
       {bits.line}
     </div>
   );

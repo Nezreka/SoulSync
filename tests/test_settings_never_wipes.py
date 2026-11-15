@@ -75,7 +75,9 @@ def test_every_field_the_save_reads_exists_on_the_page(save_body, index):
 def test_the_audit_is_actually_looking_at_something(save_body):
     # A parse that silently found nothing would make the check above pass.
     ids = _ids_read(save_body)
-    assert len(ids) > 150, f"only found {len(ids)} fields; the parse is wrong"
+    # fewer each step as tabs move to React (SETTINGS_PORT.md); a parse that
+    # found nothing would be well under this
+    assert len(ids) > 40, f"only found {len(ids)} fields; the parse is wrong"
     # a field still in the vanilla save (prowlarr-url was, until its Sources
     # panel went React in SETTINGS_PORT.md step 7g)
     assert "acoustid-api-key" in ids
@@ -108,4 +110,6 @@ def test_an_empty_string_the_user_typed_is_still_saved():
 
 def test_the_helpers_are_used_widely(save_body):
     # If most of the payload bypassed them the guard above would be hollow.
-    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 40
+    # (the save shrinks as tabs move to React, SETTINGS_PORT.md: 40 left at
+    # step 8d)
+    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 25

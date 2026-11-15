@@ -828,13 +828,7 @@ const LIBRARY_SUMMARIES = {
         const primary = set ? `${set} of 3 libraries set` : 'no primary libraries set';
         return extra ? `${primary} · ${extra} additional` : (set ? primary : 'no libraries set yet');
     },
-    'library-post-processing': () => {
-        const on = (id) => document.getElementById(id)?.checked;
-        const bits = [];
-        if (on('metadata-enabled')) bits.push('tagging');
-        if (on('embed-album-art')) bits.push('artwork');
-        return bits.length ? bits.join(' · ') : 'nothing enabled';
-    },
+    // 'library-post-processing': React (library-processing.tsx)
     // library-filtering: the Downloads tab is React (tabs/downloads.ts)
     // library-playlists, library-stats and library-discovery: the Discovery
     // tab is React and renders its own summaries (tabs/discovery.ts)
@@ -1412,115 +1406,7 @@ window.openSourceConfig = openSourceConfig;
 
 // Say it at the moment of choosing, not when a download fails days later.
 
-// ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
-const ART_SOURCES = [
-    { id: 'caa', name: 'Cover Art Archive', icon: '/static/img/brands/musicbrainz.png', emoji: '🎨' },
-    { id: 'deezer', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
-    { id: 'itunes', name: 'iTunes', icon: '/static/img/brands/itunes.png', emoji: '🍎' },
-    { id: 'spotify', name: 'Spotify', icon: '/static/img/brands/spotify.png', emoji: '🟢' },
-    { id: 'audiodb', name: 'TheAudioDB', icon: null, emoji: '💿' },
-];
-let _artSourceEnabled = {};   // id -> bool
-let _artVisualOrder = [];      // available source ids, in display order
-let _artAvailable = [];        // ids the user is connected to
-
-function buildArtSourceList() {
-    const container = document.getElementById('art-source-list');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!_artVisualOrder.length) {
-        container.innerHTML = '<div style="padding:10px;color:#888;font-size:13px;">No connected art sources available.</div>';
-        return;
-    }
-    const enabledOrder = getArtOrder();
-    _artVisualOrder.forEach((srcId) => {
-        const src = ART_SOURCES.find(s => s.id === srcId);
-        if (!src) return;
-        const enabled = _artSourceEnabled[srcId] === true;
-        const priorityNum = enabled ? enabledOrder.indexOf(srcId) + 1 : '';
-        const item = document.createElement('div');
-        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
-        item.dataset.sourceId = srcId;
-        item.innerHTML = `
-            <span class="hybrid-source-arrows">
-                <button class="hybrid-arrow-btn" onclick="moveArtSource('${srcId}', -1)" title="Move up">▲</button>
-                <button class="hybrid-arrow-btn" onclick="moveArtSource('${srcId}', 1)" title="Move down">▼</button>
-            </span>
-            ${src.icon
-                ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
-                : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
-            }
-            <span class="hybrid-source-name">${src.name}</span>
-            <span class="hybrid-source-priority">${priorityNum}</span>
-            <label class="hybrid-source-toggle">
-                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleArtSource('${srcId}', this.checked)">
-                <span class="toggle-track"></span>
-            </label>
-        `;
-        container.appendChild(item);
-    });
-}
-
-function moveArtSource(srcId, direction) {
-    const idx = _artVisualOrder.indexOf(srcId);
-    if (idx < 0) return;
-    const newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= _artVisualOrder.length) return;
-    [_artVisualOrder[idx], _artVisualOrder[newIdx]] = [_artVisualOrder[newIdx], _artVisualOrder[idx]];
-    buildArtSourceList();
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-function toggleArtSource(srcId, enabled) {
-    _artSourceEnabled[srcId] = enabled;
-    buildArtSourceList();
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-// Saved value: enabled sources in their displayed order.
-function getArtOrder() {
-    return _artVisualOrder.filter(id => _artSourceEnabled[id] === true);
-}
-
-async function loadArtSourceOrder(settings) {
-    const valid = new Set(ART_SOURCES.map(s => s.id));
-    const saved = (settings && settings.metadata_enhancement
-                   && Array.isArray(settings.metadata_enhancement.album_art_order))
-        ? settings.metadata_enhancement.album_art_order : [];
-
-    // Populate the saved order SYNCHRONOUSLY, filtered to known art sources
-    // (NOT by availability). This guarantees a save that fires before the
-    // availability fetch resolves — or while a saved source is temporarily
-    // disconnected — can never wipe the user's saved order. The backend skips
-    // any unavailable source at resolution time, and it re-activates on
-    // reconnect, so keeping it in the list is safe and preserves intent.
-    _artSourceEnabled = {};
-    _artVisualOrder = [];
-    saved.forEach(id => {
-        if (valid.has(id) && !_artVisualOrder.includes(id)) {
-            _artVisualOrder.push(id);
-            _artSourceEnabled[id] = true;
-        }
-    });
-    buildArtSourceList();
-
-    // Then fetch which sources are actually connected and append any that
-    // aren't already listed (shown disabled, ready to enable).
-    try {
-        const resp = await fetch('/api/metadata/art-sources');
-        const data = await resp.json();
-        _artAvailable = (data.available || []).map(s => (s && s.id) ? s.id : s);
-    } catch (e) {
-        _artAvailable = [];
-    }
-    _artAvailable.forEach(id => {
-        if (valid.has(id) && !_artVisualOrder.includes(id)) {
-            _artVisualOrder.push(id);
-            _artSourceEnabled[id] = false;
-        }
-    });
-    buildArtSourceList();
-}
+// the preferred album-art sources: React (library-processing.tsx)
 
 function updatePlexConfigurationButtons() {
     const plexUrl = document.getElementById('plex-url');
@@ -1749,7 +1635,6 @@ async function loadSettingsData() {
 
         // the download chain (mode and order): React, loaded in
         // SoulSyncSettings.hydrate above (sources-model.ts)
-        loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
         // Profile (ranked targets) — the per-source quality selects were removed.
         // the HiFi instance list: its React panel reads it with the settings
@@ -1774,50 +1659,8 @@ async function loadSettingsData() {
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
 
-        // Populate Post-Processing settings
-        document.getElementById('metadata-enabled').checked = settings.metadata_enhancement?.enabled !== false;
-        document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
-        document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
-        document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
-        document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
-        document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
-        document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
-        // audio_completeness_check and verify_flac_decode: the Quality tab is React
-        document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
-        // Retry Logic: the Downloads tab is React
-        // Load service master toggles
-        document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
-        document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
+        // Post-Processing: React (library-processing.tsx)
         loadMusicBrainzServerSettings(settings);
-        document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
-        // #1451: beets-style original-date-as-DATE (default off)
-        const _mbDateEl = document.getElementById('mb-use-original-date-for-date');
-        if (_mbDateEl) _mbDateEl.checked = settings.musicbrainz?.use_original_date_for_date === true;
-        document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
-        document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
-        document.getElementById('embed-tidal').checked = settings.tidal?.embed_tags !== false;
-        document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
-        document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
-        document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
-        document.getElementById('embed-hifi').checked = settings.hifi?.embed_tags !== false;
-        const embedBeatport = document.getElementById('embed-beatport');
-        if (embedBeatport) embedBeatport.checked = settings.beatport?.embed_tags !== false;
-        const beatportSearchAll = document.getElementById('beatport-search-all');
-        if (beatportSearchAll) beatportSearchAll.checked = settings.beatport?.search_all_tracks === true;
-        // Load per-tag toggles from data-config attributes
-        document.querySelectorAll('[data-config]').forEach(cb => {
-            const path = cb.dataset.config.split('.');
-            let val = settings;
-            for (const key of path) { val = val?.[key]; }
-            cb.checked = val !== false;
-        });
-        // Apply service disabled state to child tags
-        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi', 'beatport'].forEach(svc => {
-            const master = document.getElementById('embed-' + svc);
-            if (master) toggleServiceTags(master, svc);
-        });
-        document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
-
         // File Organization and every template: the Organization card is React
         // (library-organization.tsx, library-audiobooks.tsx)
         // the audiobook settings: the Organization card is React (library-audiobooks.tsx)
@@ -1844,13 +1687,7 @@ async function loadSettingsData() {
         // Filtering (explicit content, preferred version, size cap, genre
         // whitelist): the Downloads tab is React
 
-        // Populate Import settings
-        // replace_lower_quality: the Quality tab is React
-        // Default ON (legacy Artist/Album staging behavior) when the key is absent.
-        const _folderArtistEl = document.getElementById('import-folder-artist-override');
-        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
-        const _transferPermEl = document.getElementById('import-transfer-permanent');
-        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent !== false;
+        // Import: React (library-processing.tsx)
 
         // Populate M3U Export settings (the export and whole-library switches
         // and folder are on the Discovery tab, which is React)
@@ -2792,50 +2629,7 @@ async function hydrabaseSendRaw(textareaId) {
     }
 }
 
-// ── Tag embedding accordion helpers ──
-function toggleTagGroup(header) {
-    const body = header.nextElementSibling;
-    const arrow = header.querySelector('.tag-group-arrow');
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        arrow.classList.add('open');
-    } else {
-        body.style.display = 'none';
-        arrow.classList.remove('open');
-    }
-}
-
-function toggleServiceTags(masterCheckbox, serviceName) {
-    const group = masterCheckbox.closest('.tag-service-group');
-    if (!group) return;
-    const body = group.querySelector('.tag-service-body');
-    if (!body) return;
-    const childCheckboxes = body.querySelectorAll('input[type="checkbox"]');
-    childCheckboxes.forEach(cb => {
-        const label = cb.closest('.checkbox-label');
-        if (masterCheckbox.checked) {
-            if (label) label.classList.remove('disabled-tag');
-            cb.disabled = false;
-        } else {
-            if (label) label.classList.add('disabled-tag');
-            cb.disabled = true;
-        }
-    });
-}
-
-function _collectServiceTags(serviceName) {
-    const tags = {};
-    document.querySelectorAll(`[data-config^="${serviceName}.tags."]`).forEach(cb => {
-        const key = cb.dataset.config.split('.').pop();
-        tags[key] = cb.checked;
-    });
-    return tags;
-}
-
-function _getTagConfig(path) {
-    const el = document.querySelector(`[data-config="${path}"]`);
-    return el ? el.checked : true;
-}
+// the tag embedding groups: React (library-processing.tsx)
 
 // ── reading the form without destroying what is not on it ──────────────────
 // `getElementById('x')?.value || ''` looks defensive and is the opposite: when
@@ -2959,19 +2753,13 @@ async function saveSettings(quiet = false) {
         }
     }
 
-    // Validate the optional "Playlist File Naming" template before saving: it's a
-    // filename (no path separator) and must include $title — mirrors the server-side
-    // rule so a broken value can't be stored. Empty = feature off (allowed).
-    const _plItemTpl = (_cfgStr('template-playlist-item')).trim();
-    if (_plItemTpl) {
-        if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
-            showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
-            return;
-        }
-        if (!_plItemTpl.includes('$title')) {
-            showToast('Playlist File Naming must include $title so every file has a name.', 'error');
-            return;
-        }
+    // the optional "Playlist File Naming" template: a filename (no path
+    // separator) that includes $title, as the server requires. The field is
+    // the Organization card's (React), which holds its own saves back too
+    const _plItemErr = window.SoulSyncSettings?.playlistItemError?.();
+    if (_plItemErr) {
+        showToast(_plItemErr, 'error');
+        return;
     }
 
     const settings = {
@@ -2980,15 +2768,13 @@ async function saveSettings(quiet = false) {
             client_id: document.getElementById('spotify-client-id').value,
             client_secret: document.getElementById('spotify-client-secret').value,
             redirect_uri: document.getElementById('spotify-redirect-uri').value,
-            embed_tags: document.getElementById('embed-spotify').checked,
-            tags: _collectServiceTags('spotify')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
         tidal: {
             client_id: document.getElementById('tidal-client-id').value,
             client_secret: document.getElementById('tidal-client-secret').value,
             redirect_uri: document.getElementById('tidal-redirect-uri').value,
-            embed_tags: document.getElementById('embed-tidal').checked,
-            tags: _collectServiceTags('tidal')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
         plex: {
             base_url: document.getElementById('plex-url').value,
@@ -3042,8 +2828,7 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('lastfm-api-key').value,
             api_secret: document.getElementById('lastfm-api-secret').value,
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
-            embed_tags: document.getElementById('embed-lastfm').checked,
-            tags: _collectServiceTags('lastfm')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
         fanart: {
             // _cfgStr: undefined when the field is absent, so a save there
@@ -3057,13 +2842,11 @@ async function saveSettings(quiet = false) {
         },
         genius: {
             access_token: document.getElementById('genius-access-token').value,
-            embed_tags: document.getElementById('embed-genius').checked,
-            tags: _collectServiceTags('genius')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
         itunes: {
             country: document.getElementById('itunes-country').value || 'US',
-            embed_tags: document.getElementById('embed-itunes').checked,
-            tags: _collectServiceTags('itunes')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
         discogs: {
             token: document.getElementById('discogs-token').value,
@@ -3100,17 +2883,8 @@ async function saveSettings(quiet = false) {
         hifi_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
-        hifi: {
-            embed_tags: document.getElementById('embed-hifi').checked,
-            tags: _collectServiceTags('hifi')
-        },
-        // read only when the inputs exist: a missing element must leave the
-        // stored setting alone rather than save over it
-        beatport: document.getElementById('embed-beatport') ? {
-            embed_tags: document.getElementById('embed-beatport').checked,
-            search_all_tracks: _cfgBool('beatport-search-all'),
-            tags: _collectServiceTags('beatport')
-        } : undefined,
+        // hifi (embed_tags, tags): the Post-Processing card is React
+        // beatport (embed_tags, search_all_tracks, tags): the Post-Processing card is React
         // deezer_download and lidarr_download: their Sources panels are React
         // prowlarr, torrent_client and usenet_client: their Sources panels are React
         soundcloud_download: {
@@ -3118,44 +2892,23 @@ async function saveSettings(quiet = false) {
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
             // to migrate existing configs.
         },
-        qobuz: {
-            embed_tags: document.getElementById('embed-qobuz').checked,
-            tags: _collectServiceTags('qobuz'),
-        },
+        // qobuz (embed_tags, tags): the Post-Processing card is React
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
         },
-        metadata_enhancement: {
-            enabled: document.getElementById('metadata-enabled').checked,
-            embed_album_art: document.getElementById('embed-album-art').checked,
-            cover_art_download: document.getElementById('cover-art-download').checked,
-            prefer_caa_art: document.getElementById('prefer-caa-art').checked,
-            album_art_order: getArtOrder(),
-            single_to_album: document.getElementById('single-to-album-enabled').checked,
-            lrclib_enabled: document.getElementById('lrclib-enabled').checked,
-            // one key of the tags dict each: the server stores a dotted key at
-            // its path, so the Organization card's three tag options (React)
-            // are kept. a whole tags dict here would wipe them
-            'tags.quality_tag': _getTagConfig('metadata_enhancement.tags.quality_tag'),
-            'tags.genre_merge': _getTagConfig('metadata_enhancement.tags.genre_merge'),
-        },
+        // metadata_enhancement: the Post-Processing card is React
         musicbrainz: {
             ...musicBrainzServerSettings,
-            embed_tags: document.getElementById('embed-musicbrainz').checked,
-            use_original_date_for_date: _cfgBool('mb-use-original-date-for-date'),
-            tags: _collectServiceTags('musicbrainz')
+            // embed_tags, use_original_date_for_date and tags: the
+            // Post-Processing card is React (library-processing.tsx)
         },
         deezer: {
             app_id: document.getElementById('deezer-app-id').value,
             app_secret: document.getElementById('deezer-app-secret').value,
             redirect_uri: document.getElementById('deezer-redirect-uri').value,
-            embed_tags: document.getElementById('embed-deezer').checked,
-            tags: _collectServiceTags('deezer')
+            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
-        audiodb: {
-            embed_tags: document.getElementById('embed-audiodb').checked,
-            tags: _collectServiceTags('audiodb')
-        },
+        // audiodb (embed_tags, tags): the Post-Processing card is React
         // file_organization: the Organization card is React
         mcp: {
             enabled: _cfgBool('mcp-enabled'),
@@ -3168,12 +2921,8 @@ async function saveSettings(quiet = false) {
         // playlist_sync, listening_stats and discover: the Discovery tab is
         // React and saves its own keys
         // content_filter and genre_whitelist: the Downloads tab is React
-        post_processing: {
-            replaygain_enabled: document.getElementById('replaygain-enabled').checked,
-            // audio_completeness_check and verify_flac_decode: the Quality tab is React
-            duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
-            // the five retry keys: the Downloads tab (Retry Logic) is React
-        },
+        // post_processing: the Post-Processing card (replaygain, duration),
+        // Quality and Downloads tabs are React
         library: {
             // music_paths, sample_paths, music_videos_path, podcasts_path: the
             // Folders card is React (library-folders.tsx)
@@ -3184,12 +2933,7 @@ async function saveSettings(quiet = false) {
         // podcasts (download_path, media_format): the Folders and Organization
         // cards are React
         // audiobooks: React (library-audiobooks.tsx)
-        import: {
-            // replace_lower_quality: the Quality tab is React
-            folder_artist_override: _cfgBool('import-folder-artist-override'),
-            transfer_is_permanent: _cfgBool('import-transfer-permanent'),
-            // staging_path: the Folders card is React
-        },
+        // import: the Import card and the Quality tab are React
         playlists: {
             // materialize_path and materialize_mode: the Folders card is React
         },

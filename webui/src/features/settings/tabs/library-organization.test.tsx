@@ -15,7 +15,13 @@ import { createSettingsStore, type SettingsPayload, type SettingsStore } from '.
 import { shape, vanilla, withHelpLines } from './__fixtures__/shape';
 import { LibraryTab } from './library-folders';
 import { OrganizationCard } from './library-organization';
-import { musicOrgSummary, SCENARIO_KEY, templateErrors, templatesOf } from './organization';
+import {
+  musicOrgSummary,
+  playlistItemError,
+  SCENARIO_KEY,
+  templateErrors,
+  templatesOf,
+} from './organization';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -176,6 +182,20 @@ describe('the rules', () => {
     );
   });
 
+  it('the playlist file naming rule: a file name with $title, empty is off', () => {
+    const err = (playlist_item: string) =>
+      playlistItemError({ file_organization: { templates: { playlist_item } } });
+    expect(err('')).toBeNull();
+    expect(err('$position - $title')).toBeNull();
+    expect(err('$artist/$title')).toBe(
+      "Playlist File Naming can't contain a folder separator ( / or \\ ) — it names the file, not a path.",
+    );
+    expect(err('$artist\\$title')).toMatch(/folder separator/);
+    expect(err('$position - $artist')).toBe(
+      'Playlist File Naming must include $title so every file has a name.',
+    );
+  });
+
   it('sums the card up as LIBRARY_SUMMARIES did', () => {
     expect(musicOrgSummary(false, 'a/b/c')).toBe('organizing off');
     expect(musicOrgSummary(true, '$albumartist/$album/$track - $title')).toBe(
@@ -259,10 +279,19 @@ describe('the card', () => {
     expect(host.templateErrors()).toEqual([
       'Album template must include at least one folder (use / separator)',
     ]);
+    // the playlist file naming rule holds the saves back too
+    fireEvent.change(input('template-album-path'), { target: { value: '$albumartist/$album' } });
+    fireEvent.change(input('template-playlist-item'), { target: { value: '$artist' } });
+    expect(await store.flush()).toBe(false);
+    expect(host.playlistItemError()).toMatch(/must include \$title/);
+    fireEvent.change(input('template-playlist-item'), { target: { value: '' } });
     fireEvent.change(input('template-album-path'), { target: { value: '$albumartist/$album' } });
     expect(await store.flush()).toBe(true);
     expect(saved()).toEqual({
-      file_organization: { 'templates.album_path': '$albumartist/$album' },
+      file_organization: {
+        'templates.album_path': '$albumartist/$album',
+        'templates.playlist_item': '',
+      },
       ui_appearance: { sidebar_visualizer: 'wave' },
     });
   });

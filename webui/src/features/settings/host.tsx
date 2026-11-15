@@ -29,7 +29,7 @@ import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';
 import { LogsTab } from './tabs/logs-tab';
-import { templateErrors } from './tabs/organization';
+import { playlistItemError, templateErrors } from './tabs/organization';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
 import { SourcesTab } from './tabs/sources-tab';
@@ -68,6 +68,8 @@ export interface SoulSyncSettingsApi {
   /** what is wrong with the naming templates (the Library tab's
    *  Organization card): the page save refuses while any is set, and says so */
   templateErrors: () => string[];
+  /** the Playlist File Naming rule, which the page save toasts on its own */
+  playlistItemError: () => string | null;
 }
 
 declare global {
@@ -112,7 +114,8 @@ export function createSettingsHost({
   // a naming template that would not work holds every save back, as the old
   // page refused its whole save (validateFileOrganizationTemplates)
   const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
-  store.block(() => errors().length > 0);
+  const itemError = () => (tabs.library ? playlistItemError(store.getState().settings) : null);
+  store.block(() => errors().length > 0 || !!itemError());
 
   function show(tab: string) {
     if (tabs[tab]) opened[tab] = (opened[tab] ?? 0) + 1;
@@ -168,6 +171,7 @@ export function createSettingsHost({
     ported: () => Object.keys(tabs),
     set: (section, key, value) => store.set(section, key, value),
     templateErrors: errors,
+    playlistItemError: itemError,
   };
 }
 
