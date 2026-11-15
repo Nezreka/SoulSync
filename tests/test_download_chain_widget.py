@@ -445,23 +445,25 @@ def test_the_behaviour_settings_are_their_own_group(index):
 
     The claim is position: after BOTH columns, not inside either one."""
     assert 'id="dlchain-behaviour"' in index
-    assert "<h3>Download Behaviour</h3>" in index
 
     pool_at = index.index('id="dlchain-pool"')
     chain_at = index.index('id="dlchain-list"')
     group_at = index.index('id="dlchain-behaviour"')
     assert group_at > chain_at > pool_at, "the group is still tangled in a column"
 
-    # and it is an expandable card like Retry Logic / Album Publishing, not a
-    # block welded to the bottom of the widget. the collapse handler walks
-    # header.nextElementSibling, so the body has to be the very next element.
-    head = index.index('<h3>Download Behaviour</h3>')
-    hdr = index.rfind('<div class="settings-section-header', 0, head)
-    assert "settings-section-header" in index[hdr:head]
-    after = index[index.index("</div>", head) + 6:]
-    assert after.lstrip().startswith('<div class="settings-section-body'), (
-        "the body is not the header's next sibling - the collapse toggle will miss it"
-    )
+    # The group itself is React now (SETTINGS_PORT.md step 5): the vanilla
+    # wrapper holds its slot, and the card renders through the shared Section,
+    # whose header is followed by its body (the collapse handler walks
+    # header.nextElementSibling).
+    slot_at = index.index('data-stg-react="downloads" data-stg-part="behaviour"')
+    assert group_at < slot_at < index.index("</div>", group_at), "the slot left the wrapper"
+    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
+    tab = (tabs / "downloads-tab.tsx").read_text(encoding="utf-8")
+    assert 'title="Download Behaviour"' in tab
+    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
+    header = parts.index('className="settings-section-header collapsed"')
+    body = parts.index('className="settings-section-body collapsed"')
+    assert header < body and parts.count("settings-section-header") == 1
 
 
 def test_the_behaviour_group_is_music_only(js):
@@ -479,9 +481,13 @@ def test_the_behaviour_group_is_music_only(js):
 def test_moving_them_did_not_orphan_their_settings(js, index):
     """They are read by saveSettings by id, so the move is safe only as long as
     every id still exists — which is exactly the wipe this page already had."""
+    # React renders them now (downloads-tab.tsx, SETTINGS_PORT.md step 5) and
+    # saves only what changes, so a missing id can no longer wipe a value
+    tab = (Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings"
+           / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
     for el in ("stream-source", "max-concurrent-downloads", "source-search-timeout",
                "test-all-sources-btn"):
-        assert f'id="{el}"' in index, el
+        assert f'id="{el}"' in tab, el
 
 
 def test_grouping_can_never_lose_a_source(js):

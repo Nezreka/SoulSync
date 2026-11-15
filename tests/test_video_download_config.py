@@ -248,6 +248,11 @@ def test_the_downloads_tab_holds_only_download_settings():
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
         if t:
             titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    # Download Behaviour, Retry Logic, Album Publishing and Filtering are React
+    # now (SETTINGS_PORT.md step 5): their cards are rendered from the tab, in
+    # this order, into slots after Source Settings
+    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
+    titles += re.findall(r'title="([^"]+)"', tab[tab.index("function Behaviour("):])
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards
     assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing",

@@ -49,38 +49,8 @@ function syncAcoustidRequireVerifiedVisibility() {
 }
 window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
 
-// #923: "Prefer explicit versions" only makes sense while explicit content is
-// allowed at all — grey the sub-checkbox out (keeping its saved value) when
-// the parent filter is off. Called on settings load + the parent's onchange.
-function syncPreferExplicitState() {
-    const parent = document.getElementById('allow-explicit');
-    if (!parent) return;
-    // #2081: "Never download clean versions" hangs off the same parent
-    for (const id of ['prefer-explicit', 'exclude-clean']) {
-        const child = document.getElementById(id);
-        if (!child) continue;
-        child.disabled = !parent.checked;
-        const label = child.closest('.checkbox-label');
-        if (label) label.style.opacity = parent.checked ? '' : '0.45';
-    }
-}
-window.syncPreferExplicitState = syncPreferExplicitState;
-
-// Retry Logic: the two numeric rows are only meaningful when their parent toggle
-// is on — hide them otherwise. "Retries per query" needs Exhaustive retry;
-// "Minimum matching mismatches" needs the version-mismatch fallback.
-function syncRetryConditionalRows() {
-    const pairs = [
-        ['retry-exhaustive', 'retries-per-query-row'],
-        ['accept-version-mismatch-fallback', 'version-mismatch-min-count-row'],
-    ];
-    for (const [toggleId, rowId] of pairs) {
-        const toggle = document.getElementById(toggleId);
-        const row = document.getElementById(rowId);
-        if (row) row.style.display = (toggle && toggle.checked) ? '' : 'none';
-    }
-}
-window.syncRetryConditionalRows = syncRetryConditionalRows;
+// (syncPreferExplicitState and syncRetryConditionalRows lived here: Filtering
+// and Retry Logic are React now, src/features/settings/tabs/downloads-tab.tsx)
 
 // Sign in with OIDC: the provider's settings (and the admin's connect row
 // inside them) only mean something while the toggle is on, so they hide when
@@ -1090,14 +1060,7 @@ const LIBRARY_SUMMARIES = {
         if (on('embed-album-art')) bits.push('artwork');
         return bits.length ? bits.join(' · ') : 'nothing enabled';
     },
-    'library-filtering': () => {
-        const explicit = document.getElementById('allow-explicit');
-        const genre = document.getElementById('genre-whitelist-enabled');
-        const bits = [];
-        if (explicit) bits.push(explicit.checked ? 'explicit allowed' : 'explicit blocked');
-        if (genre?.checked) bits.push('genre whitelist on');
-        return bits.join(' · ');
-    },
+    // library-filtering: the Downloads tab is React (tabs/downloads.ts)
     // library-playlists, library-stats and library-discovery: the Discovery
     // tab is React and renders its own summaries (tabs/discovery.ts)
     'library-video-prefs': () => {
@@ -3519,11 +3482,7 @@ async function loadSettingsData() {
         // Populate Download Source settings
         const _savedMode = settings.download_source?.mode || 'soulseek';
         document.getElementById('download-source-mode').value = RETIRED_DOWNLOAD_SOURCES.has(_savedMode) ? 'soulseek' : _savedMode;
-        document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
-        document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
-        // #1056 — 0/blank = each source's built-in default
-        const _sst = document.getElementById('source-search-timeout');
-        if (_sst) _sst.value = settings.download_source?.source_search_timeout || '';
+        // stream source, concurrency and search timeout: the Downloads tab is React
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
@@ -3668,12 +3627,7 @@ async function loadSettingsData() {
         document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
         document.getElementById('verify-flac-decode').checked = settings.post_processing?.verify_flac_decode === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
-        document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
-        document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
-        document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
-        document.getElementById('accept-version-mismatch-fallback').checked = settings.post_processing?.accept_version_mismatch_fallback === true;
-        document.getElementById('version-mismatch-min-count').value = settings.post_processing?.version_mismatch_min_count ?? 2;
-        if (typeof syncRetryConditionalRows === 'function') syncRetryConditionalRows();
+        // Retry Logic: the Downloads tab is React
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -3836,12 +3790,7 @@ async function loadSettingsData() {
         updateLossyBitrateOptions();
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
 
-        // Album Publishing (#999) — atomic album publish, opt-in, default off.
-        const _atomicPub = document.getElementById('album-atomic-publish');
-        if (_atomicPub) _atomicPub.checked = settings.album_downloads?.atomic_publish === true;
-        const _atomicRecover = document.getElementById('album-atomic-recover');
-        // Defaults ON — an absent value means "recover", not "quarantine".
-        if (_atomicRecover) _atomicRecover.checked = settings.album_downloads?.atomic_recover_orphans !== false;
+        // Album Publishing (#999): the Downloads tab is React
 
         // Listening Stats and Discovery are on the Discovery tab, which is React
         document.getElementById('lossy-copy-options').style.display =
@@ -3870,26 +3819,8 @@ async function loadSettingsData() {
         const _redlEl = document.getElementById('redownload-externally-deleted');
         if (_redlEl) _redlEl.checked = settings.library?.redownload_externally_deleted !== false;
 
-        // Populate Content Filter settings
-        document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
-        document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
-        document.getElementById('exclude-clean').checked = settings.content_filter?.exclude_clean === true;
-        syncPreferExplicitState();
-
-        // Prefer a version (off = ''), lives under soulseek with the other match settings
-        const _pvEl = document.getElementById('preferred-version');
-        if (_pvEl) _pvEl.value = settings.soulseek?.preferred_version || '';
-        const _sizeCap = document.getElementById('music-max-mb-per-minute');
-        if (_sizeCap) _sizeCap.value = settings.download_source?.max_mb_per_minute ?? 0;
-
-        // Populate Genre Whitelist
-        const gwEnabled = settings.genre_whitelist?.enabled === true;
-        document.getElementById('genre-whitelist-enabled').checked = gwEnabled;
-        const gwContainer = document.getElementById('genre-whitelist-container');
-        if (gwContainer) gwContainer.style.display = gwEnabled ? '' : 'none';
-        if (gwEnabled) {
-            _genreWhitelistRender(settings.genre_whitelist?.genres || []);
-        }
+        // Filtering (explicit content, preferred version, size cap, genre
+        // whitelist): the Downloads tab is React
 
         // Populate Import settings
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
@@ -6100,100 +6031,7 @@ function collectSamplePaths() {
     return paths;
 }
 
-// ── Genre Whitelist ──
-let _genreWhitelistCache = [];
-
-function _genreWhitelistRender(genres) {
-    _genreWhitelistCache = genres && genres.length ? genres : [];
-    const container = document.getElementById('genre-whitelist-chips');
-    const countEl = document.getElementById('genre-whitelist-count');
-    if (!container) return;
-    if (!_genreWhitelistCache.length) {
-        container.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:13px;padding:4px 0;">No genres configured. Click "Reset to Defaults" to load the default whitelist.</div>';
-        if (countEl) countEl.textContent = '';
-        return;
-    }
-    const searchVal = (document.getElementById('genre-whitelist-search')?.value || '').toLowerCase();
-    const filtered = searchVal ? _genreWhitelistCache.filter(g => g.toLowerCase().includes(searchVal)) : _genreWhitelistCache;
-    container.innerHTML = filtered.map(g =>
-        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" data-genre="${escapeHtml(g)}">&times;</button></span>`
-    ).join('');
-    if (countEl) countEl.textContent = `${_genreWhitelistCache.length} genres`;
-    _initGenreChipClickHandler();
-}
-
-function _initGenreChipClickHandler() {
-    const container = document.getElementById('genre-whitelist-chips');
-    if (!container) return;
-    container.onclick = (e) => {
-        const btn = e.target.closest('.genre-chip-x');
-        if (btn) {
-            e.preventDefault();
-            _genreWhitelistRemove(btn.dataset.genre);
-        }
-    };
-}
-
-function _genreWhitelistRemove(genre) {
-    _genreWhitelistCache = _genreWhitelistCache.filter(g => g !== genre);
-    _genreWhitelistRender(_genreWhitelistCache);
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-function _genreWhitelistAdd(genre) {
-    genre = genre.trim();
-    if (!genre) return;
-    if (_genreWhitelistCache.some(g => g.toLowerCase() === genre.toLowerCase())) return;
-    _genreWhitelistCache.push(genre);
-    _genreWhitelistCache.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    _genreWhitelistRender(_genreWhitelistCache);
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-async function _genreWhitelistReset() {
-    try {
-        const resp = await fetch('/api/genre-whitelist/defaults');
-        const data = await resp.json();
-        if (data.genres) {
-            _genreWhitelistCache = data.genres;
-            _genreWhitelistRender(_genreWhitelistCache);
-            if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-            showToast(`Loaded ${data.genres.length} default genres`, 'success');
-        }
-    } catch (e) {
-        showToast('Failed to load defaults', 'error');
-    }
-}
-
-// Toggle whitelist container visibility + init
-document.addEventListener('change', (e) => {
-    if (e.target.id === 'genre-whitelist-enabled') {
-        const container = document.getElementById('genre-whitelist-container');
-        if (container) container.style.display = e.target.checked ? '' : 'none';
-        // Auto-populate with defaults on first enable if empty
-        if (e.target.checked && _genreWhitelistCache.length === 0) {
-            _genreWhitelistReset();
-        }
-    }
-});
-
-// Search/add handler
-document.addEventListener('keydown', (e) => {
-    if (e.target.id === 'genre-whitelist-search' && e.key === 'Enter') {
-        e.preventDefault();
-        _genreWhitelistAdd(e.target.value);
-        e.target.value = '';
-    }
-});
-document.addEventListener('input', (e) => {
-    if (e.target.id === 'genre-whitelist-search') {
-        _genreWhitelistRender(_genreWhitelistCache);
-    }
-});
-
-function _collectGenreWhitelist() {
-    return _genreWhitelistCache;
-}
+// The genre whitelist is React now: src/features/settings/tabs/downloads-tab.tsx
 
 // The live log viewer is React now: src/features/settings/tabs/logs-tab.tsx
 
@@ -6688,7 +6526,7 @@ async function saveSettings(quiet = false) {
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
             observed_speed_fallback_enabled: document.getElementById('soulseek-observed-speed-fallback-enabled').checked,
             min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 250),
-            preferred_version: _cfgStr('preferred-version'),
+            // preferred_version: the Downloads tab (Filtering) is React
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
             auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked,
             cleanup_scope: document.getElementById('soulseek-cleanup-scope').value === 'all' ? 'all' : 'own'
@@ -6773,14 +6611,8 @@ async function saveSettings(quiet = false) {
             hybrid_primary: document.getElementById('hybrid-primary-source').value,
             hybrid_secondary: document.getElementById('hybrid-secondary-source').value,
             hybrid_order: getHybridOrder(),
-            stream_source: document.getElementById('stream-source').value,
-            max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
-            // #1056 — streaming-source search timeout override; 0 = source defaults
-            source_search_timeout: _cfgInt('source-search-timeout', 0),
-            max_mb_per_minute: (() => {
-                const value = _cfgFloat('music-max-mb-per-minute', 0);
-                return value === undefined ? undefined : Math.max(0, value);
-            })(),
+            // stream_source, max_concurrent, source_search_timeout and
+            // max_mb_per_minute: the Downloads tab is React
             // Stalled-torrent knobs (rendered in the torrent client section).
             // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
             // 0 stays 0 (disabled).
@@ -6936,25 +6768,13 @@ async function saveSettings(quiet = false) {
         },
         // playlist_sync, listening_stats and discover: the Discovery tab is
         // React and saves its own keys
-        content_filter: {
-            allow_explicit: document.getElementById('allow-explicit').checked,
-            prefer_explicit: document.getElementById('prefer-explicit').checked,
-            exclude_clean: document.getElementById('exclude-clean').checked
-        },
-        genre_whitelist: {
-            enabled: document.getElementById('genre-whitelist-enabled').checked,
-            genres: _collectGenreWhitelist(),
-        },
+        // content_filter and genre_whitelist: the Downloads tab is React
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             audio_completeness_check: document.getElementById('audio-completeness-check').checked,
             verify_flac_decode: document.getElementById('verify-flac-decode').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
-            retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
-            retry_exhaustive: document.getElementById('retry-exhaustive').checked,
-            retries_per_query: Math.max(1, parseInt(document.getElementById('retries-per-query').value, 10) || 5),
-            accept_version_mismatch_fallback: document.getElementById('accept-version-mismatch-fallback').checked,
-            version_mismatch_min_count: Math.max(1, parseInt(document.getElementById('version-mismatch-min-count').value, 10) || 2),
+            // the five retry keys: the Downloads tab (Retry Logic) is React
         },
         library: {
             music_paths: collectMusicPaths(),
@@ -7056,11 +6876,7 @@ async function saveSettings(quiet = false) {
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked
         },
-        album_downloads: {
-            // Atomic album publishing (#999) — opt-in, default off.
-            atomic_publish: _cfgBool('album-atomic-publish'),
-            atomic_recover_orphans: _cfgBool('album-atomic-recover')
-        },
+        // album_downloads: the Downloads tab (Album Publishing) is React
         m3u_export: {
             // enabled, library_enabled and library_path: the Discovery tab
             relative_paths: _cfgBool('m3u-relative-paths'),

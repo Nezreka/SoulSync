@@ -1,0 +1,127 @@
+<div
+  class="settings-section-header collapsed"
+  data-stg="downloads"
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>Download Behaviour</h3>
+  <span class="settings-section-hint">Preview source, concurrency &amp; timeouts</span>
+</div>
+<div class="settings-section-body collapsed" data-stg="downloads">
+  <div class="settings-group dlchain-behaviour" data-stg="downloads">
+    <div id="dlchain-extra" class="dlchain-extra">
+      <div class="form-group">
+        <label>Stream / Preview Source:</label>
+        <select id="stream-source" class="form-select">
+          <option value="youtube">YouTube (Instant)</option>
+          <option value="active">Active Download Source</option>
+          <option value="deezer_preview">Deezer 30s Preview (Instant)</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <div class="setting-help-text setting-help-body" hidden>
+          Where to stream audio when previewing tracks. YouTube is instant and requires no setup.
+          "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) — if that's
+          Soulseek, YouTube is used automatically. "Deezer 30s Preview" plays Deezer's 30 second
+          clip of the song straight away, no Deezer account needed. Songs Deezer has no clip for use
+          YouTube. With queue auto-download off, missing queue songs play their clip instead of
+          being skipped.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Concurrent Downloads:</label>
+        <select id="max-concurrent-downloads" class="form-select">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 (Default)</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <div class="setting-help-text setting-help-body" hidden>
+          Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker due
+          to per-user upload limits. Higher values speed up large playlists and wishlists. Takes
+          effect after a restart, since the worker threads are created at startup.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Source search timeout (seconds):</label>
+        <input
+          type="number"
+          id="source-search-timeout"
+          min="0"
+          max="120"
+          step="1"
+          placeholder="0 = source defaults"
+          style="max-width: 180px"
+        />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <div class="setting-help-text setting-help-body" hidden>
+          How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer, and the
+          stream preview search).
+          <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s, Deezer
+          10s. Raise it if a slow connection makes searches give up too early; lower means failing
+          over to the next source faster. Clamped to 5&ndash;120. Soulseek is not affected — it has
+          its own Search Timeout setting above.
+        </div>
+      </div>
+      <div class="form-group">
+        <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">
+          Test all sources
+        </button>
+        <span class="setting-help-text" style="margin-left: 10px"
+          >Checks every selected source &amp; configured connection.</span
+        >
+      </div>
+    </div>
+  </div>
+</div>

@@ -12,7 +12,15 @@
  *    the rest (toggleSettingHelp).
  */
 
-import { type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useState } from 'react';
+import {
+  Children,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  isValidElement,
+  useCallback,
+  useState,
+} from 'react';
 
 /** the page's collapsible tile, exactly as its inline handler did it. the
  *  settings search and the tab switch change these classes on the nodes
@@ -142,16 +150,27 @@ function HelpIcon({
   );
 }
 
+/** the text a node renders, as the DOM's textContent would read it. help
+ *  bodies hold only text and inline tags (strong, em, code, br) */
+export function textOf(node: ReactNode): string {
+  let out = '';
+  Children.forEach(node, (child) => {
+    if (typeof child === 'string' || typeof child === 'number') out += String(child);
+    else if (isValidElement<{ children?: ReactNode }>(child)) out += textOf(child.props.children);
+  });
+  return out;
+}
+
 /**
- * The "i" and the help line for one setting. `text` is the help as plain
- * text (what the body's textContent reads); the body itself is rendered by
+ * The "i" and the help line for one setting. `text` is the help (plain text,
+ * or the body's own markup, read with textOf); the body itself is rendered by
  * the caller, `hidden` while closed, where the vanilla markup had it.
  *
  * `icon` goes where the "i" sat in the markup: present (hidden) only when the
  * whole help fits on the line. `line` is the last child of the form-group.
  */
-export function helpBits(text: string, help: { open: boolean; toggle: () => void }) {
-  const { line, rest } = helpFirstLine(text);
+export function helpBits(text: ReactNode, help: { open: boolean; toggle: () => void }) {
+  const { line, rest } = helpFirstLine(typeof text === 'string' ? text : textOf(text));
   if (!line) return { icon: <HelpIcon {...help} />, line: null };
   return {
     icon: rest ? null : <HelpIcon {...help} hidden />,

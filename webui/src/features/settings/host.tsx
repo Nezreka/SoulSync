@@ -26,6 +26,7 @@ import { settingsStore, type SettingsPayload, type SettingsStore } from './setti
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
+import { DownloadsTab } from './tabs/downloads-tab';
 import { LogsTab } from './tabs/logs-tab';
 
 export type SettingsTabKey =
@@ -68,6 +69,7 @@ declare global {
 export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
   appearance: AppearanceTab,
   discovery: DiscoveryTab,
+  downloads: DownloadsTab,
   logs: LogsTab,
 };
 

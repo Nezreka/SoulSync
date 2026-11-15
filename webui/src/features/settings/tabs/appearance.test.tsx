@@ -21,11 +21,14 @@ let posted: SettingsPayload[];
 let applied: Array<[string, unknown]>;
 
 beforeEach(() => {
-  posted = [];
+  // each store saves into its own list: a save the last test left queued
+  // must not land in this one's
+  const sink: SettingsPayload[] = [];
+  posted = sink;
   applied = [];
   store = createSettingsStore({
     post: (body) => {
-      posted.push(structuredClone(body));
+      sink.push(structuredClone(body));
       return Promise.resolve({ success: true });
     },
     delay: 0,

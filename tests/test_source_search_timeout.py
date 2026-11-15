@@ -80,6 +80,7 @@ def test_soulseek_is_untouched():
 
 
 def test_settings_ui_wired():
-    assert 'id="source-search-timeout"' in _src('webui/index.html')
-    js = _src('webui/static/settings.js')
-    assert 'source_search_timeout' in js
+    # Download Behaviour is React now (SETTINGS_PORT.md step 5)
+    tab = _src('webui/src/features/settings/tabs/downloads-tab.tsx')
+    assert 'id="source-search-timeout"' in tab
+    assert "store.set('download_source', 'source_search_timeout', toInt(raw, 0))" in tab

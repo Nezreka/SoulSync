@@ -23,7 +23,6 @@ describe('where sections live', () => {
     ['MetaSync', 'connections'],
     ['Notifications', 'connections'],
     ['Import Lists', 'discovery'],
-    ['Filtering', 'downloads'],
     ['Video Quality', 'quality'],
     ['Album Releases', 'quality'],
     ['Video Preferences', 'library'],
@@ -122,7 +121,10 @@ describe('help under each setting', () => {
       '#settings-page .info-icon[onclick*="toggleSettingHelp"]',
     );
     const lines = document.querySelectorAll('#settings-page .stg-help-line');
-    expect(icons.length).toBeGreaterThan(90);
+    // the vanilla icons only: 104 when the React port began, fewer with each
+    // tab it moves (their help lines are checked by each tab's parity test,
+    // src/features/settings/tabs/*.test.tsx). this test goes with the last tab
+    expect(icons.length).toBeGreaterThan(0);
     // nearly every icon has a body; the handful that don't keep their icon
     expect(lines.length).toBeGreaterThan(icons.length * 0.9);
   });

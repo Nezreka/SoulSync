@@ -1,0 +1,222 @@
+<div
+  class="settings-section-header collapsed"
+  data-stg="downloads"
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>Filtering</h3>
+  <span
+    class="settings-section-hint"
+    data-stg-summary="library-filtering"
+    data-stg-fallback="Explicit content &amp; genre whitelist"
+    >Explicit content &amp; genre whitelist</span
+  >
+</div>
+<div class="settings-section-body collapsed" data-stg="downloads">
+  <div class="settings-group" data-stg="downloads">
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input
+          type="checkbox"
+          id="allow-explicit"
+          checked
+          onchange="if (typeof syncPreferExplicitState === 'function') syncPreferExplicitState();"
+        />
+        Allow explicit content in downloads
+      </label>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+    </div>
+    <div class="help-text setting-help-body" hidden>
+      When disabled, tracks marked as explicit on Spotify will be skipped during matched downloads.
+      Does not affect manual Soulseek searches.
+    </div>
+
+    <!-- #923: sub-setting — only meaningful while the parent allows explicit
+                                     (syncPreferExplicitState in settings.js greys it out otherwise) -->
+    <div class="form-group" style="margin-left: 26px">
+      <label class="checkbox-label">
+        <input type="checkbox" id="prefer-explicit" />
+        Prefer explicit versions when matching
+      </label>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+    </div>
+    <div class="help-text setting-help-body" style="margin-left: 26px" hidden>
+      When picking between Soulseek results, files marked Explicit/Uncensored rank higher and
+      Clean/Censored/Radio-Edit files rank lower. Nothing is ever skipped &mdash; if only a clean
+      version exists, it still downloads. Requires explicit content to be allowed.
+    </div>
+
+    <!-- #2081: the hard version of the preference above -->
+    <div class="form-group" style="margin-left: 26px">
+      <label class="checkbox-label">
+        <input type="checkbox" id="exclude-clean" />
+        Never download clean versions
+      </label>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+    </div>
+    <div class="help-text setting-help-body" style="margin-left: 26px" hidden>
+      Files marked Clean, Censored, Edited or Radio Edit are never picked for a track that is not
+      that cut itself. If only a clean version exists, the track waits on your Wishlist until a real
+      one turns up. Requires explicit content to be allowed.
+    </div>
+
+    <div class="form-group">
+      <label for="music-max-mb-per-minute">Maximum music download size (MB/min)</label>
+      <input
+        type="number"
+        id="music-max-mb-per-minute"
+        min="0"
+        step="0.1"
+        value="0"
+        onchange="if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();"
+      />
+      <div class="help-text">
+        0 disables the limit. At 10 MB/min, a 3:30 track may be up to 35 MB (1 MB = 1,000,000
+        bytes). Oversized candidates are skipped before download. Uses the advertised duration, or
+        the requested track length when unavailable. Album releases use the album length. Sources
+        without size or duration information cannot be checked. This does not resize existing files
+        or limit post-processing output.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="preferred-version">Prefer a version when one exists</label>
+      <select
+        id="preferred-version"
+        onchange="if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();"
+      >
+        <option value="">Off &mdash; take what the source asked for</option>
+        <option value="extended">Extended mix / long version</option>
+        <option value="radio">Radio edit / radio version</option>
+        <option value="remix">Remix</option>
+        <option value="live">Live</option>
+        <option value="acoustic">Acoustic</option>
+        <option value="instrumental">Instrumental</option>
+        <option value="demo">Demo</option>
+      </select>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+    </div>
+    <div class="help-text setting-help-body" hidden>
+      Spotify often only carries one cut of a track. With a version picked here, a matching file
+      wins over the plain one when both turn up in the same Soulseek search. Nothing is ever skipped
+      &mdash; if that version isn't out there, the normal one downloads exactly as it does now. Off
+      by default.
+      <br /><br />
+      Live, remix, acoustic and instrumental files are normally thrown out on sight when the source
+      didn't ask for one. Picking any of those four here lifts that for the version you picked, so a
+      live take of a similarly titled song can be accepted when the real track is nowhere to be
+      found.
+    </div>
+
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input
+          type="checkbox"
+          id="genre-whitelist-enabled"
+          onchange="
+            if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+          "
+        />
+        Enable strict genre filtering
+      </label>
+      <span
+        class="info-icon"
+        role="button"
+        tabindex="0"
+        title="What's this?"
+        onclick="toggleSettingHelp(this)"
+        onkeydown="
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleSettingHelp(this);
+          }
+        "
+        >i</span
+      >
+    </div>
+    <div class="help-text setting-help-body" hidden style="margin-bottom: 12px">
+      When enabled, only genres on the whitelist below are kept during enrichment. Junk tags (artist
+      names, radio shows, playlist names) are silently dropped. When disabled, all genres pass
+      through unchanged.
+    </div>
+    <div id="genre-whitelist-container" style="display: none">
+      <div class="form-group" style="margin-bottom: 8px">
+        <input
+          type="text"
+          id="genre-whitelist-search"
+          placeholder="Search or add genre..."
+          class="form-input"
+          style="margin-bottom: 8px"
+        />
+      </div>
+      <div id="genre-whitelist-chips" class="genre-whitelist-chips"></div>
+      <div class="form-actions" style="margin-top: 8px; gap: 8px">
+        <button class="test-button" onclick="_genreWhitelistReset()">Reset to Defaults</button>
+        <span
+          id="genre-whitelist-count"
+          style="color: rgba(255, 255, 255, 0.4); font-size: 12px"
+        ></span>
+      </div>
+    </div>
+  </div>
+</div>

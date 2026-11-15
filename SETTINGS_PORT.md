@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 15 2026 (steps 1 to 4 done: the scaffold, Appearance, Logs, Discovery)
+- **Last updated:** Nov 15 2026 (steps 1 to 5 done: the scaffold, Appearance, Logs, Discovery, Downloads without the chain)
 
 ## Goal
 
@@ -54,7 +54,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
 | Tab: Sources | not started | 80 controls and buttons |
-| Tab: Downloads | not started | 32 controls and buttons |
+| Tab: Downloads | **done except the chain** (step 5 below) | 19 of 32 ported: Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: Source Settings (the download chain, 4 controls), which moves with the Sources tab; the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from one listed quirk. |
 | Tab: Quality | not started | 67 controls and buttons |
 | Tab: Library | not started | 236 controls and buttons |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
@@ -64,12 +64,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 3 of 9 tabs (Discovery without its video-only section), 35 of 678 controls, 20 of 333 `settings.js` functions removed, 3 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`).
+**Progress:** 4 of 9 tabs (Discovery without its video-only section, Downloads without the chain and its video-only form), 54 of 678 controls, 28 of 333 `settings.js` functions removed, 9 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 12,405 |
-| `webui/static/settings.js` | 10,187 | 9,723 |
+| `webui/index.html` | 12,823 | 12,022 |
+| `webui/static/settings.js` | 10,187 | 9,539 |
 | `webui/static/init.js` | 5,264 | 5,208 |
 
 ## Completed steps
@@ -360,12 +360,85 @@ Also `useDraft()`: a number field shows what is being typed and saves what it pa
 | `tsc --noEmit` / `oxlint` / build | clean / 0 warnings / builds |
 | **Browser, old page vs ported page** (sandbox stubs `/api/discovery/*` and logs posts; settings with Discovery values) | Values, summaries (live), section headers, help lines, two opened helps, search for "hemisphere": **identical**. All four sections open: **0 pixels differ**. Changing four settings: the old page sent a full save, lookback and hemisphere (3 requests); the ported page sent one settings save with exactly the four changed keys, and the lookback (2 requests). Same resulting values. |
 
+### Step 5: the Downloads tab, without the download chain (Nov 15 2026)
+
+**What it is.** Download Behaviour (preview source, concurrency, search timeout, Test all sources), Retry Logic, Album Publishing, and Filtering (explicit content, the size cap, preferred version, the genre whitelist). It looks and behaves as before, with one listed exception.
+
+**What is not in it, and why.**
+
+- **Source Settings (the download chain).** One widget edits three chains (music in `/api/settings`, video in `/api/video/downloads/config`, audiobooks via the Library tab's controls), and its writes feed the Sources tab: the source tiles, the hidden `download-source-mode` select that `updateDownloadSourceUI` reads, the legacy hybrid list whose status probing the tiles use. Porting it alone would have React feeding vanilla code it does not own, so it moves together with the Sources tab, its other half.
+- **The video slskd form** (`#video-slskd-container`, 9 fields): video only, for the video pass.
+
+**Where the markup was.** Three runs, replaced by three slots:
+
+| Slot | What | Lines | Fixture |
+|---|---|---|---|
+| `downloads`/`behaviour` | Download Behaviour. The slot sits **inside** the vanilla `<div id="dlchain-behaviour">` wrapper, which stays: the chain hides it under the video and audiobook chains, and keeps hiding its own node. | 90 | `downloads-behaviour.vanilla.html` |
+| `downloads`/`retry` | Retry Logic and Album Publishing | 170 | `downloads-retry.vanilla.html` |
+| `downloads`/`filtering` | Filtering | 139 | `downloads-filtering.vanilla.html` |
+
+**How each control works now**
+
+| Control | Saves |
+|---|---|
+| Stream / Preview Source | `download_source.stream_source` |
+| Concurrent Downloads | `download_source.max_concurrent` (`parseInt \|\| 3`, as before) |
+| Source search timeout | `download_source.source_search_timeout` (`_cfgInt(…, 0)`: blank saves 0) |
+| Test all sources | calls `window.testAllSources()`, the Sources tab's probe (still vanilla) |
+| Retry next-best / Exhaustive / Accept version mismatch | `post_processing.retry_next_candidate_on_mismatch` / `retry_exhaustive` / `accept_version_mismatch_fallback` |
+| Retries per query / Minimum matching mismatches | `post_processing.retries_per_query` (`max(1, parseInt \|\| 5)`) / `version_mismatch_min_count` (`max(1, parseInt \|\| 2)`). Each row shows only while its switch is on (was `syncRetryConditionalRows`). |
+| Publish albums only when complete / Recover interrupted albums | `album_downloads.atomic_publish` / `atomic_recover_orphans` |
+| Allow explicit / Prefer explicit / Never download clean | `content_filter.*`. The two children grey out (disabled, label at 0.45 opacity) while explicit is blocked (was `syncPreferExplicitState`). |
+| Maximum music download size | `download_source.max_mb_per_minute` (`max(0, _cfgFloat(…, 0))`) |
+| Prefer a version | `soulseek.preferred_version` |
+| Enable strict genre filtering, the genre list | `genre_whitelist.enabled`, `genre_whitelist.genres`. Enter adds (case-blind, sorted), × removes, typing filters, Reset to Defaults loads `/api/genre-whitelist/defaults` with its toast. Switching it on with an empty list loads the defaults. |
+
+The Filtering header's live summary (`library-filtering`) is rendered by the tab and was taken out of `LIBRARY_SUMMARIES`.
+
+**Shared change (`parts.tsx`).** `helpBits` now takes the help body as markup and reads its first sentence with `textOf`, so the long formatted help texts (bold, italics, code, line breaks) exist once, as the body. Two more help shapes are handled by the components here: the help inside the form-group (`Field`) and the `setting-row` (`Row`).
+
+**Removed from `settings.js`**
+
+| What | Lines |
+|---|---|
+| `syncPreferExplicitState`, `syncRetryConditionalRows` and their `window` exports | 31 |
+| `library-filtering` from `LIBRARY_SUMMARIES` | 8 |
+| `loadSettingsData`: preview source, concurrency, search timeout; the five retry lines and their sync call; Album Publishing; the whole Filtering block (explicit, preferred version, size cap, genre whitelist) | 5 + 6 + 6 + 19 |
+| Collector: `soulseek.preferred_version`; four `download_source` keys (`mode`, `hybrid_*` stay: the chain); `content_filter`; `genre_whitelist`; the five retry keys of `post_processing` (the rest stay: Library and Quality); `album_downloads` | 32 |
+| The whole Genre Whitelist section: the cache, 6 functions, 3 document listeners | 93 |
+
+**Differences from the old page, all deliberate**
+
+| What | Before | Now | Why |
+|---|---|---|---|
+| **Genre whitelist off at load** | The page never read the saved genres, so its list stayed empty, **and every later full-page save posted `genres: []`**: a saved list was wiped by any unrelated change while the whitelist was off. Turning it on then loaded the defaults. | The saved genres are read always and saved only when they change. Turning it on keeps a saved list, and loads the defaults only when there is none. | A data-loss bug on dev. A save of only the changed keys cannot reproduce it. |
+| The chip list after Enter | Stays filtered to what was typed (the box is cleared without a re-render); clearing the box does not bring the rest back until something is typed. | Shows the full list straight away. | A rendering quirk, not a behaviour anyone relies on. |
+| Saves | Every value on the page. | Only the keys that changed. | As every tab. |
+
+**Test fix that applies to all tab tests.** The fake `post` in each test pushed into a module-level `posted` array, so a save one test left queued (delay 0) could land in the next test's array. Each store now saves into its own list (`appearance`, `discovery`, `downloads` tests). Found when one test passed alone and failed in its file.
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity, all three parts, against the frozen markup after `settings.js`'s own help lines | Same elements, ids, classes, attributes and text. Passed first time. |
+| Behaviour tests (`downloads.test.tsx`) | 14 more: resolving saved values, the Filtering summary, adding genres, Behaviour's saves and Test all sources, the conditional rows, Retry/Publishing saves with the collector's clamping, a setting-row "i", the explicit greying, Filtering's saves (a negative cap saves 0), the defaults on switching on, a saved list kept on switching on, Enter/filter/×, the empty list's message, a failing Reset. |
+| Repointed | `src/test/music-size-limit-settings.test.ts` → `.tsx`: it ran the load line and collector snippet from `settings.js`, now loads and saves 0, 10 and 0.5 through the React tab, plus a negative cap and "not saved until changed". `settings-regroup-1822.test.ts`: the Filtering row moves to the parity test, and "finds a body for every info icon" now asks for more than zero vanilla icons (it asked for more than 90; 104 at the start of the port, 80 now, falling with each tab). |
+| `src/features/settings` + `src/test` | 76 (twice, to rule out the leak) + 1,205 pass |
+| Python tests that read the markup, scripts or these settings (86 files) | 2,237 passed, 10 failed. **9** pinned the moved code and are repointed (below); after repointing, their 5 files pass (206). **1** is pre-existing: `tests/downloads/test_atomic_album_publish.py::test_publish_order_is_total_even_for_names_that_only_differ_in_case` creates two files whose names differ only in case, which this Windows drive cannot hold; it fails on dev the same way. |
+| Repointed Python tests (intent kept, now read the React tab) | `test_download_chain_widget.py` (2: the behaviour group still sits after both chain columns, now as a slot inside the vanilla wrapper, rendered through the shared Section; its ids exist in the tab), `test_explicit_preference.py` (2: the sub-options are disabled with the parent and save their own keys), `test_preferred_version.py` (3: settings.js no longer touches the key, the tab saves it only when changed, "off" is the first option, every option is a value the backend accepts), `test_source_search_timeout.py` (1), `test_video_download_config.py` (1: the Downloads tab's sections are still exactly Source Settings, Download Behaviour, Retry Logic, Album Publishing, Filtering, in that order). |
+| `tsc --noEmit` / `oxlint` / build | clean / 0 warnings (4 fixed: number fields could stringify an object) / builds |
+| **Browser, old page vs ported page** (sandbox with Downloads values set: hybrid, explicit blocked, a 3-genre whitelist…) | From clean servers: values and disabled states, the conditional rows, the summary, section headers, 14 help lines, the chips, the chain hiding Download Behaviour under the video chain, the four changes' saved values and the number of saves: **identical**. Screenshot with all four sections open: only the help button's dot differs (63 pixels). The one difference: the chip list right after Enter (above). |
+
+**Learned.** Restart the sandboxes before each comparison: a failed run leaves its saves in the server's memory, and the two pages then start from different settings. And never wait on a background run with `pgrep -f <its args>`: the waiting loop's own command line matches, so it never ends (it cost half an hour here).
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | step 5 | **Downloads tab ported, without the chain.** New: `tabs/downloads.ts`, `tabs/downloads-tab.tsx`, their test, three fixtures. `parts.tsx`: help lines read formatted help. Markup replaced by three slots (Behaviour inside the vanilla `#dlchain-behaviour` wrapper); the four sections' helpers, summary, load, save and the genre whitelist removed from `settings.js`. Test stores now save into their own lists. Details under "Completed steps". |
 | Nov 15 | `2802c8ed0` (step 4) | **Discovery tab ported (music).** New: `tabs/parts.tsx` (shared sections, summaries, help lines), `tabs/discovery.ts`, `tabs/discovery-tab.tsx`, their test, two fixtures. Store: values with their own endpoints, and a load counter. Markup replaced by two slots; the tab's summaries, load, save, lookback and hemisphere code removed from `settings.js`. Details under "Completed steps". |
 | Nov 15 | `f1b9ccf3f` (step 3) | **Logs tab ported.** New: `tabs/logs.ts`, `tabs/logs-tab.tsx`, their test, a frozen fixture, and the shared test helper `tabs/__fixtures__/shape.ts`. Markup replaced by one slot; the 12 `_log*` functions and the tab-switch hook removed from `settings.js`; a socket bridge added to `core.js`. Host: every tab is told which tab is open (`active`). Details under "Completed steps". |
 | Nov 15 | `d58589201` (step 2) | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
@@ -826,63 +899,63 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `video-slskd-url` | slskd URL: | both | no |
-| password | `video-slskd-api-key` | API Key: | both | no |
-| number | `video-slskd-search-timeout` | Search Timeout (seconds): | both | no |
-| number | `video-slskd-search-timeout-buffer` | Search Timeout Buffer (seconds): | both | no |
-| number | `video-slskd-search-min-delay` | Minimum Delay Between Searches (seconds): | both | no |
-| number | `video-slskd-min-peer-speed` | Minimum Peer Upload Speed (Mbps): | both | no |
-| number | `video-slskd-max-peer-queue` | Max Peer Queue Length: | both | no |
-| number | `video-slskd-download-timeout` | Download Timeout (minutes): | both | no |
-| checkbox | `video-slskd-auto-clear` | Auto-clear slskd search history | both | no |
+| text | `video-slskd-url` | slskd URL: | both | no (video pass) |
+| password | `video-slskd-api-key` | API Key: | both | no (video pass) |
+| number | `video-slskd-search-timeout` | Search Timeout (seconds): | both | no (video pass) |
+| number | `video-slskd-search-timeout-buffer` | Search Timeout Buffer (seconds): | both | no (video pass) |
+| number | `video-slskd-search-min-delay` | Minimum Delay Between Searches (seconds): | both | no (video pass) |
+| number | `video-slskd-min-peer-speed` | Minimum Peer Upload Speed (Mbps): | both | no (video pass) |
+| number | `video-slskd-max-peer-queue` | Max Peer Queue Length: | both | no (video pass) |
+| number | `video-slskd-download-timeout` | Download Timeout (minutes): | both | no (video pass) |
+| checkbox | `video-slskd-auto-clear` | Auto-clear slskd search history | both | no (video pass) |
 
 **Source Settings** (both, 4)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `download-source-mode` | Download Source: {Soulseek Only / YouTube Only / Tidal Only / Qobuz Only / HiFi Only (Free Lossless) / Deezer  | both | no |
-| search | `dlchain-filter` |  | both | no |
-| select | `hybrid-primary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no |
-| select | `hybrid-secondary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no |
+| select | `download-source-mode` | Download Source: {Soulseek Only / YouTube Only / Tidal Only / Qobuz Only / HiFi Only (Free Lossless) / Deezer  | both | no (with Sources) |
+| search | `dlchain-filter` |  | both | no (with Sources) |
+| select | `hybrid-primary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no (with Sources) |
+| select | `hybrid-secondary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no (with Sources) |
 
 **Download Behaviour** (both, 4)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `stream-source` | Stream / Preview Source: {YouTube (Instant) / Active Download Source / Deezer 30s Preview (Instant)} | both | no |
-| select | `max-concurrent-downloads` | Concurrent Downloads: {1 / 2 / 3 (Default) / 4 / 5 / 6 / 8 …} | both | no |
-| number | `source-search-timeout` | Source search timeout (seconds): | both | no |
-| button | `test-all-sources-btn` | Test all sources | both | no |
+| select | `stream-source` | Stream / Preview Source: {YouTube (Instant) / Active Download Source / Deezer 30s Preview (Instant)} | both | yes (step 5) |
+| select | `max-concurrent-downloads` | Concurrent Downloads: {1 / 2 / 3 (Default) / 4 / 5 / 6 / 8 …} | both | yes (step 5) |
+| number | `source-search-timeout` | Source search timeout (seconds): | both | yes (step 5) |
+| button | `test-all-sources-btn` | Test all sources | both | yes (step 5) |
 
 **Retry Logic** (both, 5)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `retry-next-candidate` | Retry next-best candidate on mismatch | both | no |
-| checkbox | `retry-exhaustive` | Exhaustive retry (separate budget per source) | both | no |
-| number | `retries-per-query` | Retries per query (per source) | both | no |
-| checkbox | `accept-version-mismatch-fallback` | Accept best version mismatch as last resort | both | no |
-| number | `version-mismatch-min-count` | Minimum matching mismatches before accepting | both | no |
+| checkbox | `retry-next-candidate` | Retry next-best candidate on mismatch | both | yes (step 5) |
+| checkbox | `retry-exhaustive` | Exhaustive retry (separate budget per source) | both | yes (step 5) |
+| number | `retries-per-query` | Retries per query (per source) | both | yes (step 5) |
+| checkbox | `accept-version-mismatch-fallback` | Accept best version mismatch as last resort | both | yes (step 5) |
+| number | `version-mismatch-min-count` | Minimum matching mismatches before accepting | both | yes (step 5) |
 
 **Album Publishing** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `album-atomic-publish` | Publish albums only when complete | both | no |
-| checkbox | `album-atomic-recover` | Recover interrupted albums on startup | both | no |
+| checkbox | `album-atomic-publish` | Publish albums only when complete | both | yes (step 5) |
+| checkbox | `album-atomic-recover` | Recover interrupted albums on startup | both | yes (step 5) |
 
 **Filtering** (both, 8)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `allow-explicit` | Allow explicit content in downloads | both | no |
-| checkbox | `prefer-explicit` | Prefer explicit versions when matching | both | no |
-| checkbox | `exclude-clean` | Never download clean versions | both | no |
-| number | `music-max-mb-per-minute` | Maximum music download size (MB/min) | both | no |
-| select | `preferred-version` | Prefer a version when one exists {Off — take what the source asked for / Extended mix / long version / Radio e | both | no |
-| checkbox | `genre-whitelist-enabled` | Enable strict genre filtering | both | no |
-| text | `genre-whitelist-search` |  | both | no |
-| button |  | Reset to Defaults | both | no |
+| checkbox | `allow-explicit` | Allow explicit content in downloads | both | yes (step 5) |
+| checkbox | `prefer-explicit` | Prefer explicit versions when matching | both | yes (step 5) |
+| checkbox | `exclude-clean` | Never download clean versions | both | yes (step 5) |
+| number | `music-max-mb-per-minute` | Maximum music download size (MB/min) | both | yes (step 5) |
+| select | `preferred-version` | Prefer a version when one exists {Off — take what the source asked for / Extended mix / long version / Radio e | both | yes (step 5) |
+| checkbox | `genre-whitelist-enabled` | Enable strict genre filtering | both | yes (step 5) |
+| text | `genre-whitelist-search` |  | both | yes (step 5) |
+| button |  | Reset to Defaults | both | yes (step 5) |
 
 ### Quality (67)
 
@@ -1584,8 +1657,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `closeSupportModal` | 9 | no |
 | `copyAddress` | 14 | no |
 | `syncAcoustidRequireVerifiedVisibility` | 46 | no |
-| `syncPreferExplicitState` | 55 | no |
-| `syncRetryConditionalRows` | 72 | no |
+| `syncPreferExplicitState` | 55 | yes (step 5) |
+| `syncRetryConditionalRows` | 72 | yes (step 5) |
 | `syncOidcProviderBlock` | 89 | no |
 | `_qpHandleProfileControlChange` | 116 | no |
 | `_isVideoOwnedField` | 125 | no |
@@ -1772,12 +1845,12 @@ Every top-level function, with its line today. A function is removed when the la
 | `addSamplePathRow` | 6184 | no |
 | `_removeSamplePathRow` | 6204 | no |
 | `collectSamplePaths` | 6210 | no |
-| `_genreWhitelistRender` | 6223 | no |
-| `_initGenreChipClickHandler` | 6242 | no |
-| `_genreWhitelistRemove` | 6254 | no |
-| `_genreWhitelistAdd` | 6260 | no |
-| `_genreWhitelistReset` | 6270 | no |
-| `_collectGenreWhitelist` | 6311 | no |
+| `_genreWhitelistRender` | 6223 | yes (step 5) |
+| `_initGenreChipClickHandler` | 6242 | yes (step 5) |
+| `_genreWhitelistRemove` | 6254 | yes (step 5) |
+| `_genreWhitelistAdd` | 6260 | yes (step 5) |
+| `_genreWhitelistReset` | 6270 | yes (step 5) |
+| `_collectGenreWhitelist` | 6311 | yes (step 5) |
 | `_logClassify` | 6322 | yes (step 3) |
 | `_logClassToCSS` | 6336 | yes (step 3) |
 | `_logViewerInit` | 6340 | yes (step 3) |
@@ -1935,8 +2008,8 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_config_persistence.py` | no |
 | `tests/test_dashboard_seam.py` | no |
 | `tests/test_docs_settings_labels.py` | yes (step 4) |
-| `tests/test_download_chain_widget.py` | no |
-| `tests/test_explicit_preference.py` | no |
+| `tests/test_download_chain_widget.py` | yes (step 5) |
+| `tests/test_explicit_preference.py` | yes (step 5) |
 | `tests/test_hybrid_source_unready_ui.py` | no |
 | `tests/test_lastfm_username_setting.py` | no |
 | `tests/test_listenbrainz_username_setting.py` | no |
@@ -1944,7 +2017,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_m3u_relative_paths.py` | no |
 | `tests/test_music_disk_guard.py` | no |
 | `tests/test_navidrome_login_endpoints.py` | no |
-| `tests/test_preferred_version.py` | no |
+| `tests/test_preferred_version.py` | yes (step 5) |
 | `tests/test_prowlarr_throttle.py` | no |
 | `tests/test_quality_panel_layout.py` | no |
 | `tests/test_quality_profile_preview_nudge.py` | no |
@@ -1957,12 +2030,12 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_settings_textarea_autosave.py` | no |
 | `tests/test_sidebar_icon_parity.py` | no |
 | `tests/test_soulseek_observed_speed.py` | no |
-| `tests/test_source_search_timeout.py` | no |
+| `tests/test_source_search_timeout.py` | yes (step 5) |
 | `tests/test_subtitle_whisper.py` | no |
 | `tests/test_ui_features_1909.py` | no |
 | `tests/test_vanilla_globals_resolve.py` | no |
 | `tests/test_video_custom_formats.py` | no |
-| `tests/test_video_download_config.py` | no |
+| `tests/test_video_download_config.py` | yes (step 5) |
 | `tests/test_video_import_lists.py` | no |
 | `tests/test_video_notifications.py` | no |
 | `tests/test_video_quality_profiles.py` | no |
@@ -1980,7 +2053,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/video/test_youtube_embed_opts.py` | no |
 | `webui/src/test/metasync-settings-status.test.ts` | no |
 | `webui/src/test/mobile-css-batch2.test.ts` | no |
-| `webui/src/test/music-size-limit-settings.test.ts` | no |
+| `webui/src/test/music-size-limit-settings.test.ts` | yes (step 5, now `.tsx`) |
 | `webui/src/test/musicbrainz-settings.test.ts` | no |
 | `webui/src/test/oidc-provider-block-toggle.test.ts` | no |
 | `webui/src/test/outside-text-is-escaped.test.ts` | no |
@@ -1989,7 +2062,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/settings-library-tabs.test.ts` | no |
 | `webui/src/test/settings-load-element-drift.test.ts` | no |
 | `webui/src/test/settings-navigation.test.ts` | no |
-| `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4) |
+| `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4, 5) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |
 | `webui/src/test/settings-source-autotest.test.ts` | no |
 | `webui/src/test/settings-source-tiles-chains.test.ts` | no |

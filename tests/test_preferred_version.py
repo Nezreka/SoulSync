@@ -41,6 +41,7 @@ when off — ``preferred_hit`` is 0 for every candidate with no preference set, 
 the sort tuple compares exactly as it did before.
 """
 
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -633,32 +634,39 @@ def test_settings_js_round_trips_the_preference():
     rather than claiming to be empty.
 
     The test was pinning the bug. It pins the fix now.
+
+    Filtering is React now (SETTINGS_PORT.md step 5): the tab saves the key
+    only when it is changed, so an absent field cannot say anything about it,
+    and settings.js no longer reads or writes it at all.
     """
     settings_js = _read('webui/static/settings.js')
-    assert "preferred_version: _cfgStr('preferred-version')" in settings_js
-    assert "preferred_version: document.getElementById" not in settings_js, (
-        "back to reading the element directly - an absent field will wipe the stored value"
-    )
-    assert "settings.soulseek?.preferred_version || ''" in settings_js
+    tab = _read('webui/src/features/settings/tabs/downloads-tab.tsx')
+    values = _read('webui/src/features/settings/tabs/downloads.ts')
+    assert "'preferred-version'" not in settings_js
+    assert "store.set('soulseek', 'preferred_version', event.target.value)" in tab
+    assert "settings.soulseek?.preferred_version as string) || ''" in values
 
 
 def test_the_dropdown_exists_and_defaults_to_off():
-    markup = _read('webui/index.html')
-    assert 'id="preferred-version"' in markup
+    # React renders it from PREFERRED_VERSIONS (SETTINGS_PORT.md step 5)
+    import re
+    tab = _read('webui/src/features/settings/tabs/downloads-tab.tsx')
+    values = _read('webui/src/features/settings/tabs/downloads.ts')
+    assert 'id="preferred-version"' in tab
     # the empty option has to come first so an untouched install reads as off
-    select_at = markup.index('id="preferred-version"')
-    first_option = markup.index('<option', select_at)
-    assert 'value=""' in markup[first_option:first_option + 40]
+    block = values[values.index('export const PREFERRED_VERSIONS'):]
+    assert re.search(r"value: '([^']*)'", block).group(1) == ""
 
 
 def test_every_offered_option_is_an_accepted_value():
     """A dropdown entry the backend silently discards would look like a setting
     that does nothing."""
     import re
-    markup = _read('webui/index.html')
-    select_at = markup.index('id="preferred-version"')
-    block = markup[select_at:markup.index('</select>', select_at)]
-    values = [v for v in re.findall(r'<option value="([^"]*)"', block) if v]
+    # React renders the options from PREFERRED_VERSIONS (SETTINGS_PORT.md step 5)
+    values_ts = _read('webui/src/features/settings/tabs/downloads.ts')
+    block = values_ts[values_ts.index('export const PREFERRED_VERSIONS'):]
+    block = block[:block.index('] as const;')]
+    values = [v for v in re.findall(r"value: '([^']*)'", block) if v]
     assert values, "dropdown lost its options"
     for value in values:
         assert value in MusicMatchingEngine.PREFERABLE_VERSIONS, value

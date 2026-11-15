@@ -22,7 +22,10 @@ let calls: Array<{ url: string; method: string; body: unknown }>;
 let replies: Record<string, unknown>;
 
 beforeEach(() => {
-  posted = [];
+  // each store saves into its own list: a save the last test left queued
+  // must not land in this one's
+  const sink: SettingsPayload[] = [];
+  posted = sink;
   calls = [];
   replies = {
     '/api/discovery/lookback-period': { period: '90' },
@@ -30,7 +33,7 @@ beforeEach(() => {
   };
   store = createSettingsStore({
     post: (body) => {
-      posted.push(structuredClone(body));
+      sink.push(structuredClone(body));
       return Promise.resolve({ success: true });
     },
     delay: 0,
