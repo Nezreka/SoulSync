@@ -77,6 +77,16 @@ def tab():
     return _read(_TABS + "sources-tab.tsx")
 
 
+def _react_panels() -> str:
+    """the panels ported to React (step 7c on), one component per panel"""
+    return _read(_TABS + "source-panels.tsx")
+
+
+def _react_slots(index: str, region: str) -> list[str]:
+    """the parts of the React panel slots inside a stretch of index.html"""
+    return re.findall(r'data-stg-react="sources" data-stg-part="([a-z-]+)"', region)
+
+
 def _modal(tab: str) -> str:
     """the React source modal (step 7b)"""
     return tab.split("export function SourceModal(", 1)[1].split("\nexport function", 1)[0]
@@ -167,16 +177,24 @@ def test_the_shared_tabs_carry_no_side_gating(index):
 
 def test_every_source_config_lives_on_the_sources_tab(index):
     """A group nested under another tab's body would stay hidden no matter what
-    its own data-stg said — the parent is display:none."""
+    its own data-stg said — the parent is display:none. A panel ported to React
+    sits in a slot in the same place (step 7c on)."""
     body = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
+    react = _react_panels()
+    slots = _react_slots(index, body)
     for cid in _SOURCE_CONTAINERS:
-        assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
+        if f'id="{cid}"' in react:
+            assert slots, f"{cid} is React but no panel slot is on the Sources tab"
+        else:
+            assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
 
 
 def test_no_source_config_is_left_behind_on_downloads(index):
     # Exactly one home each; a duplicated id would break getElementById too.
+    react = _react_panels()
     for cid in _SOURCE_CONTAINERS:
-        assert index.count(f'id="{cid}"') == 1, f"{cid} appears more than once"
+        count = index.count(f'id="{cid}"') + react.count(f'id="{cid}"')
+        assert count == 1, f"{cid} appears {count} times"
 
 
 def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab, model):
@@ -281,11 +299,24 @@ def test_the_modal_is_a_dialog(tab):
 
 def test_the_panels_park_in_a_hidden_home(index):
     """They are real page markup, not templates — they need somewhere to live
-    that is not on screen when no modal is open."""
+    that is not on screen when no modal is open. A React panel renders into a
+    slot in the same hidden home, and only portals into the modal while open."""
     assert 'id="source-config-home" hidden' in index
     home = index.split('id="source-config-home"', 1)[1].split("end source-config-home", 1)[0]
+    react = _react_panels()
+    slots = _react_slots(index, home)
     for cid in _SOURCE_CONTAINERS:
-        assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
+        if f'id="{cid}"' in react:
+            # the component that renders it is dispatched from a slot in the home
+            comp = react[:react.index(f'id="{cid}"')].rsplit("export function ", 1)[1].split("(", 1)[0]
+            dispatch = react.split("export function SourcePanels(", 1)[1]
+            parts = [part for part in slots if f"part === '{part}'" in dispatch
+                     and f"<{comp}" in dispatch.split(f"part === '{part}'", 1)[1].split("return null", 1)[0]]
+            assert parts, f"{cid} ({comp}) has no slot in the home div"
+        else:
+            assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
+    panel = react.split("function Panel(", 1)[1].split("\n/** a status line", 1)[0]
+    assert "createPortal(node, body)" in panel and "data-react-panel" in panel
 
 
 def test_the_tiles_refresh_when_the_modal_closes(js, tab):

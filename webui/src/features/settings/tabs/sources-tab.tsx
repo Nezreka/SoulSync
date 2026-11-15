@@ -19,6 +19,7 @@ import {
 import type { SettingsTabProps } from '../host';
 
 import { settingsStore } from '../settings-store';
+import { SourcePanels } from './source-panels';
 import {
   CHAIN_KINDS,
   type ChainKind,
@@ -601,7 +602,9 @@ export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) 
     );
     setTesting(false);
     setBroken(false);
-    body.current.appendChild(panel);
+    // a panel ported to React portals itself into the body (source-panels.tsx)
+    const vanilla = !panel.hasAttribute('data-react-panel');
+    if (vanilla) body.current.appendChild(panel);
     document.body.classList.add('src-modal-open');
     try {
       w.probeSourceOnOpen?.(id);
@@ -617,7 +620,7 @@ export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) 
       clearTimeout(focus);
       // back home before the modal hides, so a later open never moves a
       // node that is still sitting in a hidden modal
-      document.getElementById('source-config-home')?.appendChild(panel);
+      if (vanilla) document.getElementById('source-config-home')?.appendChild(panel);
       document.body.classList.remove('src-modal-open');
     };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -723,5 +726,6 @@ export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) 
 /** the Sources tab: the tiles and the modal (its panels are still vanilla) */
 export function SourcesTab(props: SettingsTabProps) {
   if (props.part === 'modal') return <SourceModal />;
+  if (props.part !== 'tiles') return <SourcePanels {...props} />;
   return <SourceTiles opened={props.opened} active={props.active} />;
 }

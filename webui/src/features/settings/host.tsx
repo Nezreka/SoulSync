@@ -60,6 +60,9 @@ export interface SoulSyncSettingsApi {
   hasPending: () => boolean;
   /** the tabs React renders, for settings.js to skip in its own load and save */
   ported: () => string[];
+  /** a vanilla field that writes a React tab's key (the Connections tab's
+   *  Deezer ARL mirrors the Deezer source panel's) */
+  set: (section: string, key: string, value: unknown) => void;
 }
 
 declare global {
@@ -153,6 +156,7 @@ export function createSettingsHost({
     flush: () => store.flush(),
     hasPending: () => store.hasPending(),
     ported: () => Object.keys(tabs),
+    set: (section, key, value) => store.set(section, key, value),
   };
 }
 

@@ -129,6 +129,30 @@ return debouncedAutoSaveSettings;`;
   });
 });
 
+describe('secret fields', () => {
+  it('the vanilla mask wiring leaves a React field to React (SecretInput)', () => {
+    document.body.innerHTML = `<div id="settings-page">
+      <div data-stg-react="sources"><div class="src-config-panel" data-react-panel>
+        <input type="password" id="react-secret"></div></div>
+      <div id="source-config-home"><div class="src-config-panel">
+        <input type="password" id="vanilla-secret"></div></div></div>`;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const wire = new Function(
+      'document',
+      `const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
+${extractFunction('_wireRedactedSecrets', SETTINGS)}
+return _wireRedactedSecrets;`,
+    )(document) as () => void;
+    wire();
+    expect(
+      (document.getElementById('react-secret') as HTMLElement).dataset.redactWired,
+    ).toBeUndefined();
+    expect((document.getElementById('vanilla-secret') as HTMLElement).dataset.redactWired).toBe(
+      '1',
+    );
+  });
+});
+
 describe('core.js lends the socket to the React log viewer', () => {
   const CORE = readFileSync(resolve(process.cwd(), 'static/core.js'), 'utf8').replace(
     /\r\n/g,

@@ -12,6 +12,8 @@
  *    the rest (toggleSettingHelp).
  */
 
+import type React from 'react';
+
 import {
   Children,
   type KeyboardEvent,
@@ -200,4 +202,44 @@ export function useDraft(value: string, save: (raw: string) => void) {
     },
     reset: () => setDraft(null),
   };
+}
+
+/** ConfigManager.REDACTED_SENTINEL: a saved secret arrives as this, never the
+ *  secret itself, and saving it back means "keep what is saved" */
+export const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
+
+/**
+ * A password field for a saved secret, as settings.js _wireRedactedSecrets
+ * made them: focusing a masked field empties it so a new value is typed, not
+ * added to the mask; leaving it empty and untouched puts the mask back (and
+ * nothing is saved); real typing is a real change, an emptied field included.
+ */
+export function SecretInput({
+  value,
+  onChange,
+  ...rest
+}: {
+  value: string;
+  onChange: (value: string) => void;
+} & Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'type' | 'onFocus' | 'onBlur'
+>) {
+  // shown in place of the mask while a masked field has focus
+  const [cleared, setCleared] = useState(false);
+  return (
+    <input
+      {...rest}
+      type="password"
+      value={cleared ? '' : value}
+      onFocus={() => {
+        if (value === REDACTED_SECRET_SENTINEL) setCleared(true);
+      }}
+      onBlur={() => setCleared(false)}
+      onChange={(event) => {
+        setCleared(false);
+        onChange(event.target.value);
+      }}
+    />
+  );
 }

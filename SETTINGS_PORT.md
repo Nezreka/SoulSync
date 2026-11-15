@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | **tiles and modal done** (steps 7a, 7b below) | The tiles and the modal a tile opens are React. Left: the eleven config panels (80 controls), one at a time; the modal moves each still-vanilla panel in and out. |
+| Tab: Sources | **tiles, modal, 3 of 11 panels** (steps 7a-7c below) | The tiles, the modal, and the Deezer, SoundCloud and Lidarr panels are React. Left: Soulseek, YouTube (with yt-dlp), Tidal, Qobuz, HiFi, Prowlarr, torrent, usenet, one or a few per commit. |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
@@ -64,12 +64,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 5 of 9 tabs and the Sources tiles (Discovery, Quality and Downloads without their video-only sections), 85 of 678 controls, 109 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 5 of 9 tabs, and the Sources tiles, modal and 3 panels (Discovery, Quality and Downloads without their video-only sections), 91 of 678 controls, 112 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 11,295 |
-| `webui/static/settings.js` | 10,187 | 7,176 |
+| `webui/index.html` | 12,823 | 11,187 |
+| `webui/static/settings.js` | 10,187 | 6,962 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -601,12 +601,36 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 | Python, the 101 files | 2,434 passed, 2 failed (the two above, fixed, their files rerun: 162 pass) |
 | **Browser** (Soulseek, YouTube, Indexers, Torrent opened from their tiles; an edit then a click outside) | title, hint, icon, dot, Test, result, the panel in the body, focus, panels left at home: **identical**. The edit is saved at once on both. Screenshots: **0 pixels** differ on all four. |
 
+### Step 7c: the Deezer, SoundCloud and Lidarr source panels (Nov 15 2026)
+
+**What it is.** The first three of the eleven panels, in `tabs/source-panels.tsx` (one slot, `sources`/`deezer-soundcloud-lidarr`, inside `#source-config-home` where they sat). Deezer: the ARL token and Test Connection ("Connected as <user> (<tier>)"). SoundCloud: the anonymous-tier note and Test Connection (connected, the amber "Reachable check failed — try again", or the server's error), checked when its modal opens as `probeSourceOnOpen` did. Lidarr: URL, API key, Test Connection, which saves the page first so the server tests what is on screen. Every status line keeps its words and colours.
+
+**How a React panel sits in the modal.** `Panel` renders the `.src-config-panel` with `data-react-panel`: in its hidden home while closed, and through a portal into `#src-modal-body` while it is the open source. The modal moves only panels without that mark. The page autosave and the vanilla secret wiring skip it (step 7b's guard, extended).
+
+**Saved secrets** (`SecretInput` in `parts.tsx`): the rules `_wireRedactedSecrets` gave every password field. A saved secret arrives as the mask; focusing it empties the field; leaving it untouched brings the mask back and saves nothing; typing is a real change, an emptied field included. `_wireRedactedSecrets` now skips React fields (it would write their value behind React's back).
+
+**The Deezer ARL in two places.** The Connections tab's Deezer card (still vanilla) holds the same token. Before, the two fields copied each other on input and the page save read the Sources one. Now the panel writes `deezer_download.arl` and copies itself into the Connections field; the Connections field writes the key through a new `SoulSyncSettings.set(section, key, value)`.
+
+**Removed from settings.js**: `testDeezerDownloadConnection`, `testSoundcloudConnection`, `testLidarrConnection`, their three load lines, the two collector sections, SoundCloud's open probe, the two-way input listeners (one remains, Connections → store).
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity: the three panels against the frozen markup | same, first run. |
+| Behaviour (`source-panels.test.tsx`, 6; `settings-react-host-hooks.test.ts` +1) | ARL saved and mirrored both ways; the mask on focus, blur and a real clear; Test with the mask sends empty, with a typed token sends it, both outcomes' words; SoundCloud's three states, its check on open, its panel in the modal body while open and back home after; Lidarr's URL saved and the page saved before its test; the vanilla mask wiring skips a React field. |
+| Repointed Python | `test_settings_sources_tab.py`: every panel lives on Sources, has exactly one id, and is parked in the hidden home, whether vanilla markup or a React panel dispatched from a home slot (2 negative checks fail on broken copies). |
+| `src/test` + `src/features/settings` + `src/shell` | 1,627 pass |
+| Python, the 101 files | 2,433 passed, 3 failed (those three, repointed; the file then 98 pass) |
+| **Browser** (a masked ARL and Lidarr key; Test with the mask, focus, typed token and Test; SoundCloud opened and tested; Lidarr URL edited and tested) | values, the mask, status words and colours, the Connections field following the ARL, the saved ARL and URL, the tests sent: **identical**. Screenshots: **0 pixels** differ on all three. |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7c) | **Deezer, SoundCloud and Lidarr panels are React.** New: `tabs/source-panels.tsx` and its test; `SecretInput` in `parts.tsx`; `SoulSyncSettings.set`. React panels portal into the modal. Details under "Completed steps". |
 | Nov 15 | `690b8f7fa` (step 7b) | **The source modal is React**, hosting the still-vanilla panels. The page autosave guard lets those panels save (found in the browser). The registry left settings.js; the shell imports it. Details under "Completed steps". |
 | Nov 15 | `723dfd54b` (step 7a) | **The download chain, the Sources tiles and the sources model are React.** New: `tabs/sources-model.ts`, `tabs/sources-tab.tsx`, their test, six fixtures (one frozen markup, five drawn by settings.js). The behaviour wrapper moved into `downloads-tab.tsx`. 33 functions and the hidden transport removed; bridges for the vanilla modal and the Library tab's audiobook chain. Details under "Completed steps". |
 | Nov 15 | `fe7c38f78` (step 6) | **Quality tab ported (music).** New: `tabs/quality.ts`, `tabs/quality-tab.tsx`, their test, four fixtures (one frozen from the markup, three from what settings.js drew). Store: `hasExtra`, `dropExtras`. `parts.tsx`: `HelpIcon` exported, `Section` badge, `<br>` reads as a space. Markup replaced by one slot; the quality profile block (48 functions), its load, collector keys, default-profile mirror and save branch removed from `settings.js`, the profile load from `init.js`. Details under "Completed steps". |
@@ -990,12 +1014,12 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | button |  | Add | both | no |
 | button | `hifi-instances-check-btn` | Check All Instances | both | no |
 | button | `hifi-instances-restore-btn` | Restore Defaults | both | no |
-| password | `deezer-download-arl` | Deezer ARL Token: | both | no |
-| button | `deezer-download-test-btn` | Test Connection | both | no |
-| button | `soundcloud-test-btn` | Test Connection | both | no |
-| text | `lidarr-url` | Lidarr URL: | both | no |
-| password | `lidarr-api-key` | API Key: | both | no |
-| button | `lidarr-test-btn` | Test Connection | both | no |
+| password | `deezer-download-arl` | Deezer ARL Token: | both | yes (step 7c) |
+| button | `deezer-download-test-btn` | Test Connection | both | yes (step 7c) |
+| button | `soundcloud-test-btn` | Test Connection | both | yes (step 7c) |
+| text | `lidarr-url` | Lidarr URL: | both | yes (step 7c) |
+| password | `lidarr-api-key` | API Key: | both | yes (step 7c) |
+| button | `lidarr-test-btn` | Test Connection | both | yes (step 7c) |
 | select | `youtube-cookies-browser` | YouTube Browser Cookies: {None (No cookies) / Chrome / Firefox / Edge / Brave / Opera / Safari …} | both | no |
 | textarea | `youtube-cookies-paste` | Paste cookies.txt: | both | no |
 | number | `youtube-download-delay` | YouTube Download Delay: | both | no |
@@ -2085,8 +2109,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `disconnectTidal` | 8193 | no |
 | `authenticateDeezer` | 8219 | no |
 | `testHiFiConnection` | 8235 | no |
-| `testSoundcloudConnection` | 8257 | no |
-| `testLidarrConnection` | 8283 | no |
+| `testSoundcloudConnection` | 8257 | yes (step 7c) |
+| `testLidarrConnection` | 8283 | yes (step 7c) |
 | `_setIndStatusDot` | 8310 | no |
 | `testProwlarrConnection` | 8326 | no |
 | `updateUsenetClientUI` | 8356 | no |
@@ -2102,7 +2126,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `restoreDefaultHiFiInstances` | 8617 | no |
 | `removeHiFiInstance` | 8641 | no |
 | `checkHiFiInstances` | 8657 | no |
-| `testDeezerDownloadConnection` | 8696 | no |
+| `testDeezerDownloadConnection` | 8696 | yes (step 7c) |
 | `checkTidalDownloadAuthStatus` | 8726 | no |
 | `startTidalDownloadAuth` | 8748 | no |
 | `checkQobuzAuthStatus` | 8819 | no |

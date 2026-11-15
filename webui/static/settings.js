@@ -1840,7 +1840,7 @@ const SOURCE_OPEN_PROBE = {
     tidal: () => checkTidalDownloadAuthStatus(),
     qobuz: () => checkQobuzAuthStatus(),
     hifi: () => testHiFiConnection(),
-    soundcloud: () => testSoundcloudConnection(),
+    // soundcloud checks itself when its modal opens (source-panels.tsx)
 };
 
 function probeSourceOnOpen(srcId) {
@@ -2332,9 +2332,7 @@ async function loadSettingsData() {
         // Per-source download quality is now derived from the global Quality
         // Profile (ranked targets) — the per-source quality selects were removed.
         loadHiFiInstances();
-        document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
-        document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
-        document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
+        // deezer_download and lidarr_download: their Sources panels are React
         const _prowUrl = document.getElementById('prowlarr-url');
         const _prowKey = document.getElementById('prowlarr-api-key');
         const _prowIds = document.getElementById('prowlarr-indexer-ids');
@@ -2403,13 +2401,16 @@ async function loadSettingsData() {
         const _ucDlPath = document.getElementById('usenet-download-path');
         if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
         if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
-        // Sync ARL to connections tab field + bidirectional listeners
+        // The Connections tab's Deezer card holds the same ARL as the Deezer
+        // source panel (React, source-panels.tsx). Typing here writes the
+        // panel's key; the panel writes this field back.
         const _connArl = document.getElementById('deezer-connection-arl');
-        const _dlArl = document.getElementById('deezer-download-arl');
         if (_connArl) _connArl.value = settings.deezer_download?.arl || '';
-        if (_connArl && _dlArl) {
-            _connArl.addEventListener('input', () => { _dlArl.value = _connArl.value; });
-            _dlArl.addEventListener('input', () => { _connArl.value = _dlArl.value; });
+        if (_connArl && _connArl.dataset.arlMirror !== '1') {
+            _connArl.dataset.arlMirror = '1';
+            _connArl.addEventListener('input', () => {
+                window.SoulSyncSettings?.set('deezer_download', 'arl', _connArl.value);
+            });
         }
 
         // Populate YouTube settings
@@ -2857,6 +2858,10 @@ const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
 function _wireRedactedSecrets() {
     document.querySelectorAll('input[type="password"]').forEach(el => {
         if (el.dataset.redactWired === '1') return;
+        // a React field does this itself (SecretInput in tabs/parts.tsx):
+        // writing its value from here would fight React for it
+        if (el.closest('[data-stg-react]')
+            && !el.closest('.src-config-panel:not([data-react-panel])')) return;
         el.dataset.redactWired = '1';
         // Clear the mask on focus so the user types a fresh value, not on top
         // of the sentinel.
@@ -4192,13 +4197,7 @@ async function saveSettings(quiet = false) {
             search_all_tracks: _cfgBool('beatport-search-all'),
             tags: _collectServiceTags('beatport')
         } : undefined,
-        deezer_download: {
-            arl: document.getElementById('deezer-download-arl').value || '',
-        },
-        lidarr_download: {
-            url: document.getElementById('lidarr-url').value || '',
-            api_key: document.getElementById('lidarr-api-key').value || '',
-        },
+        // deezer_download and lidarr_download: their Sources panels are React
         prowlarr: {
             url: _cfgStr('prowlarr-url'),
             api_key: _cfgStr('prowlarr-api-key'),
@@ -5256,59 +5255,6 @@ async function testHiFiConnection() {
     }
 }
 
-async function testSoundcloudConnection() {
-    const statusEl = document.getElementById('soundcloud-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        const resp = await fetch('/api/soundcloud/status');
-        const data = await resp.json();
-        if (data.available && data.reachable) {
-            statusEl.textContent = 'Connected (anonymous)';
-            statusEl.style.color = '#4caf50';
-        } else if (data.available) {
-            // Client up but the live probe failed — likely a SoundCloud
-            // outage or a transient yt-dlp parse error. Surface plainly.
-            statusEl.textContent = 'Reachable check failed — try again';
-            statusEl.style.color = '#ff9800';
-        } else {
-            statusEl.textContent = data.error || 'Unavailable';
-            statusEl.style.color = '#f44336';
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-    }
-}
-
-async function testLidarrConnection() {
-    const statusEl = document.getElementById('lidarr-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        // Save settings first so the backend has the URL/key
-        await saveSettings();
-        const resp = await fetch('/api/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ service: 'lidarr' })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            statusEl.textContent = 'Connected';
-            statusEl.style.color = '#4caf50';
-        } else {
-            statusEl.textContent = data.error || 'Connection failed';
-            statusEl.style.color = '#f44336';
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-    }
-}
-
 function _setIndStatusDot(dotId, state) {
     const dot = document.getElementById(dotId);
     if (!dot) return;
@@ -5692,36 +5638,6 @@ async function checkHiFiInstances() {
         panel.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error checking instances: ${escapeHtml(e.message)}</div>`;
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Check All Instances'; }
-    }
-}
-
-async function testDeezerDownloadConnection() {
-    const statusEl = document.getElementById('deezer-download-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        let arl = document.getElementById('deezer-download-arl')?.value || '';
-        // An untouched field holds the redaction sentinel (a token IS saved) —
-        // send empty so the backend tests the SAVED token instead of the mask,
-        // which the source would reject (#870).
-        if (arl === REDACTED_SECRET_SENTINEL) arl = '';
-        const resp = await fetch('/api/deezer-download/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ arl }),
-        });
-        const data = await resp.json();
-        if (data.success) {
-            statusEl.textContent = `Connected as ${data.user || 'Unknown'} (${data.tier || 'Free'})`;
-            statusEl.style.color = '#4caf50';
-        } else {
-            statusEl.textContent = data.error || 'Authentication failed';
-            statusEl.style.color = '#f44336';
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
     }
 }
 
