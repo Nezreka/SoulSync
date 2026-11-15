@@ -3541,6 +3541,8 @@ async function loadSettingsData() {
         // Profile (ranked targets) — the per-source quality selects were removed.
         loadHiFiInstances();
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
+        const _scToken = document.getElementById('soundcloud-download-oauth-token');
+        if (_scToken) _scToken.value = settings.soundcloud_download?.oauth_token || '';
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
         const _prowUrl = document.getElementById('prowlarr-url');
@@ -7104,6 +7106,10 @@ async function saveSettings(quiet = false) {
         deezer_download: {
             arl: document.getElementById('deezer-download-arl').value || '',
         },
+        // read only when the input exists, like beatport above (#2116)
+        soundcloud_download: document.getElementById('soundcloud-download-oauth-token') ? {
+            oauth_token: document.getElementById('soundcloud-download-oauth-token').value || '',
+        } : undefined,
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',

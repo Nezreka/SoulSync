@@ -75,7 +75,7 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **HiFi** | Free lossless downloads via community-run hifi-api instances — no account needed |
 | **Deezer** | Download from Deezer (ARL token) |
 | **Lidarr** | Hand off to your Lidarr server |
-| **SoundCloud** | Download from SoundCloud — nothing to set up |
+| **SoundCloud** | Download from SoundCloud, nothing to set up. Optional: paste a free account's oauth_token to get the original file when the uploader allows downloads |
 | **Torrent** | Search via Prowlarr indexers through your torrent client |
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
 | **Hybrid** | Drag sources into a priority chain — SoulSync works down the list and uses the first source that returns a match |

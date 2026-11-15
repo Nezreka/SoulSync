@@ -4380,6 +4380,19 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
+                                                    <label>SoundCloud OAuth Token (optional):</label>
+                                                    <input type="password" id="soundcloud-download-oauth-token"
+                                                        class="form-input" placeholder="Paste your oauth_token cookie here">
+                                                    <div class="setting-help-text">
+                                                        With a free SoundCloud account signed in, tracks whose uploader
+                                                        turned on the free Download button come as the original file
+                                                        instead of the 128 kbps stream. Everything else still uses the
+                                                        stream. To get it: log into soundcloud.com, open DevTools
+                                                        (F12), Application, Cookies, and copy the
+                                                        <code>oauth_token</code> value.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
                                                     <label>SoundCloud Status:</label>
                                                     <div class="form-actions" style="margin-top: 4px;">
                                                         <button class="test-button" id="soundcloud-test-btn"
