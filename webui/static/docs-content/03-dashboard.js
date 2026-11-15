@@ -429,6 +429,7 @@ Three sub-tabs, each with a live health pill (**checking… / connected / unreac
 
 Clients are configured in **Settings** — an unconfigured client shows "nothing set up — configure a client in Settings and it shows up here". Rows carry a **SoulSync** chip (dispatched by SoulSync) or **external** chip (added outside SoulSync), and expand to a detail grid (state, size, speeds, ETA, seeders/peers/ratio, save path, hash, …).
 
+- **Tracker**: a torrent row names the tracker it is on: the indexer SoulSync grabbed it from, or for anything else the tracker host your client reports (qBittorrent, Transmission, Deluge). Only the host is shown, never the announce link with your passkey.
 - **Per-item controls** — pause/resume, **remove** ("Remove + delete files" vs "Remove only"), and for Soulseek transfers a cancel (✕) that cancels the transfer in slskd.
 - **Toolbar** — name filter, state chips (downloading / queued / seeding / paused / stalled / completed / error / other, with counts), sort (client order, fastest first, most complete, name, largest), aggregate line ("N shown · ↓ 1.2 MB/s · ↑ 300 KB/s"), refresh, and a link opening the client's own web UI.
 - **Add** — **+ add torrent** (paste a magnet link or .torrent URL) and **+ add nzb** (paste an .nzb URL).

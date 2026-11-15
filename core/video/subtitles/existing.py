@@ -34,6 +34,7 @@ class Track(NamedTuple):
     hi: bool
     forced: bool
     source: str  # "external" | "embedded"
+    codec: str = ""  # an embedded track's ffprobe codec (subrip, hdmv_pgs_subtitle ...)
 
 
 #: subtitle sidecar extensions bazarr indexes (.txt left out: too many
@@ -354,6 +355,7 @@ def embedded_tracks(video_path: str, settings: Any = None,
             return []
         if not video_path or not os.path.isfile(str(video_path)):
             return []
+        from .providers.embedded import _stream_language
         streams = (probe or _probe_streams)(str(video_path)) or []
         ignore = set()
         if _setting(settings, "subtitle_ignore_pgs", False):
@@ -368,15 +370,15 @@ def embedded_tracks(video_path: str, settings: Any = None,
             if codec in ignore:
                 continue
             tags = s.get("tags") if isinstance(s.get("tags"), dict) else {}
-            lang = to_code(tags.get("language"))
+            lang = _stream_language(s)
             if not lang:
-                continue  # 'und' / untagged: unknown language
+                continue  # untagged and the title doesn't say: unknown language
             disp = s.get("disposition") if isinstance(s.get("disposition"), dict) else {}
             title = str(tags.get("title") or "").lower()
             forced = bool(disp.get("forced")) or "forced" in title or "foreign" in title
             hi = bool(disp.get("hearing_impaired")) or bool(
                 re.search(r"\b(sdh|cc|hearing|hoh)\b", title))
-            out.append(Track(lang, hi, forced, "embedded"))
+            out.append(Track(lang, hi, forced, "embedded", codec))
         return out
     except Exception:  # noqa: BLE001
         return []

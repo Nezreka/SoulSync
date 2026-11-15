@@ -467,6 +467,7 @@ Plus a background YouTube upload-date enricher.
 
 <br>
 
+- **Manual search** opens with its query prefilled in a box you can edit, like Prowlarr: change it and every source searches exactly what you typed.
 - **Manual search results** can be filtered (conditions on resolution, codec, group, size, age, indexer, format score and more, matched on all or any), sorted, and saved as named filters per profile. A failed grab shows which release replaced it. **Colons in titles** can become " - " instead of being dropped.
 - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
 - **Your own libraries**: add movie and TV libraries (Stand-Up, Documentaries, Kids), each with its own folder.

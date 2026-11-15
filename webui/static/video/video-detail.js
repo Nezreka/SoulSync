@@ -1017,6 +1017,11 @@
             if (!_ownedMovie && !primary) primary = getMovie;
             else getMore += moreItem('get', '⬇', _ownedMovie ? 'Download again or upgrade…' : 'Get…',
                 _ownedMovie ? 'Search for a better copy, or grab this one again' : '');
+            // the same release picker an episode has, owned or not (#2122)
+            if (window.VideoDownload && window.VideoDownload.manualSearch) {
+                getMore += moreItem('manualsearch', '⌕', 'Manual search…',
+                    'Search every source yourself and pick the release');
+            }
             // TWO controls, like the shows' follow+get pair: Get always exists (the
             // modal offers download-now / manual search / grab), and the wishlist
             // is a separate TOGGLE showing membership. One button wearing three
@@ -4251,6 +4256,7 @@
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'subsearch') subSearchMovie();
+            else if (which === 'manualsearch') manualSearchMovie();
             else if (which === 'missing') openGetModal(true);
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
@@ -4623,6 +4629,17 @@
             tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
     }
 
+    // A movie's manual search (#2122): a library movie or a tmdb preview, the
+    // same identity the Get modal searches and grabs with.
+    function manualSearchMovie() {
+        if (!data || data.kind !== 'movie' || !window.VideoDownload || !VideoDownload.manualSearch) return;
+        VideoDownload.manualSearch({ title: data.title, scope: 'movie', year: data.year,
+            mediaId: data.id, mediaSource: data.source,
+            tmdbId: data.source === 'tmdb' ? data.id : (data.tmdb_id || null),
+            poster: data.source === 'tmdb' ? (data.poster_url || null)
+                : (data.has_poster ? '/api/video/poster/movie/' + data.id : null) });
+    }
+
     // Subtitle manual search (Phase 3; video-subtitles.js). An episode's is
     // asked for by the React list through the bridge's subtitleSearch.
     function subSearchMovie() {
@@ -4750,11 +4767,7 @@
     var detailBridge = {
         manualSearch: function (scope, season, episode) {
             if (!data || !window.VideoDownload || !VideoDownload.manualSearch) return;
-            if (scope === 'movie') {
-                VideoDownload.manualSearch({ title: data.title, scope: 'movie', year: data.year,
-                    mediaId: data.id, mediaSource: data.source, poster: data.has_poster ? '/api/video/poster/movie/' + data.id : null });
-                return;
-            }
+            if (scope === 'movie') { manualSearchMovie(); return; }
             if (season != null && selectedSeason !== season) { selectedSeason = season; renderSeasonNav(); ensureSeasonEpisodes(); }
             _openManualSearch(scope === 'episode' ? 'episode' : 'season', episode);
         },

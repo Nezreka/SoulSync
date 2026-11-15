@@ -75,12 +75,16 @@ _TEXT_SUBTITLE_CODECS = frozenset({
 
 
 def _stream_language(stream: dict) -> str | None:
-    """The stream's ISO 639-1 language, or None when unknown/untagged."""
+    """The stream's ISO 639-1 language, or None when unknown/untagged.
+
+    an untagged (or 'und') track whose title names its language ('Français',
+    'French Forced', 'English SDH') counts as that language: muxers often only
+    write the title, and the track was read as no language at all (#2126)."""
     tags = stream.get("tags")
     if not isinstance(tags, dict):
         return None
     from ..languages import to_code
-    return to_code(tags.get("language"))
+    return to_code(tags.get("language")) or to_code(tags.get("title"))
 
 
 def _probe_subtitle_streams(ffprobe: str, file_path: str) -> list[dict]:

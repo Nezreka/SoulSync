@@ -302,9 +302,13 @@ export interface ClientTorrentItem {
   content_path?: string | null;
   /** the client's own category (qbittorrent category, transmission/deluge label). */
   category?: string | null;
+  /** the tracker's host, never its announce url (#2123). */
+  tracker?: string | null;
+  /** the client has it stopped, even when state says completed (#2125). */
+  paused?: boolean;
   error?: string | null;
-  /** present when SoulSync itself dispatched this item. */
-  soulsync?: { kind?: string; title?: string };
+  /** present when SoulSync itself dispatched this item; indexer = the grab's indexer. */
+  soulsync?: { kind?: string; title?: string; indexer?: string };
 }
 
 export interface ClientUsenetItem {

@@ -229,6 +229,20 @@ _SLSKD_KEYS = {
 }
 
 
+def annotate_release_languages(rows) -> None:
+    """``release_langs`` on each download row: the audio, multi and subtitle tags
+    its release name carries, so the downloads page can show them (#2120).
+    a youtube grab has no scene tags, so it gets none."""
+    from core.video.release_parse import release_languages
+    for r in rows or []:
+        try:
+            if str(r.get("source") or "").lower() == "youtube" or not r.get("release_title"):
+                continue
+            r["release_langs"] = release_languages(r.get("release_title"))
+        except Exception:   # noqa: BLE001 - one odd row must not blank the page
+            logger.debug("release language annotation failed", exc_info=True)
+
+
 def _parse_text(hit) -> str:
     """What the release parser should read for a hit. Soulseek hits are grouped by
     FOLDER — the folder title carries the show/release name, but on library-style
@@ -383,10 +397,22 @@ def _format_strategy_query(search_type: str, query: str, extra: list) -> str:
     return ("%s: %s %s" % (search_type, query, params)).strip()
 
 
+def custom_query(body):
+    """The words the user typed into manual search, or None to search the
+    usual way (#2121). Like Prowlarr's own search box: run as typed, one text
+    query, no ids or structured search added. Capped so it stays a query."""
+    body = body if isinstance(body, dict) else {}
+    q = " ".join(str(body.get("query") or "").split())[:200]
+    return q or None
+
+
 def _search_queries(body, source: str, scope: str, title: str, season, episode) -> list:
     """Human-readable queries this manual search request will run/start."""
     body = body if isinstance(body, dict) else {}
     source = str(source or "").lower()
+    typed = custom_query(body)
+    if typed:
+        return [("search: " + typed) if source in ("torrent", "usenet") else typed]
     if source in ("torrent", "usenet"):
         try:
             from core.video.prowlarr_search import build_strategies
@@ -443,13 +469,25 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
     # shared Prowlarr budget (core.prowlarr_throttle). The background wishlist
     # drain queues happily; a manual search should say "busy, try again" rather
     # than hold a request worker while the drain empties the window.
-    pres = prowlarr_search(scope, title, year=body.get("year"),
-                           season=want_season, episode=want_episode, source=source,
-                           max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
-                           indexer_names=_basic_indexer_names(body),
-                           alt_titles=_alt_search_titles(body),
-                           indexer_ids=_library_indexers(body, scope),
-                           **_external_ids(body))
+    typed = custom_query(body)
+    if typed:
+        # typed by hand: the words as written, nothing added (#2121)
+        pres = prowlarr_search(scope, title, source=source, query=typed,
+                               max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                               indexer_names=_basic_indexer_names(body),
+                               indexer_ids=_library_indexers(body, scope),
+                               any_category=bool(body.get("basic")))
+    else:
+        pres = prowlarr_search(scope, title, year=body.get("year"),
+                               season=want_season, episode=want_episode, source=source,
+                               max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
+                               indexer_names=_basic_indexer_names(body),
+                               alt_titles=_alt_search_titles(body),
+                               indexer_ids=_library_indexers(body, scope),
+                               # the Releases tab searches every category, a tv
+                               # release must not be filtered out of it (#2127)
+                               any_category=bool(body.get("basic")),
+                               **_external_ids(body))
     prowlarr_error = None
     if not pres.get("configured"):
         prowlarr_error = ("Prowlarr isn't configured — set its URL + key on "
@@ -462,7 +500,7 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
     if source == "torrent":
         from core.video.extto_search import extto_search
         try:
-            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+            eres = extto_search(typed or title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
                                 resolve_magnets=False, max_candidates=1)
         except Exception as exc:   # noqa: BLE001 - one half must not sink the lane
             eres = {"configured": True, "error": str(exc), "hits": []}
@@ -1432,8 +1470,8 @@ def register_routes(bp):
         queries = _search_queries(body, source, scope, title, want_season, want_episode)
         if source == "soulseek":
             from core.video.slskd_search import build_query, slskd_search
-            sres = slskd_search(build_query(scope, title, year=body.get("year"),
-                                            season=want_season, episode=want_episode))
+            sres = slskd_search(custom_query(body) or build_query(
+                scope, title, year=body.get("year"), season=want_season, episode=want_episode))
             if not sres.get("configured"):
                 return jsonify({"scope": scope, "results": [], "queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if sres.get("error"):
@@ -1441,7 +1479,7 @@ def register_routes(bp):
             raw, live = sres["hits"], True
         elif source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+            eres = extto_search(custom_query(body) or title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
                                  resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"scope": scope, "results": [], "queries": queries, "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
@@ -1481,12 +1519,13 @@ def register_routes(bp):
         source = str(body.get("source") or "").lower()
         want_season, want_episode, season_end = _search_ints(body)
         queries = _search_queries(body, source, scope, title, want_season, want_episode)
+        typed = custom_query(body)
 
         if source == "soulseek":
             from core.video.slskd_search import (
                 _INTERACTIVE_MAX_WAIT_SECONDS, build_query, search_timeout_ms, start_search)
-            res = start_search(build_query(scope, title, year=body.get("year"),
-                                           season=want_season, episode=want_episode),
+            res = start_search(typed or build_query(scope, title, year=body.get("year"),
+                                                    season=want_season, episode=want_episode),
                                max_throttle_wait=_INTERACTIVE_MAX_WAIT_SECONDS)
             if not res.get("configured"):
                 return jsonify({"queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
@@ -1498,7 +1537,7 @@ def register_routes(bp):
         profile, _pid = _profile_for_request(get_video_db(), body)
         if source == "extto":
             from core.video.extto_search import extto_search
-            eres = extto_search(title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
+            eres = extto_search(typed or title, limit=25, timeout=EXTTO_PAGE_TIMEOUT_SECONDS,
                                  resolve_magnets=False, max_candidates=1)
             if not eres.get("configured"):
                 return jsonify({"queries": queries, "error": "EXT.to requires FlareSolverr — set flaresolverr.url."})
@@ -1974,6 +2013,7 @@ def register_routes(bp):
         _annotate_libraries(db, rows)
         _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
+        annotate_release_languages(rows)
         return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])

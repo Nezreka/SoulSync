@@ -28,6 +28,7 @@ import {
   vdlIsFail,
   vdlIsPackRow,
   vdlIsRetryable,
+  vdlLangLabel,
   vdlKindIcon,
   vdlMatchesFilter,
   vdlMetaURL,
@@ -312,5 +313,22 @@ describe('row text', () => {
     expect(vdlBlockWhat({ id: 1 })).toBe('Unknown release');
     expect(vdlBlockSxe({ id: 1, season_number: 2, episode_number: 4 })).toBe('S02E04');
     expect(vdlBlockSxe({ id: 1 })).toBe('');
+  });
+});
+
+describe('vdlLangLabel (#2120)', () => {
+  it('says the audio and the subtitles in scene shorthand', () => {
+    expect(vdlLangLabel({ audio: ['fr'], multi: true, subs: [], subbed: false })).toBe('MULTi FR');
+    expect(vdlLangLabel({ audio: [], multi: false, subs: ['fr'], subbed: true })).toBe('FR subs');
+    expect(vdlLangLabel({ audio: [], multi: true, subs: ['fr'], subbed: true })).toBe(
+      'MULTi · FR subs',
+    );
+    expect(vdlLangLabel({ audio: ['it', 'en'], multi: false })).toBe('IT EN');
+    expect(vdlLangLabel({ audio: [], subs: [], subbed: true })).toBe('subs');
+  });
+
+  it('is empty when the name tags nothing', () => {
+    expect(vdlLangLabel(null)).toBe('');
+    expect(vdlLangLabel({ audio: [], multi: false, subs: [], subbed: false })).toBe('');
   });
 });

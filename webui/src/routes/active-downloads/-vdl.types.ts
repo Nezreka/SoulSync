@@ -8,6 +8,18 @@
  * a port, not a reinterpretation.
  */
 
+/** a release name's language tags, read server side by release_parse. */
+export interface VdlReleaseLangs {
+  /** audio language codes, 'fr', 'de' … (none = the original audio) */
+  audio?: string[];
+  /** MULTi / Dual Audio */
+  multi?: boolean;
+  /** subtitle language codes the name tags (VOSTFR, FRENCH.SUBS …) */
+  subs?: string[];
+  /** any subtitle tag at all, a language-less one included */
+  subbed?: boolean;
+}
+
 /** One row from GET /api/video/downloads/active. */
 export interface VdlDownload {
   /** #2029: the video library it files into (by its target folder). */
@@ -47,6 +59,8 @@ export interface VdlDownload {
   filename?: string | null;
   /** true when this row IS the season pack (the batch head). */
   is_pack?: boolean | null;
+  /** what the release name tags: audio languages, multi, subtitles (#2120). */
+  release_langs?: VdlReleaseLangs | null;
   /** utc "YYYY-MM-DD HH:MM:SS" stamps off the row. */
   created_at?: string | null;
   completed_at?: string | null;
