@@ -52,6 +52,7 @@ export function Section({
   summary,
   side,
   bodyStyle,
+  bodyClass,
   badge,
   children,
 }: {
@@ -66,6 +67,8 @@ export function Section({
   summary?: string;
   side?: Side;
   bodyStyle?: Record<string, string>;
+  /** more classes on the body (the media cards' stg-media-card) */
+  bodyClass?: string;
   children: ReactNode;
 }) {
   const live = !!summaryKey && !!summary;
@@ -96,7 +99,11 @@ export function Section({
         )}
       </div>
       <div
-        className="settings-section-body collapsed"
+        className={
+          bodyClass
+            ? `settings-section-body collapsed ${bodyClass}`
+            : 'settings-section-body collapsed'
+        }
         data-stg={tab}
         {...sideAttrs(side)}
         style={{ display: 'none', ...bodyStyle }}

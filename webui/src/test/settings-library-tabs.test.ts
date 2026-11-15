@@ -14,7 +14,9 @@ let tabs: {
 beforeEach(() => {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   document.body.innerHTML = '<div id="settings-page"></div>';
-  for (const card of parsed.querySelectorAll('.stg-media-card'))
+  // the Folders card is React now (step 8a); its Audiobooks and Video panels
+  // wait in #library-parked-panels
+  for (const card of parsed.querySelectorAll('.stg-media-card, #library-parked-panels'))
     document.getElementById('settings-page')!.append(card.cloneNode(true));
   tabs = new Function(
     'document',
@@ -22,16 +24,17 @@ beforeEach(() => {
   )(document);
 });
 describe('Library settings media tabs', () => {
+  // the Folders card's tabs are React (library-folders.test.tsx); this
+  // switches the Organization card, still vanilla
   it('switches only its own card and preserves unsaved fields', () => {
-    const music = document.getElementById('transfer-path') as HTMLInputElement;
-    music.value = '/unsaved/music';
-    tabs.switchLibraryMediaTab(document.getElementById('folders-video-tab')!);
-    expect(document.getElementById('folders-music-panel')!.hidden).toBe(true);
-    expect(document.getElementById('folders-video-panel')!.hidden).toBe(false);
-    expect(document.getElementById('organization-music-panel')!.hidden).toBe(false);
-    tabs.switchLibraryMediaTab(document.getElementById('folders-music-tab')!);
-    expect(document.getElementById('transfer-path')).toBe(music);
-    expect(music.value).toBe('/unsaved/music');
+    const music = document.getElementById('template-album-path') as HTMLInputElement;
+    music.value = '$albumartist/unsaved';
+    tabs.switchLibraryMediaTab(document.getElementById('organization-video-tab')!);
+    expect(document.getElementById('organization-music-panel')!.hidden).toBe(true);
+    expect(document.getElementById('organization-video-panel')!.hidden).toBe(false);
+    tabs.switchLibraryMediaTab(document.getElementById('organization-music-tab')!);
+    expect(document.getElementById('template-album-path')).toBe(music);
+    expect(music.value).toBe('$albumartist/unsaved');
   });
   it('supports arrow keys with a single active tab stop', () => {
     const music = document.getElementById('organization-music-tab')!;
@@ -55,13 +58,13 @@ describe('Library settings media tabs', () => {
       ]);
   });
   it('keeps all four sets of controls in exactly one panel each', () => {
+    // transfer-path, download-path and podcasts-path are React now
+    // (library-folders.test.tsx)
     for (const [id, panel] of [
-      ['transfer-path', 'folders-music-panel'],
       ['video-movies-path', 'folders-video-panel'],
       ['template-album-path', 'organization-music-panel'],
       ['vo-movie-template', 'organization-video-panel'],
       ['audiobooks-path', 'folders-audiobooks-panel'],
-      ['podcasts-path', 'folders-podcasts-panel'],
       ['template-audiobook-path', 'organization-audiobooks-panel'],
       ['audiobook-recycle-deletes', 'organization-audiobooks-panel'],
       ['audiobook-format-first', 'organization-audiobooks-panel'],
@@ -69,7 +72,6 @@ describe('Library settings media tabs', () => {
       ['audiobook-write-nfo', 'organization-audiobooks-panel'],
       ['template-podcast-path', 'organization-podcasts-panel'],
       ['podcast-media-format', 'organization-podcasts-panel'],
-      ['download-path', 'folders-music-panel'],
       ['template-sample-path', 'organization-music-panel'],
       ['disc-label', 'organization-music-panel'],
     ]) {

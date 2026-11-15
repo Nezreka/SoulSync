@@ -182,8 +182,8 @@ def test_scan_sync_library_m3u_passes_the_setting():
 def test_settings_ui_round_trip_wiring():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    js = (root / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
-    html = (root / "webui" / "index.html").read_text(encoding="utf-8")
-    assert 'id="m3u-relative-paths"' in html
-    assert "relative_paths: _cfgBool('m3u-relative-paths')" in js
-    assert "settings.m3u_export?.relative_paths === true" in js
+    # the switch is in the React Folders card (SETTINGS_PORT.md step 8a)
+    ui = (root / "webui" / "src" / "features" / "settings" / "tabs" / "library-folders.tsx").read_text(encoding="utf-8")
+    assert 'id="m3u-relative-paths"' in ui
+    assert "checked={m3u.relative_paths === true}" in ui
+    assert "store.set('m3u_export', 'relative_paths', event.target.checked)" in ui

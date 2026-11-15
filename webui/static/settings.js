@@ -998,14 +998,7 @@ document.addEventListener('keydown', (e) => {
 //   * derive from the live controls, never from a second copy of the state.
 //     a summary that can disagree with the field below it is a bug generator.
 const LIBRARY_SUMMARIES = {
-    'library-paths': () => {
-        const named = ['download-path', 'transfer-path', 'podcasts-path', 'audiobooks-path']
-            .map(id => document.getElementById(id))
-            .filter(el => el && String(el.value || '').trim());
-        if (!named.length) return 'no folders set yet';
-        const tail = String(named[0].value).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-        return named.length === 1 ? tail : `${tail} +${named.length - 1} more`;
-    },
+    // 'library-paths': the Folders card is React (library-folders.tsx)
     'library-music-org': () => {
         const on = document.getElementById('file-organization-enabled');
         if (!on) return '';
@@ -2235,25 +2228,10 @@ async function loadSettingsData() {
         }).catch(() => { });
 
         // Populate Download settings (right column)
-        document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
-        document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
-        const minFree = document.getElementById('min-free-disk-gb');
-        if (minFree) minFree.value = settings.soulseek?.min_free_disk_gb ?? 5;
-        applyPathsEnvironment(settings);
-        document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
-        document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
+        // the music and podcast folders: the Folders card is React (library-folders.tsx)
         const isDocker = !!(settings._environment && settings._environment.docker) ||
                          (settings.soulseek?.transfer_path || '').startsWith('/app/') ||
                          (settings.soulseek?.download_path || '').startsWith('/app/');
-        const defaultPodcastPath = isDocker ? '/app/podcasts' : './podcasts';
-        const podcastsEl = document.getElementById('podcasts-path');
-        if (podcastsEl) {
-            podcastsEl.placeholder = defaultPodcastPath;
-            const currentPodcastsVal = settings.podcasts?.download_path || settings.library?.podcasts_path;
-            podcastsEl.value = (isDocker && (!currentPodcastsVal || currentPodcastsVal === './podcasts'))
-                ? defaultPodcastPath
-                : (currentPodcastsVal || defaultPodcastPath);
-        }
         loadAudiobookRoutes();
         const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
         const audiobooksEl = document.getElementById('audiobooks-path');
@@ -2264,8 +2242,6 @@ async function loadSettingsData() {
                 ? defaultAudiobookPath
                 : (currentAudiobooksVal || defaultAudiobookPath);
         }
-        document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
-        document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
         // the download chain (mode and order): React, loaded in
         // SoulSyncSettings.hydrate above (sources-model.ts)
@@ -2464,16 +2440,9 @@ async function loadSettingsData() {
 
         // Listening Stats and Discovery are on the Discovery tab, which is React
 
-        // Populate Music Library Paths
-        const _musicPaths = settings.library?.music_paths || [];
-        renderMusicPaths(_musicPaths);
+        // the extra music libraries and Sample Studio folders: React (library-folders.tsx)
         renderAudiobookExtraPaths(settings.library?.audiobooks_additional_paths || []);
 
-        // Populate Sample Studio folders (first = default destination).
-        // Configs predating the key get the Docker-aware default row.
-        const _samplePaths = settings.library?.sample_paths || [];
-        const _defaultSamplePath = isDocker ? '/app/samples' : './samples';
-        renderSamplePaths(_samplePaths.length ? _samplePaths : [_defaultSamplePath]);
 
         // Library Organize: preserve the user's casing (default on)
         const _pcEl = document.getElementById('reorganize-preserve-casing');
@@ -2500,11 +2469,7 @@ async function loadSettingsData() {
 
         // Populate M3U Export settings (the export and whole-library switches
         // and folder are on the Discovery tab, which is React)
-        const _m3uRelEl = document.getElementById('m3u-relative-paths');
-        if (_m3uRelEl) _m3uRelEl.checked = settings.m3u_export?.relative_paths === true;
-        document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
-        document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
-        document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
+        // relative paths, base path and prefix rewrite: the Folders card is React
 
         // UI Appearance is React now: opening Settings applies the saved accent,
         // visualizer and effect switches from src/features/settings/tabs/appearance.ts
@@ -3174,56 +3139,6 @@ async function toggleHydrabaseFromSettings() {
 }
 
 // ── Music Library Paths ──
-function renderMusicPaths(paths) {
-    const container = document.getElementById('music-paths-list');
-    if (!container) return;
-    if (!paths || paths.length === 0) {
-        container.innerHTML = '<div style="color: rgba(255,255,255,0.3); font-size: 0.85em; padding: 4px 0;">No paths configured. Click "Add Path" to add your music folder(s).</div>';
-        return;
-    }
-    container.innerHTML = paths.map((p, i) => `
-        <div class="form-group music-path-row" data-folder-row style="margin-bottom: 4px;">
-            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-role="existing" data-folder-label="Extra music folder">
-            <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
-        </div>
-    `).join('');
-    // Attach auto-save to dynamically rendered inputs
-    container.querySelectorAll('.music-path-input').forEach(input => {
-        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-    });    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
-}
-
-function addMusicPathRow() {
-    const container = document.getElementById('music-paths-list');
-    if (!container) return;
-    // Clear the "no paths" message if present
-    const placeholder = container.querySelector('div[style*="color: rgba"]');
-    if (placeholder && !container.querySelector('.music-path-row')) placeholder.remove();
-    const row = document.createElement('div');
-    row.className = 'form-group music-path-row';
-    row.setAttribute('data-folder-row', '');
-    row.style.marginBottom = '4px';
-    row.innerHTML = `
-        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-role="existing" data-folder-label="Extra music folder">
-        <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
-    `;
-    container.appendChild(row);
-    const input = row.querySelector('input');
-    input.focus();
-    // Auto-save when the user finishes typing a path
-    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-}
-
-function _removeMusicPathRow(btn) {
-    const row = btn.closest('.music-path-row');
-    const status = row.nextElementSibling;
-    if (status && status.classList.contains('folder-check')) status.remove();
-    row.remove();
-    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
-    // Auto-save after removing a path
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
 // ── Extra audiobook folders: an existing collection on another drive ──
 function addAudiobookExtraPathRow(value) {
     const container = document.getElementById('audiobooks-extra-paths');
@@ -3280,39 +3195,9 @@ function collectAudiobookExtraPaths() {
         .filter(Boolean);
 }
 
-function collectMusicPaths() {
-    const inputs = document.querySelectorAll('.music-path-input');
-    const paths = [];
-    inputs.forEach(input => {
-        const val = input.value.trim();
-        if (val) paths.push(val);
-    });
-    return paths;
-}
-
 // ── Sample Studio folders ──
 // Mirrors the additional-music-folders UI above: a dynamic list of output
 // folders for saved chops. The first entry is the default destination.
-
-function renderSamplePaths(paths) {
-    const container = document.getElementById('sample-paths-list');
-    if (!container) return;
-    if (!paths || paths.length === 0) {
-        container.innerHTML = '<div style="color: rgba(255,255,255,0.3); font-size: 0.85em; padding: 4px 0;">No sample folders configured. Saved chops fall back to the default folder.</div>';
-        return;
-    }
-    container.innerHTML = paths.map((p, i) => `
-        <div class="form-group sample-path-row" style="margin-bottom: 4px;">
-            <input type="text" class="sample-path-input" value="${escapeHtml(p)}" placeholder="/samples or C:\\Samples" style="flex:1;">
-            ${i === 0 ? '<span style="color: rgba(255,255,255,0.4); font-size: 0.8em; padding: 8px 4px;">default</span>' : ''}
-            <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
-        </div>
-    `).join('');
-    // Attach auto-save to dynamically rendered inputs
-    container.querySelectorAll('.sample-path-input').forEach(input => {
-        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-    });
-}
 
 // --- Spoken-word artists: music downloads filed in the audiobook library ---
 // The artist page and watchlist own the toggle (React); this is only the list.
@@ -3375,42 +3260,6 @@ async function audiobookRouteAction(action, key) {
     } catch (e) {
         showToast(e.message, 'error');
     }
-}
-
-function addSamplePathRow() {
-    const container = document.getElementById('sample-paths-list');
-    if (!container) return;
-    // Clear the "no folders" message if present
-    const placeholder = container.querySelector('div[style*="color: rgba"]');
-    if (placeholder && !container.querySelector('.sample-path-row')) placeholder.remove();
-    const row = document.createElement('div');
-    row.className = 'form-group sample-path-row';
-    row.style.marginBottom = '4px';
-    row.innerHTML = `
-        <input type="text" class="sample-path-input" value="" placeholder="/samples or C:\\Samples" style="flex:1;">
-        <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
-    `;
-    container.appendChild(row);
-    const input = row.querySelector('input');
-    input.focus();
-    // Auto-save when the user finishes typing a path
-    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-}
-
-function _removeSamplePathRow(btn) {
-    btn.closest('.sample-path-row').remove();
-    // Auto-save after removing a path
-    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-}
-
-function collectSamplePaths() {
-    const inputs = document.querySelectorAll('.sample-path-input');
-    const paths = [];
-    inputs.forEach(input => {
-        const val = input.value.trim();
-        if (val) paths.push(val);
-    });
-    return paths;
 }
 
 // The genre whitelist is React now: src/features/settings/tabs/downloads-tab.tsx
@@ -3898,9 +3747,7 @@ async function saveSettings(quiet = false) {
         soulseek: {
             // slskd_url, api_key and the search, peer, timeout and cleanup
             // keys: the Soulseek source panel is React (source-panels.tsx)
-            download_path: document.getElementById('download-path').value,
-            transfer_path: document.getElementById('transfer-path').value,
-            min_free_disk_gb: _cfgFloat('min-free-disk-gb', 0),
+            // download_path, transfer_path, min_free_disk_gb: the Folders card is React
             // preferred_version: the Downloads tab (Filtering) is React
         },
         listenbrainz: {
@@ -4088,10 +3935,8 @@ async function saveSettings(quiet = false) {
             // the five retry keys: the Downloads tab (Retry Logic) is React
         },
         library: {
-            music_paths: collectMusicPaths(),
-            sample_paths: collectSamplePaths(),
-            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
-            podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            // music_paths, sample_paths, music_videos_path, podcasts_path: the
+            // Folders card is React (library-folders.tsx)
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             audiobooks_additional_paths: collectAudiobookExtraPaths(),
             reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
@@ -4099,7 +3944,7 @@ async function saveSettings(quiet = false) {
             redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
         },
         podcasts: {
-            download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
+            // download_path: the Folders card is React
             media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
         },
         audiobooks: {
@@ -4174,20 +4019,17 @@ async function saveSettings(quiet = false) {
             // replace_lower_quality: the Quality tab is React
             folder_artist_override: _cfgBool('import-folder-artist-override'),
             transfer_is_permanent: _cfgBool('import-transfer-permanent'),
-            staging_path: document.getElementById('staging-path').value || './Staging'
+            // staging_path: the Folders card is React
         },
         playlists: {
-            materialize_path: document.getElementById('playlists-materialize-path').value || './Playlists',
-            materialize_mode: document.getElementById('playlists-materialize-mode').value || 'symlink'
+            // materialize_path and materialize_mode: the Folders card is React
         },
         // lossy_copy: the Quality tab is React, and saves it with its profile
         // album_downloads: the Downloads tab (Album Publishing) is React
         m3u_export: {
             // enabled, library_enabled and library_path: the Discovery tab
-            relative_paths: _cfgBool('m3u-relative-paths'),
-            entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
-            rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
-            rewrite_to: document.getElementById('m3u-rewrite-to').value || ''
+            // relative_paths, entry_base_path, rewrite_from, rewrite_to: the
+            // Folders card is React
         },
         ui_appearance: {
             // the Appearance tab is React and saves its own keys of this
@@ -5097,15 +4939,9 @@ async function logoutQobuz() {
 }
 
 const PATH_INPUT_IDS = {
-    download: 'download-path',
+    // the music and podcast folders lock themselves in the React Folders card
     'video-download': 'video-download-path',   // the same setting, from the Video folders tab
-    transfer: 'transfer-path',
-    podcasts: 'podcasts-path',
     audiobooks: 'audiobooks-path',
-    staging: 'staging-path',
-    'music-videos': 'music-videos-path',
-    'playlists-materialize': 'playlists-materialize-path',
-    'm3u-entry-base': 'm3u-entry-base-path'
 };
 
 // Deployment-aware folder-paths guidance (+ the fresh-install disk landmine).
@@ -5113,23 +4949,6 @@ const PATH_INPUT_IDS = {
 // MUST edit them. A non-Docker install still on the ./Transfer default is
 // silently filling the install disk (a Proxmox LXC root is typically 8GB and
 // hangs when full — reported live on Discord), so that state warns loudly.
-function applyPathsEnvironment(settings) {
-    const docker = !!(settings._environment && settings._environment.docker);
-    document.querySelectorAll('[data-paths-guide]').forEach(el => {
-        el.classList.toggle('hidden', (el.getAttribute('data-paths-guide') === 'docker') !== docker);
-    });
-    const warn = document.querySelector('[data-paths-default-warning]');
-    if (warn) {
-        const out = (settings.soulseek?.transfer_path || './Transfer').trim();
-        const isDefault = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
-        warn.classList.toggle('hidden', docker || !isDefault);
-    }
-    // the folder values are in now, so the live checks can run
-    if (window.SoulSyncFolderCheck) {
-        ['music', 'audiobooks', 'podcasts'].forEach(group => window.SoulSyncFolderCheck.refresh(group));
-    }
-}
-
 function togglePathLock(pathType, btn) {
     const inputId = PATH_INPUT_IDS[pathType] || (pathType.endsWith('-path') ? pathType : pathType + '-path');
     const input = document.getElementById(inputId);
@@ -5151,44 +4970,6 @@ function togglePathLock(pathType, btn) {
 
 // Manually (re)build every "organize by playlist" folder from current library
 // ownership — mirrors the automatic rebuild that runs after a playlist download.
-async function rebuildPlaylistFolders() {
-    const btn = document.getElementById('playlists-rebuild-btn');
-    const status = document.getElementById('playlists-rebuild-status');
-    if (!btn) return;
-    const original = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Rebuilding…';
-    if (status) { status.style.color = ''; status.textContent = 'Rebuilding playlist folders…'; }
-    try {
-        const res = await fetch('/api/playlists/materialize/rebuild', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}'
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Rebuild failed');
-        const n = data.count || 0;
-        let linked = 0, copied = 0, removed = 0;
-        (data.results || []).forEach(r => {
-            linked += r.linked || 0; copied += r.copied || 0; removed += r.removed_stale || 0;
-        });
-        if (status) {
-            status.style.color = '#4caf50';
-            status.textContent = (n === 0)
-                ? 'No "organize by playlist" playlists to rebuild yet.'
-                : `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`;
-        }
-        if (typeof showToast === 'function') showToast('Playlist folders rebuilt', 'success');
-    } catch (e) {
-        if (status) { status.style.color = '#f44336'; status.textContent = 'Rebuild failed: ' + (e.message || e); }
-        if (typeof showToast === 'function') showToast('Playlist rebuild failed', 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = original;
-    }
-}
-
-
 // ===============================
 
 // ============================================================================

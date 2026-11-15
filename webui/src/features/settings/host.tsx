@@ -27,6 +27,7 @@ import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
+import { LibraryTab } from './tabs/library-folders';
 import { LogsTab } from './tabs/logs-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
@@ -76,6 +77,7 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   appearance: AppearanceTab,
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
+  library: LibraryTab,
   logs: LogsTab,
   quality: QualityTab,
   sources: SourcesTab,

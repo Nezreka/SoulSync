@@ -160,7 +160,13 @@ it('locks the shared download folder on the video tab like the music one', () =>
   expect(input.readOnly).toBe(true);
   const lock = input.closest('.path-input-group')?.querySelector('button');
   expect(lock?.getAttribute('onclick')).toBe("togglePathLock('video-download', this)");
-  expect(doc.getElementById('download-path')?.hasAttribute('readonly')).toBe(true);
+  // the music download folder is in the React Folders card (step 8a): a
+  // LockedPath, read-only until Unlock (library-folders.test.tsx)
+  const folders = readFileSync(
+    resolve(process.cwd(), 'src/features/settings/tabs/library-folders.tsx'),
+    'utf8',
+  );
+  expect(folders).toMatch(/<LockedPath\s+id="download-path"/);
 });
 
 it('locks every video folder, and a 4K switch with no folder yet opens its lock', async () => {

@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
-| Tab: Library | not started | 236 controls and buttons |
+| Tab: Library | **in progress** (step 8a below) | 26 of 236: the Folders card (music and podcasts; the Audiobooks and Video panels stay vanilla, parked). Next: Organization (8b), Audiobooks (8c), Post-Processing and Import (8d). |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts), 158 of 678 controls, 141 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 184 of 678 controls, 151 of 333 `settings.js` functions removed, 27 of 83 tests repointed (step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 10,352 |
-| `webui/static/settings.js` | 10,187 | 6,018 |
+| `webui/index.html` | 12,823 | 10,058 |
+| `webui/static/settings.js` | 10,187 | 5,799 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -691,12 +691,23 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity (YouTube after help lines; the three panels with the video blocks moved in); `source-panels-more.test.tsx`, 11 (the borrowed node is the same node with its value and listener across open and close; usenet's order; each panel's load and save rules; Windows marking; the paste box; transcode; yt-dlp states, update and channel); `outside-text-is-escaped` repointed (JSX escapes the indexer list); frontend folders 1,650 pass; Python: 48 pins on the moved code, repointed (11 files by a forked agent, 429 pass, 9 negative checks; `test_download_chain_widget.py::test_mode_is_still_persisted`: the page save has no music `download_source` block left); the confirming full run 2,391 + that 1 pass; browser: every field, option label, visibility, status, the indexer list, the video seed value surviving close and reopen, usenet's order and every saved value identical; pixels 0 / 3 (the status dot's edge) / 32 / 0 plus the help button.
 
+### Step 8a: the Library Folders card (Nov 15 2026)
+
+**What.** `tabs/library-folders.tsx`, one slot (`library` / `folders`): the "Files & folders" group label, the Folders card and its media tabs (click and arrow keys), the Music panel (the Docker and bare-metal guides, the default-folder warning, download / library / import / music videos / playlists / M3U base folders behind Unlock, minimum free disk space, playlist folder style and Rebuild, M3U relative and prefix rewrite, the additional libraries list, the Sample Studio list with its default row) and the Podcasts panel (folder, saved to `podcasts.download_path` and `library.podcasts_path`). The paths summary on the card header. The folder checks (`folder-check.js`) refresh once the values are in.
+
+**The Audiobooks and Video panels stay vanilla, parked** in `#library-parked-panels` and placed back between React's panels on mount (old order); the tabs hide them. Their deployment guides are toggled by the card too: **bug found in the browser before commit**, `applyPathsEnvironment` toggled every guide on the page, so the Video panel showed both guides until that was matched.
+
+**Removed.** 10 functions (marked), the paths summary entry, their load and collector lines. `PATH_INPUT_IDS` keeps only the video and audiobook ids; `togglePathLock` stays for the parked panels.
+
+**Checked.** Parity (with the parked panels in place); `library-folders.test.tsx`, 8; two vitest and 6 Python files repointed (the card is a slot now; `_library_cards` in `test_settings_sources_tab.py` reads the slot in page order, 2 negative checks); the Python files on the moved code pass; browser: the four tabs show the same panels, read-only fields and checks; Video pixels match after the guide fix, Music boxes all identical (text antialiasing only).
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
 | Nov 15 | `93742a5b7` (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
 | Nov 15 | `514559393` (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
 | Nov 15 | `0fa4dc784` (step 7e) | **HiFi panel is React.** Details under "Completed steps". |
@@ -1344,50 +1355,50 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `folders-music-tab` | Music | both | no |
-| button | `folders-audiobooks-tab` | Audiobooks | both | no |
-| button | `folders-podcasts-tab` | Podcasts | both | no |
-| button | `folders-video-tab` | Video | both | no |
+| button | `folders-music-tab` | Music | both | yes (step 8a) |
+| button | `folders-audiobooks-tab` | Audiobooks | both | yes (step 8a) |
+| button | `folders-podcasts-tab` | Podcasts | both | yes (step 8a) |
+| button | `folders-video-tab` | Video | both | yes (step 8a) |
 
 **Folder Paths** (both, 18)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `download-path` | Download Folder (input): | both | no |
-| button |  | Unlock | both | no |
-| text | `transfer-path` | Music Library Folder (output): | both | no |
-| button |  | Unlock | both | no |
-| number | `min-free-disk-gb` | Minimum free disk space (GB): | both | no |
-| text | `staging-path` | Import Folder: | both | no |
-| button |  | Unlock | both | no |
-| text | `music-videos-path` | Music Videos Dir: | both | no |
-| button |  | Unlock | both | no |
-| text | `playlists-materialize-path` | Playlists Folder: | both | no |
-| button |  | Unlock | both | no |
-| select | `playlists-materialize-mode` | Playlist Folder Style: {Symlinks — no extra disk, point to your library / Copies — real duplicates (USB sticks | both | no |
-| button | `playlists-rebuild-btn` | Rebuild playlist folders now | both | no |
-| checkbox | `m3u-relative-paths` | Write M3U entries relative to the playlist file | both | no |
-| text | `m3u-entry-base-path` | M3U Entry Base Path: | both | no |
-| button |  | Unlock | both | no |
-| text | `m3u-rewrite-from` | M3U Path Prefix Rewrite: | both | no |
-| text | `m3u-rewrite-to` | M3U Path Prefix Rewrite: | both | no |
+| text | `download-path` | Download Folder (input): | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| text | `transfer-path` | Music Library Folder (output): | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| number | `min-free-disk-gb` | Minimum free disk space (GB): | both | yes (step 8a) |
+| text | `staging-path` | Import Folder: | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| text | `music-videos-path` | Music Videos Dir: | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| text | `playlists-materialize-path` | Playlists Folder: | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| select | `playlists-materialize-mode` | Playlist Folder Style: {Symlinks — no extra disk, point to your library / Copies — real duplicates (USB sticks | both | yes (step 8a) |
+| button | `playlists-rebuild-btn` | Rebuild playlist folders now | both | yes (step 8a) |
+| checkbox | `m3u-relative-paths` | Write M3U entries relative to the playlist file | both | yes (step 8a) |
+| text | `m3u-entry-base-path` | M3U Entry Base Path: | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
+| text | `m3u-rewrite-from` | M3U Path Prefix Rewrite: | both | yes (step 8a) |
+| text | `m3u-rewrite-to` | M3U Path Prefix Rewrite: | both | yes (step 8a) |
 
 **Additional Music Libraries** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | + Add Path | both | no |
+| button |  | + Add Path | both | yes (step 8a) |
 
 **Sample Studio Folders** (both, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | + Add Path | both | no |
+| button |  | + Add Path | both | yes (step 8a) |
 | text | `audiobooks-path` | Audiobooks Folder (output): | both | no |
 | button |  | Unlock | both | no |
 | button |  | + Add folder | both | no |
-| text | `podcasts-path` | Podcasts Folder (output): | both | no |
-| button |  | Unlock | both | no |
+| text | `podcasts-path` | Podcasts Folder (output): | both | yes (step 8a) |
+| button |  | Unlock | both | yes (step 8a) |
 
 **Where downloads arrive** (both, 2)
 
@@ -2099,19 +2110,19 @@ Every top-level function, with its line today. A function is removed when the la
 | `openQualityProfileManager` | 5895 | yes (step 6) |
 | `closeQualityProfileManager` | 5907 | yes (step 6) |
 | `toggleHydrabaseFromSettings` | 5915 | no |
-| `renderMusicPaths` | 5981 | no |
-| `addMusicPathRow` | 6000 | no |
-| `_removeMusicPathRow` | 6021 | no |
+| `renderMusicPaths` | 5981 | yes (step 8a) |
+| `addMusicPathRow` | 6000 | yes (step 8a) |
+| `_removeMusicPathRow` | 6021 | yes (step 8a) |
 | `addAudiobookExtraPathRow` | 6032 | no |
 | `renderAudiobookExtraPaths` | 6069 | no |
 | `collectAudiobookExtraPaths` | 6077 | no |
-| `collectMusicPaths` | 6087 | no |
-| `renderSamplePaths` | 6101 | no |
+| `collectMusicPaths` | 6087 | yes (step 8a) |
+| `renderSamplePaths` | 6101 | yes (step 8a) |
 | `loadAudiobookRoutes` | 6124 | no |
 | `audiobookRouteAction` | 6143 | no |
-| `addSamplePathRow` | 6184 | no |
-| `_removeSamplePathRow` | 6204 | no |
-| `collectSamplePaths` | 6210 | no |
+| `addSamplePathRow` | 6184 | yes (step 8a) |
+| `_removeSamplePathRow` | 6204 | yes (step 8a) |
+| `collectSamplePaths` | 6210 | yes (step 8a) |
 | `_genreWhitelistRender` | 6223 | yes (step 5) |
 | `_initGenreChipClickHandler` | 6242 | yes (step 5) |
 | `_genreWhitelistRemove` | 6254 | yes (step 5) |
@@ -2206,9 +2217,9 @@ Every top-level function, with its line today. A function is removed when the la
 | `loginQobuzWithTokenFromDownloads` | 8940 | yes (step 7d) |
 | `loginQobuz` | 8980 | yes (step 7d) |
 | `logoutQobuz` | 9025 | no |
-| `applyPathsEnvironment` | 9052 | no |
+| `applyPathsEnvironment` | 9052 | yes (step 8a) |
 | `togglePathLock` | 9069 | no |
-| `rebuildPlaylistFolders` | 9090 | no |
+| `rebuildPlaylistFolders` | 9090 | yes (step 8a) |
 | `loadPlexMusicLibraries` | 9152 | no |
 | `selectPlexLibrary` | 9200 | no |
 | `loadJellyfinUsers` | 9233 | no |
@@ -2280,9 +2291,9 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_hybrid_source_unready_ui.py` | yes (step 7a) |
 | `tests/test_lastfm_username_setting.py` | no |
 | `tests/test_listenbrainz_username_setting.py` | no |
-| `tests/test_m3u_prefix_rewrite.py` | no |
-| `tests/test_m3u_relative_paths.py` | no |
-| `tests/test_music_disk_guard.py` | no |
+| `tests/test_m3u_prefix_rewrite.py` | yes (step 8a) |
+| `tests/test_m3u_relative_paths.py` | yes (step 8a) |
+| `tests/test_music_disk_guard.py` | yes (step 8a) |
 | `tests/test_navidrome_login_endpoints.py` | no |
 | `tests/test_preferred_version.py` | yes (step 5) |
 | `tests/test_prowlarr_throttle.py` | yes (step 7g) |
@@ -2326,14 +2337,14 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/outside-text-is-escaped.test.ts` | yes (step 7g) |
 | `webui/src/test/quality-release-import-mode.test.ts` | yes (step 6, now `.tsx`) |
 | `webui/src/test/settings-autosave-toggle.test.ts` | yes (step 6) |
-| `webui/src/test/settings-library-tabs.test.ts` | no |
+| `webui/src/test/settings-library-tabs.test.ts` | yes (step 8a) |
 | `webui/src/test/settings-load-element-drift.test.ts` | yes (step 6) |
 | `webui/src/test/settings-navigation.test.ts` | no |
 | `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4, 5) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |
 | `webui/src/test/settings-source-autotest.test.ts` | yes (step 7a) |
 | `webui/src/test/settings-source-tiles-chains.test.ts` | yes (step 7a, now `.tsx`) |
-| `webui/src/test/settings-video-library-load.test.ts` | no |
+| `webui/src/test/settings-video-library-load.test.ts` | yes (step 8a) |
 | `webui/src/test/settings-video-tv-libraries.test.ts` | no |
 | `webui/src/test/signup-defaults-settings.test.ts` | no |
 | `webui/src/test/soulseek-observed-speed-settings.test.ts` | no |

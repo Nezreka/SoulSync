@@ -818,6 +818,28 @@ def test_an_inverted_mark_is_not_then_dimmed_into_grey():
     assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
 
 
+def _library_cards(markup):
+    """the Library tab's card titles and group labels in page order. the
+    Folders card and its group are React (SETTINGS_PORT.md step 8a): its slot
+    stands in for them, and the component is checked to render both."""
+    folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
+    assert "const TAB = 'library';" in folders
+    assert '<h3>Folders</h3>' in folders
+    assert re.search(r'className="settings-section-header collapsed"\s+data-stg=\{TAB\}', folders)
+    assert re.search(r'className="stg-cardgroup" data-stg=\{TAB\}>\s*'
+                     r'<span className="stg-cardgroup-label">Files &amp; folders</span>', folders)
+    slot = markup.index('<div data-stg-react="library" data-stg-part="folders"')
+    titles, groups = [(slot, "Folders")], [(slot, "Files &amp; folders")]
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
+        if t:
+            titles.append((m.start(), re.sub(r"<[^>]+>", "", t.group(1)).strip()))
+    for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup):
+        groups.append((m.start(), re.search(r'<span class="stg-cardgroup-label">(.*?)</span>',
+                                            markup[m.end():m.end() + 300]).group(1)))
+    return [t for _, t in sorted(titles)], [g for _, g in sorted(groups)]
+
+
 def test_the_library_tab_speaks_one_card_language():
     """It used to be three loose blocks of video settings followed by seven
     music cards - and the music half was hidden on the video side entirely, so
@@ -832,11 +854,7 @@ def test_the_library_tab_speaks_one_card_language():
     index = _read("webui/index.html")
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    titles, groups = _library_cards(markup)
 
     assert titles == [
         # files & folders
@@ -855,10 +873,6 @@ def test_the_library_tab_speaks_one_card_language():
     # you scan by skipping two of them.
     # scoped to THIS tab: the same group markup is used on Connections now, and
     # a global sweep would pick its heading up too
-    groups = [
-        re.search(r'<span class="stg-cardgroup-label">(.*?)</span>', markup[m.end():m.end() + 300]).group(1)
-        for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup)
-    ]
     assert groups == ["Files &amp; folders", "Processing", "Video"], groups
 
     # no bare settings-group left stranded outside a card on this tab
@@ -1073,14 +1087,17 @@ def test_the_two_sides_name_their_sections_the_same_way():
     index = _read("webui/index.html")
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    titles, _ = _library_cards(markup)
 
     for noun in ("Folders", "Organization"):
         assert titles.count(noun) == 1, f"expected one shared {noun} card"
+        if noun == "Folders":
+            # React card: music in the component, video in its parked panel
+            folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
+            assert "<strong>Music folders</strong>" in folders
+            parked = markup.split('<div id="library-parked-panels" hidden>', 1)[1]
+            assert "<strong>Video folders</strong>" in parked.split('id="folders-video-panel"', 1)[1]
+            continue
         card = re.split(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"',
                         markup.split(f'<h3>{noun}</h3>', 1)[1], maxsplit=1)[0]
         for media in ("Music", "Video"):

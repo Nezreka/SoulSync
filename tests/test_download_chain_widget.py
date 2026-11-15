@@ -535,7 +535,8 @@ def test_the_behaviour_settings_are_their_own_group(index, tab, downloads):
     assert 'title="Download Behaviour"' in behaviour
     parts = _read(_TABS + "parts.tsx")
     header = parts.index('className="settings-section-header collapsed"')
-    body = parts.index('className="settings-section-body collapsed"')
+    # step 8a: the body takes an extra class (bodyClass) when a section needs one
+    body = parts.index("'settings-section-body collapsed'")
     assert header < body and parts.count("settings-section-header") == 1
 
 

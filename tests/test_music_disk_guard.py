@@ -72,12 +72,14 @@ def test_orchestrator_refuses_downloads_when_disk_full(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_settings_ui_carries_the_guard_knob_and_environment_awareness():
-    assert 'id="min-free-disk-gb"' in _INDEX
-    assert "min_free_disk_gb" in _SETTINGS_JS                    # saved with soulseek block
-    assert "function applyPathsEnvironment" in _SETTINGS_JS
-    assert "_environment" in _SETTINGS_JS
-    assert 'data-paths-guide="docker"' in _INDEX
-    assert 'data-paths-guide="native"' in _INDEX
-    assert "data-paths-default-warning" in _INDEX
+    # the Folders card is React (SETTINGS_PORT.md step 8a)
+    ui = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" / "tabs"
+          / "library-folders.tsx").read_text(encoding="utf-8")
+    assert 'id="min-free-disk-gb"' in ui
+    assert "store.set('soulseek', 'min_free_disk_gb'" in ui    # saved with the soulseek keys
+    assert "settings._environment" in ui
+    assert 'data-paths-guide="docker"' in ui
+    assert 'data-paths-guide="native"' in ui
+    assert "data-paths-default-warning" in ui
     # the landmine banner only fires for non-Docker installs still on defaults
-    assert "docker || !isDefault" in _SETTINGS_JS
+    assert "loads && !docker && defaultOut" in ui
