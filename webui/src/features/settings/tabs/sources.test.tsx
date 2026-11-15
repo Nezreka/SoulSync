@@ -27,7 +27,6 @@ let model: SourcesModel;
 let posted: SettingsPayload[];
 let calls: Array<{ url: string; method: string; body: unknown }>;
 let routes: Record<string, (body: unknown) => unknown>;
-let audiobook: string[];
 
 beforeEach(() => {
   const sink: SettingsPayload[] = [];
@@ -62,11 +61,10 @@ beforeEach(() => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(data) } as Response);
     }),
   );
-  audiobook = ['usenet', 'torrent'];
-  shell.getAudiobookChain = () => audiobook.slice();
-  shell.getAudiobookActiveSources = () => ['torrent'];
-  shell.setAudiobookChain = vi.fn((order: string[]) => {
-    audiobook = order.slice();
+  // the audiobook chain is a settings key (step 8c): a book chain of usenet
+  // then torrent, set to torrent alone
+  store.hydrate({
+    audiobooks: { download_source: { mode: 'torrent', hybrid_order: ['usenet', 'torrent'] } },
   });
   shell.showToast = vi.fn();
   shell.openSourceModal = vi.fn();
@@ -75,13 +73,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(() => store.flush());
   vi.unstubAllGlobals();
-  for (const k of [
-    'getAudiobookChain',
-    'getAudiobookActiveSources',
-    'setAudiobookChain',
-    'openSourceModal',
-  ])
-    delete shell[k];
+  delete shell.openSourceModal;
   document.body.removeAttribute('data-side');
 });
 
@@ -310,7 +302,7 @@ describe('editing a chain', () => {
     expect(steps()).toEqual(['tidal', 'soulseek', 'qobuz']);
   });
 
-  it('video saves itself straight away and shows on the tiles; audiobooks go to the Library tab', async () => {
+  it('video saves itself straight away and shows on the tiles; audiobooks save through the store', async () => {
     chain();
     act(() => model.switchChain('video'));
     await waitFor(() => expect(steps()).toEqual(['usenet']));
@@ -327,8 +319,15 @@ describe('editing a chain', () => {
     act(() => model.switchChain('audiobooks'));
     await waitFor(() => expect(steps()).toEqual(['usenet', 'torrent']));
     fireEvent.click(screen.getByTitle('Move Torrent up'));
-    expect(shell.setAudiobookChain).toHaveBeenCalledWith(['torrent', 'usenet']);
-    expect(posted).toEqual([]);
+    // through the store, one key each of download_source (setAudiobookChain did
+    // it through the page save)
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      audiobooks: {
+        'download_source.mode': 'hybrid',
+        'download_source.hybrid_order': ['torrent', 'usenet'],
+      },
+    });
   });
 
   it('a failed video save says so', async () => {

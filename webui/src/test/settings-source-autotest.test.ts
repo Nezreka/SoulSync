@@ -9,13 +9,24 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createSettingsStore } from '@/features/settings/settings-store';
 import { createSourcesModel } from '@/features/settings/tabs/sources-model';
 
-const shell = window as unknown as Record<string, unknown>;
 let probed: string[];
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete shell.getAudiobookActiveSources;
 });
+
+/** a settings store holding this audiobook chain (a settings key since step
+ *  8c); none at all is a store that never loaded */
+function bookStore(books: string[]) {
+  const store = createSettingsStore({ delay: 0 });
+  if (books.length)
+    store.hydrate({
+      audiobooks: {
+        download_source: { mode: books.length > 1 ? 'hybrid' : books[0], hybrid_order: books },
+      },
+    });
+  return store;
+}
 
 async function run(musicMode: string, books: string[], videoChain: string[] = []) {
   probed = [];
@@ -33,8 +44,7 @@ async function run(musicMode: string, books: string[], videoChain: string[] = []
       return Promise.resolve({ json: () => Promise.resolve(data) } as Response);
     }),
   );
-  shell.getAudiobookActiveSources = () => books;
-  const model = createSourcesModel({ store: createSettingsStore({ delay: 0 }) });
+  const model = createSourcesModel({ store: bookStore(books) });
   model.load({
     download_source: { mode: musicMode, hybrid_order: ['deezer_dl', 'tidal', 'soulseek'] },
   });

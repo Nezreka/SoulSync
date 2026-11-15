@@ -70,17 +70,17 @@ function saved(): SettingsPayload {
 }
 
 describe('the Folders card is the markup it replaced', () => {
-  it('with the vanilla Audiobooks and Video panels back in their places', () => {
+  it('with the React Audiobooks panel and the vanilla Video panel back in its place', () => {
     park();
     const { container } = card();
     const want = shape(vanilla('library-folders.vanilla.html', { afterInit: true }));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // the Organization card's two wait there for it (step 8b)
+    // only the Organization card's vanilla video panel waits there now
     expect(
       [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
-    ).toEqual(['organization-audiobooks-panel', 'organization-video-panel']);
+    ).toEqual(['organization-video-panel']);
   });
 });
 

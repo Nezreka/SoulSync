@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
-| Tab: Library | **in progress** (steps 8a, 8b below) | 56 of 236: the Folders and Organization cards (music and podcasts; their Audiobooks and Video panels stay vanilla, parked). Next: Audiobooks (8c), Post-Processing and Import (8d). |
+| Tab: Library | **in progress** (steps 8a-8c below) | 87 of 236: the Folders and Organization cards, music, audiobooks and podcasts (their Video panels stay vanilla, parked, until the video pass). Next: Post-Processing and Import (8d). |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 214 of 678 controls, 160 of 333 `settings.js` functions removed, 31 of 83 tests repointed (step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts) and Library started, 245 of 678 controls, 170 of 333 `settings.js` functions removed, 31 of 83 tests repointed (step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 9,539 |
-| `webui/static/settings.js` | 10,187 | 5,349 |
+| `webui/index.html` | 12,823 | 9,085 |
+| `webui/static/settings.js` | 10,187 | 4,967 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -723,12 +723,34 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity against a fixture frozen with the preview drawn (`library-organization.vanilla.html`), the parked panels with their help lines (`withHelpLines` in `shape.ts`); help words and tick-box labels compared with their spaces (**found two lost spaces in the browser**: the space between a tick box and its words; JSX drops the markup's line break; now tested); `library-organization.test.tsx` 13, store 12, `settings-library-tabs.test.tsx` rewritten for the two React cards; 6 Python files repointed, 407 pass, 9 negative checks caught; browser: every loaded value, the preview in two scenarios and after typing, the four tabs, the refused save and its toast, the saved server state (dotted keys applied), Reset, organizing off. Pixels: Audiobooks and Video 0; Music the checkbox fill caught mid-transition (computed styles identical); Podcasts the floating buttons.
 
+### Step 8c: the Library Audiobooks panels (Nov 15 2026)
+
+**What.** `tabs/library-audiobooks.tsx`: the Folders card's Audiobooks panel (the folder behind Unlock, saved to `audiobooks.download_path` and `library.audiobooks_path`; more folders; the spoken-word artists with Move existing… and ×) and the Organization card's (the template, the recycle bin, Audiobook Quality, Downloads & Import). Both cards render them in place of the parked vanilla panels; only the two Video panels are parked now.
+
+**The audiobook chain is a settings key.** `sources-model.ts` reads `audiobooks.download_source` from the store (`audiobookChainOf`, `audiobookActiveOf`, the load rules of `loadSettingsData`) and writes it back as two dotted keys with the mode it implies. `getAudiobookChain`, `setAudiobookChain` and `getAudiobookActiveSources` are gone, and so are the hidden arrow rows' renderer; the hidden mode select and the empty hidden rows stay in the markup.
+
+**Dicts.** `audiobooks.quality` and `audiobooks.download_source` are saved one dotted key at a time.
+
+**Also fixed (in 8b's card too).** A template field showed the saved value or its default, so emptying one refilled the default at once. The card now keeps what was typed (an empty field stays empty) until a load or Reset; the preview and the summary read the same values. Reset writes the audiobook template through the store.
+
+**Shared now** (`library-card.tsx`): `LockedPath`, `HintGroup` (with `hidden`), `useLoadedDraft`, `int`, `isDocker`.
+
+**Removed.** 10 functions (marked), the audiobook load block, `loadAudiobookRoutes` and the folder fill in the load, the collector's `audiobooks` section, `library.audiobooks_path` and `audiobooks_additional_paths`, the dotted audiobook template, the `audiobooks` entry of `PATH_INPUT_IDS`.
+
+**Differences.**
+- Saves send only what changed, as every React tab.
+- Every format switched off stays off on screen and saves `[]` (all allowed), as before; the boxes keep what was clicked.
+- An empty extra-folder row is not saved until something is typed in it (the old page saved on blur).
+
+**Checked.** Parity of both panels against fixtures frozen from the markup, help words and tick-box spaces (9 boxes); both cards' parity with the React panels in place; `library-audiobooks.test.tsx` 8; `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains` now hold the chain in a store; `test_audiobook_settings.py` (wiring pins rewritten against the panel and the model) and `test_download_chain_widget.py`: 558 pass across 14 files, 7 negative checks caught. Browser: every loaded value, the routes list and removing one, 15 changes saved to the same server state (untouched keys aside), the chain's audiobook tab and its save; pixels 0 and 0.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
 | Nov 15 | `44daafab3` (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
 | Nov 15 | `ffc31675c` (step 8a) | **The Library Folders card is React** (music and podcasts); the Audiobooks and Video panels stay vanilla, parked. |
 | Nov 15 | `93742a5b7` (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
@@ -1417,9 +1439,9 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | button |  | + Add Path | both | yes (step 8a) |
-| text | `audiobooks-path` | Audiobooks Folder (output): | both | no |
-| button |  | Unlock | both | no |
-| button |  | + Add folder | both | no |
+| text | `audiobooks-path` | Audiobooks Folder (output): | both | yes (step 8c) |
+| button |  | Unlock | both | yes (step 8c) |
+| button |  | + Add folder | both | yes (step 8c) |
 | text | `podcasts-path` | Podcasts Folder (output): | both | yes (step 8a) |
 | button |  | Unlock | both | yes (step 8a) |
 
@@ -1520,44 +1542,44 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 |---|---|---|---|---|
 | checkbox | `reorganize-preserve-casing` | Preserve my casing, year & disc layout | both | yes (step 8b) |
 | checkbox | `write-artist-nfo` | Write artist.nfo (Jellyfin / Kodi / Emby) | both | yes (step 8b) |
-| text | `template-audiobook-path` | Audiobook Path Template: | both | no |
-| checkbox | `audiobook-recycle-deletes` | Recycle deleted audiobooks | both | no |
-| number | `audiobook-recycle-keep-days` | Empty The Recycle Bin After: | both | no |
+| text | `template-audiobook-path` | Audiobook Path Template: | both | yes (step 8c) |
+| checkbox | `audiobook-recycle-deletes` | Recycle deleted audiobooks | both | yes (step 8c) |
+| number | `audiobook-recycle-keep-days` | Empty The Recycle Bin After: | both | yes (step 8c) |
 
 **Audiobook Quality** (both, 12)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `audiobook-format-first` | Preferred Format: {M4B (recommended) / M4A / MP3 / Opus / OGG / FLAC} | both | no |
-| checkbox |  | M4B | both | no |
-| checkbox |  | M4A | both | no |
-| checkbox |  | MP3 | both | no |
-| checkbox |  | Opus | both | no |
-| checkbox |  | OGG | both | no |
-| checkbox |  | FLAC | both | no |
-| checkbox |  | Single file (whole book) | both | no |
-| checkbox |  | Multiple files (chapters or parts) | both | no |
-| number | `audiobook-min-bitrate` | Reject Below: | both | no |
-| number | `audiobook-max-bitrate` | Reject Above: | both | no |
-| checkbox | `audiobook-allow-dramatized` | Show dramatised adaptations | both | no |
+| select | `audiobook-format-first` | Preferred Format: {M4B (recommended) / M4A / MP3 / Opus / OGG / FLAC} | both | yes (step 8c) |
+| checkbox |  | M4B | both | yes (step 8c) |
+| checkbox |  | M4A | both | yes (step 8c) |
+| checkbox |  | MP3 | both | yes (step 8c) |
+| checkbox |  | Opus | both | yes (step 8c) |
+| checkbox |  | OGG | both | yes (step 8c) |
+| checkbox |  | FLAC | both | yes (step 8c) |
+| checkbox |  | Single file (whole book) | both | yes (step 8c) |
+| checkbox |  | Multiple files (chapters or parts) | both | yes (step 8c) |
+| number | `audiobook-min-bitrate` | Reject Below: | both | yes (step 8c) |
+| number | `audiobook-max-bitrate` | Reject Above: | both | yes (step 8c) |
+| checkbox | `audiobook-allow-dramatized` | Show dramatised adaptations | both | yes (step 8c) |
 
 **Downloads & Import** (both, 52)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `audiobook-marketplace` | Audible Marketplace: {United States (audible.com) / United Kingdom (audible.co.uk) / Germany (audible.de) / Fr | both | no |
-| select | `audiobook-download-mode` | Audiobook Download Sources: {Soulseek Only / Torrent Only (via Prowlarr) / Usenet Only (via Prowlarr) / Hybrid | both | no |
-| text | `audiobook-torrent-category` | Audiobook Downloader Category: | both | no |
-| text | `audiobook-prowlarr-categories` | Audiobook Prowlarr Categories: | both | no |
-| number | `audiobook-completeness-tolerance` | Import When Runtime Reaches: | both | no |
-| number | `audiobook-staging-days` | Give Up On A Short Book After: | both | no |
-| checkbox | `audiobook-renumber-chapters` | Renumber chapter files on import | both | no |
-| checkbox | `audiobook-merge-m4b` | Merge multi-file books into one M4B on import | both | no |
-| checkbox | `audiobook-remove-owned-from-wishlist` | Remove books from the wishlist once they're in the library | both | no |
-| checkbox | `audiobook-embed-metadata` | Write tags into audiobook files | both | no |
-| checkbox | `audiobook-embed-artwork` | Embed cover art in audiobook files | both | no |
-| checkbox | `audiobook-save-artwork` | Save cover.jpg beside audiobooks | both | no |
-| checkbox | `audiobook-write-nfo` | Write audiobook metadata sidecars | both | no |
+| select | `audiobook-marketplace` | Audible Marketplace: {United States (audible.com) / United Kingdom (audible.co.uk) / Germany (audible.de) / Fr | both | yes (step 8c) |
+| select | `audiobook-download-mode` | Audiobook Download Sources: {Soulseek Only / Torrent Only (via Prowlarr) / Usenet Only (via Prowlarr) / Hybrid | both | yes (step 8c) |
+| text | `audiobook-torrent-category` | Audiobook Downloader Category: | both | yes (step 8c) |
+| text | `audiobook-prowlarr-categories` | Audiobook Prowlarr Categories: | both | yes (step 8c) |
+| number | `audiobook-completeness-tolerance` | Import When Runtime Reaches: | both | yes (step 8c) |
+| number | `audiobook-staging-days` | Give Up On A Short Book After: | both | yes (step 8c) |
+| checkbox | `audiobook-renumber-chapters` | Renumber chapter files on import | both | yes (step 8c) |
+| checkbox | `audiobook-merge-m4b` | Merge multi-file books into one M4B on import | both | yes (step 8c) |
+| checkbox | `audiobook-remove-owned-from-wishlist` | Remove books from the wishlist once they're in the library | both | yes (step 8c) |
+| checkbox | `audiobook-embed-metadata` | Write tags into audiobook files | both | yes (step 8c) |
+| checkbox | `audiobook-embed-artwork` | Embed cover art in audiobook files | both | yes (step 8c) |
+| checkbox | `audiobook-save-artwork` | Save cover.jpg beside audiobooks | both | yes (step 8c) |
+| checkbox | `audiobook-write-nfo` | Write audiobook metadata sidecars | both | yes (step 8c) |
 | text | `template-podcast-path` | Podcast Path Template: | both | yes (step 8b) |
 | select | `podcast-media-format` | Podcast Media Format: {Audio Only (MP3 / M4A) — Default / Video Only (MP4 with static artwork for TV media ser | both | yes (step 8b) |
 | checkbox | `redownload-externally-deleted` | Re-download files deleted outside SoulSync | both | yes (step 8b) |
@@ -2026,11 +2048,11 @@ Every top-level function, with its line today. A function is removed when the la
 | `dlchainAdd` | 2135 | yes (step 7a) |
 | `dlchainRemove` | 2141 | yes (step 7a) |
 | `_dlchainWireDrag` | 2153 | yes (step 7a) |
-| `renderAudiobookHybrid` | 2253 | no |
-| `moveAudiobookSource` | 2274 | no |
-| `toggleAudiobookSource` | 2282 | no |
-| `_audiobookActiveSources` | 2296 | no |
-| `onAudiobookModeChange` | 2305 | no |
+| `renderAudiobookHybrid` | 2253 | yes (step 8c) |
+| `moveAudiobookSource` | 2274 | yes (step 8c) |
+| `toggleAudiobookSource` | 2282 | yes (step 8c) |
+| `_audiobookActiveSources` | 2296 | yes (step 8c) |
+| `onAudiobookModeChange` | 2305 | yes (step 8c) |
 | `toggleSourceCard` | 2389 | no |
 | `_loadVideoChainForTiles` | 2400 | yes (step 7a) |
 | `_srcAllChains` | 2412 | yes (step 7a) |
@@ -2136,13 +2158,13 @@ Every top-level function, with its line today. A function is removed when the la
 | `renderMusicPaths` | 5981 | yes (step 8a) |
 | `addMusicPathRow` | 6000 | yes (step 8a) |
 | `_removeMusicPathRow` | 6021 | yes (step 8a) |
-| `addAudiobookExtraPathRow` | 6032 | no |
-| `renderAudiobookExtraPaths` | 6069 | no |
-| `collectAudiobookExtraPaths` | 6077 | no |
+| `addAudiobookExtraPathRow` | 6032 | yes (step 8c) |
+| `renderAudiobookExtraPaths` | 6069 | yes (step 8c) |
+| `collectAudiobookExtraPaths` | 6077 | yes (step 8c) |
 | `collectMusicPaths` | 6087 | yes (step 8a) |
 | `renderSamplePaths` | 6101 | yes (step 8a) |
-| `loadAudiobookRoutes` | 6124 | no |
-| `audiobookRouteAction` | 6143 | no |
+| `loadAudiobookRoutes` | 6124 | yes (step 8c) |
+| `audiobookRouteAction` | 6143 | yes (step 8c) |
 | `addSamplePathRow` | 6184 | yes (step 8a) |
 | `_removeSamplePathRow` | 6204 | yes (step 8a) |
 | `collectSamplePaths` | 6210 | yes (step 8a) |

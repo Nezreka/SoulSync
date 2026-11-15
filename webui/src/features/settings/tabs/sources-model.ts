@@ -7,9 +7,9 @@
  * One store, read by the chain on the Downloads tab and the tiles on the
  * Sources tab, so the two cannot disagree. Until the Sources panels and their
  * modal are React (step 7b), settings.js reads and writes the connection state
- * through window.SoulSyncSources; the audiobook chain is owned by the Library
- * tab until that is React, and is read and written through
- * window.getAudiobookChain / setAudiobookChain / getAudiobookActiveSources.
+ * through window.SoulSyncSources. The audiobook chain is a settings key
+ * (audiobooks.download_source), read and written through the settings store
+ * like the music one (step 8c: settings.js held it until then).
  */
 
 import { createStore } from 'zustand/vanilla';
@@ -170,11 +170,27 @@ export interface SourcesState {
 }
 
 type ShellWindow = Window & {
-  getAudiobookChain?: () => string[];
-  setAudiobookChain?: (order: string[]) => void;
-  getAudiobookActiveSources?: () => string[];
   showToast?: (message: string, type?: string) => void;
 };
+
+/** the audiobook chain as loadSettingsData read it: unknown sources dropped,
+ *  all three in their default order when none is left */
+export function audiobookChainOf(settings: SettingsPayload): string[] {
+  const source = (settings.audiobooks?.download_source || {}) as Record<string, unknown>;
+  const order = (
+    Array.isArray(source.hybrid_order) ? (source.hybrid_order as unknown[]) : []
+  ).filter((id): id is string => typeof id === 'string' && AUDIOBOOK_SOURCES.includes(id));
+  return order.length ? order : [...AUDIOBOOK_SOURCES];
+}
+
+/** the sources books download through (_audiobookActiveSources): the chain
+ *  in hybrid mode, the one picked source otherwise */
+export function audiobookActiveOf(settings: SettingsPayload): string[] {
+  const source = (settings.audiobooks?.download_source || {}) as Record<string, unknown>;
+  const mode = typeof source.mode === 'string' && source.mode ? source.mode : 'hybrid';
+  const ids = mode === 'hybrid' ? audiobookChainOf(settings) : [mode];
+  return ids.filter((id) => AUDIOBOOK_SOURCES.includes(id));
+}
 
 function shell(): ShellWindow {
   return window as ShellWindow;
@@ -286,20 +302,9 @@ export function createSourcesModel({
   const setStatus = (id: string, state: SourceState) =>
     model.setState((s) => ({ status: { ...s.status, [id]: state } }));
 
-  const audiobookChain = () => {
-    try {
-      return (shell().getAudiobookChain?.() || []).slice();
-    } catch {
-      return [];
-    }
-  };
-  const audiobookActive = () => {
-    try {
-      return shell().getAudiobookActiveSources?.() || [];
-    } catch {
-      return [];
-    }
-  };
+  const audiobookChain = () => audiobookChainOf(store.getState().settings);
+  const audiobookActive = () =>
+    store.getState().loaded ? audiobookActiveOf(store.getState().settings) : [];
 
   /** settings.js _ssTestConn: the server's test, and what it said */
   async function testConnection(service: string): Promise<boolean> {
@@ -419,6 +424,15 @@ export function createSourcesModel({
     });
   }
 
+  /** what setAudiobookChain did: the order, and the mode it implies (one
+   *  source is that source alone). One key each of the download_source dict */
+  function writeAudiobooks(order: string[]) {
+    store.patch('audiobooks', {
+      'download_source.mode': order.length > 1 ? 'hybrid' : order[0] || 'torrent',
+      'download_source.hybrid_order': order.slice(),
+    });
+  }
+
   async function writeVideo(order: string[]) {
     const patch =
       order.length > 1
@@ -439,7 +453,7 @@ export function createSourcesModel({
     set({ order: order.slice() });
     try {
       if (kind === 'music') writeMusic(order);
-      else if (kind === 'audiobooks') shell().setAudiobookChain?.(order.slice());
+      else if (kind === 'audiobooks') writeAudiobooks(order);
       else {
         writeVideo(order.slice()).catch(() => toast('Could not save the download chain', 'error'));
       }
@@ -575,6 +589,8 @@ export function createSourcesModel({
     getState: model.getState,
     subscribe: (listener) => model.subscribe(listener),
     load(settings) {
+      // the audiobook chain is loaded now: an open one shows it
+      if (model.getState().kind === 'audiobooks') set({ order: audiobookChainOf(settings) });
       const { music, unready, mode, cleaned } = musicFromSettings(settings);
       const pair = legacyPair(music, model.getState().secondary);
       set({ music, unready, mode, secondary: pair.secondary });

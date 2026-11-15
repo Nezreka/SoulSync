@@ -22,13 +22,19 @@ import { Fragment, type ReactNode, useEffect, useRef, useState, useSyncExternalS
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { LIBRARY_TAB, LibrarySection, useMediaTabs, useParkedPanels } from './library-card';
+import { AudiobookOrganizationPanel } from './library-audiobooks';
+import {
+  HintGroup,
+  LIBRARY_TAB,
+  LibrarySection,
+  useMediaTabs,
+  useParkedPanels,
+} from './library-card';
 import {
   musicOrgSummary,
   PREVIEW_FIELDS,
   PREVIEW_SCENARIOS,
   previewBody,
-  RESET_AUDIOBOOK_TEMPLATE,
   RESET_TEMPLATES,
   savedScenario,
   SCENARIO_KEY,
@@ -36,7 +42,7 @@ import {
   type TemplateKey,
   templatesOf,
 } from './organization';
-import { helpBits, useDraft, useHelp } from './parts';
+import { useDraft } from './parts';
 import { text } from './source-panels';
 
 const TAB = LIBRARY_TAB;
@@ -44,32 +50,6 @@ type Section = Record<string, unknown>;
 
 function useSettings(store: SettingsStore) {
   return useSyncExternalStore(store.subscribe, () => store.getState().settings);
-}
-
-/** a setting with its "i" and its help (a hidden small) inside the form-group */
-function HintGroup({
-  children,
-  help,
-  preview,
-}: {
-  children: ReactNode;
-  help: ReactNode;
-  /** the path preview slot, right after the field (_pathPreviewSlot) */
-  preview?: ReactNode;
-}) {
-  const state = useHelp();
-  const bits = helpBits(help, state);
-  return (
-    <div className="form-group">
-      {children}
-      {preview}
-      {bits.icon}
-      <small className="settings-hint setting-help-body" hidden={!state.open}>
-        {help}
-      </small>
-      {bits.line}
-    </div>
-  );
 }
 
 // ── the path preview ──
@@ -144,7 +124,11 @@ function PreviewSlot({ field, preview, on }: { field: string; preview: Preview; 
 
 /** what each template makes, rendered by the server's real path builder
  *  against a made-up release; refreshed as the fields change */
-function usePathPreview(store: SettingsStore, on: boolean) {
+function usePathPreview(
+  store: SettingsStore,
+  on: boolean,
+  shown: () => Record<TemplateKey, string>,
+) {
   const settings = useSettings(store);
   const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
   const [scenario, setScenario] = useState<Scenario>(savedScenario);
@@ -163,7 +147,7 @@ function usePathPreview(store: SettingsStore, on: boolean) {
       const response = await fetch('/api/settings/path-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(previewBody(now.settings, now.scenario)),
+        body: JSON.stringify(previewBody(now.settings, now.scenario, shown())),
       });
       const data = (await response.json()) as PreviewAnswer & { success?: boolean; error?: string };
       if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
@@ -239,19 +223,28 @@ export function OrganizationCard({ store }: SettingsTabProps) {
   const wishlist = (settings.wishlist || {}) as Section;
   const library = (settings.library || {}) as Section;
   const podcasts = (settings.podcasts || {}) as Section;
-  const templates = templatesOf(settings);
+  // a template field shows what was typed, an emptied one included; a load
+  // or Reset shows the saved one again (empty saved shows the default, as
+  // loadSettingsData filled it)
+  const [typed, setTyped] = useState<Partial<Record<TemplateKey, string>>>({});
+  useEffect(() => setTyped({}), [loads]);
+  const templates = { ...templatesOf(settings), ...typed };
+  const shown = useRef(templates);
+  shown.current = templates;
 
   const on = org.enabled !== false;
-  const preview = usePathPreview(store, on);
+  const preview = usePathPreview(store, on, () => shown.current);
 
   const setOrg = (key: string, value: unknown, delay?: number) => {
     store.set('file_organization', key, value);
     preview.refresh(delay);
   };
   const template = (key: TemplateKey) => ({
-    value: templates[key],
-    onChange: (event: { target: { value: string } }) =>
-      setOrg(`templates.${key}`, event.target.value),
+    value: loads ? templates[key] : '',
+    onChange: (event: { target: { value: string } }) => {
+      setTyped({ ...typed, [key]: event.target.value });
+      setOrg(`templates.${key}`, event.target.value);
+    },
   });
 
   const ttlDraft = useDraft(text(wishlist.ignore_ttl_days) || '30', (raw) => {
@@ -267,13 +260,9 @@ export function OrganizationCard({ store }: SettingsTabProps) {
   function resetTemplates() {
     const values: Section = {};
     for (const [key, value] of Object.entries(RESET_TEMPLATES)) values[`templates.${key}`] = value;
+    // the audiobook template too, in the Audiobooks panel
+    setTyped({});
     store.patch('file_organization', values);
-    // the audiobook template is the Audiobooks panel's, still vanilla
-    const audiobook = document.getElementById('template-audiobook-path') as HTMLInputElement | null;
-    if (audiobook) {
-      audiobook.value = RESET_AUDIOBOOK_TEMPLATE;
-      (window as Window & { debouncedAutoSaveSettings?: () => void }).debouncedAutoSaveSettings?.();
-    }
     preview.refresh(0);
   }
 
@@ -281,7 +270,6 @@ export function OrganizationCard({ store }: SettingsTabProps) {
   const musicPanel = useRef<HTMLDivElement>(null);
   const podcastsPanel = useRef<HTMLDivElement>(null);
   useParkedPanels(media, [
-    { id: 'organization-audiobooks-panel', after: musicPanel, media: 'audiobooks' },
     { id: 'organization-video-panel', after: podcastsPanel, media: 'video' },
   ]);
 
@@ -764,6 +752,11 @@ export function OrganizationCard({ store }: SettingsTabProps) {
           </div>
         </div>
       </div>
+      <AudiobookOrganizationPanel
+        store={store}
+        hidden={media !== 'audiobooks'}
+        template={template('audiobook_path')}
+      />
       <div
         ref={podcastsPanel}
         id="organization-podcasts-panel"

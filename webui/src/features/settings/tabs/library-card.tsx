@@ -12,7 +12,13 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
+
+import type { SettingsStore } from '../settings-store';
+
+import { helpBits, useDraft, useHelp } from './parts';
+import { text } from './source-panels';
 
 export const LIBRARY_TAB = 'library';
 
@@ -140,4 +146,99 @@ export function useParkedPanels(
       if (node) node.hidden = media !== place.media;
     }
   }, [media]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** a path field behind an Unlock button, as togglePathLock did it */
+export function LockedPath({
+  id,
+  value,
+  onChange,
+  placeholder,
+  check,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  check?: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <div className="path-input-group">
+      <input
+        ref={input}
+        type="text"
+        id={id}
+        {...check}
+        placeholder={placeholder}
+        readOnly={!open}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <button
+        className={open ? 'browse-button' : 'browse-button locked'}
+        onClick={() => {
+          setOpen(!open);
+          if (!open) setTimeout(() => input.current?.focus(), 0);
+        }}
+      >
+        {open ? 'Lock' : 'Unlock'}
+      </button>
+    </div>
+  );
+}
+
+/** a setting with its "i" and its help (a hidden small) inside the form-group */
+export function HintGroup({
+  children,
+  help,
+  preview,
+  hidden,
+}: {
+  children: ReactNode;
+  help: ReactNode;
+  /** the path preview slot, right after the field (_pathPreviewSlot) */
+  preview?: ReactNode;
+  hidden?: boolean;
+}) {
+  const state = useHelp();
+  const bits = helpBits(help, state);
+  return (
+    <div className="form-group" hidden={hidden}>
+      {children}
+      {preview}
+      {bits.icon}
+      <small className="settings-hint setting-help-body" hidden={!state.open}>
+        {help}
+      </small>
+      {bits.line}
+    </div>
+  );
+}
+
+/** a field that shows what is typed and saves what it reads as; a fresh
+ *  load puts the saved value back */
+export function useLoadedDraft(store: SettingsStore, value: string, save: (raw: string) => void) {
+  const draft = useDraft(value, save);
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+  return draft;
+}
+
+/** parseInt with a fallback for what does not read as one (_cfgInt) */
+export function int(raw: string, fallback: number) {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** the Docker check loadSettingsData made, for the default folders */
+export function isDocker(settings: Record<string, Record<string, unknown> | undefined>) {
+  const env = settings._environment || {};
+  const soulseek = settings.soulseek || {};
+  return (
+    !!env.docker ||
+    text(soulseek.transfer_path).startsWith('/app/') ||
+    text(soulseek.download_path).startsWith('/app/')
+  );
 }

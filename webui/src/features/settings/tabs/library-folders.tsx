@@ -19,7 +19,15 @@ import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } fro
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { LIBRARY_TAB, LibrarySection, useMediaTabs, useParkedPanels } from './library-card';
+import { AudiobookFoldersPanel, audiobooksPath } from './library-audiobooks';
+import {
+  isDocker,
+  LIBRARY_TAB,
+  LibrarySection,
+  LockedPath,
+  useMediaTabs,
+  useParkedPanels,
+} from './library-card';
 import { OrganizationCard } from './library-organization';
 import { helpBits, useHelp } from './parts';
 import { NumberField, text } from './source-panels';
@@ -40,16 +48,7 @@ function useSettings(store: SettingsStore) {
   return useSyncExternalStore(store.subscribe, () => store.getState().settings);
 }
 
-/** the Docker check loadSettingsData made, for the default folders */
-export function isDocker(settings: Record<string, Record<string, unknown> | undefined>) {
-  const env = settings._environment || {};
-  const soulseek = settings.soulseek || {};
-  return (
-    !!env.docker ||
-    text(soulseek.transfer_path).startsWith('/app/') ||
-    text(soulseek.download_path).startsWith('/app/')
-  );
-}
+export { isDocker };
 
 /** the podcasts folder as loadSettingsData filled it: Docker's own default
  *  replaces the bare './podcasts' */
@@ -57,17 +56,6 @@ export function podcastsPath(settings: Record<string, Record<string, unknown> | 
   const fallback = isDocker(settings) ? '/app/podcasts' : './podcasts';
   const current = text(settings.podcasts?.download_path) || text(settings.library?.podcasts_path);
   return isDocker(settings) && (!current || current === './podcasts')
-    ? fallback
-    : current || fallback;
-}
-
-/** the audiobooks folder the same way (its field is still vanilla; the
- *  Folders summary reads it) */
-function audiobooksPath(settings: Record<string, Record<string, unknown> | undefined>) {
-  const fallback = isDocker(settings) ? '/app/audiobooks' : './audiobooks';
-  const current =
-    text(settings.audiobooks?.download_path) || text(settings.library?.audiobooks_path);
-  return isDocker(settings) && (!current || current === './audiobooks')
     ? fallback
     : current || fallback;
 }
@@ -82,47 +70,6 @@ export function pathsSummary(paths: string[]) {
       .split(/[\\/]/)
       .pop() || '';
   return named.length === 1 ? tail : `${tail} +${named.length - 1} more`;
-}
-
-/** a path field behind an Unlock button, as togglePathLock did it */
-function LockedPath({
-  id,
-  value,
-  onChange,
-  placeholder,
-  check,
-}: {
-  id: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  check?: Record<string, string>;
-}) {
-  const [open, setOpen] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <div className="path-input-group">
-      <input
-        ref={input}
-        type="text"
-        id={id}
-        {...check}
-        placeholder={placeholder}
-        readOnly={!open}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <button
-        className={open ? 'browse-button' : 'browse-button locked'}
-        onClick={() => {
-          setOpen(!open);
-          if (!open) setTimeout(() => input.current?.focus(), 0);
-        }}
-      >
-        {open ? 'Lock' : 'Unlock'}
-      </button>
-    </div>
-  );
 }
 
 /** a field with its "i" and help body inside the form-group, the help line last */
@@ -300,10 +247,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
   const { media, tabs } = useMediaTabs('folders', 'Folders media type');
   const musicPanel = useRef<HTMLDivElement>(null);
   const podcastsPanel = useRef<HTMLDivElement>(null);
-  useParkedPanels(media, [
-    { id: 'folders-audiobooks-panel', after: musicPanel, media: 'audiobooks' },
-    { id: 'folders-video-panel', after: podcastsPanel, media: 'video' },
-  ]);
+  useParkedPanels(media, [{ id: 'folders-video-panel', after: podcastsPanel, media: 'video' }]);
   // the vanilla panels' own deployment guides (the video one has a pair):
   // applyPathsEnvironment toggled every guide on the page
   useEffect(() => {
@@ -697,6 +641,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             />
           </div>
         </div>
+        <AudiobookFoldersPanel store={store} hidden={media !== 'audiobooks'} />
         <div
           ref={podcastsPanel}
           id="folders-podcasts-panel"

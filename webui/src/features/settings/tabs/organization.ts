@@ -18,6 +18,7 @@ export const TEMPLATE_DEFAULTS = {
   playlist_item: '',
   video_path: '$artist/$title-video',
   podcast_path: '$show/Season $season/$title',
+  audiobook_path: '$author/$series/$seriespos - $title',
   sample_path: '$artist/$track - $chop',
 } as const;
 
@@ -33,9 +34,9 @@ export const RESET_TEMPLATES = {
   playlist_path: '$playlist/$artist - $title',
   video_path: '$artist/$title-video',
   podcast_path: '$show/Season $season/$title',
+  audiobook_path: '$author/$series/$seriespos - $title',
   sample_path: '$artist/$track - $chop',
 } as const;
-export const RESET_AUDIOBOOK_TEMPLATE = '$author/$series/$seriespos - $title';
 
 const str = (value: unknown) =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
@@ -223,9 +224,13 @@ export function savedScenario(): Scenario {
   return 'standard';
 }
 
-/** what /api/settings/path-preview is asked (_fetchPathPreview) */
-export function previewBody(settings: SettingsPayload, scenario: Scenario) {
-  const t = templatesOf(settings);
+/** what /api/settings/path-preview is asked (_fetchPathPreview): the
+ *  templates as the fields show them */
+export function previewBody(
+  settings: SettingsPayload,
+  scenario: Scenario,
+  t: Record<TemplateKey, string> = templatesOf(settings),
+) {
   const org = (settings.file_organization || {}) as Section;
   return {
     scenario,

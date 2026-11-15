@@ -1321,94 +1321,8 @@ function toggleAllServiceAccordions(btn) {
 // The download chains (music, video, audiobooks), the source registry the
 // chain and the Sources tiles read, each source's connection state and Test
 // all sources are React: src/features/settings/tabs/sources-model.ts and
-// sources-tab.tsx (SETTINGS_PORT.md step 7a). The audiobook chain below stays
-// with the Library tab it is set on, and hands itself to the React chain
-// through getAudiobookChain / setAudiobookChain.
-
-// ---- Audiobook download sources ----
-// Same three sources the video side offers, and the same .hybrid-source-item
-// markup and CSS music and video already use, so all three read alike. No
-// album-level/track-level badge: that is a music-only idea, a book is always
-// fetched as one whole folder.
-//
-// Torrent first by default. The others are ranked against it afterwards
-// anyway, so the order decides who gets ASKED, not who wins.
-const AUDIOBOOK_SOURCES = ['torrent', 'usenet', 'soulseek'];
-const AUDIOBOOK_SOURCE_LABEL = { torrent: 'Torrent', usenet: 'Usenet', soulseek: 'Soulseek' };
-const AUDIOBOOK_SOURCE_EMOJI = { torrent: '\u{1F9F2}', usenet: '\u{1F4F0}', soulseek: '\u{1F3B5}' };
-let _audiobookHybrid = ['torrent', 'usenet', 'soulseek'];
-
-function renderAudiobookHybrid() {
-    const host = document.getElementById('audiobook-hybrid-rows');
-    if (!host) return;
-    const enabled = _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s));
-    const disabled = AUDIOBOOK_SOURCES.filter(s => !enabled.includes(s));
-    host.innerHTML = enabled.concat(disabled).map(src => {
-        const i = enabled.indexOf(src);
-        const on = i >= 0;
-        return `<div class="hybrid-source-item${on ? '' : ' disabled'}">` +
-            '<span class="hybrid-source-arrows">' +
-            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', -1)"${(!on || i === 0) ? ' disabled' : ''} title="Move up">\u25B2</button>` +
-            `<button type="button" class="hybrid-arrow-btn" onclick="moveAudiobookSource('${src}', 1)"${(!on || i === enabled.length - 1) ? ' disabled' : ''} title="Move down">\u25BC</button>` +
-            '</span>' +
-            `<span class="hybrid-source-icon emoji-icon">${AUDIOBOOK_SOURCE_EMOJI[src] || ''}</span>` +
-            `<span class="hybrid-source-name">${AUDIOBOOK_SOURCE_LABEL[src]}</span>` +
-            `<span class="hybrid-source-priority">${on ? (i + 1) : ''}</span>` +
-            `<label class="hybrid-source-toggle"><input type="checkbox" onchange="toggleAudiobookSource('${src}', this.checked)"${on ? ' checked' : ''}><span class="toggle-track"></span></label>` +
-            '</div>';
-    }).join('');
-}
-
-function moveAudiobookSource(src, direction) {
-    const i = _audiobookHybrid.indexOf(src);
-    const j = i + direction;
-    if (i < 0 || j < 0 || j >= _audiobookHybrid.length) return;
-    [_audiobookHybrid[i], _audiobookHybrid[j]] = [_audiobookHybrid[j], _audiobookHybrid[i]];
-    renderAudiobookHybrid();
-}
-
-function toggleAudiobookSource(src, on) {
-    if (on) {
-        if (!_audiobookHybrid.includes(src)) _audiobookHybrid.push(src);
-    } else {
-        // Keep at least one, the same way video does. An empty chain means
-        // no book can ever be found, with nothing on screen saying why.
-        if (_audiobookHybrid.length <= 1) { renderAudiobookHybrid(); return; }
-        _audiobookHybrid = _audiobookHybrid.filter(s => s !== src);
-    }
-    renderAudiobookHybrid();
-}
-
-// the sources audiobooks actually download through: the chain in hybrid mode,
-// the one picked source otherwise.
-function _audiobookActiveSources() {
-    const mode = document.getElementById('audiobook-download-mode')?.value;
-    if (!mode) return [];
-    const ids = mode === 'hybrid' ? _audiobookHybrid : [mode];
-    return ids.filter(s => AUDIOBOOK_SOURCES.includes(s));
-}
-
-// The React download chain (sources-model.ts) reads and writes the audiobook
-// chain through these until the Library tab is React. The write is what the
-// chain widget's audiobook adapter did: the rows, the mode, and the page save.
-window.getAudiobookChain = () => _audiobookHybrid.slice();
-window.getAudiobookActiveSources = _audiobookActiveSources;
-window.setAudiobookChain = (order) => {
-    _audiobookHybrid = order.slice();
-    const modeSel = document.getElementById('audiobook-download-mode');
-    if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'torrent');
-    try { renderAudiobookHybrid(); } catch (e) { /* legacy rows */ }
-    debouncedAutoSaveSettings();
-};
-
-// The chain only applies in hybrid mode; a single-source mode has nothing to
-// order, so showing the rows there would imply a choice that does nothing.
-function onAudiobookModeChange() {
-    const mode = document.getElementById('audiobook-download-mode')?.value || 'hybrid';
-    const container = document.getElementById('audiobook-hybrid-container');
-    if (container) container.style.display = mode === 'hybrid' ? '' : 'none';
-    if (mode === 'hybrid') renderAudiobookHybrid();
-}
+// sources-tab.tsx (SETTINGS_PORT.md step 7a). The audiobook chain is a
+// settings key the chain reads and writes through the store (step 8c).
 
 // ── Sources tab ─────────────────────────────────────────────────────────────
 // The source registry, the tiles and the modal they open are React
@@ -1830,21 +1744,8 @@ async function loadSettingsData() {
             }
         }).catch(() => { });
 
-        // Populate Download settings (right column)
-        // the music and podcast folders: the Folders card is React (library-folders.tsx)
-        const isDocker = !!(settings._environment && settings._environment.docker) ||
-                         (settings.soulseek?.transfer_path || '').startsWith('/app/') ||
-                         (settings.soulseek?.download_path || '').startsWith('/app/');
-        loadAudiobookRoutes();
-        const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
-        const audiobooksEl = document.getElementById('audiobooks-path');
-        if (audiobooksEl) {
-            audiobooksEl.placeholder = defaultAudiobookPath;
-            const currentAudiobooksVal = settings.audiobooks?.download_path || settings.library?.audiobooks_path;
-            audiobooksEl.value = (isDocker && (!currentAudiobooksVal || currentAudiobooksVal === './audiobooks'))
-                ? defaultAudiobookPath
-                : (currentAudiobooksVal || defaultAudiobookPath);
-        }
+        // every Library folder, the spoken-word artists included: the Folders
+        // card is React (library-folders.tsx, library-audiobooks.tsx)
 
         // the download chain (mode and order): React, loaded in
         // SoulSyncSettings.hydrate above (sources-model.ts)
@@ -1917,76 +1818,9 @@ async function loadSettingsData() {
         });
         document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
 
-        // File Organization and the podcast template: the Organization card is
-        // React (library-organization.tsx). The audiobook template is still here
-        document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
-        // Audiobook settings. Every read carries an explicit default: there is no
-        // deep merge of new defaults into an existing config row, so a key added
-        // after an install was set up comes back undefined, and a bare ?? here
-        // would silently show every switch as off.
-        const ab = settings.audiobooks || {};
-        const abSource = ab.download_source || {};
-        const abVal = (el, value) => { if (el) el.value = value; };
-        const abChecked = (el, value) => { if (el) el.checked = value !== false; };
-        // Which Audible storefront the catalogue pages query. No deep merge
-        // of new defaults into an existing config row, so older installs come
-        // back undefined and read as the US store, same as before.
-        abVal(document.getElementById('audiobook-marketplace'), ab.marketplace || 'us');
-        abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
-        _audiobookHybrid = (abSource.hybrid_order || [])
-            .filter(src => AUDIOBOOK_SOURCES.includes(src));
-        if (!_audiobookHybrid.length) _audiobookHybrid = [...AUDIOBOOK_SOURCES];
-        onAudiobookModeChange();
-        // the audiobook chain is loaded now: the React chain re-reads the open one
-        try { window.SoulSyncSources?.loadChain(); } catch (e) { /* not mounted yet */ }
-        abVal(document.getElementById('audiobook-torrent-category'),
-            ab.torrent_category || 'audiobooks');
-        abVal(document.getElementById('audiobook-prowlarr-categories'),
-            (ab.prowlarr_categories || [3030]).join(', '));
-        // Stored as a fraction because that is what the gate multiplies by;
-        // shown as a percentage because "0.92" in a box labelled % is a bug
-        // report waiting to happen.
-        abVal(document.getElementById('audiobook-completeness-tolerance'),
-            Math.round((ab.completeness_tolerance ?? 0.92) * 100));
-        abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
-        abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
-        // Opt-in, off by default: abChecked treats a missing key as on, which
-        // would switch these on for older configs.
-        const mergeM4b = document.getElementById('audiobook-merge-m4b');
-        if (mergeM4b) mergeM4b.checked = ab.merge_m4b === true;
-        // Off by default, unlike the toggles above: abChecked treats a
-        // missing key as on, which would switch this on for older configs.
-        const removeOwned = document.getElementById('audiobook-remove-owned-from-wishlist');
-        if (removeOwned) removeOwned.checked = ab.remove_owned_from_wishlist === true;
-        abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
-        abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
-        abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
-        abChecked(document.getElementById('audiobook-write-nfo'), ab.write_nfo);
-
-        // Quality profile. The stored order is a list, best first; the page
-        // only edits which format leads, and the rest keep their order behind
-        // it — a full drag-to-reorder list is more UI than the choice needs.
-        const abq = ab.quality || {};
-        const abOrder = Array.isArray(abq.format_order) && abq.format_order.length
-            ? abq.format_order
-            : ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac'];
-        abVal(document.getElementById('audiobook-format-first'), abOrder[0] || 'm4b');
-        // Empty means every format, so a fresh install shows them all on.
-        const abAllowed = Array.isArray(abq.allowed_formats) ? abq.allowed_formats : [];
-        document.getElementById('audiobook-allowed-formats')?.querySelectorAll('input').forEach(box => {
-            box.checked = !abAllowed.length || abAllowed.includes(box.value);
-        });
-        // "any" shows both switches on; "single"/"multiple" shows just that one.
-        const abLayout = abq.file_layout || 'any';
-        document.getElementById('audiobook-file-layout')?.querySelectorAll('input').forEach(box => {
-            box.checked = abLayout === 'any' || abLayout === box.value;
-        });
-        abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
-        abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
-        abChecked(document.getElementById('audiobook-allow-dramatized'),
-            abq.allow_dramatized);
-        abChecked(document.getElementById('audiobook-recycle-deletes'), ab.recycle_deletes);
-        abVal(document.getElementById('audiobook-recycle-keep-days'), ab.recycle_keep_days ?? 7);
+        // File Organization and every template: the Organization card is React
+        // (library-organization.tsx, library-audiobooks.tsx)
+        // the audiobook settings: the Organization card is React (library-audiobooks.tsx)
         // the naming options, tag options and wishlist rules: the Organization card is React
         const _lcOn = document.getElementById('lidarr-compat-enabled');
         if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
@@ -2003,7 +1837,6 @@ async function loadSettingsData() {
         // Listening Stats and Discovery are on the Discovery tab, which is React
 
         // the extra music libraries and Sample Studio folders: React (library-folders.tsx)
-        renderAudiobookExtraPaths(settings.library?.audiobooks_additional_paths || []);
 
 
         // Library Organize and re-download deleted files: the Organization card is React
@@ -2686,128 +2519,13 @@ async function toggleHydrabaseFromSettings() {
 }
 
 // ── Music Library Paths ──
-// ── Extra audiobook folders: an existing collection on another drive ──
-function addAudiobookExtraPathRow(value) {
-    const container = document.getElementById('audiobooks-extra-paths');
-    if (!container) return null;
-    const row = document.createElement('div');
-    row.className = 'audiobook-extra-row';
-    row.setAttribute('data-folder-row', '');
-    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'audiobook-extra-input';
-    input.value = value || '';
-    input.placeholder = '/app/audiobooks2';
-    input.style.cssText = 'flex:1;min-width:0';
-    input.setAttribute('aria-label', 'Extra audiobook folder');
-    input.setAttribute('data-folder-check', 'audiobooks');
-    input.setAttribute('data-folder-label', 'Extra audiobook folder');
-    input.setAttribute('data-folder-role', 'existing');
-    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'test-button';
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', 'Remove this folder');
-    remove.addEventListener('click', () => {
-        const status = row.nextElementSibling;
-        if (status && status.classList.contains('folder-check')) status.remove();
-        row.remove();
-        if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
-        if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('audiobooks');
-    });
-    row.append(input, remove);
-    container.appendChild(row);
-    if (value === undefined) input.focus();
-    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('audiobooks');
-    return input;
-}
-
-function renderAudiobookExtraPaths(paths) {
-    const container = document.getElementById('audiobooks-extra-paths');
-    if (!container) return;
-    container.replaceChildren();
-    (Array.isArray(paths) ? paths : []).forEach(path => addAudiobookExtraPathRow(String(path || '')));
-    container.dataset.loaded = 'true';
-}
-
-function collectAudiobookExtraPaths() {
-    // never loaded (settings failed to load): leave the key out so a save
-    // can't wipe the saved list
-    const container = document.getElementById('audiobooks-extra-paths');
-    if (!container || container.dataset.loaded !== 'true') return undefined;
-    return Array.from(document.querySelectorAll('.audiobook-extra-input'))
-        .map(input => input.value.trim())
-        .filter(Boolean);
-}
+// the extra audiobook folders: React (library-audiobooks.tsx)
 
 // ── Sample Studio folders ──
 // Mirrors the additional-music-folders UI above: a dynamic list of output
 // folders for saved chops. The first entry is the default destination.
 
-// --- Spoken-word artists: music downloads filed in the audiobook library ---
-// The artist page and watchlist own the toggle (React); this is only the list.
-
-async function loadAudiobookRoutes() {
-    const list = document.getElementById('audiobook-routes-list');
-    if (!list) return;
-    try {
-        const { artists = [] } = await (await fetch('/api/audiobook-routes')).json();
-        list.innerHTML = artists.length
-            ? artists.map(a => `<div class="abr-row"><span>${escapeHtml(a.label || a.route_key)}</span>
-                <button class="test-button" type="button" data-route="${escapeHtml(a.route_key)}" data-action="move">Move existing…</button>
-                <button class="test-button abr-remove" type="button" data-route="${escapeHtml(a.route_key)}" data-action="remove">&times;</button></div>`).join('')
-            : '<div class="abr-empty">No artists routed. Use “Treat as audiobook” on an artist’s page.</div>';
-        list.onclick = e => {
-            const btn = e.target.closest('button[data-action]');
-            if (btn) audiobookRouteAction(btn.dataset.action, btn.dataset.route);
-        };
-    } catch (e) {
-        list.textContent = 'Could not load the list.';
-    }
-}
-
-async function audiobookRouteAction(action, key) {
-    const url = '/api/audiobook-routes/' + encodeURIComponent(key);
-    const call = (path, init) => fetch(url + path, init).then(async r => {
-        const data = await r.json();
-        if (!data.success) throw new Error(data.error || 'failed');
-        return data;
-    });
-    const post = apply => call('/move', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apply }),
-    });
-    try {
-        if (action === 'remove') {
-            await call('', { method: 'DELETE' });
-            await loadAudiobookRoutes();
-            return;
-        }
-        const items = (await post(false)).items || [];
-        const todo = items.filter(i => i.action === 'move').length;
-        const clash = items.filter(i => i.action === 'exists').length;
-        if (!todo) {
-            showToast(clash ? `Nothing to move: ${clash} album(s) already exist in the audiobook folder.`
-                            : 'No albums of this artist in the music library.', 'info');
-            return;
-        }
-        if (!await showConfirmDialog({
-            title: 'Move albums',
-            message: `Move ${todo} album folder(s) from the music library to the audiobook folder? `
-                + `${clash ? `${clash} album(s) already exist there and stay as they are. ` : ''}`
-                + 'Your media server needs a library scan afterwards.',
-            confirmText: 'Move',
-        })) return;
-        const done = await post(true);
-        showToast(`Moved ${done.moved} album(s)` + (done.failed ? `, ${done.failed} failed` : ''),
-                  done.failed ? 'error' : 'success');
-    } catch (e) {
-        showToast(e.message, 'error');
-    }
-}
+// the spoken-word artists list: React (library-audiobooks.tsx)
 
 // The genre whitelist is React now: src/features/settings/tabs/downloads-tab.tsx
 
@@ -3438,12 +3156,7 @@ async function saveSettings(quiet = false) {
             embed_tags: document.getElementById('embed-audiodb').checked,
             tags: _collectServiceTags('audiodb')
         },
-        // the Organization card (React) saves the rest of file_organization.
-        // the audiobook template is the Audiobooks panel's, saved alone as a
-        // dotted key so the card's templates are kept
-        file_organization: {
-            'templates.audiobook_path': document.getElementById('template-audiobook-path')?.value,
-        },
+        // file_organization: the Organization card is React
         mcp: {
             enabled: _cfgBool('mcp-enabled'),
         },
@@ -3464,81 +3177,13 @@ async function saveSettings(quiet = false) {
         library: {
             // music_paths, sample_paths, music_videos_path, podcasts_path: the
             // Folders card is React (library-folders.tsx)
-            audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
-            audiobooks_additional_paths: collectAudiobookExtraPaths(),
+            // audiobooks_path, audiobooks_additional_paths: React (library-audiobooks.tsx)
             // reorganize_preserve_casing, write_artist_nfo,
             // redownload_externally_deleted: the Organization card is React
         },
         // podcasts (download_path, media_format): the Folders and Organization
         // cards are React
-        audiobooks: {
-            marketplace: _cfgStr('audiobook-marketplace', { fallback: 'us' }),
-            download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
-            download_source: {
-                mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),
-                hybrid_order: _audiobookHybrid.filter(s => AUDIOBOOK_SOURCES.includes(s)),
-            },
-            torrent_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
-            // One category covers both: a book is tagged the same way whichever
-            // client fetched it, and two fields to type the same word twice is
-            // two chances to get it wrong.
-            usenet_category: _cfgStr('audiobook-torrent-category', { trim: true, fallback: 'audiobooks' }),
-            prowlarr_categories: (_cfgStr('audiobook-prowlarr-categories') === undefined
-                ? undefined : splitList(_cfgStr('audiobook-prowlarr-categories')))
-                .map(n => parseInt(n, 10))
-                .filter(n => Number.isFinite(n)),
-            completeness_tolerance: Math.min(1, Math.max(0.1,
-                (_cfgInt('audiobook-completeness-tolerance', 92)) / 100)),
-            staging_days: Math.min(90, Math.max(1,
-                _cfgInt('audiobook-staging-days', 7))),
-            renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
-            merge_m4b: _cfgBool('audiobook-merge-m4b'),
-            remove_owned_from_wishlist: _cfgBool('audiobook-remove-owned-from-wishlist'),
-            embed_metadata: _cfgBool('audiobook-embed-metadata'),
-            embed_artwork: _cfgBool('audiobook-embed-artwork'),
-            save_artwork: _cfgBool('audiobook-save-artwork'),
-            write_nfo: _cfgBool('audiobook-write-nfo'),
-            quality: {
-                // The chosen format leads; the default order follows behind it, so
-                // picking MP3 does not silently discard every other format.
-                format_order: (function () {
-                    const first = document.getElementById('audiobook-format-first')?.value || 'm4b';
-                    const rest = ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac']
-                        .filter(f => f !== first);
-                    return [first, ...rest];
-                })(),
-                // Every format on is stored as [] ("no restriction"), so a format
-                // added later is not refused by a list that predates it.
-                // Undefined when the toggles are not on the page, like _cfgBool,
-                // so a missing panel cannot wipe a stored restriction.
-                allowed_formats: (function () {
-                    const group = document.getElementById('audiobook-allowed-formats');
-                    if (!group) return undefined;
-                    const boxes = [...group.querySelectorAll('input')];
-                    const on = boxes.filter(box => box.checked).map(box => box.value);
-                    return on.length === boxes.length ? [] : on;
-                })(),
-                // Exactly one switch on picks that layout; both on, or both off,
-                // means either. Undefined when the switches are not on the page.
-                file_layout: (function () {
-                    const group = document.getElementById('audiobook-file-layout');
-                    if (!group) return undefined;
-                    const on = [...group.querySelectorAll('input')].filter(box => box.checked);
-                    return on.length === 1 ? on[0].value : 'any';
-                })(),
-                min_bitrate_kbps: Math.max(0,
-                    _cfgInt('audiobook-min-bitrate', 0)),
-                max_bitrate_kbps: Math.max(0,
-                    _cfgInt('audiobook-max-bitrate', 0)),
-                allow_dramatized:
-                    document.getElementById('audiobook-allow-dramatized')?.checked !== false,
-            },
-            recycle_deletes:
-                document.getElementById('audiobook-recycle-deletes')?.checked !== false,
-            // 0 turns the bin off; it never means "erase everything now".
-            recycle_keep_days: Math.min(365, Math.max(0,
-                _cfgInt('audiobook-recycle-keep-days', 0))),
-        },
+        // audiobooks: React (library-audiobooks.tsx)
         import: {
             // replace_lower_quality: the Quality tab is React
             folder_artist_override: _cfgBool('import-folder-artist-override'),
@@ -4465,7 +4110,6 @@ async function logoutQobuz() {
 const PATH_INPUT_IDS = {
     // the music and podcast folders lock themselves in the React Folders card
     'video-download': 'video-download-path',   // the same setting, from the Video folders tab
-    audiobooks: 'audiobooks-path',
 };
 
 // Deployment-aware folder-paths guidance (+ the fresh-install disk landmine).

@@ -11,17 +11,26 @@ import { createSettingsStore } from '@/features/settings/settings-store';
 import { createSourcesModel } from '@/features/settings/tabs/sources-model';
 import { SourceTiles } from '@/features/settings/tabs/sources-tab';
 
-const shell = window as unknown as Record<string, unknown>;
-
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete shell.getAudiobookActiveSources;
 });
 
+/** a settings store holding this audiobook chain (a settings key since step
+ *  8c); none at all is a store that never loaded */
+function bookStore(books: string[]) {
+  const store = createSettingsStore({ delay: 0 });
+  if (books.length)
+    store.hydrate({
+      audiobooks: {
+        download_source: { mode: books.length > 1 ? 'hybrid' : books[0], hybrid_order: books },
+      },
+    });
+  return store;
+}
+
 async function tiles(music: string[], video: string[] | null, books: string[]) {
-  const model = createSourcesModel({ store: createSettingsStore({ delay: 0 }) });
+  const model = createSourcesModel({ store: bookStore(books) });
   model.load({ download_source: { mode: 'hybrid', hybrid_order: music } });
-  shell.getAudiobookActiveSources = () => books;
   if (video) {
     vi.stubGlobal(
       'fetch',

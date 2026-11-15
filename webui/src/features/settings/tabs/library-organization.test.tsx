@@ -100,17 +100,17 @@ function saved(): SettingsPayload {
 }
 
 describe('the Organization card is the markup it replaced', () => {
-  it('with the preview drawn and the vanilla Audiobooks and Video panels back in place', () => {
+  it('with the preview drawn, the React Audiobooks panel and the vanilla Video panel', () => {
     park();
     const { container } = card();
     const want = shape(vanilla('library-organization.vanilla.html', { afterInit: true }));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // only the Folders card's two panels wait in the park now
+    // only the Folders card's vanilla video panel waits in the park now
     expect(
       [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
-    ).toEqual(['folders-audiobooks-panel', 'folders-video-panel']);
+    ).toEqual(['folders-video-panel']);
   });
 
   it('every help reads the same, spaces included', () => {
@@ -278,10 +278,7 @@ describe('the card', () => {
     expect(summary().textContent).toBe('$albumartist - $album/$track - $title');
   });
 
-  it('Reset writes the defaults, the audiobook template in its vanilla panel included', async () => {
-    park();
-    const autosave = vi.fn();
-    shell.debouncedAutoSaveSettings = autosave;
+  it('Reset writes every default, the audiobook template included', async () => {
     act(() =>
       store.hydrate({
         file_organization: {
@@ -290,13 +287,15 @@ describe('the card', () => {
       }),
     );
     card();
-    const audiobook = input('template-audiobook-path');
-    audiobook.value = 'mine';
+    fireEvent.change(input('template-audiobook-path'), { target: { value: 'mine' } });
+    fireEvent.change(input('template-album-path'), { target: { value: 'typed/$title' } });
     fireEvent.click(
       document.querySelector('#organization-music-panel .form-group:last-child button')!,
     );
-    expect(audiobook.value).toBe('$author/$series/$seriespos - $title');
-    expect(autosave).toHaveBeenCalledTimes(1);
+    expect(input('template-audiobook-path').value).toBe('$author/$series/$seriespos - $title');
+    expect(input('template-album-path').value).toBe(
+      '$albumartist/$albumartist - $album/$track - $title',
+    );
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().file_organization).toEqual({
       'templates.album_path': '$albumartist/$albumartist - $album/$track - $title',
@@ -304,11 +303,25 @@ describe('the card', () => {
       'templates.playlist_path': '$playlist/$artist - $title',
       'templates.video_path': '$artist/$title-video',
       'templates.podcast_path': '$show/Season $season/$title',
+      'templates.audiobook_path': '$author/$series/$seriespos - $title',
       'templates.sample_path': '$artist/$track - $chop',
     });
     // the compilation template and playlist file naming are left alone, as before
     expect(input('template-compilation-path').value).toBe('C/$album');
     expect(input('template-playlist-item').value).toBe('$title');
+  });
+
+  it('an emptied template stays empty until the next load shows the default', async () => {
+    act(() => store.hydrate({ file_organization: { templates: { album_path: 'x/y' } } }));
+    card();
+    fireEvent.change(input('template-album-path'), { target: { value: '' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(input('template-album-path').value).toBe('');
+    expect(saved().file_organization).toEqual({ 'templates.album_path': '' });
+    act(() => store.hydrate({ file_organization: { templates: { album_path: '' } } }));
+    expect(input('template-album-path').value).toBe(
+      '$albumartist/$albumartist - $album/$track - $title',
+    );
   });
 });
 

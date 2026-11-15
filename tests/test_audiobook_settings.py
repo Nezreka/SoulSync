@@ -120,55 +120,80 @@ def settings_js():
     return (_ROOT / "webui/static/settings.js").read_text(encoding="utf-8", errors="ignore")
 
 
-@pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path",
-                                        "audiobook-remove-owned-from-wishlist"])
-def test_the_settings_page_has_the_input(index_html, element_id):
-    assert f'id="{element_id}"' in index_html
+_TABS = _ROOT / "webui/src/features/settings/tabs"
 
 
-def test_the_folder_path_input_can_be_unlocked(index_html, settings_js):
-    # Every other output path has an unlock button plus an entry in the path map;
-    # without the map entry the button silently does nothing.
-    assert "togglePathLock('audiobooks'" in index_html
-    assert "audiobooks: 'audiobooks-path'" in settings_js
+@pytest.fixture(scope="module")
+def panel():
+    """the Library tab's two Audiobooks panels, React since SETTINGS_PORT.md
+    step 8c: what index.html and settings.js held for them"""
+    return (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8")
 
 
-def _touch_count(js: str, element_id: str) -> int:
-    """How many places in settings.js reach this field.
+@pytest.fixture(scope="module")
+def model():
+    """the download chains, the audiobook one included (step 8c)"""
+    return (_TABS / "sources-model.ts").read_text(encoding="utf-8")
 
-    The save side reads through _cfgStr/_cfgBool/_cfgInt/_cfgFloat rather than
-    getElementById now — those return undefined for a missing element so a field
-    that is not on the page can no longer blank the stored setting. Counting
-    only getElementById would report every saved field as write-only.
-    """
-    return (js.count(f"getElementById('{element_id}')")
-            + sum(js.count(f"_cfg{kind}('{element_id}'")
-                  for kind in ("Str", "Bool", "Int", "Float")))
+
+def _has_input(src: str, element_id: str) -> bool:
+    # a plain JSX attribute, or the id handed to the panel's field helpers
+    return f'id="{element_id}"' in src or f"'{element_id}'," in src
 
 
 @pytest.mark.parametrize("element_id", ["audiobooks-path", "template-audiobook-path",
                                         "audiobook-remove-owned-from-wishlist"])
-def test_settings_js_reads_and_writes_the_input(settings_js, element_id):
-    assert _touch_count(settings_js, element_id) >= 2
+def test_the_settings_page_has_the_input(panel, element_id):
+    assert _has_input(panel, element_id)
 
 
-def test_settings_js_persists_the_audiobook_fields(settings_js):
-    assert "audiobooks_path:" in settings_js
-    # saved alone as a dotted key: the Organization card (React, step 8b)
-    # saves the other templates, and a whole templates dict would wipe them
-    assert "'templates.audiobook_path':" in settings_js
+def test_the_folder_path_input_can_be_unlocked(panel):
+    # Every other output path has an unlock button; the React one is the
+    # shared LockedPath, read-only until Unlock
+    import re
+    assert re.search(r'<LockedPath\s+id="audiobooks-path"', panel)
 
 
-def test_the_template_reset_covers_audiobooks(settings_js):
+def _saves(panel: str, key: str) -> bool:
+    """the panel saves this audiobooks.* key (a dotted key is one key of a
+    dict inside the section, saved alone)"""
+    import re
+    return bool(re.search(rf"set\(\s*'{re.escape(key)}'", panel)) or f"{key}: value" in panel
+
+
+def _reads(panel: str, key: str) -> bool:
+    """the panel shows this audiobooks.* key"""
+    if key.startswith("download_source."):
+        return f"source.{key.split('.', 1)[1]}" in panel
+    if key.startswith("quality."):
+        return key in panel
+    return f"ab.{key}" in panel
+
+
+def test_the_three_fields_are_read_and_saved(panel):
+    assert "store.set('audiobooks', 'download_path'" in panel
+    assert "store.set('library', 'audiobooks_path'" in panel
+    assert "ab.remove_owned_from_wishlist === true" in panel
+    assert "set('remove_owned_from_wishlist'" in panel
+    # the template is the Organization card's, which owns every template
+    card = (_TABS / "library-organization.tsx").read_text(encoding="utf-8")
+    assert "template={template('audiobook_path')}" in card
+    assert "setOrg(`templates.${key}`" in card
+
+
+def test_settings_js_no_longer_saves_the_audiobook_fields(settings_js):
+    # React saves them (step 8c); a second saver would race it
+    payload = settings_js.split("async function saveSettings", 1)[1]
+    assert "audiobooks_path:" not in payload
+    assert "templates.audiobook_path" not in payload
+    assert "\n        audiobooks: {" not in payload
+
+
+def test_the_template_reset_covers_audiobooks():
     # "Reset to defaults" that skips a field leaves a stale template behind.
-    # the button is the Organization card's (React, step 8b); the audiobook
-    # template is still the vanilla panel's, which Reset writes too
-    from pathlib import Path
-    tabs = Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
-    card = (tabs / "library-organization.tsx").read_text(encoding="utf-8")
-    rules = (tabs / "organization.ts").read_text(encoding="utf-8")
-    assert "audiobook.value = RESET_AUDIOBOOK_TEMPLATE;" in card
-    assert "RESET_AUDIOBOOK_TEMPLATE = '$author/$series/$seriespos - $title'" in rules
+    rules = (_TABS / "organization.ts").read_text(encoding="utf-8")
+    reset = rules.split("export const RESET_TEMPLATES", 1)[1].split("} as const", 1)[0]
+    assert "audiobook_path: '$author/$series/$seriespos - $title'" in reset
 
 
 # ---------------------------------------------------------------------------
@@ -234,15 +259,14 @@ _EXPOSED = {
 
 
 @pytest.mark.parametrize("element_id", sorted(set(_EXPOSED.values())))
-def test_every_audiobook_knob_has_an_input(index_html, element_id):
-    assert f'id="{element_id}"' in index_html
+def test_every_audiobook_knob_has_an_input(panel, element_id):
+    assert _has_input(panel, element_id)
 
 
-@pytest.mark.parametrize("element_id", sorted(set(_EXPOSED.values())))
-def test_every_audiobook_knob_is_loaded_and_saved(settings_js, element_id):
-    # Twice: once populating the form, once collecting it. One occurrence means
-    # a field that either shows the wrong value or throws its away on save.
-    assert _touch_count(settings_js, element_id) >= 2
+@pytest.mark.parametrize("key", sorted(_EXPOSED))
+def test_every_audiobook_knob_is_loaded_and_saved(panel, key):
+    assert _reads(panel, key), f"audiobooks.{key} is never shown"
+    assert _saves(panel, key), f"audiobooks.{key} is never saved"
 
 
 @pytest.mark.parametrize("key", sorted(_EXPOSED))
@@ -253,12 +277,17 @@ def test_every_exposed_knob_has_a_default(defaults, key):
         block = block[part]
 
 
-@pytest.mark.parametrize("element_id", sorted(set(_EXPOSED.values())))
-def test_every_audiobook_knob_explains_itself(index_html, element_id):
-    # Every other field on this page carries a help body. One that does not is
-    # a number the user has no way to reason about.
-    tail = index_html.split(f'id="{element_id}"', 1)[1][:2000]
-    assert "setting-help-body" in tail, f"{element_id} has no help text"
+def test_every_audiobook_knob_explains_itself():
+    # every help body of the old panel is in the React one, word for word:
+    # library-audiobooks.test.tsx compares them against the frozen markup
+    test = (_TABS / "library-audiobooks.test.tsx").read_text(encoding="utf-8")
+    assert "library-audiobook-organization.vanilla.html" in test
+    assert "'.setting-help-body, .stg-help-text, .settings-hint, label'" in test
+    fixture = (_TABS / "__fixtures__/library-audiobook-organization.vanilla.html").read_text(
+        encoding="utf-8")
+    for element_id in _EXPOSED.values():
+        tail = fixture.split(f'id="{element_id}"', 1)[1][:2000]
+        assert "setting-help-body" in tail, f"{element_id} has no help text"
 
 
 def test_the_audiobook_block_actually_persists():
@@ -300,50 +329,22 @@ def test_saving_an_empty_source_order_cannot_disable_downloading():
         assert configured_chain() == ["torrent", "usenet", "soulseek"]
 
 
-def test_the_completeness_field_is_a_percentage_of_the_stored_fraction(settings_js):
-    # Stored as 0.92 because that is what the gate multiplies by; shown as 92
-    # because "0.92" in a box labelled % is a bug report waiting to happen.
-    assert "audiobook-completeness-tolerance" in settings_js
-    assert "* 100" in settings_js and "/ 100" in settings_js
+def test_the_completeness_field_is_a_percentage_of_the_stored_fraction(panel):
+    assert "audiobook-completeness-tolerance" in panel
+    assert "* 100" in panel and "/ 100" in panel
 
 
-def test_the_two_downloader_categories_stay_in_step(settings_js):
-    # One field fills both. Two boxes asking for the same word twice is two
-    # chances to get it wrong, and a mismatch means usenet books land in a
-    # category nothing is watching.
-    # Brace-matched rather than split on "}," — the block has a nested object
-    # in it, and a naive split stops at the wrong place.
-    #
-    # Scoped to saveSettings first: the shared download-chain widget also has an
-    # `audiobooks: {` adapter, and it sits earlier in the file, so an unscoped
-    # search brace-matched that instead and reported this field as gone.
-    payload = settings_js.split("async function saveSettings", 1)[1]
-    start = payload.index("audiobooks: {") + len("audiobooks: ")
-    settings_js = payload
-    depth = 0
-    for end, char in enumerate(settings_js[start:], start):
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                break
-    block = settings_js[start:end + 1]
-
-    assert block.count("audiobook-torrent-category") == 2
-    assert "usenet_category:" in block
+def test_the_two_downloader_categories_stay_in_step(panel):
+    assert "store.patch('audiobooks', { torrent_category: value, usenet_category: value })" in panel
 
 
-def test_the_audiobook_group_is_labelled_on_the_page(index_html):
+def test_the_audiobook_group_is_labelled_on_the_page(panel):
     # these knobs used to sit in the music section under a heading, and the
     # next reader took them for global settings. they have their own tab now.
-    # the panel is still vanilla, parked for the React Organization card
-    # (step 8b); the video panel is parked right after it
-    start = index_html.index('id="organization-audiobooks-panel"')
-    end = index_html.index('id="organization-video-panel"')
-    panel = index_html[start:end]
+    organization = panel.split("export function AudiobookOrganizationPanel", 1)[1]
+    assert 'id="organization-audiobooks-panel"' in organization
     for knob in ('template-audiobook-path', 'audiobook-marketplace', 'audiobook-write-nfo'):
-        assert f'id="{knob}"' in panel
+        assert _has_input(organization, knob)
 
 
 @pytest.mark.parametrize("css_class", ["settings-subheading", "settings-unit"])
@@ -358,70 +359,54 @@ def test_the_new_markup_is_actually_styled(css_class):
 # The source chain, built the way music and video build theirs
 # ---------------------------------------------------------------------------
 
-def test_the_source_order_is_not_a_text_box(index_html):
-    """Ordering sources is a reorder, not a spelling test.
-
-    A comma-separated field makes the user remember three exact source names,
-    lets them type a fourth that silently does nothing, and shows no sign that
-    the order even matters. Music and video both solved this with draggable /
-    arrow-ordered rows; there is no reason for a third dialect.
-    """
-    assert 'id="audiobook-hybrid-order"' not in index_html
-    assert 'id="audiobook-hybrid-rows"' in index_html
+def test_the_source_order_is_not_a_text_box(panel):
+    """Ordering sources is a reorder, not a spelling test: the chain widget
+    on the Downloads tab orders them (sources-model.ts)."""
+    assert 'id="audiobook-hybrid-order"' not in panel
+    assert 'id="audiobook-hybrid-rows"' in panel
 
 
-def test_the_source_rows_reuse_the_shared_markup(index_html):
-    # Same class as music's and video's chains, so all three inherit one
-    # stylesheet and one set of behaviours.
-    block = index_html.split('id="audiobook-hybrid-container"', 1)[1][:800]
-    assert 'class="hybrid-source-list"' in block
+def test_the_source_rows_reuse_the_shared_markup(panel):
+    block = panel.split('id="audiobook-hybrid-container"', 1)[1][:800]
+    assert 'className="hybrid-source-list"' in block
 
 
-def test_the_source_rows_can_be_reordered_and_toggled(settings_js):
-    assert "function moveAudiobookSource" in settings_js
-    assert "function toggleAudiobookSource" in settings_js
-    assert "moveAudiobookSource(" in settings_js
-    assert "toggleAudiobookSource(" in settings_js
+def test_the_source_rows_can_be_reordered_and_toggled(model):
+    # the chain widget's audiobook tab moves, adds and removes them, and saves
+    # through the store
+    assert "else if (kind === 'audiobooks') writeAudiobooks(order);" in model
+    assert "'download_source.hybrid_order': order.slice()" in model
 
 
-def test_the_chain_is_only_shown_when_it_applies(index_html, settings_js):
-    # A single-source mode has nothing to order, so the rows would imply a
-    # choice that does nothing.
-    assert "onAudiobookModeChange()" in index_html
-    assert "function onAudiobookModeChange" in settings_js
+def test_the_chain_is_only_shown_when_it_applies(panel):
+    assert "display: loads && mode === 'hybrid' ? '' : 'none'" in panel
 
 
-def test_the_last_source_cannot_be_switched_off(settings_js):
-    # An empty chain means no book can ever be found, with nothing on screen
-    # saying why. Video guards this the same way.
-    body = settings_js.split("function toggleAudiobookSource", 1)[1].split("\n}", 1)[0]
-    assert "_audiobookHybrid.length <= 1" in body
+def test_the_last_source_cannot_be_switched_off():
+    widget = (_TABS / "sources-tab.tsx").read_text(encoding="utf-8")
+    body = widget.split("const remove = (id: string) => {", 1)[1].split("};", 1)[0]
+    assert "full.length <= 1" in body
 
 
-def test_the_order_is_loaded_and_saved(settings_js):
-    assert "_audiobookHybrid = (abSource.hybrid_order" in settings_js
-    assert "hybrid_order: _audiobookHybrid" in settings_js
+def test_the_order_is_loaded_and_saved(model):
+    assert "source.hybrid_order" in model.split("export function audiobookChainOf", 1)[1][:600]
+    assert "'download_source.hybrid_order': order.slice()" in model
 
 
-def test_an_unknown_source_cannot_be_saved(settings_js):
-    # The old text box accepted anything typed into it.
-    assert settings_js.count("AUDIOBOOK_SOURCES.includes(") >= 2
+def test_an_unknown_source_cannot_be_saved(model):
+    assert model.count("AUDIOBOOK_SOURCES.includes(") >= 2
 
 
-def test_the_offered_sources_match_the_backend_chain(defaults, settings_js):
-    # The rows are built from a hard-coded list. If it ever drifts from the
-    # default chain, a source becomes unreachable from the page.
-    line = next(ln for ln in settings_js.splitlines()
-                if ln.startswith("const AUDIOBOOK_SOURCES"))
+def test_the_offered_sources_match_the_backend_chain(defaults, model):
+    line = next(ln for ln in model.splitlines()
+                if ln.startswith("export const AUDIOBOOK_SOURCES"))
     offered = {part.strip(" '\"") for part in
                line.split("[", 1)[1].split("]", 1)[0].split(",")}
     assert offered == set(defaults["audiobooks"]["download_source"]["hybrid_order"])
 
 
-def test_the_mode_options_match_the_backend(defaults, index_html):
-    # A mode the backend does not understand falls through to the default
-    # chain, silently ignoring what the user picked.
-    block = index_html.split('id="audiobook-download-mode"', 1)[1].split("</select>", 1)[0]
+def test_the_mode_options_match_the_backend(defaults, panel):
+    block = panel.split('id="audiobook-download-mode"', 1)[1].split("</select>", 1)[0]
     offered = {part.split('"')[0] for part in block.split('value="')[1:]}
     assert offered == {"soulseek", "torrent", "usenet", "hybrid"}
 
@@ -666,16 +651,17 @@ def test_the_quality_profile_is_one_for_the_whole_side():
 
 def test_the_preferred_format_choice_keeps_the_others_behind_it():
     # Picking MP3 must not silently discard every other format.
-    js = _read("webui/static/settings.js")
-    block = js.split("format_order: (function", 1)[1].split("})()", 1)[0]
-    assert "filter(f => f !== first)" in block
-    assert "[first, ...rest]" in block
+    # the Organization card's Audiobooks panel is React (step 8c)
+    panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
+    block = panel.split("set('quality.format_order', [", 1)[1].split("]);", 1)[0]
+    assert "first," in block
+    assert ".filter((f) => f !== first)" in block
 
 
 def test_the_quality_floor_is_separate_from_the_completeness_floor():
     # They answer different questions: could this be the whole book at all,
     # versus do I want it. Sharing one number would conflate fact with taste.
-    index = _read("webui/index.html")
-    assert 'id="audiobook-min-bitrate"' in index
-    assert 'id="audiobook-completeness-tolerance"' in index
-    assert "min_complete_kbps" not in index
+    panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
+    assert "'audiobook-min-bitrate'," in panel
+    assert "'audiobook-completeness-tolerance'," in panel
+    assert "min_complete_kbps" not in panel

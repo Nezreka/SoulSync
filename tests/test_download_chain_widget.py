@@ -126,7 +126,7 @@ def test_each_kind_can_read_and_write_itself(model, kind):
     reads = {"music": "model.getState().music", "video": "readVideo()",
              "audiobooks": "audiobookChain()"}[kind]
     writes = {"music": "writeMusic(order)", "video": "writeVideo(",
-              "audiobooks": "setAudiobookChain"}[kind]
+              "audiobooks": "writeAudiobooks(order)"}[kind]
     assert reads in load, f"{kind} cannot load its chain"
     assert writes in commit, f"{kind} cannot save its chain"
 
@@ -142,13 +142,14 @@ def test_video_saves_to_its_own_store(model):
 def test_music_and_audiobooks_ride_the_page_save(model):
     """Both are app_config keys the settings POST already handles. Writing them
     a second way would be a second source of truth. music goes through the
-    settings store, audiobooks through the Library tab's vanilla save."""
+    settings store, audiobooks too (step 8c)."""
     music = _body(model, "function writeMusic(")
     assert "store.patch('download_source'" in music
     assert "/api/" not in music, "music should not post on its own"
     commit = _body(model, "function commit(order: string[])")
     books = commit.split("kind === 'audiobooks'", 1)[1].split("\n", 1)[0]
-    assert "setAudiobookChain" in books and "/api/" not in books
+    assert "writeAudiobooks" in books and "/api/" not in books
+    assert "store.patch('audiobooks'" in _body(model, "function writeAudiobooks(")
 
 
 def test_music_keeps_feeding_the_state_the_rest_of_the_page_reads(model):
@@ -377,17 +378,25 @@ def test_the_source_dropdown_is_gone(index, js):
     assert "download-source-mode" not in js
 
 
-def test_the_audiobook_mode_dropdown_is_hidden_too(index):
-    assert 'id="audiobook-download-mode"' in index
-    before = index.split('id="audiobook-download-mode"', 1)[0]
-    group = before[before.rindex('<div class="form-group'):]
-    assert "hidden" in group.split(">", 1)[0]
+def _mode_group_is_hidden() -> bool:
+    """the audiobook mode select's form-group is hidden (the React panel,
+    step 8c: a HintGroup given `hidden`, which HintGroup puts on its div)"""
+    panel = _read(_TABS + "library-audiobooks.tsx")
+    before = panel.split('id="audiobook-download-mode"', 1)[0]
+    group = before[before.rindex("<HintGroup"):]
+    card = _read(_TABS + "library-card.tsx")
+    return ("\n          hidden\n" in group
+            and '<div className="form-group" hidden={hidden}>' in card)
 
 
-def test_the_old_audiobook_arrow_list_is_hidden(index):
-    """renderAudiobookHybrid still writes into it, so it stays in the DOM."""
-    assert 'id="audiobook-hybrid-rows"' in index
-    line = next(ln for ln in index.splitlines() if 'id="audiobook-hybrid-rows"' in ln)
+def test_the_audiobook_mode_dropdown_is_hidden_too():
+    assert _mode_group_is_hidden()
+
+
+def test_the_old_audiobook_arrow_list_is_hidden():
+    """kept, empty and hidden, in the React Audiobooks panel (step 8c)"""
+    panel = _read(_TABS + "library-audiobooks.tsx")
+    line = next(ln for ln in panel.splitlines() if 'id="audiobook-hybrid-rows"' in ln)
     assert "hidden" in line
 
 
@@ -411,14 +420,14 @@ def test_mode_is_still_persisted(model, js):
 
 
 def test_the_widget_drives_the_audiobook_transport(model, js):
-    """REPLACED in step 7a: the music select is gone (see above). the audiobook
-    mode select is still the Library tab's, and the chain writes it through the
-    bridge settings.js gives it; nothing else sets it from the chain."""
+    """REPLACED in step 7a, again in 8c: the audiobook chain is a settings key
+    now, written through the store with the mode it implies; the bridge
+    settings.js gave the chain is gone."""
     commit = _body(model, "function commit(order: string[])")
-    assert "setAudiobookChain" in commit
-    bridge = js.split("window.setAudiobookChain = (order) =>", 1)[1].split("\n};", 1)[0]
-    assert "getElementById('audiobook-download-mode')" in bridge
-    assert "debouncedAutoSaveSettings()" in bridge
+    assert "writeAudiobooks(order)" in commit
+    write = _body(model, "function writeAudiobooks(")
+    assert "'download_source.mode': order.length > 1 ? 'hybrid' : order[0] || 'torrent'" in write
+    assert "setAudiobookChain" not in js
 
 
 def test_the_dark_brand_marks_are_inverted(model):
@@ -629,9 +638,7 @@ def test_a_hidden_form_group_is_actually_hidden(index):
     assert "display: flex" in base
 
     # a hidden form-group the page still has
-    before = index.split('id="audiobook-download-mode"', 1)[0]
-    group = before[before.rindex('<div class="form-group'):]
-    assert "hidden" in group.split(">", 1)[0]
+    assert _mode_group_is_hidden()
 
 
 def test_the_behaviour_rows_stack_on_a_phone():
