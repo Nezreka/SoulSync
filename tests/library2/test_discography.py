@@ -1828,6 +1828,695 @@ def test_a_members_auto_add_is_not_someone_asking_either(imported_conn, legacy_d
     assert wanted == ["Nutshell", "Rooster (Live)"]
 
 
+# --- #2117: the wanted projection, not the flag, is what downloads ---------
+# the #2082 tests above assert the monitored flag. but acquisition reads
+# lib2_wanted_tracks, and for the admin profile auto_monitor recorded no
+# track rules, so the album's new_release rule made every track wanted —
+# live albums were wishlisted and downloaded with Live off. these tests
+# assert the projection itself, and what the real mirror enqueue
+# (enqueue_projected_tracks, the function the mirror stub replaces) would
+# queue from it. note the fake materialize below inserts a fresh set of
+# track rows on every call, so a re-run duplicates rows; the re-run tests
+# assert on the ORIGINAL track ids, which stay in the album's track list
+# and are exactly what preservation has to protect.
+
+def _plain_album(legacy_db, monkeypatch, *, title, track_names, artist_name="Brandy Clark",
+                 track_credits=None, artist_monitored=0, fail_first=False):
+    """track_credits: optional {track title: artist name} for tracks credited
+    to someone other than the album's artist (the uncredited-veto tests)."""
+    conn = legacy_db._get_connection()
+    artist = conn.execute(
+        "INSERT INTO lib2_artists(name, monitored) VALUES(?, ?)",
+        (artist_name, artist_monitored)).lastrowid
+    others = {}
+    for name in (track_credits or {}).values():
+        if name != artist_name and name not in others:
+            others[name] = conn.execute(
+                "INSERT INTO lib2_artists(name) VALUES(?)", (name,)).lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, track_count) "
+        "VALUES(?, ?, 'album', ?)", (artist, title, len(track_names))).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album, artist))
+    conn.commit()
+    conn.close()
+
+    calls = {"n": 0}
+
+    def materialize(_config, conn, target_album_id):
+        calls["n"] += 1
+        if fail_first and calls["n"] == 1:
+            raise RuntimeError("provider fetch failed")
+        for number, name in enumerate(track_names, 1):
+            track = conn.execute(
+                "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) "
+                "VALUES(?, ?, ?, 0)", (target_album_id, name, number)).lastrowid
+            credit = artist if not track_credits else others.get(
+                track_credits.get(name, artist_name), artist)
+            conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?,?)",
+                         (track, credit))
+        return [{"title": track_names[0], "track_number": 1}]
+
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist", materialize)
+    mirrored = []
+    monkeypatch.setattr(
+        "core.library2.wishlist_mirror.mirror_projected_tracks_wishlist",
+        lambda _db, _conn, track_ids, **_kwargs: mirrored.extend(track_ids) or len(track_ids))
+    return album, mirrored
+
+
+def _wanted_titles(legacy_db, album_id, profile_id=1):
+    conn = legacy_db._get_connection()
+    try:
+        return sorted(r[0] for r in conn.execute(
+            "SELECT t.title FROM lib2_wanted_tracks w JOIN lib2_tracks t ON t.id = w.track_id "
+            "WHERE t.album_id=? AND w.profile_id=? AND w.wanted=1", (album_id, profile_id)))
+    finally:
+        conn.close()
+
+
+def _enqueued_ops(legacy_db, track_ids, profile_id=1):
+    """Run the mirror's real enqueue over the projection and return the
+    outbox ops it created for these tracks."""
+    from core.library2.mirror_outbox import enqueue_projected_tracks
+    conn = legacy_db._get_connection()
+    try:
+        outbox_ids = enqueue_projected_tracks(conn, list(track_ids), profile_id=profile_id)
+        if not outbox_ids:
+            return []
+        marks = ",".join("?" for _ in outbox_ids)
+        return [r[0] for r in conn.execute(
+            f"SELECT op FROM lib2_mirror_outbox WHERE id IN ({marks})", outbox_ids)]
+    finally:
+        conn.close()
+
+
+def _album_track_ids(legacy_db, album_id):
+    conn = legacy_db._get_connection()
+    try:
+        return [r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,))]
+    finally:
+        conn.close()
+
+
+def test_2117_admin_live_album_stays_unwanted_with_live_off(imported_conn, legacy_db, monkeypatch):
+    album, mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town", "Girl Next Door"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _monitored(legacy_db, album) == []
+    # the projection is what the wishlist mirror reads: nothing may be wanted
+    assert _wanted_titles(legacy_db, album) == []
+    assert mirrored  # the mirror was invoked over the album's tracks
+    # and the real enqueue from that projection queues no wishlist adds
+    ops = _enqueued_ops(legacy_db, _album_track_ids(legacy_db, album))
+    assert ops and set(ops) == {"wishlist_remove"}
+
+
+def test_2117_live_bonus_track_stays_unwanted_on_a_studio_album(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Drinkin' Smokin' Cheatin'", "Get High (Live)"),
+        artist_name="Brandy Clark")
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == ["12 Stories", "Drinkin' Smokin' Cheatin'"]
+    assert _monitored(legacy_db, album) == ["12 Stories", "Drinkin' Smokin' Cheatin'"]
+
+
+def test_2117_requested_live_album_still_becomes_wanted(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.approve_release(legacy_db, None, album, requested=True)
+    assert _wanted_titles(legacy_db, album) == ["Big Day in a Small Town", "When I Get to Drinkin'"]
+
+
+def test_2117_deliberate_album_rule_stands_over_the_filters(imported_conn, legacy_db, monkeypatch):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    conn = legacy_db._get_connection()
+    try:
+        record_rule(conn, "album", album, True, PROVENANCE_USER)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    # the person's own album choice is not overridden by the live filter,
+    # and no new_release track rules are written underneath it
+    assert _wanted_titles(legacy_db, album) == ["Big Day in a Small Town", "When I Get to Drinkin'"]
+    conn = legacy_db._get_connection()
+    try:
+        track_rules = conn.execute(
+            "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='track' "
+            "AND provenance='new_release' AND entity_id IN "
+            "(SELECT id FROM lib2_tracks WHERE album_id=?)", (album,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert track_rules == 0
+
+
+def test_2117_deliberate_track_rule_is_not_overwritten_on_rerun(imported_conn, legacy_db, monkeypatch):
+    from core.library2.monitor_rules import PROVENANCE_CASCADE, record_rule
+    from core.library2.wanted import recompute_wanted_for_entity
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == []
+    conn = legacy_db._get_connection()
+    try:
+        track = conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=? AND title='Big Day in a Small Town'",
+            (album,)).fetchone()[0]
+        # the person's album toggle cascades a rule onto every track
+        record_rule(conn, "track", track, True, PROVENANCE_CASCADE)
+        recompute_wanted_for_entity(conn, "album", album)
+        conn.commit()
+    finally:
+        conn.close()
+    assert _wanted_titles(legacy_db, album) == ["Big Day in a Small Town"]
+    # a materialize retry lays the tracklist down again; the deliberate
+    # rule on the existing track must survive it
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        rule = conn.execute(
+            "SELECT monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id=?", (track,)).fetchone()
+        wanted = conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+            (track,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert tuple(rule) == (1, PROVENANCE_CASCADE)
+    assert wanted == 1
+
+
+def test_2117_leaked_wanted_state_repairs_itself_on_rerun(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    # recreate the pre-fix state: album rule only, no track rules, wanted=1
+    from core.library2.wanted import recompute_wanted_for_entity
+    conn = legacy_db._get_connection()
+    try:
+        track_ids = [r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=?", (album,))]
+        conn.execute(
+            "DELETE FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id IN "
+            "(SELECT id FROM lib2_tracks WHERE album_id=?)", (album,))
+        recompute_wanted_for_entity(conn, "album", album)
+        conn.commit()
+    finally:
+        conn.close()
+    assert _wanted_titles(legacy_db, album) == ["Big Day in a Small Town", "When I Get to Drinkin'"]
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        leaked = conn.execute(
+            "SELECT COUNT(*) FROM lib2_wanted_tracks WHERE wanted=1 AND profile_id=1 "
+            "AND track_id IN (?,?)", track_ids).fetchone()[0]
+    finally:
+        conn.close()
+    assert leaked == 0
+    # and the mirror enqueue from the repaired projection withdraws the
+    # stale wishlist rows instead of adding anything
+    ops = _enqueued_ops(legacy_db, track_ids)
+    assert ops and set(ops) == {"wishlist_remove"}
+
+
+def test_2117_deliberate_album_rule_off_stands_too(imported_conn, legacy_db, monkeypatch):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Get High"), artist_name="Brandy Clark")
+    conn = legacy_db._get_connection()
+    try:
+        record_rule(conn, "album", album, False, PROVENANCE_USER)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    # the person's "off" for the whole album stands: edition selection
+    # drops an explicitly-off album before auto-monitor ever processes
+    # it, so nothing is even materialized, let alone wanted
+    assert _wanted_titles(legacy_db, album) == []
+    assert _album_track_ids(legacy_db, album) == []
+    conn = legacy_db._get_connection()
+    try:
+        track_rules = conn.execute(
+            "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='track' "
+            "AND provenance='new_release' AND entity_id IN "
+            "(SELECT id FROM lib2_tracks WHERE album_id=?)", (album,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert track_rules == 0
+
+
+def test_2117_deliberate_track_rules_survive_in_both_directions(imported_conn, legacy_db, monkeypatch):
+    from core.library2.monitor_rules import (
+        PROVENANCE_CASCADE, PROVENANCE_WISHLIST, record_rule)
+    from core.library2.wanted import recompute_wanted_for_entity
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Get High"), artist_name="Brandy Clark")
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == ["12 Stories", "Get High"]
+    conn = legacy_db._get_connection()
+    try:
+        first, second = (r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (album,)))
+        # a deliberate off (album-toggle cascade) on a passing track, and a
+        # wishlisted item's rule on the other
+        record_rule(conn, "track", first, False, PROVENANCE_CASCADE)
+        record_rule(conn, "track", second, True, PROVENANCE_WISHLIST)
+        recompute_wanted_for_entity(conn, "album", album)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        rules = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT entity_id, monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id IN (?,?)", (first, second))}
+        wanted = {r[0]: r[1] for r in conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id IN (?,?)", (first, second))}
+    finally:
+        conn.close()
+    assert rules[first] == (0, PROVENANCE_CASCADE)
+    assert rules[second] == (1, PROVENANCE_WISHLIST)
+    assert wanted == {first: 0, second: 1}
+    # pinned divergence (pre-existing, not this fix): the admin flag flip
+    # follows the filters only, so the cascade-off track's flag says
+    # monitored while the projection — what acquisition reads — says
+    # unwanted. the rule, not the flag, is what keeps it out.
+    conn = legacy_db._get_connection()
+    try:
+        flag = conn.execute(
+            "SELECT monitored FROM lib2_tracks WHERE id=?", (first,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert flag == 1
+
+
+def test_2117_remix_track_stays_unwanted_on_a_studio_album(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Get High (Remix)"), artist_name="Brandy Clark")
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == ["12 Stories"]
+    assert _monitored(legacy_db, album) == ["12 Stories"]
+
+
+def test_2117_user_explicit_track_rules_are_never_demoted(imported_conn, legacy_db, monkeypatch):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted_for_entity
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        first, second = (r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (album,)))
+        # the person's own track choices: one live track they turned on by
+        # hand (protected only by the deliberate skip — the explicit-off
+        # veto does not cover a True), one they turned off
+        record_rule(conn, "track", first, True, PROVENANCE_USER)
+        record_rule(conn, "track", second, False, PROVENANCE_USER)
+        recompute_wanted_for_entity(conn, "album", album)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        rules = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT entity_id, monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id IN (?,?)", (first, second))}
+        wanted = {r[0]: r[1] for r in conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id IN (?,?)", (first, second))}
+    finally:
+        conn.close()
+    # neither rule is rewritten as new_release: the highest-ranked
+    # provenance keeps both its value and its rank
+    assert rules[first] == (1, PROVENANCE_USER)
+    assert rules[second] == (0, PROVENANCE_USER)
+    assert wanted == {first: 1, second: 0}
+
+
+def test_2117_turning_live_on_rewrites_the_rules_on_rerun(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == []
+    track_ids = _album_track_ids(legacy_db, album)
+    # the user turns Live on: the same enforcement, with the filters
+    # flipped, rewrites the new_release rules it wrote before
+    live_on = dict(D._CONTENT_FILTER_DEFAULTS, include_live=True, include_live_tracks=True)
+    monkeypatch.setattr(D, "_artist_content_filters", lambda *_a, **_k: dict(live_on))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        states = {r[0]: r[1] for r in conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id IN (?,?)", track_ids)}
+    finally:
+        conn.close()
+    assert states == {track_ids[0]: 1, track_ids[1]: 1}
+    # and turning it back off rewrites them again
+    monkeypatch.setattr(D, "_artist_content_filters",
+                        lambda *_a, **_k: dict(D._CONTENT_FILTER_DEFAULTS))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        states = {r[0]: r[1] for r in conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id IN (?,?)", track_ids)}
+        flags = {r[0]: r[1] for r in conn.execute(
+            "SELECT id, monitored FROM lib2_tracks WHERE id IN (?,?)", track_ids)}
+    finally:
+        conn.close()
+    assert states == {track_ids[0]: 0, track_ids[1]: 0}
+    # pinned divergence (pre-existing shape, same as the cascade-off
+    # case): the flag flip only ever sets monitored=1, so after an
+    # on-then-off cycle the flags still say monitored while the rules
+    # and the projection say unwanted. acquisition reads the projection.
+    assert flags == {track_ids[0]: 1, track_ids[1]: 1}
+
+
+def test_2117_uncredited_track_stays_unwanted(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Not Hers"), artist_monitored=1,
+        track_credits={"Not Hers": "Someone Else"})
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == ["12 Stories"]
+    assert _monitored(legacy_db, album) == ["12 Stories"]
+
+
+def test_2117_requested_album_still_leaves_out_the_uncredited(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("12 Stories", "Not Hers"), artist_monitored=1,
+        track_credits={"Not Hers": "Someone Else"})
+    # asking for the live album bypasses the live filter, never the
+    # credit veto: the other artist's track is not the person's to grab
+    D.approve_release(legacy_db, None, album, requested=True)
+    assert _wanted_titles(legacy_db, album) == ["12 Stories"]
+
+
+def test_2117_derived_track_rules_follow_the_filter_outcome(imported_conn, legacy_db, monkeypatch):
+    # plan-directed, member-branch parity: derived rules (file_import,
+    # legacy_import) are not deliberate, so the enforcement rewrites
+    # them with the filter outcome — provenance AND wanted state: the
+    # album rule outranked them in the projection before, so the live
+    # tracks were wanted; now their own rewritten rule keeps them out.
+    from core.library2.monitor_rules import PROVENANCE_FILE, PROVENANCE_LEGACY, record_rule
+    from core.library2.wanted import recompute_wanted_for_entity
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        first, second = (r[0] for r in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (album,)))
+        record_rule(conn, "track", first, True, PROVENANCE_FILE)
+        record_rule(conn, "track", second, True, PROVENANCE_LEGACY)
+        recompute_wanted_for_entity(conn, "album", album)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    conn = legacy_db._get_connection()
+    try:
+        rules = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT entity_id, monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id IN (?,?)", (first, second))}
+        wanted = {r[0]: r[1] for r in conn.execute(
+            "SELECT track_id, wanted FROM lib2_wanted_tracks "
+            "WHERE profile_id=1 AND track_id IN (?,?)", (first, second))}
+    finally:
+        conn.close()
+    assert rules[first] == (0, "new_release")
+    assert rules[second] == (0, "new_release")
+    assert wanted == {first: 0, second: 0}
+
+
+def test_2117_requested_album_with_a_deliberate_off_rule_stays_off(imported_conn, legacy_db, monkeypatch):
+    # reaches the admin branch's explicit guard the only way it can be
+    # reached: a request bypasses edition selection, so the album IS
+    # processed — and the person's deliberate off still stands (the
+    # same outcome dev had; the guard is what keeps the new track-rule
+    # writing from overriding it)
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    conn = legacy_db._get_connection()
+    try:
+        record_rule(conn, "album", album, False, PROVENANCE_USER)
+        conn.commit()
+    finally:
+        conn.close()
+    D.approve_release(legacy_db, None, album, requested=True)
+    assert _wanted_titles(legacy_db, album) == []
+    # the click still records its marker: the deliberate off rule is
+    # what stands in its way (suppression), and if that rule is ever
+    # removed the recorded request is what remains — by design
+    assert _album_field(legacy_db, album, "admin_requested") == 1
+    conn = legacy_db._get_connection()
+    try:
+        track_rules = conn.execute(
+            "SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_type='track' "
+            "AND provenance='new_release' AND entity_id IN "
+            "(SELECT id FROM lib2_tracks WHERE album_id=?)", (album,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert track_rules == 0
+
+
+def test_2117_deliberate_album_on_covers_its_uncredited_tracks(imported_conn, legacy_db, monkeypatch):
+    # plan-directed suppression: a deliberate album rule stands for the
+    # whole album, so no track rules are written and even the uncredited
+    # track follows the album the person chose (same as before this fix;
+    # the member branch differs — it writes track rules regardless)
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Big Day in a Small Town",
+        track_names=("12 Stories", "Not Hers"), artist_monitored=1,
+        track_credits={"Not Hers": "Someone Else"})
+    conn = legacy_db._get_connection()
+    try:
+        record_rule(conn, "album", album, True, PROVENANCE_USER)
+        conn.commit()
+    finally:
+        conn.close()
+    D.auto_monitor_releases(legacy_db, None, [album])
+    assert _wanted_titles(legacy_db, album) == ["12 Stories", "Not Hers"]
+
+
+def _make_retryable(legacy_db, album_id):
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE lib2_albums SET origin='discography', tracklist_retry_at=NULL WHERE id=?",
+            (album_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _retry_population(legacy_db, monkeypatch, album_id):
+    """The albums a discography sweep would retry, via the real retry
+    query (the provider fetch is stubbed out, so the sweep returns
+    before its edition-selection step — that step's requested keep is
+    covered by the requested-edition test). The failed fetch stamps a
+    future retry time; make it due first."""
+    conn = legacy_db._get_connection()
+    try:
+        artist_id = conn.execute(
+            "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0]
+        conn.execute(
+            "UPDATE lib2_albums SET tracklist_retry_at='2000-01-01 00:00:00' WHERE id=?",
+            (album_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(
+        "core.library2.provider_adapters.fetch_artist_discography",
+        lambda *_args, **_kwargs: None)
+    return D.expand_artist_discography(legacy_db, artist_id)["auto_monitor_album_ids"]
+
+
+def _album_field(legacy_db, album_id, field):
+    conn = legacy_db._get_connection()
+    try:
+        return conn.execute(
+            f"SELECT {field} FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_2117_requested_live_album_survives_a_failed_first_fetch(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"),
+        fail_first=True)
+    _make_retryable(legacy_db, album)
+    D.approve_release(legacy_db, None, album, requested=True)
+    # the click recorded itself durably, and the failed fetch wanted nothing
+    assert _album_field(legacy_db, album, "admin_requested") == 1
+    assert _album_field(legacy_db, album, "tracklist_status") == "failed"
+    assert _wanted_titles(legacy_db, album) == []
+    # the retry runs without requested_ids — the marker has to carry it
+    retry_ids = _retry_population(legacy_db, monkeypatch, album)
+    assert album in retry_ids
+    D.auto_monitor_releases(legacy_db, None, retry_ids)
+    assert _wanted_titles(legacy_db, album) == ["Big Day in a Small Town", "When I Get to Drinkin'"]
+
+
+def test_2117_auto_discovered_live_album_stays_unwanted_on_retry(imported_conn, legacy_db, monkeypatch):
+    # the real retry population the rejected monitored=1 proposal would
+    # have bypassed the filter for: inserted monitored=1 by the new
+    # release enforcement, with a new_release album rule, never clicked
+    from core.library2.monitor_rules import PROVENANCE_NEW_RELEASE, record_rule
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    _make_retryable(legacy_db, album)
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute("UPDATE lib2_albums SET monitored=1, tracklist_status='failed' WHERE id=?",
+                     (album,))
+        record_rule(conn, "album", album, True, PROVENANCE_NEW_RELEASE)
+        conn.commit()
+    finally:
+        conn.close()
+    retry_ids = _retry_population(legacy_db, monkeypatch, album)
+    assert album in retry_ids
+    D.auto_monitor_releases(legacy_db, None, retry_ids)
+    assert _wanted_titles(legacy_db, album) == []
+
+
+def test_2117_auto_added_live_album_stays_unwanted_on_retry(imported_conn, legacy_db, monkeypatch):
+    # the back catalogue's auto add approves without a click
+    # (requested=False): no marker, and the retry stays filtered (#2082)
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"),
+        fail_first=True)
+    _make_retryable(legacy_db, album)
+    D.approve_release(legacy_db, None, album)
+    assert _album_field(legacy_db, album, "admin_requested") == 0
+    assert _album_field(legacy_db, album, "tracklist_status") == "failed"
+    retry_ids = _retry_population(legacy_db, monkeypatch, album)
+    assert album in retry_ids
+    D.auto_monitor_releases(legacy_db, None, retry_ids)
+    assert _wanted_titles(legacy_db, album) == []
+
+
+def test_2117_requested_album_retry_still_leaves_out_the_uncredited(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("12 Stories", "Not Hers"), artist_monitored=1,
+        track_credits={"Not Hers": "Someone Else"}, fail_first=True)
+    _make_retryable(legacy_db, album)
+    D.approve_release(legacy_db, None, album, requested=True)
+    assert _album_field(legacy_db, album, "tracklist_status") == "failed"
+    retry_ids = _retry_population(legacy_db, monkeypatch, album)
+    assert album in retry_ids
+    D.auto_monitor_releases(legacy_db, None, retry_ids)
+    assert _wanted_titles(legacy_db, album) == ["12 Stories"]
+
+
+def test_2117_member_request_leaves_the_shared_marker_alone(imported_conn, legacy_db, monkeypatch):
+    album, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Live from Los Angeles",
+        track_names=("When I Get to Drinkin'", "Big Day in a Small Town"))
+    D.approve_release(legacy_db, None, album, profile_id=3, requested=True)
+    # P2D-6: the marker is the shared library's, like the monitored
+    # column; a member's request is their own album rule instead
+    assert _album_field(legacy_db, album, "admin_requested") == 0
+
+
+def test_2117_requested_edition_survives_a_failed_first_fetch(imported_conn, legacy_db, monkeypatch):
+    # the sweep: the provider answers this time, and the edition
+    # preference would drop the deluxe — a requested retry id is kept
+    deluxe, artist, config = _requested_failed_edition(legacy_db, monkeypatch)
+    stats = D._expand_artist_discography(legacy_db, artist)
+    assert deluxe in stats["auto_monitor_album_ids"]
+    D.auto_monitor_releases(legacy_db, config, stats["auto_monitor_album_ids"])
+    assert _wanted_titles(legacy_db, deluxe) == ["Nutshell"]
+
+
+def _requested_failed_edition(legacy_db, monkeypatch):
+    """A requested deluxe whose first fetch failed, next to its standard
+    edition, with the provider answering again. Returns (deluxe, artist,
+    config) — the setup the requested-edition and scope tests share."""
+    class _Config:
+        def get(self, key, default=None):
+            return {"watchlist.edition_preference": "one_standard"}.get(key, default)
+
+    deluxe, _mirrored = _plain_album(
+        legacy_db, monkeypatch, title="Dirt (Deluxe)",
+        track_names=("Nutshell",), artist_name="Alice in Chains", fail_first=True)
+    conn = legacy_db._get_connection()
+    try:
+        artist = conn.execute(
+            "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (deluxe,)).fetchone()[0]
+        conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type, track_count, origin) "
+                     "VALUES(?, 'Dirt', 'album', 2, 'library')", (artist,))
+        conn.execute(
+            "UPDATE lib2_albums SET tracklist_retry_at='2000-01-01 00:00:00' WHERE id=?",
+            (deluxe,))
+        conn.commit()
+    finally:
+        conn.close()
+    _make_retryable(legacy_db, deluxe)
+    D.approve_release(legacy_db, _Config(), deluxe, requested=True)
+    assert _album_field(legacy_db, deluxe, "tracklist_status") == "failed"
+    conn = legacy_db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE lib2_albums SET tracklist_retry_at='2000-01-01 00:00:00' WHERE id=?",
+            (deluxe,))
+        conn.commit()
+    finally:
+        conn.close()
+    grown = _cards(
+        ("albums", {"id": "sp-dirt", "title": "Dirt", "album_type": "album"}),
+        ("albums", {"id": "sp-deluxe", "title": "Dirt (Deluxe)", "album_type": "album"}),
+    )
+    monkeypatch.setattr(
+        "core.metadata.discography.get_artist_detail_discography",
+        lambda artist_id, artist_name="", options=None: grown)
+    monkeypatch.setattr("core.settings.config_manager", _Config())
+    return deluxe, artist, _Config()
+
+
+def test_2117_requested_keep_does_not_apply_to_member_or_deferred_sweeps(imported_conn, legacy_db, monkeypatch):
+    # the marker is the admin's: a member's sweep (their own filter
+    # profile) and a deferred sweep (the repair job's review mode) keep
+    # the edition selection's verdict on a requested retry
+    deluxe, artist, _config = _requested_failed_edition(legacy_db, monkeypatch)
+    stats = D._expand_artist_discography(legacy_db, artist, filter_profile_id=3)
+    assert deluxe not in stats["auto_monitor_album_ids"]
+    stats = D._expand_artist_discography(legacy_db, artist, defer_auto_monitor=True)
+    assert deluxe not in stats["auto_monitor_album_ids"]
+    # and the admin sweep that will actually auto-monitor still keeps it
+    stats = D._expand_artist_discography(legacy_db, artist)
+    assert deluxe in stats["auto_monitor_album_ids"]
+
+
 def test_an_edition_you_ask_for_is_not_up_to_the_edition_preference(imported_conn, legacy_db, monkeypatch):
     class _Config:
         def get(self, key, default=None):

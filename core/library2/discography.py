@@ -780,6 +780,27 @@ def _expand_artist_discography(
 
         from core.library2.edition_selection import select_automatic_album_ids
         selected_ids = select_automatic_album_ids(conn, stats['auto_monitor_album_ids'])
+        # #2117: a requested album on the retry list is not up to the
+        # edition preference either — dropped here, it would be dropped
+        # on every sweep and its failed tracklist would never retry. The
+        # marker is the admin's, so the keep applies only to an admin
+        # run that will actually auto-monitor: a member's sweep and the
+        # repair job's review mode leave the selection as it was.
+        from core.library2 import ADMIN_PROFILE_ID as _EXPAND_ADMIN_ID
+        new_id_set = set(new_album_ids)
+        retry_ids = [a for a in stats['auto_monitor_album_ids']
+                     if a not in new_id_set]
+        if retry_ids and not defer_auto_monitor and int(filter_profile_id) == _EXPAND_ADMIN_ID:
+            requested_retry = set()
+            for start in range(0, len(retry_ids), 900):
+                chunk = retry_ids[start:start + 900]
+                marks = ",".join("?" for _ in chunk)
+                requested_retry.update(r[0] for r in conn.execute(
+                    f"SELECT id FROM lib2_albums WHERE admin_requested=1 AND id IN ({marks})",
+                    chunk))
+            if requested_retry:
+                keep = set(selected_ids) | requested_retry
+                selected_ids = [a for a in stats['auto_monitor_album_ids'] if a in keep]
         rejected_new = set(stats['auto_monitor_album_ids']) - set(selected_ids)
         for rejected in rejected_new & set(new_album_ids):
             # Undo only the automatic intent minted in this transaction.
@@ -900,11 +921,13 @@ def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1,
         cursor = conn.execute(
             """UPDATE lib2_albums
                   SET monitored=CASE WHEN ? THEN 1 ELSE monitored END,
+                      admin_requested=CASE WHEN ? THEN 1 ELSE admin_requested END,
                       tracklist_status='pending',
                       tracklist_error=NULL, tracklist_retry_at=NULL,
                       updated_at=CURRENT_TIMESTAMP
                 WHERE id=?""",
-            (profile == ADMIN_PROFILE_ID, int(album_id)),
+            (profile == ADMIN_PROFILE_ID,
+             profile == ADMIN_PROFILE_ID and requested, int(album_id)),
         )
         if cursor.rowcount == 0:
             raise LookupError("Library album no longer exists")
@@ -937,7 +960,22 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     from core.library2.edition_selection import select_automatic_album_ids
     # what a person asked for by name is not up to the edition preference
     requested_set = {int(a) for a in (requested_ids or ())}
+    from core.library2 import ADMIN_PROFILE_ID as _ADMIN_PROFILE_ID
     with closing(db._get_connection()) as selection_conn:
+        if int(wishlist_profile_id) == _ADMIN_PROFILE_ID:
+            # #2117: an admin Fix click records itself on the album
+            # (admin_requested), because the click's own call is not the
+            # only one — when its tracklist fetch fails, the retry runs
+            # without requested_ids and must still know the release was
+            # asked for. Members record a user album rule instead.
+            unique_ids = list({int(a) for a in album_ids})
+            for start in range(0, len(unique_ids), 900):
+                chunk = unique_ids[start:start + 900]
+                marks = ",".join("?" for _ in chunk)
+                requested_set.update(
+                    r[0] for r in selection_conn.execute(
+                        f"SELECT id FROM lib2_albums WHERE admin_requested=1 "
+                        f"AND id IN ({marks})", chunk))
         selected = set(select_automatic_album_ids(
             selection_conn, [a for a in album_ids if int(a) not in requested_set],
             config_manager, profile_id=wishlist_profile_id))
@@ -1006,13 +1044,21 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 (album_id,),
             )
             # Monitor provenance (audit P1-13): this album became wanted via
-            # the "monitor new items" enforcement, not a user click. The track
-            # flips are its cascade projection and stay rule-less — EXCEPT a
-            # track the user already explicitly unmonitored (G8): a
-            # rematerialize retry must not overturn that, same veto pattern
-            # as the bulk monitor-toggle endpoint uses.
+            # the "monitor new items" enforcement, not a user click. Two
+            # protections ride along: a track the user already explicitly
+            # unmonitored (G8) is vetoed, so a rematerialize retry cannot
+            # overturn it; and the filter outcome for each track is
+            # recorded as a new_release track rule (#2117) — the wanted
+            # projection decides from rules, not flags, so a rule-less
+            # admin track would inherit the album rule below and the
+            # excluded tracks would be wanted anyway. Deliberate track
+            # rules are never overwritten, and a deliberate album rule
+            # suppresses the track rules entirely (both further below).
             from core.library2.monitor_rules import (
+                PROVENANCE_CASCADE,
                 PROVENANCE_NEW_RELEASE,
+                PROVENANCE_USER,
+                PROVENANCE_WISHLIST,
                 explicitly_unmonitored_track_ids,
                 record_rule,
             )
@@ -1055,6 +1101,10 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                                                 requested=asked_for)
             ]
             from core.library2 import ADMIN_PROFILE_ID
+            explicit = conn.execute(
+                "SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' "
+                "AND entity_id=? AND profile_id=? AND provenance='user_explicit'",
+                (album_id, wishlist_profile_id)).fetchone()
             if int(wishlist_profile_id) == ADMIN_PROFILE_ID:
                 if auto_monitor_ids:
                     marks = ",".join("?" for _ in auto_monitor_ids)
@@ -1062,6 +1112,31 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                         f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
                         auto_monitor_ids,
                     )
+                if not explicit:
+                    # #2117: the flag flip alone does not reach acquisition —
+                    # the wanted projection reads rules, and with no track
+                    # rule the album rule recorded below decides every track,
+                    # excluded ones included. Record the filter outcome per
+                    # track, the way the member branch does, so an excluded
+                    # live/remix/uncredited track stays unwanted. Deliberate
+                    # per-track choices (a hand toggle, a wishlisted item, an
+                    # album-toggle cascade) are never overwritten, and a
+                    # deliberate album rule (checked above) suppresses this
+                    # entirely: its own on/off stands for the whole album.
+                    marks = ",".join("?" for _ in album_track_ids) or "NULL"
+                    deliberate = {
+                        r["entity_id"] for r in conn.execute(
+                            f"SELECT entity_id FROM lib2_monitor_rules WHERE entity_type='track' "
+                            f"AND profile_id=? AND provenance IN (?,?,?) AND entity_id IN ({marks})",
+                            (int(wishlist_profile_id), PROVENANCE_USER,
+                             PROVENANCE_WISHLIST, PROVENANCE_CASCADE,
+                             *album_track_ids))}
+                    wanted_ids = set(auto_monitor_ids)
+                    for track_id in album_track_ids:
+                        if track_id in deliberate:  # the user's own choice stands
+                            continue
+                        record_rule(conn, "track", track_id, track_id in wanted_ids,
+                                    PROVENANCE_NEW_RELEASE, profile_id=wishlist_profile_id)
             else:
                 # P2D-6: lib2_tracks.monitored is the shared library's. another
                 # profile's want is its own track rules, and what its filters
@@ -1076,12 +1151,13 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                         continue
                     record_rule(conn, "track", track_id, track_id in auto_monitor_ids,
                                 PROVENANCE_NEW_RELEASE, profile_id=wishlist_profile_id)
-            explicit = conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=? AND profile_id=? AND provenance='user_explicit'", (album_id, wishlist_profile_id)).fetchone()
             if not explicit:
                 record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
                             profile_id=wishlist_profile_id)
-            # The freshly materialized tracks inherit the album's new_release
-            # rule through the projection's album tier (audit §11.2).
+            # The freshly materialized tracks carry their own new_release
+            # rules (recorded above, both branches); a track without one
+            # inherits the album's new_release rule through the projection's
+            # album tier (audit §11.2).
             from core.library2.wanted import recompute_wanted_for_entity
             recompute_wanted_for_entity(conn, "album", album_id,
                                         profile_id=wishlist_profile_id)

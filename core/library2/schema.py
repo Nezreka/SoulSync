@@ -606,6 +606,14 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN reorganize_placement TEXT"),
     ("lib2_albums", "canonical_locked",
      "ALTER TABLE lib2_albums ADD COLUMN canonical_locked INTEGER"),
+    # #2117: the admin Fix click's durable record. approve_release passes
+    # requested only to its first auto_monitor call; when that tracklist
+    # fetch fails, the retry runs without it and the request was lost.
+    # Shared (admin) library only, like the monitored column (P2D-6): a
+    # member's request is their own PROVENANCE_USER album rule. Set on
+    # the click, never cleared by a later non-requested approve.
+    ("lib2_albums", "admin_requested",
+     "ALTER TABLE lib2_albums ADD COLUMN admin_requested INTEGER NOT NULL DEFAULT 0"),
     # The pinned release's track count, remembered after the first successful
     # fetch (upstream 6bb73996d). A release's tracklist does not change, so the
     # artist page's completion check reads it from here instead of resolving the
