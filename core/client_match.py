@@ -32,8 +32,13 @@ _DEAD_STATES = frozenset({"failed", "import_failed", "cancelled", "canceled"})
 KINDS = ("album", "track", "movie", "episode", "season", "audiobook")
 
 
-def _label(kind: str, title: Any) -> Dict[str, str]:
-    return {"kind": kind, "title": str(title or "")}
+def _label(kind: str, title: Any, indexer: Any = None) -> Dict[str, str]:
+    out = {"kind": kind, "title": str(title or "")}
+    # the indexer the grab came from, so the clients tab can name the tracker
+    # a soulsync torrent is on (#2123)
+    if str(indexer or "").strip():
+        out["indexer"] = str(indexer).strip()
+    return out
 
 
 def soulseek_keys(client_ref: Any) -> list:
@@ -81,7 +86,8 @@ def audiobook_known(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[Any, Dict[
         ref = str(row.get("client_id") or "").strip()
         if not ref:
             continue
-        label = _label("audiobook", row.get("title") or row.get("release_title"))
+        label = _label("audiobook", row.get("title") or row.get("release_title"),
+                       row.get("indexer") if source in ("torrent", "usenet") else None)
         if source == "soulseek":
             for key in soulseek_keys(ref):
                 known["slskd"][key] = label
@@ -141,9 +147,11 @@ def video_known(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[Any, Dict[str,
             continue
         if str(dl.get("status") or "").lower() in _DEAD_STATES:
             continue
-        label = _label(dl.get("kind") or "video", dl.get("title") or dl.get("release_title"))
-        ref = str(dl.get("client_ref") or "").strip()
         source = dl.get("source")
+        # a torrent / usenet grab keeps its indexer's name in username
+        label = _label(dl.get("kind") or "video", dl.get("title") or dl.get("release_title"),
+                       dl.get("username") if source in ("torrent", "usenet") else None)
+        ref = str(dl.get("client_ref") or "").strip()
         if source == "torrent" and ref:
             known["torrent"][ref.lower()] = label
         elif source == "usenet" and ref:

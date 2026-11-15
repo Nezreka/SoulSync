@@ -18,7 +18,7 @@ import requests as http_requests
 
 from core.settings import config_manager
 from core.async_utils import run_control
-from core.torrent_clients.base import TorrentStatus, normalize_client_url
+from core.torrent_clients.base import TorrentStatus, normalize_client_url, tracker_host
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.transmission")
@@ -261,6 +261,7 @@ class TransmissionAdapter:
         'hashString', 'name', 'status', 'percentDone', 'totalSize',
         'downloadedEver', 'rateDownload', 'rateUpload', 'peersSendingToUs',
         'peersGettingFromUs', 'eta', 'downloadDir', 'errorString', 'labels',
+        'trackers',
     ]
 
     def _parse_status(self, item: dict) -> TorrentStatus:
@@ -284,6 +285,7 @@ class TransmissionAdapter:
             save_path=item.get('downloadDir'),
             error=item.get('errorString') or None,
             category=_first_label(item.get('labels')),
+            tracker=tracker_host(item.get('trackers')),
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

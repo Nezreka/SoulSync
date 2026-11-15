@@ -867,6 +867,12 @@ function EmptyState({
   return <div className="dlc-empty-line">No {noun} right now. All quiet.</div>;
 }
 
+/** Which tracker a torrent is on, for its row (#2123): the indexer soulsync
+ * grabbed it from, else the tracker host the client reports. */
+export function trackerName(item: Pick<ClientTorrentItem, 'soulsync' | 'tracker'>): string {
+  return item.soulsync?.indexer || item.tracker || '';
+}
+
 /** Pause or resume, then remove (which asks about the files). */
 function clientActions(
   item: { id: string; name: string; state: string },
@@ -1207,6 +1213,7 @@ export function AdlClientsTab() {
         speedText(item.download_speed),
         bucket === 'downloading' ? etaText(item.eta) : '',
         item.seeders ? `${item.seeders} seeders` : '',
+        trackerName(item),
       ]
         .filter(Boolean)
         .join(' · '),
@@ -1221,6 +1228,9 @@ export function AdlClientsTab() {
         ['Peers', item.peers ? String(item.peers) : ''],
         ['Ratio', item.ratio != null ? item.ratio.toFixed(2) : ''],
         ['Seeding time', durationText(item.seeding_time)],
+        // the indexer soulsync grabbed it from, and the tracker the client talks to (#2123)
+        ['Indexer', item.soulsync?.indexer],
+        ['Tracker', item.tracker],
         ['Save path', item.save_path],
         ['Content path', item.content_path],
         ['Hash', item.id],
