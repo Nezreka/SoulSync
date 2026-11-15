@@ -652,7 +652,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
+| Nov 15 | `bdd472a63` (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
 | Nov 15 | `788691ef4` (step 7c) | **Deezer, SoundCloud and Lidarr panels are React.** New: `tabs/source-panels.tsx` and its test; `SecretInput` in `parts.tsx`; `SoulSyncSettings.set`. React panels portal into the modal. Details under "Completed steps". |
 | Nov 15 | `690b8f7fa` (step 7b) | **The source modal is React**, hosting the still-vanilla panels. The page autosave guard lets those panels save (found in the browser). The registry left settings.js; the shell imports it. Details under "Completed steps". |
 | Nov 15 | `723dfd54b` (step 7a) | **The download chain, the Sources tiles and the sources model are React.** New: `tabs/sources-model.ts`, `tabs/sources-tab.tsx`, their test, six fixtures (one frozen markup, five drawn by settings.js). The behaviour wrapper moved into `downloads-tab.tsx`. 33 functions and the hidden transport removed; bridges for the vanilla modal and the Library tab's audiobook chain. Details under "Completed steps". |
