@@ -3916,124 +3916,10 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <!-- Download Settings -->
-                                    <!-- Source Settings is always open. It is the main event on this
-                                 tab - the download chain, the source pool and the stream /
-                                 concurrency settings - so putting it behind a click only hid
-                                 the thing people came here for. Static heading, no arrow, no
-                                 toggle; the body carries no .collapsed class, which is what
-                                 switchSettingsTab keys off when it re-hides bodies. -->
-                                    <div class="settings-section-header settings-section-static" data-stg="downloads">
-                                        <h3>Source Settings</h3>
-                                        <span class="settings-section-hint">Source, stream &amp; concurrency</span>
-                                    </div>
-                                    <div class="settings-section-body" data-stg="downloads">
-                                        <div class="settings-group source-settings-wrapper" data-stg="downloads">
-
-                                            <div class="settings-subcard">
-                                                <!-- The chain widget below IS this setting now: one source in the
-                                     chain means "<that source> only", two or more means hybrid. The
-                                     select stays because saveSettings reads it to persist
-                                     download_source.mode and updateDownloadSourceUI reads it back —
-                                     it is the transport, not a control, so it is hidden rather than
-                                     deleted. Two controls for one setting is how they drift. -->
-                                                <div class="form-group" hidden>
-                                                    <label>Download Source:</label>
-                                                    <select id="download-source-mode" class="form-select"
-                                                        onchange="updateDownloadSourceUI()">
-                                                        <option value="soulseek">Soulseek Only</option>
-                                                        <option value="youtube">YouTube Only</option>
-                                                        <option value="tidal">Tidal Only</option>
-                                                        <option value="qobuz">Qobuz Only</option>
-                                                        <option value="hifi">HiFi Only (Free Lossless)</option>
-                                                        <option value="deezer_dl">Deezer Only</option>
-                                                        <option value="lidarr">Lidarr Only</option>
-                                                        <option value="soundcloud">SoundCloud Only</option>
-                                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
-                                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
-                                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <div class="setting-help-text setting-help-body" hidden>
-                                                        Choose where to download music from. Hybrid mode tries primary
-                                                        source first,
-                                                        then falls back to secondary if it fails.
-                                                    </div>
-                                                </div>
-
-
-
-
-
-                                                <!-- ═══ DOWNLOAD CHAINS ═════════════════════════════════════
-                                     One widget for all three media types. Music, video and
-                                     audiobooks each keep their own {mode, hybrid_order} —
-                                     the same shape in three places — and used to have three
-                                     separate editors that looked and behaved differently.
-                                ═════════════════════════════════════════════════════════ -->
-                                                <div id="download-chain-widget">
-                                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"></div>
-                                                    <div class="setting-help-text" id="dlchain-help"></div>
-                                                    <div class="dlchain-columns">
-                                                        <div class="dlchain-col">
-                                                            <div class="dlchain-col-head">
-                                                                <span class="dlchain-col-label">Available</span>
-                                                                <span class="dlchain-col-hint">drag one across, or click it</span>
-                                                                <input type="search" id="dlchain-filter"
-                                                                    class="dlchain-filter" placeholder="Filter"
-                                                                    aria-label="Filter available sources"
-                                                                    oninput="dlchainFilter(this.value)"
-                                                                    autocomplete="off">
-                                                            </div>
-                                                            <div class="dlchain-pool" id="dlchain-pool"></div>
-
-                                                        </div>
-                                                        <div class="dlchain-col">
-                                                            <div class="dlchain-col-head">
-                                                                <span class="dlchain-col-label">Download chain</span>
-                                                                <span class="dlchain-col-hint"
-                                                                    id="dlchain-mode-hint"></span>
-                                                            </div>
-                                                            <div class="dlchain-list" id="dlchain-list"></div>
-                                                        </div>
-                                                    </div>
-
-
-                                                </div>
-
-                                                <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
-                                                <div id="hybrid-settings-container" style="display: none;">
-                                                    <div class="hybrid-source-list" id="hybrid-source-list" hidden>
-                                                        <!-- Legacy music list. The chain widget above replaced it;
-                                             kept (hidden) because buildHybridSourceList still owns
-                                             the per-source status probing the Sources tiles read. -->
-                                                    </div>
-                                                    <!-- Hidden selects for backward compatibility with saveSettings -->
-                                                    <select id="hybrid-primary-source" style="display:none;">
-                                                        <option value="soulseek">Soulseek</option>
-                                                        <option value="youtube">YouTube</option>
-                                                        <option value="tidal">Tidal</option>
-                                                        <option value="qobuz">Qobuz</option>
-                                                        <option value="hifi">HiFi</option>
-                                                        <option value="deezer_dl">Deezer</option>
-                                                        <option value="soundcloud">SoundCloud</option>
-                                                    </select>
-                                                    <select id="hybrid-secondary-source" style="display:none;">
-                                                        <option value="soulseek">Soulseek</option>
-                                                        <option value="youtube">YouTube</option>
-                                                        <option value="tidal">Tidal</option>
-                                                        <option value="qobuz">Qobuz</option>
-                                                        <option value="hifi">HiFi</option>
-                                                        <option value="deezer_dl">Deezer</option>
-                                                        <option value="soundcloud">SoundCloud</option>
-                                                    </select>
-                                                </div>
-                                            </div><!-- end basic source subcard -->
-
-                                        </div>
-                                    </div><!-- end Download Settings body -->
+                                    <!-- Source Settings (the download chain) is React: src/features/settings/
+                                         tabs/sources-tab.tsx (SETTINGS_PORT.md step 7a) -->
+                                    <div data-stg-react="downloads" data-stg-part="chain"
+                                        style="display: contents"></div>
 
                                     <!-- ═══ SOURCES TAB ═══════════════════════════════════════════
                                  Every download source SoulSync can use, each one configurable
@@ -4049,8 +3935,9 @@
                                             the Downloads tab. A source does not have to be enabled to be
                                             configured.</small>
 
-                                        <!-- Tiles are rendered from HYBRID_SOURCES by buildSourceTiles(). -->
-                                        <div class="src-tile-grid" id="source-tile-grid"></div>
+                                        <!-- The tiles are React: sources-tab.tsx (SETTINGS_PORT.md step 7a) -->
+                                        <div data-stg-react="sources" data-stg-part="tiles"
+                                            style="display: contents"></div>
 
                                         <div class="ind-hero-warning" style="margin-bottom:12px;">
                                             <div class="ind-hero-warning-title" style="cursor:pointer;user-select:none;"
@@ -5178,18 +5065,15 @@
                                  bolted to the bottom of the chain widget. These are general download
                                  settings and have nothing to do with the chain; they only lived inside
                                  it because that column had space going spare.
-                                 The wrapper keeps id="dlchain-behaviour" because renderDownloadChain()
+                                 The wrapper keeps id="dlchain-behaviour" because the download chain
                                  hides it on the Video and Audiobooks tabs - these are download_source.*,
                                  which is music-wide. Hiding the wrapper takes the header with it, so the
                                  title never sits above nothing. -->
-                                    <div id="dlchain-behaviour" data-stg="downloads">
-                                        <!-- Download Behaviour is React now (src/features/settings/tabs/
-                                             downloads-tab.tsx, SETTINGS_PORT.md step 5). This wrapper stays
-                                             vanilla: the download chain hides it under the video and
-                                             audiobook chains. -->
-                                        <div data-stg-react="downloads" data-stg-part="behaviour"
-                                            style="display: contents"></div>
-                                    </div>
+                                    <!-- Download Behaviour and its #dlchain-behaviour wrapper are React
+                                         (downloads-tab.tsx): the chain hides the wrapper under the video
+                                         and audiobook chains (SETTINGS_PORT.md steps 5 and 7a) -->
+                                    <div data-stg-react="downloads" data-stg-part="behaviour"
+                                        style="display: contents"></div>
 
                                     <!-- Retry Logic and Album Publishing are React now (downloads-tab.tsx,
                                          SETTINGS_PORT.md step 5) -->

@@ -29,6 +29,8 @@ import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LogsTab } from './tabs/logs-tab';
 import { QualityTab } from './tabs/quality-tab';
+import { sourcesModel } from './tabs/sources-model';
+import { SourcesTab } from './tabs/sources-tab';
 
 export type SettingsTabKey =
   | 'connections'
@@ -73,12 +75,15 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   downloads: DownloadsTab,
   logs: LogsTab,
   quality: QualityTab,
+  sources: SourcesTab,
 };
 
 /** What opening Settings applies whatever tab it opens on. settings.js did
  *  these inside loadSettingsData; each moves here with its tab. */
 export const SETTINGS_LOAD_EFFECTS: Array<(settings: SettingsPayload) => void> = [
   applyAppearanceOnLoad,
+  // the music chain and which of its sources are unready (loadHybridSourceOrder)
+  (settings) => sourcesModel.load(settings),
 ];
 
 const roots = new WeakMap<Element, Root>();
@@ -155,6 +160,12 @@ export function mountSettingsHost(): void {
   if (typeof window === 'undefined' || window.SoulSyncSettings) return;
   const host = createSettingsHost();
   window.SoulSyncSettings = host;
+  // the vanilla Sources modal (until step 7b) and other pages reach the
+  // sources model through these
+  const shell = window as unknown as Record<string, unknown>;
+  shell.SoulSyncSources = sourcesModel;
+  shell.testAllSources = (opts?: { silent?: boolean }) => sourcesModel.testAll(opts);
+  shell.switchDownloadChain = (kind: string) => sourcesModel.switchChain(kind);
   // this bundle is a deferred module: settings.js may have loaded the settings
   // and opened a tab before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;

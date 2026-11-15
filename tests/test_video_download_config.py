@@ -252,6 +252,11 @@ def test_the_downloads_tab_holds_only_download_settings():
     # now (SETTINGS_PORT.md step 5): their cards are rendered from the tab, in
     # this order, into slots after Source Settings
     tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
+    # Source Settings (the download chain) is React too (step 7a), rendered
+    # into the first slot, ahead of the others
+    chain = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
+    assert markup.index('data-stg-part="chain"') < markup.index('data-stg-part="behaviour"')
+    titles += re.findall(r'settings-section-static" data-stg="downloads">\s*<h3>([^<]+)</h3>', chain)
     titles += re.findall(r'title="([^"]+)"', tab[tab.index("function Behaviour("):])
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards

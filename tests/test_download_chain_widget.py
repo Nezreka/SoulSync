@@ -53,86 +53,141 @@ def index():
     return _read("webui/index.html")
 
 
-def test_the_widget_has_somewhere_to_render(index):
+# the chain, the tiles and the sources model are React since step 7a
+# (SETTINGS_PORT.md): the contracts below now read those files
+_TABS = "webui/src/features/settings/tabs/"
+
+
+@pytest.fixture(scope="module")
+def model():
+    return _read(_TABS + "sources-model.ts")
+
+
+@pytest.fixture(scope="module")
+def tab():
+    return _read(_TABS + "sources-tab.tsx")
+
+
+@pytest.fixture(scope="module")
+def downloads():
+    return _read(_TABS + "downloads-tab.tsx")
+
+
+def _body(src: str, marker: str) -> str:
+    """a function's text, from marker to its matching closing brace"""
+    start = src.index(marker)
+    # the body's brace: after the parameter list (which may hold destructuring
+    # and type braces) or an arrow
+    m = re.compile(r"\)\s*\{|=>\s*\{").search(src, start)
+    assert m, f"{marker} has no body"
+    depth = 0
+    for i in range(m.end() - 1, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start:i + 1]
+    raise AssertionError(f"{marker} has no end")
+
+
+def _kinds(model: str) -> str:
+    return model.split("export const CHAIN_KINDS", 1)[1].split("\n};", 1)[0]
+
+
+def _chain(tab: str) -> str:
+    """the chain widget component, up to the tiles that follow it"""
+    return tab.split("export function ChainWidget(", 1)[1].split("// ── the Sources tab's tiles", 1)[0]
+
+
+def _step(tab: str) -> str:
+    return _body(tab, "const step = (id: string, position: number, total: number) =>")
+
+
+def test_the_widget_has_somewhere_to_render(index, tab):
+    """the chain renders into a React slot on the Downloads tab, and keeps its ids"""
+    assert 'data-stg-react="downloads" data-stg-part="chain"' in index
     for el in ("download-chain-widget", "dlchain-tabs", "dlchain-pool", "dlchain-list"):
-        assert f'id="{el}"' in index, el
+        assert f'id="{el}"' in tab, el
 
 
 @pytest.mark.parametrize("kind", _KINDS)
-def test_every_media_type_is_a_tab(js, kind):
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    assert f"{kind}: {{" in spec
+def test_every_media_type_is_a_tab(model, kind):
+    assert f"\n  {kind}: {{" in _kinds(model)
 
 
 @pytest.mark.parametrize("kind", _KINDS)
-def test_each_kind_can_read_and_write_itself(js, kind):
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    block = spec.split(f"{kind}: {{", 1)[1]
-    block = block.split("\n    },", 1)[0]
-    assert "read:" in block, f"{kind} cannot load its chain"
-    assert "write:" in block, f"{kind} cannot save its chain"
+def test_each_kind_can_read_and_write_itself(model, kind):
+    """the source list is in CHAIN_KINDS; reading is loadChain, writing commit"""
+    block = _kinds(model).split(f"\n  {kind}: {{", 1)[1].split("\n  },", 1)[0]
     assert "sources:" in block, f"{kind} has no source list"
+    load = _body(model, "async function loadChain()")
+    commit = _body(model, "function commit(order: string[])")
+    reads = {"music": "model.getState().music", "video": "readVideo()",
+             "audiobooks": "audiobookChain()"}[kind]
+    writes = {"music": "writeMusic(order)", "video": "writeVideo(",
+              "audiobooks": "setAudiobookChain"}[kind]
+    assert reads in load, f"{kind} cannot load its chain"
+    assert writes in commit, f"{kind} cannot save its chain"
 
 
-def test_video_saves_to_its_own_store(js):
+def test_video_saves_to_its_own_store(model):
     """Video settings live in video.db, not app_config, so it cannot ride the
     settings page's save — it has to post to its own endpoint."""
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    video = spec.split("video: {", 1)[1].split("\n    },", 1)[0]
+    video = _body(model, "async function writeVideo(")
     assert "/api/video/downloads/config" in video
+    assert "store." not in video
 
 
-def test_music_and_audiobooks_ride_the_page_save(js):
+def test_music_and_audiobooks_ride_the_page_save(model):
     """Both are app_config keys the settings POST already handles. Writing them
-    a second way would be a second source of truth."""
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    for kind in ("music", "audiobooks"):
-        block = spec.split(f"{kind}: {{", 1)[1].split("\n    },", 1)[0]
-        assert "debouncedAutoSaveSettings()" in block, kind
-        assert "/api/" not in block, f"{kind} should not post on its own"
+    a second way would be a second source of truth. music goes through the
+    settings store, audiobooks through the Library tab's vanilla save."""
+    music = _body(model, "function writeMusic(")
+    assert "store.patch('download_source'" in music
+    assert "/api/" not in music, "music should not post on its own"
+    commit = _body(model, "function commit(order: string[])")
+    books = commit.split("kind === 'audiobooks'", 1)[1].split("\n", 1)[0]
+    assert "setAudiobookChain" in books and "/api/" not in books
 
 
-def test_music_keeps_feeding_the_state_the_rest_of_the_page_reads(js):
-    """saveSettings reads the music chain through getHybridOrder() and two
-    hidden selects, and the Sources tiles read _hybridSourceStatus. The widget
-    replaced the list that used to own that state, so it has to keep it fed or
-    the chain silently stops saving."""
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    music = spec.split("music: {", 1)[1].split("\n    },", 1)[0]
-    assert "_hybridSourceOrder" in music
-    assert "_hybridSourceEnabled" in music
-    assert "_syncHybridHiddenSelects()" in music
+def test_music_keeps_feeding_the_state_the_rest_of_the_page_reads(model):
+    """the tiles and Test all read the music chain from the model, so a chain
+    edit has to update it as well as save it, or the tiles go stale."""
+    music = _body(model, "function writeMusic(")
+    assert "set({ music: order.slice(), mode, secondary: pair.secondary })" in music
 
 
-def test_one_source_means_single_mode(js):
+def test_one_source_means_single_mode(model):
     """The stored `mode` is still a real field the backends read, so a chain of
     one has to write the source name rather than 'hybrid'."""
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    music = spec.split("music: {", 1)[1].split("\n    },", 1)[0]
+    music = _body(model, "function writeMusic(")
     assert "order.length > 1 ? 'hybrid'" in music
-    video = spec.split("video: {", 1)[1].split("\n    },", 1)[0]
+    video = _body(model, "async function writeVideo(")
     assert "order.length > 1" in video
 
 
-def test_the_chain_cannot_be_emptied(js):
+def test_the_chain_cannot_be_emptied(tab):
     """An empty chain means nothing can download at all, which is never what a
     drag was trying to say. The video side already refused it; now all three do."""
-    fn = js.split("function dlchainRemove(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_dlchainOrder.length <= 1" in fn
+    fn = _body(_chain(tab), "const remove = (id: string) =>")
+    assert "full.length <= 1" in fn
     assert "return" in fn
 
 
-def test_dropping_between_columns_works_both_ways(js):
-    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
-    assert "dlchainRemove(src)" in fn      # chain -> pool removes
-    assert "_dlchainOrder.push(src)" in fn  # pool -> chain appends
+def test_dropping_between_columns_works_both_ways(tab):
+    chain = _chain(tab)
+    assert "if (src && full.includes(src)) remove(src)" in chain  # chain -> pool removes
+    assert "commit([...full, src])" in chain                     # pool -> chain appends
 
 
-def test_the_video_chain_is_re_read_on_arrival(js):
+def test_the_video_chain_is_re_read_on_arrival(tab):
     """It lives in video.db and can be changed from the video side, so a value
-    rendered earlier in the session may already be stale."""
-    fn = js.split("function switchSettingsTab(", 1)[1].split("\n}", 1)[0]
-    assert "_dlchainLoad()" in fn
+    rendered earlier in the session may already be stale. the chain re-reads
+    itself each time the Downloads tab is opened."""
+    chain = _chain(tab)
+    arrival = chain.split("if (!active || !opened) return;", 1)[1].split("}, [opened, active])", 1)[0]
+    assert "model.loadChain()" in arrival
 
 
 # ---------------------------------------------------------------------------
@@ -157,12 +212,15 @@ def test_nothing_still_calls_the_removed_video_handlers():
             assert dead not in src, f"{dead} still referenced in {rel}"
 
 
-def test_the_legacy_music_list_is_kept_but_hidden(index):
-    """buildHybridSourceList still owns the per-source connection probing the
-    Sources tiles read, so the element stays — hidden, not deleted."""
-    assert 'id="hybrid-source-list"' in index
-    line = next(ln for ln in index.splitlines() if 'id="hybrid-source-list"' in ln)
-    assert "hidden" in line
+def test_the_legacy_music_list_is_gone(index, js):
+    """REPLACED in step 7a. the hidden legacy list stayed only because
+    buildHybridSourceList owned the connection probing the tiles read. that
+    state is in the React sources model now, so the list, its two hidden
+    selects and the code that fed them are gone, not hidden."""
+    for el in ("hybrid-source-list", "hybrid-primary-source", "hybrid-secondary-source",
+               "hybrid-settings-container"):
+        assert f'id="{el}"' not in index, el
+    assert "function buildHybridSourceList" not in js
 
 
 def test_the_styling_reuses_the_pages_own_vocabulary():
@@ -180,32 +238,33 @@ def test_the_styling_reuses_the_pages_own_vocabulary():
 # It reads as a flow, not a list
 # ---------------------------------------------------------------------------
 
-def test_the_chain_renders_as_a_flow(js):
+def test_the_chain_renders_as_a_flow(tab):
     """Each source is tried in turn, so the arrow between steps is the "then
     try" — a plain list does not say that."""
-    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
-    assert "dlchain-connector" in fn
-    assert "_dlchainStep(" in fn
+    chain = _chain(tab)
+    assert "dlchain-connector" in chain
+    assert "step(id, i + 1, order.length)" in chain
 
 
-def test_there_is_exactly_one_empty_slot(js):
+def test_there_is_exactly_one_empty_slot(tab):
     """The question a person has looking at this is "where does the next one
     go". A row of identical empty boxes answers it worse than a single obvious
     one, so only the end of the chain gets a slot."""
-    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
-    assert fn.count('id="dlchain-slot"') == 1
-    assert "dlchain-slot" in fn
+    chain = _chain(tab)
+    assert chain.count('id="dlchain-slot"') == 1
+    # it sits after the steps, not inside the per-step render
+    assert "dlchain-slot" not in _step(tab)
 
 
-def test_the_slot_says_what_goes_in_it_and_why(js):
+def test_the_slot_says_what_goes_in_it_and_why(tab):
     """A thin strip with dim text reads as a divider. The automation builder's
     slot is big, dashed and explains itself, and that is the thing in this app
     people already understand."""
-    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
-    assert "Drag a source here" in fn
-    assert "tried first" in fn            # empty chain
-    assert "tried after" in fn            # naming the source above it
-    assert "dlchain-slot-title" in fn and "dlchain-slot-hint" in fn
+    chain = _chain(tab)
+    assert "Drag a source here" in chain
+    assert "tried first" in chain            # empty chain
+    assert "tried after" in chain            # naming the source above it
+    assert "dlchain-slot-title" in chain and "dlchain-slot-hint" in chain
 
 
 def test_the_slot_is_a_target_not_a_divider():
@@ -219,43 +278,43 @@ def test_the_slot_is_a_target_not_a_divider():
     assert "min-height" in _rule(css_all, ".dlchain-slot.first")
 
 
-def test_clicking_is_offered_as_well_as_dragging(index):
-    """Drag-only is a trap on a touchpad, and the tiles already take a click."""
-    assert "drag one across, or click it" in index
+def test_clicking_is_offered_as_well_as_dragging(tab):
+    """Drag-only is a trap on a touchpad, and the tiles already take a click.
+    (the chain's markup is in sources-tab.tsx now: index.html still holds the
+    same hint for the subtitle provider chain, which would pass this falsely)"""
+    chain = _chain(tab)
+    assert "drag one across, or click it" in chain
+    assert "onClick={() => add(id)}" in _body(chain, "const tile = (id: string) =>")
 
 
-def test_the_pool_uses_source_tiles(js):
+def test_the_pool_uses_source_tiles(tab):
     """The thing you drag should look like the thing you configure on the
     Sources tab — same logo, same card shape."""
-    fn = js.split("function _dlchainTile(", 1)[1].split("\n}", 1)[0]
+    fn = _body(_chain(tab), "const tile = (id: string) =>")
     assert "dlchain-tile-art" in fn and "dlchain-tile-name" in fn
-    assert "m.icon" in fn and "m.emoji" in fn
+    assert "<Mark meta={meta}" in fn
+    mark = _body(tab, "function Mark(")
+    assert "meta.icon" in mark and "meta.emoji" in mark
 
 
-def test_a_step_says_where_it_sits(js):
+def test_a_step_says_where_it_sits(tab):
     """"Fallback 2" beats "then": it says what the position MEANS, not just
     that there is one above it."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    fn = _step(tab)
     assert "Tried first" in fn
     assert "Fallback" in fn
     assert "dlchain-step-rank" in fn
 
 
-def test_the_logo_carries_the_step(js):
+def test_the_logo_carries_the_step(tab):
     """It is the fastest thing to recognise and the only part that differs at a
     glance, so it gets real size and a well of its own rather than sitting in
     the text line at 20px."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
-    assert "dlchain-step-art" in fn
+    assert "dlchain-step-art" in _step(tab)
     css = _read("webui/static/style.css")
     art = _rule(css, ".dlchain-step-art")
-    # it fills the card and stands in a well of its own. The height is a range,
-    # not a magic number: the point is that the mark is a real graphic rather
-    # than something sitting in the text line at 20px, and pinning the exact
-    # value only made a later density pass fail for no reason.
-    # It no longer stretches - the name and role take the free space now - but
-    # it keeps a real size and a well of its own rather than sitting in the text
-    # line at 20px. The height is a floor, not a magic number.
+    # a real graphic with a well of its own; the height is a floor, not a
+    # magic number
     assert "flex-shrink: 0" in art
     height = int(re.search(r"height:\s*(\d+)px", art).group(1))
     assert height >= 28, f"the mark has shrunk back into the text line ({height}px)"
@@ -272,18 +331,19 @@ def test_the_first_link_reads_as_the_primary():
     assert "--accent-rgb" in first
 
 
-def test_dropping_on_a_step_reorders(js):
+def test_dropping_on_a_step_reorders(tab):
     """Insert-before is how you move something up the chain."""
-    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
-    assert "_dlchainOrder.indexOf(target)" in fn
+    fn = _step(tab)
+    assert "next.indexOf(id)" in fn
     assert "splice(" in fn
 
 
-def test_a_near_miss_still_does_the_obvious_thing(js):
+def test_a_near_miss_still_does_the_obvious_thing(tab):
     """Dropping in the chain column but not on a step or the slot appends,
     rather than silently doing nothing."""
-    fn = js.split("function _dlchainWireDrag(", 1)[1].split("\n}\n", 1)[0]
-    assert "list.addEventListener('drop'" in fn
+    chain = _chain(tab)
+    lst = chain.split('id="dlchain-list"', 1)[1].split('id="dlchain-slot"', 1)[0]
+    assert "onDrop=" in lst and "commit([...full, src])" in lst
 
 
 def test_the_legacy_music_list_is_really_hidden():
@@ -308,15 +368,13 @@ def test_the_flow_borrows_the_builder_vocabulary():
     assert "dashed" in _rule(css_all, ".dlchain-slot")
 
 
-def test_the_source_dropdown_is_no_longer_a_control(index):
-    """The chain IS that setting: one source in it means "<that source> only",
-    two or more means hybrid. The select stays because saveSettings reads it to
-    persist download_source.mode — it is the transport, not a control — but two
-    controls for one setting is how they drift apart."""
-    assert 'id="download-source-mode"' in index          # still the transport
-    before = index.split('id="download-source-mode"', 1)[0]
-    group = before[before.rindex('<div class="form-group'):]
-    assert "hidden" in group.split(">", 1)[0], "the dropdown is still on screen"
+def test_the_source_dropdown_is_gone(index, js):
+    """REPLACED in step 7a. the chain IS that setting: one source in it means
+    "<that source> only", two or more means hybrid. the hidden select only
+    stayed as the transport saveSettings read download_source.mode from. the
+    model holds the mode now and saves it, so the select is gone."""
+    assert 'id="download-source-mode"' not in index
+    assert "download-source-mode" not in js
 
 
 def test_the_audiobook_mode_dropdown_is_hidden_too(index):
@@ -333,27 +391,39 @@ def test_the_old_audiobook_arrow_list_is_hidden(index):
     assert "hidden" in line
 
 
-def test_mode_is_still_persisted(js):
-    """Hiding the select must not stop it being saved — it is how
-    download_source.mode reaches the server at all."""
+def test_mode_is_still_persisted(model, js):
+    """the select going must not stop download_source.mode being saved: the
+    chain saves mode, the legacy primary and secondary, and the order, and the
+    page save no longer sends any of them."""
+    music = _body(model, "function writeMusic(")
+    for key in ("mode,", "hybrid_primary: pair.primary", "hybrid_secondary: pair.secondary",
+                "hybrid_order: order.slice()"):
+        assert key in music, key
     body = js.split("async function saveSettings", 1)[1]
-    assert "mode: document.getElementById('download-source-mode').value" in body
+    # the first download_source in the collector is music's (audiobooks keep theirs)
+    music_block = body.split("download_source: {", 1)[1].split("},", 1)[0]
+    code = re.sub(r"//[^\n]*", "", music_block)
+    for key in ("mode:", "hybrid_primary:", "hybrid_secondary:", "hybrid_order:"):
+        assert key not in code, key
 
 
-def test_the_widget_drives_the_hidden_transports(js):
-    """Both hidden selects are written by the chain adapters; nothing else sets
-    them any more, so a chain change that skipped this would save the old mode."""
-    spec = js.split("const DLCHAIN_KINDS = {", 1)[1].split("\n};", 1)[0]
-    assert "getElementById('download-source-mode')" in spec
-    assert "getElementById('audiobook-download-mode')" in spec
+def test_the_widget_drives_the_audiobook_transport(model, js):
+    """REPLACED in step 7a: the music select is gone (see above). the audiobook
+    mode select is still the Library tab's, and the chain writes it through the
+    bridge settings.js gives it; nothing else sets it from the chain."""
+    commit = _body(model, "function commit(order: string[])")
+    assert "setAudiobookChain" in commit
+    bridge = js.split("window.setAudiobookChain = (order) =>", 1)[1].split("\n};", 1)[0]
+    assert "getElementById('audiobook-download-mode')" in bridge
+    assert "debouncedAutoSaveSettings()" in bridge
 
 
-def test_the_dark_brand_marks_are_inverted(js):
+def test_the_dark_brand_marks_are_inverted(model):
     """Tidal, Qobuz and SoundCloud ship dark-foreground marks that vanish
     against the dark UI. `brightness(0) invert(1)` is this app's existing recipe
     for "render this image as pure white" — the equalizer and auto-sync icons
     already use it."""
-    marks = js.split("const INVERT_BRAND_MARKS = new Set([", 1)[1].split("]", 1)[0]
+    marks = model.split("export const INVERT_BRAND_MARKS = new Set([", 1)[1].split("]", 1)[0]
     for brand in ("tidal", "qobuz", "soundcloud"):
         assert f"'{brand}'" in marks, brand
     css = _read("webui/static/style.css")
@@ -361,15 +431,16 @@ def test_the_dark_brand_marks_are_inverted(js):
     assert "brightness(0) invert(1)" in rule
 
 
-def test_both_the_pool_and_the_chain_invert(js):
+def test_both_the_pool_and_the_chain_invert(tab):
     """A logo that reads in one column and vanishes in the other is worse than
     either on its own."""
-    for fn_name in ("_dlchainTile", "_dlchainStep"):
-        fn = js.split(f"function {fn_name}(", 1)[1].split("\n}", 1)[0]
-        assert "INVERT_BRAND_MARKS.has(id)" in fn, fn_name
+    assert "INVERT_BRAND_MARKS.has(id)" in tab.split("const markClass", 1)[1].split("\n\n", 1)[0]
+    tile = _body(_chain(tab), "const tile = (id: string) =>")
+    for name, fn in (("pool", tile), ("chain", _step(tab))):
+        assert "markClass(id, 'dlchain-mark')" in fn, name
 
 
-def test_a_step_says_which_source_it_is(js):
+def test_a_step_says_which_source_it_is(tab):
     """REVERSED, deliberately. This test used to assert the opposite: cards were
     logo-only and narrow, because a full-width row holding one 30px mark was
     mostly empty space.
@@ -382,7 +453,7 @@ def test_a_step_says_which_source_it_is(js):
     cart and Usenet as a newspaper.
 
     If logo-only is wanted back, narrow the rail rather than the card."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
+    fn = _step(tab)
     assert "dlchain-step-name" in fn
     assert "dlchain-step-role" in fn
     assert "dlchain-step-art" in fn
@@ -393,32 +464,32 @@ def test_a_step_says_which_source_it_is(js):
     assert "1.55fr" in cols, "the pool, not the chain, should hold the extra width"
 
 
-def test_the_name_still_reaches_a_pointer_and_a_reader(js):
+def test_the_name_still_reaches_a_pointer_and_a_reader(tab):
     """Dropping the visible text cannot mean dropping the information."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
-    assert "title=" in fn and "aria-label=" in fn
+    fn = _step(tab)
+    assert "title={" in fn and "aria-label={" in fn
     assert "Tried first" in fn and "Fallback" in fn
 
 
-def test_there_are_arrows_as_well_as_dragging(js):
+def test_there_are_arrows_as_well_as_dragging(tab):
     """Dragging is precise work on a touchpad and impossible on a phone."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
-    assert "dlchainMove(" in fn
+    fn = _step(tab)
+    assert "move(id, -1)" in fn and "move(id, 1)" in fn
     assert "dlchain-move" in fn
-    move = js.split("function dlchainMove(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_dlchainCommit()" in move
+    move = _body(_chain(tab), "const move = (id: string, delta: number) =>")
+    assert "commit(next)" in move
 
 
-def test_the_end_arrows_are_disabled(js):
+def test_the_end_arrows_are_disabled(tab):
     """An arrow that does nothing is worse than no arrow."""
-    fn = js.split("function _dlchainStep(", 1)[1].split("\n}", 1)[0]
-    assert "position === 1 ? ' disabled'" in fn
-    assert "position === total ? ' disabled'" in fn
+    fn = _step(tab)
+    assert "disabled={position === 1}" in fn
+    assert "disabled={position === total}" in fn
 
 
-def test_moving_past_either_end_is_a_no_op(js):
-    move = js.split("function dlchainMove(", 1)[1].split("\nwindow.", 1)[0]
-    assert "j < 0 || j >= _dlchainOrder.length" in move
+def test_moving_past_either_end_is_a_no_op(tab):
+    move = _body(_chain(tab), "const move = (id: string, delta: number) =>")
+    assert "j < 0 || j >= next.length" in move
 
 
 def test_it_works_on_a_phone():
@@ -433,7 +504,7 @@ def test_it_works_on_a_phone():
     assert ".dlchain-tabs" in phone
 
 
-def test_the_behaviour_settings_are_their_own_group(index):
+def test_the_behaviour_settings_are_their_own_group(index, tab, downloads):
     """REVERSED. These used to sit inside the pool's column, and this test
     asserted that position, because the column was empty below the tiles.
 
@@ -443,39 +514,38 @@ def test_the_behaviour_settings_are_their_own_group(index):
     panel read as a jumble. They are their own titled group below the chain now,
     and the pool is simply allowed to be as tall as its contents.
 
-    The claim is position: after BOTH columns, not inside either one."""
-    assert 'id="dlchain-behaviour"' in index
+    The claim is position: after BOTH columns, not inside either one. both are
+    React slots now (steps 5 and 7a), so the claim is the order of the slots,
+    and that the chain widget closes both columns before the slot ends."""
+    chain_at = index.index('data-stg-react="downloads" data-stg-part="chain"')
+    group_at = index.index('data-stg-react="downloads" data-stg-part="behaviour"')
+    assert group_at > chain_at, "the group is above the chain"
+    chain = _chain(tab)
+    assert chain.index('id="dlchain-pool"') < chain.index('id="dlchain-list"')
+    assert "dlchain-behaviour" not in chain, "the group is tangled in the chain again"
 
-    pool_at = index.index('id="dlchain-pool"')
-    chain_at = index.index('id="dlchain-list"')
-    group_at = index.index('id="dlchain-behaviour"')
-    assert group_at > chain_at > pool_at, "the group is still tangled in a column"
-
-    # The group itself is React now (SETTINGS_PORT.md step 5): the vanilla
-    # wrapper holds its slot, and the card renders through the shared Section,
-    # whose header is followed by its body (the collapse handler walks
-    # header.nextElementSibling).
-    slot_at = index.index('data-stg-react="downloads" data-stg-part="behaviour"')
-    assert group_at < slot_at < index.index("</div>", group_at), "the slot left the wrapper"
-    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    tab = (tabs / "downloads-tab.tsx").read_text(encoding="utf-8")
-    assert 'title="Download Behaviour"' in tab
-    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
+    # the group is rendered through the shared Section, whose header is
+    # followed by its body (the collapse handler walks header.nextElementSibling),
+    # inside the #dlchain-behaviour wrapper
+    behaviour = _body(downloads, "function Behaviour(")
+    assert 'id="dlchain-behaviour"' in behaviour
+    assert 'title="Download Behaviour"' in behaviour
+    parts = _read(_TABS + "parts.tsx")
     header = parts.index('className="settings-section-header collapsed"')
     body = parts.index('className="settings-section-body collapsed"')
     assert header < body and parts.count("settings-section-header") == 1
 
 
-def test_the_behaviour_group_is_music_only(js):
+def test_the_behaviour_group_is_music_only(downloads):
     """They are download_source.* - music-wide. Shown under a video or audiobook
     chain they would claim to apply there.
 
     It has to hide the WRAPPER, not the inner block: the group carries a
     "Download behaviour" heading now, and hiding only the fields would leave
     that heading floating above nothing on the other two tabs."""
-    fn = js.split("function renderDownloadChain(", 1)[1].split("\nwindow.", 1)[0]
-    assert "dlchain-behaviour" in fn, "hides the inner block, orphaning the heading"
-    assert "kind !== 'music'" in fn
+    behaviour = _body(downloads, "function Behaviour(")
+    wrapper = behaviour.split('<div id="dlchain-behaviour"', 1)[1].split(">", 1)[0]
+    assert "hidden={kind !== 'music'}" in wrapper, "hides the inner block, orphaning the heading"
 
 
 def test_moving_them_did_not_orphan_their_settings(js, index):
@@ -490,23 +560,23 @@ def test_moving_them_did_not_orphan_their_settings(js, index):
         assert f'id="{el}"' in tab, el
 
 
-def test_grouping_can_never_lose_a_source(js):
+def test_grouping_can_never_lose_a_source(model, tab):
     """The pool is grouped now. A hard-coded group map plus eleven sources is a
     setup where adding a twelfth to HYBRID_SOURCES and forgetting DLCHAIN_GROUPS
     makes it silently unavailable - it would not appear in the pool, so it could
     never be added to a chain, and nothing would say why.
 
-    _dlchainPoolHtml therefore ends with an "Other" group built from whatever is
+    The pool therefore ends with an "Other" group built from whatever is
     left over. This test pins that fallback, and separately checks that every id
     currently in HYBRID_SOURCES is actually placed, so the grouping stays
     deliberate rather than drifting into Other one source at a time.
     """
-    fn = js.split("function _dlchainPoolHtml(", 1)[1].split("\n}", 1)[0]
-    assert "'Other'" in fn, "no leftover group: a new source would vanish"
-    assert "!seen.has(id)" in fn, "the Other group is not built from the leftovers"
+    chain = _chain(tab)
+    assert "label: 'Other'" in chain, "no leftover group: a new source would vanish"
+    assert "!seen.has(id)" in chain, "the Other group is not built from the leftovers"
 
-    grouped = set(re.findall(r"'([a-z_]+)'", js.split("const DLCHAIN_GROUPS", 1)[1].split("];", 1)[0]))
-    listed = set(re.findall(r"id: '([a-z_]+)'", js.split("const HYBRID_SOURCES", 1)[1].split("];", 1)[0]))
+    grouped = set(re.findall(r"'([a-z_]+)'", model.split("export const DLCHAIN_GROUPS", 1)[1].split("];", 1)[0]))
+    listed = set(re.findall(r"id: '([a-z_]+)'", model.split("export const HYBRID_SOURCES", 1)[1].split("];", 1)[0]))
     missing = listed - grouped
     assert not missing, f"these sources fall into Other: {sorted(missing)}"
 
@@ -524,29 +594,27 @@ def test_hiding_a_tile_actually_hides_it():
         assert "display: none" in _rule(css, sel), f"{sel} does not actually hide"
 
 
-def test_the_filter_survives_a_rerender(js):
+def test_the_filter_survives_a_rerender(tab):
     """Adding a source re-renders the pool. If the query lived in the input only,
     the freshly built tiles would come back unfiltered while the box still showed
-    the text - so the state sits outside the render and is re-applied after it.
+    the text - so the query is component state the tiles are rendered from.
     """
-    assert "let _dlchainQuery" in js
-    render = js.split("function renderDownloadChain(", 1)[1].split("\n}", 1)[0]
-    assert "_dlchainApplyFilter()" in render, "render does not re-apply the filter"
-    apply_fn = js.split("function _dlchainApplyFilter(", 1)[1].split("\n}", 1)[0]
-    assert "dataset.src" in apply_fn, "filter matches display names only"
-    assert "dlchain-no-match" in apply_fn, "a query matching nothing says nothing"
+    chain = _chain(tab)
+    assert "const [query, setQuery] = useState('')" in chain
+    tile = _body(chain, "const tile = (id: string) =>")
+    assert "hidden={!hit(id)}" in tile, "the tiles are not filtered on render"
+    hit = _body(chain, "const hit = (id: string) =>")
+    assert "id.toLowerCase().includes(q)" in hit, "filter matches display names only"
+    assert 'id="dlchain-no-match"' in chain, "a query matching nothing says nothing"
 
 
 def test_a_hidden_form_group_is_actually_hidden(index):
-    """The "Download Source" select is marked hidden in the markup: the chain
-    widget replaced it, and it survives only because saveSettings reads it to
-    persist download_source.mode. It was on screen anyway, at the top of the
-    section, duplicating the chain underneath it.
-
-    Cause: #settings-page .form-group sets display:flex, and a class rule with
-    display outranks the browser's own [hidden] styling, so the attribute did
-    nothing. Exactly the trap .hybrid-source-list hit on this same page. Any
-    form-group the page hides is affected, not just this one.
+    """The "Download Source" select used to be marked hidden in the markup and
+    was on screen anyway: #settings-page .form-group sets display:flex, and a
+    class rule with display outranks the browser's own [hidden] styling, so the
+    attribute did nothing. Exactly the trap .hybrid-source-list hit on this same
+    page. Any form-group the page hides is affected, so the guard stays though
+    that select is gone (step 7a): the audiobook mode select is still one.
     """
     css = _read("webui/static/style.css")
     rule = _rule(css, "#settings-page .form-group[hidden]")
@@ -556,8 +624,10 @@ def test_a_hidden_form_group_is_actually_hidden(index):
     base = _rule(css, "#settings-page .form-group")
     assert "display: flex" in base
 
-    # the select itself stays in the DOM - it is the save/load transport
-    assert 'id="download-source-mode"' in index
+    # a hidden form-group the page still has
+    before = index.split('id="audiobook-download-mode"', 1)[0]
+    group = before[before.rindex('<div class="form-group'):]
+    assert "hidden" in group.split(">", 1)[0]
 
 
 def test_the_behaviour_rows_stack_on_a_phone():
@@ -601,7 +671,7 @@ def test_the_phone_drop_slot_is_not_taller_than_the_desktop_one():
     assert phone <= desktop, f"phone slot {phone}px is taller than desktop {desktop}px"
 
 
-def test_the_widget_is_shared_with_the_video_side(index):
+def test_the_widget_is_shared_with_the_video_side(index, tab):
     """The whole point of building it this way. The video side hides music
     controls with
 
@@ -610,7 +680,8 @@ def test_the_widget_is_shared_with_the_video_side(index):
     so a single data-music-only anywhere up the tree deletes this widget from
     the video side silently - it just would not be there, with nothing to say
     why. Pin that neither the widget, its section, nor the Sources tab sits
-    under one.
+    under one. the widget and its section are React now: their slot is checked
+    in index.html, and the markup the slot gets in sources-tab.tsx.
     """
     import re as _re
 
@@ -626,8 +697,8 @@ def test_the_widget_is_shared_with_the_video_side(index):
                 stack.append(m.group(0))
         return stack
 
-    for needle in ('id="download-chain-widget"',
-                   'settings-section-static',
+    for needle in ('data-stg-react="downloads" data-stg-part="chain"',
+                   'data-stg-react="sources" data-stg-part="tiles"',
                    '<div class="settings-group" data-stg="sources">'):
         at = index.index(needle)
         gated = [a for a in ancestors(at) if "data-music-only" in a]
@@ -639,27 +710,30 @@ def test_the_widget_is_shared_with_the_video_side(index):
         own = index[index.rfind("<", 0, at):index.index(">", at) + 1]
         assert "data-music-only" not in own, f"{needle} is itself marked music-only"
 
+    # nothing the React chain or tiles render is music-only either
+    assert "data-music-only" not in tab
+
     # and the tab buttons that reach them
-    for tab in ("downloads", "sources"):
-        btn = index.split(f'data-tab="{tab}"', 1)[0].rsplit("<button", 1)[1]
-        assert "data-music-only" not in btn, f"the {tab} tab button is music-only"
+    for name in ("downloads", "sources"):
+        btn = index.split(f'data-tab="{name}"', 1)[0].rsplit("<button", 1)[1]
+        assert "data-music-only" not in btn, f"the {name} tab button is music-only"
 
 
-def test_the_chain_opens_on_the_side_you_are_standing_on(js):
-    """_dlchainKind defaults to 'music', so a video user opening Downloads got
+def test_the_chain_opens_on_the_side_you_are_standing_on(model):
+    """the chain kind defaults to 'music', so a video user opening Downloads got
     the MUSIC chain and the music-only behaviour group beneath it - on a widget
     whose entire purpose is being shared by both sides.
 
     An explicit tab pick still wins; the side only supplies the default."""
-    assert "_dlchainSyncKindToSide" in js
-    fn = js.split("function _dlchainSyncKindToSide(", 1)[1].split("\n}", 1)[0]
+    fn = _body(model, "function syncKindToSide()")
     assert "data-side" in fn and "video" in fn
+    assert "if (model.getState().kindChosen) return;" in fn
 
-    load = js.split("async function _dlchainLoad(", 1)[1].split("\n}", 1)[0]
-    assert "_dlchainSyncKindToSide()" in load, "the default is never applied"
+    load = _body(model, "async function loadChain()")
+    assert "syncKindToSide();" in load, "the default is never applied"
 
-    switch = js.split("function switchDownloadChain(", 1)[1].split("\n}", 1)[0]
-    assert "_dlchainKindChosen = true" in switch, "a manual pick would be overridden"
+    switch = model.split("switchChain(kind) {", 1)[1].split("\n    },", 1)[0]
+    assert "kindChosen: true" in switch, "a manual pick would be overridden"
 
 
 def test_the_downloads_tab_is_shared_without_needing_a_marker():
@@ -699,13 +773,14 @@ def test_every_source_has_a_brand_colour():
     only grey card on the page. So every id that can appear on a card needs one,
     and a colour defined for an id that no longer exists is dead weight.
     """
-    js = _read("webui/static/settings.js")
+    model = _read(_TABS + "sources-model.ts")
     css = _read("webui/static/style.css")
 
-    hybrid = set(re.findall(r"id: '([a-z_]+)'", js.split("const HYBRID_SOURCES", 1)[1].split("];", 1)[0]))
-    extra = set(re.findall(r"id: '([a-z_]+)'", js.split("EXTRA_SOURCE_TILES", 1)[1].split("];", 1)[0]))
-    video = set(re.findall(r"'([a-z]+)'", js.split("sources: () => ['soulseek'", 1)[0][-1:] or "")) or {
-        "soulseek", "torrent", "usenet", "extto"}
+    hybrid = set(re.findall(r"id: '([a-z_]+)'", model.split("export const HYBRID_SOURCES", 1)[1].split("];", 1)[0]))
+    extra = set(re.findall(r"id: '([a-z_]+)'", model.split("export const EXTRA_SOURCE_TILES", 1)[1].split("];", 1)[0]))
+    video_spec = _kinds(model).split("\n  video: {", 1)[1].split("\n  },", 1)[0]
+    video = set(re.findall(r"'([a-z]+)'", video_spec.split("sources: () => [", 1)[1].split("]", 1)[0]))
+    assert video == {"soulseek", "torrent", "usenet", "extto"}
     needed = hybrid | extra | video
     defined = set(re.findall(r'\[data-src="([a-z_]+)"\]', css))
 

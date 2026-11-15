@@ -1152,10 +1152,6 @@ function switchSettingsTab(tab) {
         const hasVisible = Array.from(col.querySelectorAll('.settings-group[data-stg]')).some(g => g.style.display !== 'none');
         col.style.display = hasVisible ? '' : 'none';
     });
-    // Re-apply conditional visibility (quality profile, source containers, etc.)
-    if (typeof updateDownloadSourceUI === 'function') {
-        try { updateDownloadSourceUI(); } catch (e) { }
-    }
     // Load DB maintenance info when switching to Advanced tab
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
@@ -1176,23 +1172,8 @@ function switchSettingsTab(tab) {
     if (tab === 'connections' && typeof loadMetaSyncSettings === 'function') {
         try { loadMetaSyncSettings(); } catch (e) { }
     }
-    // First time the Downloads tab is shown, auto-probe source status so the
-    // dots reflect real connection state without a manual "Test all sources".
-    if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
-        autoTestSourcesOnce();
-    }
-    // The video chain lives in video.db and can change from the video side, so
-    // re-read on arrival rather than trusting what was rendered earlier.
-    if (tab === 'downloads') {
-        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
-    }
-    // Sources: the cards carry live status, so refresh them on arrival and let
-    // the same one-shot probe fill the dots in.
-    if (tab === 'sources') {
-        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-        try { _loadVideoChainForTiles(); } catch (e) { /* tiles are cosmetic */ }
-        if (typeof autoTestSourcesOnce === 'function') autoTestSourcesOnce();
-    }
+    // (the download chain and the Sources tiles re-read the video chain and
+    // fill their dots themselves when their tab opens: sources-tab.tsx)
     // (the live log viewer starts and stops itself: its React tab is told
     // whether it is the open tab, src/features/settings/host.tsx)
     // Refresh the green/yellow header gradient when arriving on Connections
@@ -1744,416 +1725,13 @@ function toggleAllServiceAccordions(btn) {
 }
 
 
-// ══ Download chains ═════════════════════════════════════════════════════════
-// Music, video and audiobooks each store the same thing — a mode plus an
-// ordered list of sources — and each had its own editor: music a drag list with
-// status dots, audiobooks arrow buttons and toggles, video a third one inside a
-// pop-up on its own side. Same concept, three looks, three behaviours.
-//
-// One widget now, three adapters. The adapters are the only part that differs:
-// where the chain is read from and where it goes back to. Music and audiobooks
-// ride the page's existing settings save; video has its own endpoint because
-// its settings live in video.db, not app_config.
-//
-// A chain of one IS single-source mode. There is no separate switch, because
-// "mode" and "the list" were never independent — a user picking one source and
-// a user dragging one source into the chain mean the same thing.
-const DLCHAIN_KINDS = {
-    music: {
-        label: 'Music',
-        help: 'Downloads try each source in order, top first. One source means single-source mode; two or more is hybrid.',
-        sources: () => HYBRID_SOURCES.map(s => s.id),
-        meta: (id) => HYBRID_SOURCES.find(s => s.id === id) || { id, name: id, emoji: '🎵', icon: null },
-        read: () => ({ order: getHybridOrder() }),
-        write: (order) => {
-            // Feed the SAME module state the old list owned, so saveSettings and
-            // the Sources tiles keep working with no knowledge of this widget.
-            _hybridSourceOrder = order.slice();
-            HYBRID_SOURCES.forEach(s => { _hybridSourceEnabled[s.id] = order.includes(s.id); });
-            _hybridVisualOrder = null;
-            try { _syncHybridHiddenSelects(); } catch (e) { /* legacy selects */ }
-            const modeSel = document.getElementById('download-source-mode');
-            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'soulseek');
-            try { buildHybridSourceList(); } catch (e) { /* keeps the tiles fresh */ }
-            debouncedAutoSaveSettings();
-        },
-    },
-    video: {
-        label: 'Video',
-        help: 'Video downloads try each source in order, top first. These settings are the video side\'s own and save immediately.',
-        sources: () => ['soulseek', 'torrent', 'usenet', 'extto'],
-        meta: (id) => ({
-            soulseek: { name: 'Soulseek', emoji: '🎵', icon: '/static/img/brands/slskd.png' },
-            torrent: { name: 'Torrent', emoji: '🧲', icon: null },
-            usenet: { name: 'Usenet', emoji: '📰', icon: null },
-            extto: { name: 'External', emoji: '🔗', icon: null },
-        }[id] || { name: id, emoji: '🎬', icon: null }),
-        read: async () => {
-            const r = await _ssJson('/api/video/downloads/config');
-            const cfg = r || {};
-            const order = (cfg.download_mode === 'hybrid' && Array.isArray(cfg.hybrid_order) && cfg.hybrid_order.length)
-                ? cfg.hybrid_order
-                : (cfg.download_mode ? [cfg.download_mode] : ['soulseek']);
-            return { order };
-        },
-        // Video has no page-wide save button, so it commits on change.
-        write: async (order) => {
-            const patch = order.length > 1
-                ? { download_mode: 'hybrid', hybrid_order: order }
-                : { download_mode: order[0] || 'soulseek', hybrid_order: order };
-            await _ssJson('/api/video/downloads/config', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(patch),
-            });
-            // the Sources tiles show the video chain too (#2026)
-            _videoChainOrder = order.slice();
-            try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-        },
-    },
-    audiobooks: {
-        label: 'Audiobooks',
-        // A book is fetched as one whole folder, so the order decides who gets
-        // ASKED — the ranking still decides who wins.
-        help: 'Audiobooks are fetched as a whole folder, so the order decides which source is asked first, not which release wins.',
-        sources: () => AUDIOBOOK_SOURCES.slice(),
-        meta: (id) => ({ name: AUDIOBOOK_SOURCE_LABEL[id] || id, emoji: AUDIOBOOK_SOURCE_EMOJI[id] || '📚', icon: null }),
-        read: () => ({ order: _audiobookHybrid.slice() }),
-        write: (order) => {
-            _audiobookHybrid = order.slice();
-            const modeSel = document.getElementById('audiobook-download-mode');
-            if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'torrent');
-            try { renderAudiobookHybrid(); } catch (e) { /* legacy rows */ }
-            debouncedAutoSaveSettings();
-        },
-    },
-};
+// The download chains (music, video, audiobooks), the source registry the
+// chain and the Sources tiles read, each source's connection state and Test
+// all sources are React: src/features/settings/tabs/sources-model.ts and
+// sources-tab.tsx (SETTINGS_PORT.md step 7a). The audiobook chain below stays
+// with the Library tab it is set on, and hands itself to the React chain
+// through getAudiobookChain / setAudiobookChain.
 
-let _dlchainKind = 'music';
-// The widget is deliberately shared: the Sources and Downloads tabs render on
-// the video side too. But the kind above is a music default, so a video user
-// opening Downloads landed on the MUSIC chain, with the music-only behaviour
-// group under it. Until they pick a tab themselves, follow the side they are on.
-let _dlchainKindChosen = false;
-
-function _dlchainSyncKindToSide() {
-    if (_dlchainKindChosen) return;
-    _dlchainKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
-}
-let _dlchainOrder = [];
-let _dlchainDragging = null;
-
-// A source in the pool: the Sources-tab tile, shrunk. Same logo, same shape, so
-// the thing you drag looks like the thing you configure.
-// Groups in a fixed order, each with a count, then anything unlisted under
-// "Other" so a new source is never silently dropped from the pool.
-function _dlchainPoolHtml(kind, available) {
-    if (!available.length) return '<div class="dlchain-empty">Every source is in the chain.</div>';
-    const seen = new Set();
-    let html = '';
-    const group = (label, ids) => {
-        if (!ids.length) return '';
-        ids.forEach(id => seen.add(id));
-        return `<div class="dlchain-group">`
-             + `<div class="dlchain-group-head">`
-             + `<span class="dlchain-group-label">${escapeHtml(label)}</span>`
-             + `<span class="dlchain-group-count">${ids.length}</span></div>`
-             + `<div class="dlchain-group-row">${ids.map(id => _dlchainTile(kind, id)).join('')}</div>`
-             + `</div>`;
-    };
-    for (const g of DLCHAIN_GROUPS) html += group(g.label, g.ids.filter(id => available.includes(id)));
-    html += group('Other', available.filter(id => !seen.has(id)));
-    html += '<div class="dlchain-empty" id="dlchain-no-match" hidden>Nothing matches that.</div>';
-    return html;
-}
-
-// Filter state lives outside the render so re-rendering (adding a source, or
-// switching media tab) does not silently drop what was typed.
-let _dlchainQuery = '';
-
-function dlchainFilter(q) {
-    _dlchainQuery = String(q || '').trim().toLowerCase();
-    _dlchainApplyFilter();
-}
-window.dlchainFilter = dlchainFilter;
-
-function _dlchainApplyFilter() {
-    const pool = document.getElementById('dlchain-pool');
-    if (!pool) return;
-    const q = _dlchainQuery;
-    let shown = 0;
-    pool.querySelectorAll('.dlchain-tile').forEach(tile => {
-        const name = (tile.querySelector('.dlchain-tile-name')?.textContent || '').toLowerCase();
-        const hit = !q || name.includes(q) || (tile.dataset.src || '').toLowerCase().includes(q);
-        tile.hidden = !hit;
-        if (hit) shown++;
-    });
-    pool.querySelectorAll('.dlchain-group').forEach(g => {
-        g.hidden = !g.querySelector('.dlchain-tile:not([hidden])');
-    });
-    const none = document.getElementById('dlchain-no-match');
-    if (none) none.hidden = !(q && shown === 0);
-}
-
-function _dlchainTile(kind, id) {
-    const m = DLCHAIN_KINDS[kind].meta(id);
-    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
-    const art = m.icon
-        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
-        : `<span class="emoji-icon">${m.emoji}</span>`;
-    return `<button type="button" class="dlchain-tile" draggable="true" data-src="${id}" `
-         + `onclick="dlchainAdd('${id}')" title="Add ${escapeHtml(m.name)} to the chain">`
-         + `<span class="dlchain-tile-art">${art}</span>`
-         + `<span class="dlchain-tile-name">${escapeHtml(m.name)}</span></button>`;
-}
-
-// A step in the chain: the logo, and almost nothing else. The mark identifies
-// the source faster than its name does, and repeating the name in a column
-// already headed "download chain" earned its width back nowhere. The name still
-// reaches a screen reader, and a pointer, through the label.
-function _dlchainStep(kind, id, position, total) {
-    const m = DLCHAIN_KINDS[kind].meta(id);
-    const inv = INVERT_BRAND_MARKS.has(id) ? ' is-inverted' : '';
-    const art = m.icon
-        ? `<img class="dlchain-mark${inv}" src="${m.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${m.emoji}</span>'">`
-        : `<span class="emoji-icon">${m.emoji}</span>`;
-    const role = position === 1 ? 'Tried first' : `Fallback ${position - 1}`;
-    const name = escapeHtml(m.name);
-    // A full-width row rather than a logo in a box. The logo alone could not say
-    // which source a step was - an emoji shopping cart for Amazon Music is not
-    // recognisable - and a small centred card in a wide column left most of the
-    // column empty, which is what made the whole panel look unfinished.
-    return `<div class="dlchain-step" draggable="true" data-src="${id}" `
-         + `title="${name} - ${role}" aria-label="${name}, ${role}">`
-         + '<span class="dlchain-grip" aria-hidden="true">&#x283F;</span>'
-         + `<span class="dlchain-step-rank">${position}</span>`
-         + `<span class="dlchain-step-art">${art}</span>`
-         + '<span class="dlchain-step-text">'
-         + `<span class="dlchain-step-name">${name}</span>`
-         + `<span class="dlchain-step-role">${role}</span></span>`
-         + '<span class="dlchain-step-move">'
-         + `<button type="button" class="dlchain-move" title="Move ${name} up" aria-label="Move ${name} up"`
-         + `${position === 1 ? ' disabled' : ''} onclick="dlchainMove('${id}', -1)">&#9650;</button>`
-         + `<button type="button" class="dlchain-move" title="Move ${name} down" aria-label="Move ${name} down"`
-         + `${position === total ? ' disabled' : ''} onclick="dlchainMove('${id}', 1)">&#9660;</button>`
-         + '</span>'
-         + `<button type="button" class="dlchain-btn" title="Remove ${name} from the chain" `
-         + `aria-label="Remove ${name} from the chain" onclick="dlchainRemove('${id}')">&times;</button></div>`;
-}
-
-
-// Arrows because dragging is precise work on a touchpad and impossible on a
-// phone; the drag stays for people who prefer it.
-function dlchainMove(id, delta) {
-    const i = _dlchainOrder.indexOf(id);
-    const j = i + delta;
-    if (i < 0 || j < 0 || j >= _dlchainOrder.length) return;
-    [_dlchainOrder[i], _dlchainOrder[j]] = [_dlchainOrder[j], _dlchainOrder[i]];
-    _dlchainCommit();
-}
-window.dlchainMove = dlchainMove;
-
-function renderDownloadChain() {
-    const kind = _dlchainKind;
-    const spec = DLCHAIN_KINDS[kind];
-    const tabs = document.getElementById('dlchain-tabs');
-    const pool = document.getElementById('dlchain-pool');
-    const list = document.getElementById('dlchain-list');
-    if (!spec || !tabs || !pool || !list) return;
-
-    tabs.innerHTML = Object.keys(DLCHAIN_KINDS).map(k =>
-        `<button type="button" role="tab" class="dlchain-tab${k === kind ? ' active' : ''}" `
-        + `onclick="switchDownloadChain('${k}')">${DLCHAIN_KINDS[k].label}</button>`).join('');
-    const help = document.getElementById('dlchain-help');
-    if (help) help.textContent = spec.help;
-
-    const all = spec.sources();
-    const order = _dlchainOrder.filter(id => all.includes(id));
-    const available = all.filter(id => !order.includes(id));
-
-    // Steps joined by connectors, then ONE empty slot at the end. One, not a
-    // row of placeholders: the question a person has when they look at this is
-    // "where does the next one go", and several identical empty boxes answer it
-    // worse than a single obvious one. Sized and worded like the automation
-    // builder's slots, which is the thing in this app that already gets it
-    // right — a big dashed target that says what to put in it and why.
-    const steps = order.map((id, i) => _dlchainStep(kind, id, i + 1, order.length));
-    const lastName = order.length ? spec.meta(order[order.length - 1]).name : '';
-    const slotTitle = order.length
-        ? `Drag a source here — tried after ${escapeHtml(lastName)}`
-        : 'Drag a source here — this one is tried first';
-    const slotHint = order.length
-        ? 'It only runs if everything above it came up empty.'
-        : 'Downloads need at least one source. Add more to fall back in order.';
-    const flow = steps.join('<div class="dlchain-connector"></div>')
-        + (steps.length ? '<div class="dlchain-connector"></div>' : '')
-        + `<div class="dlchain-slot${order.length ? '' : ' first'}" id="dlchain-slot">`
-        + `<span class="dlchain-slot-title">${slotTitle}</span>`
-        + `<span class="dlchain-slot-hint">${slotHint}</span>`
-        + '</div>';
-    list.innerHTML = flow;
-
-    pool.innerHTML = _dlchainPoolHtml(kind, available);
-    _dlchainApplyFilter();
-
-    // The behaviour group is download_source.* — music-wide. Showing it under a
-    // video or audiobook chain would say it applies there. Hide the WRAPPER, not
-    // the inner block, or the "Download behaviour" heading stays behind on its own.
-    const behaviour = document.getElementById('dlchain-behaviour');
-    if (behaviour) behaviour.hidden = kind !== 'music';
-
-    const hint = document.getElementById('dlchain-mode-hint');
-    if (hint) {
-        hint.textContent = order.length > 1 ? `hybrid — ${order.length} sources`
-            : order.length === 1 ? 'single source' : 'nothing selected';
-    }
-    _dlchainWireDrag();
-}
-window.renderDownloadChain = renderDownloadChain;
-
-function switchDownloadChain(kind) {
-    if (!DLCHAIN_KINDS[kind]) return;
-    _dlchainKindChosen = true;   // an explicit pick outranks the side default
-    _dlchainKind = kind;
-    _dlchainLoad();
-}
-window.switchDownloadChain = switchDownloadChain;
-
-async function _dlchainLoad() {
-    _dlchainSyncKindToSide();
-    const spec = DLCHAIN_KINDS[_dlchainKind];
-    if (!spec) return;
-    try {
-        const state = await spec.read();
-        _dlchainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
-        if (_dlchainKind === 'video') {
-            _videoChainOrder = _dlchainOrder.slice();
-            try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-        }
-    } catch (e) {
-        _dlchainOrder = [];
-    }
-    renderDownloadChain();
-}
-window.loadDownloadChain = _dlchainLoad;
-
-function _dlchainCommit() {
-    const spec = DLCHAIN_KINDS[_dlchainKind];
-    renderDownloadChain();
-    try {
-        const r = spec.write(_dlchainOrder.slice());
-        if (r && typeof r.catch === 'function') {
-            r.catch(() => { if (typeof showToast === 'function') showToast('Could not save the download chain', 'error'); });
-        }
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Could not save the download chain', 'error');
-    }
-}
-
-function dlchainAdd(id) {
-    if (!_dlchainOrder.includes(id)) _dlchainOrder.push(id);
-    _dlchainCommit();
-}
-window.dlchainAdd = dlchainAdd;
-
-function dlchainRemove(id) {
-    // An empty chain means nothing can download at all, which is never what a
-    // drag was trying to say. The video side already refused this; now all three do.
-    if (_dlchainOrder.length <= 1) {
-        if (typeof showToast === 'function') showToast('Keep at least one source — downloads need somewhere to go', 'info');
-        return;
-    }
-    _dlchainOrder = _dlchainOrder.filter(x => x !== id);
-    _dlchainCommit();
-}
-window.dlchainRemove = dlchainRemove;
-
-function _dlchainWireDrag() {
-    const pool = document.getElementById('dlchain-pool');
-    const list = document.getElementById('dlchain-list');
-    if (!pool || !list) return;
-
-    const dragged = () => _dlchainDragging;
-
-    // Pool tiles and chain steps are both draggable and both carry data-src.
-    document.querySelectorAll('#download-chain-widget [data-src]').forEach(item => {
-        item.addEventListener('dragstart', (e) => {
-            _dlchainDragging = item.dataset.src;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', item.dataset.src);
-            item.classList.add('dragging');
-        });
-        item.addEventListener('dragend', () => {
-            _dlchainDragging = null;
-            item.classList.remove('dragging');
-            document.querySelectorAll('#download-chain-widget .drag-over')
-                .forEach(el => el.classList.remove('drag-over'));
-        });
-    });
-
-    // Dropping ON a step inserts before it — that is how you reorder.
-    list.querySelectorAll('.dlchain-step').forEach(step => {
-        step.addEventListener('dragover', (e) => {
-            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-            step.classList.add('drag-over');
-        });
-        step.addEventListener('dragleave', () => step.classList.remove('drag-over'));
-        step.addEventListener('drop', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            step.classList.remove('drag-over');
-            const src = e.dataTransfer.getData('text/plain') || dragged();
-            const target = step.dataset.src;
-            if (!src || src === target) return;
-            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
-            const at = _dlchainOrder.indexOf(target);
-            _dlchainOrder.splice(at < 0 ? _dlchainOrder.length : at, 0, src);
-            _dlchainCommit();
-        });
-    });
-
-    // The slot at the end: always append.
-    const slot = document.getElementById('dlchain-slot');
-    if (slot) {
-        slot.addEventListener('dragover', (e) => {
-            e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-            slot.classList.add('drag-over');
-        });
-        slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
-        slot.addEventListener('drop', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            slot.classList.remove('drag-over');
-            const src = e.dataTransfer.getData('text/plain') || dragged();
-            if (!src) return;
-            _dlchainOrder = _dlchainOrder.filter(x => x !== src);
-            _dlchainOrder.push(src);
-            _dlchainCommit();
-        });
-    }
-
-    // Anywhere else in the chain column appends too, so a slightly-off drop
-    // still does the obvious thing instead of nothing.
-    list.addEventListener('dragover', (e) => { e.preventDefault(); list.classList.add('drag-over'); });
-    list.addEventListener('dragleave', () => list.classList.remove('drag-over'));
-    list.addEventListener('drop', (e) => {
-        e.preventDefault();
-        list.classList.remove('drag-over');
-        const src = e.dataTransfer.getData('text/plain') || dragged();
-        if (!src || _dlchainOrder.includes(src)) return;
-        _dlchainOrder.push(src);
-        _dlchainCommit();
-    });
-
-    // Dragging a step back to the pool removes it.
-    pool.addEventListener('dragover', (e) => { e.preventDefault(); pool.classList.add('drag-over'); });
-    pool.addEventListener('dragleave', () => pool.classList.remove('drag-over'));
-    pool.addEventListener('drop', (e) => {
-        e.preventDefault();
-        pool.classList.remove('drag-over');
-        const src = e.dataTransfer.getData('text/plain') || dragged();
-        if (src && _dlchainOrder.includes(src)) dlchainRemove(src);
-    });
-}
-
-// ── Hybrid source priority list (drag-and-drop) ──
 // ---- Audiobook download sources ----
 // Same three sources the video side offers, and the same .hybrid-source-item
 // markup and CSS music and video already use, so all three read alike. No
@@ -2217,6 +1795,19 @@ function _audiobookActiveSources() {
     return ids.filter(s => AUDIOBOOK_SOURCES.includes(s));
 }
 
+// The React download chain (sources-model.ts) reads and writes the audiobook
+// chain through these until the Library tab is React. The write is what the
+// chain widget's audiobook adapter did: the rows, the mode, and the page save.
+window.getAudiobookChain = () => _audiobookHybrid.slice();
+window.getAudiobookActiveSources = _audiobookActiveSources;
+window.setAudiobookChain = (order) => {
+    _audiobookHybrid = order.slice();
+    const modeSel = document.getElementById('audiobook-download-mode');
+    if (modeSel) modeSel.value = order.length > 1 ? 'hybrid' : (order[0] || 'torrent');
+    try { renderAudiobookHybrid(); } catch (e) { /* legacy rows */ }
+    debouncedAutoSaveSettings();
+};
+
 // The chain only applies in hybrid mode; a single-source mode has nothing to
 // order, so showing the rows there would imply a choice that does nothing.
 function onAudiobookModeChange() {
@@ -2226,23 +1817,9 @@ function onAudiobookModeChange() {
     if (mode === 'hybrid') renderAudiobookHybrid();
 }
 
-// Dark-foreground brand marks that vanish against the dark UI. The app's
-// canonical recipe for "render this image as pure white" is
-// `brightness(0) invert(1)` — already used for the equalizer and auto-sync icons.
-const INVERT_BRAND_MARKS = new Set(['tidal', 'qobuz', 'soundcloud']);
-
-// The pool is grouped rather than one flat grid: eleven music sources is more
-// than anyone scans comfortably, and "which of these is a streaming service"
-// is the question people actually arrive with. Ids not listed here fall into
-// "Other", so adding a source to HYBRID_SOURCES can never make it disappear.
-const DLCHAIN_GROUPS = [
-    { label: 'Peer-to-peer', ids: ['soulseek'] },
-    { label: 'Streaming services', ids: ['tidal', 'qobuz', 'deezer_dl', 'soundcloud', 'hifi'] },
-    { label: 'Public video', ids: ['youtube'] },
-    { label: 'Torrent & Usenet', ids: ['torrent', 'usenet', 'extto'] },
-    { label: 'Library manager', ids: ['lidarr'] },
-];
-
+// HYBRID_SOURCES stays here until the Sources modal is React (step 7b): the
+// modal reads its names and logos, and src/shell/service-switch.ts reads the
+// global. The React copy is in sources-model.ts.
 const HYBRID_SOURCES = [
     { id: 'soulseek', name: 'Soulseek', icon: '/static/img/brands/slskd.png', emoji: '🎵' },
     { id: 'youtube', name: 'YouTube', icon: '/static/img/brands/youtube.svg', emoji: '▶️' },
@@ -2255,34 +1832,6 @@ const HYBRID_SOURCES = [
     { id: 'torrent', name: 'Torrent', icon: null, emoji: '🧲' },
     { id: 'usenet', name: 'Usenet', icon: null, emoji: '📰' },
 ];
-
-// Prowlarr is not in HYBRID_SOURCES because it is not a link in the download
-// chain - it is the indexer both torrent and usenet search through - but it
-// very much is something you configure to download, so it earns a tile.
-//
-// There used to be a SHARED_SOURCES set here naming the four tiles the video
-// side was allowed to see. The Sources tab is fully shared now: every side sees
-// every tile, because hiding Tidal from someone standing on the video side just
-// means they cannot fix their Tidal credentials without switching sides first.
-const EXTRA_SOURCE_TILES = [
-    { id: 'prowlarr', name: 'Indexers', icon: null, emoji: '🔎' },
-];
-const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
-
-// sources that can't be picked anymore. amazon ran through the public t2tunes
-// proxy and that site is gone (#1300). a saved chain that still names one gets
-// it dropped on load, so the next save writes a chain that actually works.
-const RETIRED_DOWNLOAD_SOURCES = new Set(['amazon']);
-
-let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
-// Enabled-but-not-fully-configured sources (per the server's status):
-// shown with a "needs setup" chip instead of being silently unchecked.
-let _hybridSourceUnready = {};
-let _hybridVisualOrder = null; // Full visual order including disabled sources
-// In hybrid mode, only one source's config panel is shown at a time (clicked
-// open from its row), so the long per-source config blocks don't all stack up.
-let _expandedHybridSource = null;
 
 // ── Sources tab ─────────────────────────────────────────────────────────────
 // The cards are rendered from HYBRID_SOURCES, the same registry the chain rows
@@ -2308,133 +1857,6 @@ function toggleSourceCard(header) {
     if (header && header.dataset) openSourceModal(header.dataset.sourceId);
 }
 window.toggleSourceCard = toggleSourceCard;
-
-// The video chain lives in video.db behind its own endpoint, so it is cached
-// here for the tiles and refreshed when the Sources tab opens or the video
-// chain is edited. null means not read yet.
-let _videoChainOrder = null;
-
-async function _loadVideoChainForTiles() {
-    try {
-        const state = await DLCHAIN_KINDS.video.read();
-        _videoChainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
-    } catch (e) {
-        // leave the last known order; a failed read must not empty the tiles
-    }
-    try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-}
-window.loadVideoChainForTiles = _loadVideoChainForTiles;
-
-// Every download chain a source can sit in. A source in any of them is in use.
-function _srcAllChains() {
-    const music = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
-    let books = [];
-    try { books = _audiobookActiveSources(); } catch (e) { /* no audiobook settings on this page */ }
-    return [
-        { label: 'Music', order: music },
-        { label: 'Video', order: _videoChainOrder || [] },
-        { label: 'Audiobooks', order: books },
-    ];
-}
-
-function _srcChainUses(id, chains) {
-    const uses = [];
-    for (const c of chains) {
-        const i = c.order.indexOf(id);
-        if (i !== -1) uses.push({ label: c.label, pos: i + 1 });
-    }
-    return uses;
-}
-
-// One tile per source: logo, name under it, and the state that matters at a
-// glance. Rendered from HYBRID_SOURCES so the tiles and the chain rows on the
-// Downloads tab cannot disagree about a name or a logo.
-function _srcTileMarkup(src, chains) {
-    const uses = _srcChainUses(src.id, chains);
-    const inChain = uses.length > 0;
-    const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
-    const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
-    const said = _ssLastTestMessage[src.id];
-    const dotLabel = { unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected',
-                       warn: said || 'Working, but needs attention',
-                       fail: said || 'Connection failed',
-                       na: 'No connection test for this source' }[state];
-    // Same brand marks that get inverted in the download-chain widget: these
-    // logos are dark-on-light artwork and disappear against a dark tile. They
-    // were only inverted in the chain, so the same source looked different in
-    // the two places it appears.
-    const srcInv = INVERT_BRAND_MARKS.has(src.id) ? ' class="is-inverted"' : '';
-    const art = src.icon
-        ? `<img${srcInv} src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
-        : `<span class="emoji-icon">${src.emoji}</span>`;
-    // Prowlarr is never "in the chain" — it is what the chain's torrent and
-    // usenet links search through — so the chain chip would read as a fault.
-    const chip = src.id === 'prowlarr'
-        ? '<span class="src-tile-chip">torrent &amp; usenet</span>'
-        : (unready || state === 'warn')
-        ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
-        : inChain
-            ? `<span class="src-tile-chips">${uses.map(u =>
-                `<span class="src-tile-chip src-tile-chip--on" title="${escapeHtml(u.label)} chain, tried ${u.pos === 1 ? 'first' : '#' + u.pos}">`
-                + `${escapeHtml(u.label)} #${u.pos}</span>`).join('')}</span>`
-            : '<span class="src-tile-chip">not in a chain</span>';
-    return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
-         + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
-         + `title="Configure ${escapeHtml(src.name)}">`
-         + `<span class="src-tile-dot hss-${state}" title="${escapeHtml(String(dotLabel))}"></span>`
-         + `<span class="src-tile-art">${art}</span>`
-         + `<span class="src-tile-name">${escapeHtml(src.name)}</span>`
-         + chip
-         + '</button>';
-}
-
-// Two groups rather than one long ragged wrap: what is actually downloading for
-// you, in the order it is tried, then everything else. Eleven tiles in a single
-// auto-fill grid wrapped 7-then-4 and read as an accident, and registry order
-// put "#4" before "#2", which made the chain numbers look wrong.
-function buildSourceTiles() {
-    const grid = document.getElementById('source-tile-grid');
-    if (!grid) return;
-    const chains = _srcAllChains();
-
-    // Only sources that own a config panel get a tile. No side filtering: this
-    // tab is shared and shows the same thing on both sides.
-    const configurable = HYBRID_SOURCES.concat(EXTRA_SOURCE_TILES)
-        .filter(src => SOURCE_CONFIG_ID_BY_SRC[src.id]);
-
-    const section = (label, hint, list) => list.length
-        ? `<div class="src-group"><div class="src-group-head">`
-          + `<span class="src-group-label">${label}</span>`
-          + `<span class="src-group-count">${list.length}</span>`
-          + `<span class="src-group-hint">${hint}</span></div>`
-          + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, chains)).join('')}</div></div>`
-        : '';
-
-    // Indexers are their own kind of thing: not a source you pick, but the
-    // catalogue the torrent and usenet links search. Grouped separately so the
-    // list does not imply Prowlarr is a source you could add to the chain.
-    const isIndexer = (src) => EXTRA_SOURCE_TILES.some(x => x.id === src.id);
-    const indexers = configurable.filter(isIndexer);
-    const sources = configurable.filter(src => !isIndexer(src));
-
-    // in use means in ANY chain, music, video or audiobooks (#2026: usenet
-    // driving every video download read "not in chain" because only the music
-    // chain was looked at). music order first, then video, then audiobooks.
-    const rank = (src) => {
-        const u = _srcChainUses(src.id, chains)[0];
-        return u ? chains.findIndex(c => c.label === u.label) * 1000 + u.pos : Infinity;
-    };
-    const inChain = sources
-        .filter(src => _srcChainUses(src.id, chains).length)
-        .sort((a, b) => rank(a) - rank(b));
-    const available = sources.filter(src => !_srcChainUses(src.id, chains).length);
-
-    grid.innerHTML =
-        section('In use', 'the chains each source is in, and where it is tried', inChain) +
-        section('Available', 'configure now, add to the chain when you want it', available) +
-        section('Indexers', 'searched by torrent and usenet', indexers);
-}
-window.buildSourceTiles = buildSourceTiles;
 
 // Live auth/connection checks, run when a source is opened rather than on every
 // settings redraw. Best-effort: a probe that throws must not stop the modal.
@@ -2464,34 +1886,25 @@ let _openSourceModalId = null;
 async function testOneSource(srcId) {
     const btn = document.getElementById('src-modal-test');
     const out = document.getElementById('src-modal-result');
-    const probe = HYBRID_SOURCE_PROBE[srcId];
+    // the dots and the tests are in the React sources model (step 7a)
+    const model = window.SoulSyncSources;
     if (!out) return;
-    if (!probe) {
+    if (!model || !model.canTest(srcId)) {
         out.className = 'src-modal-result is-na';
         out.textContent = 'This source has no connection test.';
         return;
     }
     if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
-    _hybridSourceStatus[srcId] = 'testing';
     out.className = 'src-modal-result is-testing';
     out.textContent = 'Testing…';
-    let good = false;
-    try {
-        good = await probe();
-    } catch (e) {
-        good = false;
-        _ssLastTestMessage[srcId] = String((e && e.message) || e || 'Test failed');
-    }
-    const warned = !!_ssLastTestWarned[srcId];
-    const state = good ? (warned ? 'warn' : 'ok') : 'fail';
-    _hybridSourceStatus[srcId] = state;
-    const said = _ssLastTestMessage[srcId];
+    const state = await model.testOne(srcId);
+    const good = state === 'ok' || state === 'warn';
+    const said = model.getState().said[srcId];
     out.className = `src-modal-result is-${state}`;
     out.textContent = said || (good ? 'Connected.' : 'Connection failed.');
     document.getElementById('src-modal-meta').innerHTML =
         `<span class="src-tile-dot hss-${state}"></span>`;
     if (btn) { btn.disabled = false; btn.textContent = 'Test'; }
-    buildSourceTiles();
 }
 window.testOneSource = testOneSource;
 
@@ -2513,21 +1926,22 @@ function openSourceModal(srcId) {
     iconEl.innerHTML = src.icon
         ? `<img src="${src.icon}" alt="" onerror="this.outerHTML='<span class=\'emoji-icon\'>${src.emoji}</span>'">`
         : `<span class="emoji-icon">${src.emoji}</span>`;
-    const state = (_hybridSourceStatus && _hybridSourceStatus[srcId]) || 'unknown';
+    const known = window.SoulSyncSources ? window.SoulSyncSources.getState() : null;
+    const state = (known && known.status[srcId]) || 'unknown';
     document.getElementById('src-modal-meta').innerHTML = `<span class="src-tile-dot hss-${state}"></span>`;
 
     const testBtn = document.getElementById('src-modal-test');
     if (testBtn) {
         testBtn.disabled = false;
         testBtn.textContent = 'Test';
-        testBtn.style.display = HYBRID_SOURCE_PROBE[srcId] ? '' : 'none';
+        testBtn.style.display = window.SoulSyncSources?.canTest(srcId) ? '' : 'none';
         testBtn.onclick = () => testOneSource(srcId);
     }
     // Carry the last result in rather than showing a blank slate: an amber dot
     // on the tile should still explain itself once you are inside.
     const out = document.getElementById('src-modal-result');
     if (out) {
-        const said = _ssLastTestMessage[srcId];
+        const said = known && known.said[srcId];
         if (said && state !== 'unknown') {
             out.className = `src-modal-result is-${state}`;
             out.textContent = said;
@@ -2570,7 +1984,6 @@ function closeSourceModal() {
         settingsAutoSaveTimer = null;
         saveSettings(true);
     }
-    buildSourceTiles();
 }
 window.closeSourceModal = closeSourceModal;
 
@@ -2597,17 +2010,6 @@ const SOURCE_CONFIG_ID_BY_SRC = {
     prowlarr: 'prowlarr-settings-container',
 };
 
-const HYBRID_SOURCE_CONFIG_ID = {
-    soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
-    tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
-    hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
-    lidarr: 'lidarr-download-settings-container',
-    soundcloud: 'soundcloud-download-settings-container',
-    torrent: 'torrent-client-settings-container',
-    usenet: 'usenet-client-settings-container',
-    prowlarr: 'prowlarr-settings-container',
-};
-
 // The cog on a chain row. The config is on the Sources tab now, so this crosses
 // to it and opens that one source rather than expanding a panel in place.
 function toggleHybridSourceConfig(srcId) {
@@ -2626,10 +2028,6 @@ function openSourceConfig(containerId) {
     if (srcId) openSourceModal(srcId);
 }
 window.openSourceConfig = openSourceConfig;
-
-// ── Per-source live connection status (shown as a dot in the hybrid list and
-// driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
-let _hybridSourceStatus = {};
 
 // Chromium-family browsers seal their cookie store with App-Bound Encryption on
 // Windows, and yt-dlp cannot read it (yt-dlp issue 10927). Firefox is unaffected
@@ -2668,335 +2066,6 @@ function updateCookieBrowserWarning() {
     }
 }
 window.updateCookieBrowserWarning = updateCookieBrowserWarning;
-
-async function _ssJson(url, opts) {
-    const r = await fetch(url, opts);
-    return await r.json();
-}
-// Records what the server SAID about the last failure, keyed by service, so
-// the summary toast can name a reason instead of only a count. Sources
-// that can explain themselves (YouTube's bot-block, for one) were having
-// that explanation thrown away here.
-const _ssLastTestMessage = {};
-const _ssLastTestWarned = {};
-function _ssTestConn(service) {
-    return _ssJson(API.testConnection || '/api/test-connection', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service })
-    }).then(j => {
-        const msg = j && (j.message || j.error);
-        if (msg) _ssLastTestMessage[service] = String(msg);
-        else delete _ssLastTestMessage[service];
-        // A pass can still carry something worth acting on. The server marks
-        // those with a leading warning glyph; without this a working source
-        // with a broken cookie file drew a plain green light and said nothing.
-        _ssLastTestWarned[service] = !!j.success && !!msg && String(msg).trim().startsWith('\u26a0');
-        return !!j.success;
-    });
-}
-// Each probe returns a boolean (connected/ok). Endpoints mirror the per-source
-// "Test Connection" buttons so the results match what those buttons would show.
-const HYBRID_SOURCE_PROBE = {
-    soulseek:   () => _ssTestConn('soulseek'),
-    tidal:      () => _ssTestConn('tidal'),
-    qobuz:      () => _ssJson('/api/qobuz/auth/status').then(j => j.authenticated === true),
-    hifi:       () => _ssJson('/api/hifi/status').then(j => j.available === true),
-    // POST (the endpoint is POST-only) with an empty body so it tests the SAVED ARL; a GET here
-    // 405s and the probe throws -> the dot goes red even though Deezer downloads fine.
-    deezer_dl:  () => _ssJson('/api/deezer-download/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(j => j.success === true),
-    lidarr:     () => _ssTestConn('lidarr'),
-    soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
-    torrent:    () => _ssTestConn('torrent_client'),
-    usenet:     () => _ssTestConn('usenet_client'),
-    // run_service_test already handles 'prowlarr'; the tile just needed wiring.
-    prowlarr:   () => _ssTestConn('prowlarr'),
-    // Was hardcoded to true on the grounds that YouTube needs no auth.
-    // It does now — cookies — and the green dot hid a bot-block from the
-    // reporter of #1126 for long enough that he opened #1233 about it.
-    youtube:    () => _ssTestConn('youtube'),
-};
-// Configured metadata / server connections that support a generic test.
-const CONNECTION_TEST_SERVICES = ['spotify', 'server', 'tidal', 'qobuz', 'lastfm', 'genius', 'listenbrainz', 'acoustid', 'discogs'];
-
-async function testAllSources(opts = {}) {
-    const silent = opts.silent === true;          // no toast / no connection sweep (used for auto-run on load)
-    const btn = document.getElementById('test-all-sources-btn');
-    if (btn && !silent) { btn.disabled = true; btn.dataset._label = btn.textContent; btn.textContent = 'Testing…'; }
-
-    // Which download sources to test: the enabled hybrid sources, or the single
-    // selected source in non-hybrid mode.
-    const mode = document.getElementById('download-source-mode')?.value;
-    const sources = new Set();
-    if (mode === 'hybrid') {
-        (typeof getHybridOrder === 'function' ? getHybridOrder() : []).forEach(s => sources.add(s));
-    } else if (mode) {
-        sources.add(mode);
-    }
-    if (sources.size === 0) sources.add('soulseek');
-    // the audiobook chain is its own setting. a user whose books come over
-    // torrent but whose music never does saw a grey torrent tile forever,
-    // because only the music chain got probed.
-    for (const id of _audiobookActiveSources()) sources.add(id);
-    // and the video chain (#2026): usenet carrying every video download kept a
-    // grey dot because nothing ever tested it.
-    if (_videoChainOrder === null) await _loadVideoChainForTiles();
-    for (const id of (_videoChainOrder || [])) {
-        if (HYBRID_SOURCE_PROBE[id]) sources.add(id);
-    }
-
-    // Torrent/Usenet downloads go through Prowlarr — its connection must be
-    // established first or those source tests fail. Probe Prowlarr up front.
-    //
-    // The result used to be thrown away, which is why the Indexers tile stayed
-    // grey however healthy Prowlarr was: the tile reads _hybridSourceStatus,
-    // and nothing ever wrote prowlarr into it. Prowlarr is not a link in the
-    // chain, so the loop below — which walks the chain — never reaches it
-    // either. Record it here, where it is already being tested.
-    // `sources` comes from the MUSIC chain dropdown, so on the video side it
-    // says nothing about whether Prowlarr matters — and there it is the main
-    // path, not an extra. Test it there too, or its tile is permanently grey.
-    const _onVideoSide = document.body.getAttribute('data-side') === 'video';
-    if (sources.has('torrent') || sources.has('usenet') || _onVideoSide) {
-        _hybridSourceStatus.prowlarr = 'testing';
-        try {
-            const good = await _ssTestConn('prowlarr');
-            _hybridSourceStatus.prowlarr = good
-                ? (_ssLastTestWarned.prowlarr ? 'warn' : 'ok')
-                : 'fail';
-        } catch (e) {
-            _hybridSourceStatus.prowlarr = 'fail';
-        }
-        // the loop below only redraws while walking the chain, which Prowlarr
-        // is not part of
-        try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-    }
-
-    for (const id of sources) _hybridSourceStatus[id] = 'testing';
-    buildHybridSourceList();
-
-    let ok = 0, fail = 0;
-    const failedIds = [];
-    for (const id of sources) {
-        const probe = HYBRID_SOURCE_PROBE[id];
-        if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
-        try {
-            const good = await probe();
-            _hybridSourceStatus[id] = good ? (_ssLastTestWarned[id] ? 'warn' : 'ok') : 'fail';
-            good ? ok++ : (fail++, failedIds.push(id));
-            // a warning is worth surfacing even though the source passed
-            if (good && _ssLastTestWarned[id]) failedIds.push(id);
-        }
-        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; failedIds.push(id); }
-        buildHybridSourceList();
-    }
-
-    // Also test the metadata / server connections the user has configured
-    // (skipped on the silent auto-run to keep page load light).
-    let connOk = 0, connFail = 0;
-    if (!silent) {
-        try {
-            const cfg = await _ssJson('/api/settings/config-status');
-            for (const svc of CONNECTION_TEST_SERVICES) {
-                const configured = svc === 'server' ? true : (cfg && cfg[svc] && cfg[svc].configured);
-                if (!configured) continue;
-                try { const good = await _ssTestConn(svc); good ? connOk++ : (connFail++, failedIds.push(svc)); } catch (e) { connFail++; failedIds.push(svc); }
-            }
-        } catch (e) { /* config-status unavailable — skip connection sweep */ }
-    }
-
-    if (btn && !silent) { btn.disabled = false; btn.textContent = btn.dataset._label || 'Test all sources'; }
-    if (!silent) {
-        const parts = [`sources ${ok}✓${fail ? ' / ' + fail + '✗' : ''}`];
-        if (connOk || connFail) parts.push(`connections ${connOk}✓${connFail ? ' / ' + connFail + '✗' : ''}`);
-        // A count tells you something broke, not what. Sources that can
-        // explain themselves already do — carry the first one through so
-        // the toast is actionable (#1233).
-        let detail = '';
-        for (const id of failedIds) {
-            if (_ssLastTestMessage[id]) { detail = ` — ${_ssLastTestMessage[id]}`; break; }
-        }
-        showToast('Tested ' + parts.join(', ') + detail, (fail || connFail) ? 'error' : 'success');
-    }
-}
-window.testAllSources = testAllSources;
-
-// Auto-populate the source status dots once after the page settles, so they
-// reflect real state after a restart without the user having to click Test.
-let _sourcesAutoTested = false;
-function autoTestSourcesOnce() {
-    if (_sourcesAutoTested) return;
-    _sourcesAutoTested = true;
-    setTimeout(() => { try { testAllSources({ silent: true }); } catch (e) { } }, 1200);
-}
-
-function buildHybridSourceList() {
-    // Same state drives both views; refresh the Sources cards alongside.
-    try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
-    const container = document.getElementById('hybrid-source-list');
-    if (!container) return;
-
-    container.innerHTML = '';
-    // Build visual order: use persisted visual order, or enabled first + disabled at bottom
-    if (!_hybridVisualOrder) {
-        _hybridVisualOrder = [..._hybridSourceOrder];
-        for (const src of HYBRID_SOURCES) {
-            if (!_hybridVisualOrder.includes(src.id)) _hybridVisualOrder.push(src.id);
-        }
-    }
-    const allIds = _hybridVisualOrder;
-
-    allIds.forEach((srcId, idx) => {
-        const src = HYBRID_SOURCES.find(s => s.id === srcId);
-        if (!src) return;
-        const enabled = _hybridSourceEnabled[srcId] !== false;
-        const isInOrder = _hybridSourceOrder.includes(srcId);
-        const priorityNum = isInOrder && enabled ? _hybridSourceOrder.indexOf(srcId) + 1 : '';
-        const canOwnAlbum = enabled && priorityNum === 1 && ALBUM_LEVEL_HYBRID_SOURCES.has(srcId);
-        const sourceLevel = canOwnAlbum ? 'Album-level' : 'Track-level';
-        const sourceLevelClass = canOwnAlbum ? 'album' : 'track';
-        const sourceLevelTitle = canOwnAlbum
-            ? 'This first source can download a whole album release before per-track fallback.'
-            : 'This source runs as per-track fallback in the current hybrid order.';
-        const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
-        // Enabled but the server says it can't run yet (e.g. usenet/torrent
-        // need Prowlarr AND a download client). Stays enabled — downloads
-        // skip unready sources — but the row says why it won't fire.
-        const unreadyHints = {
-            usenet: 'Usenet needs Prowlarr (indexers) AND a usenet client (e.g. SABnzbd) configured. Downloads skip this source until both are set up — click ⚙ to finish.',
-            torrent: 'Torrents need Prowlarr (indexers) AND a torrent client configured. Downloads skip this source until both are set up — click ⚙ to finish.',
-        };
-        const unreadyBadge = (enabled && _hybridSourceUnready[srcId])
-            ? `<span class="hybrid-source-badge hybrid-source-unready" title="${unreadyHints[srcId] || 'This source is not fully configured yet — downloads skip it until it is. Click ⚙ to configure.'}">⚠ needs setup</span>`
-            : '';
-
-        const item = document.createElement('div');
-        const isExpanded = enabled && _expandedHybridSource === srcId;
-        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}${isExpanded ? ' config-open' : ''}`;
-        item.draggable = true;
-        item.dataset.sourceId = srcId;
-
-        // The name + a config chevron open this source's settings panel inline
-        // (only one at a time), so the long config blocks don't all stack up.
-        const clickConfig = enabled ? `onclick="toggleHybridSourceConfig('${srcId}')"` : '';
-        item.innerHTML = `
-            <span class="hybrid-source-handle" title="Drag to reorder">⠿</span>
-            <span class="hybrid-source-arrows">
-                <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', -1)" title="Move up">▲</button>
-                <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', 1)" title="Move down">▼</button>
-            </span>
-            ${src.icon
-                ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
-                : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
-            }
-            <span class="hybrid-source-name" ${clickConfig} style="${enabled ? 'cursor:pointer;' : ''}">${src.name}</span>
-            ${sourceLevelBadge}${unreadyBadge}
-            <span class="hybrid-source-priority">${priorityNum}</span>
-            <span class="hybrid-source-status hss-${_hybridSourceStatus[srcId] || 'unknown'}" title="${({ unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected', fail: 'Connection failed', na: 'No connection test for this source' })[_hybridSourceStatus[srcId] || 'unknown']}"></span>
-            ${enabled ? `<button class="hybrid-source-config-btn" ${clickConfig} title="Configure ${src.name}">⚙</button>` : ''}
-            <label class="hybrid-source-toggle">
-                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">
-                <span class="toggle-track"></span>
-            </label>
-        `;
-
-        // Real drag-to-reorder (the help text promised it; previously only the
-        // arrow buttons worked — item.draggable was set with no handlers).
-        item.addEventListener('dragstart', (e) => {
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', srcId);
-            item.classList.add('dragging');
-        });
-        item.addEventListener('dragend', () => {
-            item.classList.remove('dragging');
-            container.querySelectorAll('.hybrid-source-item').forEach(el => el.classList.remove('drag-over'));
-        });
-        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; item.classList.add('drag-over'); });
-        item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
-        item.addEventListener('drop', (e) => {
-            e.preventDefault();
-            item.classList.remove('drag-over');
-            const draggedId = e.dataTransfer.getData('text/plain');
-            if (draggedId && draggedId !== srcId) _reorderHybridSource(draggedId, srcId);
-        });
-
-        container.appendChild(item);
-    });
-
-    // Sync hidden selects for backward compat
-    _syncHybridHiddenSelects();
-}
-
-function moveHybridSource(srcId, direction) {
-    if (!_hybridVisualOrder) return;
-    const idx = _hybridVisualOrder.indexOf(srcId);
-    if (idx < 0) return;
-    const newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= _hybridVisualOrder.length) return;
-
-    // Swap in visual order
-    [_hybridVisualOrder[idx], _hybridVisualOrder[newIdx]] = [_hybridVisualOrder[newIdx], _hybridVisualOrder[idx]];
-
-    // Rebuild enabled order from visual order
-    _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
-    buildHybridSourceList();
-    updateDownloadSourceUI();
-    debouncedAutoSaveSettings();
-}
-
-function _reorderHybridSource(draggedId, targetId) {
-    // Move draggedId to just before targetId in the visual order, then rebuild
-    // the enabled subset + persist — same model moveHybridSource uses.
-    if (!_hybridVisualOrder) return;
-    const from = _hybridVisualOrder.indexOf(draggedId);
-    if (from < 0) return;
-    _hybridVisualOrder.splice(from, 1);
-    const to = _hybridVisualOrder.indexOf(targetId);
-    if (to < 0) { _hybridVisualOrder.splice(from, 0, draggedId); return; }  // target gone — undo
-    _hybridVisualOrder.splice(to, 0, draggedId);
-    _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
-    buildHybridSourceList();
-    updateDownloadSourceUI();
-    debouncedAutoSaveSettings();
-}
-
-function toggleHybridSource(srcId, enabled) {
-    _hybridSourceEnabled[srcId] = enabled;
-    // If the source we just disabled had its config panel open, close it.
-    if (!enabled && _expandedHybridSource === srcId) _expandedHybridSource = null;
-    // Rebuild enabled order from visual order so priority matches position
-    if (_hybridVisualOrder) {
-        _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
-    }
-    buildHybridSourceList();
-    updateDownloadSourceUI();
-    debouncedAutoSaveSettings();
-}
-
-function _syncHybridOrderFromDOM() {
-    const container = document.getElementById('hybrid-source-list');
-    if (!container) return;
-    const items = container.querySelectorAll('.hybrid-source-item');
-    const newOrder = [];
-    items.forEach(item => {
-        const id = item.dataset.sourceId;
-        if (_hybridSourceEnabled[id] !== false) {
-            newOrder.push(id);
-        }
-    });
-    _hybridSourceOrder = newOrder;
-}
-
-function _syncHybridHiddenSelects() {
-    // Keep hidden selects in sync for backward compat with saveSettings
-    const primary = document.getElementById('hybrid-primary-source');
-    const secondary = document.getElementById('hybrid-secondary-source');
-    if (primary && _hybridSourceOrder.length > 0) primary.value = _hybridSourceOrder[0];
-    if (secondary && _hybridSourceOrder.length > 1) secondary.value = _hybridSourceOrder[1];
-}
-
-function getHybridOrder() {
-    return _hybridSourceOrder.filter(s => _hybridSourceEnabled[s] !== false);
-}
 
 // ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
 const ART_SOURCES = [
@@ -3106,48 +2175,6 @@ async function loadArtSourceOrder(settings) {
         }
     });
     buildArtSourceList();
-}
-
-function loadHybridSourceOrder(settings) {
-    const saved = settings.download_source?.hybrid_order;
-    const order = Array.isArray(saved) ? saved.filter(id => !RETIRED_DOWNLOAD_SOURCES.has(id)) : saved;
-    const sourceStatus = settings._source_status || {};
-
-    if (order && Array.isArray(order) && order.length > 0) {
-        _hybridSourceOrder = order;
-        _hybridSourceEnabled = {};
-        for (const src of HYBRID_SOURCES) {
-            _hybridSourceEnabled[src.id] = order.includes(src.id);
-        }
-    } else {
-        // Legacy: fall back to primary/secondary
-        const primary = settings.download_source?.hybrid_primary || 'soulseek';
-        const secondary = settings.download_source?.hybrid_secondary || 'youtube';
-        _hybridSourceOrder = [primary, secondary].filter(id => !RETIRED_DOWNLOAD_SOURCES.has(id));
-        if (!_hybridSourceOrder.length) _hybridSourceOrder = ['soulseek'];
-        _hybridSourceEnabled = {};
-        for (const src of HYBRID_SOURCES) {
-            _hybridSourceEnabled[src.id] = src.id === primary || src.id === secondary;
-        }
-    }
-
-    // Sources the server reports as not-fully-configured are NOT silently
-    // unchecked anymore (Fl3m: enabling Usenet "didn't save" — the save
-    // worked; THIS loader erased it on every page load, and the next save
-    // then persisted the loss). Usenet/torrent need Prowlarr on top of the
-    // download client, so a half-configured source was constantly re-disabled
-    // with zero explanation. Keep the user's saved intent and mark the row
-    // unready instead — the backend's configured_clients() already skips
-    // unready sources at download time, so an enabled toggle is harmless.
-    _hybridSourceUnready = {};
-    for (const src of HYBRID_SOURCES) {
-        if (_hybridSourceEnabled[src.id] && sourceStatus[src.id] === false) {
-            _hybridSourceUnready[src.id] = true;
-        }
-    }
-
-    _hybridVisualOrder = null; // Reset so buildHybridSourceList rebuilds it
-    buildHybridSourceList();
 }
 
 function updateYoutubeTranscodeBitrateOptions() {
@@ -3429,11 +2456,8 @@ async function loadSettingsData() {
         document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
         document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
-        // Populate Download Source settings
-        const _savedMode = settings.download_source?.mode || 'soulseek';
-        document.getElementById('download-source-mode').value = RETIRED_DOWNLOAD_SOURCES.has(_savedMode) ? 'soulseek' : _savedMode;
-        // stream source, concurrency and search timeout: the Downloads tab is React
-        loadHybridSourceOrder(settings);
+        // the download chain (mode and order): React, loaded in
+        // SoulSyncSettings.hydrate above (sources-model.ts)
         loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
         // Profile (ranked targets) — the per-source quality selects were removed.
@@ -3560,9 +2584,6 @@ async function loadSettingsData() {
             }
         }
 
-        // Update UI based on download source mode
-        updateDownloadSourceUI();
-
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
 
@@ -3653,9 +2674,8 @@ async function loadSettingsData() {
             .filter(src => AUDIOBOOK_SOURCES.includes(src));
         if (!_audiobookHybrid.length) _audiobookHybrid = [...AUDIOBOOK_SOURCES];
         onAudiobookModeChange();
-        // Both music and audiobook chain state are loaded by now, so the shared
-        // widget can render whichever tab is showing.
-        try { _dlchainLoad(); } catch (e) { /* widget is not on every page */ }
+        // the audiobook chain is loaded now: the React chain re-reads the open one
+        try { window.SoulSyncSources?.loadChain(); } catch (e) { /* not mounted yet */ }
         abVal(document.getElementById('audiobook-torrent-category'),
             ab.torrent_category || 'audiobooks');
         abVal(document.getElementById('audiobook-prowlarr-categories'),
@@ -4331,74 +3351,6 @@ function toggleServer(serverType) {
 
     // Auto-save after server toggle change
     debouncedAutoSaveSettings();
-}
-
-function updateDownloadSourceUI() {
-    const mode = document.getElementById('download-source-mode').value;
-    // Only the ORDER widget is mode-driven now. The per-source config blocks
-    // moved to the Sources tab and are no longer looked up here at all.
-    const hybridContainer = document.getElementById('hybrid-settings-container');
-
-    hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
-
-    // Determine which sources are active
-    let activeSources = new Set();
-    if (mode === 'hybrid') {
-        const order = getHybridOrder();
-        for (const src of order) activeSources.add(src);
-        // Fallback: if no sources enabled, at least show soulseek
-        if (activeSources.size === 0) activeSources.add('soulseek');
-    } else {
-        activeSources.add(mode);
-    }
-
-    // Nothing per-source is hidden from here any more. Driving those blocks off
-    // the active-source set is what made a source impossible to configure until
-    // you had already enabled it: you had to switch Tidal on, saving a
-    // half-configured source into the chain, before its account fields existed
-    // to be filled in. They are plain accordions on the Sources tab now.
-
-    // Indexers, the torrent client and the usenet client used to be gated to
-    // the Downloads tab from here. They live on the Sources tab now, as panels
-    // behind their own tiles, so there is nothing to show or hide.
-
-    // The per-source auth probes used to run from here, gated on the same
-    // active-source test. They belong to a card being OPENED now — see
-    // probeSourceOnOpen — which also stops them firing on every unrelated
-    // settings redraw.
-}
-
-function updateHybridSecondaryOptions() {
-    const primary = document.getElementById('hybrid-primary-source').value;
-    const secondary = document.getElementById('hybrid-secondary-source');
-    const currentValue = secondary.value;
-    const allSources = [
-        { value: 'soulseek', label: 'Soulseek' },
-        { value: 'youtube', label: 'YouTube' },
-        { value: 'tidal', label: 'Tidal' },
-        { value: 'qobuz', label: 'Qobuz' },
-        { value: 'hifi', label: 'HiFi' },
-        { value: 'deezer_dl', label: 'Deezer' },
-        { value: 'lidarr', label: 'Lidarr' },
-        { value: 'soundcloud', label: 'SoundCloud' },
-    ];
-
-    secondary.innerHTML = '';
-    for (const source of allSources) {
-        if (source.value === primary) continue;
-        const opt = document.createElement('option');
-        opt.value = source.value;
-        opt.textContent = source.label;
-        secondary.appendChild(opt);
-    }
-
-    // Restore previous selection if still valid, otherwise pick first available
-    if (currentValue !== primary) {
-        secondary.value = currentValue;
-    }
-
-    // Refresh source-specific settings visibility based on new primary/secondary
-    updateDownloadSourceUI();
 }
 
 // The quality profile functions (the Music Quality tile, the ranked target
@@ -5327,10 +4279,8 @@ async function saveSettings(quiet = false) {
             auto_connect: document.getElementById('hydrabase-auto-connect').checked
         },
         download_source: {
-            mode: document.getElementById('download-source-mode').value,
-            hybrid_primary: document.getElementById('hybrid-primary-source').value,
-            hybrid_secondary: document.getElementById('hybrid-secondary-source').value,
-            hybrid_order: getHybridOrder(),
+            // mode, hybrid_primary, hybrid_secondary and hybrid_order: the
+            // download chain is React (sources-model.ts), and saves them
             // stream_source, max_concurrent, source_search_timeout and
             // max_mb_per_minute: the Downloads tab is React
             // Stalled-torrent knobs (rendered in the torrent client section).

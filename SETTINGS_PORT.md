@@ -53,8 +53,8 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | not started | 80 controls and buttons |
-| Tab: Downloads | **done except the chain** (step 5 below) | 19 of 32 ported: Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: Source Settings (the download chain, 4 controls), which moves with the Sources tab; the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from one listed quirk. |
+| Tab: Sources | **tiles done** (step 7a below) | The tiles (In use / Available / Indexers, dots, chips) are React and read the sources model. Left for 7b: the eleven config panels and the modal a tile opens (80 controls). |
+| Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
@@ -64,12 +64,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 5 of 9 tabs (Discovery and Quality without their video-only sections, Downloads without the chain and its video-only form), 81 of 678 controls, 76 of 333 `settings.js` functions removed, 14 of 83 tests repointed (`settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 5 of 9 tabs and the Sources tiles (Discovery, Quality and Downloads without their video-only sections), 85 of 678 controls, 109 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 11,411 |
-| `webui/static/settings.js` | 10,187 | 8,226 |
+| `webui/index.html` | 12,823 | 11,295 |
+| `webui/static/settings.js` | 10,187 | 7,176 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -88,7 +88,7 @@ Read before starting: `settings.js` lines ~1750-3165 (the chain, the tiles, the 
 | Video ids inside the torrent and usenet panels: `video-redownload-failed`, `video-seed-idx-refresh`, `video-seed-idx-rows`, `video-seed-mode`, `video-seed-remove-data`, `video-usenet-remove-completed` | the video pass | React renders these elements with the same ids and never touches their children or values after mount; `video-settings.js` keeps filling and saving them. |
 | `helper.js` popovers keyed by selector | n/a | matched at click time, nothing to do (checked in step 6). |
 
-**Order inside the step** (each a commit, each with parity, behaviour tests and a browser comparison):
+**Order inside the step** (each a commit, each with parity, behaviour tests and a browser comparison). *Done: 7a took the model, the chain and the tiles together (one shared state, so one commit; see step 7a below). Next: 7b, the eleven panels and the modal, as planned under 7c here.*
 
 1. **7a, the sources model**: a store (`tabs/sources-model.ts`) for the music order and enabled set, unready, status, last messages, the video order; `loadHybridSourceOrder`'s rules (retired sources dropped, the legacy primary/secondary fallback, unready kept enabled); Test all and the per-source probes (`HYBRID_SOURCE_PROBE`, `_ssTestConn`, the Prowlarr pre-probe, the video and audiobook sources, the connections sweep, the toast). `window.testAllSources` and `window.autoTestSourcesOnce` keep working, now calling the model.
 2. **7b, the chain** (Downloads > Source Settings): the widget (`#download-chain-widget`: kind tabs, pool groups with filter, steps with ▲ ▼ ×, the end slot, drag between pool and chain), its three kinds, the music save keys (`download_source.mode`, `hybrid_primary`, `hybrid_secondary`, `hybrid_order`: the hidden selects go), Download Behaviour hidden under the video and audiobook chains.
@@ -520,12 +520,68 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 | **Browser, old page vs ported page** (sandbox with two profiles, one on Auto-Import, lossy copy on) | From clean servers: every control's value, the shown/hidden groups, Opus 320, presets, target rows, cutoff options, profile rows, headers and help lines, closed and open; after Best quality on the default; after opening Strict; after editing Strict and going back and adding an Opus target; the Manage overview open and closed: **identical** (the row texts differ only in whitespace between flex items, which does not render). Writes: the same three profile updates with the same bodies to the same profiles; Verify FLAC sent `{post_processing: {verify_flac_decode}}` where the old page posted every setting. Screenshots: **0 pixels** differ by more than the noise threshold (the Manage one: 1 pixel, the help button). |
 | `helper.js` popovers on `.preset-button`, `.ranked-targets-editor`, `#lossy-copy-enabled` | matched with `element.matches()` at click time, so they find the React markup |
 
+### Step 7a: the download chain, the Sources tiles and the sources model (Nov 15 2026)
+
+**What it is.** The state every download source shares, moved out of `settings.js` into one React store, and the two things that draw it:
+
+- **The sources model** (`tabs/sources-model.ts`): the source registry (`HYBRID_SOURCES`, Prowlarr's extra tile, the pool's groups, the dark marks to invert, retired sources), the three chains (music in the store, video read from and written to `/api/video/downloads/config`, audiobooks through the Library tab's bridge), the saved `download_source.mode` and the legacy primary/secondary pair, which sources are unready (`_source_status`), each source's dot and the server's words from its last test, Test all sources (the probes, Prowlarr first when torrent or usenet is in any chain and always on the video side, the audiobook and video chains' sources, the connections sweep, the toast with the first reason) and the quiet test once when Downloads or Sources first opens.
+- **The chain** (Downloads > Source Settings, `ChainWidget` in `tabs/sources-tab.tsx`): kind tabs, help line, the pool in groups with its filter, the steps with ▲ ▼ ×, the one end slot, drag between pool, steps, slot and column, the mode hint. Opens on the side you are standing on until a tab is picked. Re-reads the open chain on each settings load and each time Downloads opens.
+- **The tiles** (Sources, `SourceTiles`): In use (in any chain, music first, then video, then audiobooks), Available, Indexers; the dot with its title, the chips. A tile still opens the vanilla modal (`window.openSourceModal`).
+- **The Download Behaviour wrapper** (`#dlchain-behaviour`) moved into the Downloads tab, hidden under the video and audiobook chains as before. The Test all sources button reads the model (disabled and "Testing…" while it runs, which the old code did by writing the button's DOM).
+
+**Why the chain and the tiles came together** (the plan said 7a model, 7b chain): the model would otherwise have needed a vanilla chain writing React state for one commit. The modal and panels stay vanilla until 7b; the modal reads and writes the model through `window.SoulSyncSources` (`getState`, `testOne`, `canTest`).
+
+**Bridges added** (removed when their other side is ported)
+
+| Bridge | Direction | Until |
+|---|---|---|
+| `window.SoulSyncSources` | settings.js modal → model: the dot, the last words, Test, which sources have a test | 7b |
+| `window.getAudiobookChain()`, `window.setAudiobookChain(order)`, `window.getAudiobookActiveSources()` | model → settings.js: the audiobook chain lives with the Library tab's mode select and rows; the write is exactly the old widget's audiobook adapter (rows, mode, page save) | Library (step 8) |
+| `window.testAllSources(opts)`, `window.switchDownloadChain(kind)` | other code → model (`src/shell/service-switch.ts` and `video-service-status.js` call `switchDownloadChain`) | stay |
+| `HYBRID_SOURCES` kept in settings.js | the modal's names and logos, and the global `service-switch.ts` reads | 7b |
+| `window.SoulSyncSources?.loadChain()` from `loadSettingsData` | after the audiobook chain is loaded, the open chain is read again | Library |
+
+**How it saves**
+
+| What | Before | Now |
+|---|---|---|
+| The music chain | The widget fed `_hybridSourceOrder`, the hidden `download-source-mode` select and the hidden primary/secondary selects; every full save posted `mode`, `hybrid_primary`, `hybrid_secondary`, `hybrid_order` | A chain change patches the same four keys through the store. `hybrid_primary` / `_secondary` are what the hidden selects held: only seven sources were options, any other saved as `''`, and the secondary kept its last value when the chain shrank to one (`legacyPair`). |
+| The video chain | POST on change, toast on failure | Same. |
+| The audiobook chain | the widget set `_audiobookHybrid`, the mode select, the rows, and called the page autosave | Same code, behind `setAudiobookChain`. |
+| A retired source in the saved chain | dropped on load; the next full save wrote the working chain | Dropped on load; the clean chain is queued in the load's held autosave, so it goes out with the next save (the save status reads "Save now" until then). |
+
+**Removed**: from `index.html` the whole Source Settings block (the hidden transport form-group, the widget's empty containers, `#hybrid-settings-container` with the hidden legacy list and two hidden selects), the tile grid, the behaviour wrapper (3 slots now); from `settings.js` 33 functions (the chain, the legacy hybrid list, the tiles, the status state and probes, Test all, `loadHybridSourceOrder`, `updateDownloadSourceUI` which only showed the hidden container, the dead `updateHybridSecondaryOptions`), their constants and module state, the tab-switch hooks and the load and collector lines. 1,050 lines.
+
+**Differences from the old page**
+
+| What | Before | Now | Why |
+|---|---|---|---|
+| Source Settings card height | In hybrid mode the empty `#hybrid-settings-container` was shown (`display: block`, children hidden), and its 8px margin left a blank strip under the chain; in single-source mode it was not there | No container: the card is the same height in both modes | Measured in the browser (711 vs 703px). A layout artefact of a hidden transport. |
+| A retired source dropped on load | Nothing on screen | The save status says there is something to save | The clean chain is a real pending change now. |
+| The page save | Posted the chain with every save | Posts it when it changes | As every tab. |
+
+**Found, not changed (old behaviour kept).** `_ssTestConn` stores the server's message under the **test's** name, so torrent (`torrent_client`) and usenet (`usenet_client`) never get their words onto their tile or into the Test all toast, which look them up by source id. Ported as it was; worth fixing on its own.
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity: Source Settings with the music chain against the frozen block (minus the hidden transport, with the widget as `renderDownloadChain` drew it); the video, audiobook and empty chains; the tile grid with dots, words, unready and chips, frozen from `buildSourceTiles` | Same, first run for the chains. |
+| Behaviour (`sources.test.tsx`, 19; `downloads.test.tsx` +1) | load rules (retired, legacy pair, retired mode, unready kept), a retired source waits for the next save, the seven-option selects, chain positions; add/move/remove and the four saved keys; single mode and the last source refused; drag onto a step, the slot and the pool; video saves itself and its failure toast; audiobooks through the bridge; the side picks the first tab; the filter; Test all (who is tested in what order, Prowlarr, the toast); the quiet run once; a ⚠ pass is amber with its words; Download Behaviour hidden under video and audiobooks. |
+| Repointed | frontend: `settings-source-autotest` (4 cases, now on the model), `settings-source-tiles-chains` → `.tsx` (3 cases, the real tiles). Python: `test_download_chain_widget.py` (41, by a forked agent: 4 replaced because the hidden transport is gone by design, now pinning that it is gone and that the chain saves the four keys), `test_settings_sources_tab.py` (18), `test_amazon_retired.py` (2), `test_hybrid_source_unready_ui.py` (2: the Prowlarr tooltip lived in the hidden legacy list nobody saw; the tile's "needs setup" is what shows), `test_youtube_failure_is_reported.py` (2), `test_video_download_config.py` (1). 17 negative checks across them, each failing on its broken copy. |
+| **Missed in step 5, fixed here** | `tests/downloads/test_download_pool_and_healing.py::test_the_help_text_no_longer_promises_something_it_cannot_do` read the Concurrent Downloads help from `index.html`; step 5's run did not include it. Repointed. A sweep since: no Python test names an id now rendered by React, or a removed function, outside the repointed files. **From now on the Python run is every file that reads `index.html`, `settings.js` or `src/features/settings` (101 files).** |
+| `src/test` + `src/features/settings` + `src/shell` | 1,615 pass |
+| Python, those 101 files | 2,436 passed, 1 skipped |
+| oxlint / ruff / build | 0 / clean / builds |
+| **Browser, old page vs ported page** (sandbox: music chain soulseek, youtube, qobuz with qobuz unready; video usenet, torrent; audiobooks torrent, soulseek; stubbed tests with a ⚠ youtube and a failing torrent and tidal) | From clean servers: the three chains, the filter, an add/move/remove, the Test all toast, the tiles, the vanilla modal opened from a React tile and its Test result, the tiles after it: **identical**. The same connection tests ran in the same order. Writes: the same chain values; the old page also posted its quality profile and discovery values with each full save. Tiles screenshot: 0 pixels differ; chain screenshot: the 8px strip above. |
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7a) | **The download chain, the Sources tiles and the sources model are React.** New: `tabs/sources-model.ts`, `tabs/sources-tab.tsx`, their test, six fixtures (one frozen markup, five drawn by settings.js). The behaviour wrapper moved into `downloads-tab.tsx`. 33 functions and the hidden transport removed; bridges for the vanilla modal and the Library tab's audiobook chain. Details under "Completed steps". |
 | Nov 15 | `fe7c38f78` (step 6) | **Quality tab ported (music).** New: `tabs/quality.ts`, `tabs/quality-tab.tsx`, their test, four fixtures (one frozen from the markup, three from what settings.js drew). Store: `hasExtra`, `dropExtras`. `parts.tsx`: `HelpIcon` exported, `Section` badge, `<br>` reads as a space. Markup replaced by one slot; the quality profile block (48 functions), its load, collector keys, default-profile mirror and save branch removed from `settings.js`, the profile load from `init.js`. Details under "Completed steps". |
 | Nov 15 | `57ade5bed` (step 5) | **Downloads tab ported, without the chain.** New: `tabs/downloads.ts`, `tabs/downloads-tab.tsx`, their test, three fixtures. `parts.tsx`: help lines read formatted help. Markup replaced by three slots (Behaviour inside the vanilla `#dlchain-behaviour` wrapper); the four sections' helpers, summary, load, save and the genre whitelist removed from `settings.js`. Test stores now save into their own lists. Details under "Completed steps". |
 | Nov 15 | `2802c8ed0` (step 4) | **Discovery tab ported (music).** New: `tabs/parts.tsx` (shared sections, summaries, help lines), `tabs/discovery.ts`, `tabs/discovery-tab.tsx`, their test, two fixtures. Store: values with their own endpoints, and a load counter. Markup replaced by two slots; the tab's summaries, load, save, lookback and hemisphere code removed from `settings.js`. Details under "Completed steps". |
@@ -1002,10 +1058,10 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `download-source-mode` | Download Source: {Soulseek Only / YouTube Only / Tidal Only / Qobuz Only / HiFi Only (Free Lossless) / Deezer  | both | no (with Sources) |
-| search | `dlchain-filter` |  | both | no (with Sources) |
-| select | `hybrid-primary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no (with Sources) |
-| select | `hybrid-secondary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | no (with Sources) |
+| select (hidden transport, removed: the model holds it) | `download-source-mode` | Download Source: {Soulseek Only / YouTube Only / Tidal Only / Qobuz Only / HiFi Only (Free Lossless) / Deezer  | both | yes (step 7a) |
+| search | `dlchain-filter` |  | both | yes (step 7a) |
+| select (hidden transport, removed) | `hybrid-primary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | yes (step 7a) |
+| select (hidden transport, removed) | `hybrid-secondary-source` | {Soulseek / YouTube / Tidal / Qobuz / HiFi / Deezer / SoundCloud} | both | yes (step 7a) |
 
 **Download Behaviour** (both, 4)
 
@@ -1800,31 +1856,31 @@ Every top-level function, with its line today. A function is removed when the la
 | `_stgVerifyServices` | 1757 | no |
 | `toggleStgService` | 1793 | no |
 | `toggleAllServiceAccordions` | 1808 | no |
-| `_dlchainSyncKindToSide` | 1921 | no |
-| `_dlchainPoolHtml` | 1932 | no |
-| `dlchainFilter` | 1956 | no |
-| `_dlchainApplyFilter` | 1962 | no |
-| `_dlchainTile` | 1980 | no |
-| `_dlchainStep` | 1996 | no |
-| `dlchainMove` | 2029 | no |
-| `renderDownloadChain` | 2038 | no |
-| `switchDownloadChain` | 2096 | no |
-| `_dlchainLoad` | 2104 | no |
-| `_dlchainCommit` | 2122 | no |
-| `dlchainAdd` | 2135 | no |
-| `dlchainRemove` | 2141 | no |
-| `_dlchainWireDrag` | 2153 | no |
+| `_dlchainSyncKindToSide` | 1921 | yes (step 7a) |
+| `_dlchainPoolHtml` | 1932 | yes (step 7a) |
+| `dlchainFilter` | 1956 | yes (step 7a) |
+| `_dlchainApplyFilter` | 1962 | yes (step 7a) |
+| `_dlchainTile` | 1980 | yes (step 7a) |
+| `_dlchainStep` | 1996 | yes (step 7a) |
+| `dlchainMove` | 2029 | yes (step 7a) |
+| `renderDownloadChain` | 2038 | yes (step 7a) |
+| `switchDownloadChain` | 2096 | yes (step 7a) |
+| `_dlchainLoad` | 2104 | yes (step 7a) |
+| `_dlchainCommit` | 2122 | yes (step 7a) |
+| `dlchainAdd` | 2135 | yes (step 7a) |
+| `dlchainRemove` | 2141 | yes (step 7a) |
+| `_dlchainWireDrag` | 2153 | yes (step 7a) |
 | `renderAudiobookHybrid` | 2253 | no |
 | `moveAudiobookSource` | 2274 | no |
 | `toggleAudiobookSource` | 2282 | no |
 | `_audiobookActiveSources` | 2296 | no |
 | `onAudiobookModeChange` | 2305 | no |
 | `toggleSourceCard` | 2389 | no |
-| `_loadVideoChainForTiles` | 2400 | no |
-| `_srcAllChains` | 2412 | no |
-| `_srcChainUses` | 2423 | no |
-| `_srcTileMarkup` | 2435 | no |
-| `buildSourceTiles` | 2478 | no |
+| `_loadVideoChainForTiles` | 2400 | yes (step 7a) |
+| `_srcAllChains` | 2412 | yes (step 7a) |
+| `_srcChainUses` | 2423 | yes (step 7a) |
+| `_srcTileMarkup` | 2435 | yes (step 7a) |
+| `buildSourceTiles` | 2478 | yes (step 7a) |
 | `probeSourceOnOpen` | 2531 | no |
 | `testOneSource` | 2547 | no |
 | `openSourceModal` | 2581 | no |
@@ -1833,23 +1889,23 @@ Every top-level function, with its line today. A function is removed when the la
 | `openSourceConfig` | 2706 | no |
 | `markUnsupportedCookieBrowsers` | 2726 | no |
 | `updateCookieBrowserWarning` | 2740 | no |
-| `_ssJson` | 2755 | no |
-| `_ssTestConn` | 2765 | no |
-| `testAllSources` | 2804 | no |
-| `autoTestSourcesOnce` | 2909 | no |
-| `buildHybridSourceList` | 2915 | no |
-| `moveHybridSource` | 3012 | no |
-| `_reorderHybridSource` | 3029 | no |
-| `toggleHybridSource` | 3045 | no |
-| `_syncHybridOrderFromDOM` | 3058 | no |
-| `_syncHybridHiddenSelects` | 3072 | no |
-| `getHybridOrder` | 3080 | no |
+| `_ssJson` | 2755 | yes (step 7a) |
+| `_ssTestConn` | 2765 | yes (step 7a) |
+| `testAllSources` | 2804 | yes (step 7a) |
+| `autoTestSourcesOnce` | 2909 | yes (step 7a) |
+| `buildHybridSourceList` | 2915 | yes (step 7a) |
+| `moveHybridSource` | 3012 | yes (step 7a) |
+| `_reorderHybridSource` | 3029 | yes (step 7a) |
+| `toggleHybridSource` | 3045 | yes (step 7a) |
+| `_syncHybridOrderFromDOM` | 3058 | yes (step 7a) |
+| `_syncHybridHiddenSelects` | 3072 | yes (step 7a) |
+| `getHybridOrder` | 3080 | yes (step 7a) |
 | `buildArtSourceList` | 3096 | no |
 | `moveArtSource` | 3133 | no |
 | `toggleArtSource` | 3143 | no |
 | `getArtOrder` | 3150 | no |
 | `loadArtSourceOrder` | 3154 | no |
-| `loadHybridSourceOrder` | 3194 | no |
+| `loadHybridSourceOrder` | 3194 | yes (step 7a) |
 | `updateLossyBitrateOptions` | 3236 | yes (step 6) |
 | `updateYoutubeTranscodeBitrateOptions` | 3250 | no |
 | `updatePlexConfigurationButtons` | 3263 | no |
@@ -1871,8 +1927,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `loadMediaServerNames` | 4530 | no |
 | `activeServerFromToggles` | 4542 | no |
 | `toggleServer` | 4547 | no |
-| `updateDownloadSourceUI` | 4581 | no |
-| `updateHybridSecondaryOptions` | 4628 | no |
+| `updateDownloadSourceUI` | 4581 | yes (step 7a) |
+| `updateHybridSecondaryOptions` | 4628 | yes (step 7a) |
 | `_qpDefaultProfileId` | 4673 | yes (step 6) |
 | `debouncedSaveQualityProfile` | 4680 | yes (step 6) |
 | `loadQualityProfile` | 4700 | yes (step 6) |
@@ -2091,15 +2147,15 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/imports/test_unicode_substitution_1867.py` | no |
 | `tests/quality/test_lossless.py` | yes (step 6) |
 | `tests/quality/test_quality_profiles_crud.py` | no |
-| `tests/test_amazon_retired.py` | no |
+| `tests/test_amazon_retired.py` | yes (step 7a) |
 | `tests/test_audiobook_settings.py` | no |
 | `tests/test_cleanup_protected_roots.py` | no |
 | `tests/test_config_persistence.py` | no |
 | `tests/test_dashboard_seam.py` | no |
 | `tests/test_docs_settings_labels.py` | yes (step 4) |
-| `tests/test_download_chain_widget.py` | yes (step 5) |
+| `tests/test_download_chain_widget.py` | yes (steps 5, 7a) |
 | `tests/test_explicit_preference.py` | yes (step 5) |
-| `tests/test_hybrid_source_unready_ui.py` | no |
+| `tests/test_hybrid_source_unready_ui.py` | yes (step 7a) |
 | `tests/test_lastfm_username_setting.py` | no |
 | `tests/test_listenbrainz_username_setting.py` | no |
 | `tests/test_m3u_prefix_rewrite.py` | no |
@@ -2113,7 +2169,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_script_split_integrity.py` | no |
 | `tests/test_settings_never_wipes.py` | no |
 | `tests/test_settings_persist_whitelist.py` | no |
-| `tests/test_settings_sources_tab.py` | yes (step 4) |
+| `tests/test_settings_sources_tab.py` | yes (steps 4, 6, 7a) |
 | `tests/test_settings_subtitles_section.py` | no |
 | `tests/test_settings_templates_exposed.py` | no |
 | `tests/test_settings_textarea_autosave.py` | no |
@@ -2133,7 +2189,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_video_title_profile_choice.py` | no |
 | `tests/test_youtube_album_bundle_setting.py` | no |
 | `tests/test_youtube_cookie_browser_picker.py` | no |
-| `tests/test_youtube_failure_is_reported.py` | no |
+| `tests/test_youtube_failure_is_reported.py` | yes (step 7a) |
 | `tests/test_ytdlp_update.py` | no |
 | `tests/video/test_colon_replacement.py` | no |
 | `tests/video/test_usenet_remove_completed.py` | no |
@@ -2153,8 +2209,8 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/settings-navigation.test.ts` | no |
 | `webui/src/test/settings-regroup-1822.test.ts` | yes (steps 2, 4, 5) |
 | `webui/src/test/settings-save-status-1909.test.ts` | no |
-| `webui/src/test/settings-source-autotest.test.ts` | no |
-| `webui/src/test/settings-source-tiles-chains.test.ts` | no |
+| `webui/src/test/settings-source-autotest.test.ts` | yes (step 7a) |
+| `webui/src/test/settings-source-tiles-chains.test.ts` | yes (step 7a, now `.tsx`) |
 | `webui/src/test/settings-video-library-load.test.ts` | no |
 | `webui/src/test/settings-video-tv-libraries.test.ts` | no |
 | `webui/src/test/signup-defaults-settings.test.ts` | no |
@@ -2169,6 +2225,8 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/video-tools-shared-page.test.ts` | no |
 
 ## Known traps
+
+- **Run every Python file that reads the settings frontend**, not a hand-picked list: `grep -rlE "index\.html|settings\.js|src/features/settings" tests --include=*.py` (101 files, ~23 minutes). Step 5 missed one by picking.
 
 - A tab's sections are scattered through `index.html`; find them by `data-stg`, not by position.
 - **The whole frontend suite is not green on dev either.** Run on its own, `vitest run src` takes about 15 minutes, times out up to ~16 tests under load, and has ~5 library page tests (`src/routes/library/-ui/`) that fail intermittently on dev. Compare a failure against dev before blaming the port. Do not put a 580-second `timeout` on the whole suite: it gets killed (exit 143).

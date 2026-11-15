@@ -27,6 +27,8 @@ import {
   toInt,
 } from './downloads';
 import { Section, helpBits, useDraft, useHelp } from './parts';
+import { sourcesModel } from './sources-model';
+import { ChainWidget } from './sources-tab';
 
 const TAB = 'downloads';
 
@@ -143,114 +145,122 @@ function Behaviour({ store }: SettingsTabProps) {
   const timeout = useNumber(store, values.searchTimeout, (raw) =>
     store.set('download_source', 'source_search_timeout', toInt(raw, 0)),
   );
+  const kind = useSyncExternalStore(sourcesModel.subscribe, () => sourcesModel.getState().kind);
+  const testing = useSyncExternalStore(
+    sourcesModel.subscribe,
+    () => sourcesModel.getState().testingAll,
+  );
+  // these are download_source.*, music-wide: the wrapper (header and all) is
+  // hidden under the video and audiobook chains, as renderDownloadChain did
   return (
-    <Section tab={TAB} title="Download Behaviour" hint="Preview source, concurrency & timeouts">
-      <div className="settings-group dlchain-behaviour" data-stg={TAB}>
-        <div id="dlchain-extra" className="dlchain-extra">
-          <Field
-            label="Stream / Preview Source:"
-            control={
-              <select
-                id="stream-source"
-                className="form-select"
-                value={values.streamSource}
-                onChange={(event) =>
-                  store.set('download_source', 'stream_source', event.target.value)
-                }
-              >
-                {STREAM_SOURCES.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            }
-            help={
-              <>
-                Where to stream audio when previewing tracks. YouTube is instant and requires no
-                setup. "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) —
-                if that's Soulseek, YouTube is used automatically. "Deezer 30s Preview" plays
-                Deezer's 30 second clip of the song straight away, no Deezer account needed. Songs
-                Deezer has no clip for use YouTube. With queue auto-download off, missing queue
-                songs play their clip instead of being skipped.
-              </>
-            }
-          />
-          <Field
-            label="Concurrent Downloads:"
-            control={
-              <select
-                id="max-concurrent-downloads"
-                className="form-select"
-                value={values.maxConcurrent}
-                onChange={(event) =>
-                  store.set(
-                    'download_source',
-                    'max_concurrent',
-                    parseInt(event.target.value, 10) || 3,
-                  )
-                }
-              >
-                {CONCURRENCY.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            }
-            help={
-              <>
-                Maximum simultaneous downloads per batch. Soulseek album downloads always use 1
-                worker due to per-user upload limits. Higher values speed up large playlists and
-                wishlists. Takes effect after a restart, since the worker threads are created at
-                startup.
-              </>
-            }
-          />
-          <Field
-            label="Source search timeout (seconds):"
-            control={
-              <input
-                type="number"
-                id="source-search-timeout"
-                min="0"
-                max="120"
-                step="1"
-                placeholder="0 = source defaults"
-                style={{ maxWidth: '180px' }}
-                value={timeout.value}
-                onChange={(event) => timeout.onChange(event.target.value)}
-              />
-            }
-            help={
-              <>
-                How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer, and
-                the stream preview search).{' '}
-                <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s,
-                Deezer 10s. Raise it if a slow connection makes searches give up too early; lower
-                means failing over to the next source faster. Clamped to 5&ndash;120. Soulseek is
-                not affected — it has its own Search Timeout setting above.
-              </>
-            }
-          />
-          <div className="form-group">
-            <button
-              className="test-button"
-              id="test-all-sources-btn"
-              // the Sources tab's probe: it fills the source tiles' status dots
-              onClick={() =>
-                (window as Window & { testAllSources?: () => void }).testAllSources?.()
+    <div id="dlchain-behaviour" data-stg={TAB} hidden={kind !== 'music'}>
+      <Section tab={TAB} title="Download Behaviour" hint="Preview source, concurrency & timeouts">
+        <div className="settings-group dlchain-behaviour" data-stg={TAB}>
+          <div id="dlchain-extra" className="dlchain-extra">
+            <Field
+              label="Stream / Preview Source:"
+              control={
+                <select
+                  id="stream-source"
+                  className="form-select"
+                  value={values.streamSource}
+                  onChange={(event) =>
+                    store.set('download_source', 'stream_source', event.target.value)
+                  }
+                >
+                  {STREAM_SOURCES.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               }
-            >
-              Test all sources
-            </button>
-            <span className="setting-help-text" style={{ marginLeft: '10px' }}>
-              Checks every selected source &amp; configured connection.
-            </span>
+              help={
+                <>
+                  Where to stream audio when previewing tracks. YouTube is instant and requires no
+                  setup. "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) —
+                  if that's Soulseek, YouTube is used automatically. "Deezer 30s Preview" plays
+                  Deezer's 30 second clip of the song straight away, no Deezer account needed. Songs
+                  Deezer has no clip for use YouTube. With queue auto-download off, missing queue
+                  songs play their clip instead of being skipped.
+                </>
+              }
+            />
+            <Field
+              label="Concurrent Downloads:"
+              control={
+                <select
+                  id="max-concurrent-downloads"
+                  className="form-select"
+                  value={values.maxConcurrent}
+                  onChange={(event) =>
+                    store.set(
+                      'download_source',
+                      'max_concurrent',
+                      parseInt(event.target.value, 10) || 3,
+                    )
+                  }
+                >
+                  {CONCURRENCY.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              }
+              help={
+                <>
+                  Maximum simultaneous downloads per batch. Soulseek album downloads always use 1
+                  worker due to per-user upload limits. Higher values speed up large playlists and
+                  wishlists. Takes effect after a restart, since the worker threads are created at
+                  startup.
+                </>
+              }
+            />
+            <Field
+              label="Source search timeout (seconds):"
+              control={
+                <input
+                  type="number"
+                  id="source-search-timeout"
+                  min="0"
+                  max="120"
+                  step="1"
+                  placeholder="0 = source defaults"
+                  style={{ maxWidth: '180px' }}
+                  value={timeout.value}
+                  onChange={(event) => timeout.onChange(event.target.value)}
+                />
+              }
+              help={
+                <>
+                  How long to wait on a streaming source's API during search (HiFi, Qobuz, Deezer,
+                  and the stream preview search).{' '}
+                  <strong>0 (or blank) = each source's built-in default</strong> — HiFi/Qobuz 15s,
+                  Deezer 10s. Raise it if a slow connection makes searches give up too early; lower
+                  means failing over to the next source faster. Clamped to 5&ndash;120. Soulseek is
+                  not affected — it has its own Search Timeout setting above.
+                </>
+              }
+            />
+            <div className="form-group">
+              <button
+                className="test-button"
+                id="test-all-sources-btn"
+                disabled={testing}
+                // fills the source tiles' status dots (sources-model.ts)
+                onClick={() => void sourcesModel.testAll()}
+              >
+                {testing ? 'Testing…' : 'Test all sources'}
+              </button>
+              <span className="setting-help-text" style={{ marginLeft: '10px' }}>
+                Checks every selected source &amp; configured connection.
+              </span>
+            </div>
           </div>
         </div>
-      </div>
-    </Section>
+      </Section>
+    </div>
   );
 }
 
@@ -646,7 +656,14 @@ function Filtering({ store }: SettingsTabProps) {
   );
 }
 
+/** Source Settings: the download chain (step 7a) */
+function Chain({ store, opened, active }: SettingsTabProps) {
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  return <ChainWidget opened={opened} active={active} loads={loads} />;
+}
+
 export function DownloadsTab(props: SettingsTabProps) {
+  if (props.part === 'chain') return <Chain {...props} />;
   if (props.part === 'behaviour') return <Behaviour {...props} />;
   if (props.part === 'filtering') return <Filtering {...props} />;
   return <Retry {...props} />;

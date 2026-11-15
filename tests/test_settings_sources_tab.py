@@ -61,6 +61,36 @@ def js():
     return _read("webui/static/settings.js")
 
 
+# the tiles, the dots and Test all are React since step 7a (SETTINGS_PORT.md):
+# sources-tab.tsx renders the tiles from sources-model.ts. the source modal and
+# its panels are still vanilla, and reach the model through window.SoulSyncSources
+_TABS = "webui/src/features/settings/tabs/"
+
+
+@pytest.fixture(scope="module")
+def model():
+    return _read(_TABS + "sources-model.ts")
+
+
+@pytest.fixture(scope="module")
+def tab():
+    return _read(_TABS + "sources-tab.tsx")
+
+
+def _tiles(tab: str) -> str:
+    """the SourceTiles component"""
+    return tab.split("export function SourceTiles(", 1)[1].split("export function SourcesTab(", 1)[0]
+
+
+def _tile(tab: str) -> str:
+    """one tile's markup"""
+    return _tiles(tab).split("const tile = (src: SourceMeta) =>", 1)[1].split("const section =", 1)[0]
+
+
+def _test_all(model: str) -> str:
+    return model.split("async function testAll(", 1)[1].split("\n  return {", 1)[0]
+
+
 def test_the_tab_exists(index):
     assert 'data-tab="sources"' in index
     assert "switchSettingsTab('sources')" in index
@@ -78,7 +108,7 @@ def test_the_tab_is_available_on_both_sides(index):
     assert "data-music-only" not in group
 
 
-def test_the_sources_tab_shows_every_tile_on_both_sides(js):
+def test_the_sources_tab_shows_every_tile_on_both_sides(tab, js):
     """REVERSED. This used to assert the opposite: the video side saw only a
     SHARED_SOURCES subset - 4 tiles out of 13 - on the theory that Tidal and
     Soulseek mean nothing to video.
@@ -89,10 +119,10 @@ def test_the_sources_tab_shows_every_tile_on_both_sides(js):
     is not a reason to be unable to see a setting. The tab is shared, so it
     renders the same thing on both sides - same tiles, same grouping.
 
-    buildSourceTiles must therefore not branch on the side at all: not to filter
+    The tiles must therefore not branch on the side at all: not to filter
     the list, and not to group it differently either."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "data-side" not in fn, "buildSourceTiles still branches on the side"
+    fn = _tiles(tab)
+    assert "data-side" not in fn, "the tiles branch on the side"
     assert "SHARED_SOURCES" not in fn
     assert "SHARED_SOURCES = new Set" not in js, "the dead subset is still declared"
 
@@ -144,25 +174,34 @@ def test_no_source_config_is_left_behind_on_downloads(index):
         assert index.count(f'id="{cid}"') == 1, f"{cid} appears more than once"
 
 
-def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js):
-    """The regression that matters. If updateDownloadSourceUI goes back to
-    driving these containers off the active-source set, configuring a source
-    you have not switched on becomes impossible again."""
-    fn = js.split("function updateDownloadSourceUI(", 1)[1].split("\n}", 1)[0]
-    assert "showCfg" not in fn, "per-source config is gated on the source being active again"
+def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab):
+    """The regression that matters. If anything goes back to driving these
+    containers off the active-source set, configuring a source you have not
+    switched on becomes impossible again. updateDownloadSourceUI, which once
+    did, is gone (step 7a): a tile opens any source's panel, chain or not."""
+    assert "function updateDownloadSourceUI" not in js
+    assert "showCfg" not in js, "per-source config is gated on the source being active again"
     for cid in _SOURCE_CONTAINERS:
-        assert f"getElementById('{cid}')" not in fn or "style.display" not in fn.split(cid, 1)[1][:120], \
-            f"updateDownloadSourceUI still sets display on {cid}"
+        for m in re.finditer(re.escape(f"getElementById('{cid}')"), js):
+            assert "style.display" not in js[m.end():m.end() + 120], \
+                f"something sets display on {cid} again"
+    opener = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
+    for gate in ("getHybridOrder", "music", "hybrid_order"):
+        assert gate not in opener, f"opening a source depends on the chain ({gate})"
+    # every configurable source gets a tile, in a chain or not
+    assert "onClick={() =>" in _tile(tab) and "openSourceModal?.(src.id)" in _tile(tab)
 
 
-def test_the_chain_widget_stayed_on_downloads(index):
+def test_the_chain_widget_stayed_on_downloads(index, tab):
     """Only the config moved. The order lives with the rest of the download
-    behaviour, and is the thing being redesigned separately."""
-    assert 'id="hybrid-settings-container"' in index
-    before = index.split('id="hybrid-settings-container"', 1)[0]
-    # the nearest preceding tab marker is the Downloads one
-    tags = re.findall(r'data-stg="([a-z]+)"', before)
-    assert tags[-1] == "downloads", f"chain widget ended up under {tags[-1]}"
+    behaviour, and is the thing being redesigned separately. the chain is a
+    React slot now (step 7a): it is the Downloads tab's, and it renders its
+    blocks as Downloads blocks."""
+    assert 'data-stg-react="downloads" data-stg-part="chain"' in index
+    assert 'data-stg-react="sources" data-stg-part="chain"' not in index
+    chain = tab.split("export function ChainWidget(", 1)[1].split("// ── the Sources tab's tiles", 1)[0]
+    tags = set(re.findall(r'data-stg="([a-z]+)"', chain))
+    assert tags == {"downloads"}, f"chain widget ended up under {tags}"
 
 
 def test_the_cog_crosses_to_the_tab(js):
@@ -171,20 +210,25 @@ def test_the_cog_crosses_to_the_tab(js):
     assert "openSourceModal(" in fn
 
 
-def test_the_tiles_refresh_with_the_chain(js):
+def test_the_tiles_refresh_with_the_chain(model, tab):
     # Same state drives both; a stale tile is a tile that lies about status.
-    fn = js.split("function buildHybridSourceList(", 1)[1].split("\n}", 1)[0]
-    assert "buildSourceTiles()" in fn
+    # the tiles subscribe to the model, and a chain edit writes the model
+    assert "useSyncExternalStore(model.subscribe, model.getState)" in tab
+    assert "const state = useModel(model);" in _tiles(tab)
+    music = model.split("function writeMusic(", 1)[1].split("\n  }", 1)[0]
+    assert "set({ music:" in music
+    video = model.split("async function writeVideo(", 1)[1].split("\n  }", 1)[0]
+    assert "set({ video:" in video
 
 
-def test_every_source_has_a_tile(js):
+def test_every_source_has_a_tile(tab):
     """Tiles are rendered, not hand-written, so the check is that the renderer
     covers every source that owns a config panel."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     assert "HYBRID_SOURCES" in fn
     assert "EXTRA_SOURCE_TILES" in fn      # Prowlarr is not a chain link
     assert "SOURCE_CONFIG_ID_BY_SRC" in fn
-    markup = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    markup = _tile(tab)
     assert "src-tile-name" in markup and "src-tile-art" in markup
 
 
@@ -231,10 +275,15 @@ def test_the_panels_park_in_a_hidden_home(index):
         assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
 
 
-def test_the_tiles_refresh_when_the_modal_closes(js):
-    # Changing a setting can change "needs setup" or the chain chip.
+def test_the_tiles_refresh_when_the_modal_closes(js, tab):
+    # Changing a setting can change "needs setup" or the chain chip. the modal
+    # used to redraw the tiles on close; they redraw themselves from the model
+    # now, so the close no longer needs to, and must not call the removed
+    # vanilla renderer (it would throw before the save below it)
     fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "buildSourceTiles()" in fn
+    assert "buildSourceTiles" not in fn
+    assert "saveSettings(true)" in fn
+    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_the_styling_reuses_the_pages_own_vocabulary():
@@ -312,10 +361,11 @@ def test_the_cookie_problem_is_named_on_both_paths():
     assert branch.count("_problem") >= 3
 
 
-def test_the_client_records_a_warning_state(js):
-    assert "_ssLastTestWarned" in js
-    fn = js.split("function _ssTestConn(", 1)[1].split("\n}", 1)[0]
+def test_the_client_records_a_warning_state(model):
+    assert "warned:" in model
+    fn = model.split("async function testConnection(", 1)[1].split("\n  }", 1)[0]
     assert "startsWith" in fn
+    assert "warned: { ...s.warned, [service]:" in fn
 
 
 def test_a_warning_gets_its_own_dot_colour():
@@ -398,19 +448,19 @@ def test_sources_gets_the_full_width_like_logs():
 # Layout and the per-source test
 # ---------------------------------------------------------------------------
 
-def test_the_tiles_are_grouped_not_one_ragged_wrap(js):
+def test_the_tiles_are_grouped_not_one_ragged_wrap(tab):
     """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
     accident. Two labelled groups make the same wrap look deliberate."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     # "in use" now, not "in your chain": it covers the video and audiobook chains too (#2026)
-    assert "In use" in fn and "Available" in fn
+    assert "section('In use'" in fn and "section('Available'" in fn
     assert "src-group" in fn
 
 
-def test_the_chain_group_is_in_chain_order(js):
+def test_the_chain_group_is_in_chain_order(tab):
     """Registry order put #4 before #2, which makes the numbers on the chips
     look wrong even though they are right."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     # ranked by chain then position, since a tile can be in more than one chain (#2026)
     assert "rank(a) - rank(b)" in fn
     assert "* 1000 + u.pos" in fn
@@ -434,14 +484,17 @@ def test_there_is_a_per_source_test_button(index, js):
 
 def test_the_test_shows_what_the_server_said(js):
     fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_ssLastTestMessage[srcId]" in fn
-    assert "out.textContent" in fn
+    assert "model.getState().said[srcId]" in fn
+    assert "out.textContent = said ||" in fn
 
 
-def test_the_test_updates_the_dot_and_the_tiles(js):
+def test_the_test_updates_the_dot_and_the_tiles(js, model):
+    # the modal's test runs through the model, which sets the dot the tiles read
     fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_hybridSourceStatus[srcId] = state" in fn
-    assert "buildSourceTiles()" in fn
+    assert "await model.testOne(srcId)" in fn
+    assert "hss-${state}" in fn
+    one = model.split("async function testOne(", 1)[1].split("\n  }", 1)[0]
+    assert "setStatus(id, state)" in one
 
 
 def test_a_source_with_no_probe_says_so_rather_than_failing(js):
@@ -533,21 +586,25 @@ def test_the_status_dots_survived_the_move(index):
         assert f'id="{dot}"' in _panel_span(index, container), dot
 
 
-def test_prowlarr_gets_a_tile_and_a_test(js):
+def test_prowlarr_gets_a_tile_and_a_test(model):
     """It is not a link in the download chain, so it is not in HYBRID_SOURCES —
     but it is very much something you configure in order to download."""
-    extra = js.split("const EXTRA_SOURCE_TILES = [", 1)[1].split("]", 1)[0]
+    extra = model.split("export const EXTRA_SOURCE_TILES", 1)[1].split("];", 1)[0]
     assert "'prowlarr'" in extra
-    probes = js.split("const HYBRID_SOURCE_PROBE = {", 1)[1].split("};", 1)[0]
+    hybrid = model.split("export const HYBRID_SOURCES", 1)[1].split("];", 1)[0]
+    assert "'prowlarr'" not in hybrid
+    probes = model.split("const probes: Record<string, () => Promise<boolean>> = {", 1)[1].split("};", 1)[0]
     assert "prowlarr:" in probes
 
 
-def test_prowlarr_does_not_claim_a_chain_position(js):
+def test_prowlarr_does_not_claim_a_chain_position(tab):
     """order.indexOf('prowlarr') is always -1, so the generic chip would label
     the indexer "not in chain" — which reads as something being wrong."""
-    fn = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    fn = _tile(tab)
     assert "src.id === 'prowlarr'" in fn
     assert "torrent &amp; usenet" in fn
+    # and it is decided before the chain chips are
+    assert fn.index("src.id === 'prowlarr'") < fn.index("not in a chain")
 
 
 def test_torrent_and_usenet_open_their_own_config(js):
@@ -582,23 +639,23 @@ def test_the_filesystem_note_is_still_reachable(index):
     assert "ind-hero-warning" in sources
 
 
-def test_indexers_are_their_own_group(js):
+def test_indexers_are_their_own_group(tab):
     """Not a source you pick — the catalogue the torrent and usenet links
     search. Left in "Available" it read as something you could add to the
     chain, which is not a thing Prowlarr can be."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     assert "section('Indexers'" in fn
-    # one code path now, not two. this used to require 2 because the video side
+    # one code path, not two. this used to require 2 because the video side
     # rendered its own grouping; the tab is shared and renders once for both.
     assert fn.count("section('Indexers'") == 1, "the side branch is back"
 
 
-def test_an_indexer_cannot_land_in_the_chain_groups(js):
+def test_an_indexer_cannot_land_in_the_chain_groups(tab):
     """The chain groups partition on order.includes(), and Prowlarr is never in
     the order — so without splitting it out first it falls into Available every
     time."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "const sources = configurable.filter(src => !isIndexer(src))" in fn
+    fn = _tiles(tab)
+    assert "const sources = configurable.filter((src) => !isIndexer(src))" in fn
     for group in ("const inChain = sources", "const available = sources"):
         assert group in fn, group
 
@@ -627,37 +684,39 @@ def test_a_moved_panel_still_has_its_content(index, container, marker):
     assert marker in panel
 
 
-def test_the_indexers_tile_can_actually_light_up(js):
+def test_the_indexers_tile_can_actually_light_up(model):
     """It stayed grey however healthy Prowlarr was.
 
-    The tile colour reads _hybridSourceStatus. testAllSources walks the download
-    CHAIN, and Prowlarr is not a link in it — it is what the torrent and usenet
+    The tile colour reads the status in the model. Test all walks the download
+    CHAINS, and Prowlarr is not a link in one — it is what the torrent and usenet
     links search through — so the loop never reached it. It was already being
     probed as a prerequisite for those two, and the result was thrown away.
     """
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    probe = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("}", 1)[0]
-    assert "_ssTestConn('prowlarr')" in probe
-    assert "_hybridSourceStatus.prowlarr = good" in probe
+    fn = _test_all(model)
+    probe = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
+    assert "testConnection('prowlarr')" in probe
+    assert "setStatus('prowlarr', result('prowlarr'," in probe
 
 
-def test_the_indexer_probe_reaches_the_video_side(js):
-    """`sources` is built from the MUSIC chain dropdown, so on the video side it
+def test_the_indexer_probe_reaches_the_video_side(model):
+    """`sources` is built from the MUSIC chain's mode, so on the video side it
     says nothing about whether Prowlarr matters — and there it is the main path,
     not an extra."""
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_onVideoSide" in fn
+    fn = _test_all(model)
+    assert "const videoSide = document.body.getAttribute('data-side') === 'video'" in fn
     cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
-    assert "_onVideoSide" in cond
+    assert "videoSide" in cond
 
 
-def test_the_indexer_result_redraws_its_tile(js):
+def test_the_indexer_result_redraws_its_tile(model, tab):
     """The per-source loop redraws while walking the chain, which Prowlarr is
     not part of — so without this the dot would only appear on the next redraw
-    triggered by something else."""
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    block = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("for (const id of sources)", 1)[0]
-    assert "buildSourceTiles()" in block
+    triggered by something else. the result goes into the model straight away,
+    and the tiles redraw on every model change."""
+    fn = _test_all(model)
+    block = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
+    assert "setStatus('prowlarr'," in block
+    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_an_inverted_mark_is_not_then_dimmed_into_grey():

@@ -11,6 +11,7 @@ import { createSettingsStore, type SettingsPayload, type SettingsStore } from '.
 import { shape, vanilla } from './__fixtures__/shape';
 import { addGenre, filteringSummary, resolveDownloads } from './downloads';
 import { DownloadsTab } from './downloads-tab';
+import { sourcesModel } from './sources-model';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -35,7 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete shell.testAllSources;
+  vi.restoreAllMocks();
 });
 
 const part = (name: string) => render(<DownloadsTab store={store} part={name} opened={1} active />);
@@ -54,7 +55,16 @@ describe('the Downloads tab is the same page it replaced', () => {
     ['filtering', 'downloads-filtering.vanilla.html'],
   ])('%s: the same elements, ids, classes, help lines and words', (name, fixture) => {
     const { container } = part(name);
-    const want = shape(vanilla(fixture, { afterInit: true }));
+    const frozen = vanilla(fixture, { afterInit: true });
+    if (name === 'behaviour') {
+      // the #dlchain-behaviour wrapper the slot sat in is React now too (step 7a)
+      const wrapper = document.createElement('div');
+      wrapper.id = 'dlchain-behaviour';
+      wrapper.setAttribute('data-stg', 'downloads');
+      wrapper.append(...frozen.childNodes);
+      frozen.append(wrapper);
+    }
+    const want = shape(frozen);
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
@@ -105,9 +115,22 @@ describe('the values', () => {
 });
 
 describe('Download Behaviour', () => {
+  it('hides itself, header and all, under the video and audiobook chains', async () => {
+    part('behaviour');
+    const wrapper = document.getElementById('dlchain-behaviour')!;
+    expect(wrapper.hidden).toBe(false);
+    act(() => sourcesModel.switchChain('video'));
+    expect(wrapper.hidden).toBe(true);
+    act(() => sourcesModel.switchChain('audiobooks'));
+    expect(wrapper.hidden).toBe(true);
+    act(() => sourcesModel.switchChain('music'));
+    expect(wrapper.hidden).toBe(false);
+    // let the chain reads the switches started settle
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+  });
+
   it('saves each of its keys, and Test all sources runs the Sources probe', async () => {
-    const probe = vi.fn();
-    shell.testAllSources = probe;
+    const probe = vi.spyOn(sourcesModel, 'testAll').mockResolvedValue(undefined);
     part('behaviour');
     fireEvent.change(document.getElementById('stream-source')!, {
       target: { value: 'deezer_preview' },

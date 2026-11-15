@@ -1,97 +1,70 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { beforeEach, expect, it, vi } from 'vitest';
+/**
+ * The silent auto-probe used to walk only the music chain, so a user whose
+ * audiobooks come over torrent saw grey torrent and indexer tiles forever.
+ * Test all is in the React sources model now (SETTINGS_PORT.md step 7a).
+ */
 
-import { extractFunction } from './vanilla-extract';
+import { afterEach, expect, it, vi } from 'vitest';
 
-// the silent auto-probe used to walk only the music chain, so a user whose
-// audiobooks come over torrent saw grey torrent and indexer tiles forever.
-const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
-const body = ['_audiobookActiveSources', 'testAllSources']
-  .map((name) => extractFunction(name, source))
-  .join('\n');
+import { createSettingsStore } from '@/features/settings/settings-store';
+import { createSourcesModel } from '@/features/settings/tabs/sources-model';
 
-let status: Record<string, string>;
+const shell = window as unknown as Record<string, unknown>;
 let probed: string[];
 
-function run(musicMode: string, bookMode: string, bookChain: string[], videoChain: string[] = []) {
-  document.body.innerHTML = `
-    <select id="download-source-mode"><option value="${musicMode}" selected></option></select>
-    <select id="audiobook-download-mode"><option value="${bookMode}" selected></option></select>`;
-  status = {};
-  probed = [];
-  const probe = (id: string) => () => {
-    probed.push(id);
-    return Promise.resolve(true);
-  };
-  const testAllSources = new Function(
-    'document',
-    'getHybridOrder',
-    '_hybridSourceStatus',
-    'HYBRID_SOURCE_PROBE',
-    '_ssTestConn',
-    '_ssLastTestWarned',
-    'buildSourceTiles',
-    'buildHybridSourceList',
-    '_audiobookHybrid',
-    'AUDIOBOOK_SOURCES',
-    // the video chain is probed too now (#2026)
-    '_videoChainOrder',
-    '_loadVideoChainForTiles',
-    `${body}; return testAllSources;`,
-  )(
-    document,
-    () => ['deezer', 'tidal', 'soulseek'],
-    status,
-    {
-      deezer: probe('deezer'),
-      tidal: probe('tidal'),
-      soulseek: probe('soulseek'),
-      torrent: probe('torrent'),
-      usenet: probe('usenet'),
-    },
-    (svc: string) => {
-      probed.push(svc);
-      return Promise.resolve(true);
-    },
-    {},
-    vi.fn(),
-    vi.fn(),
-    bookChain,
-    ['torrent', 'usenet', 'soulseek'],
-    videoChain,
-    vi.fn(),
-  );
-  return testAllSources({ silent: true });
-}
-
-beforeEach(() => {
-  document.body.innerHTML = '';
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete shell.getAudiobookActiveSources;
 });
 
+async function run(musicMode: string, books: string[], videoChain: string[] = []) {
+  probed = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string, init?: RequestInit) => {
+      let data: unknown = { success: true, available: true, authenticated: true, reachable: true };
+      if (url === '/api/video/downloads/config') {
+        data = { download_mode: 'hybrid', hybrid_order: videoChain };
+      } else if (url === '/api/test-connection') {
+        probed.push((JSON.parse(init!.body as string) as { service: string }).service);
+      } else {
+        probed.push(url);
+      }
+      return Promise.resolve({ json: () => Promise.resolve(data) } as Response);
+    }),
+  );
+  shell.getAudiobookActiveSources = () => books;
+  const model = createSourcesModel({ store: createSettingsStore({ delay: 0 }) });
+  model.load({
+    download_source: { mode: musicMode, hybrid_order: ['deezer_dl', 'tidal', 'soulseek'] },
+  });
+  await model.testAll({ silent: true });
+  return model.getState().status;
+}
+
 it('probes torrent and prowlarr when audiobooks use torrent and music does not', async () => {
-  await run('hybrid', 'torrent', ['torrent', 'usenet', 'soulseek']);
+  const status = await run('hybrid', ['torrent']);
   expect(status.torrent).toBe('ok');
   expect(status.prowlarr).toBe('ok');
-  expect(probed).not.toContain('usenet');
+  expect(probed).not.toContain('usenet_client');
 });
 
 it('probes the whole audiobook chain in hybrid mode', async () => {
-  await run('soulseek', 'hybrid', ['usenet', 'torrent']);
+  const status = await run('soulseek', ['usenet', 'torrent']);
   expect(status.usenet).toBe('ok');
   expect(status.torrent).toBe('ok');
   expect(status.prowlarr).toBe('ok');
 });
 
 it('leaves torrent alone when neither chain uses it', async () => {
-  await run('hybrid', 'soulseek', ['torrent']);
-  expect(probed).not.toContain('torrent');
+  const status = await run('hybrid', ['soulseek']);
+  expect(probed).not.toContain('torrent_client');
   expect(probed).not.toContain('prowlarr');
   expect(status.torrent).toBeUndefined();
 });
 
 it('probes the video chain too, so a usenet-only video setup gets a dot (#2026)', async () => {
-  await run('hybrid', 'soulseek', ['soulseek'], ['usenet', 'extto']);
+  const status = await run('hybrid', ['soulseek'], ['usenet', 'extto']);
   expect(status.usenet).toBe('ok');
   expect(status.prowlarr).toBe('ok');
   expect(status.extto).toBeUndefined();
