@@ -650,8 +650,379 @@ export function QobuzPanel() {
   );
 }
 
+// ── HiFi ──
+
+interface HifiInstance {
+  url: string;
+  enabled?: boolean;
+}
+
+interface HifiCheck {
+  url: string;
+  version?: string;
+  can_download?: boolean;
+  can_search?: boolean;
+  status?: string;
+}
+
+const say = (message: string) => window.alert(message);
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** one instance's state in Check All Instances */
+function checkState(inst: HifiCheck): ReactNode {
+  if (inst.can_download) return <span style={{ color: OK }}>● Download</span>;
+  if (inst.can_search) return <span style={{ color: WARN }}>● Search only</span>;
+  if (inst.status === 'online') return <span style={{ color: WARN }}>● Online (limited)</span>;
+  if (inst.status === 'ssl_error') return <span style={{ color: BAD }}>● SSL error</span>;
+  if (inst.status === 'timeout') return <span style={{ color: BAD }}>● Timeout</span>;
+  if (inst.status === 'offline') return <span style={{ color: BAD }}>● Offline</span>;
+  return <span style={{ color: BAD }}>● {text(inst.status)}</span>;
+}
+
+const MUTED = { color: 'rgba(255,255,255,0.4)', fontSize: '0.85em' };
+
+export function HifiPanel({
+  store,
+  model = sourcesModel,
+}: {
+  store: SettingsStore;
+  model?: SourcesModel;
+}) {
+  const [status, setStatus] = useState<Status>({ text: '' });
+  // null: not read yet; an error string: the read failed
+  const [list, setList] = useState<HifiInstance[] | string | null>(null);
+  const [adding, setAdding] = useState('');
+  const [restoring, setRestoring] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<
+    | { state: 'busy' }
+    | { state: 'error'; text: string }
+    | { state: 'done'; rows: HifiCheck[]; active?: string }
+    | null
+  >(null);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+
+  async function test() {
+    setStatus(CHECKING);
+    try {
+      const data = await json('/api/hifi/status');
+      if (data.available)
+        setStatus({ text: `Connected (v${text(data.version) || '?'})`, color: OK });
+      else setStatus({ text: 'No instances reachable', color: WARN });
+    } catch {
+      setStatus({ text: 'Connection error', color: BAD });
+    }
+  }
+  useOnOpen(model, 'hifi', () => void test());
+
+  async function load() {
+    try {
+      const data = await json('/api/hifi/instances/list');
+      setList(Array.isArray(data.instances) ? (data.instances as HifiInstance[]) : []);
+    } catch (error) {
+      setList(message(error));
+    }
+  }
+  // the list is read with the settings, on each visit
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  useEffect(() => {
+    if (loads) void load();
+  }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function post(url: string, init: RequestInit, failed: string) {
+    try {
+      const data = await json(url, init);
+      if (data.success) {
+        void load();
+        return data;
+      }
+      say(text(data.error) || failed);
+    } catch (error) {
+      say(`Error: ${message(error)}`);
+    }
+    return null;
+  }
+
+  const jsonPost = (body: unknown): RequestInit => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  async function add() {
+    const url = adding.trim();
+    if (!url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      say('URL must start with http:// or https://');
+      return;
+    }
+    if (await post('/api/hifi/instances', jsonPost({ url }), 'Failed to add instance'))
+      setAdding('');
+  }
+
+  async function restore() {
+    setRestoring(true);
+    try {
+      const data = await post(
+        '/api/hifi/instances/reset',
+        { method: 'POST' },
+        'Failed to restore defaults',
+      );
+      if (data) {
+        const n = typeof data.restored === 'number' ? data.restored : 0;
+        window.showToast?.(
+          n
+            ? `Restored ${n} default instance${n === 1 ? '' : 's'}`
+            : 'All default instances are already present',
+          'success',
+        );
+      }
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  async function check() {
+    setChecked({ state: 'busy' });
+    setChecking(true);
+    try {
+      const data = await json('/api/hifi/instances');
+      const rows = Array.isArray(data.instances) ? (data.instances as HifiCheck[]) : [];
+      setChecked({ state: 'done', rows, active: text(data.active) });
+    } catch (error) {
+      setChecked({ state: 'error', text: message(error) });
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function reorder(from: number, to: number) {
+    if (!Array.isArray(list) || from === to) return;
+    const next = list.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setList(next);
+    try {
+      await fetch('/api/hifi/instances/reorder', jsonPost({ urls: next.map((i) => i.url) }));
+    } catch (error) {
+      console.error('Failed to save HiFi instance order:', error);
+    }
+  }
+
+  let instances: ReactNode = null;
+  if (typeof list === 'string') {
+    instances = (
+      <div style={{ color: BAD, fontSize: '0.85em' }}>Error loading instances: {list}</div>
+    );
+  } else if (list && !list.length) {
+    instances = <div style={MUTED}>No instances configured.</div>;
+  } else if (list) {
+    instances = list.map((inst, i) => (
+      <div
+        key={inst.url}
+        className={[
+          'hifi-instance-item',
+          inst.enabled ? '' : 'disabled',
+          dragging === i ? 'dragging' : '',
+          over === i ? 'drag-over' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        draggable
+        data-url={inst.url}
+        onDragStart={(event) => {
+          setDragging(i);
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragEnd={() => {
+          setDragging(null);
+          setOver(null);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+          setOver(i);
+        }}
+        onDragLeave={() => setOver((o) => (o === i ? null : o))}
+        onDrop={(event) => {
+          event.preventDefault();
+          setOver(null);
+          if (dragging !== null) void reorder(dragging, i);
+        }}
+      >
+        <span className="hifi-instance-grip">&#x2630;</span>
+        <span className="hifi-instance-url">{inst.url}</span>
+        <span
+          className={inst.enabled ? 'hifi-instance-toggle on' : 'hifi-instance-toggle off'}
+          data-url={inst.url}
+          title={inst.enabled ? 'Click to disable' : 'Click to enable'}
+          onClick={(event) => {
+            event.preventDefault();
+            void post(
+              '/api/hifi/instances/toggle',
+              jsonPost({ url: inst.url, enabled: !inst.enabled }),
+              'Failed to toggle instance',
+            );
+          }}
+        >
+          {inst.enabled ? '\u2714' : '\u2718'}
+        </span>
+        <span
+          className="hifi-instance-remove"
+          data-url={inst.url}
+          title="Remove instance"
+          onClick={(event) => {
+            event.preventDefault();
+            void post(
+              `/api/hifi/instances?url=${encodeURIComponent(inst.url)}`,
+              { method: 'DELETE' },
+              'Failed to remove instance',
+            );
+          }}
+        >
+          &#x2716;
+        </span>
+      </div>
+    ));
+  }
+
+  let report: ReactNode = null;
+  if (checked?.state === 'busy') {
+    report = <div style={{ ...MUTED, padding: '8px 0' }}>Checking instances...</div>;
+  } else if (checked?.state === 'error') {
+    report = (
+      <div style={{ color: BAD, fontSize: '0.85em' }}>Error checking instances: {checked.text}</div>
+    );
+  } else if (checked?.state === 'done' && !checked.rows.length) {
+    report = <div style={{ color: WARN, fontSize: '0.85em' }}>No instances configured.</div>;
+  } else if (checked?.state === 'done') {
+    report = checked.rows.map((inst) => (
+      <div
+        key={inst.url}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '5px 0',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          fontSize: '0.82em',
+        }}
+      >
+        <span
+          style={{
+            color: 'rgba(255,255,255,0.6)',
+            fontFamily: 'monospace',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {inst.url}
+          {inst.version ? ` v${inst.version}` : ''}
+          {inst.url === checked.active ? (
+            <>
+              {' '}
+              <span
+                style={{ color: 'rgb(var(--accent-rgb))', fontWeight: 600, fontSize: '0.75em' }}
+              >
+                (ACTIVE)
+              </span>
+            </>
+          ) : null}
+        </span>
+        <span style={{ flexShrink: 0, marginLeft: '12px' }}>{checkState(inst)}</span>
+      </div>
+    ));
+  }
+
+  return (
+    <Panel id="hifi-download-settings-container" model={model}>
+      <div className="form-group">
+        <label>HiFi Status:</label>
+        <div className="form-actions" style={{ marginTop: '4px' }}>
+          <button className="test-button" id="hifi-test-btn" onClick={() => void test()}>
+            Test Connection
+          </button>
+          <span
+            id="hifi-connection-status"
+            className="setting-help-text"
+            style={{ marginLeft: '8px', ...(status.color ? { color: status.color } : {}) }}
+          >
+            {status.text}
+          </span>
+        </div>
+        <div className="setting-help-text" style={{ marginTop: '6px' }}>
+          Free lossless downloads via community-run hifi-api instances. No authentication or
+          subscription needed.
+        </div>
+        <div
+          className="hifi-preview-warning"
+          style={{
+            marginTop: '8px',
+            padding: '9px 11px',
+            borderRadius: '8px',
+            background: 'rgba(241, 196, 15, 0.08)',
+            border: '1px solid rgba(241, 196, 15, 0.28)',
+            color: '#f1c40f',
+            fontSize: '12px',
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>Heads up:</strong> some HiFi instances only have 30-second Tidal previews for
+          certain tracks, with headers faked to look like the full song. SoulSync decodes every HiFi
+          download to catch these and never lets a shorter clip replace a good library file, but if
+          a track just won't come through at full length here, grab it from another source.
+        </div>
+      </div>
+      <div className="form-group">
+        <label>API Instances:</label>
+        <div id="hifi-instances-list" style={{ marginBottom: '8px' }}>
+          {instances}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+          <input
+            type="url"
+            id="hifi-new-instance"
+            className="form-input"
+            placeholder="https://example.com"
+            style={{ flex: 1 }}
+            value={adding}
+            onChange={(event) => setAdding(event.target.value)}
+          />
+          <button className="test-button" onClick={() => void add()}>
+            Add
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          <button
+            className="test-button"
+            id="hifi-instances-check-btn"
+            disabled={checking}
+            onClick={() => void check()}
+          >
+            {checking ? 'Checking...' : 'Check All Instances'}
+          </button>
+          <button
+            className="test-button"
+            id="hifi-instances-restore-btn"
+            title="Re-add any of the built-in default instances you've removed (keeps the ones you added)"
+            disabled={restoring}
+            onClick={() => void restore()}
+          >
+            {restoring ? 'Restoring…' : 'Restore Defaults'}
+          </button>
+        </div>
+        <div id="hifi-instances-status-panel" style={{ display: checked ? 'block' : 'none' }}>
+          {report}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /** the panels of one slot in #source-config-home, by part */
 export function SourcePanels({ store, part }: SettingsTabProps) {
+  if (part === 'hifi') return <HifiPanel store={store} />;
   if (part === 'tidal-qobuz') {
     return (
       <>

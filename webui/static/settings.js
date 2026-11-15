@@ -1839,7 +1839,7 @@ window.toggleSourceCard = toggleSourceCard;
 const SOURCE_OPEN_PROBE = {
     // tidal checks itself when its modal opens (source-panels.tsx)
     qobuz: () => checkQobuzAuthStatus(),
-    hifi: () => testHiFiConnection(),
+    // hifi checks itself when its modal opens (source-panels.tsx)
     // soundcloud checks itself when its modal opens (source-panels.tsx)
 };
 
@@ -2331,7 +2331,7 @@ async function loadSettingsData() {
         loadArtSourceOrder(settings);
         // Per-source download quality is now derived from the global Quality
         // Profile (ranked targets) — the per-source quality selects were removed.
-        loadHiFiInstances();
+        // the HiFi instance list: its React panel reads it with the settings
         // deezer_download and lidarr_download: their Sources panels are React
         const _prowUrl = document.getElementById('prowlarr-url');
         const _prowKey = document.getElementById('prowlarr-api-key');
@@ -5233,28 +5233,6 @@ async function authenticateDeezer() {
 
 // ===== Tidal Download Auth (Device Flow) =====
 
-async function testHiFiConnection() {
-    const statusEl = document.getElementById('hifi-connection-status');
-    const btn = document.getElementById('hifi-test-btn');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        const resp = await fetch('/api/hifi/status');
-        const data = await resp.json();
-        if (data.available) {
-            statusEl.textContent = `Connected (v${data.version || '?'})`;
-            statusEl.style.color = '#4caf50';
-        } else {
-            statusEl.textContent = 'No instances reachable';
-            statusEl.style.color = '#ff9800';
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-    }
-}
-
 function _setIndStatusDot(dotId, state) {
     const dot = document.getElementById(dotId);
     if (!dot) return;
@@ -5408,239 +5386,6 @@ async function loadProwlarrIndexers() {
         listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${escapeHtml(e.message)}</em>`;
     }
 }
-
-async function loadHiFiInstances() {
-    const listEl = document.getElementById('hifi-instances-list');
-    if (!listEl) return;
-    try {
-        const resp = await fetch('/api/hifi/instances/list');
-        const data = await resp.json();
-        if (!data.instances || data.instances.length === 0) {
-            listEl.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">No instances configured.</div>';
-            return;
-        }
-        listEl.innerHTML = data.instances.map((inst, i) => {
-            const enabledClass = inst.enabled ? '' : 'hifi-instance-disabled';
-            const checkHtml = inst.enabled
-                ? `<span class="hifi-instance-toggle on" data-url="${escapeHtml(inst.url)}" title="Click to disable">&#x2714;</span>`
-                : `<span class="hifi-instance-toggle off" data-url="${escapeHtml(inst.url)}" title="Click to enable">&#x2718;</span>`;
-            return `<div class="hifi-instance-item${inst.enabled ? '' : ' disabled'}" draggable="true" data-url="${escapeHtml(inst.url)}">
-                <span class="hifi-instance-grip">&#x2630;</span>
-                <span class="hifi-instance-url">${escapeHtml(inst.url)}</span>
-                ${checkHtml}
-                <span class="hifi-instance-remove" data-url="${escapeHtml(inst.url)}" title="Remove instance">&#x2716;</span>
-            </div>`;
-        }).join('');
-        _initHiFiDragDrop();
-        _initHiFiClickHandlers();
-    } catch (e) {
-        listEl.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error loading instances: ${escapeHtml(e.message)}</div>`;
-    }
-}
-
-function _initHiFiDragDrop() {
-    const listEl = document.getElementById('hifi-instances-list');
-    if (!listEl) return;
-    let dragIdx = null;
-
-    listEl.querySelectorAll('.hifi-instance-item').forEach((item, idx) => {
-        item.addEventListener('dragstart', (e) => {
-            dragIdx = idx;
-            item.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-        });
-        item.addEventListener('dragend', () => {
-            item.classList.remove('dragging');
-            dragIdx = null;
-            listEl.querySelectorAll('.hifi-instance-item').forEach(i => i.classList.remove('drag-over'));
-        });
-        item.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            item.classList.add('drag-over');
-        });
-        item.addEventListener('dragleave', () => {
-            item.classList.remove('drag-over');
-        });
-        item.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            item.classList.remove('drag-over');
-            if (dragIdx === null) return;
-            const items = [...listEl.querySelectorAll('.hifi-instance-item')];
-            const dragged = items[dragIdx];
-            if (dragIdx !== idx) {
-                if (dragIdx < idx) {
-                    item.after(dragged);
-                } else {
-                    item.before(dragged);
-                }
-                const urls = [...listEl.querySelectorAll('.hifi-instance-item')].map(el => el.dataset.url);
-                await _saveHiFiInstanceOrder(urls);
-            }
-        });
-    });
-}
-
-function _initHiFiClickHandlers() {
-    const listEl = document.getElementById('hifi-instances-list');
-    if (!listEl) return;
-    listEl.onclick = (e) => {
-        const toggle = e.target.closest('.hifi-instance-toggle');
-        if (toggle) {
-            e.preventDefault();
-            toggleHiFiInstance(toggle.dataset.url);
-            return;
-        }
-        const remove = e.target.closest('.hifi-instance-remove');
-        if (remove) {
-            e.preventDefault();
-            removeHiFiInstance(remove.dataset.url);
-        }
-    };
-}
-
-async function _saveHiFiInstanceOrder(urls) {
-    try {
-        await fetch('/api/hifi/instances/reorder', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls })
-        });
-    } catch (e) {
-        console.error('Failed to save HiFi instance order:', e);
-    }
-}
-
-async function toggleHiFiInstance(url) {
-    const listEl = document.getElementById('hifi-instances-list');
-    if (!listEl) return;
-    const item = listEl.querySelector(`.hifi-instance-item[data-url="${url}"]`);
-    const toggle = item?.querySelector('.hifi-instance-toggle');
-    const currentlyEnabled = toggle?.classList.contains('on');
-    const newEnabled = !currentlyEnabled;
-    try {
-        const resp = await fetch('/api/hifi/instances/toggle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, enabled: newEnabled })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            loadHiFiInstances();
-        } else {
-            alert(data.error || 'Failed to toggle instance');
-        }
-    } catch (e) {
-        alert(`Error: ${e.message}`);
-    }
-}
-
-async function addHiFiInstance() {
-    const input = document.getElementById('hifi-new-instance');
-    if (!input) return;
-    const url = input.value.trim();
-    if (!url) return;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        alert('URL must start with http:// or https://');
-        return;
-    }
-    try {
-        const resp = await fetch('/api/hifi/instances', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            input.value = '';
-            loadHiFiInstances();
-        } else {
-            alert(data.error || 'Failed to add instance');
-        }
-    } catch (e) {
-        alert(`Error: ${e.message}`);
-    }
-}
-
-async function restoreDefaultHiFiInstances() {
-    const btn = document.getElementById('hifi-instances-restore-btn');
-    const orig = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Restoring…'; }
-    try {
-        const resp = await fetch('/api/hifi/instances/reset', { method: 'POST' });
-        const data = await resp.json();
-        if (data.success) {
-            loadHiFiInstances();
-            const n = data.restored || 0;
-            if (typeof showToast === 'function') {
-                showToast(n ? `Restored ${n} default instance${n === 1 ? '' : 's'}`
-                            : 'All default instances are already present', 'success');
-            }
-        } else {
-            alert(data.error || 'Failed to restore defaults');
-        }
-    } catch (e) {
-        alert(`Error: ${e.message}`);
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = orig || 'Restore Defaults'; }
-    }
-}
-
-async function removeHiFiInstance(url) {
-    try {
-        const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
-            method: 'DELETE'
-        });
-        const data = await resp.json();
-        if (data.success) {
-            loadHiFiInstances();
-        } else {
-            alert(data.error || 'Failed to remove instance');
-        }
-    } catch (e) {
-        alert(`Error: ${e.message}`);
-    }
-}
-
-async function checkHiFiInstances() {
-    const panel = document.getElementById('hifi-instances-status-panel');
-    const btn = document.getElementById('hifi-instances-check-btn');
-    if (!panel) return;
-    panel.style.display = 'block';
-    panel.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em; padding: 8px 0;">Checking instances...</div>';
-    if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
-    try {
-        const resp = await fetch('/api/hifi/instances');
-        const data = await resp.json();
-        if (!data.instances || data.instances.length === 0) {
-            panel.innerHTML = '<div style="color: #ff9800; font-size: 0.85em;">No instances configured.</div>';
-            return;
-        }
-        const _statusIcon = (inst) => {
-            if (inst.can_download) return '<span style="color:#4caf50">● Download</span>';
-            if (inst.can_search) return '<span style="color:#ff9800">● Search only</span>';
-            if (inst.status === 'online') return '<span style="color:#ff9800">● Online (limited)</span>';
-            if (inst.status === 'ssl_error') return '<span style="color:#f44336">● SSL error</span>';
-            if (inst.status === 'timeout') return '<span style="color:#f44336">● Timeout</span>';
-            if (inst.status === 'offline') return '<span style="color:#f44336">● Offline</span>';
-            return `<span style="color:#f44336">● ${escapeHtml(inst.status)}</span>`;
-        };
-        panel.innerHTML = data.instances.map(inst => {
-            const isActive = inst.url === data.active;
-            const ver = inst.version ? ` v${inst.version}` : '';
-            const activeTag = isActive ? ' <span style="color:rgb(var(--accent-rgb));font-weight:600;font-size:0.75em;">(ACTIVE)</span>' : '';
-            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.82em;">
-                <span style="color:rgba(255,255,255,0.6);font-family:monospace;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(inst.url)}${ver}${activeTag}</span>
-                <span style="flex-shrink:0;margin-left:12px;">${_statusIcon(inst)}</span>
-            </div>`;
-        }).join('');
-    } catch (e) {
-        panel.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error checking instances: ${escapeHtml(e.message)}</div>`;
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Check All Instances'; }
-    }
-}
-
 
 // ===============================
 // QOBUZ AUTH FUNCTIONS

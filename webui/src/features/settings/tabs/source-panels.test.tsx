@@ -12,6 +12,7 @@ import { shape, vanilla } from './__fixtures__/shape';
 import { REDACTED_SECRET_SENTINEL } from './parts';
 import {
   DeezerPanel,
+  HifiPanel,
   LidarrPanel,
   QobuzPanel,
   SoundcloudPanel,
@@ -95,6 +96,135 @@ describe('the Tidal and Qobuz panels are the markup they replaced', () => {
     const want = shape(vanilla('panels-tidal-qobuz.vanilla.html'));
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
+  });
+});
+
+describe('HiFi', () => {
+  const instances = () => [
+    { url: 'https://a.example', enabled: true },
+    { url: 'https://b.example', enabled: false },
+  ];
+
+  it('is the markup it replaced; the list loads with the settings', async () => {
+    routes['GET /api/hifi/instances/list'] = () => ({ instances: instances() });
+    const { container } = render(
+      <SourcePanels store={store} part="hifi" opened={0} active={false} />,
+    );
+    const got = shape(container);
+    const want = shape(vanilla('panel-hifi.vanilla.html'));
+    expect(got.elements).toEqual(want.elements);
+    expect(got.text).toBe(want.text);
+    expect(calls).toHaveLength(0);
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
+    const rows = [...document.querySelectorAll<HTMLElement>('.hifi-instance-item')];
+    expect(rows.map((r) => r.className)).toEqual([
+      'hifi-instance-item',
+      'hifi-instance-item disabled',
+    ]);
+    expect(rows[0].querySelector('.hifi-instance-toggle')!.className).toBe(
+      'hifi-instance-toggle on',
+    );
+    expect(rows[0].querySelector('.hifi-instance-toggle')!.getAttribute('title')).toBe(
+      'Click to disable',
+    );
+    expect(rows[1].querySelector('.hifi-instance-toggle')!.textContent).toBe('\u2718');
+  });
+
+  it('adds, toggles, removes and restores through the server, then rereads the list', async () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    shell.showToast = vi.fn();
+    routes['GET /api/hifi/instances/list'] = () => ({ instances: instances() });
+    routes['POST /api/hifi/instances'] = () => ({ success: false, error: 'already there' });
+    routes['POST /api/hifi/instances/toggle'] = () => ({ success: true });
+    routes['DELETE /api/hifi/instances?url=https%3A%2F%2Fb.example'] = () => ({ success: true });
+    routes['POST /api/hifi/instances/reset'] = () => ({ success: true, restored: 1 });
+    render(<HifiPanel store={store} model={model} />);
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
+    fireEvent.change(input('hifi-new-instance'), { target: { value: 'ftp://x' } });
+    fireEvent.click(document.querySelector('#hifi-new-instance + button')!);
+    expect(alert).toHaveBeenCalledWith('URL must start with http:// or https://');
+    fireEvent.change(input('hifi-new-instance'), { target: { value: ' https://c.example ' } });
+    fireEvent.click(document.querySelector('#hifi-new-instance + button')!);
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('already there'));
+    expect(calls.find((c) => c.url === '/api/hifi/instances' && c.method === 'POST')!.body).toEqual(
+      { url: 'https://c.example' },
+    );
+    const lists = () => calls.filter((c) => c.url === '/api/hifi/instances/list').length;
+    const before = lists();
+    fireEvent.click(document.querySelectorAll('.hifi-instance-toggle')[0]);
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    expect(calls.find((c) => c.url === '/api/hifi/instances/toggle')!.body).toEqual({
+      url: 'https://a.example',
+      enabled: false,
+    });
+    fireEvent.click(document.querySelectorAll('.hifi-instance-remove')[1]);
+    await waitFor(() => expect(lists()).toBe(before + 2));
+    fireEvent.click(document.getElementById('hifi-instances-restore-btn')!);
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith('Restored 1 default instance', 'success'),
+    );
+    expect(document.getElementById('hifi-instances-restore-btn')!.textContent).toBe(
+      'Restore Defaults',
+    );
+    alert.mockRestore();
+    delete shell.showToast;
+  });
+
+  it('drag reorders and saves the order; Check All lists each instance and the active one', async () => {
+    routes['GET /api/hifi/instances/list'] = () => ({ instances: instances() });
+    routes['POST /api/hifi/instances/reorder'] = () => ({ success: true });
+    routes['GET /api/hifi/instances'] = () => ({
+      active: 'https://a.example',
+      instances: [
+        { url: 'https://a.example', version: '2.1', can_download: true },
+        { url: 'https://b.example', status: 'ssl_error' },
+      ],
+    });
+    render(<HifiPanel store={store} model={model} />);
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
+    const rows = document.querySelectorAll('.hifi-instance-item');
+    fireEvent.dragStart(rows[1], { dataTransfer: { effectAllowed: '' } });
+    fireEvent.drop(rows[0], { dataTransfer: {} });
+    expect([...document.querySelectorAll('.hifi-instance-url')].map((r) => r.textContent)).toEqual([
+      'https://b.example',
+      'https://a.example',
+    ]);
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === '/api/hifi/instances/reorder')?.body).toEqual({
+        urls: ['https://b.example', 'https://a.example'],
+      }),
+    );
+    fireEvent.click(document.getElementById('hifi-instances-check-btn')!);
+    await waitFor(() =>
+      expect(document.getElementById('hifi-instances-status-panel')!.textContent).toContain(
+        'SSL error',
+      ),
+    );
+    const report = document.getElementById('hifi-instances-status-panel')!;
+    expect(report.style.display).toBe('block');
+    expect(report.textContent).toBe(
+      'https://a.example v2.1 (ACTIVE)● Downloadhttps://b.example● SSL error',
+    );
+  });
+
+  it('checks itself when its modal opens', async () => {
+    routes['GET /api/hifi/status'] = () => ({ available: true, version: '3' });
+    document.body.insertAdjacentHTML('beforeend', '<div id="source-config-home" hidden></div>');
+    render(
+      <>
+        <SourceModal model={model} />
+        <HifiPanel store={store} model={model} />
+      </>,
+    );
+    act(() => model.openModal('hifi'));
+    await waitFor(() =>
+      expect(status('hifi-connection-status').textContent).toBe('Connected (v3)'),
+    );
+    act(() => model.closeModal());
+    document.getElementById('source-config-home')?.remove();
   });
 });
 
