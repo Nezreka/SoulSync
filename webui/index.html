@@ -10219,53 +10219,9 @@
                                 </div>
                             </div>
 
-                            <!-- ═══ LOGS TAB ═══ -->
-                            <div class="settings-group" data-stg="logs" style="max-width:100%;">
-                                <div class="log-viewer-header">
-                                    <div class="log-viewer-controls">
-                                        <select id="log-viewer-source" class="log-viewer-select"
-                                            onchange="_logViewerChangeSource()">
-                                            <option value="app">app.log</option>
-                                            <option value="post_processing">post_processing.log</option>
-                                            <option value="acoustid">acoustid.log</option>
-                                            <option value="source_reuse">source_reuse.log</option>
-                                        </select>
-                                        <div class="log-viewer-filters">
-                                            <button class="log-filter-btn active" data-level=""
-                                                onclick="_logViewerFilterLevel(this)">All</button>
-                                            <button class="log-filter-btn lvl-debug" data-level="DEBUG"
-                                                onclick="_logViewerFilterLevel(this)">Debug</button>
-                                            <button class="log-filter-btn lvl-info" data-level="INFO"
-                                                onclick="_logViewerFilterLevel(this)">Info</button>
-                                            <button class="log-filter-btn lvl-warning" data-level="WARNING"
-                                                onclick="_logViewerFilterLevel(this)">Warn</button>
-                                            <button class="log-filter-btn lvl-error" data-level="ERROR"
-                                                onclick="_logViewerFilterLevel(this)">Error</button>
-                                        </div>
-                                    </div>
-                                    <div class="log-viewer-actions">
-                                        <input type="text" id="log-viewer-search" class="log-viewer-search"
-                                            placeholder="Filter logs…" oninput="_logViewerOnSearch(this)">
-                                        <button class="log-action-btn" onclick="_logViewerCopy()"
-                                            title="Copy visible logs">Copy</button>
-                                        <button class="log-action-btn" onclick="_logViewerClear()"
-                                            title="Clear display">Clear</button>
-                                        <label class="log-autoscroll-label">
-                                            <input type="checkbox" id="log-viewer-autoscroll" checked>
-                                            Auto-scroll
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="log-viewer-terminal" id="log-viewer-terminal">
-                                    <div class="log-viewer-lines" id="log-viewer-lines">
-                                        <div class="log-line log-info">Initializing log viewer...</div>
-                                    </div>
-                                </div>
-                                <div class="log-viewer-status">
-                                    <span id="log-viewer-line-count">0 lines</span>
-                                    <span id="log-viewer-live-indicator" class="log-live-dot">● Live</span>
-                                </div>
-                            </div>
+                            <!-- ═══ LOGS TAB ═══ the live log viewer is React now
+                                 (src/features/settings/tabs/logs-tab.tsx, SETTINGS_PORT.md step 3) -->
+                            <div data-stg-react="logs" style="display: contents"></div>
 
                         </div>
                     </div><!-- /.stg-detail-pane -->

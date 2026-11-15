@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 15 2026 (steps 1 and 2 done: the scaffold, and the Appearance tab)
+- **Last updated:** Nov 15 2026 (steps 1 to 3 done: the scaffold, Appearance, Logs)
 
 ## Goal
 
@@ -60,16 +60,16 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Discovery | not started | 12 controls and buttons |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | not started | 63 controls and buttons |
-| Tab: Logs | not started | 10 controls and buttons |
+| Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 1 of 9 tabs, 14 of 678 controls, 8 of 333 `settings.js` functions removed, 1 of 83 tests repointed.
+**Progress:** 2 of 9 tabs, 24 of 678 controls, 20 of 333 `settings.js` functions removed, 1 of 83 tests repointed.
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 12,671 |
-| `webui/static/settings.js` | 10,187 | 9,992 |
+| `webui/index.html` | 12,823 | 12,627 |
+| `webui/static/settings.js` | 10,187 | 9,824 |
 | `webui/static/init.js` | 5,264 | 5,208 |
 
 ## Completed steps
@@ -237,12 +237,83 @@ Each finished step, in order, with exactly what was added, changed and checked.
 - A vanilla `let` can't be set from React: expose a setter on the script that owns it.
 - Run the browser before/after check with every POST logged. The double save was invisible to every unit test.
 
+### Step 3: the Logs tab (Nov 15 2026)
+
+**What it is.** The live log viewer: pick a log, filter by level, search, copy, clear, auto-scroll. Nothing on it is a saved setting, so it never touches the store. It looks and behaves as before.
+
+**Where the markup was.** One `settings-group` at the end of the settings pane (47 lines), replaced by `<div data-stg-react="logs" style="display: contents"></div>`. The removed markup is frozen as `webui/src/features/settings/tabs/__fixtures__/logs.vanilla.html`.
+
+**How the viewer worked, and how it works now**
+
+| Behaviour | Before (`settings.js`) | Now (`logs-tab.tsx`) |
+|---|---|---|
+| Open the tab | `switchSettingsTab` called `_logViewerInit()`: `GET /api/logs/tail?source=…&lines=300` (+ `level`, `search` when set), then `socket.emit('logs:subscribe', {source})` and `socket.on('logs:live', …)` if the socket was connected. A second init while live did nothing. | Same request and same subscription, started when the host says the tab is `active`. A second start while live does nothing. |
+| Leave the tab | `switchSettingsTab` called `_logViewerStop()`: `socket.off('logs:live')`, `emit('logs:unsubscribe')`. | Same, when `active` goes false. Also on unmount. |
+| Live lines | Dropped if another source, filtered client-side by level and search, appended. | Same (`keepLiveLines`). |
+| Lines shown | DOM nodes appended by hand, oldest removed past 2,000, class from `_logClassify`. | A list of rows in state, cut to the last 2,000, same classes (`classifyLogLine`, `logLevelClass`). Each line is a memoised component, so a live push only adds new elements. |
+| Level buttons | Moved `active`, reloaded. | Same. |
+| Search | 300 ms after typing stops, reloaded. | Same. |
+| Source | Stop, "Loading...", start. | Same. |
+| Reload | Stop, one "Loading..." line, start. The line count keeps its old value until lines arrive. | Same, including the count. |
+| Copy | Clipboard API on a secure page, else a hidden textarea; toast "Logs copied". | Same. |
+| Clear | Empties the view, "0 lines". | Same. |
+| Auto-scroll | After lines were appended, if ticked. | Same: after lines arrive, not after Loading or Clear. |
+| A failed tail | Warning in the console, message left up, still subscribes. | Same. |
+
+**The socket bridge.** `socket` in `core.js` is a script-scoped `let`, which a module can't reach, so `core.js` now lends it through `window.soulsyncLogStream`:
+
+- `subscribe(source, onLive)`: if the socket is connected, emits `logs:subscribe` and listens for `logs:live`; returns false otherwise.
+- `unsubscribe(onLive)`: removes the listener and emits `logs:unsubscribe`.
+
+Exactly the four socket calls the vanilla viewer made.
+
+**Host change: `active`.** Every mounted tab is now re-rendered on each tab switch with `active` (is it the open tab?). Before, only the opened tab re-rendered, so a tab had no way to know it had been left. Re-rendering the others is cheap: they get the same props apart from `active`.
+
+**Files added**
+
+| File | What it does |
+|---|---|
+| `webui/src/features/settings/tabs/logs.ts` | Sources, levels, limits, `classifyLogLine`, `logLevelClass`, `keepLiveLines`, the bridge's type. |
+| `webui/src/features/settings/tabs/logs-tab.tsx` | The tab. |
+| `webui/src/features/settings/tabs/logs.test.tsx` | 12 tests, below. |
+| `webui/src/features/settings/tabs/__fixtures__/logs.vanilla.html` | The old markup, frozen. |
+| `webui/src/features/settings/tabs/__fixtures__/shape.ts` | The markup comparison, shared by every tab's parity test (moved out of the Appearance test; it now also compares `data-level` and `title`). |
+
+**Files changed**
+
+| File | Change |
+|---|---|
+| `webui/index.html` | The Logs block replaced by its slot (−47 lines, +3). |
+| `webui/static/settings.js` | Removed the whole Live Log Viewer section: the 4 `_logViewer*` lets, `_LOG_MAX_LINES`, `_logSearchDebounce` and 12 functions (166 lines). Removed the init/stop hook from `switchSettingsTab`. |
+| `webui/static/core.js` | Added `window.soulsyncLogStream` beside the `socket` declaration. |
+| `webui/src/features/settings/host.tsx` | `active` prop; registers `logs`. |
+| `webui/src/features/settings/tabs/appearance.test.tsx` | Uses the shared helper and passes `active`. |
+| `webui/src/test/settings-react-host-hooks.test.ts` | 2 tests for the `core.js` bridge. |
+
+**Left as it was:** the page autosave's guard for the Logs tab (`settings.js` line ~157, "never auto-save while the Logs tab is active", #827). It is harmless and goes when the page autosave goes.
+
+**Checked**
+
+| Check | Result |
+|---|---|
+| Parity with the frozen markup | Same elements, ids, classes, `data-level`, titles, placeholder and text. |
+| Behaviour tests (`logs.test.tsx`) | 11 more: level reading, waiting to be opened then tail and live, own-source live lines and stopping on leave (a late frame dropped, no stacked subscription on reopening), level reload and live filtering, search waiting 300 ms, source change, the 2,000-line cap, no socket, a failed tail, Copy and Clear, auto-scroll on and off, unmount stops the stream. |
+| The `core.js` bridge | 2 tests with a fake socket: the four calls in order, and nothing without a connected socket. |
+| `src/features/settings` + `src/test` | 47 + 1,207 tests pass. |
+| `tsc --noEmit` / `oxlint` | clean / 0 warnings, 0 errors |
+| `npm run build` | builds |
+| Python tests that read the settings markup or the vanilla scripts (67 files) | 1,662 passed |
+| **Browser, old page vs ported page** (the sandbox now stubs `/api/logs/tail` and logs each request) | Opened the tab, picked Error, searched "line 3", switched to acoustid.log, cleared, went to Appearance. Every state (lines with their classes, the count, the active level, visibility) and every tail request was **identical** on both pages. Screenshot: 1 pixel differs, the help button's dot. |
+
+**Not checked in a browser:** live lines. The sandbox has no socket server, on either page. Both halves are unit-tested (the tab against a fake bridge, the bridge against a fake socket), and the bridge makes the same four calls the old code made.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | step 3 | **Logs tab ported.** New: `tabs/logs.ts`, `tabs/logs-tab.tsx`, their test, a frozen fixture, and the shared test helper `tabs/__fixtures__/shape.ts`. Markup replaced by one slot; the 12 `_log*` functions and the tab-switch hook removed from `settings.js`; a socket bridge added to `core.js`. Host: every tab is told which tab is open (`active`). Details under "Completed steps". |
 | Nov 15 | `d58589201` (step 2) | **Appearance tab ported.** New: `tabs/appearance.ts`, `tabs/appearance-tab.tsx`, their test and two frozen-markup fixtures. Markup replaced by two slots; its load, save, listener and weather code removed from `settings.js`, `init.js` and `src/shell/weather-preview-settings.ts`. Host extended (several slots per tab, every ported tab on the page, opened counter, load effects). Fixed: the page autosave also fired for React controls. Details under "Completed steps". |
 | Nov 14 | `5f5a2717a` (step 1) | **Scaffold.** New: `settings-store.ts`, `host.tsx` and their tests, `settings-react-host-hooks.test.ts`. Changed: `main.tsx` (mounts the host), `settings.js` (three hooks: `switchSettingsTab`, `loadSettingsData`, `saveSettings`). No markup changed, no tab ported. Details under "Completed steps". |
 | Nov 14 | `2dbd3fb90` | Tracker created. No code changed. |
@@ -1422,16 +1493,16 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `log-viewer-source` | {app.log / post_processing.log / acoustid.log / source_reuse.log} | both | no |
-| button |  | All | both | no |
-| button |  | Debug | both | no |
-| button |  | Info | both | no |
-| button |  | Warn | both | no |
-| button |  | Error | both | no |
-| text | `log-viewer-search` |  | both | no |
-| button |  | Copy | both | no |
-| button |  | Clear | both | no |
-| checkbox | `log-viewer-autoscroll` | Auto-scroll | both | no |
+| select | `log-viewer-source` | {app.log / post_processing.log / acoustid.log / source_reuse.log} | both | yes (step 3) |
+| button |  | All | both | yes (step 3) |
+| button |  | Debug | both | yes (step 3) |
+| button |  | Info | both | yes (step 3) |
+| button |  | Warn | both | yes (step 3) |
+| button |  | Error | both | yes (step 3) |
+| text | `log-viewer-search` |  | both | yes (step 3) |
+| button |  | Copy | both | yes (step 3) |
+| button |  | Clear | both | yes (step 3) |
+| checkbox | `log-viewer-autoscroll` | Auto-scroll | both | yes (step 3) |
 
 ### No tab (page header and shared pieces) (4)
 
@@ -1653,18 +1724,18 @@ Every top-level function, with its line today. A function is removed when the la
 | `_genreWhitelistAdd` | 6260 | no |
 | `_genreWhitelistReset` | 6270 | no |
 | `_collectGenreWhitelist` | 6311 | no |
-| `_logClassify` | 6322 | no |
-| `_logClassToCSS` | 6336 | no |
-| `_logViewerInit` | 6340 | no |
-| `_logViewerStop` | 6370 | no |
-| `_logViewerOnLive` | 6379 | no |
-| `_logViewerAppendLines` | 6395 | no |
-| `_logViewerChangeSource` | 6425 | no |
-| `_logViewerFilterLevel` | 6433 | no |
-| `_logViewerOnSearch` | 6441 | no |
-| `_logViewerReload` | 6449 | no |
-| `_logViewerCopy` | 6456 | no |
-| `_logViewerClear` | 6474 | no |
+| `_logClassify` | 6322 | yes (step 3) |
+| `_logClassToCSS` | 6336 | yes (step 3) |
+| `_logViewerInit` | 6340 | yes (step 3) |
+| `_logViewerStop` | 6370 | yes (step 3) |
+| `_logViewerOnLive` | 6379 | yes (step 3) |
+| `_logViewerAppendLines` | 6395 | yes (step 3) |
+| `_logViewerChangeSource` | 6425 | yes (step 3) |
+| `_logViewerFilterLevel` | 6433 | yes (step 3) |
+| `_logViewerOnSearch` | 6441 | yes (step 3) |
+| `_logViewerReload` | 6449 | yes (step 3) |
+| `_logViewerCopy` | 6456 | yes (step 3) |
+| `_logViewerClear` | 6474 | yes (step 3) |
 | `loadDbMaintenanceInfo` | 6482 | no |
 | `runDatabaseVacuum` | 6505 | no |
 | `enableIncrementalVacuum` | 6532 | no |

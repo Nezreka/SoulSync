@@ -120,3 +120,46 @@ return debouncedAutoSaveSettings;`;
     expect(timers).toHaveLength(1);
   });
 });
+
+describe('core.js lends the socket to the React log viewer', () => {
+  const CORE = readFileSync(resolve(process.cwd(), 'static/core.js'), 'utf8').replace(
+    /\r\n/g,
+    '\n',
+  );
+  const start = CORE.indexOf('window.soulsyncLogStream = {');
+  const block = CORE.slice(start, CORE.indexOf('\n};\n', start) + 3);
+
+  function bridge(socket: unknown) {
+    const win: { soulsyncLogStream?: { subscribe: Function; unsubscribe: Function } } = {};
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    new Function('window', 'socket', block)(win, socket);
+    return win.soulsyncLogStream!;
+  }
+
+  it('subscribes and unsubscribes with the calls the vanilla viewer made', () => {
+    expect(start).toBeGreaterThan(-1);
+    const calls: unknown[][] = [];
+    const socket = {
+      connected: true,
+      emit: (...a: unknown[]) => calls.push(['emit', ...a]),
+      on: (...a: unknown[]) => calls.push(['on', ...a]),
+      off: (...a: unknown[]) => calls.push(['off', ...a]),
+    };
+    const onLive = () => {};
+    const stream = bridge(socket);
+    expect(stream.subscribe('acoustid', onLive)).toBe(true);
+    stream.unsubscribe(onLive);
+    expect(calls).toEqual([
+      ['emit', 'logs:subscribe', { source: 'acoustid' }],
+      ['on', 'logs:live', onLive],
+      ['off', 'logs:live', onLive],
+      ['emit', 'logs:unsubscribe', {}],
+    ]);
+  });
+
+  it('does nothing without a connected socket', () => {
+    expect(bridge(null).subscribe('app', () => {})).toBe(false);
+    expect(() => bridge(null).unsubscribe(() => {})).not.toThrow();
+    expect(bridge({ connected: false }).subscribe('app', () => {})).toBe(false);
+  });
+});

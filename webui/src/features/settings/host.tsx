@@ -25,6 +25,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
+import { LogsTab } from './tabs/logs-tab';
 
 export type SettingsTabKey =
   | 'connections'
@@ -43,6 +44,8 @@ export interface SettingsTabProps {
   part?: string;
   /** goes up each time the tab is opened, for what reloads on arrival */
   opened: number;
+  /** this is the open tab (the log viewer streams only while it is) */
+  active: boolean;
 }
 
 export interface SoulSyncSettingsApi {
@@ -63,6 +66,7 @@ declare global {
 /** A tab is added here in the change that ports it. */
 export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
   appearance: AppearanceTab,
+  logs: LogsTab,
 };
 
 /** What opening Settings applies whatever tab it opens on. settings.js did
@@ -104,11 +108,17 @@ export function createSettingsHost({
       if (!root) {
         root = createRoot(slot);
         roots.set(slot, root);
-      } else if (key !== tab) {
-        continue;
       }
+      // every mounted tab hears which tab is open, so one that was open can stop
       const render = () =>
-        root.render(<Tab store={store} part={slot.dataset.stgPart} opened={opened[key] ?? 0} />);
+        root.render(
+          <Tab
+            store={store}
+            part={slot.dataset.stgPart}
+            opened={opened[key] ?? 0}
+            active={key === tab}
+          />,
+        );
       // the first paint has to be in the DOM before settings.js goes on to
       // hide the other tabs' blocks and any column left with nothing to show
       if (first) flushSync(render);

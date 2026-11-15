@@ -708,6 +708,24 @@ function _isMassOrphanFix(jobId, count) {
 // ===============================
 let socket = null;
 let socketConnected = false;
+
+// The live log viewer on Settings > Logs is React (src/features/settings/tabs/
+// logs-tab.tsx, SETTINGS_PORT.md step 3). `socket` is a script-scoped let a
+// module cannot reach, so the tab subscribes through these. Same calls the
+// vanilla viewer made.
+window.soulsyncLogStream = {
+    subscribe(source, onLive) {
+        if (!socket || !socket.connected) return false;
+        socket.emit('logs:subscribe', { source });
+        socket.on('logs:live', onLive);
+        return true;
+    },
+    unsubscribe(onLive) {
+        if (!socket) return;
+        socket.off('logs:live', onLive);
+        socket.emit('logs:unsubscribe', {});
+    },
+};
 // Mirrored onto window so the React dashboard's fallback pollers can apply the
 // SAME socket gate the vanilla poller twins do (`socketConnected` is a
 // script-scoped `let` no module can read). Kept in lockstep at every write.

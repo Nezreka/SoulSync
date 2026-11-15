@@ -6,45 +6,15 @@
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
+import { shape, vanilla } from './__fixtures__/shape';
 import { applyAppearanceOnLoad, effectFlags, resolveAppearance } from './appearance';
 import { AppearanceTab, weatherStatus } from './appearance-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
-const fixture = (name: string) =>
-  readFileSync(resolve(process.cwd(), 'src/features/settings/tabs/__fixtures__', name), 'utf8');
-
-/** every element as tag, id, classes and the attributes the page's css and
- *  scripts key on, in document order, plus the text a person reads */
-function shape(root: Element) {
-  const elements = [...root.querySelectorAll('*')].map((el) => {
-    const attrs = ['data-stg', 'type', 'placeholder', 'for', 'role', 'tabindex', 'value']
-      .filter((name) => el.tagName !== 'INPUT' || name !== 'value')
-      .map((name) => [name, el.getAttribute(name)] as const)
-      .filter(([, value]) => value !== null)
-      .map(([name, value]) => `[${name}=${value}]`)
-      .join('');
-    const classes = [...el.classList]
-      .filter((c) => c !== 'setting-overridden')
-      .sort()
-      .join('.');
-    return `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${classes ? '.' + classes : ''}${attrs}`;
-  });
-  // the words, whatever the whitespace between the tags
-  const text = (root.textContent || '').replace(/\s+/g, '');
-  return { elements, text };
-}
-
-function vanilla(name: string) {
-  const host = document.createElement('div');
-  host.innerHTML = fixture(name);
-  return host;
-}
 
 let store: SettingsStore;
 let posted: SettingsPayload[];
@@ -92,7 +62,7 @@ afterEach(() => {
 describe('the Appearance tab is the same page it replaced', () => {
   it('UI Appearance renders the vanilla blocks: same elements, ids, classes and words', () => {
     store.hydrate({ ui_appearance: {} });
-    const { container } = render(<AppearanceTab store={store} part="ui" opened={1} />);
+    const { container } = render(<AppearanceTab store={store} part="ui" opened={1} active />);
     const want = shape(vanilla('appearance-ui.vanilla.html'));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
@@ -104,7 +74,7 @@ describe('the Appearance tab is the same page it replaced', () => {
       'fetch',
       vi.fn(() => new Promise(() => {})),
     );
-    const { container } = render(<AppearanceTab store={store} part="weather" opened={1} />);
+    const { container } = render(<AppearanceTab store={store} part="weather" opened={1} active />);
     const want = shape(vanilla('appearance-weather.vanilla.html'));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
@@ -167,7 +137,7 @@ describe('what opening Settings applies', () => {
 });
 
 describe('changing the appearance', () => {
-  const ui = () => render(<AppearanceTab store={store} part="ui" opened={1} />);
+  const ui = () => render(<AppearanceTab store={store} part="ui" opened={1} active />);
 
   it('a preset applies at once and saves only its own key', async () => {
     store.hydrate({ ui_appearance: { accent_preset: '#1db954', accent_color: '#abcdef' } });
@@ -287,7 +257,7 @@ describe('Sidebar Weather', () => {
   });
 
   const tile = (opened = 1) =>
-    render(<AppearanceTab store={store} part="weather" opened={opened} />);
+    render(<AppearanceTab store={store} part="weather" opened={opened} active />);
   const box = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   it('says where, how warm and how fresh, in every state the page had', () => {
@@ -315,7 +285,7 @@ describe('Sidebar Weather', () => {
     const view = tile(0);
     await act(async () => {});
     expect(calls).toEqual([]);
-    view.rerender(<AppearanceTab store={store} part="weather" opened={1} />);
+    view.rerender(<AppearanceTab store={store} part="weather" opened={1} active />);
     await waitFor(() => expect(box('sw-location').value).toBe('97501'));
     expect(box('sw-enabled').checked).toBe(true);
     expect(box('sw-celsius').checked).toBe(false);
@@ -324,7 +294,7 @@ describe('Sidebar Weather', () => {
       'Medford, Oregon — 62°F, updated 10:30',
     );
     expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1);
-    view.rerender(<AppearanceTab store={store} part="weather" opened={2} />);
+    view.rerender(<AppearanceTab store={store} part="weather" opened={2} active />);
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2));
   });
 
