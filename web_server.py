@@ -3771,6 +3771,9 @@ def _regenerate_batch_m3u(batch, tracks):
         active_server = config_manager.get_active_media_server()
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
+        # the batch only has what it downloaded, a mirror's m3u is the whole playlist (#2111)
+        from core.playlists.batch_m3u import playlist_m3u_tracks
+        tracks = playlist_m3u_tracks(batch, tracks, db)
 
         # Resolve file paths from library DB
         from collections import defaultdict

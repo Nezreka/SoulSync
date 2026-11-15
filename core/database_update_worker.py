@@ -1670,6 +1670,10 @@ class DatabaseUpdateWorker:
                 return self._get_recent_albums_jellyfin()
             elif self.server_type == "navidrome":
                 return self._get_recent_albums_navidrome()
+            elif callable(getattr(self.media_client, 'get_recently_added_albums', None)):
+                # music assistant and any later server: the contract method.
+                # "unknown server type" made its quick scan find nothing (#2111)
+                return self.media_client.get_recently_added_albums(400)
             else:
                 logger.error(f"Unknown server type: {self.server_type}")
                 return []

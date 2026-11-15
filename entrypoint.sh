@@ -88,8 +88,8 @@ fi
 # Pre-mid-2026 the chown line had `|| true` but mkdir didn't — combined
 # with `set -e`, a permission-denied mkdir crashed the container into a
 # restart loop. Both lines are now best-effort.
-mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
-chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
+mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts /app/podcasts /app/audiobooks /app/Playlists 2>/dev/null || true
+chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts /app/podcasts /app/audiobooks /app/Playlists 2>/dev/null || true
 
 # /app/storage is soulsync's own (playlist covers, avatars, album staging) and
 # usually not a mount, so it lives in the container layer. the recursive chown

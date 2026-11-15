@@ -423,19 +423,24 @@ def _known_library_files(db):
     return known
 
 
-def _run_soulsync_full_refresh():
+def _run_soulsync_full_refresh(incremental=False):
     """Re-index the standalone output folder through the native import writer.
 
     This is an explicit local import/recovery operation, not a media-server
     sync.  It never clears catalogue rows or server mappings up front.
+
+    ``incremental`` indexes only the files the library doesn't know yet and
+    skips the re-read of every known file. it used to skip the run outright
+    and still say complete, so a file dropped in by hand never showed (#2111).
     """
+    label = "SoulSync Incremental Update" if incremental else "SoulSync Full Refresh"
     try:
         transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         if not os.path.isdir(transfer_path):
             _db_update_error_callback(f"Output folder not found: {transfer_path}")
             return
 
-        logger.info("[SoulSync Full Refresh] Re-indexing local files: %s", transfer_path)
+        logger.info("[%s] Indexing local files: %s", label, transfer_path)
         db = get_database()
 
         _db_update_phase_callback('Scanning output folder...')
@@ -450,7 +455,7 @@ def _run_soulsync_full_refresh():
         audio_files.sort()
 
         total = len(audio_files)
-        logger.info("[SoulSync Full Refresh] Found %d audio files", total)
+        logger.info("[%s] Found %d audio files", label, total)
         _db_update_phase_callback(f'Importing local index from {total} files...')
         successful = 0
         failed = 0
@@ -460,6 +465,7 @@ def _run_soulsync_full_refresh():
         # one album per performer). 3.6.1 rebuilt one row per file.
         known = _known_library_files(db)
         reactivated = kept = 0
+        new_file_ids = []
         from core.library2.autolink import link_download_into_library_v2
         for index, file_path in enumerate(audio_files, 1):
             existing = known.get(_file_key(file_path))
@@ -488,15 +494,28 @@ def _run_soulsync_full_refresh():
                 )
                 if file_id is None:
                     raise RuntimeError("native import returned no file row")
+                new_file_ids.append(int(file_id))
                 successful += 1
             except Exception as exc:
                 failed += 1
-                logger.error("[SoulSync Full Refresh] Could not import %s: %s", file_path, exc)
+                logger.error("[%s] Could not import %s: %s", label, file_path, exc)
             if index % 50 == 0:
                 _db_update_phase_callback(f'Importing local index... {index}/{total}')
 
-        logger.info("[SoulSync Full Refresh] %d already indexed, %d back from missing, %d new",
-                    kept, reactivated, successful - kept - reactivated)
+        logger.info("[%s] %d already indexed, %d back from missing, %d new",
+                    label, kept, reactivated, successful - kept - reactivated)
+
+        if incremental:
+            artist_count, album_count = _artist_album_counts(db, new_file_ids)
+            summary = (f"Incremental update complete: {len(new_file_ids)} new local tracks indexed, "
+                       f"{kept + reactivated} already in the library")
+            if failed > 0:
+                summary += f" ({failed} failed)"
+            logger.info("[%s] %s", label, summary)
+            add_activity_item("", label, summary, "Now")
+            _db_update_finished_callback(artist_count, album_count, len(new_file_ids),
+                                         successful, failed)
+            return
 
         # Existing rows that disappeared enter the normal two-scan missing
         # lifecycle.  They are never hard-deleted by this recovery scan.
@@ -527,23 +546,7 @@ def _run_soulsync_full_refresh():
             from core.library2.scan import rescan_files
             rescan_files(db, file_ids=scoped_file_ids)
 
-        artist_ids, album_ids = set(), set()
-        with db._get_connection() as conn:
-            for start in range(0, len(scoped_file_ids), 500):
-                chunk = scoped_file_ids[start:start + 500]
-                marks = ",".join("?" for _ in chunk)
-                for row in conn.execute(
-                    f"""SELECT ar.id,al.id
-                           FROM lib2_track_files f
-                           JOIN lib2_tracks t ON t.id=f.track_id
-                           JOIN lib2_albums al ON al.id=t.album_id
-                           JOIN lib2_artists ar ON ar.id=al.primary_artist_id
-                          WHERE f.id IN ({marks})""",
-                    chunk,
-                ):
-                    artist_ids.add(int(row[0]))
-                    album_ids.add(int(row[1]))
-        artist_count, album_count = len(artist_ids), len(album_ids)
+        artist_count, album_count = _artist_album_counts(db, scoped_file_ids)
         summary = (f"Full refresh complete: {successful} local tracks indexed "
                    f"from {album_count} albums by {artist_count} artists")
         if failed > 0:
@@ -553,10 +556,31 @@ def _run_soulsync_full_refresh():
         _db_update_finished_callback(artist_count, album_count, total, successful, failed)
 
     except Exception as e:
-        logger.error(f"[SoulSync Full Refresh] {e}")
+        logger.error(f"[{label}] {e}")
         import traceback
         traceback.print_exc()
-        _db_update_error_callback(f"Full refresh failed: {e}")
+        _db_update_error_callback(f"{'Incremental update' if incremental else 'Full refresh'} failed: {e}")
+
+
+def _artist_album_counts(db, file_ids):
+    """(artists, albums) the given file rows belong to."""
+    artist_ids, album_ids = set(), set()
+    with db._get_connection() as conn:
+        for start in range(0, len(file_ids), 500):
+            chunk = file_ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(
+                f"""SELECT ar.id,al.id
+                       FROM lib2_track_files f
+                       JOIN lib2_tracks t ON t.id=f.track_id
+                       JOIN lib2_albums al ON al.id=t.album_id
+                       JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                      WHERE f.id IN ({marks})""",
+                chunk,
+            ):
+                artist_ids.add(int(row[0]))
+                album_ids.add(int(row[1]))
+    return len(artist_ids), len(album_ids)
 
 
 def _run_soulsync_deep_scan():
@@ -901,6 +925,15 @@ def _capture_task_epoch(run_epoch):
         )
 
 
+def _scan_media_client(server_type):
+    """The client a scan reads, by the server's registered name. a list of
+    plex, jellyfin and navidrome here left music assistant out, so every
+    scan of it failed with "not available" (#2111)."""
+    if not server_type or media_server_engine is None:
+        return None
+    return media_server_engine.client(server_type)
+
+
 def _run_db_update_task(full_refresh, server_type, run_epoch=None):
     """The actual function that runs in the background thread.
 
@@ -915,23 +948,10 @@ def _run_db_update_task(full_refresh, server_type, run_epoch=None):
 
     # SoulSync standalone
     if server_type == "soulsync":
-        if full_refresh:
-            _run_soulsync_full_refresh()
-        else:
-            # Incremental: library updates at download/import time, nothing to do
-            logger.warning("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan or Full Refresh.")
-            _db_update_finished_callback(0, 0, 0, 0, 0)
+        _run_soulsync_full_refresh(incremental=not full_refresh)
         return
 
-    media_client = None
-
-    if server_type == "plex":
-        media_client = media_server_engine.client('plex')
-    elif server_type == "jellyfin":
-        media_client = media_server_engine.client('jellyfin')
-    elif server_type == "navidrome":
-        media_client = media_server_engine.client('navidrome')
-
+    media_client = _scan_media_client(server_type)
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
         return
@@ -980,20 +1000,13 @@ def _run_deep_scan_task(server_type, run_epoch=None):
 
     _capture_task_epoch(run_epoch)
 
-    media_client = None
-
-    if server_type == "plex":
-        media_client = media_server_engine.client('plex')
-    elif server_type == "jellyfin":
-        media_client = media_server_engine.client('jellyfin')
-    elif server_type == "navidrome":
-        media_client = media_server_engine.client('navidrome')
-    elif server_type == "soulsync":
+    if server_type == "soulsync":
         # SoulSync standalone deep scan: find untracked files → move to Staging,
         # remove stale DB records where files no longer exist on disk
         _run_soulsync_deep_scan()
         return
 
+    media_client = _scan_media_client(server_type)
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
         return
