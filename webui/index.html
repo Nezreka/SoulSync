@@ -707,14 +707,17 @@
                         <span class="nav-text">Downloads</span>
                         <span class="dl-nav-badge hidden" data-video-downloads-badge>0</span>
                     </a>
-                    <!-- Import page hidden for now: on the video side the media server does
-                     the identification, so this only ever surfaced the rare download the
-                     auto-filer couldn't place. Route + video-import.js stay in place; just
-                     uncomment this nav entry to bring it back. -->
-                    <!-- <a class="nav-button" data-video-page="video-import" href="/video-import">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
-                    <span class="nav-text">Import</span>
-                </a> -->
+                    <!-- Import: the import folder (drop files in, review, import) and the
+                         downloads the auto-filer couldn't place. Where Music keeps its Import. -->
+                    <a class="nav-button" data-video-page="video-import" href="/video-import">
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                                <polyline points="7 9 12 4 17 9" />
+                                <line x1="12" y1="4" x2="12" y2="16" />
+                            </svg></span>
+                        <span class="nav-text">Import</span>
+                    </a>
                     <button type="button" class="nav-section-label" data-section="video-system"
                         onclick="toggleNavSection(this)">
                         <span class="nav-section-title">System</span>
@@ -1376,9 +1379,24 @@
                         <div class="vimp-head">
                             <div class="vimp-head-titles">
                                 <h1 class="vimp-title">Import <span class="vimp-count" data-vimp-count></span></h1>
-                                <p class="vimp-sub">Downloads that need a hand &mdash; place them by hand or dismiss</p>
+                                <p class="vimp-sub">Drop movies and episodes in your import folder, check what SoulSync found, and import them</p>
                             </div>
                             <button class="vimp-refresh" type="button" data-vimp-refresh>Refresh</button>
+                        </div>
+                        <!-- the import folder: video-import.js fills it from /api/video/import/folder -->
+                        <div class="vimp-folder" data-vimp-folder>
+                            <div class="vimp-section-head">
+                                <h2 class="vimp-section-h">Import folder</h2>
+                                <span class="vimp-folder-path" data-vimp-folder-path></span>
+                                <label class="vimp-auto" title="Import sure matches on their own, like Music's auto-import">
+                                    <input type="checkbox" data-vimp-auto> Import sure matches automatically
+                                </label>
+                            </div>
+                            <div class="vimp-grid" data-vimp-folder-list></div>
+                            <div class="vimp-folder-note" data-vimp-folder-note hidden></div>
+                        </div>
+                        <div class="vimp-section-head">
+                            <h2 class="vimp-section-h">Needs a hand</h2>
                         </div>
                         <div class="vimp-body">
                             <div class="vimp-loading hidden" data-vimp-loading>
@@ -6445,6 +6463,27 @@
                                                         your slskd / torrent / usenet client. It's the same setting as
                                                         the Music side's Download Folder, so it's locked here too:
                                                         change it and Music changes with it.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-import-folder-path">Import folder (optional):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-import-folder-path" readonly
+                                                            placeholder="/media/import" data-folder-check="video"
+                                                            data-folder-role="input" data-folder-label="Import folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-import-folder', this)">Unlock</button>
+                                                    </div>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-import-folder-auto">
+                                                        Import sure matches automatically
+                                                    </label>
+                                                    <div class="setting-help-text">Drop movie or episode files (or
+                                                        whole folders) here and they show on the Import page with the
+                                                        title SoulSync found. They're filed into your libraries with your
+                                                        naming template, exactly like a download. With the box ticked,
+                                                        a sure match is imported on its own once it has finished copying.
+                                                        Keep it apart from the download folder.
                                                     </div>
                                                 </div>
                                             </div>

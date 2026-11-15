@@ -957,6 +957,7 @@
                 setC('video-tv-4k-enabled', d.tv_4k_enabled);
                 setP('video-tv-4k-path', d.tv_4k_path);
                 refreshVideoFolders();
+                loadImportFolder();
                 loadDriveMap();
                 loadLibraries();
                 _videoMode = d.download_mode || 'soulseek';
@@ -983,6 +984,32 @@
                 return true;
             })
             .catch(function () { return false; });
+    }
+
+    // the import folder (#2129) has its own endpoint: the Import page reads and
+    // flips the same settings
+    var IMPORT_FOLDER_URL = '/api/video/import/folder/settings';
+    function loadImportFolder() {
+        return fetch(IMPORT_FOLDER_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var p = document.getElementById('video-import-folder-path');
+                if (p) p.value = d.path || '';
+                var a = document.getElementById('video-import-folder-auto');
+                if (a) a.checked = !!d.auto;
+                if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+            })
+            .catch(function () {});
+    }
+    function saveImportFolder() {
+        var p = document.getElementById('video-import-folder-path');
+        var a = document.getElementById('video-import-folder-auto');
+        return fetch(IMPORT_FOLDER_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ path: p ? p.value : '', auto: !!(a && a.checked) }),
+        }).then(function (r) { if (!r.ok) throw new Error('save'); toast('Import folder saved', 'success'); })
+            .catch(function () { toast('Couldn\u2019t save the import folder', 'error'); });
     }
 
     function saveDownloads(silent) {
@@ -1399,6 +1426,10 @@
          'video-movies-4k-path', 'video-tv-4k-path'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
+        });
+        ['video-import-folder-path', 'video-import-folder-auto'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', saveImportFolder); }
         });
         // Remove Completed (usenet) saves when it changes, like the folders above.
         var urcSel = document.getElementById('video-usenet-remove-completed');
