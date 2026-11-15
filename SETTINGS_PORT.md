@@ -780,7 +780,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
+| Nov 15 | `31099f899` (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
 | Nov 15 | `ec8e0b660` (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
 | Nov 15 | `96ecf1d44` (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
 | Nov 15 | `44daafab3` (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
