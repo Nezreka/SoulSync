@@ -24218,6 +24218,15 @@ try:
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
 
+# the video import folder's automatic pass (#2129). it checks its own setting
+# every pass, so it costs a sleep when the folder isn't set up.
+try:
+    from core.video.import_folder import ensure_started as _ensure_video_import_folder
+    from api.video import get_video_db as _get_video_db_for_import
+    _ensure_video_import_folder(_get_video_db_for_import)
+except Exception:
+    logger.warning("could not start the video import folder worker", exc_info=True)
+
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
 # zero runtime SQL touches the legacy tables (enforced by

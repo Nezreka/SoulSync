@@ -1223,8 +1223,9 @@ def block_and_retry_failed(db) -> dict:
     fired at once started a search per row together, which is a flood of
     indexer calls for a list of 40. A title failed twice is searched once
     (the second finds the first's grab in flight and skips)."""
+    # an import folder row has no release to block: its file is in the folder (#2129)
     rows = [r for r in (db.failed_video_downloads() or [])
-            if str(r.get("kind") or "") != "youtube"]
+            if str(r.get("kind") or "") != "youtube" and str(r.get("source") or "") != "import"]
     blocked = 0
     for dl in rows:
         if dl.get("username") and dl.get("filename"):
@@ -2008,6 +2009,32 @@ def _spawn_requery(dl_id) -> None:
                      name="video-dl-requery-%s" % dl_id).start()
 
 
+_TERMINAL = ("completed", "cancelled", "import_failed")
+
+
+def settle_outcome(db, dl, upd) -> None:
+    """Persist an import's outcome on its row and do what a finished row does:
+    clear the wishlist rows it satisfies, snapshot it into history and fire the
+    completed / upgrade / import-failed events. Shared by the monitor and the
+    import folder (#2129), so a file dropped in by hand lands exactly like a
+    download. Raises if the row can't be written; the rest is best-effort."""
+    # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
+    # episode, not an upgrade, …). Terminal + needs manual import, NOT a download
+    # failure, so don't burn the retry budget re-downloading the same good file.
+    if upd.get("status") in _TERMINAL:
+        upd.setdefault("completed_at", _now())
+    db.update_video_download(dl["id"], **upd)
+    # A wished item that just landed: remove its row when it MEETS the
+    # quality cutoff, keep it when below (upgrade-until semantics).
+    if upd.get("status") == "completed":
+        _wishlist_obtained(db, dl, upd)
+    # Snapshot terminal outcomes into the permanent history (survives the
+    # queue cleanup; powers the History modal + smart post-download scan).
+    if upd.get("status") in _TERMINAL:
+        _archive_history(db, dl, upd)
+        _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
+
+
 def _tick(db) -> bool:
     """Poll the non-YouTube active downloads once. Returns True when any row
     was in flight (the caller keeps the fast poll cadence), False when the
@@ -2035,8 +2062,10 @@ def _tick(db) -> bool:
             _spawn_requery(d["id"])
     # 'searching' rows are owned by their requery thread; 'youtube' rows are owned by
     # their yt-dlp worker thread (no slskd transfer to match) — skip both here.
+    # 'import' rows belong to the import folder's own thread (#2129): there is
+    # no transfer behind them, so the slskd path would read them as vanished.
     active = [d for d in all_active
-              if d.get("status") != "searching" and d.get("source") != "youtube"]
+              if d.get("status") != "searching" and d.get("source") not in ("youtube", "import")]
     if not active:
         _misses.clear()
         _grace.clear()
@@ -2134,22 +2163,9 @@ def _tick(db) -> bool:
                 continue
             if _verdict in (stall.MOVED, stall.SEEDED):
                 upd["progress_at"] = _now()      # restart (or start) the clock
-        # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
-        # episode, not an upgrade, …). Terminal + needs manual import — NOT a download
-        # failure, so don't burn the retry budget re-downloading the same good file.
-        if upd.get("status") in ("completed", "cancelled", "import_failed"):
-            upd.setdefault("completed_at", _now())
         try:
-            db.update_video_download(dl["id"], **upd)
-            # A wished item that just landed: remove its row when it MEETS the
-            # quality cutoff, keep it when below (upgrade-until semantics).
-            if upd.get("status") == "completed":
-                _wishlist_obtained(db, dl, upd)
-            # Snapshot terminal outcomes into the permanent history (survives the
-            # queue cleanup; powers the History modal + smart post-download scan).
-            if upd.get("status") in ("completed", "cancelled", "import_failed"):
-                _archive_history(db, dl, upd)
-                _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
+            settle_outcome(db, dl, upd)
+            if upd.get("status") in _TERMINAL:
                 # The importer proved the FILE ITSELF is junk (sample/corrupt/fake):
                 # blocklist the exact release so no search ever re-picks it. Context
                 # rejects (pack / wrong episode / not-an-upgrade) are NOT tagged.

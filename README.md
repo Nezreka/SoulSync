@@ -450,6 +450,7 @@ Plus a background YouTube upload-date enricher.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.
 - **Failed download handling**: a release SABnzbd or the torrent client fails is blocklisted and the next one your profile ranks is grabbed right away, with a notification only when nothing else could be taken.
+- **Import folder**: drop movies, episodes or whole show folders in one folder. SoulSync works out what each is, shows the TMDB match and how sure it is, and imports on approval (or on its own for sure matches) through the same importer as downloads.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management, the same setup as the music side.
 

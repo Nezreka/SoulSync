@@ -10,13 +10,19 @@
  * Reads /api/video/import/failed; resolves via /import/<id>/place + /dismiss; the
  * identity picker reuses /api/video/search. Polls every 5s while shown, like the
  * music page. Self-contained IIFE, no globals.
+ *
+ * Above that queue sits the import folder (#2129): /api/video/import/folder lists
+ * what is in it and what SoulSync thinks each entry is; Import sends it through
+ * the download importer (/import/folder/import), Change… opens the same picker.
  */
 (function () {
     'use strict';
 
     var PAGE_ID = 'video-import';
     var POLL_MS = 5000;
-    var state = { loaded: false, items: [], resolve: null, expanded: {} };
+    var state = { loaded: false, items: [], resolve: null, expanded: {},
+        folder: { loaded: false, path: '', auto: false, items: [], error: null } };
+    var _lastFolderSig = null;
     var pollTimer = null;
     var searchTimer = null;
     var _lastSig = null;
@@ -52,6 +58,7 @@
 
     // ── needs-attention list ──────────────────────────────────────────────────
     function load() {
+        loadFolder();
         fetch('/api/video/import/failed', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -60,6 +67,157 @@
                 render();
             })
             .catch(function () { state.loaded = true; render(); });
+    }
+
+    // ── import folder (#2129) ─────────────────────────────────────────────────
+    function loadFolder() {
+        fetch('/api/video/import/folder', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var f = state.folder;
+                f.loaded = true;
+                f.path = (d && d.path) || '';
+                f.auto = !!(d && d.auto);
+                f.items = (d && d.items) || [];
+                f.error = (d && d.error) || (d ? null : 'Couldn\u2019t read the import folder');
+                renderFolder();
+            })
+            .catch(function () { state.folder.loaded = true; state.folder.error = 'Couldn\u2019t read the import folder'; renderFolder(); });
+    }
+
+    // what an entry is, in a few words: "Movie", "S02E03", "12 episodes, 2 seasons"
+    function folderWhat(it) {
+        var g = it.guess || {};
+        if (g.scope === 'movie') return 'Movie';
+        if (g.scope === 'episode') {
+            return (g.season != null && g.episode != null) ? 'S' + pad2(g.season) + 'E' + pad2(g.episode) : 'Episode';
+        }
+        var eps = g.episodes || [];
+        var seasons = {};
+        eps.forEach(function (k) { seasons[k[0]] = 1; });
+        var ns = Object.keys(seasons).length;
+        if (!eps.length) return 'Show, no episode numbers found';
+        return eps.length + ' episode' + (eps.length === 1 ? '' : 's') +
+            (ns > 1 ? ', ' + ns + ' seasons' : ', season ' + Object.keys(seasons)[0]);
+    }
+
+    // the one chip that says where it stands, most urgent first
+    function folderChip(it) {
+        var m = it.match || {};
+        if (it.importing) return ['other', 'Importing\u2026'];
+        if (it.partial) return ['sample', 'Still copying'];
+        if (it.tried) return ['corrupt', 'Didn\u2019t import'];
+        if (m.confidence === 'high') return ['upgrade', 'Sure match'];
+        if (m.confidence === 'low') return ['identify', 'Check the match'];
+        return ['identify', 'No match'];
+    }
+
+    function folderCard(it) {
+        var g = it.guess || {};
+        var m = it.match || {};
+        var ep = g.kind === 'show';
+        var chip = folderChip(it);
+        var title = m.title || g.title || it.name;
+        var year = m.title ? m.year : g.year;
+        var art = m.poster_url
+            ? '<div class="vimp-art"><img src="' + esc(m.poster_url) + '" alt="" loading="lazy" ' +
+              'onerror="this.parentNode.classList.add(\'vimp-art--none\');this.remove()">' +
+              '<span class="vimp-art-badge">' + (ep ? '📺' : '🎬') + '</span></div>'
+            : '<div class="vimp-art vimp-art--none">' + (ep ? '📺' : '🎬') +
+              '<span class="vimp-art-badge">' + (ep ? '📺' : '🎬') + '</span></div>';
+        var note = it.tried ? (it.tried.error || 'It\u2019s still here after an import') : (m.why || '');
+        var canImport = !!m.tmdb_id && !it.partial && !it.importing;
+        return '<div class="vimp-card vimp-card--folder" data-vimp-fcard="' + esc(it.key) + '" data-vtype="' + (ep ? 'tv' : 'movie') + '">' +
+            '<div class="vimp-card-row">' + art +
+                '<div class="vimp-card-main">' +
+                    '<div class="vimp-card-title" title="' + esc(title) + '">' + esc(title) +
+                        (year ? ' <span class="vimp-card-year">(' + esc(year) + ')</span>' : '') + '</div>' +
+                    '<div class="vimp-card-meta">' +
+                        '<span class="vimp-rchip vimp-rchip--' + chip[0] + '">' + esc(chip[1]) + '</span>' +
+                        '<span class="vimp-qchip">' + esc(folderWhat(it)) + '</span>' +
+                        '<span class="vimp-card-file" title="' + esc(it.path) + '">' + esc(it.name) + '</span>' +
+                    '</div>' +
+                    (note ? '<div class="vimp-folder-why">' + esc(note) + '</div>' : '') +
+                '</div>' +
+                '<div class="vimp-card-side">' +
+                    '<span class="vimp-card-size">' + esc(fmtSize(it.size)) + '</span>' +
+                    '<button class="vimp-btn vimp-btn--ghost" type="button" data-vimp-fchange="' + esc(it.key) + '"' +
+                        (it.importing ? ' disabled' : '') + '>Change&hellip;</button>' +
+                    '<button class="vimp-btn vimp-btn--place" type="button" data-vimp-fimport="' + esc(it.key) + '"' +
+                        (canImport ? '' : ' disabled') + '>' + PLACE_SVG + ' Import</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }
+
+    function renderFolder(force) {
+        var f = state.folder;
+        var list = $('[data-vimp-folder-list]');
+        var note = $('[data-vimp-folder-note]');
+        var pathEl = $('[data-vimp-folder-path]');
+        var auto = $('[data-vimp-auto]');
+        if (!list) return;
+        if (pathEl) pathEl.textContent = f.path || '';
+        updateCount();
+        if (auto) { auto.checked = f.auto; auto.disabled = !f.path; }
+        var sig = JSON.stringify([f.path, f.items, f.error]);
+        if (!force && sig === _lastFolderSig) return;
+        _lastFolderSig = sig;
+        var msg = '';
+        if (!f.loaded) msg = '';
+        else if (!f.path) msg = 'No import folder yet. Set one in Settings, Library, Video folders, then drop movies or episodes in it.';
+        else if (f.error) msg = f.error;
+        else if (!f.items.length) msg = 'Nothing in the import folder. Drop movie or episode files (or folders) in it and they show up here.';
+        if (note) { note.textContent = msg; note.hidden = !msg; }
+        list.innerHTML = f.items.map(folderCard).join('');
+    }
+
+    // the badge by the title: everything on the page waiting on you
+    function updateCount() {
+        var count = $('[data-vimp-count]');
+        var n = state.items.length + state.folder.items.length;
+        if (count) count.textContent = n ? String(n) : '';
+    }
+
+    function folderItem(key) {
+        for (var i = 0; i < state.folder.items.length; i++)
+            if (String(state.folder.items[i].key) === String(key)) return state.folder.items[i];
+        return null;
+    }
+
+    function folderImport(key, override) {
+        var body = { key: key };
+        if (override) for (var k in override) body[k] = override[k];
+        return fetch('/api/video/import/folder/import', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(body),
+        }).then(function (r) { return r.json().catch(function () { return null; }); })
+            .then(function (d) {
+                if (d && d.success) { toast('Importing \u201c' + key + '\u201d', 'info'); loadFolder(); return true; }
+                toast((d && d.error) || 'Couldn\u2019t import it', 'error');
+                return false;
+            })
+            .catch(function () { toast('Couldn\u2019t import it', 'error'); return false; });
+    }
+
+    function saveAuto(on) {
+        fetch('/api/video/import/folder/settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ auto: !!on }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) { toast('Couldn\u2019t save', 'error'); return; }
+                state.folder.auto = !!d.auto;
+                toast(d.auto ? 'Sure matches import on their own now' : 'Nothing imports until you say so', 'success');
+            })
+            .catch(function () { toast('Couldn\u2019t save', 'error'); });
+    }
+
+    function onFolderClick(e) {
+        var imp = e.target.closest('[data-vimp-fimport]');
+        if (imp) { if (!imp.disabled) { imp.disabled = true; folderImport(imp.getAttribute('data-vimp-fimport')); } return; }
+        var ch = e.target.closest('[data-vimp-fchange]');
+        if (ch) { var it = folderItem(ch.getAttribute('data-vimp-fchange')); if (it) openResolveFolder(it); return; }
     }
 
     function isEpisode(it) { return it.scope === 'episode' || it.kind === 'show'; }
@@ -145,10 +303,9 @@
         var grid = $('[data-vimp-grid]');
         var loading = $('[data-vimp-loading]');
         var empty = $('[data-vimp-empty]');
-        var count = $('[data-vimp-count]');
         if (!grid) return;
         if (loading) loading.classList.toggle('hidden', state.loaded);
-        if (count) count.textContent = state.items.length ? String(state.items.length) : '';
+        updateCount();
         if (!state.loaded) { grid.innerHTML = ''; return; }
         // The 5s poll re-renders the whole grid; skip when nothing changed so an
         // open drawer (or a text selection) never blinks away under the user.
@@ -178,6 +335,27 @@
             query: item.title || basename(item.file) || '',
             results: [], picked: null, season: item.season || '', episode: item.episode || '',
             searching: false,
+        };
+        ensureModal();
+        renderModal();
+        runSearch();
+        var input = $('[data-vimp-q]');
+        if (input) { input.value = state.resolve.query; input.focus(); }
+    }
+
+    // the same picker, for an import folder entry: a show folder is the whole
+    // series, so it needs no season or episode
+    function openResolveFolder(it) {
+        var g = it.guess || {};
+        var m = it.match || {};
+        state.resolve = {
+            item: { file: it.path, reason: m.why || '', title: g.title },
+            folderKey: it.key,
+            series: g.scope === 'series',
+            kind: g.kind === 'show' ? 'episode' : 'movie',
+            query: g.title || it.name || '',
+            results: [], picked: null, season: g.season != null ? g.season : '',
+            episode: g.episode != null ? g.episode : '', searching: false,
         };
         ensureModal();
         renderModal();
@@ -242,12 +420,18 @@
         var r = state.resolve;
         if (!r) return;
         var fileEl = $('[data-vimp-modal-file]');
-        if (fileEl) fileEl.textContent = basename(r.item.file) + ' — ' + (r.item.reason || '');
+        if (fileEl) fileEl.textContent = basename(r.item.file) + (r.item.reason ? ': ' + r.item.reason : '');
+        var head = $('.vimp-modal-title');
+        if (head) head.textContent = r.folderKey ? 'What is this?' : 'Place this file';
+        var epTab = $('[data-vimp-kind="episode"]');
+        if (epTab) epTab.textContent = r.series ? 'Show' : 'Episode';
         var tabs = document.querySelectorAll('[data-vimp-kind]');
         for (var i = 0; i < tabs.length; i++)
             tabs[i].classList.toggle('vimp-kindtab--on', tabs[i].getAttribute('data-vimp-kind') === r.kind);
         var ep = $('[data-vimp-ep]');
-        if (ep) ep.hidden = !(r.kind === 'episode' && r.picked);
+        if (ep) ep.hidden = !(r.kind === 'episode' && r.picked && !r.series);
+        var go = $('[data-vimp-confirm]');
+        if (go && !r.placing) go.textContent = r.folderKey ? 'Import' : 'Place file';
         var sEl = $('[data-vimp-season]'); if (sEl && r.season !== '') sEl.value = r.season;
         var eEl = $('[data-vimp-episode]'); if (eEl && r.episode !== '') eEl.value = r.episode;
         renderHero();
@@ -309,7 +493,7 @@
         var btn = $('[data-vimp-confirm]');
         var r = state.resolve;
         if (!btn || !r) return;
-        var ok = !!r.picked && (r.kind === 'movie' ||
+        var ok = !!r.picked && (r.kind === 'movie' || r.series ||
             (r.kind === 'episode' && r.season !== '' && r.episode !== ''));
         btn.disabled = !ok;
     }
@@ -358,6 +542,7 @@
     function place() {
         var r = state.resolve;
         if (!r || !r.picked) return;
+        if (r.folderKey) { importPicked(r); return; }
         var body = {
             scope: r.kind, media_id: r.picked.media_id,
             title: r.picked.title, year: r.picked.year ? parseInt(r.picked.year, 10) : null,
@@ -379,6 +564,26 @@
             })
             .catch(function () { toast('Couldn’t place the file', 'error');
                 if (btn) { btn.disabled = false; btn.textContent = 'Place file'; } });
+    }
+
+    function importPicked(r) {
+        var body = {
+            tmdb_id: r.picked.media_id, kind: r.kind === 'episode' ? 'show' : 'movie',
+            title: r.picked.title, year: r.picked.year ? parseInt(r.picked.year, 10) : null,
+            poster_url: r.picked.poster || null,
+        };
+        if (r.kind === 'episode' && !r.series) {
+            body.season = parseInt(r.season, 10);
+            body.episode = parseInt(r.episode, 10);
+        }
+        var btn = $('[data-vimp-confirm]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+        r.placing = true;
+        folderImport(r.folderKey, body).then(function (ok) {
+            r.placing = false;
+            if (ok) closeResolve();
+            else if (btn) { btn.disabled = false; btn.textContent = 'Import'; }
+        });
     }
 
     function _dismissCall(id, del, doneMsg) {
@@ -478,6 +683,10 @@
         if (grid) grid.addEventListener('click', onGridClick);
         var refresh = $('[data-vimp-refresh]');
         if (refresh) refresh.addEventListener('click', load);
+        var flist = $('[data-vimp-folder-list]');
+        if (flist) flist.addEventListener('click', onFolderClick);
+        var autoBox = $('[data-vimp-auto]');
+        if (autoBox) autoBox.addEventListener('change', function () { saveAuto(autoBox.checked); });
         // The resolve modal is created on demand; delegate from the document.
         document.addEventListener('click', function (e) {
             if (state.resolve && e.target.closest('[data-vimp-modal]')) {

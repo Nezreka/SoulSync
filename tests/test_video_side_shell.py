@@ -58,7 +58,7 @@ _ALLOWED_WINDOW = {
     "window._vdpgAnyActive", "window._reduceEffectsActive",
     # standard DOM / browser APIs
     "window.location", "window.history", "window.matchMedia", "window.addEventListener",
-    "window.removeEventListener", "window.innerWidth", "window.confirm",
+    "window.removeEventListener", "window.innerWidth", "window.innerHeight", "window.confirm",
 }
 
 

@@ -1369,19 +1369,41 @@ registerDocsSection({
     icon: '🎬',
     pages: [
         {
+            id: 'vimp-folder',
+            title: 'Import Folder',
+            lede: 'Drop movies and episodes in one folder and SoulSync files them into your libraries.',
+            body: `
+The video side's answer to the music **Import** page. Set an **Import folder** under **Settings → Library → Video folders**, then drop movie or episode files (or whole folders) in it. Open **Import** in the sidebar to see what SoulSync found.
+
+For each file or folder it reads the names with the same release parser the downloads use, then finds the title on TMDB:
+
+- a loose file with \`S02E03\` in its name is that **episode**,
+- a folder whose files carry episode numbers is a **show** (every season in it),
+- anything else is a **movie** (the largest video in a folder, never the sample).
+
+Each entry shows the title it matched and how sure it is: **Sure match** (the title and year agree), **Check the match**, or **No match**. Press **Import** to bring it in as shown, or **Change…** to pick the right title (and the season and episode for a loose file).
+
+Imports go through the same importer a finished download uses: your naming template, the Movies / TV / anime / 4K library the title belongs in, upgrade and replace rules, subtitles beside the file, NFO and artwork, the wishlist and the download history. A file the importer refuses (a sample, not an upgrade) moves to **Needs a hand** below, where you can place it by hand.
+
+> [!TIP]
+> Tick **Import sure matches automatically** and a sure match is imported on its own once it has finished copying in, like the music side's auto-import. Anything SoulSync isn't sure about waits for you.
+
+> [!NOTE]
+> Keep the import folder apart from your download folder. Imported files leave the folder; what's left (an nfo, a sample) stays for you to clear.
+`
+        },
+        {
             id: 'vimp-failed',
-            title: 'Failed Imports',
+            title: 'Needs a Hand',
             lede: 'When a download can\'t be placed automatically, put it where it belongs by hand.',
             body: `
-When a completed download can't be automatically placed into the library — ambiguous match, unexpected folder layout — it lands in **Failed Imports**. From there you can:
+When a completed download (or an import folder file) can't be placed into the library automatically (a sample, a wrong episode, not an upgrade), it lands under **Needs a hand** on the Import page. From there you can:
 
 - **Place** it manually into the correct title, or
 - **Dismiss** it if it doesn't belong in your library.
 
 > [!NOTE]
-> The Import page is hidden from the sidebar nav — you reach it through the **Manual Import** button on failed items in [Downloads](#video-downloads). Manual import placement mutates the library on disk, so it's **admin-only**.
-
-This is the video equivalent of the music side's manual import step.
+> Placing files changes the library on disk, so the Import page is **admin-only**.
 `
         },
     ]
