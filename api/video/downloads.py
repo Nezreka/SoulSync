@@ -475,7 +475,8 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
         pres = prowlarr_search(scope, title, source=source, query=typed,
                                max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                                indexer_names=_basic_indexer_names(body),
-                               indexer_ids=_library_indexers(body, scope))
+                               indexer_ids=_library_indexers(body, scope),
+                               any_category=bool(body.get("basic")))
     else:
         pres = prowlarr_search(scope, title, year=body.get("year"),
                                season=want_season, episode=want_episode, source=source,
@@ -483,6 +484,9 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
                                indexer_names=_basic_indexer_names(body),
                                alt_titles=_alt_search_titles(body),
                                indexer_ids=_library_indexers(body, scope),
+                               # the Releases tab searches every category, a tv
+                               # release must not be filtered out of it (#2127)
+                               any_category=bool(body.get("basic")),
                                **_external_ids(body))
     prowlarr_error = None
     if not pres.get("configured"):

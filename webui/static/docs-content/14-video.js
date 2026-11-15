@@ -265,6 +265,8 @@ Studios are also a discovery vector: if you love everything A24 puts out, follow
             title: 'Fresh Releases Board',
             lede: 'A live torrent board from EXT.to — cached, matched, and instant to open.',
             body: `
+The **Releases** tab on the Search page searches release names directly: with torrents on, every torrent indexer you have in Prowlarr (private trackers included) plus EXT.to, in every category, and says which indexers answered and with how many. **Show all** lists every result past the first 25.
+
 The **Fresh Releases** tab on the Search page is a live torrent board sourced from **EXT.to** — the Movies and TV torrent sections for Day, Week, and Month, parsed from the EXT.to homepage into rows carrying size, file count, age, seeders, and leechers.
 
 ## How the board stays warm
@@ -1435,7 +1437,7 @@ A hearing-impaired track counts for a plain request. A forced track never does, 
 
 **Forced subtitles.** Switch on **Also grab forced subtitles** to fetch a \`<video>.<lang>.forced.srt\` per language as well: just the lines for scenes in another language, for watching without full subtitles. Most titles have none, so these often stay missing. Whisper never makes forced tracks.
 
-**Retries and upgrades.** Misses retry in the background with backoff (1h, 2h, 4h … up to a week) within a per-provider **daily quota**. Downloaded subtitles are re-checked every 24h: if a clearly better one appears (it beats the current score by the upgrade delta) it replaces the old one, and if the subtitle disappeared from disk it's fetched again. Your own picks from **Search subtitles** (the **CC** button on a detail page) are never auto-replaced.
+**Retries and upgrades.** Misses retry in the background with backoff (1h, 2h, 4h … up to a week) within a per-provider **daily quota**. Downloaded subtitles are re-checked every 24h: if a clearly better one appears (it beats the current score by the upgrade delta) it replaces the old one, and if the subtitle disappeared from disk it's fetched again. Your own picks from **Search subtitles** (the **CC** button on a detail page) are never auto-replaced. When the file already has the language, as a sidecar or inside the video, **Search subtitles** says so, and those count as having it, so SoulSync does not keep searching. A track inside the video with no language tag counts by its title (Français, English SDH). Picture subtitles (PGS, VobSub) count too, but can't be saved as a separate file.
 
 **Your existing library.** New imports are covered automatically. For everything you already own (including titles added straight to Plex or Jellyfin), turn on the **Missing Subtitles** job on the **Tools** page. It checks the whole library on a schedule (weekly by default) with the rules above and queues what's missing; titles that already have subtitles are just recorded as had. Turn on its **Dry Run** setting to review first: you get one finding per movie or show, and approving one queues it.
 `

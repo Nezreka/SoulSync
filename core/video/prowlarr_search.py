@@ -270,7 +270,7 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
                     absolute: Any = None, series_type: Any = None,
                     max_wait_seconds: Any = None, indexer_names: Any = None,
                     alt: Any = None, alt_titles: Any = None, indexer_ids: Any = None,
-                    query: Any = None) -> dict:
+                    query: Any = None, any_category: bool = False) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
@@ -281,7 +281,8 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     search should say "busy" rather than hold a request worker for a minute.
 
     ``query``: words typed into manual search (#2121). Run as written, one text
-    search, nothing added: Prowlarr's own search box."""
+    search, nothing added: Prowlarr's own search box.
+    ``any_category``: no category filter, the Releases tab's search (#2127)."""
     client = _client()
     if not client.is_configured():
         return {"configured": False, "hits": []}
@@ -290,7 +291,7 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     # tracker, do not send Radarr/Sonarr category filters. Some Jackett/Prowlarr
     # public tracker adapters either ignore or reject those categories, which made
     # obvious searches like "interstellar" return zero on The Pirate Bay.
-    cats = [] if indexer_names else _categories(scope)
+    cats = [] if (indexer_names or any_category) else _categories(scope)
     target_ids = _indexer_ids_matching(indexer_names, want_proto)
     if target_ids == []:
         label = ", ".join(str(n) for n in (indexer_names if isinstance(indexer_names, (list, tuple, set)) else [indexer_names]))

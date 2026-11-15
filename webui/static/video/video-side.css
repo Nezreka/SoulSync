@@ -5729,6 +5729,9 @@ body[data-side="video"] #gsearch-aura {
     display: inline-flex; align-items: center; min-height: 22px; border-radius: var(--radius-sm); font-size: 10.5px; font-weight: 800;
 }
 .vsr-basic-query-label { color: rgba(255,255,255,0.42); text-transform: uppercase; letter-spacing: 0.06em; }
+/* every result past the first page of a releases source (#2127) */
+.vsr-basic-more { display: block; margin: 10px auto 0; }
+
 .vsr-basic-query-chip {
     max-width: min(360px, 100%); padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: rgba(255,255,255,0.68); background: rgba(0,0,0,0.18); border: 1px solid var(--white-a07);

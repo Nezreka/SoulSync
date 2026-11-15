@@ -48,17 +48,22 @@
     function clearQueryContext() { queryContext = null; renderQueryContext(); }
     var BASIC_SEARCH_SOURCES = {
         soulseek: { label: 'slskd', kind: 'Soulseek', source: 'soulseek' },
-        thepiratebay: { label: 'The Pirate Bay', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: 'thepiratebay' },
+        // every torrent indexer set up in Prowlarr, private trackers included.
+        // this used to be two hardcoded public trackers (The Pirate Bay, 1337x),
+        // so nothing else you had in Prowlarr was ever searched here (#2127)
+        prowlarr: { label: 'Torrent indexers', kind: 'Every Prowlarr torrent indexer', source: 'torrent' },
         extto: { label: 'EXT.to', kind: 'FlareSolverr torrent scraper', source: 'extto' },
-        '1337x': { label: '1337x', kind: 'Prowlarr torrent indexer', source: 'torrent', indexer: '1337x' },
         usenet: { label: 'Usenet', kind: 'Prowlarr usenet indexers', source: 'usenet' }
     };
-    var BASIC_TORRENT_SOURCES = ['thepiratebay', 'extto', '1337x'];
+    var BASIC_TORRENT_SOURCES = ['prowlarr', 'extto'];
+    var BASIC_SHOWN = 25;           // results a source shows before "Show all"
     var basicSeq = 0;
     var basicConfiguredSources = null;
     var basicConfigLoading = false;
     var basicActiveSource = null;
     var basicRowsBySource = {};   // source id -> the rows currently rendered for it
+    var basicAllRows = {};        // source id -> every row it returned
+    var basicShowAll = {};        // source id -> past the first BASIC_SHOWN
     var basicOpen = {};           // hit key -> expanded
     var basicDetail = {};         // ext.to detail url -> matched facts (or false = looked, nothing)
     var freshSeq = 0;
@@ -190,7 +195,8 @@
         var source = BASIC_SEARCH_SOURCES[sourceId] || {};
         return {
             scope: 'movie', title: q, source: source.source || 'torrent', indexer: source.indexer || null,
-            year: null, season: null, episode: null
+            year: null, season: null, episode: null,
+            basic: true   // every category: a release search is not just movies (#2127)
         };
     }
 
@@ -266,6 +272,23 @@
         var c = basicSourceCounts(rows, sourceId);
         if (!(rows || []).length) return 'No matches';
         return c.usable + ' usable / ' + c.review + ' review / ' + c.noLink + ' no link';
+    }
+
+    // Which indexers answered and with how many, busiest first, so every
+    // tracker in Prowlarr that had something shows up by name (#2127).
+    function basicIndexerHTML(rows) {
+        var counts = {}, order = [];
+        (rows || []).forEach(function (r) {
+            var name = String((r && r.username) || '').trim();
+            if (!name) return;
+            if (!counts[name]) { counts[name] = 0; order.push(name); }
+            counts[name] += 1;
+        });
+        if (order.length < 2) return '';
+        order.sort(function (a, b) { return counts[b] - counts[a] || (a < b ? -1 : 1); });
+        return '<span class="vsr-basic-query-label">From</span>' + order.map(function (n) {
+            return '<span class="vsr-basic-query-chip">' + esc(n) + ' ' + counts[n] + '</span>';
+        }).join('');
     }
 
     function basicQueryHTML(queries) {
@@ -481,7 +504,7 @@
         card.classList.toggle('is-searching', !done);
         if (state) state.innerHTML = done ? esc(label) : '<span class="vsr-basic-loader-dot" aria-hidden="true"></span>' + esc(label);
         if (countsHost) countsHost.innerHTML = basicSourceCountHTML(rows, sourceId, done);
-        if (queryHost) queryHost.innerHTML = basicQueryHTML(queries);
+        if (queryHost) queryHost.innerHTML = basicQueryHTML(queries) + (done ? basicIndexerHTML(rows) : '');
         var tabBtn = document.querySelector('[data-vsr-basic-source-tab="' + sourceId + '"]');
         var tab = tabBtn && tabBtn.querySelector('[data-vsr-basic-tab-count]');
         if (tabBtn) tabBtn.classList.toggle('is-searching', !done);
@@ -492,14 +515,25 @@
                 : '<span class="vsr-basic-loader" aria-hidden="true"><i></i><i></i><i></i></span><span>Searching this source...</span>') + '</div>';
             return;
         }
-        var shown = rows.slice(0, 12);
+        basicAllRows[sourceId] = rows;
+        basicPaintHits(hits, sourceId);
+    }
+
+    // The first BASIC_SHOWN, or all of them after "Show all". It used to stop at
+    // 12 with a "+N more" note and no way to see them (#2127).
+    function basicPaintHits(hits, sourceId) {
+        var rows = basicAllRows[sourceId] || [];
+        var shown = basicShowAll[sourceId] ? rows : rows.slice(0, BASIC_SHOWN);
         basicRowsBySource[sourceId] = shown;   // what the Identify buttons index into
         hits.innerHTML = shown.map(function (r, i) { return basicResultHTML(r, sourceId, i); }).join('') +
-            (rows.length > 12 ? '<div class="vsr-basic-source-note">+' + (rows.length - 12) + ' more results in this source</div>' : '');
+            (rows.length > shown.length ? '<button class="vsr-basic-ghost vsr-basic-more" type="button" data-vsr-basic-more="' +
+                esc(sourceId) + '">Show all ' + rows.length + ' results</button>' : '');
     }
 
     function runBasicSearch(q, sources) {
         var token = ++basicSeq;
+        basicShowAll = {};
+        basicAllRows = {};
         sources.forEach(function (id) {
             var card = document.querySelector('[data-vsr-basic-card="' + id + '"]');
             if (!card) return;
@@ -1845,6 +1879,15 @@
                     e.preventDefault();
                     var bq = $('[data-vsr-basic-query]');
                     if (bq) { try { bq.focus(); } catch (err) { /* ignore */ } }
+                    return;
+                }
+                var more = e.target.closest('[data-vsr-basic-more]');
+                if (more && results.contains(more)) {
+                    e.preventDefault();
+                    var moreId = more.getAttribute('data-vsr-basic-more');
+                    var moreHits = more.closest('[data-vsr-basic-hits]');
+                    basicShowAll[moreId] = true;
+                    if (moreHits) basicPaintHits(moreHits, moreId);
                     return;
                 }
                 var st = e.target.closest('[data-vsr-basic-source-tab]');
