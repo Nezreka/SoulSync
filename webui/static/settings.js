@@ -98,8 +98,8 @@ function debouncedAutoSaveSettings(event) {
     if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     // autosave switched off in System: the change waits for the save button.
-    // the switch itself always saves, or turning it back on would need a click
-    if (window._settingsAutosaveOff === true && event?.target?.id !== 'settings-autosave-enabled') {
+    // (the switch itself is React and saves itself, system-tab.tsx)
+    if (window._settingsAutosaveOff === true) {
         settingsAutoSaveTimer = null;
         setSettingsSaveState('pending');
         return;
@@ -108,11 +108,8 @@ function debouncedAutoSaveSettings(event) {
     setSettingsSaveState('pending');
 }
 
-// the autosave switch (System tab). flips the flag right away so the very
-// next change already follows it
-function handleSettingsAutosaveToggle(event) {
-    window._settingsAutosaveOff = event.target.checked === false;
-}
+// the autosave switch is React (system-tab.tsx): it flips
+// window._settingsAutosaveOff itself
 
 function handleManualSaveClick() {
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
@@ -457,8 +454,6 @@ function initializeSettings() {
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
         });
-        document.getElementById('settings-autosave-enabled')
-            ?.addEventListener('change', handleSettingsAutosaveToggle);
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
@@ -934,10 +929,7 @@ function switchSettingsTab(tab) {
         const hasVisible = Array.from(col.querySelectorAll('.settings-group[data-stg]')).some(g => g.style.display !== 'none');
         col.style.display = hasVisible ? '' : 'none';
     });
-    // Load DB maintenance info when switching to Advanced tab
-    if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
-        try { loadDbMaintenanceInfo(); } catch (e) { }
-    }
+    // DB maintenance info loads itself on arriving at System (system-tab.tsx)
     // (the yt-dlp tile loads itself in the React YouTube panel: on arriving at
     // Sources and on opening YouTube)
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
@@ -1657,7 +1649,7 @@ async function loadSettingsData() {
         // panel is React (source-panels-more.tsx)
 
         // Populate Database settings
-        document.getElementById('max-workers').value = settings.database?.max_workers || '5';
+        // max_workers: the System tab is React (system-tab.tsx)
 
         // Post-Processing: React (library-processing.tsx)
         loadMusicBrainzServerSettings(settings);
@@ -1699,31 +1691,14 @@ async function loadSettingsData() {
 
         // autosave switch, on unless switched off. the form was just reloaded,
         // so an unsaved mark left over from a manual-save visit is stale
+        // (the switch itself is React, system-tab.tsx; the flag is the page's)
         const autosaveOn = settings.ui_appearance?.settings_autosave !== false;
-        const autosaveCheckbox = document.getElementById('settings-autosave-enabled');
-        if (autosaveCheckbox) autosaveCheckbox.checked = autosaveOn;
         window._settingsAutosaveOff = !autosaveOn;
         if (document.getElementById('save-settings')?.dataset.state === 'pending' && !settingsAutoSaveTimer) {
             setSettingsSaveState('idle');
         }
 
-        // Populate Logging information
-        const logLevelSelect = document.getElementById('log-level-select');
-        if (logLevelSelect) logLevelSelect.value = settings.logging?.level || 'INFO';
-        document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
-
-        // (the discovery lookback and hemisphere load with their React tab)
-
-        // Load current log level
-        try {
-            const logLevelResponse = await fetch('/api/settings/log-level');
-            const logLevelData = await logLevelResponse.json();
-            if (logLevelData.success && logLevelData.level) {
-                document.getElementById('log-level-select').value = logLevelData.level;
-            }
-        } catch (error) {
-            console.error('Error loading log level:', error);
-        }
+        // Logging: the System tab is React (system-tab.tsx)
 
         // Load security settings
         try {
@@ -1903,30 +1878,7 @@ function _wireRedactedSecrets() {
     });
 }
 
-async function changeLogLevel() {
-    const selector = document.getElementById('log-level-select');
-    const level = selector.value;
-
-    try {
-        const response = await fetch('/api/settings/log-level', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ level: level })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showToast(`Log level changed to ${level}`, 'success');
-            console.log(`Log level changed to: ${level}`);
-        } else {
-            showToast(`Failed to change log level: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error changing log level:', error);
-        showToast('Failed to change log level', 'error');
-    }
-}
+// changeLogLevel: the System tab is React (system-tab.tsx)
 
 function updateMediaServerFields() {
     const serverType = document.getElementById('media-server-type').value;
@@ -2368,84 +2320,7 @@ async function toggleHydrabaseFromSettings() {
 
 // The live log viewer is React now: src/features/settings/tabs/logs-tab.tsx
 
-// ── Database Maintenance ──
-async function loadDbMaintenanceInfo() {
-    try {
-        const resp = await fetch('/api/database/maintenance/info');
-        const data = await resp.json();
-        if (!data.success) return;
-        const sizeEl = document.getElementById('db-size-display');
-        const freeEl = document.getElementById('db-freepages-display');
-        const vacEl = document.getElementById('db-autovacuum-display');
-        if (sizeEl) sizeEl.textContent = data.total_size_display;
-        if (freeEl) freeEl.textContent = data.free_pages > 0
-            ? `${data.free_pages.toLocaleString()} (${data.free_size_display} reclaimable)`
-            : 'None — database is fully compacted';
-        if (vacEl) vacEl.textContent = data.auto_vacuum_label;
-        // Hide enable button if already incremental
-        const incBtn = document.getElementById('db-incvacuum-btn');
-        if (incBtn && data.auto_vacuum === 2) {
-            incBtn.textContent = 'Incremental Vacuum Enabled';
-            incBtn.disabled = true;
-            incBtn.style.opacity = '0.5';
-        }
-    } catch (e) { console.error('Error loading DB maintenance info:', e); }
-}
-
-async function runDatabaseVacuum() {
-    const btn = document.getElementById('db-vacuum-btn');
-    const status = document.getElementById('db-vacuum-status');
-    if (!confirm('This will compact the database by rewriting it. The database will be locked during this operation. For large databases this may take over a minute. Continue?')) return;
-    btn.disabled = true;
-    btn.textContent = 'Compacting...';
-    if (status) { status.style.display = 'block'; status.style.background = 'rgba(255,255,255,0.04)'; status.style.color = 'rgba(255,255,255,0.6)'; status.textContent = 'Running VACUUM — this may take a while...'; }
-    try {
-        const resp = await fetch('/api/database/maintenance/vacuum', { method: 'POST' });
-        const data = await resp.json();
-        if (data.success) {
-            showToast(`Database compacted in ${data.elapsed_seconds}s — saved ${data.saved_display}`, 'success');
-            if (status) { status.style.color = '#4caf50'; status.textContent = `Done in ${data.elapsed_seconds}s. Saved ${data.saved_display}.`; }
-            loadDbMaintenanceInfo();
-        } else {
-            showToast('Vacuum failed: ' + (data.error || 'Unknown error'), 'error');
-            if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + (data.error || 'Unknown error'); }
-        }
-    } catch (e) {
-        showToast('Vacuum failed: ' + e.message, 'error');
-        if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + e.message; }
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Compact Database (VACUUM)';
-    }
-}
-
-async function enableIncrementalVacuum() {
-    const btn = document.getElementById('db-incvacuum-btn');
-    const status = document.getElementById('db-vacuum-status');
-    if (!confirm('This will enable incremental vacuum mode. It requires a one-time full VACUUM to activate, which locks the database and may take over a minute on large databases. Continue?')) return;
-    btn.disabled = true;
-    btn.textContent = 'Enabling...';
-    if (status) { status.style.display = 'block'; status.style.background = 'rgba(255,255,255,0.04)'; status.style.color = 'rgba(255,255,255,0.6)'; status.textContent = 'Enabling incremental vacuum — this may take a while...'; }
-    try {
-        const resp = await fetch('/api/database/maintenance/enable-incremental-vacuum', { method: 'POST' });
-        const data = await resp.json();
-        if (data.success) {
-            const msg = data.already_enabled ? 'Already enabled' : `Enabled in ${data.elapsed_seconds}s — saved ${data.saved_display}`;
-            showToast(msg, 'success');
-            if (status) { status.style.color = '#4caf50'; status.textContent = msg; }
-            loadDbMaintenanceInfo();
-        } else {
-            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
-            if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + (data.error || 'Unknown error'); }
-        }
-    } catch (e) {
-        showToast('Failed: ' + e.message, 'error');
-        if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + e.message; }
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Enable Incremental Vacuum';
-    }
-}
+// Database Maintenance: the System tab is React (system-tab.tsx)
 
 async function activateDevMode() {
     const password = document.getElementById('dev-mode-password').value;
@@ -2893,9 +2768,7 @@ async function saveSettings(quiet = false) {
             // to migrate existing configs.
         },
         // qobuz (embed_tags, tags): the Post-Processing card is React
-        database: {
-            max_workers: parseInt(document.getElementById('max-workers').value)
-        },
+        // database: the System tab is React (system-tab.tsx)
         // metadata_enhancement: the Post-Processing card is React
         musicbrainz: {
             ...musicBrainzServerSettings,
@@ -2944,11 +2817,8 @@ async function saveSettings(quiet = false) {
             // relative_paths, entry_base_path, rewrite_from, rewrite_to: the
             // Folders card is React
         },
-        ui_appearance: {
-            // the Appearance tab is React and saves its own keys of this
-            // section (accent, visualizer, the four effect switches)
-            settings_autosave: _cfgBool('settings-autosave-enabled') !== false
-        },
+        // ui_appearance: the Appearance tab and the System tab's autosave
+        // switch are React and save their own keys of it
         // youtube: its Sources panel is React (source-panels-more.tsx)
         security: {
             require_pin_on_launch: _cfgBool('security-require-pin'),

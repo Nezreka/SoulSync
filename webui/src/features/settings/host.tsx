@@ -33,6 +33,7 @@ import { playlistItemError, templateErrors } from './tabs/organization';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
 import { SourcesTab } from './tabs/sources-tab';
+import { SystemTab } from './tabs/system-tab';
 
 export type SettingsTabKey =
   | 'connections'
@@ -80,6 +81,7 @@ declare global {
 
 /** A tab is added here in the change that ports it. */
 export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
+  advanced: SystemTab,
   appearance: AppearanceTab,
   discovery: DiscoveryTab,
   downloads: DownloadsTab,

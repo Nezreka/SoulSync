@@ -60,17 +60,17 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
-| Tab: System | not started | 63 controls and buttons |
+| Tab: System | **in progress** (step 9a below) | 5 of 63: Saving, Database Settings, Database Maintenance, Logging. Next: SoulSync API, Developer Mode, Artwork Cache, Developer, Experimental (9b); Security & Access (9c). |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts), 334 of 678 controls, 179 of 333 `settings.js` functions removed, 33 of 83 tests repointed (step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts) and System started, 339 of 678 controls, 184 of 333 `settings.js` functions removed, 33 of 83 tests repointed (step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 8,487 |
-| `webui/static/settings.js` | 10,187 | 4,711 |
+| `webui/index.html` | 12,823 | 8,342 |
+| `webui/static/settings.js` | 10,187 | 4,581 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -760,12 +760,27 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity of the whole slot against a frozen fixture, help words and the toggle row's space; `library-processing.test.tsx` 8; the playlist rule in `library-organization.test.tsx`. The whole frontend suite: 6 failures, 5 of them timeouts under load that pass alone, 1 the drift guard's id floor (now a marker check). The full Python run (94 files): 2,293 pass and 5 pins repointed (the playlist rule above, two count floors, the hifi save, the template wiring, the card order). Browser: every switch and its greyed state, the duration, the art list, the summary, 10 changes saved to the same server state (untouched keys aside), post-processing off; pixels 0.
 
+### Step 9a: System, part one: Saving, Database, Logging (Nov 15 2026)
+
+**What.** `tabs/system-tab.tsx` (tab key `advanced`), two slots: `saving` (the autosave switch) and `database` (Database Settings, Database Maintenance, Logging). Security & Access between them stays vanilla until 9c.
+
+**The autosave switch.** It flips `window._settingsAutosaveOff` at once (the page's autosave and the store both read it), saves `ui_appearance.settings_autosave` through the store, and when switched off it still saves itself after the usual 2 s (a flush), as the old switch did through the page save. `loadSettingsData` still sets the flag from the loaded settings.
+
+**Maintenance and logging.** Maintenance info loads on each arrival at System (it did in `switchSettingsTab`); Compact and Incremental ask first, show their status line and reload the info. The log level shows the saved level, then what the server runs at, and a change posts to `/api/settings/log-level` with its toast (not a settings key, so no page save).
+
+**Removed.** 5 functions (marked), their load lines and the tab-switch hook, the collector's `database` and `settings_autosave`.
+
+**Differences.** The switch saves only its own key; the old one set off a full page save (every section, and a re-send of the Quality and Discovery values).
+
+**Checked.** Parity of both slots against frozen fixtures; `system-tab.test.tsx` 7 (the switch's own save and the change it carries, holding while off, workers, maintenance on arrival, the confirm, the incremental button, the log level); `settings-autosave-toggle` and `settings-regroup-1822` repointed; the Python files near it pass. Browser: values, the switch saving `false`, a change held while off and saved by the button; pixels 0 on all four.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
 | Nov 15 | `ec8e0b660` (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
 | Nov 15 | `96ecf1d44` (step 8c) | **The Library Audiobooks panels are React**; the audiobook chain is read and written through the store, its three bridges gone; emptied template fields stay empty. |
 | Nov 15 | `44daafab3` (step 8b) | **The Library Organization card is React**, with the path preview; the store saves dotted keys; a bad template holds every save. |
@@ -1825,7 +1840,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `settings-autosave-enabled` | Save settings as I change them | both | no |
+| checkbox | `settings-autosave-enabled` | Save settings as I change them | both | yes (step 9a) |
 
 **🔑 Lock with a PIN simple · one shared PIN** (both, 5)
 
@@ -1882,20 +1897,20 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `max-workers` | Concurrent Workers: {3 / 4 / 5 / 6 / 7 / 8 / 9 …} | both | no |
+| select | `max-workers` | Concurrent Workers: {3 / 4 / 5 / 6 / 7 / 8 / 9 …} | both | yes (step 9a) |
 
 **Database Maintenance** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `db-vacuum-btn` | Compact Database (VACUUM) | both | no |
-| button | `db-incvacuum-btn` | Enable Incremental Vacuum | both | no |
+| button | `db-vacuum-btn` | Compact Database (VACUUM) | both | yes (step 9a) |
+| button | `db-incvacuum-btn` | Enable Incremental Vacuum | both | yes (step 9a) |
 
 **Logging** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `log-level-select` | Log Level: {DEBUG (Detailed) / INFO (Normal) / WARNING (Minimal) / ERROR (Critical Only)} | both | no |
+| select | `log-level-select` | Log Level: {DEBUG (Detailed) / INFO (Normal) / WARNING (Minimal) / ERROR (Critical Only)} | both | yes (step 9a) |
 
 **REST API Keys** (both, 4)
 
@@ -2003,7 +2018,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `_qpHandleProfileControlChange` | 116 | yes (step 6) |
 | `_isVideoOwnedField` | 125 | no |
 | `debouncedAutoSaveSettings` | 131 | no |
-| `handleSettingsAutosaveToggle` | 167 | no |
+| `handleSettingsAutosaveToggle` | 167 | yes (step 9a) |
 | `handleManualSaveClick` | 171 | no |
 | `setSettingsSaveState` | 191 | no |
 | `syncMetadataSourceSelection` | 214 | no |
@@ -2106,7 +2121,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `updatePlexConfigurationButtons` | 3263 | no |
 | `loadSettingsData` | 3282 | no |
 | `_wireRedactedSecrets` | 4212 | no |
-| `changeLogLevel` | 4238 | no |
+| `changeLogLevel` | 4238 | yes (step 9a) |
 | `updateMediaServerFields` | 4263 | no |
 | `showPlexConfiguration` | 4280 | no |
 | `showPlexSetup` | 4301 | no |
@@ -2203,9 +2218,9 @@ Every top-level function, with its line today. A function is removed when the la
 | `_logViewerReload` | 6449 | yes (step 3) |
 | `_logViewerCopy` | 6456 | yes (step 3) |
 | `_logViewerClear` | 6474 | yes (step 3) |
-| `loadDbMaintenanceInfo` | 6482 | no |
-| `runDatabaseVacuum` | 6505 | no |
-| `enableIncrementalVacuum` | 6532 | no |
+| `loadDbMaintenanceInfo` | 6482 | yes (step 9a) |
+| `runDatabaseVacuum` | 6505 | yes (step 9a) |
+| `enableIncrementalVacuum` | 6532 | yes (step 9a) |
 | `activateDevMode` | 6560 | no |
 | `hydrabaseToggleConnection` | 6590 | no |
 | `hydrabaseConnect` | 6598 | no |

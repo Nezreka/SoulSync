@@ -25,9 +25,18 @@ describe('where sections live', () => {
     ['Import Lists', 'discovery'],
     ['Video Quality', 'quality'],
     ['Video Preferences', 'library'],
-    ['Database Maintenance', 'advanced'],
   ])('%s is on %s', (heading, tab) => {
     expect(sectionTab(doc, heading)).toBe(tab);
+  });
+
+  it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {
+    const tab = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/system-tab.tsx'),
+      'utf8',
+    );
+    expect(tab).toContain("const TAB = 'advanced';");
+    expect(tab).toContain('title="Database Maintenance"');
+    expect(html).toContain('<div data-stg-react="advanced" data-stg-part="database"');
   });
 
   it('has a tab for every section tag and no tab left empty', () => {

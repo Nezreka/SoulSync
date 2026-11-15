@@ -14,7 +14,9 @@ import { extractFunction } from './vanilla-extract';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
 const SETTINGS = read('static/settings.js');
-const HTML = read('index.html');
+// the switch is React (SETTINGS_PORT.md step 9a); its own behaviour is run in
+// src/features/settings/tabs/system-tab.test.tsx
+const SWITCH = read('src/features/settings/tabs/system-tab.tsx');
 
 function labels(): string {
   const start = SETTINGS.indexOf('const SETTINGS_SAVE_LABELS = {');
@@ -36,8 +38,7 @@ ${labels()}
 ${extractFunction('setSettingsSaveState', SETTINGS)}
 ${extractFunction('_isVideoOwnedField', SETTINGS)}
 ${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
-${extractFunction('handleSettingsAutosaveToggle', SETTINGS)}
-return { debouncedAutoSaveSettings, handleSettingsAutosaveToggle };`;
+return { debouncedAutoSaveSettings };`;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const fns = new Function('window', 'setTimeout', 'clearTimeout', 'saveSettings', deps)(
     win,
@@ -49,7 +50,6 @@ return { debouncedAutoSaveSettings, handleSettingsAutosaveToggle };`;
     () => undefined,
   ) as {
     debouncedAutoSaveSettings: (event?: { target: Element | null }) => void;
-    handleSettingsAutosaveToggle: (event: { target: { checked: boolean } }) => void;
   };
   const change = (id: string) => {
     timers.length = 0;
@@ -109,25 +109,28 @@ describe('the settings autosave switch', () => {
   });
 
   it('the switch itself always saves, so it can be turned back on', () => {
-    const { change } = page(true);
-    expect(change('settings-autosave-enabled')).toBe(true);
+    // switched off, it saves itself after the usual wait all the same
+    expect(SWITCH).toContain(
+      'if (!checked) setTimeout(() => void store.flush(), AUTOSAVE_DELAY_MS);',
+    );
   });
 
   it('flipping the switch takes hold on the very next change', () => {
-    const { win, fns, change } = page(false);
-    fns.handleSettingsAutosaveToggle({ target: { checked: false } });
-    expect(win._settingsAutosaveOff).toBe(true);
+    // the switch flips the page's flag at once...
+    expect(SWITCH).toContain('shell()._settingsAutosaveOff = !checked;');
+    // ...and the page's autosave follows the flag on the next change
+    const { win, change } = page(false);
+    win._settingsAutosaveOff = true;
     expect(change('soulseek-url')).toBe(false);
-    fns.handleSettingsAutosaveToggle({ target: { checked: true } });
+    win._settingsAutosaveOff = false;
     expect(change('soulseek-url')).toBe(true);
   });
 
   it('is on the page, ticked by default, saved and loaded with the settings', () => {
-    expect(HTML).toMatch(/<input type="checkbox" id="settings-autosave-enabled" checked>/);
-    expect(SETTINGS).toContain(
-      "settings_autosave: _cfgBool('settings-autosave-enabled') !== false",
-    );
+    expect(SWITCH).toContain('id="settings-autosave-enabled"');
+    expect(SWITCH).toContain('(settings.ui_appearance || {}).settings_autosave !== false : true');
+    expect(SWITCH).toContain("store.set('ui_appearance', 'settings_autosave', checked);");
+    // the page's flag still comes from the loaded settings
     expect(SETTINGS).toContain('settings.ui_appearance?.settings_autosave !== false');
-    expect(SETTINGS).toContain(".addEventListener('change', handleSettingsAutosaveToggle)");
   });
 });
