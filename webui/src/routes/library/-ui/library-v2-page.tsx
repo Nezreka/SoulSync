@@ -277,7 +277,7 @@ import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
-import { ReviewLockButton } from './review-lock';
+import { ReviewLockButton, lockedPresence, useLockedIds } from './review-lock';
 import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
 import { UnmatchedReviewModal } from './unmatched-review-modal';
@@ -301,22 +301,36 @@ function TrackPresence({
   present,
   total,
   className = '',
+  locked = false,
 }: {
   present: number;
   total: number;
   className?: string;
+  /** #2119: a reviewed and locked album reads as finished */
+  locked?: boolean;
 }) {
-  const description = `${present} of ${total} tracks in your library`;
+  const shown = lockedPresence(present, total, locked);
+  const description = shown.locked
+    ? `${present} ${present === 1 ? 'track' : 'tracks'}, reviewed and locked` +
+      (total > present ? ` (${total} on the release)` : '')
+    : `${present} of ${total} tracks in your library`;
   return (
     <span
       className={`${styles.trackPresence} ${className}`}
       data-presence={
-        total === 0 ? 'unknown' : present >= total ? 'complete' : present > 0 ? 'partial' : 'empty'
+        shown.total === 0
+          ? 'unknown'
+          : shown.present >= shown.total
+            ? 'complete'
+            : shown.present > 0
+              ? 'partial'
+              : 'empty'
       }
+      data-locked={shown.locked ? '' : undefined}
       title={description}
       aria-label={description}
     >
-      {trackProgress(present, total)}
+      {trackProgress(shown.present, shown.total)}
     </span>
   );
 }
@@ -6145,6 +6159,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   const canWish = useLibraryV2CanWish();
   const previousArtist = Route.useSearch().artist;
   const openTrackArtist = useOpenTrackArtist();
+  const lockedIds = useLockedIds();
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
   // release as its own page did not, so a discography-only release (a
@@ -6286,7 +6301,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     ? profileLabel(album.quality_profile.name, album.quality_profile_source)
                     : 'No quality profile'}
                 </span>
-                <TrackPresence present={album.tracks_present} total={album.track_count} />
+                <TrackPresence
+                  present={album.tracks_present}
+                  total={album.track_count}
+                  locked={lockedIds.albums.has(album.id)}
+                />
 
                 {album.total_size_bytes > 0 ? (
                   <span className={styles.detailLabel}>
@@ -6873,11 +6892,17 @@ function providerCard(release: ProviderRelease): DiscographyCard {
 }
 
 /** The completion badge pinned to a card's corner (`library.js:2181-2220`). */
-function completionOverlay(card: DiscographyCard): {
+export function completionOverlay(
+  card: Pick<DiscographyCard, 'owned' | 'ownedTracks' | 'totalTracks'>,
+  locked = false,
+): {
   cls: string;
   label: string;
 } {
   if (card.owned === null) return { cls: 'checking', label: 'Checking…' };
+  // #2119: locked means done, so it reads like a finished album
+  if (locked && card.ownedTracks > 0)
+    return { cls: 'completed', label: `${card.ownedTracks}/${card.ownedTracks}` };
   if (card.totalTracks === 0)
     return { cls: card.owned ? 'completed' : 'missing', label: card.owned ? 'Owned' : 'Missing' };
   return {
@@ -6904,6 +6929,7 @@ function ReleaseCardGrid({
   /** play button and musicbrainz link, dev's release card extras */
   extras?: (card: DiscographyCard) => ReactNode;
 }) {
+  const lockedIds = useLockedIds();
   if (cards.length === 0) return null;
   return (
     <div className="releases-grid">
@@ -6912,7 +6938,7 @@ function ReleaseCardGrid({
           title: card.title,
           album_type: card.albumType,
         });
-        const overlay = completionOverlay(card);
+        const overlay = completionOverlay(card, lockedIds.albums.has(card.albumId ?? -1));
         const state = card.owned ? '' : card.owned === null ? ' checking' : ' missing';
         return (
           <div
@@ -9701,6 +9727,7 @@ function AlbumBlock({
 }) {
   const navigate = useNavigate();
   const openTrackArtist = useOpenTrackArtist();
+  const lockedIds = useLockedIds();
   const [open, setOpen] = useState(false);
   // Browser `dblclick` can span changing descendants (title, cover, empty row space) and its click
   // counter carries surprising state across rerenders. A timestamp owned by THIS album makes the
@@ -9779,6 +9806,7 @@ function AlbumBlock({
           className={styles.albumTrackCount}
           present={album.tracks_present}
           total={album.track_count}
+          locked={lockedIds.albums.has(album.id)}
         />
         <span className={styles.albumActions}>
           <AlbumPlayButton
