@@ -118,7 +118,7 @@ def _probe(path: Path, ffprobe: str) -> Optional[Tuple[float, str, str, str, str
              "-show_entries",
              "stream=codec_name,sample_rate,channels,profile:format=duration",
              "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_FFPROBE_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("Could not probe %s: %s", path.name, exc)
@@ -309,7 +309,7 @@ def _verify_output(output: Path, ffprobe: str, expected_seconds: float,
             # titles or tag formatting in the chapter metadata.
             [ffprobe, "-v", "error", "-show_entries", "chapter=id",
              "-of", "csv=p=0", str(output)],
-            capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_FFPROBE_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("Could not read chapters of %s: %s", output.name, exc)
@@ -455,7 +455,7 @@ def merge_book_files(folder: Any, files: Any, book: Any) -> List[str]:
                         "stream copy" if copy_ok else "AAC re-encode")
             try:
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
+                    cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_FFMPEG_TIMEOUT)
             except (OSError, subprocess.SubprocessError) as exc:
                 logger.warning("ffmpeg would not run for %s: %s", target.name, exc)
                 _remove_quietly(tmp_output)

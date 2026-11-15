@@ -84,7 +84,7 @@ def probe_decoded_duration(file_path: str, timeout: int = 180) -> float:
         proc = subprocess.run(
             [ff, '-hide_banner', '-nostdin', '-i', str(file_path),
              '-map', '0:a:0', '-f', 'null', '-'],
-            capture_output=True, text=True, timeout=timeout)
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
         return _parse_ffmpeg_time(proc.stderr)
     except Exception:   # noqa: BLE001 - probe failure is 'unknown', never a reject
         return 0.0

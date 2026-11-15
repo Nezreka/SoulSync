@@ -833,7 +833,7 @@ def downsample_hires_flac(final_path, context, enabled=None):
                 "-y", temp_path,
             ],
             capture_output=True,
-            text=True,
+            text=True, encoding='utf-8', errors='replace',
             timeout=300,
         )
 
@@ -993,7 +993,7 @@ def create_lossy_copy(final_path, settings=None):
             "-map_metadata", "0",
         ] + extra_args + ["-y", out_path]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
 
         if result.returncode == 0:
             logger.info(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
