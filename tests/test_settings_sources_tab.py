@@ -78,8 +78,27 @@ def tab():
 
 
 def _react_panels() -> str:
-    """the panels ported to React (step 7c on), one component per panel"""
-    return _read(_TABS + "source-panels.tsx")
+    """the panels ported to React (step 7c on), one component per panel: the
+    first seven in source-panels.tsx, the last four in source-panels-more.tsx"""
+    return _read(_TABS + "source-panels.tsx") + "\n" + _read(_TABS + "source-panels-more.tsx")
+
+
+def _react_dispatch(react: str) -> str:
+    """the two components that pick a slot's panels by part"""
+    return "\n".join(react.split(f"export function {name}(", 1)[1].split("\nexport ", 1)[0]
+                     for name in ("SourcePanels", "MoreSourcePanels"))
+
+
+def _panel_text(index: str, container_id: str) -> str:
+    """One panel's content, wherever it lives: its vanilla markup in index.html,
+    or, once ported, the React component that renders that container."""
+    if f'id="{container_id}"' in index:
+        return _panel_span(index, container_id)
+    react = _react_panels()
+    at = react.index(f'id="{container_id}"')
+    start = react.rindex("export function ", 0, at)
+    end = react.find("\nexport ", at)
+    return react[start:end if end != -1 else len(react)]
 
 
 def _react_slots(index: str, region: str) -> list[str]:
@@ -309,7 +328,7 @@ def test_the_panels_park_in_a_hidden_home(index):
         if f'id="{cid}"' in react:
             # the component that renders it is dispatched from a slot in the home
             comp = react[:react.index(f'id="{cid}"')].rsplit("export function ", 1)[1].split("(", 1)[0]
-            dispatch = react.split("export function SourcePanels(", 1)[1]
+            dispatch = _react_dispatch(react)
             parts = [part for part in slots if f"part === '{part}'" in dispatch
                      and f"<{comp}" in dispatch.split(f"part === '{part}'", 1)[1].split("return null", 1)[0]]
             assert parts, f"{cid} ({comp}) has no slot in the home div"
@@ -602,9 +621,9 @@ def test_the_scattered_config_moved_into_its_panel(index, container, marker):
     """Indexers, the torrent client and the usenet client each had their own
     collapsible section on the Downloads tab, while the Sources tab showed a
     tile that just said "configure it over there". The config is in the tile
-    now."""
-    assert f'id="{container}"' in index
-    assert marker in _panel_span(index, container), f"{marker} did not move into {container}"
+    now (a React panel since SETTINGS_PORT.md step 7g)."""
+    assert f'id="{container}"' in index or f'id="{container}"' in _react_panels()
+    assert marker in _panel_text(index, container), f"{marker} did not move into {container}"
 
 
 def test_the_old_downloads_tab_section_is_gone(index):
@@ -628,7 +647,7 @@ def test_the_status_dots_survived_the_move(index):
     for dot, container in (("prowlarr-status-dot", "prowlarr-settings-container"),
                            ("torrent-client-status-dot", "torrent-client-settings-container"),
                            ("usenet-client-status-dot", "usenet-client-settings-container")):
-        assert f'id="{dot}"' in _panel_span(index, container), dot
+        assert f'id="{dot}"' in _panel_text(index, container), dot
 
 
 def test_prowlarr_gets_a_tile_and_a_test(model):
@@ -664,15 +683,19 @@ def test_ytdlp_moved_in_with_youtube(index):
     """It was under Advanced. yt-dlp going stale is the single most common cause
     of YouTube downloads failing, so it belongs where somebody debugging YouTube
     will look."""
-    panel = _panel_span(index, "youtube-settings-container")
+    panel = _panel_text(index, "youtube-settings-container")
     assert "ytdlp-update-btn" in panel
     assert "ytdlp-installed" in panel
     assert 'id="ytdlp-hint-badge"' in panel      # the badge lived in the old header
 
 
 def test_the_moved_ytdlp_block_left_the_advanced_tab(index):
-    block = index.split('id="ytdlp-update-btn"', 1)[0][-2500:]
-    assert 'data-stg="advanced"' not in block
+    # the tile is in the React YouTube panel now (step 7g): it is not in the
+    # page markup at all, and the panel's slot sits in the Sources home
+    assert 'id="ytdlp-update-btn"' not in index
+    assert 'id="ytdlp-update-btn"' in _panel_text(index, "youtube-settings-container")
+    slot = index.index('data-stg-part="youtube"')
+    assert 'data-stg="advanced"' not in index[slot - 2500:slot]
 
 
 def test_the_filesystem_note_is_still_reachable(index):
@@ -716,7 +739,7 @@ def test_a_moved_panel_carries_no_stale_tab_attribute(index, container):
     The modal owns visibility now. A tab attribute inside a panel can only
     hide it.
     """
-    panel = _panel_span(index, container)
+    panel = _panel_text(index, container)
     assert 'data-stg="downloads"' not in panel
     assert 'data-stg=' not in panel, "a tab attribute inside a panel can only hide it"
 
@@ -724,7 +747,7 @@ def test_a_moved_panel_carries_no_stale_tab_attribute(index, container):
 @pytest.mark.parametrize("container,marker", sorted(_MOVED_IN.items()))
 def test_a_moved_panel_still_has_its_content(index, container, marker):
     # The empty-modal bug looked identical to the content not having moved.
-    panel = _panel_span(index, container)
+    panel = _panel_text(index, container)
     assert len(panel) > 1000, f"{container} looks empty"
     assert marker in panel
 

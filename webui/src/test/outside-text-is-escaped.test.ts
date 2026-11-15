@@ -48,13 +48,9 @@ const SITES: Array<[string, string[]]> = [
       'Error: ${escapeHtml(e.message)}',
     ],
   ],
-  [
-    'settings.js',
-    [
-      "${escapeHtml(data.error || 'Prowlarr not configured.')}",
-      'Failed to load indexers: ${escapeHtml(e.message)}',
-    ],
-  ],
+  // the Prowlarr indexer list that escaped these is React now (JSX escapes
+  // text itself, source-panels-more.tsx); settings.js still gets the RAW checks
+  ['settings.js', []],
   ['enrichment.js', ['Search error: ${escapeHtml(err.message)}']],
 ];
 

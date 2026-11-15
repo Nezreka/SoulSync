@@ -220,6 +220,11 @@ def test_automation_wiring_exists():
 
 
 def test_settings_ui_has_the_goal_fields():
-    assert 'id="music-seed-ratio"' in _INDEX and 'id="music-seed-hours"' in _INDEX
-    assert 'id="music-seed-remove-data"' in _INDEX
-    assert "seed_ratio_goal" in _SETTINGS_JS and "seed_time_goal_hours" in _SETTINGS_JS
+    # the torrent client panel is React now (SETTINGS_PORT.md step 7g)
+    panel = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(
+        encoding="utf-8")
+    torrent = panel.split("export function TorrentPanel(", 1)[1].split("\nexport function", 1)[0]
+    assert 'id="music-seed-ratio"' in torrent and 'id="music-seed-hours"' in torrent
+    assert 'id="music-seed-remove-data"' in torrent
+    assert "set('seed_ratio_goal'" in torrent and "set('seed_time_goal_hours'" in torrent
+    assert "store.set('torrent_client', key, value)" in torrent

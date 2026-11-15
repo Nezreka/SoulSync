@@ -1159,14 +1159,8 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
-    // The yt-dlp tile moved to the YouTube panel on the SOURCES tab - "it belongs
-    // where somebody debugging YouTube will actually look" - but this trigger
-    // stayed behind on Advanced. So the card sat on "Loading..." forever unless
-    // you happened to visit Advanced first, which is not a thing anyone does to
-    // read a version number. Load it wherever it now lives.
-    if ((tab === 'advanced' || tab === 'sources') && typeof loadYtdlpStatus === 'function') {
-        try { loadYtdlpStatus(); } catch (e) { }
-    }
+    // (the yt-dlp tile loads itself in the React YouTube panel: on arriving at
+    // Sources and on opening YouTube)
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
         try { loadImageCacheStatus(); } catch (e) { }
     }
@@ -1900,40 +1894,13 @@ window.openSourceConfig = openSourceConfig;
 // Chromium-family browsers seal their cookie store with App-Bound Encryption on
 // Windows, and yt-dlp cannot read it (yt-dlp issue 10927). Firefox is unaffected
 // — different storage, no DPAPI.
-const _ABE_BROWSERS = ['chrome', 'edge', 'brave', 'opera', 'vivaldi', 'chromium'];
 
 // Mark them rather than disable them, for a reason worth writing down: a
 // <select> whose SELECTED option is disabled reports value === '', so the next
 // auto-save would quietly write an empty cookie source over the user's setting.
 // Labelling warns everybody and destroys nobody's config.
-function markUnsupportedCookieBrowsers(isWindowsServer) {
-    const sel = document.getElementById('youtube-cookies-browser');
-    if (!sel) return;
-    sel.querySelectorAll('option').forEach(opt => {
-        const affected = isWindowsServer && _ABE_BROWSERS.includes(opt.value);
-        const base = opt.dataset.baseLabel || (opt.dataset.baseLabel = opt.textContent.trim());
-        opt.textContent = affected ? `${base} — not supported on Windows` : base;
-        opt.dataset.abeUnsupported = affected ? '1' : '';
-    });
-    updateCookieBrowserWarning();
-}
-window.markUnsupportedCookieBrowsers = markUnsupportedCookieBrowsers;
 
 // Say it at the moment of choosing, not when a download fails days later.
-function updateCookieBrowserWarning() {
-    const sel = document.getElementById('youtube-cookies-browser');
-    const box = document.getElementById('youtube-cookie-abe-warning');
-    if (!sel || !box) return;
-    const opt = sel.selectedOptions && sel.selectedOptions[0];
-    const bad = !!(opt && opt.dataset.abeUnsupported === '1');
-    box.hidden = !bad;
-    if (bad) {
-        box.textContent = `${opt.dataset.baseLabel || sel.value} seals its cookies with `
-            + 'App-Bound Encryption on Windows, which yt-dlp cannot read. This will not work. '
-            + 'Choose "Paste cookies.txt" instead, or "None" if you only download public videos.';
-    }
-}
-window.updateCookieBrowserWarning = updateCookieBrowserWarning;
 
 // ---- Preferred album-art sources (reuses the hybrid-source-list styling) ----
 const ART_SOURCES = [
@@ -2043,19 +2010,6 @@ async function loadArtSourceOrder(settings) {
         }
     });
     buildArtSourceList();
-}
-
-function updateYoutubeTranscodeBitrateOptions() {
-    const codec = document.getElementById('youtube-transcode-codec')?.value || 'mp3';
-    const bitrateSelect = document.getElementById('youtube-transcode-bitrate');
-    if (!bitrateSelect) return;
-    const opt320 = bitrateSelect.querySelector('option[value="320"]');
-    if (codec === 'opus') {
-        if (opt320) opt320.disabled = true;
-        if (bitrateSelect.value === '320') bitrateSelect.value = '256';
-    } else {
-        if (opt320) opt320.disabled = false;
-    }
 }
 
 function updatePlexConfigurationButtons() {
@@ -2320,74 +2274,8 @@ async function loadSettingsData() {
         // Profile (ranked targets) — the per-source quality selects were removed.
         // the HiFi instance list: its React panel reads it with the settings
         // deezer_download and lidarr_download: their Sources panels are React
-        const _prowUrl = document.getElementById('prowlarr-url');
-        const _prowKey = document.getElementById('prowlarr-api-key');
-        const _prowIds = document.getElementById('prowlarr-indexer-ids');
-        if (_prowUrl) _prowUrl.value = settings.prowlarr?.url || '';
-        if (_prowKey) _prowKey.value = settings.prowlarr?.api_key || '';
-        if (_prowIds) _prowIds.value = settings.prowlarr?.indexer_ids || '';
-        // #2061: the pacing knobs. ?? not ||: 0 is a real choice (off)
-        const _prowGap = document.getElementById('prowlarr-search-min-gap');
-        const _prowCap = document.getElementById('prowlarr-max-searches-per-minute');
-        if (_prowGap) _prowGap.value = settings.prowlarr?.search_min_gap_seconds ?? 2;
-        if (_prowCap) _prowCap.value = settings.prowlarr?.max_searches_per_minute ?? 20;
-        const _tcType = document.getElementById('torrent-client-type');
-        const _tcUrl = document.getElementById('torrent-client-url');
-        const _tcUser = document.getElementById('torrent-client-username');
-        const _tcPass = document.getElementById('torrent-client-password');
-        const _tcCat = document.getElementById('torrent-client-category');
-        const _tcPath = document.getElementById('torrent-client-save-path');
-        if (_tcType) _tcType.value = settings.torrent_client?.type || 'qbittorrent';
-        if (_tcUrl) _tcUrl.value = settings.torrent_client?.url || '';
-        if (_tcUser) _tcUser.value = settings.torrent_client?.username || '';
-        if (_tcPass) _tcPass.value = settings.torrent_client?.password || '';
-        if (_tcCat) _tcCat.value = settings.torrent_client?.category || 'soulsync';
-        if (_tcPath) _tcPath.value = settings.torrent_client?.save_path || '';
-        // #2087: start what SoulSync adds even when qBittorrent adds torrents stopped
-        const _tcStart = document.getElementById('torrent-client-start-torrents');
-        if (_tcStart) _tcStart.checked = settings.torrent_client?.start_torrents === true;
-        // Seeding goals (torrent grabs) — off (0) by default, mirrors the video side.
-        const _tcRatio = document.getElementById('music-seed-ratio');
-        const _tcHours = document.getElementById('music-seed-hours');
-        const _tcRemove = document.getElementById('music-seed-remove-data');
-        if (_tcRatio) _tcRatio.value = settings.torrent_client?.seed_ratio_goal != null ? settings.torrent_client.seed_ratio_goal : 0;
-        if (_tcHours) _tcHours.value = settings.torrent_client?.seed_time_goal_hours != null ? settings.torrent_client.seed_time_goal_hours : 0;
-        if (_tcRemove) _tcRemove.checked = settings.torrent_client?.seed_remove_data !== false;
-        const _tcSeedMode = document.getElementById('music-seed-mode');
-        if (_tcSeedMode) _tcSeedMode.value = settings.torrent_client?.seed_mode || 'soulsync';
-        // Stalled-torrent knobs live under download_source but render in the
-        // torrent client section. Timeout is stored in SECONDS, shown in MINUTES.
-        const _tcStall = document.getElementById('torrent-stall-timeout');
-        const _tcStallAct = document.getElementById('torrent-stall-action');
-        if (_tcStall) {
-            const secs = settings.download_source?.torrent_stall_timeout_seconds;
-            _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
-        }
-        if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
-        const _tcMinSeed = document.getElementById('torrent-min-seeders');
-        if (_tcMinSeed) {
-            const n = settings.download_source?.torrent_min_seeders;
-            _tcMinSeed.value = (n === undefined || n === null) ? 1 : Number(n);
-        }
-        const _tcDlPath = document.getElementById('torrent-download-path');
-        if (_tcDlPath) _tcDlPath.value = settings.download_source?.torrent_download_path || '';
-        const _ucType = document.getElementById('usenet-client-type');
-        const _ucUrl = document.getElementById('usenet-client-url');
-        const _ucKey = document.getElementById('usenet-client-api-key');
-        const _ucUser = document.getElementById('usenet-client-username');
-        const _ucPass = document.getElementById('usenet-client-password');
-        const _ucCat = document.getElementById('usenet-client-category');
-        if (_ucType) _ucType.value = settings.usenet_client?.type || 'sabnzbd';
-        if (_ucUrl) _ucUrl.value = settings.usenet_client?.url || '';
-        if (_ucKey) _ucKey.value = settings.usenet_client?.api_key || '';
-        if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
-        if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
-        if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
-        const _ucRemove = document.getElementById('music-usenet-remove-completed');
-        if (_ucRemove) _ucRemove.value = settings.usenet_client?.remove_completed || 'off';
-        const _ucDlPath = document.getElementById('usenet-download-path');
-        if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
-        if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
+        // prowlarr, torrent_client, usenet_client and their download_source
+        // keys: their Sources panels are React (source-panels-more.tsx)
         // The Connections tab's Deezer card holds the same ARL as the Deezer
         // source panel (React, source-panels.tsx). Typing here writes the
         // panel's key; the panel writes this field back.
@@ -2400,47 +2288,8 @@ async function loadSettingsData() {
             });
         }
 
-        // Populate YouTube settings
-        document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
-        markUnsupportedCookieBrowsers(!!(settings._environment && settings._environment.windows));
-        document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
-        const _ytAlbumBundle = document.getElementById('youtube-album-bundle');
-        if (_ytAlbumBundle) _ytAlbumBundle.checked = settings.download_source?.youtube_album_bundle === true;
-        const _ytTranscode = document.getElementById('youtube-transcode');
-        const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
-        if (_ytTranscode) {
-            _ytTranscode.checked = settings.youtube?.transcode !== false;
-            if (_ytTranscodeOpts) {
-                _ytTranscodeOpts.style.display = _ytTranscode.checked ? 'block' : 'none';
-            }
-        }
-        const _ytCodec = document.getElementById('youtube-transcode-codec');
-        if (_ytCodec) _ytCodec.value = settings.youtube?.transcode_codec || 'mp3';
-        const _ytBitrate = document.getElementById('youtube-transcode-bitrate');
-        if (_ytBitrate) _ytBitrate.value = settings.youtube?.transcode_bitrate || '320';
-        if (typeof updateYoutubeTranscodeBitrateOptions === 'function') {
-            updateYoutubeTranscodeBitrateOptions();
-        }
-        // Show the cookies.txt paste box only in "custom" mode. We never echo the
-        // stored cookie back to the UI (it's secret + lives in a file, not config);
-        // if one is already saved, say so via placeholder so a blank save won't wipe it.
-        const _ytCookieSel = document.getElementById('youtube-cookies-browser');
-        const _ytPasteBox = document.getElementById('youtube-cookies-paste');
-        const _ytPasteGroup = document.getElementById('youtube-cookies-paste-group');
-        if (_ytCookieSel && _ytPasteGroup) {
-            const _toggleYtPaste = () => {
-                _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
-            };
-            if (_ytPasteBox && settings.youtube?.cookies_file) {
-                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
-            }
-            _toggleYtPaste();
-            if (!_ytCookieSel.dataset.pasteToggleBound) {
-                _ytCookieSel.addEventListener('change', _toggleYtPaste);
-                _ytCookieSel.addEventListener('change', updateCookieBrowserWarning);
-                _ytCookieSel.dataset.pasteToggleBound = '1';
-            }
-        }
+        // youtube.* and download_source.youtube_album_bundle: the YouTube source
+        // panel is React (source-panels-more.tsx)
 
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
@@ -4130,33 +3979,8 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('hydrabase-api-key').value,
             auto_connect: document.getElementById('hydrabase-auto-connect').checked
         },
-        download_source: {
-            // mode, hybrid_primary, hybrid_secondary and hybrid_order: the
-            // download chain is React (sources-model.ts), and saves them
-            // stream_source, max_concurrent, source_search_timeout and
-            // max_mb_per_minute: the Downloads tab is React
-            // Stalled-torrent knobs (rendered in the torrent client section).
-            // UI is in MINUTES; stored in SECONDS. Blank/NaN → 10 min default;
-            // 0 stays 0 (disabled).
-            torrent_stall_timeout_seconds: (() => {
-                const m = parseInt(document.getElementById('torrent-stall-timeout')?.value, 10);
-                return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
-            })(),
-            torrent_stall_action: _cfgStr('torrent-stall-action', { fallback: 'abandon' }),
-            // #1139: don't queue a release nobody is serving. Blank/NaN → 1;
-            // 0 stays 0 (gate off).
-            torrent_min_seeders: (() => {
-                const n = parseInt(document.getElementById('torrent-min-seeders')?.value, 10);
-                return Number.isFinite(n) && n >= 0 ? n : 1;
-            })(),
-            // In-container path(s) where SoulSync reads finished torrent/usenet
-            // downloads (#857). Rendered in the torrent/usenet client sections.
-            torrent_download_path: _cfgStr('torrent-download-path'),
-            usenet_download_path: _cfgStr('usenet-download-path'),
-            // #1851: fetch an album through its YouTube Music playlist. Rendered
-            // in the YouTube section; it lives here because the album flow reads it.
-            youtube_album_bundle: _cfgBool('youtube-album-bundle'),
-        },
+        // download_source: every key is React now (the chain, the Downloads
+        // tab, and the YouTube, torrent and usenet source panels)
         tidal_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
@@ -4175,35 +3999,7 @@ async function saveSettings(quiet = false) {
             tags: _collectServiceTags('beatport')
         } : undefined,
         // deezer_download and lidarr_download: their Sources panels are React
-        prowlarr: {
-            url: _cfgStr('prowlarr-url'),
-            api_key: _cfgStr('prowlarr-api-key'),
-            indexer_ids: _cfgStr('prowlarr-indexer-ids'),
-            search_min_gap_seconds: _cfgFloat('prowlarr-search-min-gap', 2),
-            max_searches_per_minute: _cfgInt('prowlarr-max-searches-per-minute', 20),
-        },
-        torrent_client: {
-            type: _cfgStr('torrent-client-type', { fallback: 'qbittorrent' }),
-            url: _cfgStr('torrent-client-url'),
-            username: _cfgStr('torrent-client-username'),
-            password: _cfgStr('torrent-client-password'),
-            category: _cfgStr('torrent-client-category', { fallback: 'soulsync' }),
-            save_path: _cfgStr('torrent-client-save-path'),
-            start_torrents: !!(document.getElementById('torrent-client-start-torrents') || {}).checked,
-            seed_ratio_goal: _cfgFloat('music-seed-ratio', 0),
-            seed_time_goal_hours: _cfgInt('music-seed-hours', 0),
-            seed_remove_data: !!(document.getElementById('music-seed-remove-data') || {}).checked,
-            seed_mode: _cfgStr('music-seed-mode', { fallback: 'soulsync' }),
-        },
-        usenet_client: {
-            type: _cfgStr('usenet-client-type', { fallback: 'sabnzbd' }),
-            url: _cfgStr('usenet-client-url'),
-            api_key: _cfgStr('usenet-client-api-key'),
-            username: _cfgStr('usenet-client-username'),
-            password: _cfgStr('usenet-client-password'),
-            category: _cfgStr('usenet-client-category', { fallback: 'soulsync' }),
-            remove_completed: _cfgStr('music-usenet-remove-completed', { fallback: 'off' }),
-        },
+        // prowlarr, torrent_client and usenet_client: their Sources panels are React
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
             // future tier-2 OAuth wiring (Go+ session token) doesn't have
@@ -4398,16 +4194,7 @@ async function saveSettings(quiet = false) {
             // section (accent, visualizer, the four effect switches)
             settings_autosave: _cfgBool('settings-autosave-enabled') !== false
         },
-        youtube: {
-            cookies_browser: document.getElementById('youtube-cookies-browser').value,
-            download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
-            transcode: _cfgBool('youtube-transcode'),
-            transcode_codec: _cfgStr('youtube-transcode-codec', { fallback: 'mp3' }),
-            transcode_bitrate: _cfgStr('youtube-transcode-bitrate', { fallback: '320' }),
-            // Raw cookies.txt blob — backend validates, writes it to a file, and stores
-            // only the path (never echoed back). Blank = keep any already-saved file.
-            cookies_paste: _cfgStr('youtube-cookies-paste'),
-        },
+        // youtube: its Sources panel is React (source-panels-more.tsx)
         security: {
             require_pin_on_launch: _cfgBool('security-require-pin'),
             cors_origins: _cfgStr('security-cors-origins', { trim: true }),
@@ -5183,160 +4970,6 @@ async function authenticateDeezer() {
 
 // ===== Tidal Download Auth (Device Flow) =====
 
-function _setIndStatusDot(dotId, state) {
-    const dot = document.getElementById(dotId);
-    if (!dot) return;
-    dot.classList.remove('ind-status-dot-unknown', 'ind-status-dot-connected', 'ind-status-dot-error');
-    if (state === 'connected') {
-        dot.classList.add('ind-status-dot-connected');
-        dot.title = 'Connected';
-    } else if (state === 'error') {
-        dot.classList.add('ind-status-dot-error');
-        dot.title = 'Connection failed';
-    } else {
-        dot.classList.add('ind-status-dot-unknown');
-        dot.title = 'Not tested';
-    }
-}
-
-async function testProwlarrConnection() {
-    const statusEl = document.getElementById('prowlarr-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        await saveSettings();
-        const resp = await fetch('/api/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ service: 'prowlarr' })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            statusEl.textContent = data.message || 'Connected';
-            statusEl.style.color = '#4caf50';
-            _setIndStatusDot('prowlarr-status-dot', 'connected');
-            loadProwlarrIndexers();
-        } else {
-            statusEl.textContent = data.error || 'Connection failed';
-            statusEl.style.color = '#f44336';
-            _setIndStatusDot('prowlarr-status-dot', 'error');
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-        _setIndStatusDot('prowlarr-status-dot', 'error');
-    }
-}
-
-function updateUsenetClientUI() {
-    const type = document.getElementById('usenet-client-type')?.value || 'sabnzbd';
-    const apikeyGroup = document.getElementById('usenet-apikey-group');
-    const userGroup = document.getElementById('usenet-username-group');
-    const passGroup = document.getElementById('usenet-password-group');
-    if (type === 'sabnzbd') {
-        if (apikeyGroup) apikeyGroup.style.display = '';
-        if (userGroup) userGroup.style.display = 'none';
-        if (passGroup) passGroup.style.display = 'none';
-    } else {
-        if (apikeyGroup) apikeyGroup.style.display = 'none';
-        if (userGroup) userGroup.style.display = '';
-        if (passGroup) passGroup.style.display = '';
-    }
-}
-
-async function testUsenetClientConnection() {
-    const statusEl = document.getElementById('usenet-client-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        await saveSettings();
-        const resp = await fetch('/api/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ service: 'usenet_client' })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            statusEl.textContent = data.message || 'Connected';
-            statusEl.style.color = '#4caf50';
-            _setIndStatusDot('usenet-client-status-dot', 'connected');
-        } else {
-            statusEl.textContent = data.error || 'Connection failed';
-            statusEl.style.color = '#f44336';
-            _setIndStatusDot('usenet-client-status-dot', 'error');
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-        _setIndStatusDot('usenet-client-status-dot', 'error');
-    }
-}
-
-async function testTorrentClientConnection() {
-    const statusEl = document.getElementById('torrent-client-connection-status');
-    if (!statusEl) return;
-    statusEl.textContent = 'Checking...';
-    statusEl.style.color = '#aaa';
-    try {
-        await saveSettings();
-        const resp = await fetch('/api/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ service: 'torrent_client' })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            statusEl.textContent = data.message || 'Connected';
-            statusEl.style.color = '#4caf50';
-            _setIndStatusDot('torrent-client-status-dot', 'connected');
-        } else {
-            statusEl.textContent = data.error || 'Connection failed';
-            statusEl.style.color = '#f44336';
-            _setIndStatusDot('torrent-client-status-dot', 'error');
-        }
-    } catch (e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#f44336';
-        _setIndStatusDot('torrent-client-status-dot', 'error');
-    }
-}
-
-async function loadProwlarrIndexers() {
-    const listEl = document.getElementById('prowlarr-indexer-list');
-    if (!listEl) return;
-    listEl.innerHTML = '<em>Loading…</em>';
-    try {
-        const resp = await fetch('/api/prowlarr/indexers');
-        const data = await resp.json();
-        if (!data.success) {
-            listEl.innerHTML = `<em style="color:#f44336;">${escapeHtml(data.error || 'Prowlarr not configured.')}</em>`;
-            return;
-        }
-        if (!data.indexers || data.indexers.length === 0) {
-            listEl.innerHTML = '<em>No indexers configured in Prowlarr yet. Add some in Prowlarr → Indexers.</em>';
-            return;
-        }
-        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        const rows = data.indexers.map(idx => {
-            const protoClass = idx.protocol === 'usenet' ? 'ind-indexer-card-proto-usenet' : 'ind-indexer-card-proto-torrent';
-            const protoLabel = idx.protocol === 'usenet' ? 'Usenet' : 'Torrent';
-            const privacyHTML = idx.privacy ? `<span class="ind-indexer-card-privacy">${esc(idx.privacy)}</span>` : '';
-            const disabledClass = idx.enable ? '' : ' ind-indexer-card-disabled';
-            return `<div class="ind-indexer-card${disabledClass}">
-                <span class="ind-indexer-card-id">#${esc(idx.id)}</span>
-                <span class="ind-indexer-card-name">${esc(idx.name)}</span>
-                ${privacyHTML}
-                <span class="ind-indexer-card-proto ${protoClass}">${protoLabel}</span>
-            </div>`;
-        }).join('');
-        listEl.innerHTML = rows;
-    } catch (e) {
-        listEl.innerHTML = `<em style="color:#f44336;">Failed to load indexers: ${escapeHtml(e.message)}</em>`;
-    }
-}
-
 // ===============================
 // QOBUZ AUTH FUNCTIONS
 // ===============================
@@ -5939,96 +5572,6 @@ async function selectNavidromeMusicFolder() {
 // release, so a copy a few weeks old starts answering "403 Forbidden" on videos
 // that worked yesterday. Without an in-app update, those downloads quietly burn
 // their retry budget and get abandoned for an entirely fixable reason.
-
-async function loadYtdlpStatus() {
-    const chanEl = document.getElementById('ytdlp-channel');
-    const instEl = document.getElementById('ytdlp-installed');
-    const latEl = document.getElementById('ytdlp-latest');
-    const badge = document.getElementById('ytdlp-hint-badge');
-    if (!instEl || !latEl) return;
-    const channel = (chanEl && chanEl.value) || 'nightly';
-    instEl.textContent = 'Loading...';
-    latEl.textContent = 'Loading...';
-    try {
-        const resp = await fetch('/api/ytdlp/status?channel=' + encodeURIComponent(channel));
-        const d = await resp.json();
-        // The running process keeps the yt-dlp it imported at startup, so after
-        // an update these two disagree until a restart. Saying only the loaded
-        // one made a SUCCESSFUL update read as "still behind", while the button
-        // said "already on the newest build" — both true, and together they made
-        // it look like the update had not worked.
-        instEl.textContent = d.restart_pending
-            ? `${d.installed} running — ${d.on_disk} installed, restart to finish`
-            : (d.installed || 'Not installed');
-        instEl.style.color = d.restart_pending ? '#ffb300' : '';
-        // A PyPI outage must not read as "you are up to date" — say we could not
-        // look, which is a different fact from "nothing newer exists".
-        latEl.textContent = d.latest || (d.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown');
-        latEl.style.color = d.behind ? '#ffb300' : '';
-        if (badge) {
-            badge.hidden = !(d.behind || d.restart_pending);
-            badge.style.color = '#ffb300';
-            badge.title = d.restart_pending
-                ? 'yt-dlp is updated on disk — restart SoulSync to use it'
-                : (d.behind ? 'A newer yt-dlp is available' : '');
-        }
-    } catch (e) {
-        instEl.textContent = 'Unknown';
-        latEl.textContent = 'Unknown';
-        console.error('yt-dlp status failed:', e);
-    }
-}
-
-async function runYtdlpUpdate() {
-    const btn = document.getElementById('ytdlp-update-btn');
-    const status = document.getElementById('ytdlp-status');
-    const detail = document.getElementById('ytdlp-detail');
-    const chanEl = document.getElementById('ytdlp-channel');
-    const channel = (chanEl && chanEl.value) || 'nightly';
-    if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
-    if (detail) { detail.style.display = 'none'; detail.textContent = ''; }
-    if (status) {
-        status.style.display = 'block';
-        status.style.background = 'rgba(255,255,255,0.04)';
-        status.style.color = 'rgba(255,255,255,0.6)';
-        status.textContent = 'Installing the newest ' + channel + ' build — this can take a minute...';
-    }
-    try {
-        const resp = await fetch('/api/ytdlp/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channel: channel })
-        });
-        const d = await resp.json();
-        if (status) {
-            status.style.color = d.success ? (d.restart_required ? '#ffb300' : '#4caf50') : '#ff5252';
-            status.textContent = d.message || (d.success ? 'Done.' : 'Update failed.');
-        }
-        // pip's own words, kept available but out of the way — every failure mode
-        // here (read-only container, distro-managed Python, wrong user, dead
-        // network) needs a different action, and the output is what says which.
-        if (detail && d.detail) { detail.style.display = 'block'; detail.textContent = d.detail; }
-        // Guarded the way chat.js guards it: showToast is a global owned by
-        // downloads.js, and this tile renders on the video side too.
-        if (typeof showToast === 'function') {
-            if (d.success) {
-                showToast(d.restart_required
-                    ? 'yt-dlp updated — restart SoulSync to use it'
-                    : (d.message || 'Already up to date'),
-                    d.restart_required ? 'info' : 'success');
-            } else {
-                showToast('yt-dlp update failed — see Settings for details', 'error');
-            }
-        }
-        loadYtdlpStatus();
-    } catch (e) {
-        if (status) { status.style.color = '#ff5252'; status.textContent = 'Update request failed: ' + e; }
-        if (typeof showToast === 'function') showToast('yt-dlp update failed', 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Update yt-dlp'; }
-    }
-}
-
 
 // == ARTWORK CACHE (Advanced tab, both sides)               ==
 // One cache serves album covers on the music side and posters on the video

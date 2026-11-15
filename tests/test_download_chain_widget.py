@@ -400,10 +400,13 @@ def test_mode_is_still_persisted(model, js):
                 "hybrid_order: order.slice()"):
         assert key in music, key
     body = js.split("async function saveSettings", 1)[1]
-    # the first download_source in the collector is music's (audiobooks keep theirs)
-    music_block = body.split("download_source: {", 1)[1].split("},", 1)[0]
-    code = re.sub(r"//[^\n]*", "", music_block)
-    for key in ("mode:", "hybrid_primary:", "hybrid_secondary:", "hybrid_order:"):
+    # step 7g: every music download_source key is React now, so the page save
+    # has no top-level download_source block at all (audiobooks keep theirs,
+    # nested deeper)
+    assert not re.search(r"^        download_source: \{", body, re.M)
+    # and no music chain key anywhere in it
+    code = re.sub(r"//[^\n]*", "", body)
+    for key in ("hybrid_primary:", "hybrid_secondary:"):
         assert key not in code, key
 
 

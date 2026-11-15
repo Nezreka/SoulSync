@@ -76,7 +76,9 @@ def test_the_audit_is_actually_looking_at_something(save_body):
     # A parse that silently found nothing would make the check above pass.
     ids = _ids_read(save_body)
     assert len(ids) > 150, f"only found {len(ids)} fields; the parse is wrong"
-    assert "prowlarr-url" in ids
+    # a field still in the vanilla save (prowlarr-url was, until its Sources
+    # panel went React in SETTINGS_PORT.md step 7g)
+    assert "acoustid-api-key" in ids
 
 
 def test_no_payload_field_blanks_a_missing_element(save_body):

@@ -183,8 +183,15 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
         found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
         assert found == tab, f"{pid} is on the {found} tab, expected {tab}"
 
-    # seeding has to be INSIDE the torrent panel, not merely on the same tab
-    assert index.index('id="video-seeding-goals"') > index.index('id="torrent-client-settings-container"')
+    # seeding has to be INSIDE the torrent panel, not merely on the same tab.
+    # the torrent panel is React now (SETTINGS_PORT.md step 7g) and the seeding
+    # block stays vanilla (video-settings.js binds to its nodes): it is parked
+    # in #video-source-blocks and the panel moves it in while mounted
+    park = index.index('<div id="video-source-blocks" hidden>')
+    assert park < index.index('id="video-seeding-goals"') < index.index('</div>', index.index('id="video-seed-idx-rows"'))
+    panels = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(encoding="utf-8")
+    torrent = panels.split("export function TorrentPanel(", 1)[1].split("\nexport function", 1)[0]
+    assert "<ParkedHost ids={['video-seeding-goals']} />" in torrent
 
     # nothing the video saver reads may have been left behind by a move
     js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
@@ -358,17 +365,19 @@ def test_the_ytdlp_card_loads_where_it_actually_lives():
     does to read a version number.
 
     Predates this session; found while checking nothing else had come unhooked.
+
+    The tile is React now, inside the YouTube panel (SETTINGS_PORT.md step 7g):
+    the settings.js tab hook and the modal's call are gone, and the panel loads
+    the version itself on arriving at Sources and on opening YouTube. Advanced
+    loads nothing.
     """
+    panels = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(encoding="utf-8")
+    youtube = panels.split("export function YoutubePanel(", 1)[1].split("\nexport function", 1)[0]
+    assert "if (active && opened) void loadYtdlp();" in youtube, "the loader is no longer wired to the Sources tab"
+    # and opening the YouTube card refreshes it
+    assert "useOnOpen(model, 'youtube', () => void loadYtdlp());" in youtube
     js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
-    trigger = re.search(r"if \(\(?tab === [^)]*\)? && typeof loadYtdlpStatus", js)
-    assert trigger, "the yt-dlp loader is no longer wired to a tab"
-    assert "'sources'" in trigger.group(0), (
-        "the loader still only fires on Advanced, where the tile no longer is"
-    )
-    # and opening the YouTube card refreshes it (the modal is React, step 7b)
-    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
-    opener = tab.split("export function SourceModal(", 1)[1].split("return () => {", 1)[0]
-    assert "if (id === 'youtube')" in opener and "loadYtdlpStatus?.()" in opener
+    assert "loadYtdlpStatus" not in js, "settings.js still wires a loader for a tile it no longer has"
 
 
 

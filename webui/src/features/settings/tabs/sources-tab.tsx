@@ -20,6 +20,7 @@ import type { SettingsTabProps } from '../host';
 
 import { settingsStore } from '../settings-store';
 import { SourcePanels } from './source-panels';
+import { MORE_SOURCE_PARTS, MoreSourcePanels } from './source-panels-more';
 import {
   CHAIN_KINDS,
   type ChainKind,
@@ -551,7 +552,6 @@ export const SOURCE_CARD_HINTS: Record<string, string> = {
 };
 
 type ShellFns = Window & {
-  loadYtdlpStatus?: () => void;
   probeSourceOnOpen?: (id: string) => void;
   landPendingSettingsSave?: () => void;
   _settingsAutosaveOff?: boolean;
@@ -583,14 +583,7 @@ export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) 
       return;
     }
     const w = window as ShellFns;
-    // opening YouTube is the moment its yt-dlp version matters
-    if (id === 'youtube') {
-      try {
-        w.loadYtdlpStatus?.();
-      } catch {
-        // the modal still opens
-      }
-    }
+    // (YouTube's panel reads its yt-dlp version itself when it opens)
     const known = model.getState();
     const dot = known.status[id] || 'unknown';
     const said = known.said[id];
@@ -726,6 +719,7 @@ export function SourceModal({ model = sourcesModel }: { model?: SourcesModel }) 
 /** the Sources tab: the tiles and the modal (its panels are still vanilla) */
 export function SourcesTab(props: SettingsTabProps) {
   if (props.part === 'modal') return <SourceModal />;
+  if (props.part && MORE_SOURCE_PARTS.includes(props.part)) return <MoreSourcePanels {...props} />;
   if (props.part !== 'tiles') return <SourcePanels {...props} />;
   return <SourceTiles opened={props.opened} active={props.active} />;
 }

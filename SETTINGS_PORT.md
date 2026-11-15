@@ -54,7 +54,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
 | Tab: Connections | not started | 160 controls and buttons |
-| Tab: Sources | **tiles, modal, 7 of 11 panels** (steps 7a-7f below) | The tiles, the modal, and the Deezer, SoundCloud, Lidarr, Tidal, Qobuz, HiFi and Soulseek panels are React. Left: YouTube (with yt-dlp), Prowlarr, torrent, usenet. |
+| Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | not started | 236 controls and buttons |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 5 of 9 tabs, and the Sources tiles, modal and 6 panels (Discovery, Quality and Downloads without their video-only sections), 103 of 678 controls, 126 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 6 of 9 tabs (Discovery, Quality, Downloads and Sources without their video-only parts), 158 of 678 controls, 141 of 333 `settings.js` functions removed, 21 of 83 tests repointed (`settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 10,955 |
-| `webui/static/settings.js` | 10,187 | 6,474 |
+| `webui/index.html` | 12,823 | 10,352 |
+| `webui/static/settings.js` | 10,187 | 6,018 |
 | `webui/static/init.js` | 5,264 | 5,209 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -675,12 +675,29 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity; `source-panels.test.tsx` +4 (load rules, save parsing, detect once); `soulseek-observed-speed-settings.test.ts` → `.tsx` (same 6 cases on the panel); Python repointed: `test_soulseek_observed_speed.py` (1), `test_video_download_config.py` (the video slskd form's fields each still have a music counterpart, now in the panel); full Python run 2,434 + those 2; browser: values, detection, saves and save-before-test order identical, 44 pixels (the help button).
 
+### Step 7g: the YouTube, Prowlarr, torrent and usenet panels; Sources done (Nov 15 2026)
+
+**What.** `source-panels-more.tsx`, two slots (`youtube`, `prowlarr-torrent-usenet`):
+- **YouTube**: the cookie browser picker (Chromium browsers marked "not supported on Windows" and a warning when one is picked, from `_environment.windows`; marked, not disabled), the cookies.txt paste box (custom only; says when a file is already saved; the paste saves `youtube.cookies_paste` only when typed), the download delay, the album-bundle switch (`download_source.youtube_album_bundle`), re-encode with codec and bitrate (Opus greys out 320), and the yt-dlp tile (installed and newest with the amber states, the dot badge, channel, Update with its words, pip's output and toasts). The tile loads on arriving at Sources and on opening YouTube, as before; the Advanced-tab trigger it still had is gone (the tile has not been on Advanced for a while).
+- **Prowlarr**: URL, key, indexer ids, the two pacing numbers (`??` so 0 stays off), Test (saves first, then lists the indexers), Refresh Indexer List, the corner status dot.
+- **Torrent client**: type, URL, login, category (blank saves `soulsync`), save path, start torrents, the completed path, minimum seeders and the stall timeout and action (`download_source.*`, the timeout stored in seconds), the music seeding goals, Test with its dot.
+- **Usenet client**: type (key for SABnzbd, login for NZBGet), URL, category, completed path, Test with its dot, the music remove-completed.
+
+**The video blocks stay vanilla, parked.** `#video-seeding-goals` and the usenet `video-usenet-remove-completed` and `video-redownload-failed` groups belong to `video-settings.js`, which binds listeners to those exact nodes and holds their values. A React panel remounts when it moves into the modal, so React must not own them: they are parked in `#video-source-blocks` (hidden, in the home) and `ParkedInto` moves them in on mount and back on unmount. **Bug caught by the tests before commit:** the first version borrowed the nodes from the outer panel component, which does not remount on that move, so the nodes went down with the old DOM. The borrowing now sits inside the part that remounts.
+
+**Removed.** 11 functions (the list is marked), all the load lines of these panels, and the collector's `youtube`, `prowlarr`, `torrent_client`, `usenet_client` and the whole `download_source` block (every key of it is React now).
+
+**Differences.** None seen. One found and matched in the browser: a stored 320 kbps under Opus shows 256; the old page's next save wrote 256, and a codec change kept it. A codec change now saves the bitrate the field shows.
+
+**Checked.** Parity (YouTube after help lines; the three panels with the video blocks moved in); `source-panels-more.test.tsx`, 11 (the borrowed node is the same node with its value and listener across open and close; usenet's order; each panel's load and save rules; Windows marking; the paste box; transcode; yt-dlp states, update and channel); `outside-text-is-escaped` repointed (JSX escapes the indexer list); frontend folders 1,650 pass; Python: 48 pins on the moved code, repointed (11 files by a forked agent, 429 pass, 9 negative checks; `test_download_chain_widget.py::test_mode_is_still_persisted`: the page save has no music `download_source` block left); the confirming full run 2,391 + that 1 pass; browser: every field, option label, visibility, status, the indexer list, the video seed value surviving close and reopen, usenet's order and every saved value identical; pixels 0 / 3 (the status dot's edge) / 32 / 0 plus the help button.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 7g) | **YouTube, Prowlarr, torrent and usenet panels are React; the Sources tab is done.** The video side's blocks in the torrent and usenet panels stay vanilla, parked. Details under "Completed steps". |
 | Nov 15 | `514559393` (step 7f) | **Soulseek panel is React**; Auto-detect runs once per click. Pace changed (Method, item 6). |
 | Nov 15 | `0fa4dc784` (step 7e) | **HiFi panel is React.** Details under "Completed steps". |
 | Nov 15 | `bdd472a63` (step 7d) | **Tidal and Qobuz panels are React.** `checkQobuzAuthStatus` stays for the Connections card and tells the panel by an event. Details under "Completed steps". |
@@ -1043,19 +1060,19 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | url | `soulseek-url` | slskd URL: | both | yes (step 7f) |
-| button |  | Auto-detect | both | no |
+| button |  | Auto-detect | both | yes (step 7g) |
 | password | `soulseek-api-key` | API Key: | both | yes (step 7f) |
 | number | `soulseek-search-timeout` | Search Timeout (seconds): | both | yes (step 7f) |
 | number | `soulseek-search-timeout-buffer` | Search Timeout Buffer (seconds): | both | yes (step 7f) |
 | number | `soulseek-search-min-delay-seconds` | Minimum Delay Between Searches (seconds): | both | yes (step 7f) |
 | select | `soulseek-min-peer-speed` | Minimum Peer Upload Speed: {Any speed / 1 Mbps / 2 Mbps / 3 Mbps / 4 Mbps / 5 Mbps / 10 Mbps} | both | yes (step 7f) |
 | select | `soulseek-max-peer-queue` | Max Peer Queue Length: {No limit / 5 / 10 / 20 / 50 / 100} | both | yes (step 7f) |
-| checkbox | `soulseek-observed-speed-fallback-enabl` | Retry slow Soulseek downloads | both | no |
+| checkbox | `soulseek-observed-speed-fallback-enabl` | Retry slow Soulseek downloads | both | yes (step 7g) |
 | number | `soulseek-min-observed-download-speed` | Minimum Observed Download Speed (KB/s): | both | yes (step 7f) |
 | number | `soulseek-download-timeout` | Download Timeout (minutes): | both | yes (step 7f) |
 | checkbox | `soulseek-auto-clear-searches` | Auto-clear slskd search history | both | yes (step 7f) |
 | select | `soulseek-cleanup-scope` | slskd Cleanup Scope: {Only SoulSync's own transfers / Everything in slskd} | both | yes (step 7f) |
-| button |  | Test Soulseek Connection | both | no |
+| button |  | Test Soulseek Connection | both | yes (step 7g) |
 | button | `tidal-download-auth-btn` | Link Tidal Account | both | yes (step 7d) |
 | button |  | Disconnect | both | yes (step 7d) |
 | email | `qobuz-email` | Qobuz Account: | both | yes (step 7d) |
@@ -1074,74 +1091,74 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | text | `lidarr-url` | Lidarr URL: | both | yes (step 7c) |
 | password | `lidarr-api-key` | API Key: | both | yes (step 7c) |
 | button | `lidarr-test-btn` | Test Connection | both | yes (step 7c) |
-| select | `youtube-cookies-browser` | YouTube Browser Cookies: {None (No cookies) / Chrome / Firefox / Edge / Brave / Opera / Safari …} | both | no |
-| textarea | `youtube-cookies-paste` | Paste cookies.txt: | both | no |
-| number | `youtube-download-delay` | YouTube Download Delay: | both | no |
-| checkbox | `youtube-album-bundle` | Download whole albums from YouTube Music | both | no |
-| checkbox | `youtube-transcode` | Re-encode YouTube audio | both | no |
-| select | `youtube-transcode-codec` | Codec: {MP3 / Opus / AAC (M4A)} | both | no |
-| select | `youtube-transcode-bitrate` | Bitrate: {320 kbps / 256 kbps / 192 kbps / 128 kbps} | both | no |
+| select | `youtube-cookies-browser` | YouTube Browser Cookies: {None (No cookies) / Chrome / Firefox / Edge / Brave / Opera / Safari …} | both | yes (step 7g) |
+| textarea | `youtube-cookies-paste` | Paste cookies.txt: | both | yes (step 7g) |
+| number | `youtube-download-delay` | YouTube Download Delay: | both | yes (step 7g) |
+| checkbox | `youtube-album-bundle` | Download whole albums from YouTube Music | both | yes (step 7g) |
+| checkbox | `youtube-transcode` | Re-encode YouTube audio | both | yes (step 7g) |
+| select | `youtube-transcode-codec` | Codec: {MP3 / Opus / AAC (M4A)} | both | yes (step 7g) |
+| select | `youtube-transcode-bitrate` | Bitrate: {320 kbps / 256 kbps / 192 kbps / 128 kbps} | both | yes (step 7g) |
 
 **yt-dlp ●** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `ytdlp-channel` | Release channel: {Nightly (recommended) / Stable} | both | no |
-| button | `ytdlp-update-btn` | Update yt-dlp | both | no |
+| select | `ytdlp-channel` | Release channel: {Nightly (recommended) / Stable} | both | yes (step 7g) |
+| button | `ytdlp-update-btn` | Update yt-dlp | both | yes (step 7g) |
 
 **⬢ Prowlarr** (both, 7)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `prowlarr-url` | Prowlarr URL: | both | no |
-| password | `prowlarr-api-key` | API Key: | both | no |
-| text | `prowlarr-indexer-ids` | Restrict to indexer IDs (optional): | both | no |
-| number | `prowlarr-search-min-gap` | Seconds between searches: | both | no |
-| number | `prowlarr-max-searches-per-minute` | Searches per minute, at most: | both | no |
-| button | `prowlarr-test-btn` | Test Connection | both | no |
-| button | `prowlarr-refresh-indexers-btn` | Refresh Indexer List | both | no |
+| text | `prowlarr-url` | Prowlarr URL: | both | yes (step 7g) |
+| password | `prowlarr-api-key` | API Key: | both | yes (step 7g) |
+| text | `prowlarr-indexer-ids` | Restrict to indexer IDs (optional): | both | yes (step 7g) |
+| number | `prowlarr-search-min-gap` | Seconds between searches: | both | yes (step 7g) |
+| number | `prowlarr-max-searches-per-minute` | Searches per minute, at most: | both | yes (step 7g) |
+| button | `prowlarr-test-btn` | Test Connection | both | yes (step 7g) |
+| button | `prowlarr-refresh-indexers-btn` | Refresh Indexer List | both | yes (step 7g) |
 
 **⬢ Torrent Downloader** (both, 21)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `torrent-client-type` | Client Type: {qBittorrent / Transmission / Deluge 2.x / Aria2 (RPC)} | both | no |
-| text | `torrent-client-url` | WebUI URL: | both | no |
-| text | `torrent-client-username` | Username: | both | no |
-| password | `torrent-client-password` | Password: | both | no |
-| text | `torrent-client-category` | Category / Label: | both | no |
-| text | `torrent-client-save-path` | Save Path (optional): | both | no |
-| checkbox | `torrent-client-start-torrents` | Start the torrents SoulSync adds | both | no |
-| text | `torrent-download-path` | Completed Downloads Path — in SoulSync (optional): | both | no |
-| number | `torrent-min-seeders` | Minimum seeders: | both | no |
-| number | `torrent-stall-timeout` | Stalled torrent timeout (minutes): | both | no |
-| select | `torrent-stall-action` | When a torrent stalls: {Abandon — remove it & its partial data, fail the download / Pause — pause it in the cl | both | no |
-| number | `music-seed-ratio` | Seeding goals (torrents): | both | no |
-| number | `music-seed-hours` | Seeding goals (torrents): | both | no |
-| checkbox | `music-seed-remove-data` | also delete the client's copy | both | no |
-| select | `music-seed-mode` | Seeding goals (torrents): {SoulSync (watches the client + removes) / Torrent client (writes its own seed limit | both | no |
-| button | `torrent-client-test-btn` | Test Connection | both | no |
-| number | `video-seed-ratio` | Seeding goals (torrents): | both | no |
-| number | `video-seed-hours` | Seeding goals (torrents): | both | no |
-| checkbox | `video-seed-remove-data` | also delete the client's copy | both | no |
-| select | `video-seed-mode` | Seeding goals (torrents): {SoulSync (watches the client + removes) / Torrent client (writes its own seed limit | both | no |
-| button | `video-seed-idx-refresh` | Load indexers | both | no |
+| select | `torrent-client-type` | Client Type: {qBittorrent / Transmission / Deluge 2.x / Aria2 (RPC)} | both | yes (step 7g) |
+| text | `torrent-client-url` | WebUI URL: | both | yes (step 7g) |
+| text | `torrent-client-username` | Username: | both | yes (step 7g) |
+| password | `torrent-client-password` | Password: | both | yes (step 7g) |
+| text | `torrent-client-category` | Category / Label: | both | yes (step 7g) |
+| text | `torrent-client-save-path` | Save Path (optional): | both | yes (step 7g) |
+| checkbox | `torrent-client-start-torrents` | Start the torrents SoulSync adds | both | yes (step 7g) |
+| text | `torrent-download-path` | Completed Downloads Path — in SoulSync (optional): | both | yes (step 7g) |
+| number | `torrent-min-seeders` | Minimum seeders: | both | yes (step 7g) |
+| number | `torrent-stall-timeout` | Stalled torrent timeout (minutes): | both | yes (step 7g) |
+| select | `torrent-stall-action` | When a torrent stalls: {Abandon — remove it & its partial data, fail the download / Pause — pause it in the cl | both | yes (step 7g) |
+| number | `music-seed-ratio` | Seeding goals (torrents): | both | yes (step 7g) |
+| number | `music-seed-hours` | Seeding goals (torrents): | both | yes (step 7g) |
+| checkbox | `music-seed-remove-data` | also delete the client's copy | both | yes (step 7g) |
+| select | `music-seed-mode` | Seeding goals (torrents): {SoulSync (watches the client + removes) / Torrent client (writes its own seed limit | both | yes (step 7g) |
+| button | `torrent-client-test-btn` | Test Connection | both | yes (step 7g) |
+| number | `video-seed-ratio` | Seeding goals (torrents): | both | no (video pass, parked vanilla) |
+| number | `video-seed-hours` | Seeding goals (torrents): | both | no (video pass, parked vanilla) |
+| checkbox | `video-seed-remove-data` | also delete the client's copy | both | no (video pass, parked vanilla) |
+| select | `video-seed-mode` | Seeding goals (torrents): {SoulSync (watches the client + removes) / Torrent client (writes its own seed limit | both | no (video pass, parked vanilla) |
+| button | `video-seed-idx-refresh` | Load indexers | both | no (video pass, parked vanilla) |
 
 **⬢ Usenet Downloader** (both, 11)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `usenet-client-type` | Client Type: {SABnzbd / NZBGet} | both | no |
-| text | `usenet-client-url` | WebUI URL: | both | no |
-| password | `usenet-client-api-key` | API Key: | both | no |
-| text | `usenet-client-username` | Username: | both | no |
-| password | `usenet-client-password` | Password: | both | no |
-| text | `usenet-client-category` | Category / Label: | both | no |
-| text | `usenet-download-path` | Completed Downloads Path — in SoulSync (optional): | both | no |
-| button | `usenet-client-test-btn` | Test Connection | both | no |
-| select | `music-usenet-remove-completed` | When a usenet download has imported (music): {Leave it in the client / Remove it from the client's history / R | both | no |
-| select | `video-usenet-remove-completed` | When a usenet download has imported (video): {Leave it in the client / Remove it from the client's history / R | both | no |
-| checkbox | `video-redownload-failed` | When a video download fails, grab the next best release | both | no |
+| select | `usenet-client-type` | Client Type: {SABnzbd / NZBGet} | both | yes (step 7g) |
+| text | `usenet-client-url` | WebUI URL: | both | yes (step 7g) |
+| password | `usenet-client-api-key` | API Key: | both | yes (step 7g) |
+| text | `usenet-client-username` | Username: | both | yes (step 7g) |
+| password | `usenet-client-password` | Password: | both | yes (step 7g) |
+| text | `usenet-client-category` | Category / Label: | both | yes (step 7g) |
+| text | `usenet-download-path` | Completed Downloads Path — in SoulSync (optional): | both | yes (step 7g) |
+| button | `usenet-client-test-btn` | Test Connection | both | yes (step 7g) |
+| select | `music-usenet-remove-completed` | When a usenet download has imported (music): {Leave it in the client / Remove it from the client's history / R | both | yes (step 7g) |
+| select | `video-usenet-remove-completed` | When a usenet download has imported (video): {Leave it in the client / Remove it from the client's history / R | both | no (video pass, parked vanilla) |
+| checkbox | `video-redownload-failed` | When a video download fails, grab the next best release | both | no (video pass, parked vanilla) |
 
 ### Downloads (32)
 
@@ -1992,8 +2009,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `closeSourceModal` | 2635 | yes (step 7b) |
 | `toggleHybridSourceConfig` | 2696 | no |
 | `openSourceConfig` | 2706 | no |
-| `markUnsupportedCookieBrowsers` | 2726 | no |
-| `updateCookieBrowserWarning` | 2740 | no |
+| `markUnsupportedCookieBrowsers` | 2726 | yes (step 7g) |
+| `updateCookieBrowserWarning` | 2740 | yes (step 7g) |
 | `_ssJson` | 2755 | yes (step 7a) |
 | `_ssTestConn` | 2765 | yes (step 7a) |
 | `testAllSources` | 2804 | yes (step 7a) |
@@ -2012,7 +2029,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `loadArtSourceOrder` | 3154 | no |
 | `loadHybridSourceOrder` | 3194 | yes (step 7a) |
 | `updateLossyBitrateOptions` | 3236 | yes (step 6) |
-| `updateYoutubeTranscodeBitrateOptions` | 3250 | no |
+| `updateYoutubeTranscodeBitrateOptions` | 3250 | yes (step 7g) |
 | `updatePlexConfigurationButtons` | 3263 | no |
 | `loadSettingsData` | 3282 | no |
 | `_wireRedactedSecrets` | 4212 | no |
@@ -2165,12 +2182,12 @@ Every top-level function, with its line today. A function is removed when the la
 | `testHiFiConnection` | 8235 | yes (step 7e) |
 | `testSoundcloudConnection` | 8257 | yes (step 7c) |
 | `testLidarrConnection` | 8283 | yes (step 7c) |
-| `_setIndStatusDot` | 8310 | no |
-| `testProwlarrConnection` | 8326 | no |
-| `updateUsenetClientUI` | 8356 | no |
-| `testUsenetClientConnection` | 8372 | no |
-| `testTorrentClientConnection` | 8401 | no |
-| `loadProwlarrIndexers` | 8430 | no |
+| `_setIndStatusDot` | 8310 | yes (step 7g) |
+| `testProwlarrConnection` | 8326 | yes (step 7g) |
+| `updateUsenetClientUI` | 8356 | yes (step 7g) |
+| `testUsenetClientConnection` | 8372 | yes (step 7g) |
+| `testTorrentClientConnection` | 8401 | yes (step 7g) |
+| `loadProwlarrIndexers` | 8430 | yes (step 7g) |
 | `loadHiFiInstances` | 8464 | yes (step 7e) |
 | `_initHiFiDragDrop` | 8493 | yes (step 7e) |
 | `_initHiFiClickHandlers` | 8536 | yes (step 7e) |
@@ -2204,8 +2221,8 @@ Every top-level function, with its line today. A function is removed when the la
 | `saveNavidromePlaylistLogin` | 9438 | no |
 | `clearNavidromePlaylistLogin` | 9463 | no |
 | `selectNavidromeMusicFolder` | 9478 | no |
-| `loadYtdlpStatus` | 9512 | no |
-| `runYtdlpUpdate` | 9551 | no |
+| `loadYtdlpStatus` | 9512 | yes (step 7g) |
+| `runYtdlpUpdate` | 9551 | yes (step 7g) |
 | `_imgCacheBytes` | 9606 | no |
 | `_imgCacheStatus` | 9612 | no |
 | `onImageCacheSettingChanged` | 9621 | no |
@@ -2243,9 +2260,9 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 
 | Test file | Repointed |
 |---|---|
-| `tests/downloads/test_seeding.py` | no |
-| `tests/downloads/test_usenet_remove_completed_music.py` | no |
-| `tests/downloads/test_youtube_audio_quality.py` | no |
+| `tests/downloads/test_seeding.py` | yes (step 7g) |
+| `tests/downloads/test_usenet_remove_completed_music.py` | yes (step 7g) |
+| `tests/downloads/test_youtube_audio_quality.py` | yes (step 7g) |
 | `tests/imports/test_artist_letter.py` | no |
 | `tests/imports/test_compilation_album_artist.py` | no |
 | `tests/imports/test_configured_root_folders.py` | no |
@@ -2268,16 +2285,16 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_music_disk_guard.py` | no |
 | `tests/test_navidrome_login_endpoints.py` | no |
 | `tests/test_preferred_version.py` | yes (step 5) |
-| `tests/test_prowlarr_throttle.py` | no |
+| `tests/test_prowlarr_throttle.py` | yes (step 7g) |
 | `tests/test_quality_panel_layout.py` | no |
 | `tests/test_quality_profile_preview_nudge.py` | yes (step 6) |
 | `tests/test_script_split_integrity.py` | no |
-| `tests/test_settings_never_wipes.py` | no |
+| `tests/test_settings_never_wipes.py` | yes (step 7g) |
 | `tests/test_settings_persist_whitelist.py` | no |
 | `tests/test_settings_sources_tab.py` | yes (steps 4, 6, 7a) |
 | `tests/test_settings_subtitles_section.py` | no |
 | `tests/test_settings_templates_exposed.py` | no |
-| `tests/test_settings_textarea_autosave.py` | no |
+| `tests/test_settings_textarea_autosave.py` | yes (step 7g) |
 | `tests/test_sidebar_icon_parity.py` | no |
 | `tests/test_soulseek_observed_speed.py` | no |
 | `tests/test_source_search_timeout.py` | yes (step 5) |
@@ -2292,10 +2309,10 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `tests/test_video_seeding.py` | no |
 | `tests/test_video_side_shell.py` | no |
 | `tests/test_video_title_profile_choice.py` | no |
-| `tests/test_youtube_album_bundle_setting.py` | no |
-| `tests/test_youtube_cookie_browser_picker.py` | no |
+| `tests/test_youtube_album_bundle_setting.py` | yes (step 7g) |
+| `tests/test_youtube_cookie_browser_picker.py` | yes (step 7g) |
 | `tests/test_youtube_failure_is_reported.py` | yes (step 7a) |
-| `tests/test_ytdlp_update.py` | no |
+| `tests/test_ytdlp_update.py` | yes (step 7g) |
 | `tests/video/test_colon_replacement.py` | no |
 | `tests/video/test_usenet_remove_completed.py` | no |
 | `tests/video/test_video_recycle.py` | no |
@@ -2306,7 +2323,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/music-size-limit-settings.test.ts` | yes (step 5, now `.tsx`) |
 | `webui/src/test/musicbrainz-settings.test.ts` | no |
 | `webui/src/test/oidc-provider-block-toggle.test.ts` | no |
-| `webui/src/test/outside-text-is-escaped.test.ts` | no |
+| `webui/src/test/outside-text-is-escaped.test.ts` | yes (step 7g) |
 | `webui/src/test/quality-release-import-mode.test.ts` | yes (step 6, now `.tsx`) |
 | `webui/src/test/settings-autosave-toggle.test.ts` | yes (step 6) |
 | `webui/src/test/settings-library-tabs.test.ts` | no |

@@ -45,12 +45,16 @@ def test_they_are_bound_on_input_not_change(js):
 
 def test_the_cookie_paste_is_covered():
     """The field this was found on. It lives inside a source modal, so the only
-    thing that used to save it was closing that modal."""
-    index = _read("webui/index.html")
-    assert 'id="youtube-cookies-paste"' in index
-    tag = re.search(r'<textarea[^>]*id="youtube-cookies-paste"[^>]*>', index)
+    thing that used to save it was closing that modal. The YouTube panel is
+    React now (SETTINGS_PORT.md step 7g): a React textarea's onChange fires on
+    every input, like the 'input' binding, and writes the key to the settings
+    store, which autosaves it."""
+    panel = _read("webui/src/features/settings/tabs/source-panels-more.tsx")
+    tag = re.search(r'<textarea\s[^>]*?id="youtube-cookies-paste"[\s\S]*?/>', panel)
     assert tag, "the paste field is not a textarea any more — recheck the binding"
+    assert "set('cookies_paste', event.target.value)" in tag.group(0)
     assert "hydra-payload" not in tag.group(0)
+    assert 'id="youtube-cookies-paste"' not in _read("webui/index.html")
 
 
 def test_the_dev_console_boxes_are_excluded(js):
@@ -128,6 +132,8 @@ def test_is_behind_has_the_same_padding_fix():
 
 
 def test_the_panel_shows_the_pending_state(js):
-    fn = js.split("async function loadYtdlpStatus(", 1)[1].split("\n}", 1)[0]
+    # the yt-dlp tile is in the React YouTube panel now (step 7g)
+    panel = _read("webui/src/features/settings/tabs/source-panels-more.tsx")
+    fn = panel.split("async function loadYtdlp(", 1)[1].split("\n  }\n", 1)[0]
     assert "restart_pending" in fn
     assert "restart to finish" in fn

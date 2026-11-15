@@ -324,12 +324,14 @@ class TestInteractiveSearchesAreBounded:
 def test_the_pacing_settings_are_on_the_settings_page_and_saved():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent / "webui"
-    index = (root / "index.html").read_text(encoding="utf-8", errors="replace")
-    js = (root / "static" / "settings.js").read_text(encoding="utf-8")
-    assert 'id="prowlarr-search-min-gap"' in index
-    assert 'id="prowlarr-max-searches-per-minute"' in index
+    # the Prowlarr panel is React now (SETTINGS_PORT.md step 7g)
+    src = (root / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(encoding="utf-8")
+    panel = src.split("export function ProwlarrPanel(", 1)[1].split("\nexport function", 1)[0]
+    assert 'id="prowlarr-search-min-gap"' in panel
+    assert 'id="prowlarr-max-searches-per-minute"' in panel
     # loaded with ?? so a saved 0 (off) is not shown as the default
-    assert "settings.prowlarr?.search_min_gap_seconds ?? 2" in js
-    assert "settings.prowlarr?.max_searches_per_minute ?? 20" in js
-    assert "search_min_gap_seconds: _cfgFloat('prowlarr-search-min-gap', 2)" in js
-    assert "max_searches_per_minute: _cfgInt('prowlarr-max-searches-per-minute', 20)" in js
+    assert "text(p.search_min_gap_seconds ?? 2)" in panel
+    assert "text(p.max_searches_per_minute ?? 20)" in panel
+    # saved as a number, blank or junk falling back to the default
+    assert "set('search_min_gap_seconds', float(raw, 2))" in panel
+    assert "set('max_searches_per_minute', integer(raw, 20))" in panel

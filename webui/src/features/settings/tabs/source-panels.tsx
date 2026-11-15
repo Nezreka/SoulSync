@@ -19,15 +19,15 @@ import { type SettingsStore, settingsStore } from '../settings-store';
 import { REDACTED_SECRET_SENTINEL, SecretInput, useDraft } from './parts';
 import { SOURCE_CONFIG_ID_BY_SRC, type SourcesModel, sourcesModel } from './sources-model';
 
-function useSettings(store: SettingsStore) {
+export function useSettings(store: SettingsStore) {
   return useSyncExternalStore(store.subscribe, () => store.getState().settings);
 }
 
-const text = (value: unknown) =>
+export const text = (value: unknown) =>
   typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 
 /** a panel: in the modal while open, in its hidden home otherwise */
-function Panel({
+export function Panel({
   id,
   model = sourcesModel,
   children,
@@ -48,17 +48,17 @@ function Panel({
 }
 
 /** a status line next to a Test Connection button */
-interface Status {
+export interface Status {
   text: string;
   color?: string;
 }
 
-const CHECKING: Status = { text: 'Checking...', color: '#aaa' };
-const OK = '#4caf50';
-const BAD = '#f44336';
-const WARN = '#ff9800';
+export const CHECKING: Status = { text: 'Checking...', color: '#aaa' };
+export const OK = '#4caf50';
+export const BAD = '#f44336';
+export const WARN = '#ff9800';
 
-function TestRow({
+export function TestRow({
   label,
   buttonId,
   statusId,
@@ -93,7 +93,7 @@ function TestRow({
   );
 }
 
-async function json(url: string, init?: RequestInit) {
+export async function json(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
   return (await response.json()) as Record<string, unknown>;
 }
@@ -296,10 +296,10 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
   );
 }
 
-const toast = (message: string, type: string) => window.showToast?.(message, type);
+export const toast = (message: string, type: string) => window.showToast?.(message, type);
 
 /** opening this source's modal runs its check, as probeSourceOnOpen did */
-function useOnOpen(model: SourcesModel, id: string, check: () => void) {
+export function useOnOpen(model: SourcesModel, id: string, check: () => void) {
   const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
   useEffect(() => {
     if (open === id) check();
@@ -1033,7 +1033,7 @@ type ShellTools = Window & {
 
 /** a number field that shows what is typed and saves what it parses to,
  *  reset by each settings load */
-function NumberField({
+export function NumberField({
   store,
   id,
   value,
@@ -1059,7 +1059,7 @@ function NumberField({
   );
 }
 
-const int = (raw: string, fallback: number) => parseInt(raw, 10) || fallback;
+export const int = (raw: string, fallback: number) => parseInt(raw, 10) || fallback;
 
 export function SoulseekPanel({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
