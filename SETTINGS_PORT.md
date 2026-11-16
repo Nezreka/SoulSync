@@ -811,7 +811,7 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **What.** The support modal (`showSupportModal`, `closeSupportModal`, `copyAddress`), the Hydrabase page (`hydrabaseToggleConnection` and the rest), the dashboard's `testDashboardConnection` and the Spotify rate-limit modal (`handleSpotifyRateLimit` and the rest) moved verbatim to `pages-extra.js`, which loads after `settings.js` and already holds such page functions. They are only called at run time, so the later load changes nothing.
 
-**Checked.** `test_vanilla_globals_resolve` (the rate-limit code's three guarded `loadDiscoverPage` calls moved their baseline from `settings.js` to `pages-extra.js`; `settings.js` is at zero now), `test_script_split_integrity` (every onclick still resolves), `test_spotify_ratelimit_modal`; the frontend `src/test`, Settings and dashboard folders, 1,990 pass. On V3c: the 213 Python files that read the web UI, and the whole frontend suite (12 route tests failed under load and pass alone).
+**Checked.** `test_vanilla_globals_resolve` (the rate-limit code's three guarded `loadDiscoverPage` calls moved their baseline from `settings.js` to `pages-extra.js`; `settings.js` is at zero now), `test_script_split_integrity` (every onclick still resolves), `test_spotify_ratelimit_modal`; the frontend `src/test`, Settings and dashboard folders, 1,990 pass. On V3c, the whole frontend suite: 12 route tests failed under load and pass alone. (The 213 Python files that read the web UI: still running.)
 
 ### Video pass V3c: Notifications, Import Lists; the retired forms go (Nov 16 2026)
 
