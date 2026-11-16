@@ -191,6 +191,14 @@ def apply_split_plan(conn, plan: Dict[str, Any]) -> List[int]:
             "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)"
             " SELECT ?, artist_id, role FROM lib2_album_artists WHERE album_id=?",
             (new_id, source_id))
+        # what each profile chose for the merged row holds for every release
+        # in it, or a profile's watched album comes back unwatched
+        conn.execute(
+            "INSERT OR IGNORE INTO lib2_monitor_rules(entity_type, entity_id, profile_id,"
+            "                                        monitored, provenance)"
+            " SELECT 'album', ?, profile_id, monitored, provenance FROM lib2_monitor_rules"
+            "  WHERE entity_type='album' AND entity_id=?",
+            (new_id, source_id))
         track_ids = [int(t) for t in part["track_ids"]]
         conn.execute(
             f"UPDATE lib2_tracks SET album_id=?, updated_at=CURRENT_TIMESTAMP"

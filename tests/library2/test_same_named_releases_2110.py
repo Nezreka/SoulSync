@@ -168,6 +168,26 @@ def test_a_merged_weezer_row_splits_into_its_releases(cur):
     assert RS.split_same_named_releases(cur.connection) == {"albums_split": 0, "albums_made": 0}
 
 
+def test_a_split_keeps_each_profiles_watch_choice(cur):
+    """#2110 heal: a profile that watched the merged row watches every release
+    it splits into, and one that turned it off keeps it off."""
+    album = _merged(cur, [
+        (1, "My Name Is Jonas", "/m/Weezer/1994 - Weezer/01.flac", _w(1994)),
+        (1, "Don't Let Go", "/m/Weezer/2001 - Weezer/01.flac", _w(2001)),
+    ], year=2001)
+    cur.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored,"
+                " provenance) VALUES('album', ?, 2, 1, 'user_explicit'),"
+                " ('album', ?, 3, 0, 'user_explicit')", (album, album))
+    RS.split_same_named_releases(cur.connection)
+    made = [r[0] for r in cur.execute(
+        "SELECT id FROM lib2_albums WHERE title='Weezer' AND id<>?", (album,))]
+    assert len(made) == 1
+    rules = sorted(tuple(r) for r in cur.execute(
+        "SELECT profile_id, monitored, provenance FROM lib2_monitor_rules"
+        " WHERE entity_type='album' AND entity_id=?", (made[0],)))
+    assert rules == [(2, 1, "user_explicit"), (3, 0, "user_explicit")]
+
+
 @pytest.mark.parametrize("files", [
     # disc folders of one year
     [(1, "A", "/m/W/CD1/01.flac", _w(2004)), (1, "B", "/m/W/CD2/01.flac", _w(2004))],
