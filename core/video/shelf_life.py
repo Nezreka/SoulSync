@@ -62,11 +62,12 @@ PLAYS_FOR_FULL = 8                 # the eighth play is as good as it gets
 CLASSIC_YEARS = 25
 
 # gate keys, in the order they're checked; the first that holds is the one shown
-GATES = ("playing", "in_progress", "watching", "keep", "requested", "following", "new_arrival")
+GATES = ("playing", "in_progress", "watching", "locked", "keep", "requested", "following", "new_arrival")
 GATE_TEXT = {
     "playing": "someone is playing it right now",
     "in_progress": "someone is part-way through it",
     "watching": "someone has watched an episode lately",
+    "locked": "locked, so automation leaves it alone",
     "keep": "marked Keep",
     "requested": "requested and not yet watched by the requester",
     "following": "a followed show that is still airing",
@@ -112,6 +113,8 @@ def gate(facts: Dict[str, Any], settings: Dict[str, Any], now: datetime) -> Opti
         return "in_progress"
     if facts.get("kind") == "show" and facts.get("watching"):
         return "watching"
+    if facts.get("locked"):
+        return "locked"
     if facts.get("keep"):
         return "keep"
     req = facts.get("request") or {}

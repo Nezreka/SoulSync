@@ -183,6 +183,7 @@ def test_a_show_with_an_episode_watched_lately_is_never_flagged(db, worker):
 @pytest.mark.parametrize("setup,gate", [
     (lambda db, mid: _sql(db, "UPDATE movies SET view_offset_ms=5000 WHERE id=?", (mid,)), "in_progress"),
     (lambda db, mid: db.shelf_life_set_keep("movie", 1, True, set_by=1), "keep"),
+    (lambda db, mid: db.set_hands_off("movie", mid, True), "locked"),
     (lambda db, mid: _sql(db, "UPDATE movies SET added_at=? WHERE id=?", (_ago(3), mid)), "new_arrival"),
 ])
 def test_gated_movies_are_stored_with_their_gate_and_never_flagged(db, worker, setup, gate):
@@ -624,6 +625,44 @@ def test_a_kept_title_is_never_deleted_even_from_an_old_finding(db, worker, monk
     res = worker.fix_finding(fid, fix_action="Low")
     assert not res.get("success") and "Keep" in (res.get("error") or "") and calls == []
     assert mid
+
+
+def test_a_locked_show_is_stored_with_the_padlock_and_never_flagged(db, worker):
+    sid = _show(db, "Locked Show", tmdb=55, streaming="ok", count=5)
+    _run(worker)
+    assert [f["entity_id"] for f in _pending(db)] == ["s:%d" % sid]
+    db.set_hands_off("show", sid, True)
+    _run(worker)
+    assert _pending(db) == []
+    assert _stored(db, "show", [sid])[sid]["gate"] == "locked"
+
+
+def test_a_title_locked_behind_an_old_finding_is_never_deleted(db, worker, monkeypatch):
+    from core.video import delete_title
+    calls = []
+    monkeypatch.setattr(delete_title, "run", lambda *a, **k: calls.append(a) or {"success": True})
+    # a show with no tmdb match: nothing in the finding names it for the
+    # worker's own padlock check, so the job's fix has to hold it
+    sid = _show(db, "Low", tmdb=None, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    db.set_hands_off("show", sid, True)             # locked behind the finding's back
+    res = worker.fix_finding(fid, fix_action="Low")
+    assert res.get("error") == "This title is locked, so maintenance leaves it alone. Nothing was deleted."
+    assert calls == []
+
+
+def test_a_cleanup_leaves_out_a_finding_whose_title_was_locked_since(db):
+    from core.video.repair.shelf_life import batch_delete_actions, batch_phrase, plan_cleanup
+    a = _movie(db, "A", tmdb=1)
+    b = _movie(db, "B", tmdb=2)
+    fa = _flag(db, "A", score=10, size_gb=40, item_id=a)
+    fb = _flag(db, "B", score=20, size_gb=10, item_id=b)
+    db.set_hands_off("movie", a, True)
+    plan = plan_cleanup(db, target_bytes=100 * GB)
+    assert [x["id"] for x in plan["items"]] == [fb] and plan["candidates"] == 1
+    actions, error = batch_delete_actions(db, [fa, fb], batch_phrase(2))
+    assert actions is None and "aren't open" in error
 
 
 def test_detail_routes(client):

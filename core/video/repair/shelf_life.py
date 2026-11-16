@@ -390,6 +390,8 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
                 "playing": (kind, row["id"]) in playing,
                 "in_progress": in_progress,
                 "watching": watching,
+                # the padlock: reviewed and locked, automation leaves it alone
+                "locked": bool(row.get("hands_off")),
                 "keep": bool(tmdb and (kind, tmdb) in keeps),
                 "request": request,
                 "followed": bool(kind == "show" and tmdb and tmdb in following),
@@ -421,6 +423,13 @@ def _pending_findings(db) -> list:
             if (f.get("details") or {}).get("item_id")]
 
 
+def _cleanup_findings(db) -> list:
+    """the open findings a cleanup can act on. one filed before its title was
+    locked waits for the next run to clear it, and a cleanup leaves it out"""
+    return [f for f in _pending_findings(db)
+            if not db.is_hands_off(f["details"].get("kind"), f["details"]["item_id"])]
+
+
 def plan_cleanup(db, target_bytes=None, ids=None) -> dict:
     """the titles a cleanup would delete, lowest Shelf Life first (the bigger
     one first on a tie). with ``target_bytes`` it stops once the total reaches
@@ -429,7 +438,7 @@ def plan_cleanup(db, target_bytes=None, ids=None) -> dict:
     with ``ids`` it plans exactly those findings. sizes go to the recycle bin
     and come back as free space once the bin's retention clears them."""
     from core.video import organization
-    pending = _pending_findings(db)
+    pending = _cleanup_findings(db)
     if ids is not None:
         wanted = {int(i) for i in ids}
         pending = [f for f in pending if f["id"] in wanted]
@@ -458,7 +467,7 @@ def batch_delete_actions(db, ids, phrase: str):
     """check a batch delete before it starts. returns ({finding id: typed
     title}, None) for the run, or (None, error). every id must be a pending
     Shelf Life finding, and the phrase must name exactly how many there are."""
-    pending = {f["id"]: f for f in _pending_findings(db)}
+    pending = {f["id"]: f for f in _cleanup_findings(db)}
     try:
         wanted = sorted({int(i) for i in (ids or [])})
     except (TypeError, ValueError):
@@ -563,7 +572,7 @@ class ShelfLifeJob(VideoRepairJob):
         "A signal with no data counts as 50, so it never drags a title down on its own.\n\n"
         "Never flagged, whatever the score: anything playing or paused on any server right now (checked again "
         "right before a delete), anything someone left part-way within Active Days, a show someone watched an "
-        "episode of within Active Days, anything marked Keep, a "
+        "episode of within Active Days, anything locked with the padlock, anything marked Keep, a "
         "request its requester hasn't watched yet (within Request Grace Days), a followed show still airing, "
         "and anything newer than New Arrival Days. A play counts as watched once it reaches 90%. A movie "
         "Watched Cleanup has already flagged is scored but "
@@ -665,6 +674,9 @@ class ShelfLifeJob(VideoRepairJob):
         kind, item_id = d.get("kind"), d.get("item_id")
         if kind not in ("movie", "show") or not item_id:
             return {"success": False, "error": "finding has no title to delete"}
+        if context.db.is_hands_off(kind, item_id):
+            return {"success": False,
+                    "error": "This title is locked, so maintenance leaves it alone. Nothing was deleted."}
         tmdb = d.get("tmdb_id")
         if tmdb and (kind, int(tmdb)) in context.db.shelf_life_keeps():
             return {"success": False, "error": "This title is marked Keep. Nothing was deleted."}

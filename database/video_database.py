@@ -9415,7 +9415,7 @@ class VideoDatabase:
                 "SELECT m.id, m.tmdb_id, m.title, m.year, "
                 f"CASE WHEN {trusted} THEN m.server_added_at ELSE m.added_at END AS added_at, "
                 f"CASE WHEN {trusted} THEN 'server' ELSE 'first_seen' END AS added_from, "
-                "m.runtime_minutes, "
+                "m.runtime_minutes, m.hands_off, "
                 "m.play_count, m.last_viewed_at, m.view_offset_ms, " + cols + ", "
                 "(SELECT COALESCE(SUM(f.size_bytes), 0) FROM media_files f WHERE f.movie_id = m.id) "
                 "AS size_bytes "
@@ -9441,7 +9441,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT s.id, s.tmdb_id, s.title, s.year, s.status, s.series_type, "
+                "SELECT s.id, s.tmdb_id, s.title, s.year, s.status, s.series_type, s.hands_off, "
                 f"COALESCE({trusted}, s.added_at) AS added_at, "
                 f"CASE WHEN {trusted} IS NULL THEN 'first_seen' ELSE 'server' END AS added_from, "
                 + cols + ", "

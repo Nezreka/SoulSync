@@ -41,6 +41,7 @@ def test_unknown_preset_falls_back_to_balanced():
 # ── gates ────────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("over,expected", [
     ({"in_progress": True}, "in_progress"),
+    ({"locked": True}, "locked"),
     ({"keep": True}, "keep"),
     ({"request": {"approved": True, "arrived_at": "2026-10-01"}}, "requested"),
     ({"kind": "show", "followed": True, "airing": True}, "following"),
@@ -51,6 +52,12 @@ def test_each_gate_protects(over, expected):
     assert r["gate"] == expected
     assert r["score"] is None and r["candidate"] is False
     assert r["reasons"] == [{"signal": "gate", "text": sl.GATE_TEXT[expected]}]
+
+
+def test_the_padlock_is_named_before_keep():
+    # a title both locked and kept says the padlock, the wider of the two
+    r = sl.score(_facts(locked=True, keep=True), now=NOW)
+    assert r["gate"] == "locked" and r["score"] is None
 
 
 def test_in_progress_wins_over_every_other_gate():
