@@ -935,6 +935,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | `5772e28b8` (video pass V3c) | **Notifications and Import Lists are React; every video section is.** The retired source picker and slskd form are gone. |
 | Nov 16 | `31fc736bb` (video pass V3b) | **The video side's Server Connection is React.** |
 | Nov 16 | `371d442de` (video pass V3a) | **The video side's API cards are React.** |
 | Nov 15 | `b7fef8fd7` (video pass V2c) | **Video Preferences is React; the Library tab is done.** Monitor Specials loads again (V2a had dropped it). |
