@@ -57,10 +57,12 @@ describe('the Save Settings button on the video side', () => {
       '/api/video/server-config',
       '/api/video/libraries',
       '/api/video/enrichment/config',
-      '/api/video/downloads/config',
     ]) {
       expect(posts, `${url} was not saved`).toContain(url);
     }
+    // the downloads config, Video Quality and YouTube Quality are React and
+    // save from the same capture-phase click (video-shown.ts); their tests
+    // press it: video-quality.test.tsx, library-video-folders.test.tsx
   });
 
   it('leaves the music side alone', () => {

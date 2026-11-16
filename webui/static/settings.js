@@ -254,14 +254,7 @@ function initializeSettings() {
 const LIBRARY_SUMMARIES = {
     // 'library-paths': the Folders card is React (library-folders.tsx)
     // 'library-music-org': the Organization card is React (library-organization.tsx)
-    'library-video-folders': () => {
-        const set = ['video-movies-path', 'video-tv-path', 'video-youtube-path']
-            .filter(id => (document.getElementById(id)?.value || '').trim()).length;
-        const extra = [...document.querySelectorAll('[data-video-extra-kind] input')]
-            .filter(input => input.value.trim()).length;
-        const primary = set ? `${set} of 3 libraries set` : 'no primary libraries set';
-        return extra ? `${primary} · ${extra} additional` : (set ? primary : 'no libraries set yet');
-    },
+    // 'library-video-folders': React (library-video-folders.tsx)
     // 'library-post-processing': React (library-processing.tsx)
     // library-filtering: the Downloads tab is React (tabs/downloads.ts)
     // library-playlists, library-stats and library-discovery: the Discovery
@@ -1432,34 +1425,9 @@ function formatRateLimitDuration(seconds) {
 // ===============================
 
 
-const PATH_INPUT_IDS = {
-    // the music and podcast folders lock themselves in the React Folders card
-    'video-download': 'video-download-path',   // the same setting, from the Video folders tab
-};
+// the folder locks are React's own (LockedPath, library-card.tsx; VideoPath,
+// library-video-folders.tsx)
 
-// Deployment-aware folder-paths guidance (+ the fresh-install disk landmine).
-// Docker installs must NOT touch the container paths; bare-metal/LXC installs
-// MUST edit them. A non-Docker install still on the ./Transfer default is
-// silently filling the install disk (a Proxmox LXC root is typically 8GB and
-// hangs when full — reported live on Discord), so that state warns loudly.
-function togglePathLock(pathType, btn) {
-    const inputId = PATH_INPUT_IDS[pathType] || (pathType.endsWith('-path') ? pathType : pathType + '-path');
-    const input = document.getElementById(inputId);
-    if (!input) return;
-    const isLocked = input.hasAttribute('readonly') || input.readOnly;
-    if (isLocked) {
-        input.removeAttribute('readonly');
-        input.readOnly = false;
-        input.focus();
-        btn.textContent = 'Lock';
-        btn.classList.remove('locked');
-    } else {
-        input.setAttribute('readonly', '');
-        input.readOnly = true;
-        btn.textContent = 'Unlock';
-        btn.classList.add('locked');
-    }
-}
 
 // Manually (re)build every "organize by playlist" folder from current library
 // ownership — mirrors the automatic rebuild that runs after a playlist download.

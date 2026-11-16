@@ -125,10 +125,11 @@ def test_saving_seed_settings_cannot_clobber_the_download_chain():
     persists keys that are present (core/video/download_config.save), so the fix
     is for this saver to stop sending them and let the widget own them.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    body = js.split("function saveDownloads(", 1)[1].split("})", 1)[0]
-    assert "download_mode:" not in body, "saveDownloads still posts a possibly-stale download_mode"
-    assert "hybrid_order:" not in body, "saveDownloads still posts a possibly-stale hybrid_order"
+    # the saver is React (video-downloads.ts downloadsBody, SETTINGS_PORT.md video pass V2a)
+    js = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-downloads.ts").read_text(encoding="utf-8")
+    body = js.split("export function downloadsBody(", 1)[1].split("\n}\n", 1)[0]
+    assert "download_mode" not in body, "the saver still posts a possibly-stale download_mode"
+    assert "hybrid_order" not in body, "the saver still posts a possibly-stale hybrid_order"
     # it must still save what it is actually for
     assert "seed_ratio_goal" in body and "download_path" in body
 
@@ -171,10 +172,13 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     can still find every field it touches.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    for pid, tab in (("video-download-path", "library"),
-                     ("video-seeding-goals", "sources"),
-                     # #1822: import lists add to what you discover
+    # the download folders and the seeding are React (SETTINGS_PORT.md video
+    # pass V2a): the folders in the Folders card's Video panel, on Library
+    folders = (tabs / "library-video-folders.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'library';" in folders and 'id="video-download-path"' in folders
+    for pid, tab in (# #1822: import lists add to what you discover
                      ("video-import-lists", "discovery"),
                      # what to hunt is a library choice, not a usenet one
                      ("video-monitor-specials", "library")):
@@ -183,15 +187,11 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
         found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
         assert found == tab, f"{pid} is on the {found} tab, expected {tab}"
 
-    # seeding has to be INSIDE the torrent panel, not merely on the same tab.
-    # the torrent panel is React now (SETTINGS_PORT.md step 7g) and the seeding
-    # block stays vanilla (video-settings.js binds to its nodes): it is parked
-    # in #video-source-blocks and the panel moves it in while mounted
-    park = index.index('<div id="video-source-blocks" hidden>')
-    assert park < index.index('id="video-seeding-goals"') < index.index('</div>', index.index('id="video-seed-idx-rows"'))
-    panels = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(encoding="utf-8")
+    # seeding has to be INSIDE the torrent panel, not merely on the same tab
+    panels = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
     torrent = panels.split("export function TorrentPanel(", 1)[1].split("\nexport function", 1)[0]
-    assert "<ParkedHost ids={['video-seeding-goals']} />" in torrent
+    assert "<VideoSeedingGoals />" in torrent
+    assert 'id="video-seeding-goals"' in (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
 
     # nothing the video saver reads may have been left behind by a move
     js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
@@ -309,8 +309,10 @@ def test_the_video_save_button_cannot_write_a_retired_form():
         "the video save button posts the retired slskd form again"
     )
     # the savers that legitimately belong to the video side stay
-    for keep in ("saveConn", "saveDownloads"):
-        assert keep in chain, f"{keep} was dropped from the video save chain"
+    assert "saveConn" in chain, "saveConn was dropped from the video save chain"
+    # the downloads config is React and saves from the same click (video-downloads.ts)
+    downloads = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-downloads.ts").read_text(encoding="utf-8")
+    assert "onVideoSave(() => videoDownloads.save());" in downloads
     # Video Quality and YouTube Quality are React and add their own savers to
     # the same capture-phase click (SETTINGS_PORT.md, video pass V1)
     tabs = _WEBUI / "src" / "features" / "settings" / "tabs"

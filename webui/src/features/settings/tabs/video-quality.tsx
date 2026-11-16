@@ -13,6 +13,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { useCommit } from './commit';
 import { Section } from './parts';
 import { onVideoSave, useVideoShown } from './video-shown';
 
@@ -71,25 +72,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T | null> {
     body: JSON.stringify(body),
   });
   return r.ok ? ((await r.json()) as T) : null;
-}
-
-/** the browser's change event on an input (a text field left, a slider let
- *  go), which React's onChange is not */
-function useCommit<T extends HTMLElement>(commit: (el: T) => void) {
-  const latest = useRef(commit);
-  latest.current = commit;
-  const attached = useRef<{ el: T; listener: () => void } | null>(null);
-  const [ref] = useState(() => (el: T | null) => {
-    if (attached.current) {
-      attached.current.el.removeEventListener('change', attached.current.listener);
-      attached.current = null;
-    }
-    if (!el) return;
-    const listener = () => latest.current(el);
-    el.addEventListener('change', listener);
-    attached.current = { el, listener };
-  });
-  return ref;
 }
 
 // ── the profile ──

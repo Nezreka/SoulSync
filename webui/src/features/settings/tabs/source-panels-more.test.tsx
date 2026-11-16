@@ -5,8 +5,6 @@
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
@@ -21,6 +19,7 @@ import {
 } from './source-panels-more';
 import { sourcesModel } from './sources-model';
 import { SourceModal } from './sources-tab';
+import { videoDownloads } from './video-downloads';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -29,25 +28,6 @@ let store: SettingsStore;
 let posted: SettingsPayload[];
 let calls: Array<{ url: string; method: string; body: unknown }>;
 let routes: Record<string, (body: unknown) => unknown>;
-
-/** the parked video blocks, as index.html has them */
-function park() {
-  const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-  const start = html.indexOf('<div id="video-source-blocks" hidden>');
-  let depth = 0;
-  const re = /<(\/?)div\b[^>]*>/g;
-  re.lastIndex = start;
-  let m: RegExpExecArray | null;
-  let end = start;
-  while ((m = re.exec(html))) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) {
-      end = m.index + m[0].length;
-      break;
-    }
-  }
-  document.body.insertAdjacentHTML('beforeend', html.slice(start, end));
-}
 
 beforeEach(() => {
   const sink: SettingsPayload[] = [];
@@ -104,8 +84,7 @@ describe('the panels are the markup they replaced', () => {
     expect(got.text).toBe(want.text);
   });
 
-  it('Prowlarr, torrent and usenet, with the video blocks moved in', () => {
-    park();
+  it("Prowlarr, torrent and usenet, with the video side's blocks in them", () => {
     const { container } = render(
       <MoreSourcePanels store={store} part="prowlarr-torrent-usenet" opened={0} active={false} />,
     );
@@ -113,19 +92,20 @@ describe('the panels are the markup they replaced', () => {
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // and they left their parking place
-    expect(document.getElementById('video-source-blocks')!.children).toHaveLength(0);
   });
 });
 
-describe('the video blocks are borrowed, never remounted', () => {
-  it('the same nodes, with their values and listeners, move into the modal and back', async () => {
-    park();
+describe("the video side's blocks", () => {
+  it('show the video downloads config, keep it through the modal, and save it', async () => {
+    videoDownloads.reset();
+    routes['GET /api/video/downloads/config'] = () => ({
+      seed_ratio_goal: 1.5,
+      seed_mode: 'client',
+      usenet_remove_completed: 'files',
+      redownload_failed: false,
+    });
+    routes['POST /api/video/downloads/config'] = () => ({ success: true });
     document.body.insertAdjacentHTML('beforeend', '<div id="source-config-home" hidden></div>');
-    const ratio = document.getElementById('video-seed-ratio') as HTMLInputElement;
-    const heard = vi.fn();
-    ratio.addEventListener('change', heard);
-    ratio.value = '1.5';
     render(
       <>
         <SourceModal />
@@ -133,15 +113,24 @@ describe('the video blocks are borrowed, never remounted', () => {
         <UsenetPanel store={store} />
       </>,
     );
+    await act(() => videoDownloads.load());
+    expect(input('video-seed-ratio').value).toBe('1.5');
+    expect((document.getElementById('video-seed-mode') as HTMLSelectElement).value).toBe('client');
     act(() => sourcesModel.openModal('torrent'));
     const moved = document.querySelector('#src-modal-body #video-seed-ratio') as HTMLInputElement;
-    expect(moved).toBe(ratio);
     expect(moved.value).toBe('1.5');
-    fireEvent.change(moved);
-    expect(heard).toHaveBeenCalledOnce();
+    fireEvent.input(moved, { target: { value: '2' } });
+    moved.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toMatchObject({
+        seed_ratio_goal: 2,
+        seed_mode: 'client',
+        usenet_remove_completed: 'files',
+        redownload_failed: false,
+      }),
+    );
     act(() => sourcesModel.closeModal());
-    expect(document.querySelector('#src-modal-body #video-seed-ratio')).toBeNull();
-    expect(document.getElementById('video-seed-ratio')).toBe(ratio);
+    expect(input('video-seed-ratio').value).toBe('2');
     // usenet's two follow its music settings in the frame
     const frame = document.querySelector('#usenet-client-settings-container .api-service-frame')!;
     expect([...frame.children].slice(-3).map((n) => n.id)).toEqual([
@@ -149,6 +138,12 @@ describe('the video blocks are borrowed, never remounted', () => {
       'video-usenet-remove-completed-group',
       'video-redownload-failed-group',
     ]);
+    fireEvent.click(input('video-redownload-failed'));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toMatchObject({
+        redownload_failed: true,
+      }),
+    );
   });
 });
 

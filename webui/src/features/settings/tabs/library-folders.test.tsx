@@ -70,7 +70,7 @@ function saved(): SettingsPayload {
 }
 
 describe('the Folders card is the markup it replaced', () => {
-  it('with the React Audiobooks panel and the vanilla Video panel back in its place', () => {
+  it('with the React Audiobooks and Video panels', () => {
     park();
     const { container } = card();
     const want = shape(vanilla('library-folders.vanilla.html', { afterInit: true }));
@@ -132,7 +132,7 @@ describe('the card', () => {
     expect([guide('docker'), guide('native'), warn()]).toEqual([false, true, true]);
   });
 
-  it('the vanilla video panel guides follow the deployment too', () => {
+  it('the video panel guides follow the deployment too', () => {
     park();
     act(() => store.hydrate({ _environment: { docker: false } }));
     card();

@@ -1117,6 +1117,11 @@ def test_the_two_sides_name_their_sections_the_same_way():
         # parked panel
         card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
         assert f"<strong>Music {noun.lower()}</strong>" in card
+        if noun == "Folders":
+            # the Video panel is React too (SETTINGS_PORT.md video pass V2a)
+            video = _read("webui/src/features/settings/tabs/library-video-folders.tsx")
+            assert "<strong>Video folders</strong>" in video
+            continue
         parked = markup.split('<div id="library-parked-panels" hidden>', 1)[1]
         assert f"<strong>Video {noun.lower()}</strong>" in parked.split(f'id="{noun.lower()}-video-panel"', 1)[1]
 
@@ -1189,7 +1194,10 @@ def test_no_two_cards_share_a_name():
     # the tabs ported to React render their cards themselves (SETTINGS_PORT.md):
     # a Section's title, or a header written out by hand (Music Quality)
     tabs = Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
-    for tsx in sorted(tabs.glob("*-tab.tsx")):
+    # (and the video pass's sections, video-*.tsx)
+    for tsx in sorted([*tabs.glob("*-tab.tsx"), *tabs.glob("video-*.tsx")]):
+        if tsx.name.endswith(".test.tsx"):
+            continue
         text = tsx.read_text(encoding="utf-8")
         titles += re.findall(r'<Section\b[^<]*?\btitle="([^"]+)"', text, re.S)
         for m in re.finditer(r'className="settings-section-header[^"]*"', text):

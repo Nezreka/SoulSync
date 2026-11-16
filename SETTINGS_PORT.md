@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done** (steps 6 and V1 below) | 67 of 67: the music sections (step 6) and Video Quality, Custom Formats and YouTube Quality (video pass V1). |
-| Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
+| Tab: Library | **done but the video Organization panel and Video Preferences** (steps 8a-8d, V2a below) | Folders, Organization, Post-Processing, Import, and the Folders card's Video panel (V2a). Left for V2b/V2c: the Organization card's Video panel and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | **done** (steps 9a-9c, and Experimental in 10a) | 63 of 63. |
@@ -65,13 +65,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality done), 560 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality done, Library's video folders done), 582 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 6,111 |
-| `webui/static/settings.js` | 10,187 | 1,480 |
-| `webui/static/video/video-settings.js` | 2,940 | 2,404 |
+| `webui/index.html` | 12,823 | 5,810 |
+| `webui/static/settings.js` | 10,187 | 1,457 |
+| `webui/static/video/video-settings.js` | 2,940 | 1,643 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -807,6 +807,18 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Video pass V2a: the Folders card's Video panel and the video downloads config (Nov 15 2026)
+
+**What.** `tabs/video-downloads.ts`: the video downloads config (`/api/video/downloads/config`) as one model, loaded once a page (the first time the Library tab or the video settings page is shown, as `loadSharedLibrary` did) and posted back whole (`downloadsBody`, `saveDownloads`' fields; never the chain). `tabs/library-video-folders.tsx`: the Folders card's Video panel, React now in the card (no longer parked): where downloads arrive, the four libraries, the 4K switches (one with no folder opens its lock), More libraries (#2029: rows, sources in order, indexers asked from Prowlarr when a box opens, categories, the two switches, Add, Save, Make default, Remove with the house confirm), your library's folders (the drive map, a folder's neighbours filled and checked), the extra folders, and the Docker lines; the load gate (every control off, Loading, a failed load's Retry). `tabs/video-source-blocks.tsx`: the seeding goals with their per-indexer rules in the torrent panel, and the usenet panel's remove-completed and redownload-failed. `tabs/commit.ts`: the browser change event as a hook (a typed path saves when left, as before).
+
+**Removed.** About 800 lines of `video-settings.js` (the folders, 4K, Docker lines, drive map, More libraries, seeding, `loadDownloads`, `saveDownloads`, `wireDownloads`, and the retired video source picker's hybrid list, which nothing showed), the parked panel and blocks from `index.html`, `togglePathLock` and the video summary from `settings.js`.
+
+**Found while porting.** One commit hook was shared by two fields and only one heard (a hook's ref follows one element): each has its own now. An inline callback ref on the panel was detached and attached again each render, after the Docker lines read it, so they never saw the panel: an object ref now.
+
+**Differences.** The four seeding goals save when changed; the page saved them only when another of these fields saved (nothing listened to them), so an edit to one alone could be lost. The save button on the video side no longer posts the config before it has loaded (the page posted its empty fields). On load the Docker lines include a More libraries folder too (the page drew them before the libraries arrived, and only listed it after the next edit).
+
+**Checked.** Parity of the panel and the source blocks against frozen fixtures (and the Folders card's own); `library-video-folders.test.tsx` 9 (the cases `settings-video-library-load` ran, ported: the load once, the retry, the extra folders, Anime, 4K and its lock, the Docker lines; the load gate negative-checked), `video-source-blocks.test.tsx` 2, `video-libraries-2029` now runs the React editor with its assertions unchanged (14), `source-panels-more` (the blocks keep the config through the modal and save it); Python pins repointed (`test_video_download_config`, `test_video_seeding`, `test_usenet_remove_completed`, `test_video_seed_rules`, `test_settings_sources_tab`, which also caught that V1 had moved Video Quality out of its title check). Browser: every value, the libraries, the drive map, the guides, the edits and the seeding the same; pixels the same but faint background noise and the extra Docker line.
+
 ### Video pass V1: the Quality tab's video sections (Nov 15 2026)
 
 **What.** `tabs/video-quality.tsx`, slot `quality`/`video`: Video Quality (the profile bar with New, rename and Delete, each kind's default profile, the ladder with its arrows and switches, Upgrade until, Never grab, the codec, HDR and audio tie-breakers, REPACK, the audio language and its chips, Save to, the max and preferred sizes and the seeders floor), Custom Formats (rows, the per-profile override, add, delete, the minimum score) and YouTube Quality. They save through `/api/video/downloads/quality*` and `/youtube-quality` as before, each change at once, and a typed field or a slider commits on the browser's change event (leaving it, letting go), as it did. `tabs/video-shown.ts` hears `soulsync:video-page-shown` for the video settings page (the sections load on it) and adds the video sections' saves to the shared save button on the video side (a capture-phase click, as `video-settings.js` did).
@@ -1236,7 +1248,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `video-download-mode` | Download Source: {Soulseek Only / Torrent Only (via Prowlarr) / Usenet Only (via Prowlarr) / Hybrid (Primary + | video only | no |
+| select | `video-download-mode` | Download Source: {Soulseek Only / Torrent Only (via Prowlarr) / Usenet Only (via Prowlarr) / Hybrid (Primary + | video only | yes (video pass V2a) |
 | button |  | + Add connection | video only | no |
 
 ### Sources (80)
@@ -1579,57 +1591,57 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `video-download-path` | Download folder (input, shared with Music): | both | no |
-| button |  | Unlock | both | no |
+| text | `video-download-path` | Download folder (input, shared with Music): | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
 
 **Libraries** (both, 8)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `video-movies-path` | 🎬 Movies: | both | no |
-| button |  | Unlock | both | no |
-| text | `video-tv-path` | 📺 TV shows: | both | no |
-| button |  | Unlock | both | no |
-| text | `video-anime-path` | 🍥 Anime (optional): | both | no |
-| button |  | Unlock | both | no |
-| text | `video-youtube-path` | ▶️ YouTube: | both | no |
-| button |  | Unlock | both | no |
+| text | `video-movies-path` | 🎬 Movies: | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
+| text | `video-tv-path` | 📺 TV shows: | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
+| text | `video-anime-path` | 🍥 Anime (optional): | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
+| text | `video-youtube-path` | ▶️ YouTube: | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
 
 **4K libraries (optional)** (both, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `video-movies-4k-enabled` | Separate 4K movies folder | both | no |
-| text | `video-movies-4k-path` | Separate 4K movies folder | both | no |
-| button |  | Unlock | both | no |
-| checkbox | `video-tv-4k-enabled` | Separate 4K TV folder | both | no |
-| text | `video-tv-4k-path` | Separate 4K TV folder | both | no |
-| button |  | Unlock | both | no |
+| checkbox | `video-movies-4k-enabled` | Separate 4K movies folder | both | yes (video pass V2a) |
+| text | `video-movies-4k-path` | Separate 4K movies folder | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
+| checkbox | `video-tv-4k-enabled` | Separate 4K TV folder | both | yes (video pass V2a) |
+| text | `video-tv-4k-path` | Separate 4K TV folder | both | yes (video pass V2a) |
+| button |  | Unlock | both | yes (video pass V2a) |
 
 **More libraries** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `video-library-add` | + Add library | both | no |
+| button | `video-library-add` | + Add library | both | yes (video pass V2a) |
 
 **Your library's folders** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `video-drive-map-save` | Save folders | both | no |
+| button | `video-drive-map-save` | Save folders | both | yes (video pass V2a) |
 
 **Folders your server doesn't list** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | + Add folder | both | no |
-| button |  | + Add folder | both | no |
+| button |  | + Add folder | both | yes (video pass V2a) |
+| button |  | + Add folder | both | yes (video pass V2a) |
 
 **Docker volumes** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `video-compose-copy` | Copy lines | both | no |
+| button | `video-compose-copy` | Copy lines | both | yes (video pass V2a) |
 
 **Organization** (both, 4)
 

@@ -1,17 +1,23 @@
-import { waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  VideoFoldersPanel,
+  resetLibraryIndexers,
+} from '@/features/settings/tabs/library-video-folders';
+import { videoDownloads } from '@/features/settings/tabs/video-downloads';
 
 /**
  * #2029: named video libraries. Settings > Folders > Video lists every library
  * (the main and 4K ones with their folders set above, custom ones with their
  * own), adds, saves, makes default and removes; the Get / Manual search
  * window picks a title's library.
+ *
+ * The Settings editor is React (library-video-folders.tsx, SETTINGS_PORT.md
+ * video pass V2a): these run it, with the server stubbed.
  */
-
-const SETTINGS = readFileSync(resolve(process.cwd(), 'static/video/video-settings.js'), 'utf8');
-const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 const VIEW = readFileSync(resolve(process.cwd(), 'static/video/video-download-view.js'), 'utf8');
 
 const LIBRARIES = [
@@ -51,14 +57,12 @@ const LIBRARIES = [
 ];
 
 function setup() {
-  const doc = new DOMParser().parseFromString(HTML, 'text/html');
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     const body = (v: unknown) => new Response(JSON.stringify(v));
     if (url === '/api/video/libraries/folders' && !init?.method) {
       return body({ libraries: LIBRARIES, genres: ['Comedy', 'Documentary'] });
     }
     if (url.startsWith('/api/video/libraries/folders')) return body({ success: true });
-    if (url.includes('/organization')) return body({ movie_template: '$title' });
     if (url.includes('/quality/profiles')) {
       return body({
         profiles: [
@@ -71,17 +75,24 @@ function setup() {
     return body({ movies_path: '/movies', tv_path: '/tv' });
   });
   const confirm = vi.fn(async () => true);
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  new Function('document', 'window', 'fetch', 'showConfirmDialog', SETTINGS)(
-    doc,
-    {},
-    fetcher,
-    confirm,
-  );
-  doc.dispatchEvent(new Event('DOMContentLoaded'));
-  doc.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
-  return { doc, fetcher, confirm };
+  vi.stubGlobal('fetch', fetcher);
+  (window as unknown as Record<string, unknown>).showConfirmDialog = confirm;
+  videoDownloads.reset();
+  resetLibraryIndexers();
+  render(<VideoFoldersPanel hidden={false} docker={null} />);
+  act(() => {
+    document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
+  });
+  return { doc: document, fetcher, confirm };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete (window as unknown as Record<string, unknown>).showConfirmDialog;
+});
+
+/** a click React hears, and what it sets off */
+const click = (el: Element | null) => act(() => (el as HTMLElement).click());
 
 const calls = (f: ReturnType<typeof vi.fn>) => f.mock.calls as unknown as [string, RequestInit?][];
 
@@ -117,8 +128,8 @@ describe('settings: more libraries', () => {
   it('adds a library with its kind, folder and rules', async () => {
     const { doc, fetcher } = setup();
     await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
-    (doc.getElementById('video-library-add') as HTMLButtonElement).click();
-    (doc.getElementById('video-library-add') as HTMLButtonElement).click(); // one new row only
+    click(doc.getElementById('video-library-add'));
+    click(doc.getElementById('video-library-add')); // one new row only
     const rows = doc.querySelectorAll('.video-library-row');
     expect(rows.length).toBe(4);
     const row = rows[3];
@@ -126,7 +137,7 @@ describe('settings: more libraries', () => {
     (row.querySelector('.video-library-kind-pick') as HTMLSelectElement).value = 'show';
     (row.querySelector('.video-library-path') as HTMLInputElement).value = ' /kids ';
     (row.querySelector('.video-library-genres') as HTMLInputElement).value = 'Kids, Family,';
-    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    click(row.querySelector('[data-library-action="save"]'));
     const post = calls(fetcher).find((c) => c[1]?.method === 'POST');
     expect(post![0]).toBe('/api/video/libraries/folders');
     expect(JSON.parse(post![1]!.body as string)).toEqual({
@@ -157,7 +168,7 @@ describe('settings: more libraries', () => {
       'UHD',
     ]);
     prof.value = '7';
-    (main.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    click(main.querySelector('[data-library-action="save"]'));
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     expect(put![0]).toBe('/api/video/libraries/folders/1');
     expect(JSON.parse(put![1]!.body as string)).toEqual({
@@ -177,11 +188,11 @@ describe('settings: more libraries', () => {
     const { doc, fetcher, confirm } = setup();
     await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
     const custom = doc.querySelectorAll('.video-library-row')[2];
-    (custom.querySelector('[data-library-action="default"]') as HTMLButtonElement).click();
+    click(custom.querySelector('[data-library-action="default"]'));
     expect(calls(fetcher).some((c) => c[0] === '/api/video/libraries/folders/5/default')).toBe(
       true,
     );
-    (custom.querySelector('[data-library-action="remove"]') as HTMLButtonElement).click();
+    click(custom.querySelector('[data-library-action="remove"]'));
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ destructive: true }));
     await waitFor(() =>
       expect(calls(fetcher).some((c) => c[1]?.method === 'DELETE' && c[0].endsWith('/5'))).toBe(
@@ -310,20 +321,19 @@ describe('settings: a library picks its sources and categories (#2029 step 3)', 
     const { doc, fetcher } = setup();
     await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
     const row = () => doc.querySelectorAll('.video-library-row')[2] as HTMLElement;
-    const click = (src: string) =>
-      (row().querySelector(`[data-library-src="${src}"]`) as HTMLButtonElement).click();
+    const pick = (src: string) => click(row().querySelector(`[data-library-src="${src}"]`));
     expect(row().querySelector('.video-library-hint')!.textContent).toBe('the global order');
-    click('usenet');
-    click('torrent');
-    click('soulseek');
-    click('torrent'); // off again
+    pick('usenet');
+    pick('torrent');
+    pick('soulseek');
+    pick('torrent'); // off again
     const on = Array.from(row().querySelectorAll('.video-library-src.is-on')).map(
       (b) => b.textContent,
     );
     expect(on).toEqual(['2 Soulseek', '1 Usenet']);
     (row().querySelector('.video-library-tcat') as HTMLInputElement).value = 'standup';
     (row().querySelector('.video-library-ucat') as HTMLInputElement).value = 'standup-nzb';
-    (row().querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    click(row().querySelector('[data-library-action="save"]'));
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     const body = JSON.parse(put![1]!.body as string);
     expect(body.sources).toEqual(['usenet', 'soulseek']);
@@ -357,10 +367,12 @@ describe('settings: a library picks its indexers (#2029 step 4)', () => {
     const box = row.querySelector('.video-library-indexers') as HTMLDetailsElement;
     expect(box.querySelector('summary')!.textContent).toBe('Indexers: every one');
     box.open = true;
-    box.dispatchEvent(new Event('toggle'));
+    act(() => {
+      box.dispatchEvent(new Event('toggle'));
+    });
     await waitFor(() => expect(row.querySelectorAll('.video-library-idx').length).toBe(2));
     (row.querySelector('.video-library-idx[value="7"]') as HTMLInputElement).checked = true;
-    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    click(row.querySelector('[data-library-action="save"]'));
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     expect(JSON.parse(put![1]!.body as string).indexer_ids).toEqual([7]);
   });
@@ -374,7 +386,7 @@ describe('settings: automatic search and upgrades per library (#2029 step 5)', (
     const auto = row.querySelector('.video-library-auto') as HTMLInputElement;
     expect(auto.checked).toBe(true);
     auto.checked = false;
-    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    click(row.querySelector('[data-library-action="save"]'));
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     const body = JSON.parse(put![1]!.body as string);
     expect(body.auto_search).toBe(false);

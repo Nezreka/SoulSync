@@ -113,10 +113,10 @@ describe('the Organization card is the markup it replaced', () => {
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // only the Folders card's vanilla video panel waits in the park now
+    // the Folders card's video panel is React (video pass V2a): the park is empty
     expect(
       [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
-    ).toEqual(['folders-video-panel']);
+    ).toEqual([]);
   });
 
   it('every help reads the same, spaces included', () => {

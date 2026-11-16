@@ -3,24 +3,14 @@
  * yt-dlp updater, Prowlarr, the torrent client and the usenet client. Same
  * markup, classes and ids as the vanilla panels, same load and save rules.
  *
- * The torrent and usenet panels hold three blocks the VIDEO side owns
- * (video-settings.js fills them, binds listeners to the nodes and saves them
- * itself): the torrent seeding goals with their per-indexer rows, and the
- * usenet remove-completed and redownload-failed settings. A React panel
- * remounts when it moves into the modal, which would drop those listeners and
- * values, so the blocks stay vanilla: they are parked in #video-source-blocks
- * and each panel moves them in on mount and back on unmount, the way the old
- * modal moved whole panels. Until the video pass ports them.
+ * The torrent and usenet panels hold three blocks the VIDEO side owns: the
+ * torrent seeding goals with their per-indexer rows, and the usenet
+ * remove-completed and redownload-failed settings. They are React too
+ * (video-source-blocks.tsx, SETTINGS_PORT.md video pass V2a), keys of the
+ * video downloads config.
  */
 
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
@@ -40,6 +30,7 @@ import {
   useSettings,
 } from './source-panels';
 import { type SourcesModel, sourcesModel } from './sources-model';
+import { VideoSeedingGoals, VideoUsenetBlocks } from './video-source-blocks';
 
 type ShellTools = Window & { saveSettings?: () => Promise<void> };
 
@@ -147,38 +138,6 @@ function useConnectionTest(service: string) {
     }
   }
   return { status, dot, run };
-}
-
-/**
- * Move parked vanilla nodes into `host` while mounted (see the top). It must
- * sit INSIDE the panel, in the part that remounts when the panel moves into
- * the modal: borrowed by the outer component, the nodes went down with the
- * old DOM on that move and were lost.
- */
-function ParkedInto({ host, ids }: { host: RefObject<HTMLElement | null>; ids: string[] }) {
-  useEffect(() => {
-    const target = host.current;
-    if (!target) return;
-    const nodes = ids
-      .map((id) => document.getElementById(id))
-      .filter((node): node is HTMLElement => !!node);
-    for (const node of nodes) target.appendChild(node);
-    return () => {
-      const park = document.getElementById('video-source-blocks');
-      if (park) for (const node of nodes) park.appendChild(node);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  return null;
-}
-
-/** a host element of its own for parked nodes */
-function ParkedHost({ ids }: { ids: string[] }) {
-  const host = useRef<HTMLDivElement>(null);
-  return (
-    <div ref={host}>
-      <ParkedInto host={host} ids={ids} />
-    </div>
-  );
 }
 
 const str = (value: unknown, fallback = '') => text(value) || fallback;
@@ -685,8 +644,10 @@ export function TorrentPanel({ store }: { store: SettingsStore }) {
           </Field>
         </div>
       </div>
-      {/* the video seeding block (video-settings.js) is moved in here */}
-      <ParkedHost ids={['video-seeding-goals']} />
+      {/* the video side's seeding goals (video-source-blocks.tsx) */}
+      <div>
+        <VideoSeedingGoals />
+      </div>
     </Panel>
   );
 }
@@ -843,10 +804,7 @@ export function UsenetPanel({ store }: { store: SettingsStore }) {
             </select>
           </Field>
           {/* the video side's two blocks follow the music ones (see the top) */}
-          <ParkedInto
-            host={frame}
-            ids={['video-usenet-remove-completed-group', 'video-redownload-failed-group']}
-          />
+          <VideoUsenetBlocks />
         </div>
       </div>
     </Panel>

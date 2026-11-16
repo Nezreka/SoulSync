@@ -30,13 +30,14 @@ it('uses one category bar instead of a second sidebar', () => {
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
   nav.switchSettingsTab('connections');
-  const input = document.getElementById('video-movies-path') as HTMLInputElement;
+  // a field still in the page's own markup (the Organization card's video panel)
+  const input = document.getElementById('vo-movie-template') as HTMLInputElement;
   input.value = '/unsaved';
   const section = input.closest('[data-stg]') as HTMLElement;
   const display = section.style.display;
-  nav.filterSettings("Your library's folders");
+  nav.filterSettings('Movie Path Template');
   expect(section.style.display).toBe(display);
-  expect(document.getElementById('video-movies-path')).toBe(input);
+  expect(document.getElementById('vo-movie-template')).toBe(input);
   const shown = vi.fn();
   document.addEventListener('soulsync:library-settings-shown', shown, { once: true });
   (document.querySelector('#stg-search-results button') as HTMLButtonElement).click();

@@ -20,16 +20,10 @@ import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
 import { AudiobookFoldersPanel, audiobooksPath } from './library-audiobooks';
-import {
-  isDocker,
-  LIBRARY_TAB,
-  LibrarySection,
-  LockedPath,
-  useMediaTabs,
-  useParkedPanels,
-} from './library-card';
+import { isDocker, LIBRARY_TAB, LibrarySection, LockedPath, useMediaTabs } from './library-card';
 import { OrganizationCard } from './library-organization';
 import { ProcessingCards } from './library-processing';
+import { VideoFoldersPanel } from './library-video-folders';
 import { helpBits, useHelp } from './parts';
 import { NumberField, text } from './source-panels';
 
@@ -248,14 +242,11 @@ export function FoldersCard({ store }: SettingsTabProps) {
   const { media, tabs } = useMediaTabs('folders', 'Folders media type');
   const musicPanel = useRef<HTMLDivElement>(null);
   const podcastsPanel = useRef<HTMLDivElement>(null);
-  useParkedPanels(media, [{ id: 'folders-video-panel', after: podcastsPanel, media: 'video' }]);
   // the vanilla panels' own deployment guides (the video one has a pair):
   // applyPathsEnvironment toggled every guide on the page
   useEffect(() => {
     if (!loads) return;
-    const guides = document.querySelectorAll(
-      '#folders-audiobooks-panel [data-paths-guide], #folders-video-panel [data-paths-guide]',
-    );
+    const guides = document.querySelectorAll('#folders-audiobooks-panel [data-paths-guide]');
     for (const el of guides)
       el.classList.toggle('hidden', (el.getAttribute('data-paths-guide') === 'docker') !== docker);
   }, [loads, docker]);
@@ -674,6 +665,12 @@ export function FoldersCard({ store }: SettingsTabProps) {
             </div>
           </div>
         </div>
+        {/* the deployment guides show once the settings have loaded, as before */}
+        <VideoFoldersPanel
+          hidden={media !== 'video'}
+          docker={loads ? docker : null}
+          settingsLoaded={loads > 0}
+        />
       </LibrarySection>
     </>
   );
