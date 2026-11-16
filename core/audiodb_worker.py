@@ -5,6 +5,7 @@ import time
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
+from core.text.title_match import numbers_conflict
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.audiodb_client import AudioDBClient
@@ -284,6 +285,10 @@ class AudioDBWorker:
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:
         """Check if AudioDB result name matches our query with fuzzy matching"""
+        # names that differ by a number are other releases: 'Group Therapy 702'
+        # scored 0.94 of 701 and its ids landed on 701's rows (#2134)
+        if numbers_conflict(query_name or '', result_name or ''):
+            return False
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
         if not norm_query or not norm_result:
