@@ -65,13 +65,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done), 621 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 636 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 5,387 |
-| `webui/static/settings.js` | 10,187 | 1,457 |
-| `webui/static/video/video-settings.js` | 2,940 | 839 |
+| `webui/index.html` | 12,823 | 5,029 |
+| `webui/static/settings.js` | 10,187 | 1,442 |
+| `webui/static/video/video-settings.js` | 2,940 | 702 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -807,6 +807,14 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Video pass V3a: the video side's API Configuration (Nov 16 2026)
+
+**What.** `tabs/connections-video-api.tsx` (slot `connections` / `api-video`): the hidden group and its 11 cards (TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSource, Trakt, MDBList, Community Data, YouTube Extras), each portalled into a wrapper that the tiles move into the services modal, as the music cards are (`useServicePlace` takes the side now). `tabs/video-keys.ts`: the 9 keys and 6 switches, loaded each time the video settings page is shown and all posted when one changes (a key when its field is left, a switch at once), quietly from the video side's save button; Test (`testVideoServices`: save quietly, test each, only the switched-on ones of a keyless card).
+
+**Removed.** `loadKeys`, `saveKeys`, `testConnection` and their wiring from `video-settings.js`, the cards from `index.html`, and `toggleStgService` and `toggleAllServiceAccordions` from `settings.js` (every card is React now).
+
+**Checked.** Parity (`video-api.vanilla.html`, wrappers unwrapped); `connections-video-api.test.tsx` 6 (the load, the saves and their body, Test and the keyless filter, the save button, a tile opening its card in the modal and still heard there, back in page order; the side in `useServicePlace` negative-checked); `video-side-settings-save` repointed; Python `test_service_test_buttons` (the video cards' Test buttons and the bundle workers read the component now: the old check matched nothing in `index.html` once the cards left it), `test_video_side_shell`, `test_settings_subtitles_section` (1 negative check). Settings suites 1,506 pass. Browser: the video tiles and their chips, every loaded value, a key typed and left, TMDB's Test and the keyless card's (Wikidata failing), what the server holds after, and the toasts, all the same; the open card 2 pixels.
+
 ### Video pass V2c: Video Preferences (Nov 15 2026)
 
 **What.** `tabs/library-video-prefs.tsx` (slot `library` / `video-prefs`): the Video group label and the Video Preferences card, Detail Pages (autoplay, the where-to-watch region) and Monitoring (Monitor Specials), and its summary (`where to watch: <region>` once the settings load). `tabs/video-prefs.ts`: autoplay and the region, read from the enrichment config each time the video settings page is shown (as `loadKeys` did) and posted together on a change (and quietly from the video side's save button). Monitor Specials reads the video downloads model (V2a) and posts its one key alone, as `saveMonitorSpecials` did.
@@ -1113,81 +1121,81 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `tmdb-api-key` | API Key: | video only | no |
+| password | `tmdb-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test TMDB | video only | no |
 
 **TVDB** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `tvdb-api-key` | API Key: | video only | no |
+| password | `tvdb-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test TVDB | video only | no |
 
 **OMDb (Ratings)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `omdb-api-key` | API Key: | video only | no |
+| password | `omdb-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test OMDb | video only | no |
 
 **fanart.tv (Artwork)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `fanart-api-key` | API Key: | video only | no |
+| password | `fanart-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test fanart.tv | video only | no |
 
 **OpenSubtitles (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `opensubtitles-api-key` | API Key: | video only | no |
+| password | `opensubtitles-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test OpenSubtitles | video only | no |
 
 **SubDL (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `subdl-api-key` | API Key: | video only | no |
+| password | `subdl-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test SubDL | video only | no |
 
 **SubSource (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `subsource-api-key` | API Key: | video only | no |
+| password | `subsource-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test SubSource | video only | no |
 
 **Trakt (Audience Rating)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `trakt-api-key` | API Key (Client ID): | video only | no |
+| password | `trakt-api-key` | API Key (Client ID): | video only | yes (video pass V3a) |
 | button |  | Test Trakt | video only | no |
 
 **MDBList (List Collections)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `mdblist-api-key` | API Key: | video only | no |
+| password | `mdblist-api-key` | API Key: | video only | yes (video pass V3a) |
 | button |  | Test MDBList | video only | no |
 
 **Community Data (No Key)** (video only, 4)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `video-tvmaze-enabled` | TVmaze (TV community rating) | video only | no |
-| checkbox | `video-anilist-enabled` | AniList (anime): links your anime to AniList by id and adds their roma | video only | no |
-| checkbox | `video-wikidata-enabled` | Wikidata (official website link) | video only | no |
+| checkbox | `video-tvmaze-enabled` | TVmaze (TV community rating) | video only | yes (video pass V3a) |
+| checkbox | `video-anilist-enabled` | AniList (anime): links your anime to AniList by id and adds their roma | video only | yes (video pass V3a) |
+| checkbox | `video-wikidata-enabled` | Wikidata (official website link) | video only | yes (video pass V3a) |
 | button |  | Test Connections | video only | no |
 
 **YouTube Extras (No Key)** (video only, 4)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `video-ryd-enabled` | Return YouTube Dislike (like/dislike estimates) | video only | no |
-| checkbox | `video-sponsorblock-enabled` | SponsorBlock (crowd-sourced segments) | video only | no |
-| checkbox | `video-dearrow-enabled` | DeArrow (crowd-sourced better titles) | video only | no |
+| checkbox | `video-ryd-enabled` | Return YouTube Dislike (like/dislike estimates) | video only | yes (video pass V3a) |
+| checkbox | `video-sponsorblock-enabled` | SponsorBlock (crowd-sourced segments) | video only | yes (video pass V3a) |
+| checkbox | `video-dearrow-enabled` | DeArrow (crowd-sourced better titles) | video only | yes (video pass V3a) |
 | button |  | Test Connections | video only | no |
 
 **Server Connection** (video only, 9)

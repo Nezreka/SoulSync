@@ -56,13 +56,13 @@ describe('the Save Settings button on the video side', () => {
     for (const url of [
       '/api/video/server-config',
       '/api/video/libraries',
-      '/api/video/enrichment/config',
     ]) {
       expect(posts, `${url} was not saved`).toContain(url);
     }
-    // the downloads config, Video Quality and YouTube Quality are React and
-    // save from the same capture-phase click (video-shown.ts); their tests
-    // press it: video-quality.test.tsx, library-video-folders.test.tsx
+    // the downloads config, Video Quality, YouTube Quality, Video Preferences
+    // and the API keys are React and save from the same capture-phase click
+    // (video-shown.ts); their tests press it: video-quality.test.tsx,
+    // library-video-folders.test.tsx, library-video-prefs.test.tsx
   });
 
   it('leaves the music side alone', () => {
@@ -127,7 +127,7 @@ return debouncedAutoSaveSettings;`;
 
   it('skips a field inside a video-only block - it saves itself', () => {
     const { scheduled } = autosave('video');
-    expect(scheduled('tmdb-api-key')).toBe(false);
+    expect(scheduled('video-import-lists')).toBe(false);
   });
 
   it('skips a field wired by a data-video-* hook - it saves itself', () => {
@@ -147,6 +147,6 @@ return debouncedAutoSaveSettings;`;
   it('is unchanged on the music side', () => {
     const { scheduled } = autosave('music');
     expect(scheduled('security-oidc-only')).toBe(true);
-    expect(scheduled('tmdb-api-key')).toBe(true);
+    expect(scheduled('video-import-lists')).toBe(true);
   });
 });

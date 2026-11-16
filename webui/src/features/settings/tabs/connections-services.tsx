@@ -26,7 +26,7 @@ import {
 
 import { settingsStore } from '../settings-store';
 
-type Kind = 'music' | 'video';
+export type Kind = 'music' | 'video';
 
 export const SERVICE_KINDS: Record<Kind, { label: string; attr: string }> = {
   music: { label: 'Music', attr: 'data-service' },
@@ -177,13 +177,14 @@ function placeHome(home: HTMLElement, wrap: HTMLElement) {
 }
 
 /**
- * The wrapper a music card portals into, and whether it is the open one.
- * It sits in the card's home slot, or in the modal body while open.
+ * The wrapper a React card portals into, and whether it is the open one.
+ * It sits in the card's home slot, or in the modal body while open. The
+ * video side's cards are React too (SETTINGS_PORT.md video pass V3a).
  */
-export function useServicePlace(service: string, order: number) {
+export function useServicePlace(service: string, order: number, kind: Kind = 'music') {
   const home = useContext(ServiceHome);
   const { open } = useServices();
-  const isOpen = open?.kind === 'music' && open.id === service;
+  const isOpen = open?.kind === kind && open.id === service;
   const [wrap] = useState(() => {
     const div = document.createElement('div');
     div.style.display = 'contents';

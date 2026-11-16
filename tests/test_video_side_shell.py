@@ -286,12 +286,16 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     # Video API frames use the SAME .api-service-frame structure as music but a
     # data-VIDEO-service attribute, so music's settings.js [data-service] verify
     # loop can't pick them up ("Unknown service: tvdb").
-    assert 'class="api-service-frame stg-service" data-video-service="tmdb"' in _INDEX
-    assert 'class="api-service-frame stg-service" data-video-service="tvdb"' in _INDEX
+    # The cards are React (SETTINGS_PORT.md video pass V3a).
+    cards = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+             "connections-video-api.tsx").read_text(encoding="utf-8")
+    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    assert '<Card\n        service="tmdb"' in cards and '<Card\n        service="tvdb"' in cards
+    assert 'data-stg-part="api-video"' in _INDEX
     # They must NOT carry the music-hooked data-service attribute.
-    assert 'data-service="tmdb"' not in _INDEX and 'data-service="tvdb"' not in _INDEX
+    assert "data-service=" not in cards
     # Each connection item has a Test button (like music's connections).
-    assert 'data-video-test-service="tmdb"' in _INDEX and 'data-video-test-service="tvdb"' in _INDEX
+    assert '<Test spec="tmdb">' in cards and '<Test spec="tvdb">' in cards
 
 
 def test_dashboard_enrichment_buttons_are_delegated():

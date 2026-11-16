@@ -530,7 +530,7 @@ const TEST_ROW: Array<[string, string]> = [
 
 /** settings.js toggleAllServiceAccordions: every card on the page, open or
  *  shut together */
-function toggleAll(button: HTMLButtonElement) {
+export function toggleAll(button: HTMLButtonElement) {
   const cards = [...document.querySelectorAll('#settings-page .stg-service')];
   const allOpen = cards.length > 0 && cards.every((c) => c.classList.contains('expanded'));
   for (const c of cards) c.classList.toggle('expanded', !allOpen);

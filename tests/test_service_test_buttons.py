@@ -27,6 +27,10 @@ CARDS = "\n".join(
     for f in ("connections-metadata.tsx", "connections-extras.tsx", "connections-servers.tsx")
 )
 
+# the video cards are React too (SETTINGS_PORT.md video pass V3a): a <Card
+# service="..."> with its <Test spec="...">, the switches <Toggle k="...">
+VIDEO_CARDS = (_TABS / "connections-video-api.tsx").read_text(encoding="utf-8")
+
 # hydrabase's own Connect button is its test: it opens the socket and says so
 HAS_OWN_CHECK = {"hydrabase"}
 
@@ -66,10 +70,14 @@ def test_every_music_service_frame_has_a_test_button():
 
 
 def test_every_video_service_frame_has_a_test_button():
-    frames = [(s, b) for s, b in _connections_frames("data-video-service") if s != "prefs"]
+    starts = [(m.start(), m.group(1)) for m in re.finditer(r'<Card\s+service="([^"]+)"', VIDEO_CARDS)]
+    frames = [(sid, VIDEO_CARDS[pos:starts[i + 1][0] if i + 1 < len(starts) else len(VIDEO_CARDS)])
+              for i, (pos, sid) in enumerate(starts)]
     assert len(frames) >= 11
-    missing = [sid for sid, body in frames if "data-video-test-service=" not in body]
+    missing = [sid for sid, body in frames if "<Test spec=" not in body]
     assert missing == []
+    # and the button is the one the page's css and tiles know
+    assert "data-video-test-service={spec}" in VIDEO_CARDS
 
 
 def test_every_music_button_reaches_a_real_backend_branch():
@@ -89,13 +97,15 @@ def test_every_music_button_reaches_a_real_backend_branch():
 def test_video_bundle_buttons_name_real_workers():
     from core.video.enrichment.backfill import build_backfill_workers
     workers = set(build_backfill_workers(SimpleNamespace(get_setting=lambda k: None)))
-    for spec in re.findall(r'data-video-test-service="([^"]+)"', INDEX):
+    specs = re.findall(r'<Test spec="([^"]+)"', VIDEO_CARDS)
+    assert len(specs) >= 11
+    for spec in specs:
         for svc in spec.split(","):
             if svc in {"tmdb", "tvdb", "omdb", "subdl", "subsource", "mdblist"}:
                 continue        # matcher clients / subtitle providers / list source
             assert svc in workers, svc
-            # the js only tests a switched-on service, and finds the switch by id
-            assert f'id="video-{svc}-enabled"' in INDEX or "," not in spec
+            # only a switched-on service is tested, and the switch is its own
+            assert f'<Toggle k="{svc}">' in VIDEO_CARDS or "," not in spec
 
 
 # ── concerts ────────────────────────────────────────────────────────────────

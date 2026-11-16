@@ -164,9 +164,15 @@ def test_every_subtitle_control_autosaves(panel):
         assert f"'{element_id}': true," in panel, element_id
 
 
-def test_subdl_and_subsource_have_test_buttons(index):
+def _video_cards():
+    # the video API cards are React (SETTINGS_PORT.md video pass V3a)
+    return _read(_TABS + "connections-video-api.tsx") + _read(_TABS + "video-keys.ts")
+
+
+def test_subdl_and_subsource_have_test_buttons():
+    cards = _video_cards()
     for svc in ("subdl", "subsource", "opensubtitles", "fanart"):
-        assert f'data-video-test-service="{svc}"' in index, svc
+        assert f'<Test spec="{svc}">' in cards, svc
 
 
 def test_autosync_toggle_wired(panel, org_src):
@@ -206,14 +212,18 @@ def test_advanced_knobs_wired(panel, video_js):
         assert f"{setting}:" in video_js, setting
 
 
-def test_provider_api_keys_have_fields_and_endpoints(index, video_js):
-    for element_id in ("opensubtitles-api-key", "subdl-api-key", "subsource-api-key"):
-        assert f'id="{element_id}"' in index, element_id
-    # keys save through the enrichment config endpoint
-    assert "subdl_api_key:" in video_js
-    assert "subsource_api_key:" in video_js
+def test_provider_api_keys_have_fields_and_endpoints(panel):
+    cards = _video_cards()
+    # each key field is id="<field>-api-key"
+    assert 'id={`${field}-api-key`}' in cards
+    for field in ("opensubtitles", "subdl", "subsource"):
+        assert f'<Key field="{field}"' in cards, field
+        assert f"'{field}'," in cards.split("export const KEY_FIELDS", 1)[1].split("]", 1)[0], field
+    # keys save through the enrichment config endpoint, as <field>_api_key
+    assert "export const CONFIG_URL = '/api/video/enrichment/config';" in cards
+    assert "`${k}_api_key`, s.keys[k]" in cards
     # the section points at the Services keys
-    assert "Services" in index
+    assert "Services" in panel
 
 
 def test_sane_defaults(org_src):

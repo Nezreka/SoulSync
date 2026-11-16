@@ -513,20 +513,9 @@ document.addEventListener('keydown', (e) => {
 
 
 // ── Settings → Connections: the service cards ──
-// The music cards are React (connections-metadata.tsx, connections-extras.tsx,
-// SETTINGS_PORT.md steps 10a and 10b), and their header gradient and verify
-// calls are gone: nothing showed those headers. The video side's cards are
-// still vanilla, and their hidden headers still call this.
-function toggleStgService(el) {
-    el.closest('.stg-service')?.classList.toggle('expanded');
-}
-// and the video group's Expand All (the music group's is React)
-function toggleAllServiceAccordions(btn) {
-    const services = document.querySelectorAll('#settings-page .stg-service');
-    const allExpanded = Array.from(services).every(s => s.classList.contains('expanded'));
-    services.forEach(s => s.classList.toggle('expanded', !allExpanded));
-    btn.textContent = allExpanded ? 'Expand All' : 'Collapse All';
-}
+// Every card is React now, music and video (connections-metadata.tsx,
+// connections-extras.tsx, connections-video-api.tsx; SETTINGS_PORT.md steps
+// 10a, 10b and video pass V3a), and their headers and Expand All with them.
 
 // The download chains (music, video, audiobooks), the source registry the
 // chain and the Sources tiles read, each source's connection state and Test

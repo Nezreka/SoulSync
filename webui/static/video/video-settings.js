@@ -12,7 +12,6 @@
 
     var PAGE_ID = 'video-settings';
     var URL = '/api/video/libraries';
-    var CONFIG_URL = '/api/video/enrichment/config';
     var SERVER_URL = '/api/video/server';
     var CONN_URL = '/api/video/server-config';
     var DOWNLOADS_URL = '/api/video/downloads/config';
@@ -296,46 +295,8 @@
             .catch(function () { status('Save failed'); if (!silent) toast('Could not save libraries', 'error'); });
     }
 
-    // ── Enrichment API keys (TMDB / TVDB) ───────────────────────────────────
-    function loadKeys() {
-        fetch(CONFIG_URL, { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                if (!d) return;
-                var t = document.getElementById('tmdb-api-key');
-                var v = document.getElementById('tvdb-api-key');
-                var o = document.getElementById('omdb-api-key');
-                if (t && d.tmdb_api_key != null) t.value = d.tmdb_api_key;
-                if (v && d.tvdb_api_key != null) v.value = d.tvdb_api_key;
-                if (o && d.omdb_api_key != null) o.value = d.omdb_api_key;
-                var fa = document.getElementById('fanart-api-key');
-                if (fa && d.fanart_api_key != null) fa.value = d.fanart_api_key;
-                var sub = document.getElementById('opensubtitles-api-key');
-                if (sub && d.opensubtitles_api_key != null) sub.value = d.opensubtitles_api_key;
-                var sdl = document.getElementById('subdl-api-key');
-                if (sdl && d.subdl_api_key != null) sdl.value = d.subdl_api_key;
-                var sso = document.getElementById('subsource-api-key');
-                if (sso && d.subsource_api_key != null) sso.value = d.subsource_api_key;
-                var trakt = document.getElementById('trakt-api-key');
-                if (trakt && d.trakt_api_key != null) trakt.value = d.trakt_api_key;
-                var mdbl = document.getElementById('mdblist-api-key');
-                if (mdbl && d.mdblist_api_key != null) mdbl.value = d.mdblist_api_key;
-                var ryd = document.getElementById('video-ryd-enabled');
-                if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
-                var sb = document.getElementById('video-sponsorblock-enabled');
-                if (sb && d.sponsorblock_enabled != null) sb.checked = !!d.sponsorblock_enabled;
-                var dea = document.getElementById('video-dearrow-enabled');
-                if (dea && d.dearrow_enabled != null) dea.checked = !!d.dearrow_enabled;
-                var tvm = document.getElementById('video-tvmaze-enabled');
-                if (tvm && d.tvmaze_enabled != null) tvm.checked = !!d.tvmaze_enabled;
-                var anl = document.getElementById('video-anilist-enabled');
-                if (anl && d.anilist_enabled != null) anl.checked = !!d.anilist_enabled;
-                var wkd = document.getElementById('video-wikidata-enabled');
-                if (wkd && d.wikidata_enabled != null) wkd.checked = !!d.wikidata_enabled;
-                // autoplay and the region are React (library-video-prefs.tsx)
-            })
-            .catch(function () { /* ignore */ });
-    }
+    // the enrichment keys and switches (the API Configuration cards) are React:
+    // connections-video-api.tsx, video-keys.ts (SETTINGS_PORT.md video pass V3a)
 
     // Video Preferences (autoplay, the region, Monitor Specials) is React and
     // saves itself: library-video-prefs.tsx (SETTINGS_PORT.md video pass V2c)
@@ -646,87 +607,8 @@
     // as it was when the quality code around it went
     function escA(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
-    function saveKeys(silent) {
-        var t = document.getElementById('tmdb-api-key');
-        var v = document.getElementById('tvdb-api-key');
-        var o = document.getElementById('omdb-api-key');
-        var fa = document.getElementById('fanart-api-key');
-        var sub = document.getElementById('opensubtitles-api-key');
-        var trakt = document.getElementById('trakt-api-key');
-        var ryd = document.getElementById('video-ryd-enabled');
-        var sb = document.getElementById('video-sponsorblock-enabled');
-        var dea = document.getElementById('video-dearrow-enabled');
-        var tvm = document.getElementById('video-tvmaze-enabled');
-        var anl = document.getElementById('video-anilist-enabled');
-        var wkd = document.getElementById('video-wikidata-enabled');
-        return fetch(CONFIG_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({
-                tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '',
-                omdb_api_key: o ? o.value : '',
-                fanart_api_key: fa ? fa.value : '',
-                opensubtitles_api_key: sub ? sub.value : '',
-                subdl_api_key: (document.getElementById('subdl-api-key') || {}).value || '',
-                subsource_api_key: (document.getElementById('subsource-api-key') || {}).value || '',
-                trakt_api_key: trakt ? trakt.value : '',
-                mdblist_api_key: (document.getElementById('mdblist-api-key') || {}).value || '',
-                ryd_enabled: ryd ? ryd.checked : true,
-                sponsorblock_enabled: sb ? sb.checked : true,
-                dearrow_enabled: dea ? dea.checked : true,
-                tvmaze_enabled: tvm ? tvm.checked : true,
-                anilist_enabled: anl ? anl.checked : false,
-                wikidata_enabled: wkd ? wkd.checked : true,
-            })
-        }).then(function () { if (!silent) toast('API keys saved', 'success'); })
-          .catch(function () { /* ignore */ });
-    }
-
     function toast(msg, type) {
         if (typeof showToast === 'function') showToast(msg, type);  // shared shell helper
-    }
-
-    // Mirrors music's testConnection(): save the key, then hit the test
-    // endpoint, then toast the result. Isolated -> /api/video/enrichment/<svc>/test.
-    var TEST_NAMES = { tmdb: 'TMDB', tvdb: 'TVDB', omdb: 'OMDb', fanart: 'fanart.tv',
-        opensubtitles: 'OpenSubtitles', subdl: 'SubDL', subsource: 'SubSource', trakt: 'Trakt',
-        mdblist: 'MDBList', tvmaze: 'TVmaze', anilist: 'AniList', wikidata: 'Wikidata',
-        ryd: 'Return YouTube Dislike', sponsorblock: 'SponsorBlock', dearrow: 'DeArrow' };
-    function _testOne(svc) {
-        return fetch('/api/video/enrichment/' + svc + '/test',
-            { method: 'POST', headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.json(); })
-            .catch(function () { return { success: false, error: 'request failed' }; });
-    }
-    // the keyless cards hold several services behind one button ("tvmaze,anilist,wikidata").
-    // only the ones switched on get tested, a service you turned off isn't broken.
-    function testConnection(spec) {
-        var svcs = String(spec || '').split(',').filter(Boolean);
-        if (svcs.length > 1) {
-            svcs = svcs.filter(function (s) {
-                var box = document.getElementById('video-' + s + '-enabled');
-                return !box || box.checked;
-            });
-            if (!svcs.length) { toast('Nothing to test, all of these are switched off', 'info'); return; }
-        }
-        var names = svcs.map(function (s) { return TEST_NAMES[s] || s.toUpperCase(); });
-        toast('Testing ' + names.join(', ') + '…', 'info');
-        saveKeys(true).then(function () {
-            return Promise.all(svcs.map(_testOne));
-        }).then(function (results) {
-            if (results.length === 1) {
-                var res = results[0];
-                if (res && res.success) toast(res.message || (names[0] + ' connection successful'), 'success');
-                else toast(names[0] + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
-                return;
-            }
-            var bad = [];
-            results.forEach(function (res, i) {
-                if (!(res && res.success)) bad.push(names[i] + ': ' + ((res && res.error) || 'unknown'));
-            });
-            if (!bad.length) toast(names.join(', ') + ' all reachable', 'success');
-            else toast('Failed: ' + bad.join(' · '), 'error');
-        }).catch(function () { toast('Failed to test ' + names.join(', '), 'error'); });
     }
 
     // the Organization card's Video panel (templates, post-processing,
@@ -738,7 +620,6 @@
         loadServer();
         loadConn();
         load();
-        loadKeys();
         loadImportLists();
         loadNotify();
         // Video Quality and YouTube Quality load themselves (video-quality.tsx)
@@ -755,16 +636,6 @@
         for (var i = 0; i < selects.length; i++) {
             selects[i].addEventListener('change', function () { fillTvMore(); save(); });
         }
-        // Enrichment keys save on blur/change (turns the workers on).
-        ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
-            'fanart-api-key', 'opensubtitles-api-key', 'subdl-api-key',
-            'subsource-api-key', 'trakt-api-key',
-            'video-ryd-enabled', 'video-sponsorblock-enabled', 'video-dearrow-enabled',
-            'video-tvmaze-enabled', 'video-anilist-enabled',
-            'video-wikidata-enabled'].forEach(function (id) {
-            var el = document.getElementById(id);
-            if (el) el.addEventListener('change', function () { saveKeys(); });
-        });
         // Server toggle (Plex/Jellyfin) — select + reveal that server's config.
         var toggles = document.querySelectorAll('[data-video-server-toggle]');
         for (var t = 0; t < toggles.length; t++) {
@@ -790,15 +661,6 @@
         // Jellyfin user pick → store it + refresh that user's libraries.
         var userSel = document.querySelector('[data-video-jellyfin-user]');
         if (userSel) userSel.addEventListener('change', function () { selectJellyfinUser(userSel.value); });
-        // Per-connection Test buttons (same behaviour as music's testConnection).
-        var testBtns = document.querySelectorAll('[data-video-test-service]');
-        for (var k = 0; k < testBtns.length; k++) {
-            (function (b) {
-                b.addEventListener('click', function () {
-                    testConnection(b.getAttribute('data-video-test-service'));
-                });
-            })(testBtns[k]);
-        }
         // The shared "Save Settings" button. On the video side it flushes the
         // video settings here (capture phase), then lets the click through to the
         // button's own handler, which saves the rest of the page exactly as it
@@ -825,7 +687,8 @@
             // (Video Quality and YouTube Quality add their own saves: video-shown.ts)
             // (the video downloads config adds its own save too: video-downloads.ts,
             // and Video Preferences: video-prefs.ts)
-            Promise.all([saveConn(true), save(true), saveKeys(true)])
+            // (and the API keys: video-keys.ts)
+            Promise.all([saveConn(true), save(true)])
                 .catch(function () { toast('Some video settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
