@@ -33,14 +33,16 @@ def _sent_sections() -> set:
     a fixed indent inside one `const settings = {` block, and anything deeper
     is a key within a section, not a section.
     """
-    source = (_ROOT / "webui/static/settings.js").read_text(encoding="utf-8", errors="ignore")
+    source = (_ROOT / "webui/src/features/settings/shell.ts").read_text(encoding="utf-8", errors="ignore")
     body = source.split("async function saveSettings", 1)[1]
     literal = body.split("const settings = {", 1)[1]
+    # the shell's save (shell.ts, SETTINGS_PORT.md step V4b) writes each
+    # section on one line, `name: {},`, at the literal's first indent
     sections = set()
     for line in literal.splitlines():
-        if line.startswith("    };"):
+        if re.match(r"^ {0,4}\};", line):
             break
-        match = re.match(r"^ {8}([a-z0-9_]+): \{$", line)
+        match = re.match(r"^ {4}([a-z0-9_]+): \{\}?,?$", line)
         if match:
             sections.add(match.group(1))
     return sections
@@ -49,8 +51,11 @@ def _sent_sections() -> set:
 def test_the_page_sends_something_at_all():
     # A parse that quietly finds nothing would make every check below pass.
     sent = _sent_sections()
-    assert len(sent) > 30, sent
-    assert "spotify" in sent
+    # fewer as tabs move to React and save their own sections (SETTINGS_PORT.md:
+    # 27 at step 9c; after step 10d only the empty placeholders are left, each
+    # React tab saving its own keys of them)
+    assert len(sent) >= 5, sent
+    assert {"soulseek", "library", "playlists", "m3u_export"} <= sent
 
 
 def test_every_section_the_page_sends_is_persisted():
@@ -66,4 +71,10 @@ def test_the_hifi_metadata_toggles_persist():
     are read by the tagging pipeline on every download, the settings page has
     checkboxes for them, and the save dropped the lot."""
     assert "hifi" in _persisted_sections()
-    assert "hifi" in _sent_sections()
+    # the toggles are the Post-Processing card's (React, SETTINGS_PORT.md step
+    # 8d), which saves hifi.embed_tags and each hifi.tags key itself
+    card = (_ROOT / "webui/src/features/settings/tabs/library-processing.tsx").read_text(
+        encoding="utf-8")
+    assert "service: 'hifi'" in card
+    assert "store.set(service, 'embed_tags', event.target.checked)" in card
+    assert "store.set(section, rest.join('.'), event.target.checked)" in card

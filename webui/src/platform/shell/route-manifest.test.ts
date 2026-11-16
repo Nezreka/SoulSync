@@ -82,6 +82,7 @@ describe('shellRouteManifest', () => {
       'artist-detail',
       'label-detail',
       'stats',
+      'settings',
       'issues',
       'requests',
       'podcasts',
@@ -89,15 +90,19 @@ describe('shellRouteManifest', () => {
       'sample-studio',
       'calendar',
     ]);
-    // Sync was the 13th and last big music page; nothing in the music nav is
-    // legacy now. `settings` stands in as a route that genuinely still is.
+    // Sync was the 13th and last big music page; Settings went React last
+    // (SETTINGS_PORT.md step V4c). `help` stands in as a route that genuinely
+    // still is legacy.
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(false);
     expect(legacyShellRoutes.some((route) => route.pageId === 'sync')).toBe(false);
-    expect(legacyShellRoutes.some((route) => route.pageId === 'settings')).toBe(true);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'settings')).toBe(false);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'help')).toBe(true);
   });
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
-    expect(resolveLegacyShellPageFromPath('/settings')).toBe('settings');
+    expect(resolveLegacyShellPageFromPath('/help')).toBe('help');
+    // React owns /settings now (SETTINGS_PORT.md step V4c)
+    expect(resolveLegacyShellPageFromPath('/settings')).toBeNull();
     // React owns /sync now — resolving it as legacy would show the vanilla
     // page underneath the React one.
     expect(resolveLegacyShellPageFromPath('/sync')).toBeNull();

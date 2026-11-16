@@ -125,8 +125,9 @@ def test_off_does_not_move_the_naming_fingerprint(monkeypatch):
 
 
 def test_settings_ui_round_trip_wiring():
-    js = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
-    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    assert 'id="unicode-substitution"' in html
-    assert "unicode_substitution: document.getElementById('unicode-substitution').checked" in js
-    assert "settings.file_organization?.unicode_substitution === true" in js
+    # the Organization card is React (SETTINGS_PORT.md step 8b): it shows the
+    # key off unless saved on, and saves it under file_organization
+    card = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "library-organization.tsx").read_text(encoding="utf-8")
+    assert "'unicode-substitution'," in card
+    assert "org.unicode_substitution === true," in card
+    assert "setOrg('unicode_substitution', v, 0)" in card

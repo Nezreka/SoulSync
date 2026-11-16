@@ -1,0 +1,100 @@
+                                    <div class="settings-group" data-stg="connections" data-video-only
+                                        data-svc-side="video">
+                                        <h3>Server Connection</h3>
+                                        <p class="setting-help-text" style="margin: -4px 0 14px;">Pick the server the
+                                            video side uses. Fields are pre-filled from your Music settings — edit them
+                                            to point video at a different server without touching Music.</p>
+
+                                        <div class="server-toggle-container">
+                                            <button class="server-toggle-btn" type="button"
+                                                data-video-server-toggle="plex">
+                                                <img src="/static/img/brands/plex.png" alt="Plex" class="server-logo">
+                                            </button>
+                                            <button class="server-toggle-btn" type="button"
+                                                data-video-server-toggle="jellyfin">
+                                                <img src="/static/img/brands/jellyfin.png" alt="Jellyfin"
+                                                    class="server-logo">
+                                            </button>
+                                        </div>
+
+                                        <!-- Plex -->
+                                        <div class="server-config-container hidden" data-video-server-config="plex">
+                                            <div class="form-group">
+                                                <label>Plex Server URL:</label>
+                                                <input type="text" data-video-conn="plex-url"
+                                                    placeholder="http://localhost:32400">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Plex Token:</label>
+                                                <input type="password" data-video-conn="plex-token"
+                                                    placeholder="X-Plex-Token">
+                                            </div>
+                                            <div class="setting-help-text" data-video-conn-note="plex"></div>
+                                            <div class="form-actions">
+                                                <button class="test-button" type="button"
+                                                    data-video-conn-test="plex">Test Connection</button>
+                                            </div>
+                                        </div>
+
+                                        <!-- Jellyfin -->
+                                        <div class="server-config-container hidden" data-video-server-config="jellyfin">
+                                            <div class="form-group">
+                                                <label>Jellyfin Server URL:</label>
+                                                <input type="text" data-video-conn="jellyfin-url"
+                                                    placeholder="http://localhost:8096">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>API Key:</label>
+                                                <input type="password" data-video-conn="jellyfin-key"
+                                                    placeholder="Jellyfin API Key">
+                                            </div>
+                                            <div class="setting-help-text" data-video-conn-note="jellyfin"></div>
+                                            <div class="form-actions">
+                                                <button class="test-button" type="button"
+                                                    data-video-conn-test="jellyfin">Test Connection</button>
+                                            </div>
+                                            <div class="form-group" data-video-jellyfin-user-wrap
+                                                style="display:none; margin-top:14px;">
+                                                <label>Jellyfin User</label>
+                                                <select data-video-jellyfin-user>
+                                                    <option value="">Select User</option>
+                                                </select>
+                                                <small
+                                                    style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                                    Which user's libraries to scan. The Movies/TV lists below reflect
+                                                    this user — pick an admin to see everything.
+                                                </small>
+                                            </div>
+                                        </div>
+
+                                        <!-- Which libraries on the chosen server the video side scans. -->
+                                        <!-- One row per setting, like every other row on this page. These were a
+                                     single form-group holding two label+select pairs and a caption, and a
+                                     form-group is a flex ROW - so both libraries and the note all landed on
+                                     one line and the caption rendered like a heading. -->
+                                        <div class="form-group video-library-selectors">
+                                            <label>Movies Library:</label>
+                                            <select data-video-lib-select="movies">
+                                                <option value="">Loading...</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group video-library-selectors">
+                                            <label>TV Shows Library:</label>
+                                            <select data-video-lib-select="tv">
+                                                <option value="">Loading...</option>
+                                            </select>
+                                        </div>
+                                        <!-- Every other TV library on the server: tick Scan to read it as
+                                     well, Anime when its shows are anime (their new episodes then go
+                                     to the Anime folder). Filled by video-settings.js. -->
+                                        <div class="form-group video-library-selectors video-library-tv-more"
+                                            data-video-lib-tv-more-row hidden>
+                                            <label>Other TV Libraries:</label>
+                                            <div class="video-library-tv-more-list" data-video-lib-tv-more></div>
+                                        </div>
+                                        <div class="setting-help-text video-library-note">
+                                            Which libraries the video side scans. A library ticked Anime files
+                                            its shows' new episodes in the Anime folder (Settings &gt; Library).
+                                            <span data-video-lib-save-status></span>
+                                        </div>
+                                    </div>

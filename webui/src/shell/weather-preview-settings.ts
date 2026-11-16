@@ -1,16 +1,16 @@
 /**
  * settings > advanced: the weather controls that live in typescript.
  *
- * - sidebar weather > holiday decorations: a server setting (on by default)
  * - developer > weather preview: pick a sky, a holiday and/or a pretend
  *   date, session-only, nothing touches the server
  *
  * the markup is static in index.html; this fills the lists and wires it up.
+ * (the holiday decorations switch on Appearance is React now:
+ * src/features/settings/tabs/appearance-tab.tsx, SETTINGS_PORT.md step 2)
  */
 
 import { HOLIDAY_LABELS } from './holidays';
 import {
-  bootSidebarWeather,
   getWeatherPreview,
   isSidebarWeatherMounted,
   setWeatherPreview,
@@ -22,7 +22,6 @@ const HOLIDAY_ID = 'sw-preview-holiday';
 const DATE_ID = 'sw-preview-date';
 const RESET_ID = 'sw-preview-reset';
 const STATUS_ID = 'sw-preview-status';
-const HOLIDAYS_TOGGLE_ID = 'sw-holidays';
 
 function status(): void {
   const el = document.getElementById(STATUS_ID);
@@ -84,36 +83,8 @@ function fill(
   }
 }
 
-/** the holiday decorations switch: a server setting, reboots the sidebar */
-async function wireHolidaysToggle(): Promise<void> {
-  const box = document.getElementById(HOLIDAYS_TOGGLE_ID) as HTMLInputElement | null;
-  if (!box || box.dataset.wired === '1') return;
-  box.dataset.wired = '1';
-  try {
-    const resp = await fetch('/api/weather', { headers: { Accept: 'application/json' } });
-    if (resp.ok) {
-      const data = (await resp.json()) as { holidays?: boolean };
-      box.checked = data.holidays !== false;
-    }
-  } catch {
-    // keep the default; the switch still works
-  }
-  box.addEventListener('change', async () => {
-    try {
-      await fetch('/api/weather/holidays', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ enabled: box.checked }),
-      });
-    } finally {
-      await bootSidebarWeather();
-    }
-  });
-}
-
 /** wire the controls once. safe to call again (settings re-renders, tests) */
 export function initWeatherPreviewSettings(): void {
-  void wireHolidaysToggle();
   const preset = document.getElementById(PRESET_ID) as HTMLSelectElement | null;
   const holiday = document.getElementById(HOLIDAY_ID) as HTMLSelectElement | null;
   const date = document.getElementById(DATE_ID) as HTMLInputElement | null;

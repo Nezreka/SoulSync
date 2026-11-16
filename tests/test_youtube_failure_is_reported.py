@@ -230,11 +230,12 @@ def test_the_settings_probe_is_not_hardcoded_true():
     button most people press. ``HYBRID_SOURCE_PROBE.youtube`` was
     ``() => Promise.resolve(true)``, so the dot was green while YouTube was
     refusing every download. Same reporter came back with #1233."""
-    js = _read("webui/static/settings.js")
-    probe = js.split("const HYBRID_SOURCE_PROBE = {", 1)[1].split("};", 1)[0]
+    # the probes are in the React sources model now (SETTINGS_PORT.md step 7a)
+    model = _read("webui/src/features/settings/tabs/sources-model.ts")
+    probe = model.split("const probes: Record<string, () => Promise<boolean>> = {", 1)[1].split("};", 1)[0]
     line = next(ln for ln in probe.splitlines() if ln.strip().startswith("youtube:"))
     assert "Promise.resolve(true)" not in line, "the YouTube probe still cannot fail"
-    assert "_ssTestConn('youtube')" in line
+    assert "testConnection('youtube')" in line
 
 
 def test_the_server_knows_how_to_test_youtube():
@@ -326,11 +327,12 @@ def test_the_summary_toast_carries_a_reason_not_just_a_count():
     """"Tested sources 1✓, connections 3✓ / 1✗" is the screenshot on #1233.
     It says something failed and nothing about what, even when the source
     handed back a sentence explaining itself."""
-    js = _read("webui/static/settings.js")
-    assert "_ssLastTestMessage" in js
-    conn = js.split("function _ssTestConn(", 1)[1].split("\n}", 1)[0]
+    # Test all is in the React sources model now (SETTINGS_PORT.md step 7a)
+    model = _read("webui/src/features/settings/tabs/sources-model.ts")
+    conn = model.split("async function testConnection(", 1)[1].split("\n  }", 1)[0]
     assert "j.message || j.error" in conn, "the reason is still discarded on failure"
-    toast = js.split("const parts = [`sources", 1)[1].split("showToast(", 1)[1]
+    assert "said[service] = msg" in conn
+    toast = model.split("const parts = [`sources", 1)[1].split("toast(", 1)[1]
     assert "detail" in toast
 
 

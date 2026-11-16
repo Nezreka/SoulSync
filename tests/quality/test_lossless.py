@@ -161,12 +161,14 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_SETTINGS_JS = _ROOT / "webui" / "static" / "settings.js"
-_INDEX_HTML = _ROOT / "webui" / "index.html"
+# the Quality tab is React (SETTINGS_PORT.md step 6): the list lives in its
+# logic module, the dropdown in its component
+_SETTINGS_JS = _ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "quality.ts"
+_INDEX_HTML = _ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "quality-tab.tsx"
 
 
 def _js_array(text, name):
-    m = re.search(rf"{name}\s*=\s*\[([^\]]*)\]", text)
+    m = re.search(rf"{name}\s*(?::[^=]+)?=\s*\[([^\]]*)\]", text)
     assert m, f"{name} not found"
     return set(re.findall(r"'([^']+)'", m.group(1)))
 
@@ -175,7 +177,7 @@ def test_frontend_rt_lossless_formats_matches_backend():
     js = _SETTINGS_JS.read_text(encoding="utf-8")
     frontend = _js_array(js, "RT_LOSSLESS_FORMATS")
     assert frontend == set(LOSSLESS_FORMATS), (
-        f"settings.js RT_LOSSLESS_FORMATS {frontend} != backend LOSSLESS_FORMATS "
+        f"quality.ts RT_LOSSLESS_FORMATS {frontend} != backend LOSSLESS_FORMATS "
         f"{set(LOSSLESS_FORMATS)} — add the new format to BOTH"
     )
 
@@ -183,11 +185,11 @@ def test_frontend_rt_lossless_formats_matches_backend():
 def test_quality_profile_dropdown_offers_every_lossless_format():
     html = _INDEX_HTML.read_text(encoding="utf-8")
     m = re.search(r'<optgroup label="Lossless">(.*?)</optgroup>', html, re.DOTALL)
-    assert m, "Lossless optgroup not found in index.html"
+    assert m, "Lossless optgroup not found in quality-tab.tsx"
     # concrete per-format option values (skip the 'group:lossless' convenience entry)
     option_values = {v for v in re.findall(r'value="([^"]+)"', m.group(1))
                      if not v.startswith("group:")}
     assert set(LOSSLESS_FORMATS) <= option_values, (
-        f"index.html lossless dropdown {option_values} is missing "
+        f"quality-tab.tsx lossless dropdown {option_values} is missing "
         f"{set(LOSSLESS_FORMATS) - option_values}"
     )

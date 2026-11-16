@@ -147,25 +147,32 @@ describe('calls that cross out of the files the sync port deletes', () => {
     // Inverted rather than deleted, because the failure mode is a REGRESSION:
     // somebody appends a Settings helper to a sync file again and it quietly
     // becomes deletable-by-association.
+    // They moved again with the Connections tab: the Server Connections
+    // section is React (src/features/settings/tabs/connections-servers.tsx,
+    // SETTINGS_PORT.md step 10c), and loads and sets each picker itself.
     const dir = resolve(process.cwd(), 'static');
-    const settings = readFileSync(resolve(dir, 'settings.js'), 'utf8');
+    const servers = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/connections-servers.tsx'),
+      'utf8',
+    );
     // beatport-ui.js is deleted now; if it ever comes back it still must not
     // take the pickers with it.
     const beatportPath = resolve(dir, 'beatport-ui.js');
     const beatport = existsSync(beatportPath) ? readFileSync(beatportPath, 'utf8') : '';
-    for (const name of [
-      'loadPlexMusicLibraries',
-      'selectPlexLibrary',
-      'loadJellyfinUsers',
-      'selectJellyfinUser',
-      'loadJellyfinMusicLibraries',
-      'selectJellyfinLibrary',
-      'loadNavidromeMusicFolders',
-      'selectNavidromeMusicFolder',
+    for (const endpoint of [
+      '/api/plex/music-libraries',
+      '/api/plex/select-music-library',
+      '/api/jellyfin/users',
+      '/api/jellyfin/select-user',
+      '/api/jellyfin/music-libraries',
+      '/api/jellyfin/select-music-library',
+      '/api/navidrome/music-folders',
+      '/api/navidrome/select-music-folder',
     ]) {
-      expect(settings, `${name} should be defined in settings.js`).toContain(
-        `async function ${name}(`,
+      expect(servers, `${endpoint} should be reached from connections-servers.tsx`).toContain(
+        `'${endpoint}'`,
       );
+      expect(beatport).not.toContain(endpoint);
     }
   });
 

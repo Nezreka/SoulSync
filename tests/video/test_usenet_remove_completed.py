@@ -517,15 +517,16 @@ def test_a_tick_with_the_setting_off_leaves_the_client_alone(tmp_path, monkeypat
 # ── the settings page ─────────────────────────────────────────────────────────
 
 def test_the_video_setting_is_on_the_settings_page_and_saved():
-    html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    # React (SETTINGS_PORT.md video pass V2a)
+    tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+    html = (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
     i = html.index('id="video-usenet-remove-completed"')
-    group = html.rfind('<div class="form-group"', 0, i)
+    group = html.rfind('<div className="form-group"', 0, i)
     # the Sources tab is shared: no side gating, the label says which side
     assert "data-video-only" not in html[group:i] and "data-music-only" not in html[group:i]
     assert "(video)" in html[group:i]
     for value in ('value="off"', 'value="history"', 'value="files"'):
         assert value in html[i:i + 800]
-    js = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    body = js.split("function saveDownloads(", 1)[1].split("function loadImportLists(", 1)[0]
-    assert "usenet_remove_completed: val('video-usenet-remove-completed')" in body
-    assert "d.usenet_remove_completed" in js
+    assert "videoDownloads.change({ usenet_remove_completed: event.target.value })" in html
+    js = (tabs / "video-downloads.ts").read_text(encoding="utf-8")
+    assert "usenet_remove_completed: str('usenet_remove_completed') || 'off'" in js

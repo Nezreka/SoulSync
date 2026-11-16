@@ -320,15 +320,18 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_the_music_setting_is_on_the_settings_page_and_saved():
-    html = (_ROOT / 'webui' / 'index.html').read_text(encoding='utf-8')
-    i = html.index('id="music-usenet-remove-completed"')
-    group = html.rfind('<div class="form-group"', 0, i)
-    assert 'data-music-only' not in html[group:i] and '(music)' in html[group:i]
+    # the usenet client panel is React now (SETTINGS_PORT.md step 7g)
+    panel = (_ROOT / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'source-panels-more.tsx').read_text(
+        encoding='utf-8')
+    usenet = panel.split('export function UsenetPanel(', 1)[1].split('\nexport function', 1)[0]
+    i = usenet.index('id="music-usenet-remove-completed"')
+    group = usenet.rfind('<Field', 0, i)
+    assert 'data-music-only' not in usenet[group:i] and '(music)' in usenet[group:i]
     for value in ('value="off"', 'value="history"', 'value="files"'):
-        assert value in html[i:i + 800]
-    js = (_ROOT / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
-    assert "remove_completed: _cfgStr('music-usenet-remove-completed'" in js
-    assert "settings.usenet_client?.remove_completed" in js
+        assert value in usenet[i:i + 800]
+    assert "set('remove_completed', event.target.value || 'off')" in usenet
+    assert "str(u.remove_completed, 'off')" in usenet
+    assert "store.set('usenet_client', key, value)" in usenet
 
 
 def test_both_sides_hand_their_library_folders_to_the_folder_check(monkeypatch):

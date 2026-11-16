@@ -18,7 +18,6 @@ from core.downloads import seed_rules
 from core.video import seeding
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 
 
@@ -216,10 +215,14 @@ def test_the_download_table_can_store_it(tmp_path):
 
 
 def test_settings_ui_exposes_the_per_indexer_rules():
+    # React (SETTINGS_PORT.md video pass V2a)
+    from pathlib import Path
+    tabs = Path(__file__).resolve().parents[2] / "webui" / "src" / "features" / "settings" / "tabs"
+    blocks = (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
     for frag in ('id="video-seed-idx-rows"', 'id="video-seed-idx-refresh"'):
-        assert frag in _INDEX, frag
+        assert frag in blocks, frag
     for frag in ("seed_overrides", "data-vseed-idx", "data-vseed-field", "pack_hours"):
-        assert frag in _SETTINGS_JS, frag
+        assert frag in blocks, frag
 
 
 # ── the sweep loop itself ────────────────────────────────────────────────────

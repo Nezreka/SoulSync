@@ -1,0 +1,229 @@
+                                        <div id="folders-video-panel" role="tabpanel"
+                                            aria-labelledby="folders-video-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Video folders</strong><span
+                                                    class="stg-media-summary" data-stg-summary="library-video-folders"
+                                                    data-stg-fallback="Movies, TV &amp; YouTube libraries">Movies, TV
+                                                    &amp; YouTube libraries</span></div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Where downloads arrive</h3>
+                                                <div class="setting-help-text">
+                                                    Files land in the download folder first, then get renamed and
+                                                    moved into the right library below. Each folder gets a live check
+                                                    under it: whether SoulSync can write there and how much room is
+                                                    left. Video folders are separate from your Music folders.
+                                                </div>
+                                                <!-- settings.js applyPathsEnvironment shows the one that fits -->
+                                                <div class="setting-help-text" data-paths-guide="docker">
+                                                    <strong>Docker / Unraid detected:</strong> these start on the
+                                                    container paths your compose file maps. Leave them and map your
+                                                    real folders in the container config. Unlock one only if you mapped
+                                                    it somewhere else.
+                                                </div>
+                                                <div class="setting-help-text" data-paths-guide="native">
+                                                    <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no
+                                                    container, so unlock each folder and point it at your real one.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-download-path">Download folder (input, shared with Music):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-download-path" placeholder="./downloads"
+                                                            readonly data-folder-check="video" data-folder-role="input"
+                                                            data-folder-label="Download folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-download', this)">Unlock</button>
+                                                    </div>
+                                                    <div class="setting-help-text">Point this at the same folder as
+                                                        your slskd / torrent / usenet client. It's the same setting as
+                                                        the Music side's Download Folder, so it's locked here too:
+                                                        change it and Music changes with it.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-import-folder-path">Import folder (optional):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-import-folder-path" readonly
+                                                            placeholder="/media/import" data-folder-check="video"
+                                                            data-folder-role="input" data-folder-label="Import folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-import-folder', this)">Unlock</button>
+                                                    </div>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-import-folder-auto">
+                                                        Import sure matches automatically
+                                                    </label>
+                                                    <div class="setting-help-text">Drop movie or episode files (or
+                                                        whole folders) here and they show on the Import page with the
+                                                        title SoulSync found. They're filed into your libraries with your
+                                                        naming template, exactly like a download. With the box ticked,
+                                                        a sure match is imported on its own once it has finished copying.
+                                                        Keep it apart from the download folder.
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Where finished downloads are filed. Point your Plex / Jellyfin /
+                                                    Emby libraries at the same folders.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-movies-path">🎬 Movies:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-movies-path" readonly placeholder="/media/movies"
+                                                            data-folder-check="video" data-folder-label="Movies library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-movies', this)">Unlock</button>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-tv-path">📺 TV shows:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-tv-path" readonly placeholder="/media/tv"
+                                                            data-folder-check="video" data-folder-label="TV library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-tv', this)">Unlock</button>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-anime-path">🍥 Anime (optional):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-anime-path" readonly placeholder="/media/anime"
+                                                            data-folder-check="video" data-folder-label="Anime library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-anime', this)">Unlock</button>
+                                                    </div>
+                                                    <div class="setting-help-text">New episodes of anime shows go
+                                                        here instead of the TV folder: shows in a TV library ticked Anime
+                                                        (Settings &gt; Connections), shows set to Anime by hand, and shows
+                                                        not in your library yet that TMDB suggests are anime (an admin can
+                                                        change that on the show's page or when approving). Leave empty to
+                                                        keep anime with TV.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-youtube-path">▶️ YouTube:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-youtube-path" readonly placeholder="/media/youtube"
+                                                            data-folder-check="video" data-folder-label="YouTube library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-youtube', this)">Unlock</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>4K libraries (optional)</h3>
+                                                <div class="setting-help-text">
+                                                    Keep 4K copies in their own folders, like a separate Movies 4K
+                                                    library in Plex. Off until you turn one on. A title files here when
+                                                    its quality profile is set to save to the 4K library (Settings &gt;
+                                                    Quality). Titles you already have stay where they are, and their
+                                                    upgrades land beside the copy you have.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-movies-4k-enabled"
+                                                            data-video-4k-toggle="movies">
+                                                        Separate 4K movies folder
+                                                    </label>
+                                                    <div class="video-4k-path" data-folder-optional data-video-4k-row="movies" hidden>
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-movies-4k-path" readonly
+                                                                placeholder="/media/movies-4k" aria-label="4K movies folder"
+                                                                data-folder-check="video" data-folder-label="Movies 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-movies-4k', this)">Unlock</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-tv-4k-enabled"
+                                                            data-video-4k-toggle="tv">
+                                                        Separate 4K TV folder
+                                                    </label>
+                                                    <div class="video-4k-path" data-folder-optional data-video-4k-row="tv" hidden>
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-tv-4k-path" readonly
+                                                                placeholder="/media/tv-4k" aria-label="4K TV folder"
+                                                                data-folder-check="video" data-folder-label="TV 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-tv-4k', this)">Unlock</button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="setting-help-text">Anime keeps its own folder when one
+                                                        is set, whatever the profile.</div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>More libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Your own movie and TV libraries, each with its own folder, like a
+                                                    Stand-Up, Documentaries or Kids library in Plex. A new title files
+                                                    into the library picked for it (in its Get or Manual search window),
+                                                    else the 4K one when its quality profile says so, else the first
+                                                    library whose rules match its genres or TMDB keywords, else the
+                                                    default library for its kind. Titles you already have stay where
+                                                    they are. The main and 4K libraries are here too: their folders are
+                                                    the ones above.
+                                                </div>
+                                                <div id="video-libraries-list" class="video-libraries"></div>
+                                                <datalist id="video-library-genre-list"></datalist>
+                                                <button type="button" class="test-button" id="video-library-add">+ Add
+                                                    library</button>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Your library's folders</h3>
+                                                <div class="setting-help-text">
+                                                    Every folder your Plex / Jellyfin libraries read, Movies or TV.
+                                                    The ones SoulSync already reaches are ticked. Tell it where it
+                                                    reaches the rest and every file in them is found, renamed to
+                                                    your templates, recycled on delete and kept track of. New
+                                                    downloads still go to the folders above. Leave one blank and it
+                                                    works the way it does today.
+                                                </div>
+                                                <div id="video-drive-map" class="video-drive-map"></div>
+                                                <button type="button" class="test-button" id="video-drive-map-save">Save
+                                                    folders</button>
+
+                                                <h4 class="video-extra-heading">Folders your server doesn't list</h4>
+                                                <div class="setting-help-text">
+                                                    A collection SoulSync should manage that your server doesn't
+                                                    read. New downloads never go here.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Movie folders:</label>
+                                                    <div id="video-movies-additional-paths"
+                                                        data-video-extra-kind="movies"></div>
+                                                    <button type="button" class="test-button"
+                                                        data-video-add-path="movies">+ Add folder</button>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>TV folders:</label>
+                                                    <div id="video-tv-additional-paths" data-video-extra-kind="tv">
+                                                    </div>
+                                                    <button type="button" class="test-button" data-video-add-path="tv">+
+                                                        Add folder</button>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library" data-video-compose hidden>
+                                                <h3>Docker volumes</h3>
+                                                <div class="setting-help-text">
+                                                    In Docker every folder above is a path inside the container. Each
+                                                    one needs a line in your compose file mapping a real folder to it,
+                                                    read-write so renames, upgrades and the recycle bin work. These are
+                                                    the lines for what's set here: swap the left side for the folder on
+                                                    your machine, then recreate the container.
+                                                </div>
+                                                <pre class="video-compose-lines" id="video-compose-lines"></pre>
+                                                <button type="button" class="test-button" id="video-compose-copy">Copy
+                                                    lines</button>
+                                            </div>
+
+                                        </div>

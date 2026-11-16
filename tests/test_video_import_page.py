@@ -114,6 +114,10 @@ def test_the_page_lists_the_folder_and_imports_through_the_folder_routes():
 
 
 def test_the_folder_is_a_setting_with_its_automatic_switch():
-    settings = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    assert 'id="video-import-folder-path"' in _INDEX and 'id="video-import-folder-auto"' in _INDEX
-    assert "/api/video/import/folder/settings" in settings
+    # the Settings page is React (SETTINGS_PORT.md step V4c): the field is
+    # library-video-folders.tsx, saved to its own endpoint
+    settings = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+                "library-video-folders.tsx").read_text(encoding="utf-8")
+    assert 'id="video-import-folder-path"' in settings and 'id="video-import-folder-auto"' in settings
+    assert "'/api/video/import/folder/settings'" in settings
+    assert "<ImportFolder />" in settings

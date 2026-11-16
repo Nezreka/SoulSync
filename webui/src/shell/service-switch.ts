@@ -9,22 +9,20 @@
  * library scan, and the chain has its own editor in Settings that a second
  * copy here kept drifting from. Each gets one way into the right Settings spot.
  *
- * SOURCE_LABELS (shared-helpers.js) and HYBRID_SOURCES (settings.js) are
- * top-level consts in still-classic scripts - global LEXICAL bindings, not
- * window properties - so they are reached as bare names through the global
- * scope chain with the vanilla's typeof guards, declared ambiently below.
- * When those files port into the shell the declares migrate with them.
+ * SOURCE_LABELS (shared-helpers.js) is a top-level const in a still-classic
+ * script - a global LEXICAL binding, not a window property - so it is reached
+ * as a bare name through the global scope chain with the vanilla's typeof
+ * guard, declared ambiently below. HYBRID_SOURCES moved from settings.js into
+ * the Settings sources model (SETTINGS_PORT.md step 7b) and is imported.
  */
+
+import { HYBRID_SOURCES } from '@/features/settings/tabs/sources-model';
 
 import { escapeHtml, toast } from './html';
 
 declare global {
   // eslint-disable-next-line no-var
   var SOURCE_LABELS: Record<string, { text?: string; icon?: string; logo?: string }> | undefined;
-  // eslint-disable-next-line no-var
-  var HYBRID_SOURCES:
-    | Array<{ id: string; name: string; icon?: string | null; emoji?: string }>
-    | undefined;
   // the last /status frame (core.js), kept fresh by the poller and the socket
   // eslint-disable-next-line no-var
   var _lastStatusPayload: SsStatusPayload | null | undefined;
@@ -109,7 +107,7 @@ function _ssMetaInfo(id: string): { text?: string; icon?: string; logo?: string 
   return { text: id, icon: '🎵' };
 }
 
-// names for when settings.js (HYBRID_SOURCES) isn't loaded yet
+// names for a source the registry no longer lists (amazon is retired)
 const _SS_DL_FALLBACK: Record<string, string> = {
   soulseek: 'Soulseek',
   youtube: 'YouTube',
@@ -125,10 +123,9 @@ const _SS_DL_FALLBACK: Record<string, string> = {
 };
 
 function _ssDownloadInfo(id: string): { name: string; logo?: string; emoji?: string } {
-  if (typeof HYBRID_SOURCES !== 'undefined' && HYBRID_SOURCES) {
-    const h = HYBRID_SOURCES.find((s) => s.id === id);
-    if (h) return { name: h.name, logo: h.icon || undefined, emoji: h.emoji };
-  }
+  // the registry the Settings chain and tiles use (sources-model.ts)
+  const h = HYBRID_SOURCES.find((s) => s.id === id);
+  if (h) return { name: h.name, logo: h.icon || undefined, emoji: h.emoji };
   return { name: _SS_DL_FALLBACK[id] || id, emoji: '⬇️' };
 }
 

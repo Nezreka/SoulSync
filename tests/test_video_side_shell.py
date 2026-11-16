@@ -14,7 +14,9 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
+from tests.support.settings_page import index_with_settings_page
+# the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+_INDEX = index_with_settings_page()
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
 _INIT_JS = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
 _DASH_DIR = _ROOT / "webui" / "src" / "routes" / "dashboard" / "-video"
@@ -24,7 +26,6 @@ _MGR_DIR = _ROOT / "webui" / "src" / "features" / "video-manager"
 _MGR = "\n".join(f.read_text(encoding="utf-8") for f in sorted(_MGR_DIR.glob("*.ts*"))
                  if ".test." not in f.name)
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
-_VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
@@ -258,21 +259,28 @@ def test_scan_module_referenced_and_isolated():
 
 
 def test_video_settings_reuses_real_music_settings_page():
-    # The video Settings nav shows the actual #settings-page (identically, for
-    # now) via CSS + the shared loadPageData loader — not a video subpage.
-    assert "'video-settings': 'settings'" in _JS or '"video-settings": "settings"' in _JS
-    assert "loadPageData" in _JS
+    # The video Settings nav shows the one Settings page, not a video subpage:
+    # the React /settings page on ?media=video since SETTINGS_PORT.md step V4c,
+    # handed off like Tools and the calendar, and revealed with them.
+    assert "'video-settings': 'settings'" not in _JS
+    assert "'video-settings': 1" in _JS.split("var HANDED_OFF = {", 1)[1].split("};", 1)[0]
+    assert "wsr.navigateToPage('settings', { query: { media: 'video' }, replace: replace });" in _JS
+    assert "if (path === '/settings') return media === 'video' ? 'video-settings' : null;" in _JS
     css = _CSS_PATH.read_text(encoding="utf-8")
-    assert 'data-video-page="video-settings"] #settings-page' in css
+    assert 'data-video-page="video-settings"] #webui-react-root' in css
+    assert 'data-video-page="video-settings"] #settings-page' not in css
     assert 'data-video-page="video-settings"] #video-page-host' in css
 
 
 def test_video_library_mapping_ui_present_and_video_only():
     # Movies/TV selectors live next to the music library selector, marked
     # data-video-only so they show only on the video side.
-    assert 'data-video-lib-select="movies"' in _INDEX
-    assert 'data-video-lib-select="tv"' in _INDEX
-    assert "data-video-only" in _INDEX
+    # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
+    section = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+               "connections-video-server.tsx").read_text(encoding="utf-8")
+    assert '<LibrarySelect kind="movies" />' in section and '<LibrarySelect kind="tv" />' in section
+    assert 'data-video-lib-select={kind}' in section
+    assert 'data-video-only=""' in section
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'body[data-side="music"] [data-video-only]' in css  # video bits hidden on music side
     # ...and the music-library picker is hidden on the video side.
@@ -286,12 +294,16 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     # Video API frames use the SAME .api-service-frame structure as music but a
     # data-VIDEO-service attribute, so music's settings.js [data-service] verify
     # loop can't pick them up ("Unknown service: tvdb").
-    assert 'class="api-service-frame stg-service" data-video-service="tmdb"' in _INDEX
-    assert 'class="api-service-frame stg-service" data-video-service="tvdb"' in _INDEX
+    # The cards are React (SETTINGS_PORT.md video pass V3a).
+    cards = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+             "connections-video-api.tsx").read_text(encoding="utf-8")
+    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    assert '<Card\n        service="tmdb"' in cards and '<Card\n        service="tvdb"' in cards
+    assert 'data-stg-part="api-video"' in _INDEX
     # They must NOT carry the music-hooked data-service attribute.
-    assert 'data-service="tmdb"' not in _INDEX and 'data-service="tvdb"' not in _INDEX
+    assert "data-service=" not in cards
     # Each connection item has a Test button (like music's connections).
-    assert 'data-video-test-service="tmdb"' in _INDEX and 'data-video-test-service="tvdb"' in _INDEX
+    assert '<Test spec="tmdb">' in cards and '<Test spec="tvdb">' in cards
 
 
 def test_dashboard_enrichment_buttons_are_delegated():
@@ -356,18 +368,17 @@ def test_video_enrichment_manager_isolated():
     assert "state.kind = 'movie'" not in src
 
 
-def test_video_settings_module_referenced_and_isolated():
-    assert "video/video-settings.js" in _INDEX
-    stripped = _VSETTINGS_JS.strip()
-    assert stripped.startswith("/*") or stripped.startswith("(function")
-    assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
-    # the folder checker is the shared settings helper (folder-check.js), not music
-    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries",
-                                                                 "window.SoulSyncFolderCheck"}
-    assert "addEventListener" in _VSETTINGS_JS
-    assert "/api/video/libraries" in _VSETTINGS_JS
-    assert "soulsync:video-page-shown" in _VSETTINGS_JS
-    assert "'change'" in _VSETTINGS_JS  # saves on change, like the music selector
+def test_video_settings_are_react_and_the_old_module_is_gone():
+    # every video settings section is React (SETTINGS_PORT.md video pass), and
+    # the page itself is (step V4c): the vanilla module and its tag are gone
+    assert "video/video-settings.js" not in _INDEX
+    assert not (_ROOT / "webui" / "static" / "video" / "video-settings.js").exists()
+    # each section loads on the video page being shown, and saves on change
+    tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+    shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")
+    assert "document.addEventListener('soulsync:video-page-shown', heard)" in shown
+    server = (tabs / "video-server.ts").read_text(encoding="utf-8")
+    assert "export const LIBS_URL = '/api/video/libraries';" in server
 
 
 def test_video_worker_orbs_referenced_and_isolated():

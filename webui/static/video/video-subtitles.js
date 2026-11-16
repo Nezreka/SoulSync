@@ -7,7 +7,7 @@
  * Two surfaces:
  *  1. mountOverrides(kind, itemId, source) — the "Subtitles" config section on
  *     movie/show detail pages: effective languages + an "Override"/"Global"
- *     badge, a language list (same comma style as video-settings.js), Save
+ *     badge, a language list (same comma style as the video settings), Save
  *     (PUT) and "Reset to global defaults" (DELETE).
  *  2. openManualSearch(kind, itemId, title, label, opts) — the Bazarr-style
  *     manual-search modal: language picker, scored candidate table, per-row
@@ -92,7 +92,7 @@
   function keyOf(kind, itemId) {
     return kind + ':' + itemId;
   }
-  // Language codes, same rule as the settings page (video-settings.js): 2-3
+  // Language codes, same rule as the settings page: 2-3
   // letters, optional region subtag (pt-br), separated by commas/spaces/semicolons.
   function parseLangs(raw) {
     var out = [];

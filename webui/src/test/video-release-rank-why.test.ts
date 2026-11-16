@@ -105,18 +105,18 @@ describe('rankWhyHTML', () => {
 });
 
 describe('preferred size setting', () => {
-  const SETTINGS = readFileSync(resolve(process.cwd(), 'static/video/video-settings.js'), 'utf8');
-  const INDEX = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+  // the sliders are React (src/features/settings/tabs/video-quality.tsx,
+  // SETTINGS_PORT.md video pass V1): video-quality.test.tsx drives them
+  const SETTINGS = readFileSync(
+    resolve(process.cwd(), 'src/features/settings/tabs/video-quality.tsx'),
+    'utf8',
+  );
 
   it('has a movie and an episode slider that save the profile keys', () => {
-    expect(INDEX).toContain('id="vq-movie-pref"');
-    expect(INDEX).toContain('id="vq-episode-pref"');
-    expect(SETTINGS).toContain(
-      '_videoQuality.preferred_movie_gb = parseFloat(e.target.value) || 0',
-    );
-    expect(SETTINGS).toContain(
-      '_videoQuality.preferred_episode_gb = parseFloat(e.target.value) || 0',
-    );
-    expect(SETTINGS).toContain("lab.textContent = v ? ('Around ' + v + ' GB') : 'Off'");
+    expect(SETTINGS).toContain('id="vq-movie-pref"');
+    expect(SETTINGS).toContain('id="vq-episode-pref"');
+    expect(SETTINGS).toContain('change((cur) => ({ ...cur, preferred_movie_gb: v }))');
+    expect(SETTINGS).toContain('change((cur) => ({ ...cur, preferred_episode_gb: v }))');
+    expect(SETTINGS).toContain("const prefLabel = (v: number) => (v ? `Around ${v} GB` : 'Off');");
   });
 });

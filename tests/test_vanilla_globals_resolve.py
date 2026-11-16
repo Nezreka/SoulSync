@@ -66,7 +66,9 @@ _BASELINE = {
     "core.js": 12,
     "downloads.js": 6,
     "init.js": 4,
-    "settings.js": 3,
+    # the Spotify rate-limit modal's three typeof-guarded loadDiscoverPage
+    # calls, moved here from settings.js (SETTINGS_PORT.md step V4a)
+    "pages-extra.js": 3,
     "stats-automations.js": 4,
     "wishlist-tools.js": 3,
 }

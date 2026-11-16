@@ -106,9 +106,10 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
-            // React-owned pages have no .page.active node — the shell's
-            // currentPage covers both worlds.
-            const activePage = document.querySelector('.page.active');
+            // React-owned pages render inside #webui-react-root (itself a .page)
+            // and have no page node of their own — the shell's currentPage
+            // covers both worlds.
+            const activePage = document.querySelector('.page.active:not(#webui-react-root)');
             const activeId = activePage
                 ? activePage.id.replace('-page', '')
                 : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -141,61 +142,8 @@ function applyWorkerOrbsSetting(enabled) {
     if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
 }
 
-function initAccentColorListeners() {
-    const presetSelect = document.getElementById('accent-preset');
-    const customGroup = document.getElementById('custom-color-group');
-    const customPicker = document.getElementById('accent-custom-color');
-    if (!presetSelect) return;
-
-    presetSelect.addEventListener('change', () => {
-        const val = presetSelect.value;
-        if (val === 'custom') {
-            if (customGroup) customGroup.style.display = '';
-            if (customPicker) applyAccentColor(customPicker.value);
-        } else {
-            if (customGroup) customGroup.style.display = 'none';
-            applyAccentColor(val);
-        }
-    });
-
-    if (customPicker) {
-        customPicker.addEventListener('input', () => {
-            applyAccentColor(customPicker.value);
-        });
-    }
-
-    // Particles toggle — apply immediately on change
-    const particlesCheckbox = document.getElementById('particles-enabled');
-    if (particlesCheckbox) {
-        particlesCheckbox.addEventListener('change', () => {
-            applyParticlesSetting(particlesCheckbox.checked);
-        });
-    }
-
-    // Worker orbs toggle — apply immediately on change
-    const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
-    if (workerOrbsCheckbox) {
-        workerOrbsCheckbox.addEventListener('change', () => {
-            applyWorkerOrbsSetting(workerOrbsCheckbox.checked);
-        });
-    }
-
-    // Reduce effects toggle — apply immediately on change
-    const reduceEffectsCheckbox = document.getElementById('reduce-effects-enabled');
-    if (reduceEffectsCheckbox) {
-        reduceEffectsCheckbox.addEventListener('change', () => {
-            applyReduceEffects(reduceEffectsCheckbox.checked);
-        });
-    }
-
-    // Max Performance toggle — apply immediately on change
-    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
-    if (maxPerfCheckbox) {
-        maxPerfCheckbox.addEventListener('change', () => {
-            applyMaxPerformance(maxPerfCheckbox.checked);
-        });
-    }
-}
+// (initAccentColorListeners lived here. The Appearance tab is React now and
+// calls applyAccentColor and the four appliers itself: appearance-tab.tsx)
 
 function applyReduceEffects(enabled) {
     if (enabled) {
@@ -215,7 +163,7 @@ function applyReduceEffects(enabled) {
         if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
     } else {
         // Restore only what the user's own toggles still allow.
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -277,7 +225,7 @@ function applyMaxPerformance(enabled) {
     } else {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -948,206 +896,8 @@ function showLaunchPinScreen() {
     });
 }
 
-// ── Security Settings Helpers ──────────────────────────────────────────
-
-async function saveLoginPassword() {
-    const input = document.getElementById('security-login-password');
-    const confirmInput = document.getElementById('security-login-password-confirm');
-    const msg = document.getElementById('security-login-password-msg');
-    const password = input?.value || '';
-    const confirm = confirmInput?.value || '';
-    const show = (text, ok) => {
-        if (!msg) return;
-        msg.textContent = text;
-        msg.style.color = ok ? '#4caf50' : '#ff5252';
-        msg.style.display = 'block';
-    };
-    if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
-    if (password !== confirm) { show('Passwords do not match', false); return; }
-    try {
-        const res = await fetch('/api/profiles/1/set-password', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            show('Admin login password saved', true);
-            if (input) { input.value = ''; input.placeholder = 'Enter a new password to change it'; }
-            if (confirmInput) confirmInput.value = '';
-            updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
-            const st = document.getElementById('security-login-password-status');
-            if (st) st.style.display = 'block';
-        }
-        else show(data.error || 'Failed to save password', false);
-    } catch (e) { show('Connection error', false); }
-}
-
-// Lock/unlock the "Require login" toggle based on whether the admin has a
-// password — makes the prerequisite (anti-lockout) visible instead of a
-// surprise 400 on save.
-function updateRequireLoginGate(hasPassword) {
-    const toggle = document.getElementById('security-require-login');
-    const wrap = document.getElementById('security-login-toggle-wrap');
-    const help = document.getElementById('security-require-login-help');
-    if (!toggle) return;
-    toggle.disabled = !hasPassword;
-    if (!hasPassword) toggle.checked = false;
-    if (wrap) wrap.classList.toggle('security-locked', !hasPassword);
-    if (help) {
-        help.innerHTML = hasPassword
-            ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
-            : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
-    }
-}
-
-// Reflect already-saved login credentials. Passwords are never sent to the
-// browser, so instead of an empty field (which looks unset after a refresh) we
-// show that one is set and pre-fill the saved recovery question.
-function applyLoginSavedState(profile) {
-    const hasPassword = profile?.has_password || false;
-    const hasRecovery = profile?.has_recovery || false;
-    const question = profile?.recovery_question || '';
-
-    const pwStatus = document.getElementById('security-login-password-status');
-    const pwField = document.getElementById('security-login-password');
-    const pwConfirm = document.getElementById('security-login-password-confirm');
-    if (pwStatus) pwStatus.style.display = hasPassword ? 'block' : 'none';
-    if (hasPassword) {
-        if (pwField) pwField.placeholder = 'Enter a new password to change it';
-        if (pwConfirm) pwConfirm.placeholder = 'Confirm new password';
-    }
-
-    const recStatus = document.getElementById('security-recovery-status');
-    const recSel = document.getElementById('security-recovery-question');
-    const recCustom = document.getElementById('security-recovery-custom');
-    const recAnswer = document.getElementById('security-recovery-answer');
-    if (recStatus) {
-        recStatus.style.display = hasRecovery ? 'block' : 'none';
-        recStatus.textContent = hasRecovery
-            ? ('✓ Recovery question saved' + (question ? ': “' + question + '”' : ''))
-            : '';
-    }
-    if (hasRecovery) {
-        if (recSel && question) {
-            recSel.value = question;            // preset options default value = their text
-            if (recSel.value !== question) {    // not a preset → custom question
-                recSel.value = '__custom__';
-                if (recCustom) { recCustom.style.display = 'block'; recCustom.value = question; }
-            }
-        }
-        if (recAnswer) recAnswer.placeholder = 'Enter a new answer to change it';
-    }
-}
-
-function handleRecoveryQuestionChange() {
-    const sel = document.getElementById('security-recovery-question');
-    const custom = document.getElementById('security-recovery-custom');
-    if (sel && custom) custom.style.display = (sel.value === '__custom__') ? 'block' : 'none';
-}
-
-async function saveRecoveryQuestion() {
-    const sel = document.getElementById('security-recovery-question');
-    const custom = document.getElementById('security-recovery-custom');
-    const answer = document.getElementById('security-recovery-answer')?.value || '';
-    const msg = document.getElementById('security-recovery-msg');
-    const show = (text, ok) => {
-        if (!msg) return;
-        msg.textContent = text;
-        msg.style.color = ok ? '#4caf50' : '#ff5252';
-        msg.style.display = 'block';
-    };
-    let question = sel?.value || '';
-    if (question === '__custom__') question = (custom?.value || '').trim();
-    if (!question) { show('Pick or type a question', false); return; }
-    if (!answer.trim()) { show('Enter an answer', false); return; }
-    try {
-        const res = await fetch('/api/profiles/1/set-recovery', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, answer }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            show('Recovery question saved', true);
-            const a = document.getElementById('security-recovery-answer');
-            if (a) { a.value = ''; a.placeholder = 'Enter a new answer to change it'; }
-            const rst = document.getElementById('security-recovery-status');
-            if (rst) { rst.style.display = 'block'; rst.textContent = '✓ Recovery question saved: “' + question + '”'; }
-        }
-        else show(data.error || 'Failed to save', false);
-    } catch (e) { show('Connection error', false); }
-}
-
-async function saveSecurityPin() {
-    const pin = document.getElementById('security-new-pin').value;
-    const confirm = document.getElementById('security-confirm-pin').value;
-    const msg = document.getElementById('security-pin-msg');
-
-    const pinProblem = profilePinError(pin || '');
-    if (pinProblem) {
-        msg.textContent = pinProblem;
-        msg.style.display = 'block';
-        msg.style.color = '#ff5252';
-        return;
-    }
-    if (pin !== confirm) {
-        msg.textContent = 'PINs do not match';
-        msg.style.display = 'block';
-        msg.style.color = '#ff5252';
-        return;
-    }
-
-    try {
-        const res = await fetch('/api/profiles/1/set-pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            msg.textContent = 'PIN saved! You can now enable the lock screen.';
-            msg.style.color = '#4caf50';
-            msg.style.display = 'block';
-
-            // Update UI — hide setup, show change, enable toggle
-            document.getElementById('security-pin-setup').style.display = 'none';
-            document.getElementById('security-change-pin-section').style.display = 'block';
-            document.getElementById('security-require-pin').disabled = false;
-
-            // Clear inputs
-            document.getElementById('security-new-pin').value = '';
-            document.getElementById('security-confirm-pin').value = '';
-        } else {
-            msg.textContent = data.error || 'Failed to save PIN';
-            msg.style.color = '#ff5252';
-            msg.style.display = 'block';
-        }
-    } catch (e) {
-        msg.textContent = 'Connection error';
-        msg.style.color = '#ff5252';
-        msg.style.display = 'block';
-    }
-}
-
-function handleSecurityPinToggle(checkbox) {
-    // If trying to enable but no PIN, show the setup section
-    if (checkbox.checked) {
-        const setupSection = document.getElementById('security-pin-setup');
-        if (setupSection.style.display !== 'none' || checkbox.disabled) {
-            checkbox.checked = false;
-            setupSection.style.display = 'block';
-            document.getElementById('security-new-pin').focus();
-            return;
-        }
-    }
-    // Auto-save this setting
-    saveSettings(true);
-}
-
-function showChangeSecurityPin() {
-    document.getElementById('security-pin-setup').style.display = 'block';
-    document.getElementById('security-new-pin').focus();
-}
+// the Security & Access helpers (the PIN, the admin password, the recovery
+// question): the System tab is React (system-security.tsx)
 
 // ── Forgot PIN Recovery ────────────────────────────────────────────────
 
@@ -4928,22 +4678,8 @@ async function loadPageData(pageId) {
             // loadPageData only runs for legacy-kind pages. The vanilla page it
             // used to call lived in pages-extra.js and is deleted, along with
             // #playlist-explorer-page.
-            case 'settings':
-                // Suppress auto-save while the form is being populated, so opening
-                // Settings no longer fires a spurious full save (4 POSTs + backend
-                // service re-init) on every visit.
-                window._suppressSettingsAutoSave = true;
-                try {
-                    initializeSettings();
-                    switchSettingsTab('connections');
-                    await loadSettingsData();
-                    await loadQualityProfile();
-                    loadApiKeys();
-                    loadBlacklistCount();
-                } finally {
-                    window._suppressSettingsAutoSave = false;
-                }
-                break;
+            // 'settings' is React (src/routes/settings/route.tsx, SETTINGS_PORT.md
+            // step V4c): it opens the page itself, as this case did
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
                 try {

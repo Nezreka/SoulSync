@@ -17,8 +17,9 @@ import core.video.import_lists as il
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+from tests.support.settings_page import index_with_settings_page
+# the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+_INDEX = index_with_settings_page()
 
 
 @pytest.fixture()
@@ -154,5 +155,11 @@ def test_wiring_and_ui():
     assert '"type": "video_import_lists"' in open(blocks_mod.__file__, encoding="utf-8").read()
     assert "'video_import_lists'" in open(reg.__file__, encoding="utf-8").read()
     assert "'action_type': 'video_import_lists'" in open(eng_mod.__file__, encoding="utf-8").read()
-    assert 'id="vq-implist-rows"' in _INDEX and "data-vq-implist-add" in _INDEX
-    assert "IMPLIST_URL" in _SETTINGS_JS and "loadImportLists()" in _SETTINGS_JS
+    # the editor is React (video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
+    from pathlib import Path
+    ui = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" /
+          "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
+    assert 'id="vq-implist-rows"' in ui and "data-vq-implist-add" in ui
+    assert "createRows('/api/video/downloads/config/import-lists')" in ui
+    assert "void importLists.load('lists');" in ui
+    assert 'data-stg-part="import-lists"' in _INDEX

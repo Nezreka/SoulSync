@@ -15,6 +15,11 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+# the Folders card is React (SETTINGS_PORT.md step 8a); its copy is checked
+# with the whitespace JSX wraps lines with collapsed
+_FOLDERS = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "library-folders.tsx").read_text(
+    encoding="utf-8")
+_FOLDERS_FLAT = " ".join(_FOLDERS.split())
 _DOCS = " ".join(
     p.read_text(encoding="utf-8")
     for p in sorted((_ROOT / "webui" / "static" / "docs-content").glob("*.js"))
@@ -24,31 +29,34 @@ _SETUP = (_ROOT / "webui" / "src" / "features" / "onboarding" / "plan.ts").read_
 
 
 def test_pipeline_explained_on_the_folder_fields():
-    assert "How files flow:" in _INDEX
-    assert "post-processing" in _INDEX
-    assert "Keeping the two separate stops half-finished files being scanned." in _INDEX
+    assert "How files flow:" in _FOLDERS_FLAT
+    assert "post-processing" in _FOLDERS_FLAT
+    assert "Keeping the two separate stops half-finished files being scanned." in _FOLDERS_FLAT
 
 
 def test_warning_serves_both_audiences_not_just_docker():
     # the old copy told EVERYONE to leave the fields alone; LXC/bare-metal
     # users are the ones who must edit them
-    assert "Container-internal paths. Only change them if you know what you're doing" not in _INDEX
-    assert "Docker / Unraid detected:" in _INDEX
-    assert "Proxmox LXC" in _INDEX
-    assert "expected to" in _INDEX and "unlock" in _INDEX
+    for ui in (_INDEX, _FOLDERS_FLAT):
+        assert "Container-internal paths. Only change them if you know what you're doing" not in ui
+    assert "Docker / Unraid detected:" in _FOLDERS_FLAT
+    assert "Proxmox LXC" in _FOLDERS_FLAT
+    assert "expected to" in _FOLDERS_FLAT and "unlock" in _FOLDERS_FLAT
 
 
 def test_labels_dropped_the_ambiguous_transfer_language():
-    assert "Download Folder (input):" in _INDEX
-    assert "Music Library Folder (output):" in _INDEX
-    assert "Input Folder (Download Dir):" not in _INDEX
-    assert "Output Folder (Music Library):" not in _INDEX
+    assert "Download Folder (input):" in _FOLDERS
+    assert "Music Library Folder (output):" in _FOLDERS
+    for ui in (_INDEX, _FOLDERS):
+        assert "Input Folder (Download Dir):" not in ui
+        assert "Output Folder (Music Library):" not in ui
 
 
 def test_extra_libraries_section_stops_being_a_red_herring():
-    assert "<h3>Additional Music Libraries</h3>" in _INDEX
-    assert "<h3>Music Library Paths</h3>" not in _INDEX
-    assert "you don't need to repeat it here" in _INDEX
+    assert "<h3>Additional Music Libraries</h3>" in _FOLDERS
+    for ui in (_INDEX, _FOLDERS):
+        assert "<h3>Music Library Paths</h3>" not in ui
+    assert "you don't need to repeat it here" in _FOLDERS_FLAT
 
 
 def test_docs_and_setup_tell_the_same_story():
@@ -59,14 +67,20 @@ def test_docs_and_setup_tell_the_same_story():
 
 
 def test_podcasts_folder_field_present():
-    assert "Podcasts Folder (output):" in _INDEX
-    assert 'id="podcasts-path"' in _INDEX
-    assert "togglePathLock('podcasts', this)" in _INDEX
+    assert "Podcasts Folder (output):" in _FOLDERS
+    assert 'id="podcasts-path"' in _FOLDERS
+    # behind its Unlock button, like the other folders
+    field = _FOLDERS.split('id="podcasts-path"', 1)[0].rsplit("<LockedPath", 1)[1]
+    # nothing closes between the LockedPath tag and the id: the id is its prop
+    assert "/>" not in field and "</" not in field
 
 
 def test_podcast_path_template_field_present():
-    assert "Podcast Path Template:" in _INDEX
-    assert 'id="template-podcast-path"' in _INDEX
-    assert 'placeholder="$show/Season $season/$title"' in _INDEX
+    # the Organization card is React (SETTINGS_PORT.md step 8b)
+    card = (Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
+            / "library-organization.tsx").read_text(encoding="utf-8")
+    assert "<label>Podcast Path Template:</label>" in card
+    assert 'id="template-podcast-path"' in card
+    assert 'placeholder="$show/Season $season/$title"' in card
 
 

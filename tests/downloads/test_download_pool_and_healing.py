@@ -124,9 +124,12 @@ def test_the_help_text_no_longer_promises_something_it_cannot_do():
     even with the sentence deleted, because an unrelated setting further down
     the page carries the same phrase.
     """
-    html = _source('webui/index.html')
-    block = html[html.index('id="max-concurrent-downloads"'):]
-    block = block[:block.index('</div>', block.index('setting-help-body'))]
+    # the field is React now (SETTINGS_PORT.md step 5): its help is the
+    # `help` of the same Field, which ends at the next Field
+    tab = _source('webui/src/features/settings/tabs/downloads-tab.tsx')
+    block = tab[tab.index('label="Concurrent Downloads:"'):]
+    block = block[:block.index('<Field', 1)]
+    assert 'id="max-concurrent-downloads"' in block
     assert 'Takes effect after a restart' in block, (
         "the Concurrent Downloads help text must say the pool is built at startup")
 

@@ -270,12 +270,14 @@ def test_cached_retry_keeps_slow_source_as_last_resort(monkeypatch):
 def test_setting_is_wired_through_defaults_and_web_ui():
     root = Path(__file__).resolve().parents[1]
     settings_py = (root / 'core/settings.py').read_text()
-    settings_js = (root / 'webui/static/settings.js').read_text()
-    index_html = (root / 'webui/index.html').read_text()
+    # the Soulseek panel is React now (SETTINGS_PORT.md step 7f); its load and
+    # save are tested in src/test/soulseek-observed-speed-settings.test.tsx
+    panel = (root / 'webui/src/features/settings/tabs/source-panels.tsx').read_text()
 
     assert '"observed_speed_fallback_enabled": False' in settings_py
     assert '"min_observed_download_speed_kbps": 250' in settings_py
-    assert 'settings.soulseek?.min_observed_download_speed_kbps ?? 250' in settings_js
-    assert "min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 250)" in settings_js
-    assert 'id="soulseek-observed-speed-fallback-enabled"' in index_html
-    assert 'id="soulseek-min-observed-download-speed"' in index_html
+    assert 'num(s.min_observed_download_speed_kbps, 250, true)' in panel
+    assert "set('min_observed_download_speed_kbps', Number.isFinite(n) ? n : 250)" in panel
+    assert 'id="soulseek-observed-speed-fallback-enabled"' in panel
+    assert "set('observed_speed_fallback_enabled', event.target.checked)" in panel
+    assert 'id="soulseek-min-observed-download-speed"' in panel

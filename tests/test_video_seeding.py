@@ -21,7 +21,9 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+_TABS = Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" / "tabs"
+_BLOCKS = (_TABS / "video-source-blocks.tsx").read_text(encoding="utf-8")
+_DOWNLOADS = (_TABS / "video-downloads.ts").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -204,9 +206,10 @@ def test_automation_wiring_exists():
 
 
 def test_settings_ui_has_the_goal_fields():
-    assert 'id="video-seed-ratio"' in _INDEX and 'id="video-seed-hours"' in _INDEX
-    assert 'id="video-seed-remove-data"' in _INDEX
-    assert "seed_ratio_goal" in _SETTINGS_JS and "seed_time_goal_hours" in _SETTINGS_JS
+    # React (SETTINGS_PORT.md video pass V2a)
+    assert 'id="video-seed-ratio"' in _BLOCKS and 'id="video-seed-hours"' in _BLOCKS
+    assert 'id="video-seed-remove-data"' in _BLOCKS
+    assert "seed_ratio_goal" in _DOWNLOADS and "seed_time_goal_hours" in _DOWNLOADS
 
 
 # ---------------------------------------------------------------------------
@@ -292,5 +295,5 @@ def test_client_mode_fallback_removes_when_goal_met(db, monkeypatch):
 
 
 def test_seed_mode_ui_present():
-    assert 'id="video-seed-mode"' in _INDEX
-    assert "seed_mode" in _SETTINGS_JS
+    assert 'id="video-seed-mode"' in _BLOCKS
+    assert "seed_mode" in _DOWNLOADS
