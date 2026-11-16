@@ -978,6 +978,8 @@ class ConfigManager:
                 # import creates it. Jellyfin/Kodi/Emby use it to identify
                 # the artist instead of guessing by name. Off by default —
                 # the Artist NFO Backfill repair job covers existing folders.
+                # #2138: the same switch writes poster.jpg / background.jpg
+                # beside it when the artist folder has no artwork.
                 "write_artist_nfo": False,
                 # Library v2: a monitored track whose file was deleted outside
                 # SoulSync is downloaded again (Lidarr behaviour). Off, the

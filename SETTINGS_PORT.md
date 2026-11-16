@@ -1821,7 +1821,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | checkbox | `reorganize-preserve-casing` | Preserve my casing, year & disc layout | both | yes (step 8b) |
-| checkbox | `write-artist-nfo` | Write artist.nfo (Jellyfin / Kodi / Emby) | both | yes (step 8b) |
+| checkbox | `write-artist-nfo` | Write artist.nfo and artwork (Plex / Jellyfin / Kodi / Emby) | both | yes (step 8b) |
 | text | `template-audiobook-path` | Audiobook Path Template: | both | yes (step 8c) |
 | checkbox | `audiobook-recycle-deletes` | Recycle deleted audiobooks | both | yes (step 8c) |
 | number | `audiobook-recycle-keep-days` | Empty The Recycle Bin After: | both | yes (step 8c) |

@@ -26,6 +26,13 @@ class Config:
 MBID = "b9ca7096-68de-455f-8a36-1f1ebb2abf2a"
 
 
+@pytest.fixture(autouse=True)
+def _no_artwork_lookups(monkeypatch):
+    """the backfill also looks up poster/background art (#2138): never online here."""
+    import core.metadata.artist_artwork as artwork
+    monkeypatch.setattr(artwork, "candidates", lambda *a, **k: {"photos": [], "backgrounds": []})
+
+
 # ---------------------------------------------------------------------------
 # build_artist_nfo
 # ---------------------------------------------------------------------------
@@ -220,9 +227,10 @@ class TestEnsureArtistNfoForTrack:
         ok, detail = ensure_artist_nfo_for_track("/nonexistent/x.mp3", Config(**{"library.write_artist_nfo": True}))
         assert not ok
 
-    def test_skips_when_derived_folder_is_library_root(self, tmp_path, monkeypatch):
-        """Flat layout: track directly in the artist folder means the derived
-        folder IS the library root — never plant artist.nfo there."""
+    def test_flat_artist_track_layout_writes_into_artist_not_root(self, tmp_path, monkeypatch):
+        """Flat layout: track directly in the artist folder. "one up" was the
+        library root (#1449 refused it); the template level finds the artist
+        folder itself (#2138). Never the root."""
         from core.library.artist_nfo import ensure_artist_nfo_for_track
         artist = tmp_path / "Mammoth"
         artist.mkdir()
@@ -236,7 +244,21 @@ class TestEnsureArtistNfoForTrack:
             "library.music_paths": [str(tmp_path)],
         })
         ok, detail = ensure_artist_nfo_for_track(str(track), cfg)
-        assert not ok and "library root" in detail
+        assert ok, detail
+        assert (artist / "artist.nfo").exists()
+        assert not (tmp_path / "artist.nfo").exists()
+
+    def test_loose_track_in_library_root_never_writes_there(self, tmp_path, monkeypatch):
+        """#1449: a track loose in the root has no artist folder at all."""
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        track = tmp_path / "track.mp3"
+        track.write_bytes(b"fake-audio")
+        self._stub_tags(monkeypatch, {"available": True, "tags": {
+            "album_artist": "Mammoth", "musicbrainz_albumartistid": MBID}})
+        cfg = Config(**{"library.write_artist_nfo": True,
+                        "library.music_paths": [str(tmp_path)]})
+        ok, _detail = ensure_artist_nfo_for_track(str(track), cfg)
+        assert not ok
         assert not (tmp_path / "artist.nfo").exists()
 
     def test_fallback_mbid_used_when_tags_lack_it(self, tmp_path, monkeypatch):
