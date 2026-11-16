@@ -423,6 +423,9 @@ export interface FindingDetailProps {
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   /** put back what this finding's fix changed */
   onUndo?: (finding: RepairFinding) => void;
+  /** fix this finding with an answer of the user's own (#2150: a split
+   *  artist edited by hand, or "it's one artist") */
+  onFixAction?: (finding: RepairFinding, action: string) => void;
 }
 
 const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
@@ -639,11 +642,90 @@ export function FindingDetail(props: FindingDetailProps) {
   );
 }
 
+/**
+ * #2150: a split that's wrong is corrected on the finding itself. Edit split
+ * takes the names joined by ";" (only the tag's own names, joined or parted
+ * where it has a separator), and One artist keeps the whole credit. A name
+ * either one joins goes on the job's Keep Whole Names list, so no scan or
+ * import splits it again.
+ */
+function CommaSplitEditor({
+  finding,
+  proposed,
+  onFixAction,
+}: {
+  finding: RepairFinding;
+  proposed: string;
+  onFixAction: (finding: RepairFinding, action: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(proposed);
+  const combined = text((finding.details || {}).combined_name);
+  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+
+  const keepWhole = async () => {
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'One artist',
+      message: `Keep "${combined}" as one artist? Nothing is re-tagged, and it won't be split again. You can take it off the list in the job's Keep Whole Names setting.`,
+      confirmText: 'One artist',
+    });
+    if (confirmed) onFixAction(finding, 'keep_whole');
+  };
+
+  if (!editing) {
+    return (
+      <div className="repair-finding-meta" style={{ marginTop: '8px' }} onClick={stop}>
+        Split wrong?{' '}
+        <button className="repair-btn" type="button" onClick={() => setEditing(true)}>
+          Edit split
+        </button>{' '}
+        <button className="repair-btn" type="button" onClick={() => void keepWhole()}>
+          One artist
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="repair-finding-meta" style={{ marginTop: '8px' }} onClick={stop}>
+      <label style={{ display: 'block', marginBottom: '4px' }}>
+        One artist per &quot;;&quot;. A name you join stays one artist from now on.
+        <input
+          type="text"
+          className="repair-setting-input"
+          aria-label="Split artists"
+          style={{ display: 'block', width: '100%', marginTop: '4px' }}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      </label>
+      <button
+        className="repair-btn repair-btn-fix"
+        type="button"
+        disabled={!value.trim()}
+        onClick={() => onFixAction(finding, `split:${value}`)}
+      >
+        Apply this split
+      </button>{' '}
+      <button
+        className="repair-btn"
+        type="button"
+        onClick={() => {
+          setValue(proposed);
+          setEditing(false);
+        }}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function FindingDetailBody({
   finding,
   onKeepDuplicate,
   onApplyCoverArt,
   onUndo,
+  onFixAction,
 }: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
@@ -831,6 +913,14 @@ function FindingDetailBody({
           <div className="repair-finding-meta" style={{ marginTop: '8px' }}>
             Your media server picks up the split on its next scan.
           </div>
+          {onFixAction && finding.status === 'pending' ? (
+            <CommaSplitEditor
+              key={finding.id}
+              finding={finding}
+              proposed={text(d.new_display_artist) || parts.join('; ')}
+              onFixAction={onFixAction}
+            />
+          ) : null}
         </>
       );
     }

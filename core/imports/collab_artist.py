@@ -190,16 +190,74 @@ def library_has_artist(name: str) -> bool:
                 pass
 
 
-def library_has_identified_artist(name: str) -> bool:
+# where "this is one artist" answers from the Tools page live: the Split
+# Artists job's own settings, so the list can be read and edited there (#2150)
+KEPT_WHOLE_SETTINGS_KEY = "repair.jobs.comma_artist_splitter.settings"
+KEPT_WHOLE_SETTING = "keep_whole_names"
+
+
+def parse_kept_whole_names(value) -> list:
+    """the names in a keep-whole setting, one per ';' or line. a name with
+    ',' '&' or '/' in it is the point, so those never split here."""
+    if isinstance(value, (list, tuple, set)):
+        items = [str(v) for v in value]
+    else:
+        items = re.split(r"[;\n]", str(value or ""))
+    out, seen = [], set()
+    for item in items:
+        name = " ".join(item.split())
+        key = name.casefold()
+        if name and key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+def kept_whole_artist_names(config=None) -> list:
+    """names the user said are one artist each, never to be split (#2150)."""
+    try:
+        if config is None:
+            from core.settings import config_manager as config
+        settings = config.get(KEPT_WHOLE_SETTINGS_KEY, {}) or {}
+        if not isinstance(settings, dict):
+            return []
+        return parse_kept_whole_names(settings.get(KEPT_WHOLE_SETTING))
+    except Exception as exc:  # noqa: BLE001 - an unreadable setting keeps nothing
+        logger.debug("keep-whole names unreadable: %s", exc)
+        return []
+
+
+def remember_kept_whole_names(names, config=None) -> list:
+    """add ``names`` to the keep-whole list. returns the list as saved."""
+    if config is None:
+        from core.settings import config_manager as config
+    settings = config.get(KEPT_WHOLE_SETTINGS_KEY, {}) or {}
+    settings = dict(settings) if isinstance(settings, dict) else {}
+    merged = parse_kept_whole_names(
+        parse_kept_whole_names(settings.get(KEPT_WHOLE_SETTING)) + list(names or ()))
+    settings[KEPT_WHOLE_SETTING] = "; ".join(merged)
+    config.set(KEPT_WHOLE_SETTINGS_KEY, settings)
+    return merged
+
+
+def kept_whole_keys(config=None) -> set:
+    """casefolded, whitespace-collapsed keys of the keep-whole names."""
+    return {name.casefold() for name in kept_whole_artist_names(config)}
+
+
+def library_has_identified_artist(name: str, conn=None) -> bool:
     """does the library hold an artist by exactly this name that a provider
-    identified. False on any doubt."""
+    identified, or one the user said is one artist. False on any doubt."""
     name = str(name or "").strip()
     if not name:
         return False
-    conn = None
+    if " ".join(name.split()).casefold() in kept_whole_keys():
+        return True
+    own = conn is None
     try:
-        from database.music_database import get_database
-        conn = get_database()._get_connection()
+        if own:
+            from database.music_database import get_database
+            conn = get_database()._get_connection()
         row = conn.execute(
             "SELECT 1 FROM lib2_artists WHERE LOWER(name) = LOWER(?) "
             "AND (COALESCE(spotify_id,'') <> '' OR COALESCE(musicbrainz_id,'') <> '' "
@@ -208,7 +266,7 @@ def library_has_identified_artist(name: str) -> bool:
     except Exception:  # noqa: BLE001 - naming never fails over a lookup
         return False
     finally:
-        if conn is not None:
+        if own and conn is not None:
             try:
                 conn.close()
             except Exception as exc:  # noqa: BLE001 - cleanup only

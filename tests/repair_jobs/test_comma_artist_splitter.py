@@ -732,3 +732,207 @@ def test_a_capped_run_resumes_after_the_last_file_it_read(tmp_path, monkeypatch)
     _run(db, monkeypatch, {})
     # carries on after file 3 and wraps round to the top
     assert opened[:6] == paths[4:] and opened[6] == paths[0]
+
+
+# ── #2150: a name that is one artist is never split, and the user corrects ──
+
+KDA_CREDIT = 'K/DA; League Of Legends; Mimi Webb; Sophie Powers'
+
+
+class _Cfg:
+    """config manager stand-in: dotted get/set over one dict."""
+
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+
+def _kda_db(tmp_path, identified=False):
+    db = MusicDatabase(str(tmp_path / "kda.db"))
+    with db._get_connection() as conn:
+        combined = _seed_artist(conn, KDA_CREDIT)
+        # ghost rows an earlier blind split made, exactly as in a live library
+        for name in ('K', 'DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'):
+            _seed_artist(conn, name)
+        if identified:
+            conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id) "
+                         "VALUES('K/DA', 'K/DA', '4gOc8TsQed9eqnqJct2c5v')")
+        _seed_album(conn, combined, 'Kda Album')
+        conn.commit()
+    return db, combined
+
+
+def _kda_file(db, tmp_path, combined):
+    path = str(tmp_path / 'kda.flac')
+    _make_flac(path, tags={'artist': KDA_CREDIT, 'albumartist': KDA_CREDIT, 'title': 'Song'})
+    with db._get_connection() as conn:
+        _seed_file(conn, 1, 'Song', path, combined)
+        conn.commit()
+    return path
+
+
+def test_a_provider_known_slash_name_stays_one_artist(tmp_path, monkeypatch):
+    """#2150: "K/DA; Mimi Webb" proposed "K; DA; ..." and album artist "K"."""
+    db, combined = _kda_db(tmp_path)
+    _kda_file(db, tmp_path, combined)
+    result, findings = _run(db, monkeypatch, {'deezer': _FakeArtistClient(known=['K/DA'])},
+                            tmp_path=tmp_path)
+    assert len(findings) == 1
+    d = findings[0]['details']
+    assert d['split_artists'] == ['K/DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers']
+    assert d['primary_artist'] == 'K/DA'
+    assert d['new_display_artist'] == KDA_CREDIT
+
+
+def test_a_library_identified_slash_name_stays_one_artist(tmp_path, monkeypatch):
+    """#2150: the library holding K/DA with a provider id is enough."""
+    db, combined = _kda_db(tmp_path, identified=True)
+    _kda_file(db, tmp_path, combined)
+    result, findings = _run(db, monkeypatch, {'deezer': _FakeArtistClient()}, tmp_path=tmp_path)
+    assert findings[0]['details']['split_artists'][0] == 'K/DA'
+
+
+def test_a_kept_whole_name_stays_one_artist_with_no_provider(tmp_path, monkeypatch):
+    """#2150: a name on the job's Keep Whole Names list is one artist."""
+    db, combined = _kda_db(tmp_path)
+    _kda_file(db, tmp_path, combined)
+    _patch_clients(monkeypatch, {'deezer': _FakeArtistClient()})
+    cfg = _Cfg({'repair.jobs.comma_artist_splitter.settings': {'keep_whole_names': 'k/da'}})
+    findings = []
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg,
+                     create_finding=lambda **kw: findings.append(kw) or True)
+    CommaArtistSplitterJob().scan(ctx)
+    assert findings[0]['details']['split_artists'][0] == 'K/DA'
+
+
+def test_a_kept_whole_credit_is_not_proposed_at_all(tmp_path, monkeypatch):
+    """#2150: "One artist" on a finding means the scan never files it again."""
+    db = _db(tmp_path)
+    _add_track(db, 'T1', DUMMY, str(tmp_path / 'a.flac'), file_artist='Camellia, Toby Fox')
+    _patch_clients(monkeypatch, {'deezer': _FakeArtistClient()})
+    cfg = _Cfg({'repair.jobs.comma_artist_splitter.settings': {'keep_whole_names': 'camellia,toby fox'}})
+    findings = []
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg,
+                     create_finding=lambda **kw: findings.append(kw) or True)
+    CommaArtistSplitterJob().scan(ctx)
+    assert findings == []
+
+
+def test_custom_split_parts_only_regroups_the_tags_own_names():
+    from core.repair_jobs.comma_artist_splitter import custom_split_parts
+    parts, joined = custom_split_parts(KDA_CREDIT, 'K/DA; League Of Legends; Mimi Webb; Sophie Powers')
+    assert parts == ['K/DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers']
+    assert joined == ['K/DA']
+    # spelled as in the tag, whatever spacing was typed
+    parts, joined = custom_split_parts('Above & Beyond, Mat Zo', 'above &beyond; Mat Zo')
+    assert parts == ['Above & Beyond', 'Mat Zo'] and joined == ['Above & Beyond']
+    for bad in ('K/DA; Somebody Else; Mimi Webb; Sophie Powers',   # invents a name
+                'K/DA; League Of Legends',                            # drops names
+                'K/DA League Of Legends; Mimi Webb; Sophie Powers',   # runs over a ";"
+                ''):
+        with pytest.raises(ValueError):
+            custom_split_parts(KDA_CREDIT, bad)
+
+
+def _kda_details(path, parts):
+    return {
+        'combined_name': KDA_CREDIT,
+        'split_artists': parts,
+        'new_display_artist': '; '.join(parts),
+        'primary_artist': parts[0],
+        'all_files': [{'file_path': path}],
+        'library_v2_native': True,
+    }
+
+
+def test_fix_one_artist_keeps_the_credit_and_remembers_it(tmp_path):
+    """#2150: "One artist" on the finding re-tags nothing and is remembered."""
+    from mutagen.flac import FLAC
+    db, combined = _kda_db(tmp_path)
+    path = _kda_file(db, tmp_path, combined)
+    w = _worker(db, tmp_path)
+    w._config_manager = _Cfg()
+    details = _kda_details(path, ['K', 'DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'])
+    details['_fix_action'] = 'keep_whole'
+    result = w._fix_comma_artist_split('artist', f'lib2:{combined}', None, details)
+    assert result['success'] is True and result['action'] == 'kept_whole'
+    assert FLAC(path)['artist'] == [KDA_CREDIT]
+    saved = w._config_manager.data['repair.jobs.comma_artist_splitter.settings']
+    assert saved['keep_whole_names'] == KDA_CREDIT
+
+
+def test_fix_with_an_edited_split_writes_it_and_remembers_the_joined_name(tmp_path):
+    """#2150: the user's own split is what gets written, album artist included."""
+    from mutagen.flac import FLAC
+    db, combined = _kda_db(tmp_path)
+    path = _kda_file(db, tmp_path, combined)
+    w = _worker(db, tmp_path)
+    w._config_manager = _Cfg({'repair.jobs.comma_artist_splitter.settings': {'dry_run': True}})
+    details = _kda_details(path, ['K', 'DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'])
+    details['_fix_action'] = 'split:K/DA; League Of Legends; Mimi Webb; Sophie Powers'
+    result = w._fix_comma_artist_split('artist', f'lib2:{combined}', None, details)
+    assert result['success'] is True and result['action'] == 'artists_split'
+    audio = FLAC(path)
+    assert list(audio['artists']) == ['K/DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers']
+    assert audio['albumartist'] == ['K/DA']
+    saved = w._config_manager.data['repair.jobs.comma_artist_splitter.settings']
+    assert saved == {'dry_run': True, 'keep_whole_names': 'K/DA'}
+
+
+def test_fix_refuses_an_edit_that_invents_a_name(tmp_path):
+    from mutagen.flac import FLAC
+    db, combined = _kda_db(tmp_path)
+    path = _kda_file(db, tmp_path, combined)
+    w = _worker(db, tmp_path)
+    w._config_manager = _Cfg()
+    details = _kda_details(path, ['K', 'DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'])
+    details['_fix_action'] = 'split:KDA Fans; League Of Legends; Mimi Webb; Sophie Powers'
+    result = w._fix_comma_artist_split('artist', f'lib2:{combined}', None, details)
+    assert result['success'] is False
+    assert FLAC(path)['artist'] == [KDA_CREDIT]
+    assert w._config_manager.data == {}
+
+
+def test_fix_refuses_an_old_finding_that_breaks_a_known_name(tmp_path):
+    """#2150: a finding filed before the fix still says "K", "DA". applying
+    it must not write the fragments once K/DA is known as one artist."""
+    from mutagen.flac import FLAC
+    db, combined = _kda_db(tmp_path, identified=True)
+    path = _kda_file(db, tmp_path, combined)
+    w = _worker(db, tmp_path)
+    w._config_manager = _Cfg()
+    details = _kda_details(path, ['K', 'DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'])
+    result = w._fix_comma_artist_split('artist', f'lib2:{combined}', None, details)
+    assert result['success'] is False
+    assert '"K/DA" is one artist' in result['error']
+    assert FLAC(path)['artist'] == [KDA_CREDIT]
+
+
+def test_the_other_splitters_honour_kept_names(tmp_path, monkeypatch):
+    """#2150: a name kept whole from the Tools page is one artist for the
+    import credit split, the folder rule and the library's combined-artist
+    split too, not just for this job."""
+    import core.settings as settings_mod
+    from core.imports.collab_artist import library_has_identified_artist
+    from core.library2.importer import _credit_names_for_import
+    from core.library2.native_enrich import _identified_name_keys
+
+    cfg = _Cfg({'repair.jobs.comma_artist_splitter.settings': {'keep_whole_names': 'K/DA; Above & Beyond'}})
+    monkeypatch.setattr(settings_mod, 'config_manager', cfg)
+    db = MusicDatabase(str(tmp_path / 'h.db'))
+    with db._get_connection() as conn:
+        assert library_has_identified_artist('k/da', conn=conn) is True
+        assert library_has_identified_artist('K', conn=conn) is False
+        assert {'k/da', 'above & beyond'} <= _identified_name_keys(conn)
+
+    from core.library2.importer import _ArtistResolver
+    with db._get_connection() as conn:
+        resolver = _ArtistResolver(conn.cursor(), 1)
+        assert resolver.known_name('K/DA') is True
+        assert _credit_names_for_import('K/DA, Mimi Webb', resolver.known_name,
+                                        split_with_known_anchor=True) == ['K/DA', 'Mimi Webb']

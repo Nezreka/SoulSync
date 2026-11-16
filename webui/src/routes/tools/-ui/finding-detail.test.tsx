@@ -335,3 +335,75 @@ describe('Library re-tag checks (Storm)', () => {
     expect(text).toContain('Tag checks');
   });
 });
+
+describe('FindingDetail split artists correction (#2150)', () => {
+  const credit = 'K/DA; League Of Legends; Mimi Webb';
+  const splitFinding = (status = 'pending'): RepairFinding =>
+    ({
+      id: 7,
+      finding_type: 'comma_artist_split',
+      severity: 'warning',
+      status,
+      entity_type: 'artist',
+      entity_id: 'lib2:1',
+      title: `Combined artist: ${credit}`,
+      description: '',
+      details: {
+        combined_name: credit,
+        split_artists: ['K', 'DA', 'League Of Legends', 'Mimi Webb'],
+        new_display_artist: 'K; DA; League Of Legends; Mimi Webb',
+        primary_artist: 'K',
+      },
+    }) as unknown as RepairFinding;
+
+  it('sends the hand-edited split as the fix', () => {
+    const onFixAction = vi.fn();
+    render(
+      <FindingDetail
+        finding={splitFinding()}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={onFixAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit split' }));
+    const input = screen.getByLabelText('Split artists') as HTMLInputElement;
+    expect(input.value).toBe('K; DA; League Of Legends; Mimi Webb');
+    fireEvent.change(input, { target: { value: 'K/DA; League Of Legends; Mimi Webb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply this split' }));
+    expect(onFixAction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7 }),
+      'split:K/DA; League Of Legends; Mimi Webb',
+    );
+  });
+
+  it('asks before keeping the whole credit as one artist', async () => {
+    const onFixAction = vi.fn();
+    const confirm = vi.fn().mockResolvedValue(true);
+    window.showConfirmDialog = confirm as typeof window.showConfirmDialog;
+    render(
+      <FindingDetail
+        finding={splitFinding()}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={onFixAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'One artist' }));
+    await vi.waitFor(() => expect(onFixAction).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(onFixAction).toHaveBeenCalledWith(expect.objectContaining({ id: 7 }), 'keep_whole');
+  });
+
+  it('offers no correction on a finding that is already settled', () => {
+    render(
+      <FindingDetail
+        finding={splitFinding('resolved')}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Edit split' })).toBeNull();
+  });
+});

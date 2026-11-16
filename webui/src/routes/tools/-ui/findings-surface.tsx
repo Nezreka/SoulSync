@@ -2439,6 +2439,7 @@ function FindingCard({
                 onKeepDuplicate={onKeepDuplicate}
                 onApplyCoverArt={onApplyCoverArt}
                 onUndo={onUndo}
+                onFixAction={(target, action) => void onFix(target, action)}
               />
             )
           ) : null}

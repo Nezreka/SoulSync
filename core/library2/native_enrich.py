@@ -1235,6 +1235,9 @@ def _identified_name_keys(conn, *, exclude_id: Optional[int] = None) -> set:
         key = normalize_name(name or "")
         if key:
             keys.add(key)
+    # a name the user said is one artist counts as identified (#2150)
+    from core.imports.collab_artist import kept_whole_keys
+    keys.update(kept_whole_keys())
     return keys
 
 

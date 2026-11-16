@@ -30,6 +30,7 @@ import os
 import re
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.imports.collab_artist import library_has_identified_artist, parse_kept_whole_names
 from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
 
@@ -89,6 +90,107 @@ def split_artist_parts(name: str, symbols: list = None) -> list:
         return [str(name or '').strip()] if str(name or '').strip() else []
     parts = re.split(r'[{}]+'.format(''.join(symbols)), str(name or ''))
     return [p.strip() for p in parts if p.strip()]
+
+
+# a run of pieces checked as one name is at most this long: every run costs
+# a provider lookup, and longer known names are on the whitelist above
+_MAX_KNOWN_RUN = 3
+
+
+def _piece_spans(name: str, symbols: list) -> list:
+    """(start, end) of each non-empty piece of ``name`` between separators."""
+    name = str(name or '')
+    if not symbols:
+        return [(0, len(name))] if name.strip() else []
+    spans, pos = [], 0
+    for sep in re.finditer(r'[{}]+'.format(re.escape(''.join(symbols))), name):
+        spans.append((pos, sep.start()))
+        pos = sep.end()
+    spans.append((pos, len(name)))
+    return [(a, b) for a, b in spans if name[a:b].strip()]
+
+
+def split_keeping_known(name: str, symbols: list, known) -> list:
+    """``split_artist_parts``, but a run of pieces that spells an artist
+    ``known`` knows stays one name, spelled as in ``name``.
+
+    "K/DA; Mimi Webb" is two artists when "K/DA" is known, never "K", "DA"
+    and "Mimi Webb" (#2150). same rule as the importer's
+    split_known_artist_credits (#2136): the longest known run wins. a ";"
+    is never inside an act's name, so no run crosses one."""
+    name = str(name or '')
+    hard = ';' if ';' in (symbols or []) else None
+    soft = [s for s in (symbols or []) if s != ';']
+    chunks = []
+    if hard:
+        pos = 0
+        for sep in re.finditer(r';+', name):
+            chunks.append((pos, sep.start()))
+            pos = sep.end()
+        chunks.append((pos, len(name)))
+    else:
+        chunks = [(0, len(name))]
+
+    def _known(text: str) -> bool:
+        try:
+            return bool(known(text))
+        except Exception as e:  # noqa: BLE001 - a lookup never breaks a split
+            logger.debug("known-artist check failed for %r: %s", text, e)
+            return False
+
+    out = []
+    for c0, c1 in chunks:
+        chunk = name[c0:c1]
+        spans = _piece_spans(chunk, soft)
+        i = 0
+        while i < len(spans):
+            taken = 1
+            for j in range(min(len(spans), i + _MAX_KNOWN_RUN), i + 1, -1):
+                if _known(chunk[spans[i][0]:spans[j - 1][1]].strip()):
+                    taken = j - i
+                    break
+            piece = chunk[spans[i][0]:spans[i + taken - 1][1]].strip()
+            if piece:
+                out.append(piece)
+            i += taken
+    return out
+
+
+def _letters(text: str) -> str:
+    return ''.join(str(text or '').casefold().split())
+
+
+def custom_split_parts(combined: str, edited: str) -> tuple:
+    """the user's own split of ``combined`` (#2150): names joined by ';'.
+
+    every name must be a run of the tag's own pieces, so an edit can join
+    or part names at the separators that are there but never invents one.
+    returns (parts spelled as in the tag, the parts that join pieces).
+    raises ValueError when the edit doesn't fit the tag."""
+    combined = str(combined or '')
+    spans = _piece_spans(combined, [',', ';', '/', '&'])
+    wanted = [w.strip() for w in str(edited or '').split(';') if w.strip()]
+    if not wanted:
+        raise ValueError('No names given')
+    parts, joined, i = [], [], 0
+    for want in wanted:
+        target = _letters(re.sub(r'[,;/&]', '', want))
+        got, j = '', i
+        while j < len(spans) and len(got) < len(target):
+            got += _letters(re.sub(r'[,;/&]', '', combined[spans[j][0]:spans[j][1]]))
+            j += 1
+        if j == i or got != target:
+            raise ValueError(f'"{want}" is not a name in "{combined}"')
+        part = combined[spans[i][0]:spans[j - 1][1]].strip()
+        if ';' in part:
+            raise ValueError(f'"{want}" runs across a ";", which always parts two names')
+        parts.append(part)
+        if j - i > 1:
+            joined.append(part)
+        i = j
+    if i != len(spans):
+        raise ValueError(f'Every name in "{combined}" has to stay in the split')
+    return parts, joined
 
 
 def _norm_set(items) -> set:
@@ -167,6 +269,8 @@ class CommaArtistSplitterJob(RepairJob):
         '- Semicolon Splitter: Enable splitting semicolons (;)\n'
         '- Forward Slash Splitter: Enable splitting forward slashes (/)\n'
         '- Ampersand Splitter: Enable splitting ampersands (&)\n'
+        '- Keep Whole Names: Names that are one artist and never split, separated by ";" '
+        '(e.g. "K/DA; Above & Beyond"). A finding\'s "One artist" and "Edit split" add to it\n'
         '- Dry Run: When enabled, only reports issues without modifying files'
     )
     icon = 'repair-icon-artist'
@@ -177,6 +281,7 @@ class CommaArtistSplitterJob(RepairJob):
         'semicolon_splitter': True,
         'forward_slash_splitter': True,
         'ampersand_splitter': True,
+        'keep_whole_names': '',
         'dry_run': True,
     }
     auto_fix = True
@@ -228,6 +333,9 @@ class CommaArtistSplitterJob(RepairJob):
         settings = self._get_settings(context)
         dry_run = bool(settings.get('dry_run', True))
         symbols: list = self._get_symbols(settings)
+        # names the user said are one artist each (#2150)
+        kept = {normalize_artist_name(n) for n in parse_kept_whole_names(
+            settings.get('keep_whole_names'))}
         sources: list = [s for s in _API_SOURCES
                          if not (s == 'spotify' and context.is_spotify_rate_limited())]
 
@@ -311,7 +419,7 @@ class CommaArtistSplitterJob(RepairJob):
                 # Memoize the split
                 if file_artist not in memo_splits:
                     norm_full = normalize_artist_name(file_artist, symbols)
-                    if norm_full in KNOWN_COMMA_ARTISTS:
+                    if norm_full in KNOWN_COMMA_ARTISTS or norm_full in kept:
                         memo_splits[file_artist] = None
                     else:
                         # Check 1: is the FULL string a real artist?
@@ -323,12 +431,25 @@ class CommaArtistSplitterJob(RepairJob):
                             # No API reachable → fail-safe
                             memo_splits[file_artist] = None
                         else:
-                            # Check 2: every part must resolve
-                            parts_resolution = self._resolve_parts(context, parts, search_memo, symbols, sources)
-                            if parts_resolution is None:
+                            # a name inside the credit that is one artist
+                            # stays whole: "K/DA; Mimi Webb" is never "K",
+                            # "DA" and "Mimi Webb" (#2150)
+                            whole = split_keeping_known(
+                                file_artist, symbols,
+                                lambda name: self._is_one_artist(
+                                    context, name, kept, search_memo, symbols, sources))
+                            if len(whole) < 2:
                                 memo_splits[file_artist] = None
                             else:
-                                memo_splits[file_artist] = (parts, parts[0], '; '.join(parts), checked_sources, parts_resolution)
+                                # Check 2: every part must resolve
+                                parts_resolution = self._resolve_parts(
+                                    context, whole, search_memo, symbols, sources, kept)
+                                if parts_resolution is None:
+                                    memo_splits[file_artist] = None
+                                else:
+                                    memo_splits[file_artist] = (
+                                        whole, whole[0], '; '.join(whole),
+                                        checked_sources, parts_resolution)
 
                 split_info = memo_splits.get(file_artist)
                 if split_info is None:
@@ -336,6 +457,9 @@ class CommaArtistSplitterJob(RepairJob):
                     continue
 
                 parts, primary, display, checked_sources, parts_resolution = split_info
+                if file_already_split(audio, parts):
+                    result.skipped += 1
+                    continue
 
                 # Track this finding
                 if file_artist not in findings_map:
@@ -678,7 +802,29 @@ class CommaArtistSplitterJob(RepairJob):
                 return True, checked
         return False, checked
 
-    def _resolve_parts(self, context: JobContext, parts: list, memo: dict, symbols: list, sources: list):
+    def _is_one_artist(self, context: JobContext, name: str, kept: set,
+                       memo: dict, symbols: list, sources: list) -> bool:
+        """a run of a credit that names one artist: the user said so, it's
+        a famous separator-named act, the library holds it identified, or a
+        provider has it by exactly that name."""
+        norm = normalize_artist_name(name, symbols)
+        if norm in kept or norm in KNOWN_COMMA_ARTISTS:
+            return True
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            if library_has_identified_artist(name, conn=conn):
+                return True
+        except Exception as e:  # noqa: BLE001 - falls through to the providers
+            logger.debug("library check failed for %r: %s", name, e)
+        finally:
+            if conn:
+                conn.close()
+        is_real, _checked = self._full_string_is_real_artist(name, memo, symbols, sources)
+        return is_real
+
+    def _resolve_parts(self, context: JobContext, parts: list, memo: dict, symbols: list,
+                       sources: list, kept: set = frozenset()):
         """Verify every part is a known artist. Returns the resolution list
         for the finding details, or None if any part can't be verified."""
         resolution = []
@@ -686,7 +832,10 @@ class CommaArtistSplitterJob(RepairJob):
             entry = {'name': part, 'in_library': False,
                      'library_artist_id': None, 'verified_via': None}
             library_id = self._library_artist_id(context, part)
-            if library_id is not None:
+            if library_id is None and normalize_artist_name(part, symbols) in kept:
+                # the user said this name is one artist (#2150)
+                entry['verified_via'] = 'your list'
+            elif library_id is not None:
                 entry['in_library'] = True
                 entry['library_artist_id'] = library_id
                 entry['verified_via'] = 'library'
