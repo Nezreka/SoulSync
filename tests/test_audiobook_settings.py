@@ -117,7 +117,7 @@ def index_html():
 
 @pytest.fixture(scope="module")
 def settings_js():
-    return (_ROOT / "webui/static/settings.js").read_text(encoding="utf-8", errors="ignore")
+    return (_ROOT / "webui/src/features/settings/shell.ts").read_text(encoding="utf-8", errors="ignore")
 
 
 _TABS = _ROOT / "webui/src/features/settings/tabs"

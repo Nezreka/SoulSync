@@ -27,7 +27,7 @@ TABS = ROOT / "webui" / "src" / "features" / "settings" / "tabs"
 
 @pytest.fixture(scope="module")
 def settings_js() -> str:
-    return (ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
+    return (ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -113,12 +113,12 @@ def test_the_full_bundle_is_included_in_profile_autosave(tab):
 
 
 def test_the_settings_autosave_leaves_quality_changes_to_the_tab(settings_js):
-    start = settings_js.index("function debouncedAutoSaveSettings(event)")
+    # the page's own autosave is gone with settings.js (SETTINGS_PORT.md step
+    # V4b): the shell wires no field, so a quality change saves only through
+    # the tab's profile save
+    start = settings_js.index("export function initializeSettings()")
     body = settings_js[start:settings_js.index("\n}", start)]
-    # a React control returns here; a vanilla source panel moved into the
-    # React modal does not (step 7b)
-    assert "if (_t?.closest?.('[data-stg-react]')" in body
-    assert "!_t.closest('.src-config-panel:not([data-react-panel])')) return;" in body
+    assert "addEventListener('input'" not in body and "addEventListener('change'" not in body
     assert "_qpHandleProfileControlChange" not in settings_js
 
 

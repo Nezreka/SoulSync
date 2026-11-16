@@ -1,26 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, expect, it, vi } from 'vitest';
+
+import { filterSettings, switchSettingsTab } from '@/features/settings/shell';
+
+// the tab switch and the search are shell.ts's (settings.js's, until
+// SETTINGS_PORT.md step V4b), run here on the page's own markup
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
-const block = source.slice(
-  source.indexOf('function switchSettingsTab('),
-  source.indexOf('window.filterSettings = filterSettings;'),
-);
-let nav: { switchSettingsTab: (tab: string) => void; filterSettings: (query: string) => void };
+const nav = { switchSettingsTab, filterSettings };
 beforeEach(() => {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   document.body.replaceChildren(parsed.getElementById('settings-page')!);
   Element.prototype.scrollIntoView = vi.fn();
-  nav = new Function(
-    'document',
-    'window',
-    'autoTestSourcesOnce',
-    '_logViewerStop',
-    '_logViewerInit',
-    'switchLibraryMediaTab',
-    `${block}; return {switchSettingsTab, filterSettings};`,
-  )(document, window, vi.fn(), vi.fn(), vi.fn(), vi.fn());
 });
 it('uses one category bar instead of a second sidebar', () => {
   expect(document.querySelectorAll('.stg-category-nav .stg-tabbar')).toHaveLength(1);

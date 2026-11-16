@@ -9,74 +9,59 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
-
-import { extractFunction } from './vanilla-extract';
+import { setSettingsSaveState } from '@/features/settings/shell';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
-const SETTINGS = read('static/settings.js');
+// the page's load and status button (shell.ts, settings.js's until
+// SETTINGS_PORT.md step V4b)
+const SHELL = read('src/features/settings/shell.ts');
 // the switch is React (SETTINGS_PORT.md step 9a); its own behaviour is run in
 // src/features/settings/tabs/system-tab.test.tsx
 const SWITCH = read('src/features/settings/tabs/system-tab.tsx');
 
-function labels(): string {
-  const start = SETTINGS.indexOf('const SETTINGS_SAVE_LABELS = {');
-  return SETTINGS.slice(start, SETTINGS.indexOf('};', start) + 2);
-}
+type Shell = Window & Record<string, unknown>;
+const shell = window as unknown as Shell;
 
-// the real autosave functions and the real button status, timers captured
+/** a field's change, through the store every control saves through, with the
+ *  page's status button on window as on the page */
 function page(autosaveOff: boolean | undefined) {
   document.body.innerHTML =
-    '<button id="save-settings" data-state="idle"><svg></svg><span>All changes saved</span></button>' +
-    '<input type="checkbox" id="settings-autosave-enabled">' +
-    '<input type="text" id="soulseek-url">';
-  const win: Record<string, unknown> = {};
-  if (autosaveOff !== undefined) win._settingsAutosaveOff = autosaveOff;
-  const timers: unknown[] = [];
-  const deps = `let settingsAutoSaveTimer = null;
-let _settingsSavedTimer = null;
-${labels()}
-${extractFunction('setSettingsSaveState', SETTINGS)}
-${extractFunction('_isVideoOwnedField', SETTINGS)}
-${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
-return { debouncedAutoSaveSettings };`;
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const fns = new Function('window', 'setTimeout', 'clearTimeout', 'saveSettings', deps)(
-    win,
-    (cb: unknown) => {
-      timers.push(cb);
-      return timers.length;
-    },
-    () => undefined,
-    () => undefined,
-  ) as {
-    debouncedAutoSaveSettings: (event?: { target: Element | null }) => void;
+    '<button id="save-settings" data-state="idle"><svg></svg><span>All changes saved</span></button>';
+  if (autosaveOff === undefined) delete shell._settingsAutosaveOff;
+  else shell._settingsAutosaveOff = autosaveOff;
+  shell.setSettingsSaveState = setSettingsSaveState;
+  const post = vi.fn(() => Promise.resolve({ success: true }));
+  const store = createSettingsStore({ post, delay: 0 });
+  let n = 0;
+  /** whether the change saved on its own */
+  const change = async () => {
+    post.mockClear();
+    store.set('soulseek', 'slskd_url', `http://slskd-${(n += 1)}`);
+    await new Promise((r) => setTimeout(r, 10));
+    return post.mock.calls.length > 0;
   };
-  const change = (id: string) => {
-    timers.length = 0;
-    fns.debouncedAutoSaveSettings({ target: document.getElementById(id) });
-    return timers.length > 0;
-  };
-  return { win, timers, fns, change };
+  return { win: shell, change, store };
 }
 
 const btn = () => document.getElementById('save-settings')!;
 
 afterEach(() => {
   document.body.innerHTML = '';
+  delete shell._settingsAutosaveOff;
+  delete shell.setSettingsSaveState;
 });
 
 describe('the settings autosave switch', () => {
-  it('saves a change on its own while the switch is on', () => {
+  it('saves a change on its own while the switch is on', async () => {
     for (const flag of [undefined, false]) {
       const { change } = page(flag);
-      expect(change('soulseek-url')).toBe(true);
-      expect(btn().textContent).toBe('Save now');
+      expect(await change()).toBe(true);
     }
   });
 
-  it('holds a change for the save button while the switch is off', () => {
+  it('holds a change for the save button while the switch is off', async () => {
     const { change } = page(true);
-    expect(change('soulseek-url')).toBe(false);
+    expect(await change()).toBe(false);
     expect(btn().dataset.state).toBe('pending');
     expect(btn().textContent).toBe('Save changes');
     expect(btn().title).toContain('Autosave is off');
@@ -115,15 +100,15 @@ describe('the settings autosave switch', () => {
     );
   });
 
-  it('flipping the switch takes hold on the very next change', () => {
+  it('flipping the switch takes hold on the very next change', async () => {
     // the switch flips the page's flag at once...
     expect(SWITCH).toContain('shell()._settingsAutosaveOff = !checked;');
-    // ...and the page's autosave follows the flag on the next change
+    // ...and the autosave follows the flag on the next change
     const { win, change } = page(false);
     win._settingsAutosaveOff = true;
-    expect(change('soulseek-url')).toBe(false);
+    expect(await change()).toBe(false);
     win._settingsAutosaveOff = false;
-    expect(change('soulseek-url')).toBe(true);
+    expect(await change()).toBe(true);
   });
 
   it('is on the page, ticked by default, saved and loaded with the settings', () => {
@@ -131,6 +116,6 @@ describe('the settings autosave switch', () => {
     expect(SWITCH).toContain('(settings.ui_appearance || {}).settings_autosave !== false : true');
     expect(SWITCH).toContain("store.set('ui_appearance', 'settings_autosave', checked);");
     // the page's flag still comes from the loaded settings
-    expect(SETTINGS).toContain('settings.ui_appearance?.settings_autosave !== false');
+    expect(SHELL).toContain('appearance?.settings_autosave !== false');
   });
 });

@@ -45,7 +45,7 @@ def _read(rel: str) -> str:
 
 @pytest.fixture(scope="module")
 def js():
-    return _read("webui/static/settings.js")
+    return _read("webui/src/features/settings/shell.ts")
 
 
 @pytest.fixture(scope="module")

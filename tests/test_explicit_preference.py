@@ -137,7 +137,7 @@ def test_settings_ui_wires_the_sub_toggle():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
-    settings_js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
     # Filtering is React now (SETTINGS_PORT.md step 5)
     tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')
@@ -234,7 +234,7 @@ def test_settings_ui_wires_never_download_clean():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
-    settings_js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
     # Filtering is React now (SETTINGS_PORT.md step 5)
     tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')

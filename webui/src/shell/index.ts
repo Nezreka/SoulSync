@@ -12,6 +12,20 @@
  */
 
 import {
+  filterSettings,
+  initializeSettings,
+  landPendingSettingsSave,
+  loadSettingsData,
+  openSourceConfig,
+  probeSourceOnOpen,
+  saveSettings,
+  setSettingsSaveState,
+  startSettingsShell,
+  switchSettingsTab,
+  toggleSourceCard,
+} from '@/features/settings/shell';
+
+import {
   blockFromSearch,
   closeBlocklistModal,
   onBlocklistSearchInput,
@@ -50,6 +64,9 @@ import {
 } from './my-accounts';
 import { initOidcOnlyAdmin, refreshOidcOnlySettingsStatus } from './oidc-only';
 import { initOidcAdminStatus, initOidcSignIn } from './oidc-signin';
+import './download-modal-library';
+import './library-switch';
+import './server-activity';
 import {
   closeDownloadOriginsModal,
   deleteSelectedOriginEntries,
@@ -60,9 +77,6 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
-import './download-modal-library';
-import './library-switch';
-import './server-activity';
 import { initPlexSignIn } from './plex-signin';
 import {
   closeServiceSwitchModal,
@@ -161,11 +175,24 @@ export const SHELL_WINDOW_EXPORTS = {
   // has put them on the page (SETTINGS_PORT.md step 9c)
   initOidcAdminStatus,
   refreshOidcOnlySettingsStatus,
+  // settings.js (ported nov 16, SETTINGS_PORT.md step V4b)
+  initializeSettings,
+  switchSettingsTab,
+  loadSettingsData,
+  saveSettings,
+  setSettingsSaveState,
+  filterSettings,
+  landPendingSettingsSave,
+  probeSourceOnOpen,
+  openSourceConfig,
+  toggleSourceCard,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 // window.SoulSyncFeatures (#1909): what this profile chose to see
 installFeatures();
+// the Settings page's keyboard, and password managers kept off its fields
+startSettingsShell();
 startDiscoverInboxBadge();
 initSidebarWeather();
 const onReady = () => {

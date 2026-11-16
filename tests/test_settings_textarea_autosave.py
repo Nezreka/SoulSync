@@ -28,19 +28,33 @@ def _read(rel: str) -> str:
 
 @pytest.fixture(scope="module")
 def js():
-    return _read("webui/static/settings.js")
+    return _read("webui/src/features/settings/shell.ts")
+
+
+def _react_textareas():
+    """every textarea the Settings tabs render (each is React since
+    SETTINGS_PORT.md: the page binds no field of its own, step V4b)"""
+    tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+    out = []
+    for f in sorted(tabs.glob("*.tsx")):
+        if f.name.endswith(".test.tsx"):
+            continue
+        out += [(f.name, m.group(0)) for m in re.finditer(r"<textarea\s[\s\S]*?/>", f.read_text(encoding="utf-8"))]
+    return out
 
 
 def test_textareas_are_bound_to_the_autosave(js):
-    assert "querySelectorAll('textarea" in js
+    # the page's own binding is gone with settings.js: each textarea is React's
+    assert "querySelectorAll('textarea" not in js
+    assert _react_textareas(), "no React textarea found — has the parse broken?"
 
 
 def test_they_are_bound_on_input_not_change(js):
     """'change' waits for blur. Paste, then click Test without leaving the
-    field, and a 'change' binding still would not have saved it."""
-    block = js.split("querySelectorAll('textarea", 1)[1].split("});", 1)[0]
-    assert "'input', debouncedAutoSaveSettings" in block
-    assert "'change'" not in block
+    field, and a 'change' binding still would not have saved it. React's
+    onChange fires on every input."""
+    for name, tag in _react_textareas():
+        assert "onChange=" in tag or "{...draft" in tag or "{...field" in tag, f"{name}: {tag[:120]}"
 
 
 def test_the_cookie_paste_is_covered():
@@ -59,21 +73,20 @@ def test_the_cookie_paste_is_covered():
 
 def test_the_dev_console_boxes_are_excluded(js):
     """The Hydrabase payload boxes are a request console, not settings. Binding
-    them would fire a full settings save on every keystroke of a JSON blob."""
-    assert "textarea:not(.hydra-payload)" in js
+    them would fire a full settings save on every keystroke of a JSON blob. The
+    page binds no field at all now (shell.ts initializeSettings)."""
+    init = js.split("export function initializeSettings()", 1)[1].split("\n}", 1)[0]
+    assert "addEventListener('input'" not in init and "addEventListener('change'" not in init
 
 
 def test_every_settings_textarea_is_either_bound_or_deliberately_skipped():
     """A guard against the next textarea being added and silently not saving —
     which is the whole bug, and it sat there unnoticed."""
     index = _read("webui/index.html")
-    page = index[index.index('id="settings-page"'):]
-    tags = re.findall(r"<textarea[^>]*>", page)
-    assert tags, "no textareas found — has the page changed shape?"
-    for tag in tags:
-        is_console = "hydra-payload" in tag
-        # everything else must be a real setting the binding will pick up
-        assert is_console or "<textarea" in tag
+    start = index.index('id="settings-page"')
+    page = index[start:index.index('<!-- ═══ LOGS TAB', start)]
+    # none is left in the page's markup: each is a React tab's, bound above
+    assert re.findall(r"<textarea[^>]*>", page) == []
 
 
 # ---------------------------------------------------------------------------

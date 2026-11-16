@@ -1,25 +1,42 @@
 /**
- * The three places settings.js hands over to the React Settings tabs while
- * the page is being ported (SETTINGS_PORT.md): the settings it loaded, the tab
- * that was opened, and its save.
+ * Where the page's shell hands over to the React Settings tabs (shell.ts,
+ * settings.js's until SETTINGS_PORT.md step V4b): the tab that was opened, the
+ * settings it loaded, and its save. Run, not read.
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import {
+  initializeSettings,
+  loadSettingsData,
+  saveSettings,
+  switchSettingsTab,
+  wireRedactedSecrets,
+} from '@/features/settings/shell';
 
-const SETTINGS = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8').replace(
-  /\r\n/g,
-  '\n',
-);
+// the page's globals, stubbed partly
+const shell = window as unknown as Record<string, unknown>;
 
 afterEach(() => {
   document.body.innerHTML = '';
+  vi.unstubAllGlobals();
+  for (const k of ['SoulSyncSettings', 'showToast', '_settingsLoadFailed', '_settingsPayload'])
+    delete shell[k];
 });
 
-describe('settings.js hands over to the React tabs', () => {
+function respond(body: unknown, ok = true) {
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    void url;
+    void init;
+    return { ok, status: ok ? 200 : 500, json: async () => body } as Response;
+  });
+  vi.stubGlobal('fetch', fetcher);
+  return fetcher;
+}
+
+describe('the shell hands over to the React tabs', () => {
   it('opening a tab shows its React slot, and a failing mount does not break the switch', () => {
     document.body.innerHTML = `<div id="settings-page">
       <button class="stg-tab" data-tab="appearance"></button>
@@ -27,123 +44,109 @@ describe('settings.js hands over to the React tabs', () => {
       <div data-stg="appearance" data-stg-react="appearance"></div>
       <div data-stg="logs"></div></div>`;
     const shown: string[] = [];
-    const win = {
-      SoulSyncSettings: {
-        show: (tab: string) => {
-          shown.push(tab);
-          if (tab === 'logs') throw new Error('boom');
-        },
+    shell.SoulSyncSettings = {
+      show: (tab: string) => {
+        shown.push(tab);
+        if (tab === 'logs') throw new Error('boom');
       },
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    // the function also starts the log viewer, the db info and other loaders:
-    // every name it does not get here is a no-op
-    const scope = new Proxy(
-      { window: win, document, console, CustomEvent, Array } as Record<string, unknown>,
-      {
-        has: () => true,
-        get: (target, key) =>
-          key === Symbol.unscopables ? undefined : key in target ? target[key as string] : () => {},
-      },
-    );
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const switchTab = new Function(
-      'scope',
-      `with (scope) { ${extractFunction('switchSettingsTab', SETTINGS)}\nreturn switchSettingsTab; }`,
-    )(scope) as (tab: string) => void;
-    switchTab('appearance');
+    switchSettingsTab('appearance');
     expect(shown).toEqual(['appearance']);
     expect(
       (document.querySelector('[data-stg-react="appearance"]') as HTMLElement).style.display,
     ).toBe('');
     expect((document.querySelector('[data-stg="logs"]') as HTMLElement).style.display).toBe('none');
-    expect(() => switchTab('logs')).not.toThrow();
+    expect(() => switchSettingsTab('logs')).not.toThrow();
     expect(document.querySelector('.stg-tab[data-tab="logs"]')!.classList.contains('active')).toBe(
       true,
     );
     error.mockRestore();
   });
 
-  it('the settings it loads reach the React store, after the failed-load guard', () => {
-    const load = extractFunction('loadSettingsData', SETTINGS);
-    const guard = load.indexOf('window._settingsLoadFailed = true');
-    const good = load.indexOf('window._settingsPayload = settings;');
-    const hydrate = load.indexOf('window.SoulSyncSettings.hydrate(settings)');
-    expect(guard).toBeGreaterThan(-1);
-    expect(good).toBeGreaterThan(guard);
-    expect(hydrate).toBeGreaterThan(good);
+  it('the settings it loads reach the React store, after the failed-load guard', async () => {
+    const hydrate = vi.fn();
+    shell.SoulSyncSettings = { hydrate };
+    shell.showToast = vi.fn();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // #879: an error body is not settings: nothing is hydrated, saves are held
+    respond({ error: 'db locked' }, false);
+    await loadSettingsData();
+    expect(shell._settingsLoadFailed).toBe(true);
+    expect(hydrate).not.toHaveBeenCalled();
+    respond({ ui_appearance: {} });
+    await loadSettingsData();
+    expect(shell._settingsLoadFailed).toBe(false);
+    expect(shell._settingsPayload).toEqual({ ui_appearance: {} });
+    expect(hydrate).toHaveBeenCalledWith({ ui_appearance: {} });
   });
 
-  it('its save flushes the React tabs, and their failure wins over "saved"', () => {
-    const save = extractFunction('saveSettings', SETTINGS);
-    const flush = save.indexOf('reactSaved = await window.SoulSyncSettings.flush()');
-    const failed = save.indexOf('if (result.success && !reactSaved) {');
-    const saved = save.indexOf('} else if (result.success) {');
-    // the quality profile is a React tab now: no save of its own in here
-    expect(save).not.toContain('saveQualityProfile');
-    expect(flush).toBeGreaterThan(save.indexOf('body: JSON.stringify(settings)'));
-    expect(failed).toBeGreaterThan(flush);
-    expect(saved).toBeGreaterThan(failed);
-    expect(save.slice(failed, saved)).toContain("setSettingsSaveState('error')");
+  it('its save flushes the React tabs, and their failure wins over "saved"', async () => {
+    document.body.innerHTML = `<button id="save-settings" data-state="idle"><span></span></button>`;
+    shell.showToast = vi.fn();
+    const flush = vi.fn(async () => false);
+    shell.SoulSyncSettings = { flush };
+    const fetcher = respond({ success: true });
+    await saveSettings(true);
+    // after the page's own post
+    expect(fetcher.mock.calls[0][1]?.method).toBe('POST');
+    expect(flush).toHaveBeenCalledOnce();
+    const btn = document.getElementById('save-settings')!;
+    expect(btn.dataset.state).toBe('error');
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Some settings failed to save',
+      'error',
+      'set-services',
+    );
+    flush.mockResolvedValueOnce(true);
+    await saveSettings(true);
+    expect(btn.dataset.state).toBe('saved');
   });
-  it("the page autosave leaves a React tab's controls to the tab", () => {
+
+  it('a save the settings never loaded for is refused, and a template rule holds it back', async () => {
+    shell.showToast = vi.fn();
+    const fetcher = respond({ success: true });
+    shell._settingsLoadFailed = true;
+    await saveSettings(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    shell._settingsLoadFailed = false;
+    shell.SoulSyncSettings = { templateErrors: () => ['album: no $title'], flush: vi.fn() };
+    await saveSettings(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Template validation failed: album: no $title',
+      'error',
+    );
+  });
+
+  it("the page wires no field of its own: every control is a React tab's; the button saves", async () => {
+    // the search box is the one input left in the page's markup: each letter
+    // typed in it used to queue a whole save
     document.body.innerHTML = `<div id="settings-page">
-      <div data-stg-react="appearance"><select id="sidebar-visualizer-type"></select></div>
-      <div data-stg-react="sources"><div id="src-modal-body">
-        <div class="src-config-panel" id="soulseek-settings-container"><input id="soulseek-url"></div>
-        <div class="src-config-panel" data-react-panel id="tidal-download-settings-container"><input id="tidal-x"></div>
-      </div></div>
-      <input id="spotify-client-id"></div>`;
-    const timers: unknown[] = [];
-    const deps = `let settingsAutoSaveTimer = null;
-const _isVideoOwnedField = () => false;
-const setSettingsSaveState = () => {};
-${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
-return debouncedAutoSaveSettings;`;
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const autosave = new Function(
-      'window',
-      'document',
-      'setTimeout',
-      'clearTimeout',
-      'saveSettings',
-      deps,
-    )(
-      {},
-      document,
-      (cb: unknown) => timers.push(cb),
-      () => undefined,
-      () => undefined,
-    ) as (event: { target: Element | null }) => void;
-    autosave({ target: document.getElementById('sidebar-visualizer-type') });
-    expect(timers).toHaveLength(0);
-    autosave({ target: document.getElementById('spotify-client-id') });
-    expect(timers).toHaveLength(1);
-    // a vanilla panel moved into the React source modal still saves here
-    // (step 7b: it saved nothing until the guard knew about it)
-    autosave({ target: document.getElementById('soulseek-url') });
-    expect(timers).toHaveLength(2);
-    // a panel ported to React does not
-    autosave({ target: document.getElementById('tidal-x') });
-    expect(timers).toHaveLength(2);
+      <input type="text" id="stg-search-input">
+      <button id="save-settings" data-state="idle"><span></span></button></div>`;
+    const fetcher = respond({ success: true });
+    shell.SoulSyncSettings = { flush: vi.fn(async () => true) };
+    initializeSettings();
+    document
+      .getElementById('stg-search-input')!
+      .dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(document.getElementById('save-settings')!.dataset.state).toBe('idle');
+    document.getElementById('save-settings')!.click();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
   });
 });
 
 describe('secret fields', () => {
-  it('the vanilla mask wiring leaves a React field to React (SecretInput)', () => {
+  it('the mask wiring leaves a React field to React (SecretInput)', () => {
     document.body.innerHTML = `<div id="settings-page">
       <div data-stg-react="sources"><div class="src-config-panel" data-react-panel>
         <input type="password" id="react-secret"></div></div>
       <div id="source-config-home"><div class="src-config-panel">
         <input type="password" id="vanilla-secret"></div></div></div>`;
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const wire = new Function(
-      'document',
-      `const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
-${extractFunction('_wireRedactedSecrets', SETTINGS)}
-return _wireRedactedSecrets;`,
-    )(document) as () => void;
-    wire();
+    wireRedactedSecrets();
     expect(
       (document.getElementById('react-secret') as HTMLElement).dataset.redactWired,
     ).toBeUndefined();

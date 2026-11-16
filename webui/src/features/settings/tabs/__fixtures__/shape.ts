@@ -60,20 +60,55 @@ export function withHelpLines(root: Element): Element {
   return root;
 }
 
+/**
+ * settings.js's initSettingHelpLines, as the live page ran it over the vanilla
+ * markup at start (frozen here when settings.js went, SETTINGS_PORT.md step
+ * V4b: the fixtures are that page, and parts.tsx renders the same lines).
+ */
 function helpLines(): (root: Element) => void {
-  const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
-  const fn = (name: string) => {
-    const start = source.indexOf(`function ${name}(`);
-    let depth = 0;
-    for (let i = source.indexOf('{', start); i < source.length; i += 1) {
-      if (source[i] === '{') depth += 1;
-      if (source[i] === '}' && (depth -= 1) === 0) return source.slice(start, i + 1);
+  type Icon = HTMLElement & { __helpBody?: Element };
+  const firstLine = (text: string) => {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return { line: '', rest: false };
+    const match = clean.match(/^(.+?[.!?])(\s|$)/);
+    let line = match ? match[1] : clean;
+    if (line.length > 140) {
+      const cut = line.slice(0, 140);
+      line = cut.slice(0, Math.max(cut.lastIndexOf(' '), 80)).replace(/[,;:\s]+$/, '') + '…';
     }
-    throw new Error(`${name} not found in settings.js`);
+    return { line, rest: line.length < clean.length };
   };
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(
-    'document',
-    `${fn('settingHelpFirstLine')}\n${fn('_settingHelpBody')}\n${fn('initSettingHelpLines')}\nreturn initSettingHelpLines;`,
-  )(document) as (root: Element) => void;
+  const helpBody = (icon: Icon): Element | null => {
+    if (icon.__helpBody) return icon.__helpBody;
+    const row = icon.closest('.setting-row') || icon;
+    let el = row.nextElementSibling;
+    while (el && !el.classList.contains('setting-help-body')) el = el.nextElementSibling;
+    if (!el) {
+      const sib = icon.closest('.form-group')?.nextElementSibling ?? null;
+      if (sib && sib.classList.contains('setting-help-body')) el = sib;
+    }
+    return el || null;
+  };
+  return (root) => {
+    for (const icon of root.querySelectorAll<Icon>('.info-icon[onclick*="toggleSettingHelp"]')) {
+      if (icon.dataset.helpLine) continue;
+      icon.dataset.helpLine = '1';
+      const group = icon.closest('.form-group');
+      const body = group ? helpBody(icon) : null;
+      if (!group || !body) continue;
+      const { line, rest } = firstLine(body.textContent || '');
+      if (!line) continue;
+      const small = document.createElement('small');
+      small.className = 'stg-help-line';
+      const text = document.createElement('span');
+      text.className = 'stg-help-text';
+      text.textContent = line;
+      small.append(text);
+      group.append(small);
+      if (rest) {
+        icon.__helpBody = body;
+        small.append(icon);
+      } else icon.hidden = true;
+    }
+  };
 }

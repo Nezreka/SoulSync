@@ -1846,7 +1846,7 @@ def test_settings_ui_has_no_preferred_youtube_audio_control():
     root = Path(__file__).resolve().parents[2]
     # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
     index = _youtube_panel(root)
-    settings = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    settings = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
     assert 'id="youtube-audio-format"' not in index
     assert 'Preferred YouTube audio' not in index
     assert 'youtube-audio-format' not in settings

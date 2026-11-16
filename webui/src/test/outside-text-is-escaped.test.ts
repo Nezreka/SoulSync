@@ -49,8 +49,9 @@ const SITES: Array<[string, string[]]> = [
     ],
   ],
   // the Prowlarr indexer list that escaped these is React now (JSX escapes
-  // text itself, source-panels-more.tsx); settings.js still gets the RAW checks
-  ['settings.js', []],
+  // text itself, source-panels-more.tsx), and settings.js is gone
+  // (SETTINGS_PORT.md step V4b): what it held that builds html, the Hydrabase
+  // page, is pages-extra.js's, checked above
   ['enrichment.js', ['Search error: ${escapeHtml(err.message)}']],
 ];
 

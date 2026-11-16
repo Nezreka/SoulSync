@@ -3,16 +3,17 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // Drift guard: loadSettingsData() touches form fields by id without null
-// guards, so a settings.js change that references an id missing from
+// guards, so a change that references an id missing from
 // index.html throws mid-load, aborts the whole settings page (the #879 guard
 // then blocks saves too). The verify-flac-decode checkbox shipped exactly
 // this way — referenced in the load path, never added to the page.
-const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
+// the load is shell.ts's (settings.js's until SETTINGS_PORT.md step V4b)
+const source = readFileSync(resolve(process.cwd(), 'src/features/settings/shell.ts'), 'utf8');
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
 function loadSettingsIds(): string[] {
-  const start = source.indexOf('async function loadSettingsData()');
-  const end = source.indexOf('// Mirrors ConfigManager.REDACTED_SENTINEL');
+  const start = source.indexOf('export async function loadSettingsData()');
+  const end = source.indexOf('// ── opening the page ──');
   // both markers found, in order: a missing one would slice nothing and pass
   if (start < 0 || end <= start) throw new Error('loadSettingsData markers moved');
   const body = source.slice(start, end);

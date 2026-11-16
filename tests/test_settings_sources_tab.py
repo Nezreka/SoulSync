@@ -58,7 +58,7 @@ def index():
 
 @pytest.fixture(scope="module")
 def js():
-    return _read("webui/static/settings.js")
+    return _read("webui/src/features/settings/shell.ts")
 
 
 # the tiles, the dots and Test all are React since step 7a (SETTINGS_PORT.md):
@@ -249,9 +249,12 @@ def test_the_chain_widget_stayed_on_downloads(index, tab):
 
 
 def test_the_cog_crosses_to_the_tab(js):
-    fn = js.split("function toggleHybridSourceConfig(", 1)[1].split("\n}", 1)[0]
-    assert "switchSettingsTab('sources')" in fn
-    assert "window.openSourceModal?.(" in fn  # set by the React modal host (step 7b)
+    # the chain is React since step 7a and its rows have no cog: a source's
+    # settings open from its tile, in the modal (sources-model.ts openModal).
+    # the cog's crossing went with settings.js (step V4b): nothing called it
+    model = _read("webui/src/features/settings/tabs/sources-model.ts")
+    assert "/** open a source's settings in the modal (a tile, a chain cog) */" in model
+    assert "toggleHybridSourceConfig" not in js
 
 
 def test_the_tiles_refresh_with_the_chain(model, tab):
@@ -302,8 +305,10 @@ def test_closing_lands_a_pending_autosave(js, tab):
     close = _modal(tab).split("function close() {", 1)[1].split("\n  }", 1)[0]
     assert "landPendingSettingsSave?.()" in close
     assert "settingsStore.flush()" in close and "_settingsAutosaveOff !== true" in close
-    bridge = js.split("window.landPendingSettingsSave = () => {", 1)[1].split("};", 1)[0]
-    assert "settingsAutoSaveTimer" in bridge and "saveSettings(true)" in bridge
+    # the page-wide autosave timer the bridge landed went with settings.js
+    # (step V4b): every control is React, and the store is flushed right here
+    bridge = js.split("export function landPendingSettingsSave() {", 1)[1].split("\n}", 1)[0]
+    assert "saveSettings" not in bridge
 
 
 def test_escape_closes_it(tab):
@@ -463,7 +468,7 @@ def test_a_broken_source_is_visible_at_the_tile_not_just_the_dot():
 def test_usenet_has_a_tile(js):
     """It is its own link in the chain and shares the Prowlarr panel with
     torrent. It had no entry at all, so a usenet user saw nothing to click."""
-    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
     assert "usenet:" in m
     assert "torrent:" in m
 
@@ -673,7 +678,7 @@ def test_prowlarr_does_not_claim_a_chain_position(tab):
 
 def test_torrent_and_usenet_open_their_own_config(js):
     """Both used to open the same redirect panel that pointed elsewhere."""
-    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
     assert "torrent: 'torrent-client-settings-container'" in m
     assert "usenet: 'usenet-client-settings-container'" in m
     assert "prowlarr-source-redirect" not in m
@@ -1092,31 +1097,26 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     # and they read the real inputs rather than a cached copy of the settings
     # (every Library summary is React since SETTINGS_PORT.md video pass V2c,
     # checked above; the vanilla map is empty until settings.js goes)
-    engine = js.split('const LIBRARY_SUMMARIES', 1)[1].split('function refreshLibrarySummaries', 1)[0]
-    if computed:
-        assert 'getElementById' in engine
-    assert 'settings.' not in engine, "reading a settings object instead of the live fields"
+    # (the vanilla map went with settings.js, step V4b)
+    assert "LIBRARY_SUMMARIES" not in js and not computed
 
 
 def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     """If the fetch fails the form is blank, and a blank form summarised reads as
     "nothing enabled" - which is a confident lie about the user's config at the
-    exact moment they should be told to reload. The refresh therefore sits INSIDE
-    the try, alongside the other population, not in a finally."""
-    fn = js.split('async function loadSettingsData()', 1)[1]
-    # the loader has several NESTED try/catch blocks, so splitting on the first
-    # 'catch' stops long before the end of the success path. the OUTER catch -
-    # the last one - is the boundary that matters here.
-    body = fn.rsplit("} catch (error) {", 1)
-    assert len(body) > 1, "loader shape changed"
-    assert 'refreshLibrarySummaries()' in body[0], (
-        "summaries are refreshed outside the success path - a failed load would "
-        "report an empty form as real settings"
-    )
-    tail = body[1][:400]
-    assert 'refreshLibrarySummaries()' not in tail, (
-        "refreshed in the failure path too, which is the thing this prevents"
-    )
+    exact moment they should be told to reload.
+
+    Every summary is React (parts.tsx Section, the Library cards): it shows
+    only once the store has loaded settings, and the store is given them only
+    on a good load, after the #879 guard (shell.ts, SETTINGS_PORT.md step V4b).
+    """
+    fn = js.split("export async function loadSettingsData()", 1)[1]
+    good = fn.split("} catch (error) {", 1)[0]
+    assert good.index("throw new Error(") < good.index("SoulSyncSettings?.hydrate(settings)")
+    assert "hydrate" not in fn.split("} catch (error) {")[-1][:400]
+    # a React header shows its summary only after a load
+    folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
+    assert "const summary = loads" in folders
 
 
 def test_the_two_sides_name_their_sections_the_same_way():

@@ -347,15 +347,15 @@ def test_the_music_autosave_runs_on_the_video_side_for_shared_fields():
     never auto-saved either. Only a field the video side saves itself (inside a
     data-video-only block or wired by a data-video-* hook) may skip it - that
     one already saves through /api/video/*."""
-    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
-    body = js.split("function debouncedAutoSaveSettings(", 1)[1].split("\nfunction ", 1)[0]
-    blanket = re.search(r"getAttribute\('data-side'\)\s*===\s*'video'\)\s*return;", body)
-    assert not blanket, "the music auto-save still stands down for every field on the video side"
-    assert "_isVideoOwnedField(event?.target)" in body
-
-    helper = js.split("function _isVideoOwnedField(", 1)[1].split("\nfunction ", 1)[0]
-    assert "[data-video-only]" in helper
-    assert "data-video-" in helper
+    # every control is React and saves through the settings store, which has
+    # no side in it; the page's own autosave went with settings.js
+    # (SETTINGS_PORT.md step V4b). video-side-settings-save.test.ts runs it:
+    # a Security and a Sources field save on the video side, and no video
+    # section saves through it (each posts to /api/video/* itself)
+    store = (_WEBUI / "src" / "features" / "settings" / "settings-store.ts").read_text(encoding="utf-8")
+    assert "data-side" not in store, "the store stands down on one side"
+    shell = (_WEBUI / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
+    assert "debouncedAutoSaveSettings" not in shell
 
 
 def test_the_ytdlp_card_loads_where_it_actually_lives():
@@ -376,7 +376,7 @@ def test_the_ytdlp_card_loads_where_it_actually_lives():
     assert "if (active && opened) void loadYtdlp();" in youtube, "the loader is no longer wired to the Sources tab"
     # and opening the YouTube card refreshes it
     assert "useOnOpen(model, 'youtube', () => void loadYtdlp());" in youtube
-    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
+    js = (_WEBUI / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
     assert "loadYtdlpStatus" not in js, "settings.js still wires a loader for a tile it no longer has"
 
 

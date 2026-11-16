@@ -37,7 +37,8 @@ SPLIT_MODULES = [
     "core.js",
     "shared-helpers.js",
     "media-player.js",
-    "settings.js",
+    # settings.js is GONE too: the Settings page's shell is React
+    # (src/features/settings/shell.ts, SETTINGS_PORT.md step V4b)
     "sync-spotify.js",
     "downloads.js",
     "wishlist-tools.js",
@@ -355,5 +356,7 @@ class TestModuleSizes:
         total = 0
         for module in SPLIT_MODULES:
             total += _read(_STATIC / module).count("\n") + 1
-        # The original was ~78K lines; allow 60K-100K for flexibility
-        assert 50000 < total < 120000, f"Total lines: {total}"
+        # The original was ~78K lines; the files keep shrinking as pages move
+        # to React (settings.js went with SETTINGS_PORT.md step V4b, ~49.6K
+        # after it). The floor only catches a read that found nothing
+        assert 30000 < total < 120000, f"Total lines: {total}"

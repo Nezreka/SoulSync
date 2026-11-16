@@ -639,7 +639,7 @@ def test_settings_js_round_trips_the_preference():
     only when it is changed, so an absent field cannot say anything about it,
     and settings.js no longer reads or writes it at all.
     """
-    settings_js = _read('webui/static/settings.js')
+    settings_js = _read('webui/src/features/settings/shell.ts')
     tab = _read('webui/src/features/settings/tabs/downloads-tab.tsx')
     values = _read('webui/src/features/settings/tabs/downloads.ts')
     assert "'preferred-version'" not in settings_js

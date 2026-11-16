@@ -74,7 +74,7 @@ def test_amazon_is_not_a_pickable_download_source():
     # the registry and the pool's groups are React now (SETTINGS_PORT.md
     # steps 7a and 7b); settings.js no longer has a copy
     model = _read("webui/src/features/settings/tabs/sources-model.ts")
-    js = _read("webui/static/settings.js")
+    js = _read("webui/src/features/settings/shell.ts")
     index = _read("webui/index.html")
     assert "const HYBRID_SOURCES" not in js
     hybrid = re.findall(r"id: '([a-z_]+)'", model.split("HYBRID_SOURCES", 1)[1].split("];", 1)[0])

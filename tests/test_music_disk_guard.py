@@ -21,7 +21,7 @@ import pytest
 import core.disk_guard as dg
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
+_SETTINGS_JS = (_ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 
 

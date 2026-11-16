@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { createSettingsStore } from '@/features/settings/settings-store';
 import { LibraryTab } from '@/features/settings/tabs/library-folders';
 
-const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
+// the search is shell.ts's (settings.js's until SETTINGS_PORT.md step V4b)
+const source = readFileSync(resolve(process.cwd(), 'src/features/settings/shell.ts'), 'utf8');
 
 function cards() {
   const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
@@ -67,7 +68,9 @@ describe('Library settings media cards', () => {
 
   it('the settings search opens a card on its tab by clicking it', () => {
     // filterSettings: the matched label's panel, then its tab
-    expect(source).toContain('if (mediaTab) mediaTab.click();');
+    expect(source).toContain(
+      'document.querySelector<HTMLElement>(`[aria-controls="${panel.id}"]`)?.click();',
+    );
     cards();
     act(() => document.getElementById('organization-video-tab')!.click());
     expect(document.getElementById('organization-video-panel')!.hidden).toBe(false);

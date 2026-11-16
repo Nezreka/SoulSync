@@ -33,14 +33,16 @@ def _sent_sections() -> set:
     a fixed indent inside one `const settings = {` block, and anything deeper
     is a key within a section, not a section.
     """
-    source = (_ROOT / "webui/static/settings.js").read_text(encoding="utf-8", errors="ignore")
+    source = (_ROOT / "webui/src/features/settings/shell.ts").read_text(encoding="utf-8", errors="ignore")
     body = source.split("async function saveSettings", 1)[1]
     literal = body.split("const settings = {", 1)[1]
+    # the shell's save (shell.ts, SETTINGS_PORT.md step V4b) writes each
+    # section on one line, `name: {},`, at the literal's first indent
     sections = set()
     for line in literal.splitlines():
-        if line.startswith("    };"):
+        if re.match(r"^ {0,4}\};", line):
             break
-        match = re.match(r"^ {8}([a-z0-9_]+): \{$", line)
+        match = re.match(r"^ {4}([a-z0-9_]+): \{\}?,?$", line)
         if match:
             sections.add(match.group(1))
     return sections

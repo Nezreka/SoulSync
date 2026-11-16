@@ -215,14 +215,14 @@ export function mountSettingsHost(): void {
   shell.closeServiceModal = () => servicesModel.close();
   // every card's Test button, React's and the video side's vanilla ones
   shell.testConnection = (service: string) => testConnection(service);
-  // this bundle is a deferred module: settings.js may have loaded the settings
-  // and opened a tab before it ran
+  // this bundle is a deferred module: the page's shell (shell.ts, in the
+  // shell bundle) may have loaded the settings and opened a tab before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;
   if (payload) host.hydrate(payload);
   const open = document.querySelector<HTMLElement>('#settings-page .stg-tab.active')?.dataset.tab;
   if (!open) return;
-  // through settings.js's own tab switch, which mounts the tabs and then
-  // shows and hides every block for the open one
+  // through the shell's own tab switch, which mounts the tabs and then shows
+  // and hides every block for the open one
   const switchTab = (window as Window & { switchSettingsTab?: (tab: string) => void })
     .switchSettingsTab;
   if (typeof switchTab === 'function') switchTab(open);

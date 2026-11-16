@@ -191,9 +191,11 @@ def test_jiosaavn_bubble_writer_dispatches() -> None:
 
 
 def test_dev_mode_writers_dispatch() -> None:
-    settings = (STATIC / "settings.js").read_text(encoding="utf-8")
+    settings = (STATIC.parent / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
     enabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: true } })")
-    disabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
+    # the Hydrabase page's disconnect moved to pages-extra.js (SETTINGS_PORT.md step V4a)
+    hydra = (STATIC / "pages-extra.js").read_text(encoding="utf-8")
+    disabled = hydra.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
     assert enabled == 1, (
         f"expected the dev-mode ENABLE dispatch at the initial check, found {enabled}"
     )

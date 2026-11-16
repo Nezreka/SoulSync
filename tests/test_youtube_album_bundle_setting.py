@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
 PANEL = (ROOT / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'source-panels-more.tsx').read_text(
     encoding='utf-8')
-SETTINGS = (ROOT / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+SETTINGS = (ROOT / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
 
 def _youtube(src: str) -> str:

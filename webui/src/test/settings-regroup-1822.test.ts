@@ -2,12 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { switchSettingsTab } from '@/features/settings/shell';
+import { withHelpLines } from '@/features/settings/tabs/__fixtures__/shape';
+import { helpFirstLine } from '@/features/settings/tabs/parts';
+
 // #1822: settings were "buried". Library held discovery and playlists, Advanced
 // held notifications, metasync and the sidebar weather. Sections now sit where
 // people look for them, and each setting says what it does under it.
 
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
 
 describe('where sections live', () => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -85,20 +88,13 @@ describe('where sections live', () => {
   });
 });
 
-const helpBlock = source.slice(
-  source.indexOf('function _settingHelpBody('),
-  source.indexOf('function toggleSettingHelp('),
-);
-const lineBlock = source.slice(
-  source.indexOf('function settingHelpFirstLine('),
-  source.indexOf('window.initSettingHelpLines = initSettingHelpLines;'),
-);
-const help = new Function(
-  'document',
-  `${helpBlock}\n${lineBlock}\nreturn { settingHelpFirstLine, initSettingHelpLines };`,
-)(document) as {
-  settingHelpFirstLine: (text: string) => { line: string; rest: boolean };
-  initSettingHelpLines: (root?: Element) => void;
+// what settings.js did to put a help line under each setting: the rule is
+// parts.tsx's helpFirstLine (React renders the lines), and the pass over the
+// markup is the fixtures' frozen copy (SETTINGS_PORT.md step V4b)
+const help = {
+  settingHelpFirstLine: helpFirstLine,
+  initSettingHelpLines: (root?: Element) =>
+    withHelpLines(root ?? document.getElementById('settings-page')!),
 };
 
 describe('help under each setting', () => {
@@ -163,10 +159,6 @@ describe('help under each setting', () => {
 });
 
 describe('loaders follow their sections', () => {
-  const navBlock = source.slice(
-    source.indexOf('function switchSettingsTab('),
-    source.indexOf('function filterSettings('),
-  );
   const g = globalThis as Record<string, unknown>;
   beforeEach(() => {
     g.loadMetaSyncSettings = vi.fn();
@@ -177,13 +169,8 @@ describe('loaders follow their sections', () => {
   });
 
   it('hands Appearance and Connections to their React tabs', () => {
-    const nav = new Function(
-      'document',
-      'window',
-      '_logViewerStop',
-      '_logViewerInit',
-      `${navBlock}; return switchSettingsTab;`,
-    )(document, window, vi.fn(), vi.fn()) as (tab: string) => void;
+    // the tab switch is shell.ts's (settings.js's until step V4b)
+    const nav = switchSettingsTab;
     // Appearance is React: opening it is handed to the host, and the weather
     // tile reloads itself from there (appearance.test.tsx)
     const show = vi.fn();

@@ -41,7 +41,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
+_SETTINGS_JS = (_ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 _DOCS_DIR = _ROOT / "webui" / "static" / "docs-content"
 # The Tools page is React-rendered (webui/src); its card titles and button
 # labels don't reach the static corpus above.

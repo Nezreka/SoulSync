@@ -9,25 +9,19 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { saveSettings, setSettingsSaveState } from '@/features/settings/shell';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
-const SETTINGS = read('static/settings.js');
 const HTML = read('index.html');
 const HELPER = read('static/helper.js');
+const STORE = read('src/features/settings/settings-store.ts');
 
-function labels(): string {
-  const start = SETTINGS.indexOf('const SETTINGS_SAVE_LABELS = {');
-  return SETTINGS.slice(start, SETTINGS.indexOf('};', start) + 2);
-}
-
+/** the button, and the page's status function (shell.ts, settings.js's
+ *  until SETTINGS_PORT.md step V4b) */
 function load() {
   document.body.innerHTML =
     '<button id="save-settings" data-state="idle"><svg></svg><span>All changes saved</span></button>';
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(
-    `${labels()}\nlet _settingsSavedTimer = null;\n${extractFunction('setSettingsSaveState', SETTINGS)}\nreturn setSettingsSaveState;`,
-  )() as (state: string) => void;
+  return setSettingsSaveState as (state: string) => void;
 }
 
 const btn = () => document.getElementById('save-settings')!;
@@ -69,16 +63,30 @@ describe('the settings save status', () => {
     expect(btn().dataset.state).toBe('error');
   });
 
-  it('a change marks it pending and a save drives it', () => {
-    expect(extractFunction('debouncedAutoSaveSettings', SETTINGS)).toContain(
-      "setSettingsSaveState('pending')",
+  it('a change marks it pending and a save drives it', async () => {
+    // a change: the store, which every control saves through, marks it
+    expect(STORE).toContain("show('pending');");
+    // a save: saving, then saved, and no toast on every successful save
+    load();
+    const toast = vi.fn();
+    const w = window as unknown as Record<string, unknown>;
+    w.showToast = toast;
+    w.SoulSyncSettings = { flush: async () => true };
+    const states: string[] = [];
+    const seen = new MutationObserver(() => states.push(btn().dataset.state || ''));
+    seen.observe(btn(), { attributes: true, attributeFilter: ['data-state'] });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ json: async () => ({ success: true }) })),
     );
-    const save = extractFunction('saveSettings', SETTINGS);
-    expect(save).toContain("setSettingsSaveState('saving')");
-    expect(save).toContain("setSettingsSaveState('saved')");
-    expect(save).toContain("setSettingsSaveState('error')");
-    // no toast on every successful save any more, the button says it
-    expect(save).not.toContain('Settings auto-saved');
+    await saveSettings(true);
+    await new Promise((r) => setTimeout(r, 0));
+    seen.disconnect();
+    expect(states).toEqual(['saving', 'saved']);
+    expect(toast).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    delete w.showToast;
+    delete w.SoulSyncSettings;
   });
 
   it('the page and the tour tell the same story', () => {

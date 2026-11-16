@@ -22,7 +22,7 @@ from database.music_database import MusicDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
+_SETTINGS_JS = (_ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 
 
 @pytest.fixture()

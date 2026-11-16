@@ -306,7 +306,7 @@ def test_every_element_the_script_touches_exists_in_the_markup():
             "ytdlp-status", "ytdlp-detail"} <= set(ids)
     assert len(ids) == len(set(ids))
     from pathlib import Path
-    js = Path("webui/static/settings.js").read_text(encoding="utf-8")
+    js = Path("webui/src/features/settings/shell.ts").read_text(encoding="utf-8")
     assert not re.findall(r"getElementById\('(ytdlp-[a-z-]+)'\)", js), "settings.js still drives the tile"
 
 
@@ -330,7 +330,7 @@ def test_the_version_panel_loads_where_it_lives():
     assert "if (active && opened) void loadYtdlp();" in panel
     assert "useOnOpen(model, 'youtube', () => void loadYtdlp());" in panel
     from pathlib import Path
-    js = Path("webui/static/settings.js").read_text(encoding="utf-8")
+    js = Path("webui/src/features/settings/shell.ts").read_text(encoding="utf-8")
     assert "loadYtdlpStatus" not in js
 
 

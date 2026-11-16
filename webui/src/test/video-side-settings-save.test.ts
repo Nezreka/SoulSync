@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { createSettingsStore } from '@/features/settings/settings-store';
 
 /**
  * The Settings page is shared, so on the video side it shows every music field
@@ -20,7 +20,6 @@ import { extractFunction } from './vanilla-extract';
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
 const HTML = read('index.html');
 const VIDEO = read('static/video/video-settings.js');
-const SETTINGS = read('static/settings.js');
 
 function page(side: 'music' | 'video') {
   const doc = new DOMParser().parseFromString(HTML, 'text/html');
@@ -68,93 +67,51 @@ describe('the Save Settings button on the video side', () => {
   });
 });
 
-/** a field in a video-only block, on a shared tab */
-function videoOnlyProbe(doc: Document) {
-  const block = doc.createElement('div');
-  block.setAttribute('data-video-only', '');
-  block.innerHTML = '<input id="probe-video-only">';
-  doc.querySelector('#settings-page [data-stg="sources"]')!.appendChild(block);
-}
-
 describe('the music auto-save on the video side', () => {
-  // the real function and its helper, with the page's globals stubbed around them
-  function autosave(side: 'music' | 'video') {
-    const doc = page(side);
-    const timers: unknown[] = [];
-    const deps = `let settingsAutoSaveTimer = null;
-const _qpHandleProfileControlChange = () => false;
-// the save status the button shows (#1909), not what this test is about
-const setSettingsSaveState = () => {};
-${extractFunction('_isVideoOwnedField', SETTINGS)}
-${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
-return debouncedAutoSaveSettings;`;
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const fn = new Function(
-      'document',
-      'window',
-      'setTimeout',
-      'clearTimeout',
-      'saveSettings',
-      deps,
-    )(
-      doc,
-      {},
-      (cb: unknown) => {
-        timers.push(cb);
-        return timers.length;
-      },
-      () => undefined,
-      () => undefined,
-    ) as (event?: { target: Element | null }) => void;
-    const scheduled = (id: string | null) => {
-      timers.length = 0;
-      fn(id === null ? undefined : { target: doc.getElementById(id) });
-      return timers.length > 0;
+  // every control is React and saves through the settings store, on both
+  // sides; the page's own autosave, which stood down for video-owned fields,
+  // went with settings.js (SETTINGS_PORT.md step V4b)
+  function store(side: 'music' | 'video') {
+    document.body.setAttribute('data-side', side);
+    const post = vi.fn(() => Promise.resolve({ success: true }));
+    const s = createSettingsStore({ post, delay: 0 });
+    const saved = async (section: string, key: string, value: unknown) => {
+      post.mockClear();
+      s.set(section, key, value);
+      await new Promise((r) => setTimeout(r, 10));
+      return post.mock.calls.length > 0;
     };
-    return { doc, scheduled };
+    return { saved };
   }
 
-  it('saves a security field changed on the video side', () => {
-    const { scheduled } = autosave('video');
-    expect(scheduled('security-oidc-only')).toBe(true);
+  afterEach(() => document.body.removeAttribute('data-side'));
+
+  it('saves a security field changed on the video side', async () => {
+    expect(await store('video').saved('security', 'oidc_only', true)).toBe(true);
   });
 
-  it('saves a field on a shared tab changed on the video side', () => {
-    const { scheduled } = autosave('video');
-    expect(scheduled('soulseek-url')).toBe(true);
+  it('saves a field on a shared tab changed on the video side', async () => {
+    expect(await store('video').saved('soulseek', 'slskd_url', 'http://slskd')).toBe(true);
   });
 
-  it('saves a music write made from code (no event) on the video side', () => {
-    const { scheduled } = autosave('video');
-    expect(scheduled(null)).toBe(true);
+  it('is unchanged on the music side', async () => {
+    expect(await store('music').saved('security', 'oidc_only', true)).toBe(true);
   });
 
-  it('skips a field inside a video-only block - it saves itself', () => {
-    const { doc, scheduled } = autosave('video');
-    // every video-only block is React now (SETTINGS_PORT.md video pass): one
-    // stands in, as the probe below does for the data-video-* hook
-    videoOnlyProbe(doc);
-    expect(scheduled('probe-video-only')).toBe(false);
-  });
-
-  it('skips a field wired by a data-video-* hook - it saves itself', () => {
-    const { doc, scheduled } = autosave('video');
-    // on a shared tab, so no data-video-only block above it: only the hook says
-    // it is video's own
-    const host = doc.querySelector('#settings-page [data-stg="sources"]');
-    expect(host).not.toBeNull();
-    const probe = doc.createElement('input');
-    probe.id = 'probe-video-field';
-    probe.setAttribute('data-video-probe', '');
-    host!.appendChild(probe);
-    expect(probe.closest('[data-video-only]')).toBeNull();
-    expect(scheduled('probe-video-field')).toBe(false);
-  });
-
-  it('is unchanged on the music side', () => {
-    const { doc, scheduled } = autosave('music');
-    expect(scheduled('security-oidc-only')).toBe(true);
-    videoOnlyProbe(doc);
-    expect(scheduled('probe-video-only')).toBe(true);
+  it('a video section never saves through it: each posts to /api/video/* itself', () => {
+    const tabs = resolve(process.cwd(), 'src/features/settings/tabs');
+    for (const f of [
+      'video-downloads.ts',
+      'video-organization.ts',
+      'video-prefs.ts',
+      'video-keys.ts',
+      'video-server.ts',
+      'video-row-lists.tsx',
+      'video-quality.tsx',
+    ]) {
+      const src = readFileSync(resolve(tabs, f), 'utf8');
+      expect(src, f).not.toContain('settingsStore');
+      expect(src, f).toContain('/api/video/');
+    }
   });
 });

@@ -4680,7 +4680,8 @@ async function loadPageData(pageId) {
             case 'settings':
                 // Suppress auto-save while the form is being populated, so opening
                 // Settings no longer fires a spurious full save (4 POSTs + backend
-                // service re-init) on every visit.
+                // service re-init) on every visit. (the page's shell is
+                // src/features/settings/shell.ts, in the shell bundle)
                 window._suppressSettingsAutoSave = true;
                 try {
                     initializeSettings();
