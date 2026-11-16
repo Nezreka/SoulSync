@@ -812,7 +812,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
-| Nov 15 | (step 9c) | **System: Security & Access is React**; the System tab is done but Experimental. |
+| Nov 15 | `4fc0293de` (step 9c) | **System: Security & Access is React**; the System tab is done but Experimental. |
 | Nov 15 | `19888f9d5` (step 9b) | **System: SoulSync API, Developer Mode, Artwork Cache and Developer are React.** The shell hands the weather preview init over on window. |
 | Nov 15 | `31099f899` (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
 | Nov 15 | `ec8e0b660` (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
