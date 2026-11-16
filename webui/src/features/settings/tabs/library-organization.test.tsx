@@ -6,13 +6,11 @@
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost } from '../host';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla, withHelpLines } from './__fixtures__/shape';
+import { shape, vanilla } from './__fixtures__/shape';
 import { LibraryTab } from './library-folders';
 import { OrganizationCard } from './library-organization';
 import {
@@ -30,26 +28,6 @@ let store: SettingsStore;
 let posted: SettingsPayload[];
 let previews: Array<Record<string, unknown>>;
 let answer: (body: Record<string, unknown>) => unknown;
-
-/** the parked panels, as index.html has them */
-function park() {
-  const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-  const start = html.indexOf('<div id="library-parked-panels" hidden>');
-  let depth = 0;
-  const re = /<(\/?)div\b[^>]*>/g;
-  re.lastIndex = start;
-  let m: RegExpExecArray | null;
-  let end = start;
-  while ((m = re.exec(html))) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) {
-      end = m.index + m[0].length;
-      break;
-    }
-  }
-  document.body.insertAdjacentHTML('beforeend', html.slice(start, end));
-  withHelpLines(document.getElementById('library-parked-panels')!);
-}
 
 beforeEach(() => {
   const sink: SettingsPayload[] = [];
@@ -91,7 +69,6 @@ afterEach(async () => {
   await act(() => store.flush());
   vi.unstubAllGlobals();
   delete shell.debouncedAutoSaveSettings;
-  document.getElementById('library-parked-panels')?.remove();
   localStorage.removeItem(SCENARIO_KEY);
 });
 
@@ -106,23 +83,18 @@ function saved(): SettingsPayload {
 }
 
 describe('the Organization card is the markup it replaced', () => {
-  it('with the preview drawn, the React Audiobooks panel and the vanilla Video panel', () => {
-    park();
+  it('with the preview drawn and the React Audiobooks and Video panels', () => {
     const { container } = card();
     const want = shape(vanilla('library-organization.vanilla.html', { afterInit: true }));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // the Folders card's video panel is React (video pass V2a): the park is empty
-    expect(
-      [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
-    ).toEqual([]);
   });
 
   it('every help reads the same, spaces included', () => {
     const words = (root: Element) =>
       [...root.querySelectorAll('.setting-help-body, .help-text, .stg-help-text, .settings-hint')]
-        .filter((el) => !el.closest('#organization-audiobooks-panel, #organization-video-panel'))
+        .filter((el) => !el.closest('#organization-audiobooks-panel'))
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim());
     const { container } = card();
     expect(words(container)).toEqual(
@@ -135,7 +107,7 @@ describe('the Organization card is the markup it replaced', () => {
     // screen; JSX drops it unless it is written in
     const labels = (root: Element) =>
       [...root.querySelectorAll('label')]
-        .filter((el) => !el.closest('#organization-audiobooks-panel, #organization-video-panel'))
+        .filter((el) => !el.closest('#organization-audiobooks-panel'))
         .filter((el) => el.querySelector('input[type="checkbox"]'))
         .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trimEnd());
     const { container } = card();

@@ -30,14 +30,14 @@ it('uses one category bar instead of a second sidebar', () => {
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
   nav.switchSettingsTab('connections');
-  // a field still in the page's own markup (the Organization card's video panel)
-  const input = document.getElementById('vo-movie-template') as HTMLInputElement;
-  input.value = '/unsaved';
+  // a field still in the page's own markup (Video Preferences)
+  const input = document.getElementById('video-billboard-autoplay') as HTMLInputElement;
+  input.checked = true;
   const section = input.closest('[data-stg]') as HTMLElement;
   const display = section.style.display;
-  nav.filterSettings('Movie Path Template');
+  nav.filterSettings('Autoplay trailers');
   expect(section.style.display).toBe(display);
-  expect(document.getElementById('vo-movie-template')).toBe(input);
+  expect(document.getElementById('video-billboard-autoplay')).toBe(input);
   const shown = vi.fn();
   document.addEventListener('soulsync:library-settings-shown', shown, { once: true });
   (document.querySelector('#stg-search-results button') as HTMLButtonElement).click();
@@ -45,7 +45,7 @@ it('search leaves mounted forms and their visibility unchanged until selecting a
   expect(document.querySelector('.stg-tab[aria-current="page"]')?.getAttribute('data-tab')).toBe(
     'library',
   );
-  expect(input.value).toBe('/unsaved');
+  expect(input.checked).toBe(true);
 });
 it('has an empty state and clearing search does not switch categories', () => {
   nav.switchSettingsTab('library');

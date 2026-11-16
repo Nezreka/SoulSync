@@ -3,10 +3,9 @@
  * its Music and Podcasts panels, the naming templates' live preview (#1868)
  * and Reset to Defaults. Same markup, classes and ids.
  *
- * The Audiobooks and Video panels are still vanilla (settings.js until step
- * 8c, video-settings.js until the video pass), parked and placed back like the
- * Folders card's (library-card.tsx). The audiobook template is in the
- * Audiobooks panel: Reset writes it there, as before.
+ * The Audiobooks panel is library-audiobooks.tsx (step 8c) and the Video
+ * panel library-video-organization.tsx (video pass V2b). The audiobook
+ * template is in the Audiobooks panel: Reset writes it there, as before.
  *
  * Templates are one dict on the server (file_organization.templates), and so
  * are the tag options (metadata_enhancement.tags): each key is saved alone as
@@ -23,13 +22,8 @@ import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
 import { AudiobookOrganizationPanel } from './library-audiobooks';
-import {
-  HintGroup,
-  LIBRARY_TAB,
-  LibrarySection,
-  useMediaTabs,
-  useParkedPanels,
-} from './library-card';
+import { HintGroup, LIBRARY_TAB, LibrarySection, useMediaTabs } from './library-card';
+import { VideoOrganizationPanel } from './library-video-organization';
 import {
   musicOrgSummary,
   PREVIEW_FIELDS,
@@ -268,10 +262,6 @@ export function OrganizationCard({ store }: SettingsTabProps) {
 
   const { media, tabs } = useMediaTabs('organization', 'Organization media type');
   const musicPanel = useRef<HTMLDivElement>(null);
-  const podcastsPanel = useRef<HTMLDivElement>(null);
-  useParkedPanels(media, [
-    { id: 'organization-video-panel', after: podcastsPanel, media: 'video' },
-  ]);
 
   const summary = loads ? musicOrgSummary(on, templates.album_path) : '';
   const fallback = 'File naming templates & reorganize';
@@ -758,7 +748,6 @@ export function OrganizationCard({ store }: SettingsTabProps) {
         template={template('audiobook_path')}
       />
       <div
-        ref={podcastsPanel}
         id="organization-podcasts-panel"
         role="tabpanel"
         aria-labelledby="organization-podcasts-tab"
@@ -840,6 +829,7 @@ export function OrganizationCard({ store }: SettingsTabProps) {
           </div>
         </div>
       </div>
+      <VideoOrganizationPanel hidden={media !== 'video'} />
     </LibrarySection>
   );
 }

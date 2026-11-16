@@ -1,12 +1,8 @@
 /**
  * Library > Folders (SETTINGS_PORT.md, step 8a): the media-tabbed card, its
- * Music and Podcasts panels. Same markup, classes and ids.
- *
- * The Audiobooks and Video panels are still vanilla (the audiobook folders and
- * spoken-word routes are settings.js until step 8c; the video panel is
- * video-settings.js until the video pass). They are parked in
- * #library-parked-panels and placed back in the card, in their old order,
- * while it is mounted; the tabs show and hide them like the rest.
+ * Music and Podcasts panels. Same markup, classes and ids. The Audiobooks
+ * panel is library-audiobooks.tsx (step 8c) and the Video panel
+ * library-video-folders.tsx (video pass V2a).
  *
  * folder-check.js puts a status line after each checked input's group or row.
  * It listens on the document, so these inputs need nothing but the same data

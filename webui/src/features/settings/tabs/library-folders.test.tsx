@@ -5,8 +5,6 @@
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
@@ -18,25 +16,6 @@ const shell = window as unknown as Shell;
 
 let store: SettingsStore;
 let posted: SettingsPayload[];
-
-/** the parked panels, as index.html has them */
-function park() {
-  const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-  const start = html.indexOf('<div id="library-parked-panels" hidden>');
-  let depth = 0;
-  const re = /<(\/?)div\b[^>]*>/g;
-  re.lastIndex = start;
-  let m: RegExpExecArray | null;
-  let end = start;
-  while ((m = re.exec(html))) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) {
-      end = m.index + m[0].length;
-      break;
-    }
-  }
-  document.body.insertAdjacentHTML('beforeend', html.slice(start, end));
-}
 
 beforeEach(() => {
   const sink: SettingsPayload[] = [];
@@ -57,7 +36,6 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   delete shell.SoulSyncFolderCheck;
   delete shell.showToast;
-  document.getElementById('library-parked-panels')?.remove();
 });
 
 const card = () => render(<FoldersCard store={store} part="folders" opened={0} active={false} />);
@@ -71,16 +49,11 @@ function saved(): SettingsPayload {
 
 describe('the Folders card is the markup it replaced', () => {
   it('with the React Audiobooks and Video panels', () => {
-    park();
     const { container } = card();
     const want = shape(vanilla('library-folders.vanilla.html', { afterInit: true }));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
-    // only the Organization card's vanilla video panel waits there now
-    expect(
-      [...document.getElementById('library-parked-panels')!.children].map((el) => el.id),
-    ).toEqual(['organization-video-panel']);
   });
 });
 
@@ -100,7 +73,6 @@ describe('the rules', () => {
 
 describe('the card', () => {
   it('the tabs show one panel, the vanilla ones included, and the arrows move', () => {
-    park();
     card();
     const tab = (k: string) => document.getElementById(`folders-${k}-tab`)!;
     const panel = (k: string) => document.getElementById(`folders-${k}-panel`)!;
@@ -133,7 +105,6 @@ describe('the card', () => {
   });
 
   it('the video panel guides follow the deployment too', () => {
-    park();
     act(() => store.hydrate({ _environment: { docker: false } }));
     card();
     const guide = (k: string) =>

@@ -8,7 +8,6 @@
 import {
   type KeyboardEvent,
   type ReactNode,
-  type RefObject,
   useEffect,
   useRef,
   useState,
@@ -118,34 +117,6 @@ export function useMediaTabs(prefix: string, label: string) {
     </div>
   );
   return { media, tabs };
-}
-
-/**
- * The card's vanilla panels: moved in after the React panel each followed, in
- * their old order, and back to #library-parked-panels when the card goes. The
- * tabs show and hide them like the rest.
- */
-export function useParkedPanels(
-  media: Media,
-  places: Array<{ id: string; after: RefObject<HTMLElement | null>; media: Media }>,
-) {
-  useEffect(() => {
-    const nodes = places.map(({ id, after }) => {
-      const node = document.getElementById(id);
-      if (node && after.current) after.current.after(node);
-      return node;
-    });
-    return () => {
-      const park = document.getElementById('library-parked-panels');
-      if (park) for (const node of nodes) if (node) park.appendChild(node);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    for (const place of places) {
-      const node = document.getElementById(place.id);
-      if (node) node.hidden = media !== place.media;
-    }
-  }, [media]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** a path field behind an Unlock button, as togglePathLock did it */

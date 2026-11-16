@@ -57,7 +57,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done** (steps 6 and V1 below) | 67 of 67: the music sections (step 6) and Video Quality, Custom Formats and YouTube Quality (video pass V1). |
-| Tab: Library | **done but the video Organization panel and Video Preferences** (steps 8a-8d, V2a below) | Folders, Organization, Post-Processing, Import, and the Folders card's Video panel (V2a). Left for V2b/V2c: the Organization card's Video panel and Video Preferences. |
+| Tab: Library | **done but Video Preferences** (steps 8a-8d, V2a, V2b below) | Folders, Organization, Post-Processing, Import, and both cards' Video panels (V2a, V2b). Left for V2c: Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | **done** (steps 9a-9c, and Experimental in 10a) | 63 of 63. |
@@ -65,13 +65,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality done, Library's video folders done), 582 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality done, Library's video folders and organization done), 618 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 5,810 |
+| `webui/index.html` | 12,823 | 5,387 |
 | `webui/static/settings.js` | 10,187 | 1,457 |
-| `webui/static/video/video-settings.js` | 2,940 | 1,643 |
+| `webui/static/video/video-settings.js` | 2,940 | 870 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +806,16 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 **Checked.** Parity against a frozen fixture; `system-security.test.tsx` 10 (the PIN and password flows and their locks, the recovery question, the OIDC block, every saved key, the cors warning, the shell's boxes kept); `oidc-provider-block-toggle` and `signup-defaults-settings` rewritten to run the section. End of the tab: the whole frontend suite, 12,448 pass and 9 failures in 5 files outside Settings that pass alone (load timeouts); the full Python run (96 files) 2,347 pass and 2 count floors repointed. Browser: every loaded value, the lock words, the password unlocking Require login, four changes saved the same; pixels identical.
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
+
+### Video pass V2b: the Organization card's Video panel (Nov 15 2026)
+
+**What.** `tabs/video-organization.ts`: the video organization settings (`/api/video/organization`) as one model, loaded once a page on the same two triggers as V2a and posted back whole (`orgBody`, `collectOrg`'s fields with its clamps and the Whisper echo), the template engine for the previews (`renderTemplate`, `replaceColons`, kept in lockstep with `core/video/organization`), the stored chain order, the Whisper status (polled every 2 s while a download runs), Reset, and the Missing Subtitles job's line (loaded each time the video settings page is shown, as before). `tabs/library-video-organization.tsx`: the panel, rendered by the Organization card. A typed field saves when left (one change listener on the panel), a box or a pick at once, the languages are checked first and put back when one is not a code, the subtitle chain as the download chain works (tiles, steps, arrows, drag, the slot, the last one kept, Whisper pinned last while it can run).
+
+**Removed.** About 770 lines of `video-settings.js` (the organization block, `loadSharedLibrary`, its two listeners), the panel from `index.html`, and the park: `#library-parked-panels` and `useParkedPanels` held nothing any more.
+
+**Differences.** The ignore switches stay off while embedded subtitles do not count, as they do after the switch is flipped; on load the page's gate turned them back on (it put back what it had seen before the settings filled them in). After a video field is changed the page header says All changes saved; the page said Save now, though the panel had already saved itself and the button had nothing of it to save.
+
+**Checked.** Parity against the frozen panel (`video-organization.vanilla.html`) and in the whole card's fixture, the card's help words and tick-box spaces now including the video panel; `library-video-organization.test.tsx` 17 (the load cases `settings-video-library-load` ran, ported and the file deleted; previews; saves; clamps; the languages; the chain; Whisper's states, download and failure; Reset; the job line; the gate and the Whisper pin negative-checked); `settings-navigation`, `video-tools-shared-page`, `settings-library-tabs`, the two cards' tests repointed; Python: `test_settings_subtitles_section`, `test_subtitle_whisper`, `test_colon_replacement`, `test_video_recycle`, `test_youtube_embed_opts`, `test_settings_sources_tab` (2 negative checks). Browser: every loaded value, option label, preview, the chain, Whisper and the job line the same, and after typing a template, embedded off, a provider added and moved, a bad language and another model; pixels the same but background noise, the header (above) and the toast mid-animation.
 
 ### Video pass V2a: the Folders card's Video panel and the video downloads config (Nov 15 2026)
 
@@ -1726,42 +1736,42 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | text | `template-podcast-path` | Podcast Path Template: | both | yes (step 8b) |
 | select | `podcast-media-format` | Podcast Media Format: {Audio Only (MP3 / M4A) — Default / Video Only (MP4 with static artwork for TV media ser | both | yes (step 8b) |
 | checkbox | `redownload-externally-deleted` | Re-download files deleted outside SoulSync | both | yes (step 8b) |
-| text | `vo-movie-template` | Movie Path Template: | both | no |
-| text | `vo-episode-template` | Episode Path Template: | both | no |
-| select | `vo-colon-replacement` | Colons in titles: {Delete (Dexter Resurrection) / Smart (Dexter - Resurrection, 12:30 becomes 12-30) / Space d | both | no |
-| text | `vo-youtube-template` | YouTube Path Template: | both | no |
-| number | `vo-yt-follow-count` | YouTube: videos to grab when you follow a channel: | both | no |
-| select | `vo-transfer-mode` | When a file finishes: {Copy in, then remove the source (kept for torrents) / Move into the library} | both | no |
-| checkbox | `vo-verify` | Verify with ffprobe | both | no |
-| checkbox | `vo-replace` | Replace an existing copy when the new one is better | both | no |
-| checkbox | `vo-subs` | Carry matching subtitles | both | no |
-| checkbox | `vo-artwork` | Save artwork into the folder | both | no |
-| checkbox | `vo-nfo` | Write NFO metadata files | both | no |
-| checkbox | `vo-recycle` | Recycle deleted files instead of erasing them | both | no |
-| number | `vo-recycle-days` | Keep recycled files for (days): | both | no |
-| text | `vo-recycle-path` | Recycle folder (optional): | both | no |
-| number | `vo-min-free` | Minimum free disk space (GB): | both | no |
-| select | `vo-sponsorblock` | YouTube: SponsorBlock {Off / Mark segments as chapters / Cut sponsor segments out} | both | no |
-| checkbox | `vo-yt-subs` | YouTube: embed subtitles | both | no |
-| button | `vo-reset` | 🔄 Reset to Defaults | both | no |
-| checkbox | `vo-subs-dl` | Download subtitles | both | no |
-| text | `vo-sub-langs` | Subtitle Languages: | both | no |
-| select | `vo-sub-hi-forced` | Hearing-impaired preference: {Off — best match wins / Prefer hearing-impaired} | both | no |
-| checkbox | `vo-sub-forced` | Also grab forced subtitles | both | no |
-| checkbox | `vo-sub-use-embedded` | Count embedded subtitles | both | no |
-| checkbox | `vo-sub-ignore-pgs` | …except PGS (Blu-ray image subs) | both | no |
-| checkbox | `vo-sub-ignore-vobsub` | …except VobSub (DVD image subs) | both | no |
-| checkbox | `vo-sub-ignore-ass` | …except ASS/SSA (styled subs) | both | no |
-| checkbox | `vo-sub-autosync` | Auto-sync subtitles to audio | both | no |
-| select | `vo-whisper-model` | Local transcription (Whisper): {tiny / base / small} | both | no |
-| button | `vo-whisper-dl` | Download model | both | no |
-| checkbox | `vo-whisper-enabled` | Enable local transcription | both | no |
-| number | `vo-sub-min-score` | Advanced: | both | no |
-| number | `vo-sub-daily-quota` | Advanced: | both | no |
-| number | `vo-sub-upgrade-delta` | Advanced: | both | no |
-| number | `vo-sub-worker-interval` | Advanced: | both | no |
-| number | `vo-sub-worker-batch` | Advanced: | both | no |
-| button | `vo-sub-open-job` | Missing Subtitles job → | both | no |
+| text | `vo-movie-template` | Movie Path Template: | both | yes (video pass V2b) |
+| text | `vo-episode-template` | Episode Path Template: | both | yes (video pass V2b) |
+| select | `vo-colon-replacement` | Colons in titles: {Delete (Dexter Resurrection) / Smart (Dexter - Resurrection, 12:30 becomes 12-30) / Space d | both | yes (video pass V2b) |
+| text | `vo-youtube-template` | YouTube Path Template: | both | yes (video pass V2b) |
+| number | `vo-yt-follow-count` | YouTube: videos to grab when you follow a channel: | both | yes (video pass V2b) |
+| select | `vo-transfer-mode` | When a file finishes: {Copy in, then remove the source (kept for torrents) / Move into the library} | both | yes (video pass V2b) |
+| checkbox | `vo-verify` | Verify with ffprobe | both | yes (video pass V2b) |
+| checkbox | `vo-replace` | Replace an existing copy when the new one is better | both | yes (video pass V2b) |
+| checkbox | `vo-subs` | Carry matching subtitles | both | yes (video pass V2b) |
+| checkbox | `vo-artwork` | Save artwork into the folder | both | yes (video pass V2b) |
+| checkbox | `vo-nfo` | Write NFO metadata files | both | yes (video pass V2b) |
+| checkbox | `vo-recycle` | Recycle deleted files instead of erasing them | both | yes (video pass V2b) |
+| number | `vo-recycle-days` | Keep recycled files for (days): | both | yes (video pass V2b) |
+| text | `vo-recycle-path` | Recycle folder (optional): | both | yes (video pass V2b) |
+| number | `vo-min-free` | Minimum free disk space (GB): | both | yes (video pass V2b) |
+| select | `vo-sponsorblock` | YouTube: SponsorBlock {Off / Mark segments as chapters / Cut sponsor segments out} | both | yes (video pass V2b) |
+| checkbox | `vo-yt-subs` | YouTube: embed subtitles | both | yes (video pass V2b) |
+| button | `vo-reset` | 🔄 Reset to Defaults | both | yes (video pass V2b) |
+| checkbox | `vo-subs-dl` | Download subtitles | both | yes (video pass V2b) |
+| text | `vo-sub-langs` | Subtitle Languages: | both | yes (video pass V2b) |
+| select | `vo-sub-hi-forced` | Hearing-impaired preference: {Off — best match wins / Prefer hearing-impaired} | both | yes (video pass V2b) |
+| checkbox | `vo-sub-forced` | Also grab forced subtitles | both | yes (video pass V2b) |
+| checkbox | `vo-sub-use-embedded` | Count embedded subtitles | both | yes (video pass V2b) |
+| checkbox | `vo-sub-ignore-pgs` | …except PGS (Blu-ray image subs) | both | yes (video pass V2b) |
+| checkbox | `vo-sub-ignore-vobsub` | …except VobSub (DVD image subs) | both | yes (video pass V2b) |
+| checkbox | `vo-sub-ignore-ass` | …except ASS/SSA (styled subs) | both | yes (video pass V2b) |
+| checkbox | `vo-sub-autosync` | Auto-sync subtitles to audio | both | yes (video pass V2b) |
+| select | `vo-whisper-model` | Local transcription (Whisper): {tiny / base / small} | both | yes (video pass V2b) |
+| button | `vo-whisper-dl` | Download model | both | yes (video pass V2b) |
+| checkbox | `vo-whisper-enabled` | Enable local transcription | both | yes (video pass V2b) |
+| number | `vo-sub-min-score` | Advanced: | both | yes (video pass V2b) |
+| number | `vo-sub-daily-quota` | Advanced: | both | yes (video pass V2b) |
+| number | `vo-sub-upgrade-delta` | Advanced: | both | yes (video pass V2b) |
+| number | `vo-sub-worker-interval` | Advanced: | both | yes (video pass V2b) |
+| number | `vo-sub-worker-batch` | Advanced: | both | yes (video pass V2b) |
+| button | `vo-sub-open-job` | Missing Subtitles job → | both | yes (video pass V2b) |
 
 **Post-Processing** (both, 87)
 

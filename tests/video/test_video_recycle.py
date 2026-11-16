@@ -25,6 +25,10 @@ from database.video_database import VideoDatabase
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+_TABS = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+# the Organization card's Video panel is React (SETTINGS_PORT.md video pass V2b)
+_PANEL = (_TABS / "library-video-organization.tsx").read_text(encoding="utf-8")
+_ORG = (_TABS / "video-organization.ts").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -273,11 +277,11 @@ def test_settings_normalize_recycle_keys():
 
 
 def test_settings_ui_has_the_recycle_fields():
-    for frag in ("vo-recycle'", "vo-recycle-days", "vo-recycle-path",
-                 "recycle_deletes", "recycle_keep_days", "recycle_path"):
-        assert frag in _SETTINGS_JS, frag
-    for frag in ('id="vo-recycle"', 'id="vo-recycle-days"', 'id="vo-recycle-path"'):
-        assert frag in _INDEX, frag
+    for frag in ("recycle_deletes", "recycle_keep_days", "recycle_path"):
+        assert frag in _ORG, frag
+    for frag in ('id="vo-recycle"', 'id="vo-recycle-days"', 'id="vo-recycle-path"',
+                 'field="recycle_deletes"', 'field="recycle_keep_days"', 'field="recycle_path"'):
+        assert frag in _PANEL, frag
 
 
 # ── the browsable bin: manifest / list / restore / purge (Aug 27) ────────────

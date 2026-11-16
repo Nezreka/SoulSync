@@ -2,36 +2,21 @@
  * The Library tab's two media cards, Folders and Organization, are React
  * (SETTINGS_PORT.md steps 8a and 8b). Their own tests cover each card; this
  * keeps the rules they share: one tab order, every control in exactly one
- * panel (the parked vanilla ones included), and the settings search landing
+ * panel, and the settings search landing
  * on a card's tab.
  */
 
 import { act, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
 import { LibraryTab } from '@/features/settings/tabs/library-folders';
 
-const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
 
 function cards() {
-  const start = html.indexOf('<div id="library-parked-panels" hidden>');
-  let depth = 0;
-  const re = /<(\/?)div\b[^>]*>/g;
-  re.lastIndex = start;
-  let m: RegExpExecArray | null;
-  let end = start;
-  while ((m = re.exec(html))) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) {
-      end = m.index + m[0].length;
-      break;
-    }
-  }
-  document.body.insertAdjacentHTML('beforeend', html.slice(start, end));
   const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
   return render(
     <div id="settings-page">
@@ -40,8 +25,6 @@ function cards() {
     </div>,
   );
 }
-
-afterEach(() => document.getElementById('library-parked-panels')?.remove());
 
 describe('Library settings media cards', () => {
   it('orders the tabs music, audiobooks, podcasts, video on both cards', () => {

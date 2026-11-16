@@ -1114,16 +1114,12 @@ def test_the_two_sides_name_their_sections_the_same_way():
     for noun in ("Folders", "Organization"):
         assert titles.count(noun) == 1, f"expected one shared {noun} card"
         # React cards (steps 8a, 8b): music in the component, video in its
-        # parked panel
+        # own (SETTINGS_PORT.md video pass V2a, V2b), mounted by the card
         card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
         assert f"<strong>Music {noun.lower()}</strong>" in card
-        if noun == "Folders":
-            # the Video panel is React too (SETTINGS_PORT.md video pass V2a)
-            video = _read("webui/src/features/settings/tabs/library-video-folders.tsx")
-            assert "<strong>Video folders</strong>" in video
-            continue
-        parked = markup.split('<div id="library-parked-panels" hidden>', 1)[1]
-        assert f"<strong>Video {noun.lower()}</strong>" in parked.split(f'id="{noun.lower()}-video-panel"', 1)[1]
+        assert f"<Video{noun}Panel" in card
+        video = _read(f"webui/src/features/settings/tabs/library-video-{noun.lower()}.tsx")
+        assert f"<strong>Video {noun.lower()}</strong>" in video
 
     # Folder locations and naming rules remain separate subjects.
     assert "Paths &amp; Organization" not in titles
