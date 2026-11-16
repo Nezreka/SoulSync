@@ -18,7 +18,6 @@ from core.downloads import seed_rules
 from core.video import seeding
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 
 

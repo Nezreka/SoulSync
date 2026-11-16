@@ -190,7 +190,6 @@ def test_the_ui_has_the_picker_and_the_kind_defaults():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     view = (root / "webui/static/video/video-download-view.js").read_text(encoding="utf-8")
-    settings = (root / "webui/static/video/video-settings.js").read_text(encoding="utf-8")
     # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
     from tests.support.settings_page import index_with_settings_page
     html = index_with_settings_page()

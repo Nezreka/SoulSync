@@ -26,7 +26,6 @@ _MGR_DIR = _ROOT / "webui" / "src" / "features" / "video-manager"
 _MGR = "\n".join(f.read_text(encoding="utf-8") for f in sorted(_MGR_DIR.glob("*.ts*"))
                  if ".test." not in f.name)
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
-_VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
@@ -369,13 +368,11 @@ def test_video_enrichment_manager_isolated():
     assert "state.kind = 'movie'" not in src
 
 
-def test_video_settings_module_referenced_and_isolated():
-    # every video settings section is React (SETTINGS_PORT.md video pass); the
-    # file is a note until the page itself goes React, and must stay inert
-    assert "video/video-settings.js" in _INDEX
-    stripped = _VSETTINGS_JS.strip()
-    assert stripped.startswith("/*") and stripped.endswith("*/")
-    assert "window." not in _VSETTINGS_JS and "addEventListener" not in _VSETTINGS_JS
+def test_video_settings_are_react_and_the_old_module_is_gone():
+    # every video settings section is React (SETTINGS_PORT.md video pass), and
+    # the page itself is (step V4c): the vanilla module and its tag are gone
+    assert "video/video-settings.js" not in _INDEX
+    assert not (_ROOT / "webui" / "static" / "video" / "video-settings.js").exists()
     # each section loads on the video page being shown, and saves on change
     tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
     shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")

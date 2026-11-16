@@ -21,7 +21,6 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _TABS = Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" / "tabs"
 _BLOCKS = (_TABS / "video-source-blocks.tsx").read_text(encoding="utf-8")
 _DOWNLOADS = (_TABS / "video-downloads.ts").read_text(encoding="utf-8")

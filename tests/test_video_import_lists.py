@@ -20,7 +20,6 @@ _ROOT = Path(__file__).resolve().parent.parent
 from tests.support.settings_page import index_with_settings_page
 # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
 _INDEX = index_with_settings_page()
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 
 
 @pytest.fixture()

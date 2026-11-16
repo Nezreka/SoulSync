@@ -24,7 +24,6 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
 _MANAGE_JS = (_ROOT / "webui" / "static" / "video" / "video-manage-panel.js").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _WLBTN_JS = (_ROOT / "webui" / "static" / "video" / "video-watchlist-btn.js").read_text(encoding="utf-8")
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
 

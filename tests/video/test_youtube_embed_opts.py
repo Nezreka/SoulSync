@@ -15,7 +15,6 @@ from core.video.youtube_download import media_embed_opts, ydl_download_opts
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _YTD = (_ROOT / "core" / "video" / "youtube_download.py").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 _TABS = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
 # the Organization card's Video panel is React (SETTINGS_PORT.md video pass V2b)

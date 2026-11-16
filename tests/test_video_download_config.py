@@ -188,11 +188,9 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     assert "<VideoSeedingGoals />" in torrent
     assert 'id="video-seeding-goals"' in (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
 
-    # nothing the video saver reads may have been left behind by a move
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    touched = {a or b for a, b in re.findall(r"getElementById\('([^']+)'\)|val\('([^']+)'\)", js)}
-    orphans = [i for i in sorted(touched) if i.startswith(("video-", "vq-")) and f'id="{i}"' not in index]
-    assert not orphans, f"the move orphaned these fields: {orphans}"
+    # the vanilla video saver that read fields by id is gone (SETTINGS_PORT.md
+    # step V4c): each React section reads its own state, no id can be orphaned
+    assert not (_WEBUI / "static" / "video" / "video-settings.js").exists()
 
 
 def test_the_video_slskd_form_is_gone():
@@ -211,7 +209,9 @@ def test_the_video_slskd_form_is_gone():
     assert "data-dupe-of" not in index
     css = (_WEBUI / "static" / "style.css").read_text(encoding="utf-8")
     assert "[data-dupe-of]" not in css
-    vjs = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+    tabs_dir = _WEBUI / "src" / "features" / "settings" / "tabs"
+    vjs = "".join(p.read_text(encoding="utf-8") for p in sorted(tabs_dir.glob("video-*.ts*"))
+                  if not p.name.endswith((".test.ts", ".test.tsx")))
     assert "saveSlskd" not in vjs and "/api/video/downloads/slskd" not in vjs
     # the music Soulseek panel (React, SETTINGS_PORT.md step 7f) is the editor
     panel = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels.tsx").read_text(encoding="utf-8")
@@ -286,13 +286,12 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     gone for the same reason: hidden fields can only change from code, and any
     write from there races the music panel's own save.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
     tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
     # every video section is React (SETTINGS_PORT.md video pass): the save
     # button's capture listener is video-shown.ts, and each section adds its
-    # saver there. video-settings.js has none left, and nothing posts slskd
-    assert "#save-settings" not in js, "video-settings.js has its own save hook again"
+    # saver there. video-settings.js is gone, and nothing posts slskd
+    assert not (_WEBUI / "static" / "video" / "video-settings.js").exists()
     savers = [p for p in tabs.glob("*.ts*") if "onVideoSave(" in p.read_text(encoding="utf-8")
               and not p.name.endswith((".test.tsx", ".test.ts")) and p.name != "video-shown.ts"]
     for p in savers:
@@ -313,8 +312,10 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     quality = (tabs / "video-quality.tsx").read_text(encoding="utf-8")
     assert quality.count("useEffect(() => onVideoSave(() => save()), [])") == 2
 
-    wiring = js.split("function wireSlskd", 1)[-1][:1200] if "function wireSlskd" in js else js
-    assert "addEventListener('change', function () { saveSlskd(true); })" not in js, (
+    # and no video section saves the retired form's endpoint from a field
+    sections = "".join(p.read_text(encoding="utf-8") for p in sorted(tabs.glob("video-*.ts*"))
+                       if not p.name.endswith((".test.ts", ".test.tsx")))
+    assert "saveSlskd" not in sections and "/api/video/downloads/slskd" not in sections, (
         "a retired hidden field can still trigger a save"
     )
 

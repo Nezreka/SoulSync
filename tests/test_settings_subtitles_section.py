@@ -37,8 +37,9 @@ def index():
 
 @pytest.fixture(scope="module")
 def video_js():
-    # the API keys are still video-settings.js
-    return (_read("webui/static/video/video-settings.js")
+    # the API keys are React too (SETTINGS_PORT.md video pass V3a)
+    return (_read(_TABS + "video-keys.ts")
+            + _read(_TABS + "connections-video-api.tsx")
             + _read(_TABS + "video-organization.ts")
             + _read(_TABS + "library-video-organization.tsx"))
 

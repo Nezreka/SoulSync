@@ -23,7 +23,6 @@ from core.video import recycle
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 _TABS = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
 # the Organization card's Video panel is React (SETTINGS_PORT.md video pass V2b)

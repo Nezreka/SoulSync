@@ -998,6 +998,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | (cleanup) | **`video-settings.js` is gone** (it was a note since V3c), with its script tag; the 12 Python files that read it now read the React sections or check it stays gone. |
 | Nov 16 | (the review) | **The port read line by line against dev.** 17 differences fixed (one shell copy, revisits start fresh, particles and Help find the page, autosaves refresh the status dots, emptied fields stay empty, Tidal, Quality, Discovery); the rest recorded. |
 | Nov 16 | `ee53c8b34` (step V4c) | **Settings is a React route.** The video side's settings are `/settings?media=video`. |
 | Nov 16 | `1e96eae14` (step V4b) | **`settings.js` is gone.** Its shell is `shell.ts`, in the shell bundle; searching no longer saves. |

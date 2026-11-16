@@ -17,7 +17,6 @@ import core.video.custom_formats as cf
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 # the Video Quality and Custom Formats editor is React (SETTINGS_PORT.md, video pass V1)
 _QUALITY = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "video-quality.tsx").read_text(encoding="utf-8")
