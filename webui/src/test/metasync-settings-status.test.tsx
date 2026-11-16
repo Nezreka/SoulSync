@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { render, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { MetaSyncSection } from '@/features/settings/tabs/connections-metasync';
 
 /**
  * Settings > MetaSync says whether this install is counted.
@@ -11,30 +10,31 @@ import { extractFunction } from './vanilla-extract';
  * nothing, so the network doesn't count the install. The settings page
  * showed "connected" and the pool, and never that nothing was being sent,
  * nor how far the network was from charting on its own.
+ *
+ * The section is React (SETTINGS_PORT.md step 10d): this runs it, with the
+ * node's answers stubbed, and reads the status lines it draws.
  */
 
-const SRC = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
-
 async function detailFor(status: Record<string, unknown>, nodeUrl = 'http://node:8790') {
-  document.body.innerHTML = `<input id="metasync-node-url" value="${nodeUrl}">`;
-  let detail = '';
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const refresh = new Function(
-    '__status',
-    '__out',
-    `const _MS_BINDING_TEXT = { bound: 'Approved' };
-     async function _msApi() { return { success: true, status: __status }; }
-     function _msStatus() {}
-     function _msDetail(html) { __out(html); }
-     function _msEscape(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
-     ${extractFunction('refreshMetaSyncStatus', SRC)}
-     return refreshMetaSyncStatus;`,
-  )(status, (html: string) => {
-    detail = html;
-  }) as () => Promise<void>;
-  await refresh();
-  return detail;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      const data =
+        url === '/api/metasync/status'
+          ? { success: true, status }
+          : { success: true, node_url: nodeUrl, local_key_set: true };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(data) } as Response);
+    }),
+  );
+  render(<MetaSyncSection opened={1} />);
+  const detail = document.getElementById('metasync-status-detail')!;
+  await waitFor(() =>
+    expect(document.getElementById('metasync-status')!.textContent).toMatch(/^Step 1: connected/),
+  );
+  return detail.innerHTML;
 }
+
+afterEach(() => vi.unstubAllGlobals());
 
 const pool = { name: 'SIN', url: 'https://pool', binding_status: 'bound' };
 
@@ -46,7 +46,7 @@ describe('Settings > MetaSync: is this install counted', () => {
       dry_run: true,
       unsent_report: { week: '2026-W43', signal_count: 37, pools: 1 },
     });
-    expect(html).toContain(
+    expect(html.replace(/<!-- -->/g, '')).toContain(
       'Step 3: dry run is on. Your report for 2026-W43 is ready (37 anonymous',
     );
     expect(html).toContain("isn't counted yet");

@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Branch and worktree | done | `node_modules` is a Windows junction to the main checkout's. Tests run in the worktree. |
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
-| Tab: Connections | **in progress** (steps 10a-10c below) | 113 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal; 10b: every other music card and the rest of the hidden group; 10c: Server Connections. Left: MetaSync (10d); the video side's cards and server row for the video pass. |
+| Tab: Connections | **done for music** (steps 10a-10d below) | 123 of 160, and System's Experimental (2): the metadata source, every music service card, the tiles and their modal, Server Connections, MetaSync. Left for the video pass: the video side's service cards (26), its Server Connection (9) and Notifications (2). |
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 510 of 678 controls, 282 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side (Discovery, Quality, Downloads, Sources, Library, System and Connections without their video-only parts), 520 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 6,554 |
-| `webui/static/settings.js` | 10,187 | 1,773 |
+| `webui/index.html` | 12,823 | 6,385 |
+| `webui/static/settings.js` | 10,187 | 1,480 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +806,16 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Step 10d: Connections, part four: MetaSync; the music side done (Nov 15 2026)
+
+**What.** `tabs/connections-metasync.tsx`, slot `metasync`: pairing (Connect, the code and ID, finish), the MetaSync URL, the manual local key, the pool URL and key, Send pool key, Save, Refresh status, the status readout with its lines, and Disconnect. Its fields are not settings keys: they go through `/api/metasync` as before, and it loads each time Connections opens (it was the tab switch's `loadMetaSyncSettings`), auto-detecting the node once while nothing is set.
+
+**Removed.** 13 functions and the binding words from `settings.js`, and the tab switch's MetaSync call.
+
+**Found by the end-of-tab run.** The video side's hidden API group still has an Expand All calling `toggleAllServiceAccordions`, gone in 10b: it is back as a five-line toggle, beside `toggleStgService`. `settings.js` now reaches the two React hooks it calls (`checkQobuzAuthStatus`, `syncMetadataSourceSelection`) through `window`.
+
+**Checked.** Parity against a frozen fixture; `connections-metasync.test.tsx` 6; `metasync-settings-status` rewritten to run the React section (negative-checked: a non-http node address is never linked); `settings-regroup-1822` repointed (MetaSync's place, and the tab switch hands Connections over). End of the tab: the whole frontend suite, 12,482 pass and 9 failures in 6 files outside Settings that pass alone (load timeouts); the full Python run (95 files), 2,336 pass and 4 fixed (the Expand All above, the two window calls, two count floors: `test_script_split_integrity`, `test_settings_persist_whitelist`). Browser: every loaded value, the status lines (the same HTML) and pairing the same; screenshots identical but the Open MetaSync link caught mid-paint (its computed style is the same on both pages).
+
 ### Step 10c: Connections, part three: Server Connections (Nov 15 2026)
 
 **What.** `tabs/connections-servers.tsx`, slot `servers`: the five server toggles, Plex (its setup with Link to Plex, Manually Configure and View Configuration, the PIN link with its polling, re-link that keeps the address and checks the new token first, Clear Configuration), Jellyfin (with its timeout and its user and library pickers), Navidrome (its folder picker and the admin's playlist account), Music Assistant (its source picker, loaded quietly when it is set up), Standalone and Test Server. The library picks, the playlist account and the Music Assistant source go through their own endpoints as before; the connection fields are settings keys; the active server saves alone (`active_media_server`, through `setExtra`), and never from the video side. `testConnection` moved here too (on window for every card): a good Plex, Jellyfin or Navidrome test reloads that picker.
@@ -1198,16 +1208,16 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Connect | both | no |
-| button |  | I've approved it — finish connecting | both | no |
-| text | `metasync-node-url` | MetaSync URL: | both | no |
-| password | `metasync-local-key` |  | both | no |
-| text | `metasync-pool-url` | Pool URL: | both | no |
-| password | `metasync-pool-key` | Pool key: | both | no |
-| button |  | Send pool key to MetaSync | both | no |
-| button |  | Save | both | no |
-| button |  | Refresh status | both | no |
-| button |  | Disconnect | both | no |
+| button |  | Connect | both | yes (step 10d) |
+| button |  | I've approved it — finish connecting | both | yes (step 10d) |
+| text | `metasync-node-url` | MetaSync URL: | both | yes (step 10d) |
+| password | `metasync-local-key` |  | both | yes (step 10d) |
+| text | `metasync-pool-url` | Pool URL: | both | yes (step 10d) |
+| password | `metasync-pool-key` | Pool key: | both | yes (step 10d) |
+| button |  | Send pool key to MetaSync | both | yes (step 10d) |
+| button |  | Save | both | yes (step 10d) |
+| button |  | Refresh status | both | yes (step 10d) |
+| button |  | Disconnect | both | yes (step 10d) |
 
 **Notifications** (video only, 2)
 

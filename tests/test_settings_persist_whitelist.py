@@ -50,9 +50,10 @@ def test_the_page_sends_something_at_all():
     # A parse that quietly finds nothing would make every check below pass.
     sent = _sent_sections()
     # fewer as tabs move to React and save their own sections (SETTINGS_PORT.md:
-    # 27 at step 9c); the Connections tab's still go through this save
-    assert len(sent) > 10, sent
-    assert {"spotify", "plex", "jellyfin", "lastfm"} <= sent
+    # 27 at step 9c; after step 10d only the empty placeholders are left, each
+    # React tab saving its own keys of them)
+    assert len(sent) >= 5, sent
+    assert {"soulseek", "library", "playlists", "m3u_export"} <= sent
 
 
 def test_every_section_the_page_sends_is_persisted():

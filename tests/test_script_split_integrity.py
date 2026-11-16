@@ -285,8 +285,11 @@ class TestOnclickCoverage:
 
     def test_onclick_count_sanity(self):
         """Sanity check: there should be a substantial number of onclick handlers."""
-        assert len(self.onclick_fns) > 50, (
-            f"Only found {len(self.onclick_fns)} onclick handlers — expected 100+"
+        # fewer as the Settings page moves to React (SETTINGS_PORT.md: 44
+        # after the music side, step 10d); a parse that found nothing would be
+        # well under this
+        assert len(self.onclick_fns) > 30, (
+            f"Only found {len(self.onclick_fns)} onclick handlers — the parse is wrong"
         )
 
 

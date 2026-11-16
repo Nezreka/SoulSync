@@ -19,8 +19,16 @@ function sectionTab(doc: Document, heading: string): string | null {
 describe('where sections live', () => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
+  it('MetaSync is on connections (React, SETTINGS_PORT.md step 10d)', () => {
+    const section = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/connections-metasync.tsx'),
+      'utf8',
+    );
+    expect(section).toMatch(/tab="connections"\s+title="MetaSync"/);
+    expect(html).toContain('<div data-stg-react="connections" data-stg-part="metasync"');
+  });
+
   it.each([
-    ['MetaSync', 'connections'],
     ['Notifications', 'connections'],
     ['Import Lists', 'discovery'],
     ['Video Quality', 'quality'],
@@ -150,7 +158,7 @@ describe('loaders follow their sections', () => {
     delete g.loadMetaSyncSettings;
   });
 
-  it('hands Appearance to the React tab and loads MetaSync on Connections', () => {
+  it('hands Appearance and Connections to their React tabs', () => {
     const nav = new Function(
       'document',
       'window',
@@ -166,10 +174,11 @@ describe('loaders follow their sections', () => {
     nav('appearance');
     expect(show).toHaveBeenLastCalledWith('appearance');
     expect(g.loadMetaSyncSettings).not.toHaveBeenCalled();
+    // MetaSync is React too, and loads itself each time Connections opens
+    // (connections-metasync.test.tsx); the tab switch no longer calls it
     nav('connections');
-    expect(g.loadMetaSyncSettings).toHaveBeenCalledOnce();
-    nav('advanced');
-    expect(g.loadMetaSyncSettings).toHaveBeenCalledOnce();
+    expect(show).toHaveBeenLastCalledWith('connections');
+    expect(g.loadMetaSyncSettings).not.toHaveBeenCalled();
     delete shell.SoulSyncSettings;
   });
 });
