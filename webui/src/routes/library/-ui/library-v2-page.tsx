@@ -295,6 +295,7 @@ import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
+import { AlbumRenameBadge, renameHintTitle, useRenameCheck } from './rename-hint';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
 import { ReviewLockButton, lockedPresence, useLockedIds } from './review-lock';
@@ -8845,6 +8846,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
   const [showReorganizeAll, setShowReorganizeAll] = useState(false);
+  // after the page is up: it plans every album, so it never races the page itself
+  const renameCheck = useRenameCheck(
+    artistQuery.data && artistQuery.data.in_library !== false ? artistId : 0,
+  );
   const [showEditArtist, setShowEditArtist] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
   // Album-scoped retag/delete now live inside each album's own
@@ -9231,6 +9236,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   name={artist.name}
                   variant="toolbar"
                 />
+                {/* #2141: what Preview rename would change, without opening it */}
+                {renameCheck.total > 0 ? (
+                  <ActionButton
+                    icon="folder"
+                    label={`${renameCheck.total} to rename`}
+                    title={renameHintTitle(renameCheck.total)}
+                    onClick={() => setShowReorganizeAll(true)}
+                  />
+                ) : null}
                 <ArtistToolsMenu
                   onViewSettings={() => setShowViewSettings(true)}
                   artistId={artistId}
@@ -9935,6 +9949,7 @@ function AlbumBlock({
   const navigate = useNavigate();
   const openTrackArtist = useOpenTrackArtist();
   const lockedIds = useLockedIds();
+  const rename = useRenameCheck(artistId);
   const [open, setOpen] = useState(false);
   // Browser `dblclick` can span changing descendants (title, cover, empty row space) and its click
   // counter carries surprising state across rerenders. A timestamp owned by THIS album makes the
@@ -10002,6 +10017,9 @@ function AlbumBlock({
               <SvgIcon name="star" />
               {profileName || 'Default'}
             </span>
+            {album.tracks_present > 0 ? (
+              <AlbumRenameBadge artistId={artistId} albumId={album.id} albumTitle={album.title} />
+            ) : null}
           </div>
         </div>
         {/* Sonarr's season toggle: in the middle of the row, out of the way of
@@ -10023,16 +10041,10 @@ function AlbumBlock({
             tracksPresent={album.tracks_present}
           />
           <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
+          {/* #2143: no "Lock and next" here. it opened the next album's page,
+              and on the artist page you lock one row after another in place */}
           {album.tracks_present > 0 ? (
-            <ReviewLockButton
-              entity="album"
-              id={album.id}
-              name={album.title}
-              artistId={artistId}
-              onOpenAlbum={(next) =>
-                void navigate({ search: (previous) => ({ ...previous, album: next }) })
-              }
-            />
+            <ReviewLockButton entity="album" id={album.id} name={album.title} artistId={artistId} />
           ) : null}
           <IconActionButton
             icon="automatic"
@@ -10093,6 +10105,7 @@ function AlbumBlock({
           queueStatusTracks={queueStatusTracks}
           currentArtistId={artistId}
           onOpenArtist={openTrackArtist}
+          renameTrackIds={rename.tracks}
         />
       ) : null}
     </div>
@@ -11622,6 +11635,7 @@ export function AlbumTrackTable({
   queueStatusTracks,
   currentArtistId,
   onOpenArtist,
+  renameTrackIds,
 }: {
   albumId: number;
   /** Discography-only releases materialize their provider tracklist on expand. */
@@ -11641,6 +11655,8 @@ export function AlbumTrackTable({
   currentArtistId?: number;
   /** Supplied by route-owned pages; omitted in standalone table surfaces. */
   onOpenArtist?: OpenTrackArtist;
+  /** #2141: tracks whose file Preview rename would move (the artist page's check) */
+  renameTrackIds?: ReadonlySet<number>;
 }) {
   const canWrite = useLibraryV2CanWrite();
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
@@ -12184,6 +12200,7 @@ export function AlbumTrackTable({
               queueStatus={track.id != null ? queueTracks[track.id] : undefined}
               currentArtistId={currentArtistId}
               onOpenArtist={onOpenArtist}
+              wouldRename={track.id != null && Boolean(renameTrackIds?.has(track.id))}
             />
           ))}
         </tbody>
@@ -12431,6 +12448,8 @@ type TrackRowProps = {
   version?: boolean;
   currentArtistId?: number;
   onOpenArtist?: OpenTrackArtist;
+  /** #2141: its file isn't where the naming template puts it */
+  wouldRename?: boolean;
 };
 
 type TrackArtist = { id: number; name: string };
@@ -12525,6 +12544,7 @@ function TrackRow(props: TrackRowProps) {
     version = false,
     currentArtistId,
     onOpenArtist,
+    wouldRename = false,
   } = props;
   const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
@@ -12812,13 +12832,21 @@ function TrackRow(props: TrackRowProps) {
             style={widthStyle('file_path')}
             title={track.file?.path ?? undefined}
           >
-            {track.file?.playlists?.length ? (
+            {track.file?.playlists?.length || wouldRename ? (
               <div className={styles.fileVersionBadges}>
-                {track.file.playlists.map((name) => (
+                {track.file?.playlists?.map((name) => (
                   <span key={name} className={styles.fileRoleBadge} title="Saved for this playlist">
                     Playlist: {name}
                   </span>
                 ))}
+                {wouldRename ? (
+                  <span
+                    className={styles.albumRenameBadge}
+                    title="This file is not where your naming template puts it. Preview Rename / Organize on the album shows where it goes."
+                  >
+                    To rename
+                  </span>
+                ) : null}
               </div>
             ) : null}
             <FilePathCellBody path={track.file?.path} display={track.file?.display_path} />
