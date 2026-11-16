@@ -35,7 +35,7 @@ from typing import Callable, List, Mapping, Optional, Sequence
 
 from core.imports.paths import sanitize_filename
 from core.playlists.managed_artifacts import (
-    MANIFEST_DIR, MATERIALIZE_LOCK, artifact_fingerprint, entry_is_owned,
+    MANIFEST_DIR, MATERIALIZE_LOCK, artifact_fingerprint, entry_is_owned, stable_fingerprint,
     load_manifest, safe_output_dir, save_manifest,
 )
 
@@ -217,7 +217,8 @@ def materialize_one(
                 copy_fn(real_path, temporary)
                 outcome = "fellback"
         if replace_owned:
-            if expected_fingerprint is not None and artifact_fingerprint(dest_path) != expected_fingerprint:
+            if (expected_fingerprint is not None
+                    and artifact_fingerprint(dest_path) != stable_fingerprint(expected_fingerprint)):
                 raise FileExistsError("Managed playlist destination changed while preparing its replacement")
             os.replace(temporary, dest_path)
         else:
