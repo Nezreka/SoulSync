@@ -840,9 +840,13 @@ def _library_cards(markup):
     assert processing.index('title="Post-Processing"') < processing.index('title="Import"')
     assert '<span className="stg-cardgroup-label">Processing</span>' in processing
     proc = markup.index('<div data-stg-react="library" data-stg-part="processing"')
+    prefs = _read(tabs + "library-video-prefs.tsx")
+    assert re.search(r'tab=\{TAB\}\s+title="Video Preferences"', prefs)
+    assert '<span className="stg-cardgroup-label">Video</span>' in prefs
+    vp = markup.index('<div data-stg-react="library" data-stg-part="video-prefs"')
     titles = [(slot, "Folders"), (org, "Organization"),
-              (proc, "Post-Processing"), (proc + 1, "Import")]
-    groups = [(slot, "Files &amp; folders"), (proc, "Processing")]
+              (proc, "Post-Processing"), (proc + 1, "Import"), (vp, "Video Preferences")]
+    groups = [(slot, "Files &amp; folders"), (proc, "Processing"), (vp, "Video")]
     for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
         if t:

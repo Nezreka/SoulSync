@@ -178,10 +178,12 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     # pass V2a): the folders in the Folders card's Video panel, on Library
     folders = (tabs / "library-video-folders.tsx").read_text(encoding="utf-8")
     assert "const TAB = 'library';" in folders and 'id="video-download-path"' in folders
+    # what to hunt is a library choice, not a usenet one (Video Preferences,
+    # React: SETTINGS_PORT.md video pass V2c)
+    prefs = (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'library';" in prefs and 'id="video-monitor-specials"' in prefs
     for pid, tab in (# #1822: import lists add to what you discover
-                     ("video-import-lists", "discovery"),
-                     # what to hunt is a library choice, not a usenet one
-                     ("video-monitor-specials", "library")):
+                     ("video-import-lists", "discovery"),):
         at = index.index(f'id="{pid}"')
         stg = index.rfind('data-stg=', 0, at)
         found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)

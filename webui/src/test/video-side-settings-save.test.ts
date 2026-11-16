@@ -134,7 +134,7 @@ return debouncedAutoSaveSettings;`;
     const { doc, scheduled } = autosave('video');
     // on a shared tab, so no data-video-only block above it: only the hook says
     // it is video's own
-    const host = doc.querySelector('#settings-page [data-stg="library"]');
+    const host = doc.querySelector('#settings-page [data-stg="sources"]');
     expect(host).not.toBeNull();
     const probe = doc.createElement('input');
     probe.id = 'probe-video-field';

@@ -332,39 +332,13 @@
                 if (anl && d.anilist_enabled != null) anl.checked = !!d.anilist_enabled;
                 var wkd = document.getElementById('video-wikidata-enabled');
                 if (wkd && d.wikidata_enabled != null) wkd.checked = !!d.wikidata_enabled;
-                var ap = document.getElementById('video-billboard-autoplay');
-                if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
-                var wr = document.getElementById('video-watch-region');
-                if (wr && d.watch_region) wr.value = d.watch_region;
+                // autoplay and the region are React (library-video-prefs.tsx)
             })
             .catch(function () { /* ignore */ });
     }
 
-    function savePrefs(silent) {
-        var ap = document.getElementById('video-billboard-autoplay');
-        var wr = document.getElementById('video-watch-region');
-        return fetch(CONFIG_URL, {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({
-                billboard_autoplay: ap ? ap.checked : true,
-                watch_region: wr ? wr.value : 'US',
-            })
-        }).then(function () { if (!silent) toast('Preferences saved', 'success'); })
-          .catch(function () { /* ignore */ });
-    }
-
-    // Monitor Specials lives in Library > Video Preferences but is stored with
-    // the video downloads config (the server saves only the keys sent), so it
-    // posts on its own and the Usenet panel's save never re-posts it.
-    function saveMonitorSpecials() {
-        var el = document.getElementById('video-monitor-specials');
-        if (!el) return Promise.resolve();
-        return fetch(DOWNLOADS_URL, {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ monitor_specials: !!el.checked })
-        }).then(function () { toast(el.checked ? 'Specials monitored' : 'Specials unmonitored', 'success'); })
-          .catch(function () { toast('Could not save Monitor Specials', 'error'); });
-    }
+    // Video Preferences (autoplay, the region, Monitor Specials) is React and
+    // saves itself: library-video-prefs.tsx (SETTINGS_PORT.md video pass V2c)
 
     // ── the video downloads config: the Folders card's Video panel (the folders,
     //    4K, More libraries, the drive map, the extra folders, the Docker lines)
@@ -791,12 +765,6 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });
         });
-        var autoplay = document.getElementById('video-billboard-autoplay');
-        if (autoplay) autoplay.addEventListener('change', function () { savePrefs(); });
-        var region = document.getElementById('video-watch-region');
-        if (region) region.addEventListener('change', function () { savePrefs(); });
-        var specials = document.getElementById('video-monitor-specials');
-        if (specials) specials.addEventListener('change', function () { saveMonitorSpecials(); });
         // Server toggle (Plex/Jellyfin) — select + reveal that server's config.
         var toggles = document.querySelectorAll('[data-video-server-toggle]');
         for (var t = 0; t < toggles.length; t++) {
@@ -855,8 +823,9 @@
             // stores it, then this button writes the stale copy back over it.
             // The music panel saves through the main settings save.
             // (Video Quality and YouTube Quality add their own saves: video-shown.ts)
-            // (the video downloads config adds its own save too: video-downloads.ts)
-            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true)])
+            // (the video downloads config adds its own save too: video-downloads.ts,
+            // and Video Preferences: video-prefs.ts)
+            Promise.all([saveConn(true), save(true), saveKeys(true)])
                 .catch(function () { toast('Some video settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);

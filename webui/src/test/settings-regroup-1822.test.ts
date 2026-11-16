@@ -38,10 +38,19 @@ describe('where sections live', () => {
     expect(html).toContain('<div data-stg-react="quality" data-stg-part="video"');
   });
 
+  it('Video Preferences is on library (React, SETTINGS_PORT.md video pass V2c)', () => {
+    const section = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/library-video-prefs.tsx'),
+      'utf8',
+    );
+    expect(section).toContain("const TAB = 'library';");
+    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Preferences"/);
+    expect(html).toContain('<div data-stg-react="library" data-stg-part="video-prefs"');
+  });
+
   it.each([
     ['Notifications', 'connections'],
     ['Import Lists', 'discovery'],
-    ['Video Preferences', 'library'],
   ])('%s is on %s', (heading, tab) => {
     expect(sectionTab(doc, heading)).toBe(tab);
   });

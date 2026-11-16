@@ -30,22 +30,21 @@ it('uses one category bar instead of a second sidebar', () => {
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
   nav.switchSettingsTab('connections');
-  // a field still in the page's own markup (Video Preferences)
-  const input = document.getElementById('video-billboard-autoplay') as HTMLInputElement;
-  input.checked = true;
-  const section = input.closest('[data-stg]') as HTMLElement;
+  // a part still in the page's own markup (Import Lists, until the video pass
+  // ports it): its rows are what video-settings.js keeps
+  const rows = document.getElementById('vq-implist-rows') as HTMLElement;
+  rows.dataset.probe = 'kept';
+  const section = rows.closest('.settings-section-body') as HTMLElement;
   const display = section.style.display;
-  nav.filterSettings('Autoplay trailers');
+  nav.filterSettings('Import lists');
   expect(section.style.display).toBe(display);
-  expect(document.getElementById('video-billboard-autoplay')).toBe(input);
-  const shown = vi.fn();
-  document.addEventListener('soulsync:library-settings-shown', shown, { once: true });
+  expect(document.getElementById('vq-implist-rows')).toBe(rows);
   (document.querySelector('#stg-search-results button') as HTMLButtonElement).click();
-  expect(shown).toHaveBeenCalledOnce();
   expect(document.querySelector('.stg-tab[aria-current="page"]')?.getAttribute('data-tab')).toBe(
-    'library',
+    'discovery',
   );
-  expect(input.checked).toBe(true);
+  expect(section.classList.contains('collapsed')).toBe(false);
+  expect(rows.dataset.probe).toBe('kept');
 });
 it('has an empty state and clearing search does not switch categories', () => {
   nav.switchSettingsTab('library');

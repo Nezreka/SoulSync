@@ -259,11 +259,7 @@ const LIBRARY_SUMMARIES = {
     // library-filtering: the Downloads tab is React (tabs/downloads.ts)
     // library-playlists, library-stats and library-discovery: the Discovery
     // tab is React and renders its own summaries (tabs/discovery.ts)
-    'library-video-prefs': () => {
-        const region = document.getElementById('video-watch-region');
-        const label = region?.selectedOptions?.[0]?.textContent?.trim();
-        return label ? `where to watch: ${label}` : '';
-    },
+    // 'library-video-prefs': React (library-video-prefs.tsx)
 };
 
 function refreshLibrarySummaries() {

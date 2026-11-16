@@ -20,6 +20,7 @@ import { isDocker, LIBRARY_TAB, LibrarySection, LockedPath, useMediaTabs } from 
 import { OrganizationCard } from './library-organization';
 import { ProcessingCards } from './library-processing';
 import { VideoFoldersPanel } from './library-video-folders';
+import { VideoPrefs } from './library-video-prefs';
 import { helpBits, useHelp } from './parts';
 import { NumberField, text } from './source-panels';
 
@@ -677,5 +678,6 @@ export function LibraryTab(props: SettingsTabProps) {
   if (props.part === 'folders') return <FoldersCard {...props} />;
   if (props.part === 'organization') return <OrganizationCard {...props} />;
   if (props.part === 'processing') return <ProcessingCards {...props} />;
+  if (props.part === 'video-prefs') return <VideoPrefs {...props} />;
   return null;
 }
