@@ -103,6 +103,14 @@ export interface LibraryV2ListFilters {
   review?: string;
   /** ask for each artist card's "could be better" count */
   includeUpgradable?: boolean;
+  /** #2107: sort direction, collection filters, featured-only artists */
+  dir?: string;
+  completion?: string;
+  missingMin?: number;
+  missingMax?: number;
+  pctMin?: number;
+  pctMax?: number;
+  credit?: string;
 }
 
 function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) {
@@ -112,6 +120,13 @@ function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) 
   if (filters.review === 'reviewed' || filters.review === 'unreviewed') {
     params.set('review', filters.review);
   }
+  if (filters.dir) params.set('dir', filters.dir);
+  if (filters.completion) params.set('completion', filters.completion);
+  if (filters.missingMin != null) params.set('missing_min', String(filters.missingMin));
+  if (filters.missingMax != null) params.set('missing_max', String(filters.missingMax));
+  if (filters.pctMin != null) params.set('pct_min', String(filters.pctMin));
+  if (filters.pctMax != null) params.set('pct_max', String(filters.pctMax));
+  if (filters.credit) params.set('credit', filters.credit);
 }
 
 export async function fetchLibraryV2Artists(
@@ -138,6 +153,22 @@ export async function fetchLibraryV2Artists(
     apiClient.get('library/v2/artists', { searchParams: params }),
     'Failed to load library',
   );
+}
+
+/** #2109: every artist id the list's filters match, for "select all" */
+export async function fetchLibraryV2ArtistIds(
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'monitored'> & LibraryV2ListFilters,
+): Promise<number[]> {
+  const params = new URLSearchParams();
+  if (search.q) params.set('search', search.q);
+  params.set('sort', search.sort);
+  params.set('monitored', search.monitored);
+  setListFilters(params, search);
+  const payload = await lib2Json<Ok & { ids: number[] }>(
+    apiClient.get('library/v2/artists/ids', { searchParams: params }),
+    'Could not select every artist',
+  );
+  return payload.ids ?? [];
 }
 
 interface AlbumsResponse extends Ok {
@@ -170,11 +201,12 @@ interface WantedResponse extends Ok {
 
 /** §64 I2: library-wide Missing / Cutoff Unmet lists. */
 export async function fetchLibraryV2Wanted(
-  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'> & { wantedArtist?: number },
 ): Promise<WantedResponse> {
   const params = new URLSearchParams();
   params.set('kind', search.wantedKind);
   if (search.q) params.set('search', search.q);
+  if (search.wantedArtist) params.set('artist', String(search.wantedArtist));
   params.set('page', String(search.page));
   return lib2Json<WantedResponse>(
     apiClient.get('library/v2/wanted', { searchParams: params }),
@@ -183,10 +215,17 @@ export async function fetchLibraryV2Wanted(
 }
 
 export function libraryV2WantedQueryOptions(
-  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'> & { wantedArtist?: number },
 ) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'wanted', search.wantedKind, search.q, search.page],
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'wanted',
+      search.wantedKind,
+      search.q,
+      search.page,
+      search.wantedArtist ?? 0,
+    ],
     queryFn: () => fetchLibraryV2Wanted(search),
   });
 }
@@ -2102,6 +2141,13 @@ export function libraryV2ArtistsQueryOptions(
     search.quality === 'upgradable' ? 'upgradable' : '',
     Boolean(search.includeUpgradable),
     search.review ?? '',
+    search.dir ?? '',
+    search.completion ?? '',
+    search.missingMin ?? '',
+    search.missingMax ?? '',
+    search.pctMin ?? '',
+    search.pctMax ?? '',
+    search.credit ?? '',
   ];
   return queryOptions({
     queryKey,
@@ -2816,4 +2862,42 @@ export async function fetchLibraryV2ArtworkStatus(
     }),
   );
   return payload.states ?? {};
+}
+
+/** #2107: the library at a glance, over the artist list */
+export interface LibraryV2Overview {
+  artists: number;
+  owned_tracks: number;
+  missing_tracks: number;
+  complete_artists: number;
+  incomplete_artists: number;
+  unchecked_artists: number;
+  watchlist_artists: number;
+}
+
+export function libraryV2OverviewQueryOptions(enabled = true) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'overview'],
+    queryFn: () =>
+      lib2Json<LibraryV2Overview & Ok>(
+        apiClient.get('library/v2/artists/overview'),
+        'Could not load the overview',
+      ),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** the could-be-better part on its own: the first count can take a while */
+export function libraryV2OverviewUpgradesQueryOptions(enabled = true) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'overview', 'upgrades'],
+    queryFn: () =>
+      lib2Json<{ upgrade_artists: number; upgrade_tracks: number } & Ok>(
+        apiClient.get('library/v2/artists/overview', { searchParams: { part: 'upgrades' } }),
+        'Could not count upgrades',
+      ),
+    enabled,
+    staleTime: 60_000,
+  });
 }

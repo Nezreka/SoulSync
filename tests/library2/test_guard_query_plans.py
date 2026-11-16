@@ -41,6 +41,13 @@ BASELINE: dict = {
     ("/api/library/v2/albums", "lib2_albums"): 4,
     ("/api/library/v2/artists", "lib2_artists"): 1,
     ("/api/library/v2/wanted-projection/status", "lib2_tracks"): 3,
+    # #2106/#2107: every artist's completeness, one pass over the tracks and
+    # the releases, kept per member-version (core.library2.artist_completeness)
+    # and refreshed behind the page; ~5 s on a 311k-track library, once per
+    # change. one per profile here
+    ("/api/library/v2/artists/overview", "lib2_tracks"): 3,
+    ("/api/library/v2/artists/overview", "lib2_albums"): 3,
+    ("/api/library/v2/artists/overview", "lib2_album_artists"): 3,
     # the library picker's per-library file counts, one pass
     ("/api/library/v2/scopes", "lib2_track_files"): 1,
     # track_downloads is the download log: 5k rows on a 300k-track library,

@@ -284,11 +284,15 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                  source_filter: str = "", quality_filter: str = "",
                  profile_id: int = 1,
                  include_upgradable: bool = False,
-                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                 review_filter: str = "",
+                 direction: str = "",
+                 completeness: Dict[str, Any] | None = None,
+                 credit: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """Library-v2 display adapter over the shared artist page reader.
 
     include_upgradable adds each card's "could be better" count, judged by
     the same live evaluator as the upgradable filter, for this page only."""
+    from .artist_completeness import completion_state
     from .artist_reader import read_artist_page, upgradable_track_counts
 
     rows, total = read_artist_page(
@@ -296,7 +300,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         limit=limit, include_size=include_size, letter=letter,
         watchlist_filter=watchlist_filter, source_filter=source_filter,
         quality_filter=quality_filter, profile_id=profile_id,
-        review_filter=review_filter)
+        review_filter=review_filter, direction=direction,
+        completeness=completeness, credit=credit)
     projected = project_metadata_many(
         conn,
         entity_type="artist",
@@ -336,6 +341,9 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "track_count": track_count,
             "tracks_present": present,
             "tracks_missing": max(0, track_count - present),
+            # #2106: releases of unknown size, and what that makes the artist
+            "unverified_albums": r["unverified_albums"] or 0,
+            "completion": completion_state(track_count, present, r["unverified_albums"] or 0),
             "total_size_bytes": r["total_size_bytes"] or 0,
             "media_server_sources": media_sources.get(int(r["id"]), []),
             "user_overrides": overrides,

@@ -22,6 +22,12 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import {
+  CardSizeSlider,
+  cardGridStyle,
+  useCardSize,
+  type CardSizeRange,
+} from '@/components/card-size';
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import {
   routedNamesQueryOptions,
@@ -230,7 +236,19 @@ import {
   summarizeRecentHistory,
 } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
+import { ArtistBulkBar, SelectBox, useArtistSelection, type ArtistSelection } from './library-bulk';
+import bulkStyles from './library-bulk.module.css';
 import classic from './library-classic-cards.module.css';
+import {
+  ArtistSortControl,
+  CollectionMeter,
+  ShowMissingProvider,
+  LibraryOverview,
+  OverviewToggle,
+  rememberIndex,
+  useIndexScrollMemory,
+  useOverviewOpen,
+} from './library-collection';
 import { LibraryCover } from './library-cover';
 import {
   AlbumCardPlayButton,
@@ -245,6 +263,7 @@ import {
   LibraryFilterMenu,
   useUpgradableCounts,
 } from './library-index-extras';
+import extrasStyles from './library-index-extras.module.css';
 import {
   ChipCheck,
   ChoiceCard,
@@ -4888,10 +4907,15 @@ function UnmatchedImportsBanner() {
   );
 }
 
+/** #2108: the grids' card sizes; base is what their css picks on a desktop */
+const ARTIST_CARD_SIZES: CardSizeRange = { min: 130, max: 360, base: 200 };
+const ALBUM_CARD_SIZES: CardSizeRange = { min: 110, max: 320, base: 160 };
+
 function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const canWrite = useLibraryV2CanWrite();
+  const canWish = useLibraryV2CanWish();
   // Debounce the filter box: navigating per keystroke fires a request each key.
   const artistFilter = useUrlSyncedFilter(
     search.q,
@@ -4935,17 +4959,52 @@ function ArtistIndexView() {
       source: search.source,
       quality: search.quality,
       review: search.review,
+      dir: search.dir,
+      completion: search.completion,
+      missingMin: search.missingMin,
+      missingMax: search.missingMax,
+      pctMin: search.pctMin,
+      pctMax: search.pctMax,
+      credit: search.credit,
     }),
   );
 
   const artists = artistsQuery.data?.artists ?? [];
+  // #2109: pick several artists, run one action on them all. shift-click
+  // ranges follow the page's order
+  const pageOrder = useMemo(() => artists.map((a) => a.id), [artists]);
+  const selection = useArtistSelection(pageOrder);
+  // #2108: each grid keeps its own card size, through a trip to the table
+  const [cardSize, setCardSize] = useCardSize(
+    'soulsync:library-card-size:artists',
+    ARTIST_CARD_SIZES,
+  );
+  // #2107: the overview is optional and stays how you left it
+  const [overviewOpen, setOverviewOpen] = useOverviewOpen();
+  // #2107: the next plain visit to the Library opens this list the same way
+  const profileId = useProfile()?.profileId;
+  useEffect(() => {
+    rememberIndex(profileId, search);
+  }, [profileId, search]);
+  // ...and the trip to an artist and back lands where you were
+  const scrollAnchor = useIndexScrollMemory(
+    JSON.stringify([search.view, search.sort, search.dir, search.page, search.q]),
+    !artistsQuery.isLoading && artists.length > 0,
+  );
   const pagination = artistsQuery.data?.pagination;
   const hasActiveArtistFilters =
     Boolean(search.q.trim()) ||
     search.monitored !== 'all' ||
     search.letter !== 'all' ||
     Boolean(search.source) ||
-    search.quality === 'upgradable';
+    search.quality === 'upgradable' ||
+    Boolean(search.review) ||
+    Boolean(search.completion) ||
+    search.missingMin !== undefined ||
+    search.missingMax !== undefined ||
+    search.pctMin !== undefined ||
+    search.pctMax !== undefined ||
+    Boolean(search.credit);
   const hasNoArtistResults =
     !artistsQuery.isLoading &&
     !artistsQuery.isError &&
@@ -5013,26 +5072,7 @@ function ArtistIndexView() {
           value={artistFilter.value}
           onChange={artistFilter.onChange}
         />
-        <select
-          aria-label="Sort artists"
-          id="library-sort"
-          className={styles.select}
-          value={search.sort}
-          onChange={(e) =>
-            void navigate({
-              search: (p) => ({
-                ...p,
-                sort: e.target.value as typeof p.sort,
-                page: 1,
-              }),
-            })
-          }
-        >
-          <option value="name">Name</option>
-          <option value="added">Recently added</option>
-          <option value="albums">Album count</option>
-          <option value="tracks">Track count</option>
-        </select>
+        <ArtistSortControl />
         <LibraryFilterMenu />
         <div className={styles.viewToggle} id="library-view-toggle">
           <button
@@ -5052,12 +5092,48 @@ function ArtistIndexView() {
         </div>
         {isTableView ? (
           <ArtistTableOptionsMenu columns={artistTableColumns} columnOrder={artistColumnOrder} />
-        ) : null}
+        ) : (
+          <CardSizeSlider
+            label="Artist card size"
+            size={cardSize}
+            range={ARTIST_CARD_SIZES}
+            onChange={setCardSize}
+          />
+        )}
+        <OverviewToggle open={overviewOpen} onToggle={() => setOverviewOpen(!overviewOpen)} />
       </div>
+
+      {overviewOpen ? <LibraryOverview /> : null}
 
       <LibraryActiveFilters count={pagination?.total_count} />
 
+      <ArtistBulkBar
+        selection={selection}
+        pageArtists={artists}
+        totalMatching={pagination?.total_count ?? 0}
+        canWrite={canWrite}
+        canWish={canWish}
+        filters={{
+          q: search.q,
+          sort: search.sort,
+          monitored: search.monitored,
+          letter: search.letter,
+          source: search.source,
+          quality: search.quality,
+          review: search.review,
+          dir: search.dir,
+          completion: search.completion,
+          missingMin: search.missingMin,
+          missingMax: search.missingMax,
+          pctMin: search.pctMin,
+          pctMax: search.pctMax,
+          credit: search.credit,
+        }}
+      />
+
       <LibraryAlphabetBar />
+
+      <div ref={scrollAnchor} aria-hidden="true" />
 
       {/* Host for the vanilla download bubbles — see the note above. Sits
           directly above the artist list, where the vanilla page put it. */}
@@ -5102,6 +5178,12 @@ function ArtistIndexView() {
                   source: '',
                   quality: '' as const,
                   review: '' as const,
+                  completion: '' as const,
+                  missingMin: undefined,
+                  missingMax: undefined,
+                  pctMin: undefined,
+                  pctMax: undefined,
+                  credit: '' as const,
                   page: 1,
                 }),
               });
@@ -5111,15 +5193,20 @@ function ArtistIndexView() {
           </button>
           <LibrarySearchFallback noun="artists" />
         </div>
-      ) : search.view === 'table' ? (
-        <ArtistTable
-          artists={artists}
-          columns={artistTableColumns}
-          columnOrder={artistColumnOrder}
-          profileNameById={profileNameById}
-        />
       ) : (
-        <ArtistCards artists={artists} />
+        <ShowMissingProvider>
+          {search.view === 'table' ? (
+            <ArtistTable
+              artists={artists}
+              columns={artistTableColumns}
+              columnOrder={artistColumnOrder}
+              profileNameById={profileNameById}
+              selection={selection}
+            />
+          ) : (
+            <ArtistCards artists={artists} cardSize={cardSize} selection={selection} />
+          )}
+        </ShowMissingProvider>
       )}
 
       <PageNav
@@ -5143,6 +5230,11 @@ const ALBUM_SORT_LABELS: Record<LibraryV2AlbumSort, string> = {
 function AlbumIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  // #2108: its own size: smaller artist cards and bigger covers can coexist
+  const [albumCardSize, setAlbumCardSize] = useCardSize(
+    'soulsync:library-card-size:albums',
+    ALBUM_CARD_SIZES,
+  );
   const openArtist = useOpenArtist();
   const canWrite = useLibraryV2CanWrite();
   const albumFilter = useUrlSyncedFilter(
@@ -5211,6 +5303,12 @@ function AlbumIndexView() {
           ))}
         </select>
         <LibraryFilterMenu albums />
+        <CardSizeSlider
+          label="Album card size"
+          size={albumCardSize}
+          range={ALBUM_CARD_SIZES}
+          onChange={setAlbumCardSize}
+        />
       </div>
 
       <LibraryActiveFilters albums count={pagination?.total_count} />
@@ -5236,7 +5334,11 @@ function AlbumIndexView() {
           <LibrarySearchFallback noun="albums" />
         </div>
       ) : (
-        <div className="library-artists-grid" id="library-albums-grid">
+        <div
+          className="library-artists-grid"
+          id="library-albums-grid"
+          style={cardGridStyle(albumCardSize)}
+        >
           {albums.map((album, index) => (
             <AlbumListCard
               key={album.id}
@@ -5743,10 +5845,19 @@ function WantedIndexView() {
       q: search.q,
       page: search.page,
       wantedKind: search.wantedKind,
+      wantedArtist: search.wantedArtist,
     }),
   );
   const rows = wantedQuery.data?.tracks ?? [];
   const pagination = wantedQuery.data?.pagination;
+  // #2106: one artist's missing tracks (from their count on the list), with
+  // what the download queue is doing with each
+  const artistQueue = useQuery({
+    ...libraryV2QueueStatusQueryOptions('artists', search.wantedArtist ?? 0),
+    enabled: Boolean(search.wantedArtist),
+  });
+  const queueTracks = artistQueue.data?.tracks ?? {};
+  const showQueue = Boolean(search.wantedArtist);
 
   function setKind(kind: LibraryV2WantedKind) {
     void navigate({ search: (p) => ({ ...p, wantedKind: kind, page: 1 }) });
@@ -5798,6 +5909,29 @@ function WantedIndexView() {
         />
       </div>
 
+      {search.wantedArtist ? (
+        <div className={extrasStyles.chips}>
+          <button
+            type="button"
+            className={extrasStyles.chip}
+            aria-label={`Show every artist again, not only ${search.wantedArtistName ?? 'this one'}`}
+            onClick={() =>
+              void navigate({
+                search: (p) => ({
+                  ...p,
+                  wantedArtist: undefined,
+                  wantedArtistName: undefined,
+                  page: 1,
+                }),
+              })
+            }
+          >
+            Only {search.wantedArtistName ?? 'this artist'}
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+      ) : null}
+
       {wantedQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
       ) : wantedQuery.isError ? (
@@ -5830,6 +5964,7 @@ function WantedIndexView() {
                 <th>Album</th>
                 <th>Track</th>
                 {search.wantedKind === 'cutoff_unmet' ? <th>Quality</th> : null}
+                {showQueue ? <th>Status</th> : null}
                 <th />
               </tr>
             </thead>
@@ -5871,6 +6006,15 @@ function WantedIndexView() {
                   {search.wantedKind === 'cutoff_unmet' ? (
                     <td>{formatWantedFileQuality(row.file) ?? '—'}</td>
                   ) : null}
+                  {showQueue ? (
+                    <td>
+                      {queueTracks[row.track_id] ? (
+                        <QueueStatusBadge status={queueTracks[row.track_id]} />
+                      ) : (
+                        <span className={styles.wantedIdle}>Not searching</span>
+                      )}
+                    </td>
+                  ) : null}
                   <td className={styles.trackActions}>
                     <IconActionButton
                       icon="automatic"
@@ -5902,13 +6046,17 @@ export function ArtistCard({
   index = 0,
   onOpen,
   upgradable,
+  selection,
 }: {
   artist: LibraryV2ArtistSummary;
   index?: number;
   onOpen: (artistId: number) => void;
   /** tracks that could be better, once counted */
   upgradable?: number;
+  /** #2109: the list's multi-select, when it has one */
+  selection?: ArtistSelection;
 }) {
+  const picked = selection?.selected.has(artist.id) ?? false;
   // dev's artist tile, with nick's monitor toggle and the media-server tag on
   // top. the open button and the toggle stay siblings, never nested
   const better = upgradable ?? artist.upgradable_count;
@@ -5917,6 +6065,8 @@ export function ArtistCard({
       className="library-artist-card"
       data-artist-id={String(artist.id)}
       data-artist-name={artist.name}
+      data-collection=""
+      data-selected={picked ? '' : undefined}
       style={{
         ...CARD_FRAME,
         animation: cardFadeIn(index),
@@ -5948,9 +6098,6 @@ export function ArtistCard({
             {artist.name}
           </h3>
           <div className="library-artist-stats">
-            {artist.tracks_present ? (
-              <span className="library-artist-stat">{tracksLabel(artist.tracks_present)}</span>
-            ) : null}
             {better ? (
               <span
                 className="library-artist-stat library-artist-upgradable"
@@ -5962,6 +6109,16 @@ export function ArtistCard({
           </div>
         </div>
       </button>
+      {/* #2106: outside the open button, so its missing count can be a link */}
+      <CollectionMeter artist={artist} variant="card" />
+      {selection ? (
+        <SelectBox
+          className={bulkStyles.cardCheck}
+          checked={picked}
+          label={`Select ${artist.name}`}
+          onToggle={(shift) => selection.toggle(artist.id, shift)}
+        />
+      ) : null}
       <ClassicCardBadges ids={artist.provider_ids} entity="artist" />
       <ArtistCardPlayButton artist={artist} className={`library-artist-play-btn ${classic.play}`} />
       <span className={`${styles.cardMonitor} ${classic.monitor}`}>
@@ -5976,17 +6133,31 @@ export function ArtistCard({
   );
 }
 
-function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
+function ArtistCards({
+  artists,
+  cardSize = null,
+  selection,
+}: {
+  artists: LibraryV2ArtistSummary[];
+  cardSize?: number | null;
+  selection?: ArtistSelection;
+}) {
   const openArtist = useOpenArtist();
   const upgradable = useUpgradableCounts(artists);
   return (
-    <div className="library-artists-grid" id="library-artists-grid">
+    <div
+      className="library-artists-grid"
+      id="library-artists-grid"
+      style={cardGridStyle(cardSize)}
+      data-selecting={selection && selection.selected.size > 0 ? '' : undefined}
+    >
       {artists.map((artist, index) => (
         <ArtistCard
           key={artist.id}
           index={index}
           artist={artist}
           upgradable={upgradable.get(artist.id)}
+          selection={selection}
           onOpen={openArtist}
         />
       ))}
@@ -5999,11 +6170,13 @@ function ArtistTable({
   columns,
   columnOrder,
   profileNameById,
+  selection,
 }: {
   artists: LibraryV2ArtistSummary[];
   columns: LibraryV2ArtistTableColumns;
   columnOrder: (keyof LibraryV2ArtistTableColumns)[];
   profileNameById: Map<number, string>;
+  selection?: ArtistSelection;
 }) {
   const openArtist = useOpenArtist();
 
@@ -6092,19 +6265,47 @@ function ArtistTable({
       <table className={`${styles.table} ${styles.artistTable}`} id="library-artists-grid">
         <thead>
           <tr>
+            {selection ? (
+              <th className={styles.colSelect}>
+                <SelectBox
+                  checked={artists.length > 0 && artists.every((a) => selection.selected.has(a.id))}
+                  label="Select every artist on this page"
+                  onToggle={() =>
+                    selection.setMany(
+                      artists.map((a) => a.id),
+                      !artists.every((a) => selection.selected.has(a.id)),
+                    )
+                  }
+                />
+              </th>
+            ) : null}
             <th className={styles.colMonitor} title="On the Wishlist">
               Wish
             </th>
             <th>Artist</th>
-            <th className={styles.colNum}>Albums</th>
-            <th className={styles.colNum}>Singles</th>
-            <th className={styles.colNum}>Tracks</th>
+            <th className={`${styles.colNum} ${styles.colReleaseCount}`}>Albums</th>
+            <th className={`${styles.colNum} ${styles.colReleaseCount}`}>Singles</th>
+            <th className={styles.colCollection}>Collection</th>
             {orderedKeys.map(renderHeaderCell)}
           </tr>
         </thead>
         <tbody>
           {artists.map((artist) => (
-            <tr key={artist.id} className={styles.tableRow} onClick={() => openArtist(artist.id)}>
+            <tr
+              key={artist.id}
+              className={styles.tableRow}
+              data-selected={selection?.selected.has(artist.id) ? '' : undefined}
+              onClick={() => openArtist(artist.id)}
+            >
+              {selection ? (
+                <td className={styles.colSelect}>
+                  <SelectBox
+                    checked={selection.selected.has(artist.id)}
+                    label={`Select ${artist.name}`}
+                    onToggle={(shift) => selection.toggle(artist.id, shift)}
+                  />
+                </td>
+              ) : null}
               <td>
                 <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
               </td>
@@ -6135,10 +6336,12 @@ function ArtistTable({
                   <MediaServerRecognitionBadge sources={artist.media_server_sources} />
                 </span>
               </td>
-              <td className={styles.colNum}>{artist.album_count}</td>
-              <td className={styles.colNum}>{artist.single_count}</td>
-              <td className={styles.colNum}>
-                <TrackPresence present={artist.tracks_present} total={artist.track_count} />
+              <td className={`${styles.colNum} ${styles.colReleaseCount}`}>{artist.album_count}</td>
+              <td className={`${styles.colNum} ${styles.colReleaseCount}`}>
+                {artist.single_count}
+              </td>
+              <td className={styles.colCollection}>
+                <CollectionMeter artist={artist} variant="row" />
               </td>
               {orderedKeys.map((key) => renderBodyCell(artist, key))}
             </tr>

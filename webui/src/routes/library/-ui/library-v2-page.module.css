@@ -1140,6 +1140,26 @@ button.featureTag:disabled {
   text-align: center;
 }
 
+/* #2106: a wanted track the queue isn't working on */
+.wantedIdle {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* #2109: the artist table's checkbox column and a picked row */
+.colSelect {
+  width: 40px;
+}
+
+.tableRow[data-selected] {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+/* #2106: owned / expected with a bar, in place of the bare count */
+.colCollection {
+  width: 210px;
+}
+
 .colActions {
   width: 170px;
   text-align: right;
@@ -5300,6 +5320,11 @@ textarea.searchInput {
 .libraryTableResponsive > .table {
   table-layout: fixed;
 }
+/* #2106: on a wide screen the artist sat far left and its numbers far right.
+   the artist table keeps to a readable width instead of the whole monitor */
+.libraryTableResponsive > .artistTable {
+  max-width: 1180px;
+}
 .libraryTableResponsive td {
   overflow-wrap: anywhere;
 }
@@ -5335,6 +5360,9 @@ textarea.searchInput {
   .artistTable .colMonitor {
     width: 36px;
   }
+  .artistTable .colCollection {
+    width: 150px;
+  }
   .artistTable th,
   .artistTable td {
     padding: 9px 6px;
@@ -5345,10 +5373,8 @@ textarea.searchInput {
   }
 }
 @container library-table (max-width: 540px) {
-  .artistTable th:nth-child(3),
-  .artistTable th:nth-child(4),
-  .artistTable td:nth-child(3),
-  .artistTable td:nth-child(4) {
+  /* by class, not position: the checkbox column (#2109) moves them */
+  .artistTable .colReleaseCount {
     display: none;
   }
   .artistTableReleaseCounts {
@@ -5811,11 +5837,6 @@ textarea.searchInput {
     font-size: 11px;
     color: #ffffff60;
   }
-}
-
-.artistTable th:nth-child(5),
-.artistTable td:nth-child(5) {
-  width: 84px;
 }
 
 /* Workspaces share Interactive Search's width; Artist Settings keeps its size. */
