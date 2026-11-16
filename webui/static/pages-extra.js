@@ -1257,3 +1257,343 @@ function _syncDetailFilter(btn, filter) {
 // _adlOpenBatchModal moved to core.js as window.openDownloadBatchModal
 // rather than being deleted: it reads activeDownloadProcesses,
 // rehydrateModal and WishlistModalState, which are script-scoped there.
+
+// ==================================================================================
+// Moved from settings.js (SETTINGS_PORT.md step V4a): none of these belong to the
+// Settings page, and settings.js goes when that page is React.
+// ==================================================================================
+
+// ===============================
+// SUPPORT MODAL
+// ===============================
+
+function showSupportModal() {
+    const overlay = document.getElementById('support-modal-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+}
+
+function closeSupportModal() {
+    const overlay = document.getElementById('support-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function copyAddress(address, cryptoName) {
+    try {
+        // navigator.clipboard requires HTTPS — use fallback for HTTP (Docker)
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(address);
+        } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = address;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
+        showToast(`${cryptoName} address copied to clipboard`, 'success');
+    } catch (error) {
+        console.error('Failed to copy address:', error);
+        // Show the address so user can copy manually
+        showToast(`${cryptoName}: ${address}`, 'info');
+    }
+}
+
+// ── Hydrabase Functions ──
+
+let _hydrabaseConnected = false;
+
+async function hydrabaseToggleConnection() {
+    if (_hydrabaseConnected) {
+        await hydrabaseDisconnect();
+    } else {
+        await hydrabaseConnect();
+    }
+}
+
+async function hydrabaseConnect() {
+    const url = document.getElementById('hydra-ws-url').value.trim();
+    const apiKey = document.getElementById('hydra-api-key').value.trim();
+    if (!url || !apiKey) {
+        showToast('URL and API key required', 'error');
+        return;
+    }
+    const statusEl = document.getElementById('hydra-connection-status');
+    const btn = document.getElementById('hydra-connect-btn');
+    statusEl.textContent = 'Connecting...';
+    statusEl.style.color = '#f0ad4e';
+    try {
+        const response = await fetch('/api/hydrabase/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, api_key: apiKey })
+        });
+        const data = await response.json();
+        if (data.success) {
+            _hydrabaseConnected = true;
+            statusEl.textContent = 'Connected';
+            statusEl.style.color = 'rgb(var(--accent-light-rgb))';
+            btn.textContent = 'Disconnect';
+            showToast('Connected to Hydrabase', 'success');
+        } else {
+            statusEl.textContent = 'Failed';
+            statusEl.style.color = '#f44336';
+            showToast(data.error || 'Connection failed', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.style.color = '#f44336';
+        showToast('Connection error', 'error');
+    }
+}
+
+async function hydrabaseDisconnect() {
+    try {
+        await fetch('/api/hydrabase/disconnect', { method: 'POST' });
+    } catch (e) { }
+    _hydrabaseConnected = false;
+    document.getElementById('hydra-connection-status').textContent = 'Disconnected';
+    document.getElementById('hydra-connection-status').style.color = '#888';
+    document.getElementById('hydra-connect-btn').textContent = 'Connect';
+    // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
+    window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
+    document.getElementById('hydrabase-nav').style.display = 'none';
+    // Orb visibility rides the dispatch (React-owned since the flip), and so
+    // does the System tab's dev mode status (system-tab.tsx)
+    showToast('Disconnected — dev mode disabled', 'success');
+    navigateToPage('settings');
+}
+
+async function loadHydrabaseComparisons() {
+    const container = document.getElementById('hydra-comparisons-container');
+    if (!container) return;
+    try {
+        const response = await fetch('/api/hydrabase/comparisons');
+        const data = await response.json();
+        if (!data.success || !data.comparisons?.length) {
+            container.innerHTML = '<p style="color: #666; font-size: 13px;">No comparisons yet. Search with Hydrabase active to generate comparisons.</p>';
+            return;
+        }
+        let html = '';
+        for (const comp of data.comparisons) {
+            const time = new Date(comp.timestamp * 1000).toLocaleTimeString();
+            html += `<div style="background: rgba(30, 30, 30, 0.6); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #fff;">"${comp.query}"</strong>
+                    <span style="color: #666; font-size: 11px;">${time}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 12px;">
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3);">
+                        <div style="color: rgba(139, 92, 246, 1); font-weight: 600; margin-bottom: 2px;">Hydrabase</div>
+                        <div style="color: #aaa;">${comp.hydrabase?.tracks || 0}T / ${comp.hydrabase?.artists || 0}A / ${comp.hydrabase?.albums || 0}Al</div>
+                    </div>
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(29, 185, 84, 0.15); border: 1px solid rgba(29, 185, 84, 0.3);">
+                        <div style="color: rgb(var(--accent-light-rgb)); font-weight: 600; margin-bottom: 2px;">Spotify</div>
+                        <div style="color: #aaa;">${comp.spotify?.tracks || 0}T / ${comp.spotify?.artists || 0}A / ${comp.spotify?.albums || 0}Al</div>
+                    </div>
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(251, 93, 93, 0.15); border: 1px solid rgba(251, 93, 93, 0.3);">
+                        <div style="color: #fb5d5d; font-weight: 600; margin-bottom: 2px;">${comp.fallback_source === 'deezer' ? 'Deezer' : 'iTunes'}</div>
+                        <div style="color: #aaa;">${(comp.fallback || comp.itunes)?.tracks || 0}T / ${(comp.fallback || comp.itunes)?.artists || 0}A / ${(comp.fallback || comp.itunes)?.albums || 0}Al</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<p style="color: #f44336; font-size: 13px;">Failed to load comparisons.</p>';
+    }
+}
+
+async function hydrabaseSendRaw(textareaId) {
+    const textarea = document.getElementById(textareaId);
+    const raw = textarea.value.trim();
+    if (!raw) {
+        showToast('Payload is empty', 'error');
+        return;
+    }
+    if (!_hydrabaseConnected) {
+        showToast('Not connected to Hydrabase', 'error');
+        return;
+    }
+    let payload;
+    try {
+        payload = JSON.parse(raw);
+    } catch (e) {
+        showToast('Invalid JSON payload', 'error');
+        return;
+    }
+    // Auto-inject a fresh nonce if not set or zero
+    if (!payload.nonce) {
+        payload.nonce = Date.now();
+    }
+    const responseArea = document.getElementById('hydra-response');
+    responseArea.textContent = 'Sending...';
+    try {
+        const response = await fetch('/api/hydrabase/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload })
+        });
+        const data = await response.json();
+        if (data.success) {
+            responseArea.textContent = JSON.stringify(data.data, null, 2);
+        } else {
+            responseArea.textContent = 'Error: ' + (data.error || 'Unknown error');
+            if (data.error && data.error.includes('Not connected')) {
+                _hydrabaseConnected = false;
+                document.getElementById('hydra-connection-status').textContent = 'Disconnected';
+                document.getElementById('hydra-connection-status').style.color = '#888';
+                document.getElementById('hydra-connect-btn').textContent = 'Connect';
+            }
+        }
+    } catch (e) {
+        responseArea.textContent = 'Error: ' + e.message;
+    }
+}
+
+// Dashboard-specific test functions that create activity items
+async function testDashboardConnection(service) {
+    // 'spotify_free' is a display-only label for the no-auth composite; the real
+    // service to test is 'spotify'.
+    if (service === 'spotify_free') service = 'spotify';
+    try {
+        showLoadingOverlay(`Testing ${service} service...`);
+
+        const response = await fetch(API.testDashboardConnection, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Use backend's message which contains dynamic source name
+            showToast(result.message || `${service} service verified`, 'success');
+            // Refresh status indicators immediately so UI reflects the new state
+            fetchAndUpdateServiceStatus();
+        } else {
+            showToast(`${service} service check failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error(`Error testing ${service} service:`, error);
+        showToast(`Failed to test ${service} service`, 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+// ── Spotify Rate Limit Handling ───────────────────────────────────────────
+let _spotifyRateLimitShown = false;
+let _spotifyInCooldown = false;
+let _rateLimitModalOpen = false;
+let _rateLimitCountdownInterval = null;
+let _rateLimitExpiresAt = 0;
+
+function handleSpotifyRateLimit(rateLimitInfo) {
+    if (!rateLimitInfo || !rateLimitInfo.active) {
+        if (_spotifyRateLimitShown) {
+            _spotifyRateLimitShown = false;
+            closeRateLimitModal();
+            showToast('Spotify access restored', 'success');
+            // Refresh discover page if user is on it — data source switched back to Spotify
+            if (currentPage === 'discover') {
+                console.log('Spotify restored — refreshing discover page data');
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
+            }
+        }
+        return;
+    }
+    // Update countdown if modal is open (status pushes every 10s keep it accurate)
+    if (_rateLimitModalOpen && rateLimitInfo.remaining_seconds) {
+        _rateLimitExpiresAt = Date.now() + (rateLimitInfo.remaining_seconds * 1000);
+    }
+    if (!_spotifyRateLimitShown) {
+        _spotifyRateLimitShown = true;
+        _spotifyInCooldown = false;
+        showRateLimitModal(rateLimitInfo);
+        // Refresh discover page if user is on it — data source switched to iTunes
+        if (currentPage === 'discover') {
+            console.log('Spotify rate limited — refreshing discover page with iTunes data');
+            if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
+        }
+    }
+}
+
+function showRateLimitModal(rateLimitInfo) {
+    const overlay = document.getElementById('rate-limit-modal-overlay');
+    if (!overlay) return;
+
+    // Populate details
+    const banDuration = document.getElementById('rate-limit-ban-duration');
+    const endpoint = document.getElementById('rate-limit-endpoint');
+    const countdown = document.getElementById('rate-limit-countdown');
+
+    banDuration.textContent = formatRateLimitDuration(rateLimitInfo.retry_after || rateLimitInfo.remaining_seconds);
+    endpoint.textContent = rateLimitInfo.endpoint || 'unknown';
+    countdown.textContent = formatRateLimitDuration(rateLimitInfo.remaining_seconds);
+
+    // Set expiry for live countdown
+    _rateLimitExpiresAt = Date.now() + (rateLimitInfo.remaining_seconds * 1000);
+
+    // Start live countdown timer
+    if (_rateLimitCountdownInterval) clearInterval(_rateLimitCountdownInterval);
+    _rateLimitCountdownInterval = setInterval(() => {
+        const remaining = Math.max(0, Math.round((_rateLimitExpiresAt - Date.now()) / 1000));
+        countdown.textContent = formatRateLimitDuration(remaining);
+        if (remaining <= 0) {
+            clearInterval(_rateLimitCountdownInterval);
+            _rateLimitCountdownInterval = null;
+        }
+    }, 1000);
+
+    overlay.classList.remove('hidden');
+    _rateLimitModalOpen = true;
+}
+
+function closeRateLimitModal() {
+    const overlay = document.getElementById('rate-limit-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    if (_rateLimitCountdownInterval) {
+        clearInterval(_rateLimitCountdownInterval);
+        _rateLimitCountdownInterval = null;
+    }
+    _rateLimitModalOpen = false;
+}
+
+async function disconnectSpotifyFromRateLimit() {
+    closeRateLimitModal();
+    try {
+        showLoadingOverlay('Disconnecting Spotify...');
+        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            _spotifyRateLimitShown = false;
+            showToast(data.message || 'Spotify disconnected.', 'success');
+            // React's metadata source picker (connections-metadata.tsx), on window
+            window.syncMetadataSourceSelection?.(data.source || 'deezer');
+            await fetchAndUpdateServiceStatus();
+            if (currentPage === 'discover') {
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
+            }
+        } else {
+            showToast(`Failed to disconnect: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error disconnecting Spotify:', error);
+        showToast('Failed to disconnect Spotify', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function formatRateLimitDuration(seconds) {
+    if (!seconds || seconds <= 0) return '0s';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}

@@ -70,7 +70,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | File | At the start | Now |
 |---|---|---|
 | `webui/index.html` | 12,823 | 4,754 |
-| `webui/static/settings.js` | 10,187 | 1,442 |
+| `webui/static/settings.js` | 10,187 | 1,111 |
 | `webui/static/video/video-settings.js` | 2,940 | 19 (a note) |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
@@ -806,6 +806,12 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 **Checked.** Parity against a frozen fixture; `system-security.test.tsx` 10 (the PIN and password flows and their locks, the recovery question, the OIDC block, every saved key, the cors warning, the shell's boxes kept); `oidc-provider-block-toggle` and `signup-defaults-settings` rewritten to run the section. End of the tab: the whole frontend suite, 12,448 pass and 9 failures in 5 files outside Settings that pass alone (load timeouts); the full Python run (96 files) 2,347 pass and 2 count floors repointed. Browser: every loaded value, the lock words, the password unlocking Require login, four changes saved the same; pixels identical.
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
+
+### Step V4a: what was never the Settings page's leaves settings.js (Nov 16 2026)
+
+**What.** The support modal (`showSupportModal`, `closeSupportModal`, `copyAddress`), the Hydrabase page (`hydrabaseToggleConnection` and the rest), the dashboard's `testDashboardConnection` and the Spotify rate-limit modal (`handleSpotifyRateLimit` and the rest) moved verbatim to `pages-extra.js`, which loads after `settings.js` and already holds such page functions. They are only called at run time, so the later load changes nothing.
+
+**Checked.** `test_vanilla_globals_resolve` (the rate-limit code's three guarded `loadDiscoverPage` calls moved their baseline from `settings.js` to `pages-extra.js`; `settings.js` is at zero now), `test_script_split_integrity` (every onclick still resolves), `test_spotify_ratelimit_modal`; the frontend `src/test`, Settings and dashboard folders, 1,990 pass. On V3c: the 213 Python files that read the web UI, and the whole frontend suite (12 route tests failed under load and pass alone).
 
 ### Video pass V3c: Notifications, Import Lists; the retired forms go (Nov 16 2026)
 
