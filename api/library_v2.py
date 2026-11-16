@@ -2617,6 +2617,46 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             bundle = album_match_bundle(conn, album_id, available_services=available)
         return jsonify({"success": True, **bundle})
 
+    @_route("/api/library/v2/albums/<int:album_id>/versions")
+    def lib2_album_versions(album_id):
+        """#2145: the album's other versions (musicbrainz release group + the
+        primary source's same-title releases). ``?q=`` searches this artist."""
+        from core.library2 import album_versions
+        query = request.args.get("q")
+        if query is not None:
+            payload = album_versions.search_versions(get_database(), album_id, query)
+        else:
+            payload = album_versions.list_versions(get_database(), album_id)
+        if payload is None:
+            return _fail("Album not found", 404)
+        return jsonify({"success": True, **payload})
+
+    @_route("/api/library/v2/albums/<int:album_id>/versions/preview", methods=["POST"])
+    def lib2_album_version_preview(album_id):
+        """What switching to one version changes, before anything is written."""
+        from core.library2.album_versions import preview_version
+        body = request.get_json(silent=True) or {}
+        payload = preview_version(get_database(), album_id, body.get("source"),
+                                  body.get("release_id"))
+        return jsonify(payload), (200 if payload.get("success") else 400)
+
+    @_route("/api/library/v2/albums/<int:album_id>/versions/apply", methods=["POST"])
+    def lib2_album_version_apply(album_id):
+        """Point the album at the picked version: the manual album match (#758)."""
+        from core.library2.album_versions import apply_version
+        body = request.get_json(silent=True) or {}
+        payload = apply_version(get_database(), album_id, body.get("source"),
+                                body.get("release_id"), actor=f"profile:{_profile()}")
+        if not payload.get("success"):
+            return jsonify(payload), 400
+        from core.enrichment.unmatched import invalidate_unmatched_snapshots
+        invalidate_unmatched_snapshots()
+        # the new release's guests, same as a manual match
+        from core.library2.provider_credits import schedule_match_credits
+        schedule_match_credits(get_database(), "album", album_id, payload["source"],
+                               payload["release_id"])
+        return jsonify(payload)
+
     @_route(
         "/api/library/v2/<entity_type>/<int:entity_id>/manual-match",
         methods=["PUT", "DELETE"],

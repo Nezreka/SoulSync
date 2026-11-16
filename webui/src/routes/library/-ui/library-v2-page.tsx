@@ -207,6 +207,7 @@ import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { WatchlistAddModal } from '../../artist-detail/-ui/watchlist-add-modal';
+import { AlbumVersionsModal } from './album-versions-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { ArtistHeroVideo } from './artist-hero-video';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
@@ -3176,6 +3177,7 @@ export function AlbumOverflowMenu({
   const [showUseFileTags, setShowUseFileTags] = useState(false);
   const [showReorganize, setShowReorganize] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -3333,6 +3335,21 @@ export function AlbumOverflowMenu({
               >
                 Reassign to another artist…
               </button>
+              {/* #2145: picard's "other versions": point the album at the right edition */}
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canWrite}
+                title="Pick which edition this album is (deluxe, remaster, a release with more tracks)"
+                onClick={() => {
+                  if (!canWrite) return;
+                  setShowVersions(true);
+                  setOpen(false);
+                }}
+              >
+                Other versions…
+              </button>
               <button
                 type="button"
                 className={styles.overflowMenuItem}
@@ -3479,6 +3496,14 @@ export function AlbumOverflowMenu({
           onApplied={() => {
             void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
           }}
+        />
+      ) : null}
+      {showVersions ? (
+        <AlbumVersionsModal
+          albumId={album.id}
+          albumTitle={album.title}
+          artistName={String(album.artist_name || '')}
+          onClose={() => setShowVersions(false)}
         />
       ) : null}
       {showArtPicker ? (

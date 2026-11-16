@@ -423,6 +423,103 @@ export async function manualMatchLibraryV2Entity(input: {
   };
 }
 
+/** #2145: one release of an album, as the Other versions picker lists it. */
+export interface LibraryV2AlbumVersion {
+  source: string;
+  id: string;
+  title: string;
+  date: string | null;
+  year: number | null;
+  track_count: number | null;
+  label: string | null;
+  country: string | null;
+  format: string | null;
+  disambiguation: string | null;
+  status: string | null;
+  album_type: string | null;
+  image_url: string | null;
+  current: boolean;
+}
+
+export interface LibraryV2AlbumVersionGroup {
+  source: string;
+  label: string;
+  versions: LibraryV2AlbumVersion[];
+  error?: string;
+  note?: string;
+}
+
+export interface LibraryV2AlbumVersions {
+  album?: {
+    id: number;
+    title: string;
+    artist_name: string;
+    track_count: number | null;
+    release_ids: Record<string, string>;
+    pinned: { source: string; id: string } | null;
+  };
+  groups: LibraryV2AlbumVersionGroup[];
+}
+
+export interface LibraryV2AlbumVersionPreview {
+  source: string;
+  release_id: string;
+  track_count_before: number | null;
+  track_count_after: number;
+  owned_count: number;
+  mapped_count: number;
+  unmapped_count: number;
+  pairings: {
+    local_title: string;
+    local_track_number: number | null;
+    target_title: string | null;
+    target_track_number: number | null;
+    matched_by: string;
+    mapped: boolean;
+  }[];
+  tracks: { title: string | null; track_number: number | null; disc_number: number | null }[];
+  held_by: { id: number; title: string } | null;
+}
+
+/** #2145: the album's other versions; `query` searches this artist instead. */
+export async function fetchLibraryV2AlbumVersions(
+  albumId: number,
+  query?: string,
+): Promise<LibraryV2AlbumVersions> {
+  return lib2Json<Ok & LibraryV2AlbumVersions>(
+    apiClient.get(`library/v2/albums/${albumId}/versions`, {
+      ...(query !== undefined ? { searchParams: { q: query } } : {}),
+      timeout: 60_000,
+    }),
+    'Could not load other versions',
+  );
+}
+
+export async function previewLibraryV2AlbumVersion(
+  albumId: number,
+  version: { source: string; id: string },
+): Promise<LibraryV2AlbumVersionPreview> {
+  return lib2Json<Ok & LibraryV2AlbumVersionPreview>(
+    apiClient.post(`library/v2/albums/${albumId}/versions/preview`, {
+      json: { source: version.source, release_id: version.id },
+      timeout: 60_000,
+    }),
+    'Could not read that version',
+  );
+}
+
+export async function applyLibraryV2AlbumVersion(
+  albumId: number,
+  version: { source: string; id: string },
+): Promise<void> {
+  await lib2Json(
+    apiClient.post(`library/v2/albums/${albumId}/versions/apply`, {
+      json: { source: version.source, release_id: version.id },
+    }),
+    'Switching version failed',
+  );
+}
+
 /** Clear a wrong provider identity, optionally with the linked Watchlist row
  * in the same transaction. */
 export async function clearLibraryV2EntityMatch(input: {
