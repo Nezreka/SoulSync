@@ -649,11 +649,19 @@ function ApiKeys({ store }: { store: SettingsStore }) {
 
 type Profile = { id: number | string; name?: string; can_download?: boolean };
 
-/** the Lidarr profile list (loadLidarrCompatProfiles) */
-function LidarrProfile({ store }: { store: SettingsStore }) {
+/** the profile list of a compat api (loadLidarrCompatProfiles): Lidarr's and Seerr's */
+function CompatProfile({
+  store,
+  section,
+  id,
+}: {
+  store: SettingsStore;
+  section: string;
+  id: string;
+}) {
   const settings = useSettings(store);
   const loads = useLoads(store);
-  const saved = text((settings.lidarr_compat || {}).profile_id ?? 1) || '1';
+  const saved = text((settings[section] || {}).profile_id ?? 1) || '1';
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   useEffect(() => {
     if (!loads) return;
@@ -662,7 +670,7 @@ function LidarrProfile({ store }: { store: SettingsStore }) {
         const data = (await (await fetch('/api/profiles')).json()) as { profiles?: Profile[] };
         if (data.profiles?.length) setProfiles(data.profiles);
       } catch (error) {
-        console.debug('lidarr profile list failed', error);
+        console.debug(section + ' profile list failed', error);
       }
     })();
   }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -673,11 +681,9 @@ function LidarrProfile({ store }: { store: SettingsStore }) {
       : String(parseInt(saved, 10) || 1);
   return (
     <select
-      id="lidarr-compat-profile"
+      id={id}
       value={profiles ? value : '1'}
-      onChange={(event) =>
-        store.set('lidarr_compat', 'profile_id', parseInt(event.target.value, 10) || 1)
-      }
+      onChange={(event) => store.set(section, 'profile_id', parseInt(event.target.value, 10) || 1)}
     >
       {profiles ? (
         profiles.map((p) => (
@@ -774,10 +780,32 @@ function ApiSection({ store }: { store: SettingsStore }) {
           {check('lidarr-compat-enabled', 'lidarr_compat', 'Answer as Lidarr at /lidarr')}
           <div className="form-group">
             <label>Requests go to profile:</label>
-            <LidarrProfile store={store} />
+            <CompatProfile store={store} section="lidarr_compat" id="lidarr-compat-profile" />
             <div className="setting-help-text" style={{ marginTop: '4px', ...HELP }}>
               Pick a profile without download rights and every request waits for approval on the
               Requests page first.
+            </div>
+          </div>
+        </div>
+
+        <div className="api-service-frame" style={{ marginTop: '16px' }}>
+          <h4 className="service-title" style={{ color: '#64ffda' }}>
+            Seerr Compatible API
+          </h4>
+          <div className="setting-help-text" style={{ marginBottom: '10px', ...HELP }}>
+            Lets apps built for Seerr (Jellyseerr, Overseerr), like Litefin&apos;s Jellyfin plugin,
+            discover and request movies and shows through SoulSync&apos;s video side. In the app,
+            set the Seerr URL to <code>http://&lt;host&gt;:8008/seerr</code> and paste an{' '}
+            <strong>Admin</strong> API key from above. Each Jellyfin user requests as the profile
+            linked to their Jellyfin account, or the profile with the same name.
+          </div>
+          {check('seerr-compat-enabled', 'seerr_compat', 'Answer as Seerr at /seerr')}
+          <div className="form-group">
+            <label>Jellyfin users with no profile request as:</label>
+            <CompatProfile store={store} section="seerr_compat" id="seerr-compat-profile" />
+            <div className="setting-help-text" style={{ marginTop: '4px', ...HELP }}>
+              A profile that can download gets requests on its wishlist right away. One without
+              download rights sends them to the Requests page for approval first.
             </div>
           </div>
         </div>

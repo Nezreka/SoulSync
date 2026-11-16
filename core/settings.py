@@ -699,6 +699,12 @@ class ConfigManager:
                 "enabled": False,
                 "profile_id": 1,
             },
+            # soulsync answering as seerr for video request apps (#2151). off
+            # by default. requests from jellyfin users with no profile go to profile_id
+            "seerr_compat": {
+                "enabled": False,
+                "profile_id": 1,
+            },
             # ai clients over /mcp, with an api key. off by default
             "mcp": {
                 "enabled": False,

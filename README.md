@@ -591,8 +591,9 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 | **Inbound request webhook** | `POST /api/v1/request` with a query and SoulSync searches, matches and downloads it. Good for Discord bots and shortcuts. |
 | **MCP server** | `/mcp`, so Claude and other AI apps can search, check your library and download through SoulSync with an API key. A read-only key can look but not change anything. |
 | **Lidarr compatible API** | `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead. |
+| **Seerr compatible API** | `/seerr`, so apps built for Seerr (Jellyseerr, Overseerr), like Litefin's Jellyfin plugin, can browse and request movies and shows through SoulSync's video side. |
 
-The MCP server and the Lidarr compatible API are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
+The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
 
 ## Mobile, PWA & theming
 
