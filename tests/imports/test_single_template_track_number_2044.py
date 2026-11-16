@@ -41,6 +41,7 @@ def _cfg(monkeypatch, tmp_path, single=SINGLE):
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
     monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
     monkeypatch.setattr(import_paths, "library_has_artist", lambda n: False)
+    monkeypatch.setattr(import_paths, "library_has_whole_artist", lambda n, segments=(): False)
 
 
 def _file(tmp_path, number, *, disc=1, total_discs=1, album_info=True, title=None):

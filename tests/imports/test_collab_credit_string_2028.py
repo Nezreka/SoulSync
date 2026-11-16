@@ -45,6 +45,8 @@ def _cfg(monkeypatch, tmp_path, mode="first", library=()):
     monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
     known = {n.casefold() for n in library}
     monkeypatch.setattr(import_paths, "library_has_artist", lambda n: n.casefold() in known)
+    monkeypatch.setattr(import_paths, "library_has_whole_artist",
+                        lambda n, segments=(): n.casefold() in known)
     return config
 
 
@@ -138,7 +140,8 @@ def test_album_artist_tag_follows_the_same_rule():
         "source": "deezer",
     }
     with patch.object(src_module, "get_config_manager", return_value=cfg), \
-            patch.object(src_module, "library_has_artist", lambda n: False):
+            patch.object(src_module, "library_has_artist", lambda n: False), \
+            patch.object(src_module, "library_has_whole_artist", lambda n, segments=(): False):
         meta = src_module.extract_source_metadata(
             context, {"name": "3 Doors Down"}, {"album_name": "Hits"})
     assert meta["album_artist"] == "Creed"
@@ -150,6 +153,7 @@ def test_web_server_copy_of_the_replacer_agrees(monkeypatch):
     monkeypatch.setattr(web_server, "config_manager",
                         _Config({"file_organization.collab_artist_mode": "first"}))
     monkeypatch.setattr(web_server, "library_has_artist", lambda n: False)
+    monkeypatch.setattr(web_server, "library_has_whole_artist", lambda n, segments=(): False)
     ctx = {"artist": "3 Doors Down", "albumartist": CREED, "album": "Hits",
            "title": "Song", "track_number": 1, "disc_number": 1, "year": "2004",
            "_artists_list": [{"name": CREED}], "_track_artists_list": [{"name": "3 Doors Down"}]}

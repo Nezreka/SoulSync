@@ -16,7 +16,8 @@ from utils.logging_config import get_logger
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
-from core.imports.collab_artist import collab_primary, library_has_artist
+from core.imports.collab_artist import (
+    collab_primary, library_has_artist, library_has_whole_artist)
 from core.imports.compilation import is_various_artists_credit, is_various_artists_name
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
@@ -834,7 +835,8 @@ def _replace_template_variables(template: str, context: dict) -> str:
         primary = collab_primary(
             _raw_album_artist, artists_list, context.get("_track_artists_list"),
             known_names=context.get("_collab_known_names") or (),
-            library_has=library_has_artist)
+            library_has=library_has_artist,
+            whole_library_has=library_has_whole_artist)
         if primary:
             # the list's name is raw: unsanitized, a collab album went to
             # "L.A.B." and a solo one to "L.A.B" (#1954), and a "/" in it

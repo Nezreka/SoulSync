@@ -26,7 +26,8 @@ from core.imports.context import (
     is_real_provider_album_id,
     normalize_import_context,
 )
-from core.imports.collab_artist import collab_primary, library_has_artist
+from core.imports.collab_artist import (
+    collab_primary, library_has_artist, library_has_whole_artist)
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
@@ -2628,7 +2629,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         primary = collab_primary(
             raw_album_artist, context_artists, _track_artists,
             known_names=[n for n in (artist_dict.get("name"), *(all_artists or [])) if n],
-            library_has=library_has_artist)
+            library_has=library_has_artist,
+            whole_library_has=library_has_whole_artist)
         if primary:
             raw_album_artist = primary
         elif len(context_artists) == 1 and ("," in raw_album_artist or " & " in raw_album_artist):

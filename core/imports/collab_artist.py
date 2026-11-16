@@ -67,7 +67,8 @@ def credit_segments(name: str) -> list:
     return parts
 
 
-def split_credit_primary(album_artist: str, known_names=(), library_has=None) -> str:
+def split_credit_primary(album_artist: str, known_names=(), library_has=None,
+                         whole_library_has=None) -> str:
     """the first artist of a credit the source gave as one string, '' when
     it can't tell the string is a list.
 
@@ -76,9 +77,13 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
     own combined folder (#2028). it counts as a list when it has a ";" or
     " / ", when one of its parts is an artist this download names (the
     track's artist, the watched artist), or when the library already holds
-    two of its parts as artists. a known name that starts the credit wins
-    whole, so "Axwell & Sebastian Ingrosso, X" keeps the duo.
+    two of its parts as artists and not the whole credit (#2131). a known
+    name that starts the credit wins whole, so
+    "Axwell & Sebastian Ingrosso, X" keeps the duo.
     ``library_has(name)`` says whether the library has an artist by that name.
+    ``whole_library_has(name, segments)`` says whether the library holds
+    the whole credit as one act (#2131); without one, ``library_has``
+    answers for the whole credit too.
     """
     combined = str(album_artist or "").strip()
     segments = credit_segments(combined)
@@ -99,6 +104,19 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
         except Exception:  # noqa: BLE001 - naming never fails over a lookup
             return False
 
+    # the whole-name check has its own lookup when the caller gives one:
+    # it also hears the segments, because an alias row for the whole
+    # credit only means "already resolved as a list" when it points at
+    # one of the parts — a §40 alias points at the same act spelled
+    # another way and still counts as holding the act (#2131 gate)
+    def in_whole_library(name):
+        if whole_library_has is None:
+            return in_library(name)
+        try:
+            return bool(whole_library_has(name, segments))
+        except Exception:  # noqa: BLE001 - naming never fails over a lookup
+            return False
+
     # the longest known name the credit starts with ("Axwell Λ Ingrosso")
     best = ""
     for name in known.values():
@@ -113,7 +131,13 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
         # ("Axwell & Sebastian Ingrosso") as much as a single part
         is_list = any(_names_later(combined, name) for name in known.values())
     if not is_list and library_has is not None:
-        is_list = sum(1 for seg in segments if in_library(seg)) >= 2
+        # two parts the library knows make a list, unless the library knows
+        # the whole credit as one act too: ghost "Above" / "Beyond" rows
+        # next to "Above & Beyond" (#2131). the whole lookup collapses the
+        # credit's own whitespace, so a double-spaced credit still matches
+        # a canonically spaced library row
+        is_list = (sum(1 for seg in segments if in_library(seg)) >= 2
+                   and not in_whole_library(" ".join(combined.split())))
     if not is_list:
         return ""
     # a lead the library knows by its full name ("Earth, Wind & Fire; ...")
@@ -178,8 +202,63 @@ def library_has_artist(name: str) -> bool:
                 pass
 
 
+def _fold_name(name) -> str:
+    """a name folded for comparison: accents dropped, case folded,
+    whitespace collapsed. the library's own split can land a part on a
+    row spelled with an accent the credit lacks ("Beyonce" resolving to
+    the library's "Beyoncé"), and an exact compare would miss it."""
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFKD", str(name or ""))
+    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(plain.casefold().split())
+
+
+def library_has_whole_artist(name: str, segments=()) -> bool:
+    """does the library hold this whole credit as one act (#2131).
+
+    A row with the name counts when it is canonical (the self-canonical
+    spelling ``canonical_artist_id = id``, normalized to NULL by dedup
+    repair, counts too), or when it is an alias whose canonical row is
+    NOT one of ``segments``: a §40 alias is the same act under another
+    spelling. The one alias that does not count points at a part of the
+    credit — that is the ghost split's tombstone for a combined row it
+    already resolved as a list (native_enrich keeps a legacy-backed
+    combined row as an alias of its lead part). False on any doubt."""
+    name = str(name or "").strip()
+    if not name:
+        return False
+    parts = {_fold_name(seg) for seg in segments or ()}
+    conn = None
+    try:
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        rows = conn.execute(
+            "SELECT id, canonical_artist_id FROM lib2_artists "
+            "WHERE LOWER(name) = LOWER(?)", (name,)).fetchall()
+        for row in rows:
+            canonical_id = row[1]
+            if canonical_id is None or canonical_id == row[0]:
+                return True
+            target = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id = ?", (canonical_id,)).fetchone()
+            # a dangling alias (its target row is gone) proves nothing:
+            # doubt means this row does not count, like every lookup here
+            if target is not None and _fold_name(target[0]) not in parts:
+                return True
+        return False
+    except Exception:  # noqa: BLE001 - naming never fails over a lookup
+        return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110 - cleanup only
+                pass
+
+
 def collab_primary(album_artist: str, album_artists=None, track_artists=None,
-                   known_names=(), library_has=None) -> str:
+                   known_names=(), library_has=None, whole_library_has=None) -> str:
     """the album artist under 'first listed', '' when it stays as it is.
 
     one rule for the folder ($albumartist, both template builders) and the
@@ -192,7 +271,8 @@ def collab_primary(album_artist: str, album_artists=None, track_artists=None,
         names = list(known_names or ())
         names.extend(album_artists or ())
         names.extend(track_artists or ())
-        primary = split_credit_primary(album_artist, names, library_has)
+        primary = split_credit_primary(album_artist, names, library_has,
+                                       whole_library_has)
     return primary
 
 
