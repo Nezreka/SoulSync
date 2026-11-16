@@ -280,6 +280,7 @@ import {
   songsStripQueryOptions,
 } from './library-songs';
 import styles from './library-v2-page.module.css';
+import { LineIcon } from './line-icon';
 import { WatchlistIcon, WishlistIcon } from './list-icons';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArtistBack } from './owned-artist-back';
@@ -12578,6 +12579,7 @@ function TrackRow(props: TrackRowProps) {
               ) : (
                 <span className={missing ? styles.muted : undefined}>{label}</span>
               )}
+              {track.popular ? <PopularMark /> : null}
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
               {(track.file_count ?? 0) > 1 ? (
                 <button
@@ -13324,6 +13326,17 @@ export function TrackLyricsBadge({
 }
 
 /** Legacy parity: present/missing indicator that sits inline after the title. */
+/** #2144: plexamp's flame for an album's most played tracks (last.fm plays,
+ *  ranked inside the album by the server). */
+export function PopularMark() {
+  const text = 'Popular: one of the most played tracks on this album (Last.fm)';
+  return (
+    <span className={styles.popularMark} role="img" aria-label={text} title={text}>
+      <LineIcon name="flame" size={13} />
+    </span>
+  );
+}
+
 function InlineFileStatus({
   status,
   linkedFrom,

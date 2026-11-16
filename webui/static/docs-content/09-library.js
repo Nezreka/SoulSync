@@ -56,6 +56,8 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
 Management actions are part of the Library page; there is no separate Enhanced toggle.
 
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
+
+On an album's track list, a small **flame** next to a title marks the album's most played tracks on Last.fm: up to three that clearly stand out from the rest. It needs the Last.fm worker to have enriched the album's tracks, and an album where the plays are close together, or where Last.fm knows too few of the tracks, shows none.
 `
         },
         {

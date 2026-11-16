@@ -3477,6 +3477,14 @@ button.statusWarn:disabled {
   flex-wrap: wrap;
 }
 
+/* #2144: the popular flame, warm like plexamp's */
+.popularMark {
+  display: inline-flex;
+  align-self: center;
+  color: var(--warning-strong);
+  cursor: help;
+}
+
 .inlineMissingSuspected,
 .inlineDuplicate {
   font-size: 10px;
