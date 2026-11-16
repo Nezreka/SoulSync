@@ -491,6 +491,12 @@
   left: 8px;
 }
 
+.cardShelf {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+
 .cardCheck,
 .cardEdit {
   position: absolute;
@@ -647,6 +653,47 @@
 .check input:focus-visible + span {
   outline: 2px solid rgb(var(--accent-light-rgb));
   outline-offset: 2px;
+}
+
+/* Shelf Life: the score in a band against the job's threshold, or a shield */
+.shelf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--white-a18);
+  border-radius: var(--radius-pill);
+  background: var(--black-a70);
+  color: var(--text-bright);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.shelf[data-band='low'] {
+  border-color: rgba(var(--danger-soft-rgb), 0.5);
+  color: var(--danger-soft);
+}
+
+.shelf[data-band='mid'] {
+  border-color: rgba(var(--gold-rgb), 0.45);
+  color: var(--gold);
+}
+
+.shelf[data-band='ok'] {
+  border-color: rgba(var(--success-strong-rgb), 0.4);
+  color: var(--success);
+}
+
+.shelfGate {
+  padding: 0 4px;
+}
+
+.shelfGate svg {
+  width: 13px;
+  height: 13px;
 }
 
 .flags {

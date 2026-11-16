@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cardGridStyle } from '@/components/card-size';
 import { cardFadeIn } from '@/routes/library/-ui/card-fade';
 
-import type { Facets, FileRow, Side, Sort, TitleRow } from './types';
+import type { Facets, FileRow, ShelfLife, Side, Sort, TitleRow } from './types';
 
 import {
   channelsLabel,
@@ -109,6 +109,36 @@ function Flags({ row }: { row: TitleRow }) {
   );
 }
 
+/**
+ * the Shelf Life job's verdict on a title: its score in a colour band against
+ * the job's threshold (red = flagged for cleanup, amber = just above the line,
+ * green = clear), or a shield when a gate protects it. nothing when unscored.
+ */
+export function ShelfBadge({ value, threshold }: { value?: ShelfLife; threshold: number }) {
+  if (!value) return null;
+  if (value.gate) {
+    const why = `Shelf Life: protected, ${value.gate_text || 'kept'}`;
+    return (
+      <span className={clsx(s.shelf, s.shelfGate)} title={why} aria-label={why} role="img">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9}>
+          <path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+  if (value.score == null) return null;
+  const band = value.score < threshold ? 'low' : value.score < threshold + 15 ? 'mid' : 'ok';
+  return (
+    <span
+      className={s.shelf}
+      data-band={band}
+      title={`Shelf Life ${value.score}${band === 'low' ? ', flagged for cleanup' : ''}`}
+    >
+      {value.score}
+    </span>
+  );
+}
+
 /* ── posters ──────────────────────────────────────────────────────────────── */
 
 export function PosterGrid({
@@ -120,6 +150,7 @@ export function PosterGrid({
   cardSize = null,
   onToggle,
   onEdit,
+  shelfThreshold = null,
 }: {
   rows: TitleRow[];
   side: Side;
@@ -130,6 +161,8 @@ export function PosterGrid({
   cardSize?: number | null;
   onToggle: (id: number, on?: boolean) => void;
   onEdit: (row: TitleRow) => void;
+  /** the Shelf Life job's threshold, only while it is on and has scored */
+  shelfThreshold?: number | null;
 }) {
   return (
     <div
@@ -168,6 +201,11 @@ export function PosterGrid({
               ) : !row.owned ? (
                 <span className={s.cardRes}>
                   <span className={s.res}>Wanted</span>
+                </span>
+              ) : null}
+              {shelfThreshold != null && row.shelf_life ? (
+                <span className={s.cardShelf}>
+                  <ShelfBadge value={row.shelf_life} threshold={shelfThreshold} />
                 </span>
               ) : null}
             </a>
@@ -243,7 +281,8 @@ export type ColumnId =
   | 'rating'
   | 'runtime'
   | 'genres'
-  | 'status';
+  | 'status'
+  | 'shelf_life';
 
 interface Column {
   id: ColumnId;
@@ -254,7 +293,9 @@ interface Column {
   sides?: Side[];
   /** a list that gives way when the table runs out of room: cut short, in full on hover */
   clip?: (row: TitleRow) => string;
-  render: (row: TitleRow, facets: Facets | null) => ReactNode;
+  /** only offered while the Shelf Life job is on and has scored */
+  shelfLife?: boolean;
+  render: (row: TitleRow, facets: Facets | null, shelfThreshold: number | null) => ReactNode;
 }
 
 function MixBar({ row }: { row: TitleRow }) {
@@ -389,12 +430,28 @@ const COLUMNS: Column[] = [
   { id: 'genres', label: 'Genres', render: (r) => r.genres.slice(0, 3).join(', ') },
   { id: 'status', label: 'Status', render: (r) => r.status ?? '' },
   { id: 'added', label: 'Added', sort: 'added', render: (r) => formatDate(r.added_at) },
+  {
+    id: 'shelf_life',
+    label: 'Shelf Life',
+    sort: 'shelf_life',
+    align: 'right',
+    shelfLife: true,
+    render: (r, _facets, threshold) =>
+      threshold != null ? <ShelfBadge value={r.shelf_life} threshold={threshold} /> : '',
+  },
 ];
+
+/** the columns this side can show, the Shelf Life one only while it has scores */
+function columnsFor(side: Side, shelfThreshold: number | null): Column[] {
+  return COLUMNS.filter(
+    (c) => (!c.sides || c.sides.includes(side)) && (!c.shelfLife || shelfThreshold != null),
+  );
+}
 
 export function defaultColumns(side: Side): ColumnId[] {
   return side === 'shows'
-    ? ['episodes', 'missing', 'quality', 'size', 'drive']
-    : ['year', 'quality', 'video', 'audio', 'subtitles', 'size', 'drive'];
+    ? ['episodes', 'missing', 'quality', 'size', 'drive', 'shelf_life']
+    : ['year', 'quality', 'video', 'audio', 'subtitles', 'size', 'drive', 'shelf_life'];
 }
 
 function SortHead({
@@ -435,10 +492,12 @@ function ColumnPicker({
   side,
   value,
   onChange,
+  shelfThreshold,
 }: {
   side: Side;
   value: ColumnId[];
   onChange: (next: ColumnId[]) => void;
+  shelfThreshold: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -450,7 +509,7 @@ function ColumnPicker({
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
-  const available = COLUMNS.filter((c) => !c.sides || c.sides.includes(side));
+  const available = columnsFor(side, shelfThreshold);
   return (
     <div className={s.picker} ref={ref}>
       <button
@@ -521,6 +580,7 @@ export function TitleTable({
   onTogglePage,
   loading,
   onEdit,
+  shelfThreshold = null,
 }: {
   rows: TitleRow[];
   side: Side;
@@ -534,10 +594,10 @@ export function TitleTable({
   onTogglePage: (on: boolean) => void;
   loading: boolean;
   onEdit: (row: TitleRow) => void;
+  /** the Shelf Life job's threshold, only while it is on and has scored */
+  shelfThreshold?: number | null;
 }) {
-  const shown = COLUMNS.filter(
-    (c) => columns.includes(c.id) && (!c.sides || c.sides.includes(side)),
-  );
+  const shown = columnsFor(side, shelfThreshold).filter((c) => columns.includes(c.id));
   const allPicked = rows.length > 0 && rows.every((r) => selected.has(r.id));
   return (
     <div className={clsx(s.tableWrap, loading && s.dim)}>
@@ -559,7 +619,12 @@ export function TitleTable({
               />
             ))}
             <th className={s.endCell}>
-              <ColumnPicker side={side} value={columns} onChange={onColumns} />
+              <ColumnPicker
+                side={side}
+                value={columns}
+                onChange={onColumns}
+                shelfThreshold={shelfThreshold}
+              />
             </th>
           </tr>
         </thead>
@@ -602,10 +667,10 @@ export function TitleTable({
                   >
                     {c.clip ? (
                       <span className={s.clip} title={c.clip(row) || undefined}>
-                        {c.render(row, facets)}
+                        {c.render(row, facets, shelfThreshold)}
                       </span>
                     ) : (
-                      c.render(row, facets)
+                      c.render(row, facets, shelfThreshold)
                     )}
                   </td>
                 ))}

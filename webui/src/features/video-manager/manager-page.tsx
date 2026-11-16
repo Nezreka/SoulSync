@@ -122,6 +122,8 @@ export function ManagerPage() {
   const [titles, setTitles] = useState<TitleRow[]>([]);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [totals, setTotals] = useState({ count: 0, size: 0, files: 0, pages: 1 });
+  /** the Shelf Life job's threshold: set only while it is on and has scored */
+  const [shelfThreshold, setShelfThreshold] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /** the manager is the admin's; anyone else browses posters */
@@ -219,6 +221,7 @@ export function ManagerPage() {
           : fetchTitles(side, filters, sort, page, limit).then((out) => {
               if (request !== requestRef.current) return;
               setTitles(out.items);
+              setShelfThreshold(out.shelf_life_threshold ?? null);
               setTotals({
                 count: out.totals.titles,
                 size: out.totals.size_bytes,
@@ -310,7 +313,14 @@ export function ManagerPage() {
     setSort((prev) =>
       prev.by === by
         ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
-        : { by, dir: by === 'title' || by === 'path' || by === 'codec' ? 'asc' : 'desc' },
+        : {
+            by,
+            // Shelf Life opens lowest first: the titles worth a look
+            dir:
+              by === 'title' || by === 'path' || by === 'codec' || by === 'shelf_life'
+                ? 'asc'
+                : 'desc',
+          },
     );
     setPage(1);
   };
@@ -620,6 +630,7 @@ export function ManagerPage() {
               cardSize={posterSize}
               onToggle={toggle}
               onEdit={(row) => setEditing({ kind: row.kind, id: row.id })}
+              shelfThreshold={shelfThreshold}
             />
           ) : null}
           {!error && view === 'table' ? (
@@ -636,6 +647,7 @@ export function ManagerPage() {
               onTogglePage={togglePage}
               loading={loading}
               onEdit={(row) => setEditing({ kind: row.kind, id: row.id })}
+              shelfThreshold={shelfThreshold}
             />
           ) : null}
           {!error && view === 'files' ? (

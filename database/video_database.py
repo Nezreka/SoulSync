@@ -9565,6 +9565,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def shelf_life_badges(self, kind: str) -> dict:
+        """{item_id: {score, gate}} for every title of one kind the job stored,
+        for the library page's badges and sort (none of the reasons)."""
+        if kind not in ("movie", "show"):
+            return {}
+        conn = self._get_connection()
+        try:
+            return {r["item_id"]: {"score": r["score"], "gate": r["gate"]} for r in conn.execute(
+                "SELECT item_id, score, gate FROM video_shelf_life WHERE kind = ?", (kind,))}
+        finally:
+            conn.close()
+
+    def shelf_life_scored(self, kind: str) -> bool:
+        """has the Shelf Life job stored any result for this kind yet?"""
+        if kind not in ("movie", "show"):
+            return False
+        conn = self._get_connection()
+        try:
+            return conn.execute("SELECT 1 FROM video_shelf_life WHERE kind = ? LIMIT 1", (kind,)).fetchone() is not None
+        finally:
+            conn.close()
+
     def shelf_life_set_keep(self, kind: str, tmdb_id, keep: bool, set_by=None) -> bool:
         """mark (or unmark) a title Keep. False for a bad kind or no tmdb id."""
         if kind not in ("movie", "show") or not tmdb_id:
