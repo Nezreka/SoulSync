@@ -871,6 +871,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | `16fc2f2b8` (video pass V1) | **Video Quality, Custom Formats and YouTube Quality are React; the Quality tab is done.** `video-shown.ts` carries the video page's load and save-button hooks. |
 | Nov 15 | `f795cbb36` (step 10d) | **Connections: MetaSync is React; every tab's music side is done.** The video group's Expand All is back (gone with 10b). |
 | Nov 15 | `2530c0523` (step 10c) | **Connections: Server Connections are React**, with `testConnection`; the page-wide save reads no field now. One CSS rule exempts the music server group from the first-in-column heading padding. |
 | Nov 15 | `cf80f6ab1` (step 10b) | **Connections: every music service card is React**, in one group with its heading and test row; the invisible header gradient and verify calls are gone. |
