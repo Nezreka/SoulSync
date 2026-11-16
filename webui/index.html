@@ -2092,399 +2092,26 @@
                                  22 services in nested accordions meant scrolling a wall of chevrons to
                                  find out whether Last.fm was even configured. The tiles answer that
                                  without opening anything. -->
-                                    <div class="settings-group" data-stg="connections" data-music-only>
-                                        <!-- metadata source. this sat inside the hidden legacy group after the tiles rebuild, so the
-                                             dropdown (and the library discography source injected next to it) had no way in -->
-                                        <div class="api-service-frame">
-                                            <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
-                                            <div class="form-group">
-                                                <label>Primary metadata source:</label>
-                                                <select id="metadata-fallback-source">
-                                                    <option value="spotify">Spotify</option>
-                                                    <option value="spotify_free">Spotify (no auth)</option>
-                                                    <option value="itunes">iTunes / Apple Music</option>
-                                                    <option value="deezer">Deezer</option>
-                                                    <option value="discogs">Discogs</option>
-                                                    <option value="musicbrainz">MusicBrainz</option>
-                                                </select>
-                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                                    onclick="toggleSettingHelp(this)"
-                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                <div class="setting-help-text setting-help-body" hidden>Where artist,
-                                                    album, and track metadata comes from:<br>
-                                                    • <strong>Spotify</strong> — official Spotify; connect your account
-                                                    with the Spotify tile under Services.<br>
-                                                    • <strong>Spotify (no auth)</strong> — the same Spotify catalog with
-                                                    no account needed. It's unofficial and best-effort (may break if
-                                                    Spotify changes its site) and can't read your personal library or
-                                                    playlists.<br>
-                                                    • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no
-                                                    account.<br>
-                                                    • <strong>MusicBrainz</strong> — free; the public server is limited
-                                                    to 1 request/sec. Configure a self-hosted server in the MusicBrainz
-                                                    tile under Services.<br>
-                                                    • <strong>Discogs</strong> — needs a personal access token.<br>
-                                                    • <strong>JioSaavn</strong> — opt in under Advanced → Experimental.
-                                                    Strong for Indian and Bollywood catalogs.<br><br>
-                                                    Tip: if you pick <strong>Spotify (no auth)</strong> and later
-                                                    connect a real Spotify account, it uses the official account
-                                                    normally and only falls back to no-auth while Spotify is
-                                                    rate-limited — then switches back automatically.</div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <!-- the metadata source and the Library discography source are React (connections-metadata.tsx, step 10a) -->
+                                    <div data-stg-react="connections" data-stg-part="metadata"
+                                        style="display: contents"></div>
                                     <div class="stg-cardgroup" data-stg="connections">
                                         <span class="stg-cardgroup-label">Services</span>
                                         <span class="stg-cardgroup-sub">Accounts and API keys SoulSync connects
                                             to</span>
                                     </div>
-                                    <div class="dlchain-tabs" id="svc-tabs" role="tablist" data-stg="connections"></div>
-                                    <div class="svc-required-note" data-stg="connections" data-video-only>
-                                        <p class="stg-required-note">
-                                            <strong>TMDB &amp; TVDB are required.</strong> The video side matches,
-                                            enriches and automates
-                                            everything from these &mdash; library matching, artwork, airing shows,
-                                            collections &mdash; so nothing
-                                            works until both keys are set. Both are free. OMDb and fanart.tv below are
-                                            optional extras.
-                                        </p>
-                                    </div>
-                                    <div class="src-tile-grid" id="service-tile-grid" data-stg="connections"></div>
-                                    <div class="src-modal-overlay" id="service-config-modal" data-stg="connections"
-                                        hidden onclick="if (event.target === this) closeServiceModal()">
-                                        <div class="src-modal" role="dialog" aria-modal="true"
-                                            aria-labelledby="svc-modal-title">
-                                            <div class="src-modal-header">
-                                                <span class="src-modal-icon" id="svc-modal-icon"></span>
-                                                <span class="src-modal-titles">
-                                                    <h3 id="svc-modal-title">Service</h3>
-                                                    <span class="src-modal-sub" id="svc-modal-sub"></span>
-                                                </span>
-                                                <button type="button" class="src-modal-close"
-                                                    onclick="closeServiceModal()" aria-label="Close">&times;</button>
-                                            </div>
-                                            <div class="src-modal-body" id="svc-modal-body"></div>
-                                        </div>
-                                    </div>
+                                    <!-- the Music / Video tabs, the service tiles and their modal are React
+                                         (connections-services.tsx, SETTINGS_PORT.md step 10a) -->
+                                    <div data-stg-react="connections" data-stg-part="services"
+                                        style="display: contents"></div>
 
                                     <div class="settings-group" data-stg="connections" data-music-only data-svc-legacy>
                                         <h3>API Configuration <button class="stg-accordion-toggle"
                                                 onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
 
-                                        <!-- Spotify Settings -->
-                                        <div class="api-service-frame stg-service" data-service="spotify">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #1DB954;"></span>
-                                                <h4 class="service-title spotify-title">Spotify</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label>Client ID:</label>
-                                                    <input type="text" id="spotify-client-id"
-                                                        placeholder="Spotify Client ID">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Client Secret:</label>
-                                                    <input type="password" id="spotify-client-secret"
-                                                        placeholder="Spotify Client Secret">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Redirect URI:</label>
-                                                    <input type="text" id="spotify-redirect-uri"
-                                                        placeholder="http://127.0.0.1:8888/callback">
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-label">Current Redirect URI:</div>
-                                                    <div class="callback-url" id="spotify-callback-display">
-                                                        http://127.0.0.1:8888/callback</div>
-                                                    <div class="callback-help">Add this URL to your Spotify app's
-                                                        'Redirect URIs' in
-                                                        the Spotify Developer Dashboard. Spotify requires
-                                                        HTTPS for any URI that isn't loopback — on a NAS or
-                                                        remote server, enter an HTTPS proxy URL in the
-                                                        Redirect URI field above instead
-                                                        (see Help &amp; Docs → Getting Started).</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="auth-button" onclick="authenticateSpotify()">🔐
-                                                        Authenticate</button>
-                                                    <button class="auth-button disconnect-button"
-                                                        id="spotify-disconnect-btn" onclick="disconnectSpotify()"
-                                                        style="display: none;">🔌
-                                                        Disconnect</button>
-                                                    <button class="test-button" type="button" onclick="testConnection('spotify')">Test Connection</button>
-                                                </div>
-                                                <div class="form-group"
-                                                    style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
-                                                    <div class="setting-row" style="flex:1;min-width:0;">
-                                                        <label
-                                                            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; margin:0;">
-                                                            <input type="checkbox"
-                                                                id="metadata-spotify-free-enrichment">
-                                                            <span>Use Spotify (no auth) for background enrichment</span>
-                                                        </label>
-                                                        <span class="info-icon" role="button" tabindex="0"
-                                                            title="What's this?" onclick="toggleSettingHelp(this)"
-                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    </div>
-                                                    <div class="setting-help-text setting-help-body" hidden>Runs the
-                                                        background metadata enrichment worker on the no-auth Spotify
-                                                        source instead of this connected account — keeping bulk
-                                                        enrichment off your official API quota (and dodging rate-limit
-                                                        bans), so your account is reserved for interactive search and
-                                                        playlist sync. <strong>On by default.</strong> Turn off to
-                                                        enrich through your connected account instead. Works even with
-                                                        no account connected. Note: the no-auth source can't supply
-                                                        artist genres.</div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- iTunes Settings -->
-                                        <div class="api-service-frame stg-service" data-service="itunes">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #fc3c44;"></span>
-                                                <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label>Storefront Country:</label>
-                                                    <select id="itunes-country">
-                                                        <option value="US">United States (US)</option>
-                                                        <option value="GB">United Kingdom (GB)</option>
-                                                        <option value="CA">Canada (CA)</option>
-                                                        <option value="AU">Australia (AU)</option>
-                                                        <option value="DE">Germany (DE)</option>
-                                                        <option value="FR">France (FR)</option>
-                                                        <option value="JP">Japan (JP)</option>
-                                                        <option value="KR">South Korea (KR)</option>
-                                                        <option value="BR">Brazil (BR)</option>
-                                                        <option value="SE">Sweden (SE)</option>
-                                                        <option value="NL">Netherlands (NL)</option>
-                                                        <option value="IT">Italy (IT)</option>
-                                                        <option value="ES">Spain (ES)</option>
-                                                        <option value="MX">Mexico (MX)</option>
-                                                        <option value="IN">India (IN)</option>
-                                                        <option value="RU">Russia (RU)</option>
-                                                    </select>
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-help">Sets the primary Apple Music storefront.
-                                                        Region-specific albums are auto-searched across other
-                                                        storefronts as fallback.</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="test-button" type="button" onclick="testConnection('itunes')">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Deezer OAuth Auth -->
-                                        <div class="api-service-frame stg-service" data-service="deezer">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #A238FF;"></span>
-                                                <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)
-                                                </h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label>App ID:</label>
-                                                    <input type="text" id="deezer-app-id" placeholder="Deezer App ID">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>App Secret:</label>
-                                                    <input type="password" id="deezer-app-secret"
-                                                        placeholder="Deezer App Secret">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Redirect URI:</label>
-                                                    <input type="text" id="deezer-redirect-uri"
-                                                        placeholder="http://127.0.0.1:8008/deezer/callback">
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-label">Current Redirect URI:</div>
-                                                    <div class="callback-url" id="deezer-callback-display">
-                                                        http://127.0.0.1:8008/deezer/callback</div>
-                                                    <div class="callback-help">Add this URL to your Deezer app at
-                                                        developers.deezer.com</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="auth-button" onclick="authenticateDeezer()">🔐
-                                                        Authenticate</button>
-                                                </div>
-                                                <div class="callback-info"
-                                                    style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
-                                                    <div class="callback-help" style="margin-bottom: 8px;">Or use an
-                                                        <strong>ARL token</strong> for playlist access and downloads (no
-                                                        OAuth app needed):</div>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>ARL Token:</label>
-                                                    <input type="password" id="deezer-connection-arl"
-                                                        placeholder="Paste your ARL cookie token here">
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-help">Log into <a href="https://www.deezer.com"
-                                                            target="_blank" style="color: #A238FF;">deezer.com</a>
-                                                        → DevTools (F12) → Application → Cookies → copy the
-                                                        <code>arl</code> value. Provides playlist access + downloads.
-                                                    </div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="test-button" type="button" onclick="testDeezerConnection()">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Discogs Settings -->
-                                        <div class="api-service-frame stg-service" data-service="discogs">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #e0d4b8;"></span>
-                                                <h4 class="service-title">Discogs</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label>Personal Access Token:</label>
-                                                    <input type="password" id="discogs-token"
-                                                        placeholder="Discogs Personal Access Token">
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-help">Get your free token from <a
-                                                            href="https://www.discogs.com/settings/developers"
-                                                            target="_blank" style="color: #ffff64;">Discogs Developer
-                                                            Settings</a></div>
-                                                    <div class="callback-help">Click "Generate new token" — no app
-                                                        registration needed. Provides 60 req/min and cover art in search
-                                                        results.</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="test-button" type="button" onclick="testConnection('discogs')">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Tidal Playlist/Metadata Auth -->
-                                        <div class="api-service-frame stg-service" data-service="tidal">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #ff6600;"></span>
-                                                <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label>Client ID:</label>
-                                                    <input type="text" id="tidal-client-id"
-                                                        placeholder="Tidal Client ID">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Client Secret:</label>
-                                                    <input type="password" id="tidal-client-secret"
-                                                        placeholder="Tidal Client Secret">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Redirect URI:</label>
-                                                    <input type="text" id="tidal-redirect-uri"
-                                                        placeholder="http://127.0.0.1:8889/tidal/callback">
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-label">Current Redirect URI:</div>
-                                                    <div class="callback-url" id="tidal-callback-display">
-                                                        http://127.0.0.1:8889/tidal/callback</div>
-                                                    <div class="callback-help">Add this URL to your Tidal app
-                                                        configuration</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="auth-button" onclick="authenticateTidal()">🔐
-                                                        Authenticate</button>
-                                                    <button class="auth-button" onclick="disconnectTidal()"
-                                                        style="margin-left: 8px;">
-                                                        Disconnect</button>
-                                                    <button class="test-button" type="button" onclick="testConnection('tidal')">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Qobuz Metadata/Enrichment Auth -->
-                                        <div class="api-service-frame stg-service" data-service="qobuz">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #4285f4;"></span>
-                                                <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div id="qobuz-connection-logged-in"
-                                                    style="display: none; margin-bottom: 8px;">
-                                                    <span id="qobuz-connection-user-info" class="setting-help-text"
-                                                        style="color: #4caf50;"></span>
-                                                    <button class="auth-button" onclick="logoutQobuz()"
-                                                        style="margin-left: 8px;">
-                                                        Disconnect
-                                                    </button>
-                                                </div>
-                                                <div id="qobuz-connection-form">
-                                                    <div class="form-group">
-                                                        <label>Email:</label>
-                                                        <input type="email" id="qobuz-connection-email"
-                                                            class="form-input" placeholder="Qobuz email"
-                                                            autocomplete="email">
-                                                    </div>
-                                                    <div class="form-group">
-                                                        <label>Password:</label>
-                                                        <input type="password" id="qobuz-connection-password"
-                                                            class="form-input" placeholder="Qobuz password"
-                                                            autocomplete="current-password">
-                                                    </div>
-                                                    <div class="form-actions">
-                                                        <button class="auth-button" id="qobuz-connection-login-btn"
-                                                            onclick="loginQobuzFromConnections()">
-                                                            Connect Qobuz
-                                                        </button>
-                                                        <span id="qobuz-connection-status" class="setting-help-text"
-                                                            style="margin-left: 8px;"></span>
-                                                    </div>
-                                                </div>
-                                                <div class="setting-help-text" style="margin-top: 6px;">
-                                                    Connects Qobuz for metadata enrichment (ISRC, labels, copyright).
-                                                    Also used for downloads if Qobuz is your download source.
-                                                </div>
-                                                <div class="callback-info"
-                                                    style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
-                                                    <div class="callback-help" style="margin-bottom: 8px;">
-                                                        <strong>Alternative: Auth Token</strong> — If email/password
-                                                        login fails (CAPTCHA), paste your token directly:</div>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Auth Token:</label>
-                                                    <input type="password" id="qobuz-connection-token"
-                                                        class="form-input"
-                                                        placeholder="Paste your Qobuz auth token here">
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="auth-button" id="qobuz-token-login-btn"
-                                                        onclick="loginQobuzWithToken()">
-                                                        Connect with Token
-                                                    </button>
-                                                    <span id="qobuz-token-status" class="setting-help-text"
-                                                        style="margin-left: 8px;"></span>
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-help">To get your token: log into <a
-                                                            href="https://play.qobuz.com" target="_blank"
-                                                            style="color: #4285f4;">play.qobuz.com</a>
-                                                        → DevTools (F12) → Network tab → find any request to
-                                                        <code>www.qobuz.com/api.json</code>
-                                                        → look in the request headers for <code>X-User-Auth-Token</code>
-                                                        → copy that value.</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="test-button" type="button" onclick="testConnection('qobuz')">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <!-- Spotify, iTunes, Deezer, Discogs, Tidal and Qobuz are React (connections-metadata.tsx, step 10a) -->
+                                        <div data-stg-react="connections" data-stg-part="services-metadata"
+                                            style="display: contents"></div>
 
                                         <!-- Last.fm Settings -->
                                         <!-- Concerts: two providers, two questions -->
@@ -2666,51 +2293,9 @@
                                             </div>
                                         </div>
 
-                                        <!-- MusicBrainz server (optional; public API requires no credentials) -->
-                                        <div class="api-service-frame stg-service" id="musicbrainz-server-settings"
-                                            data-service="musicbrainz">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #ba478f;"></span>
-                                                <h4 class="service-title">MusicBrainz</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <div class="form-group">
-                                                    <label for="musicbrainz-base-url">MusicBrainz server URL</label>
-                                                    <input type="url" id="musicbrainz-base-url"
-                                                        placeholder="https://musicbrainz.org"
-                                                        aria-describedby="musicbrainz-server-help">
-                                                    <small class="settings-hint" id="musicbrainz-server-help">Optional:
-                                                        enter your self-hosted server address. Leave blank to use public
-                                                        MusicBrainz. Applies to search, matching and enrichment as soon
-                                                        as settings are saved.</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label for="musicbrainz-rate-mode">MusicBrainz request rate</label>
-                                                    <select id="musicbrainz-rate-mode"
-                                                        onchange="updateMusicBrainzRateControls()"
-                                                        aria-describedby="musicbrainz-rate-help">
-                                                        <option value="fixed">Fixed limit</option>
-                                                        <option value="adaptive">No limit (adaptive)</option>
-                                                    </select>
-                                                    <label for="musicbrainz-request-rate">Maximum requests/second</label>
-                                                    <input type="number" id="musicbrainz-request-rate" min="0.001"
-                                                        step="any" value="1" aria-describedby="musicbrainz-rate-help">
-                                                    <small class="settings-hint" id="musicbrainz-rate-help">For a fixed
-                                                        limit, enter requests/second (for example, 10). With No limit
-                                                        (adaptive), SoulSync will try to find the maximum number of
-                                                        requests/second your server can handle. Only use this when you
-                                                        host the MusicBrainz server yourself and it has no other traffic.
-                                                        Public MusicBrainz always keeps its rate limit. Environment
-                                                        overrides take precedence over these fields. Your server needs
-                                                        search indexes; use its final URL.</small>
-                                                </div>
-
-                                                <div class="form-actions">
-                                                    <button class="test-button" type="button" onclick="testConnection('musicbrainz')">Test Connection</button>
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <!-- MusicBrainz is React (connections-metadata.tsx, step 10a) -->
+                                        <div data-stg-react="connections" data-stg-part="musicbrainz"
+                                            style="display: contents"></div>
 
                                         <!-- AcoustID Settings -->
                                         <div class="api-service-frame stg-service" data-service="acoustid">
@@ -2802,46 +2387,9 @@
                                             </div>
                                         </div>
 
-                                        <!-- Hydrabase P2P Metadata -->
-                                        <div class="api-service-frame stg-service" data-stg="connections"
-                                            data-service="hydrabase">
-                                            <div class="stg-service-header" onclick="toggleStgService(this)">
-                                                <span class="stg-service-dot" style="color: #00b4d8;"></span>
-                                                <h4 class="service-title">Hydrabase</h4>
-                                                <span class="stg-service-chevron">›</span>
-                                            </div>
-                                            <div class="stg-service-body">
-                                                <input type="hidden" id="hydrabase-enabled" value="false">
-                                                <div class="form-group">
-                                                    <label>WebSocket URL:</label>
-                                                    <input type="text" id="hydrabase-url"
-                                                        placeholder="ws://localhost:4545">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>API Key:</label>
-                                                    <input type="password" id="hydrabase-api-key"
-                                                        placeholder="Hydrabase API Key">
-                                                </div>
-                                                <div class="form-group" style="margin-bottom: 8px;">
-                                                    <label class="checkbox-label"
-                                                        style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
-                                                        <input type="checkbox" id="hydrabase-auto-connect">
-                                                        <span>Auto-connect on startup</span>
-                                                    </label>
-                                                </div>
-                                                <div class="callback-info">
-                                                    <div class="callback-help">P2P metadata network. When enabled and
-                                                        connected, replaces Spotify/iTunes as the primary metadata
-                                                        source for searches.</div>
-                                                </div>
-                                                <div class="form-actions">
-                                                    <button class="test-button" id="hydrabase-connect-btn"
-                                                        onclick="toggleHydrabaseFromSettings()">Connect</button>
-                                                    <span id="hydrabase-settings-status"
-                                                        style="font-size: 0.82em; color: rgba(255,255,255,0.4); margin-left: 8px;"></span>
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <!-- Hydrabase is React (connections-metadata.tsx, step 10a) -->
+                                        <div data-stg-react="connections" data-stg-part="hydrabase"
+                                            style="display: contents"></div>
 
                                         <!-- Test Connection Buttons -->
                                         <div class="api-test-buttons">
@@ -5197,55 +4745,9 @@
                                         </div>
                                     </div>
 
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-music-only
-                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
-                                        role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">&#9660;</span>
-                                        <h3>Experimental</h3>
-                                        <span class="settings-section-hint">Opt-in preview features</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
-                                        <div class="settings-group" data-stg="advanced" data-music-only>
-                                            <p class="settings-experimental-intro">Features in this section are
-                                                optional, may change without notice, and are not held to the same
-                                                support standard as core metadata sources.</p>
-                                            <div class="form-group">
-                                                <div class="setting-row" style="flex:1;min-width:0;">
-                                                    <label
-                                                        style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
-                                                        <input type="checkbox" id="experimental-jiosaavn-enabled"
-                                                            onchange="onExperimentalJiosaavnToggle(this)">
-                                                        <span>Enable JioSaavn metadata source</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                </div>
-                                                <div class="setting-help-text setting-help-body" hidden>Exposes JioSaavn
-                                                    as a primary metadata source on the Connections tab and in search.
-                                                    Free, no account — strong for Indian and Bollywood catalogs; limited
-                                                    to 1 request/sec via the public proxy API. Off by default.</div>
-                                            </div>
-                                            <div class="form-group">
-                                                <div class="setting-row" style="flex:1;min-width:0;">
-                                                    <label
-                                                        style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
-                                                        <input type="checkbox" id="experimental-bandcamp-enabled"
-                                                            onchange="onExperimentalBandcampToggle(this)">
-                                                        <span>Enable Bandcamp search &amp; enrichment</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                </div>
-                                                <div class="setting-help-text setting-help-body" hidden>Adds Bandcamp as
-                                                    a Discover search source and a track/album metadata enrichment
-                                                    source (tags, label, credits). Free, no account — uses Bandcamp's
-                                                    own public search and release-page endpoints (unofficial, no
-                                                    guaranteed uptime or rate limits). Off by default.</div>
-                                            </div>
-                                        </div>
-                                    </div><!-- end Experimental body -->
+                                    <!-- Experimental is React (connections-metadata.tsx, SETTINGS_PORT.md step 10a) -->
+                                    <div data-stg-react="advanced" data-stg-part="experimental"
+                                        style="display: contents"></div>
                                 </div>
                             </div>
 
@@ -7308,29 +6810,6 @@
         </div>
     </div>
 
-    <!-- Experimental feature enable acknowledgment -->
-    <div class="modal-overlay hidden" id="experimental-enable-modal-overlay">
-        <div class="confirm-modal experimental-enable-modal">
-            <div class="confirm-modal-header">
-                <h2 id="experimental-enable-modal-title">Enable experimental feature</h2>
-                <button class="confirm-modal-close" type="button"
-                    onclick="resolveExperimentalEnableDialog(false)">✕</button>
-            </div>
-            <div class="confirm-modal-content">
-                <p id="experimental-enable-modal-message"></p>
-                <label class="experimental-enable-ack">
-                    <input type="checkbox" id="experimental-enable-ack-checkbox">
-                    <span>I understand the implications of enabling this experimental feature.</span>
-                </label>
-            </div>
-            <div class="confirm-modal-actions">
-                <button class="modal-button modal-button--secondary" type="button"
-                    onclick="resolveExperimentalEnableDialog(false)">Cancel</button>
-                <button class="modal-button modal-button--primary" type="button" id="experimental-enable-confirm-btn"
-                    onclick="resolveExperimentalEnableDialog(true)" disabled>Enable</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Spotify Rate Limit Modal -->
     <div class="modal-overlay hidden" id="rate-limit-modal-overlay">

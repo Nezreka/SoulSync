@@ -1105,15 +1105,8 @@ function handleServiceStatusUpdate(data) {
     // Cache for library status card
     _lastStatusPayload = data;
 
-    if (typeof syncSpotifySettingsAuthState === 'function') {
-        syncSpotifySettingsAuthState(data?.spotify || null);
-    }
-    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(data?.spotify || null);
-    }
-    if (typeof sanitizeMetadataSourceSelection === 'function') {
-        sanitizeMetadataSourceSelection({ quiet: true });
-    }
+    // the Settings metadata source picker and Spotify card follow the
+    // dispatch above (connections-metadata.tsx)
 
     // The dashboard service cards are React-rendered from the dispatch above
     // since the flip (service-cards.tsx) — only the sidebar half survives here.

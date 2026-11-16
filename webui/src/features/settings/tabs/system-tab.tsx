@@ -14,6 +14,7 @@ import { wireSetupPreviewControls } from '@/features/onboarding/host';
 import type { SettingsTabProps } from '../host';
 
 import { AUTOSAVE_DELAY_MS, type SettingsStore } from '../settings-store';
+import { ExperimentalSection } from './connections-metadata';
 import { helpBits, Section, useHelp } from './parts';
 import { text } from './source-panels';
 import { SecuritySection } from './system-security';
@@ -1174,5 +1175,7 @@ export function SystemTab(props: SettingsTabProps) {
   if (props.part === 'database') return <DatabaseSections {...props} />;
   if (props.part === 'tools') return <ToolSections {...props} />;
   if (props.part === 'developer') return <DeveloperSection />;
+  // Experimental is the Connections tab's (the metadata source picker reads it)
+  if (props.part === 'experimental') return <ExperimentalSection store={props.store} />;
   return null;
 }

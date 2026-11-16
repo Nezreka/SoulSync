@@ -67,6 +67,9 @@ export interface SettingsStore {
   set: (section: string, key: string, value: unknown) => void;
   /** several keys of one section at once */
   patch: (section: string, values: SettingsSection) => void;
+  /** keys the server already holds, saved some other way (an immediate
+   *  save of its own): shown at once, never queued */
+  assume: (section: string, values: SettingsSection) => void;
   /** a value with its own endpoint, saved with the same autosave rules */
   setExtra: (key: string, value: unknown, save: ExtraSaver) => void;
   /** true while a value whose key starts with `prefix` waits to be saved */
@@ -249,6 +252,11 @@ export function createSettingsStore({
     },
     set: (section, key, value) => changed(section, { [key]: value }),
     patch: (section, values) => changed(section, values),
+    assume(section, values) {
+      store.setState((state) => ({ settings: apply(state.settings, { [section]: values }) }));
+      const payload = shell()._settingsPayload;
+      if (payload) shell()._settingsPayload = apply(payload, { [section]: values });
+    },
     setExtra(key, value, save) {
       extras[key] = { value, save };
       queue();

@@ -1,0 +1,24 @@
+    <!-- Experimental feature enable acknowledgment -->
+    <div class="modal-overlay hidden" id="experimental-enable-modal-overlay">
+        <div class="confirm-modal experimental-enable-modal">
+            <div class="confirm-modal-header">
+                <h2 id="experimental-enable-modal-title">Enable experimental feature</h2>
+                <button class="confirm-modal-close" type="button"
+                    onclick="resolveExperimentalEnableDialog(false)">✕</button>
+            </div>
+            <div class="confirm-modal-content">
+                <p id="experimental-enable-modal-message"></p>
+                <label class="experimental-enable-ack">
+                    <input type="checkbox" id="experimental-enable-ack-checkbox">
+                    <span>I understand the implications of enabling this experimental feature.</span>
+                </label>
+            </div>
+            <div class="confirm-modal-actions">
+                <button class="modal-button modal-button--secondary" type="button"
+                    onclick="resolveExperimentalEnableDialog(false)">Cancel</button>
+                <button class="modal-button modal-button--primary" type="button" id="experimental-enable-confirm-btn"
+                    onclick="resolveExperimentalEnableDialog(true)" disabled>Enable</button>
+            </div>
+        </div>
+    </div>
+

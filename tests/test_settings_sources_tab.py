@@ -1205,6 +1205,26 @@ def test_no_two_cards_share_a_name():
 
 
 # ── Connections: services as tiles ─────────────────────────────────────────
+#
+# the tiles, the Music / Video tabs and the modal are React since step 10a
+# (SETTINGS_PORT.md): connections-services.tsx. the Metadata service cards are
+# React too (connections-metadata.tsx), each a <ServiceCard service="...">
+
+
+@pytest.fixture(scope="module")
+def tiles():
+    return _read(_TABS + "connections-services.tsx")
+
+
+def _react_cards():
+    """the service ids of the cards React renders, in page order"""
+    return re.findall(r'<ServiceCard\s+service="([a-z-]+)"', _read(_TABS + "connections-metadata.tsx"))
+
+
+def _fn(src, name):
+    """a top-level function's text in a ts module"""
+    start = src.index(f"function {name}(")
+    return src[start:src.index("\n}\n", start)]
 
 
 def test_every_service_has_a_handle_a_tile_can_use(index):
@@ -1218,6 +1238,7 @@ def test_every_service_has_a_handle_a_tile_can_use(index):
     service belongs to without a second registry to keep in step.
     """
     music = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-service="([^"]+)"', index)
+    music += _react_cards()
     video = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-video-service="([^"]+)"', index)
     assert len(music) >= 12, f"only {len(music)} music services carry a handle"
     assert len(video) >= 10, f"only {len(video)} video services carry a handle"
@@ -1231,7 +1252,7 @@ def test_every_service_has_a_handle_a_tile_can_use(index):
         )
 
 
-def test_opening_a_service_moves_the_panel_and_never_clones_it(js):
+def test_opening_a_service_moves_the_panel_and_never_clones_it(tiles):
     """The forms are not rebuilt for the modal - the real panel is MOVED into it.
 
     That is not a style preference. Cloning would duplicate every field id in
@@ -1242,32 +1263,32 @@ def test_opening_a_service_moves_the_panel_and_never_clones_it(js):
     The panel also has to go home to the EXACT slot it came from, or the
     accordion groups silently reorder themselves as services get opened.
     """
-    open_fn = js.split('function openServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'appendChild(frame)' in open_fn, "the panel is not moved into the modal"
-    assert 'cloneNode' not in open_fn, "cloning would duplicate every id in the panel"
-    assert 'parent: frame.parentNode' in open_fn and 'next: frame.nextSibling' in open_fn, (
+    part = _fn(tiles, "ServicesPart")
+    assert 'body.appendChild(frame)' in part, "the panel is not moved into the modal"
+    assert 'cloneNode' not in tiles, "cloning would duplicate every id in the panel"
+    assert 'parent: frame.parentNode' in part and 'next: frame.nextSibling' in part, (
         "the panel's original slot is not recorded - it cannot go back where it was"
     )
-
-    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'insertBefore(frame' in close_fn, "the panel is not restored to its slot"
-    # order matters: home first, hide second
-    assert close_fn.index('insertBefore') < close_fn.index('overlay.hidden = true'), (
-        "the panel is put back after the modal is hidden, so its ids sit inside a "
-        "hidden modal in between"
-    )
+    # home in the effect's cleanup: it runs before the closed modal is drawn
+    cleanup = part[part.index('return () => {', part.index('body.appendChild(frame)')):]
+    assert 'insertBefore(frame, lifted.next)' in cleanup, "the panel is not restored to its slot"
+    # a React card is never moved itself: its wrapper is (React keeps hearing it)
+    place = _fn(tiles, "useServicePlace")
+    assert 'body.appendChild(wrap)' in place and 'placeHome(slot, wrap)' in place
 
 
-def test_closing_a_service_lands_a_pending_key(js):
+def test_closing_a_service_lands_a_pending_key(tiles):
     """An API key typed seconds before closing sits on the 2s autosave timer. If
     the modal just closes, the field it belongs to has been moved out of view and
     nothing on screen says a save is still pending - and a reload loses it."""
-    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'clearTimeout(settingsAutoSaveTimer)' in close_fn
-    assert 'saveSettings(true)' in close_fn
+    part = _fn(tiles, "ServicesPart")
+    close_fn = part[part.index('function close()'):]
+    # the page's own timer (window.landPendingSettingsSave) and the React store
+    assert 'landPendingSettingsSave?.()' in close_fn
+    assert 'settingsStore.flush()' in close_fn
 
 
-def test_a_service_tile_reports_the_live_field_not_a_cached_setting(js):
+def test_a_service_tile_reports_the_live_field_not_a_cached_setting(tiles):
     """Same rule as the library summaries: judge by the inputs on the page. A
     tile that reads a cached settings object can disagree with the field behind
     it, and "configured" is not a claim worth getting wrong about a credential.
@@ -1276,8 +1297,8 @@ def test_a_service_tile_reports_the_live_field_not_a_cached_setting(js):
     claiming a service is unconfigured because you cannot see its fields is worse
     than staying quiet.
     """
-    fn = js.split('function _svcConfigured(', 1)[1].split('\n}', 1)[0]
-    assert 'querySelectorAll' in fn and 'settings.' not in fn
+    fn = _fn(tiles, "serviceConfigured")
+    assert 'querySelectorAll' in fn and 'settings' not in fn
     assert 'return null' in fn, "no 'cannot tell' state - it will guess instead"
 
 
@@ -1304,42 +1325,39 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
     assert 'api-service-frame[data-svc-legacy]' not in css
 
 
-def test_the_required_keys_note_survived_hiding_its_group(index):
+def test_the_required_keys_note_survived_hiding_its_group(index, tiles):
     """TMDB and TVDB are required, and the note saying so - crucially including
     "both are free" - lived inside the group that is now hidden. The tiles show a
     "required" chip, but a chip cannot say why, and someone who assumes it is a
     paid feature just skips it and wonders why matching never works."""
-    at = index.index('stg-required-note')
+    # the note is the Services part's (React), drawn into its slot
+    assert 'className="svc-required-note"' in tiles and 'both keys are set. Both are free.' in tiles
+    at = index.index('data-stg-react="connections" data-stg-part="services"')
     enclosing = index.rfind('data-svc-legacy', 0, at)
-    # if the note were still inside the hidden group there would be no closing
-    # </div> between that group's tag and the note
+    # if the slot were inside the hidden group there would be no closing
+    # </div> between that group's tag and the slot
     assert enclosing == -1 or index.count('</div>', enclosing, at) > 0, (
         "the required-keys note is inside the hidden group and will never be seen"
     )
-    assert 'svc-required-note' in index
 
 
-def test_the_service_tabs_open_on_the_side_you_are_on(js):
+def test_the_service_tabs_open_on_the_side_you_are_on(tiles):
     """Defaulting to music meant a video user landed on a grid of Spotify and
     Tidal tiles with their own TMDB key nowhere in sight. Same fix, and same
     reasoning, as the download chain's media tabs."""
-    assert '_svcSyncKindToSide' in js
-    fn = js.split('function _svcSyncKindToSide(', 1)[1].split('\n}', 1)[0]
-    assert 'data-side' in fn and 'video' in fn
-
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert '_svcSyncKindToSide()' in build, "the side default is never applied"
-
-    switch = js.split('function switchServiceKind(', 1)[1].split('\nwindow.', 1)[0]
-    assert '_svcKindChosen = true' in switch, "a manual pick would be overridden"
+    model = _fn(tiles, "createServicesModel")
+    side = model[model.index('const sideKind'):model.index('return {')]
+    assert 'data-side' in side and 'video' in side and 'state.chosen' in side
+    assert "rebuild: () => set({ kind: sideKind()" in model, "the side default is never applied"
+    assert "set({ kind, chosen: true" in model, "a manual pick would be overridden"
 
 
-def test_every_mapped_service_logo_actually_exists(js):
+def test_every_mapped_service_logo_actually_exists(tiles):
     """A wrong path fails silently: the <img> 404s, onerror swaps in the
     monogram, and the card looks deliberate while quietly having lost its
     artwork. Nobody would ever notice from the page."""
     import os
-    block = js.split('const SERVICE_LOGOS = {', 1)[1].split('};', 1)[0]
+    block = tiles.split('const SERVICE_LOGOS: Record<string, string> = {', 1)[1].split('};', 1)[0]
     pairs = re.findall(r"(\w+):\s*'([^']+)'", block)
     assert len(pairs) >= 13, f"only {len(pairs)} services mapped to artwork"
     missing = [(svc, path) for svc, path in pairs
@@ -1347,7 +1365,7 @@ def test_every_mapped_service_logo_actually_exists(js):
     assert not missing, f"logo paths that do not exist: {missing}"
 
 
-def test_a_service_without_artwork_still_looks_deliberate(js):
+def test_a_service_without_artwork_still_looks_deliberate(tiles):
     """Nine services have no brand art in the repo. A grey blob for each would
     make the grid a list you have to read anyway, which defeats the point of a
     grid. They get a monogram on their own brand colour instead.
@@ -1355,14 +1373,14 @@ def test_a_service_without_artwork_still_looks_deliberate(js):
     The colour comes off the element as --svc-brand rather than out of a
     stylesheet map, so a service added later picks its hue up with no CSS change.
     """
-    meta = js.split('function _svcMeta(', 1)[1].split('\n}', 1)[0]
+    meta = _fn(tiles, "serviceMeta")
     assert 'monogram' in meta, "no monogram fallback"
     assert "replace(/[^A-Za-z0-9]/g, '')" in meta, (
         "a name starting with punctuation would yield an empty monogram"
     )
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert '--svc-brand' in build, "the brand colour never reaches the card"
-    assert 'svc-monogram' in build
+    build = _fn(tiles, "ServicesPart")
+    assert "'--svc-brand'" in build, "the brand colour never reaches the card"
+    assert 'svc-monogram' in _fn(tiles, "Fallback")
 
     css = _read("webui/static/style.css")
     # the tinted well lives on the shared container, not on the fallback: a card
@@ -1378,7 +1396,7 @@ def test_a_service_without_artwork_still_looks_deliberate(js):
     )
 
 
-def test_the_service_grid_only_shows_actual_services(js):
+def test_the_service_grid_only_shows_actual_services(tiles):
     """"Detail Pages" is a video-preferences panel on the LIBRARY tab that
     happens to use the same accordion component. An unscoped query pulled it into
     the Connections grid, where it appeared as a connection you could configure -
@@ -1387,13 +1405,13 @@ def test_the_service_grid_only_shows_actual_services(js):
     The grid is scoped to the connections tab, so a panel reusing this component
     elsewhere cannot wander in.
     """
-    fn = js.split('function _svcFrames(', 1)[1].split('\n}', 1)[0]
+    fn = _fn(tiles, "frames")
     assert 'closest(' in fn and 'data-stg="connections"' in fn, (
         "the service query is not scoped to the connections tab"
     )
 
 
-def test_the_media_tab_owns_the_whole_connections_tab(index, js):
+def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     """The Services tabs moved only the tile grid. The server sections below kept
     following body[data-side], so a music user clicking "Video" got video service
     tiles sitting directly above their own MUSIC server settings - the tab said
@@ -1407,7 +1425,7 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, js):
     assert index.count('data-svc-side=') == 2, "the two server sections are not both marked"
     assert 'data-svc-side="music"' in index and 'data-svc-side="video"' in index
 
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    build = _fn(tiles, "ServicesPart")
     assert 'data-svc-side' in build and 'svc-side-active' in build, (
         "switching tab does not move the server section with it"
     )
@@ -1536,7 +1554,7 @@ def test_a_server_row_is_one_setting_per_row(index):
     assert 'setting-help-text video-library-note' in index
 
 
-def test_services_without_art_reuse_the_app_s_own_glyphs(js):
+def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
     """Six video services have no brand art anywhere in the repo - OMDb,
     fanart.tv, OpenSubtitles, Trakt, MDBList, Community Data - and a grid of
     letter monograms among real logos reads as placeholders, not as icons.
@@ -1553,17 +1571,18 @@ def test_services_without_art_reuse_the_app_s_own_glyphs(js):
     dash = set(re.findall(r"logo: \{ glyph: '([^']+)' \}", hero))
     assert dash, "the dashboard glyphs this borrows from are gone"
 
-    block = js.split('const SERVICE_GLYPHS = {', 1)[1].split('};', 1)[0]
-    mapped = re.findall(r'^\s*(\w+):', block, re.M)
+    block = tiles.split('const SERVICE_GLYPHS: Record<string, string> = {', 1)[1].split('};', 1)[0]
+    mapped = re.findall(r"^\s*'?([\w-]+)'?:", block, re.M)
     assert len(mapped) >= 5, f"only {len(mapped)} services reuse a dashboard glyph"
     for svc in ('omdb', 'fanart', 'opensubtitles', 'trakt'):
         assert svc in mapped, f"{svc} still falls back to a letter"
 
     # order of preference: artwork, then the app's glyph, then a monogram
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'm.glyph' in build and 'svc-monogram' in build
-    assert build.index('const fallback') < build.index('const art'), (
-        "the fallback is built after the art that depends on it"
+    fallback = _fn(tiles, "Fallback")
+    assert 'meta.glyph' in fallback and 'svc-monogram' in fallback
+    art = _fn(tiles, "Art")
+    assert '<Fallback meta={meta} />' in art and 'onError' in art, (
+        "a logo that does not load is not replaced by the glyph or monogram"
     )
 
     css = _read("webui/static/style.css")
@@ -1714,17 +1733,18 @@ def test_the_connections_tab_survives_a_phone():
 
 
 
-def test_every_connections_service_sits_in_a_named_group(index, js):
+def test_every_connections_service_sits_in_a_named_group(index, tiles):
     """The grid groups services by what they do (metadata, scrobbling, subtitles
     and so on). Anything unlisted falls into "Other" so it never vanishes, but a
     new service landing there means nobody decided where it belongs."""
-    block = js.split('const SERVICE_GROUPS = {', 1)[1].split('\n};', 1)[0]
+    block = tiles.split('const SERVICE_GROUPS', 1)[1].split('\n};', 1)[0]
     lists = ' '.join(re.findall(r'ids:\s*\[([^\]]*)\]', block))
     grouped = set(re.findall(r"'([a-z]+)'", lists))
     connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
-    ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections))
+    ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections)) | {
+        i for i in _react_cards() if re.fullmatch(r'[a-z]+', i)
+    }
     assert len(ids) >= 20, f"only found {len(ids)} services, the page split is off"
     assert ids - grouped == set(), f"services with no group: {sorted(ids - grouped)}"
 
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert "'Other'" in build, "an unlisted service would vanish from the grid"
+    assert "label: 'Other'" in _fn(tiles, "readGroups"), "an unlisted service would vanish from the grid"

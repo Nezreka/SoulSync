@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom';
 import type { SettingsTabProps } from '../host';
 
 import { type SettingsStore, settingsStore } from '../settings-store';
+import { checkQobuzAuthStatus, onQobuzAuth, type QobuzAuthState } from './connections';
 import { REDACTED_SECRET_SENTINEL, SecretInput, useDraft } from './parts';
 import { SOURCE_CONFIG_ID_BY_SRC, type SourcesModel, sourcesModel } from './sources-model';
 
@@ -105,13 +106,8 @@ export function DeezerPanel({ store }: { store: SettingsStore }) {
   const arl = text(settings.deezer_download?.arl);
   const [status, setStatus] = useState<Status>({ text: '' });
 
-  const change = (value: string) => {
-    store.set('deezer_download', 'arl', value);
-    // the Connections tab has the same token in its Deezer card (still
-    // vanilla): the two fields mirror each other, as before
-    const conn = document.getElementById('deezer-connection-arl') as HTMLInputElement | null;
-    if (conn) conn.value = value;
-  };
+  // the Connections tab's Deezer card holds the same token (the same key)
+  const change = (value: string) => store.set('deezer_download', 'arl', value);
 
   async function test() {
     setStatus(CHECKING);
@@ -428,18 +424,13 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
 
 // ── Qobuz ──
 
-/** what checkQobuzAuthStatus (settings.js) last heard: it still updates the
- *  Connections tab's Qobuz card too, and tells this panel by an event */
-interface QobuzAuth {
-  authenticated?: boolean;
-  user?: { display_name?: string; subscription?: string };
-}
+/** what checkQobuzAuthStatus last heard (connections.ts): the Connections
+ *  tab's Qobuz card hears it too */
+type QobuzAuth = QobuzAuthState;
 
 const QOBUZ_ERR = '#ff5555';
 
-function refreshQobuz() {
-  (window as Window & { checkQobuzAuthStatus?: () => void }).checkQobuzAuthStatus?.();
-}
+const refreshQobuz = () => void checkQobuzAuthStatus();
 
 export function QobuzPanel() {
   const [auth, setAuth] = useState<QobuzAuth | null>(null);
@@ -449,11 +440,7 @@ export function QobuzPanel() {
   const [login, setLogin] = useState({ busy: false, status: { text: '' } as Status });
   const [byToken, setByToken] = useState({ busy: false, status: { text: '' } as Status });
 
-  useEffect(() => {
-    const heard = (event: Event) => setAuth((event as CustomEvent<QobuzAuth>).detail || {});
-    window.addEventListener('soulsync:qobuz-auth', heard);
-    return () => window.removeEventListener('soulsync:qobuz-auth', heard);
-  }, []);
+  useEffect(() => onQobuzAuth(setAuth), []);
 
   async function connect() {
     if (!email.trim() || !password) {

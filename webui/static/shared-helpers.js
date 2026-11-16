@@ -4014,15 +4014,8 @@ async function fetchAndUpdateServiceStatus() {
         // duplicate frames.
         window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
 
-        if (typeof syncSpotifySettingsAuthState === 'function') {
-            syncSpotifySettingsAuthState(data?.spotify || null);
-        }
-        if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-            syncPrimaryMetadataSourceAvailability(data?.spotify || null);
-        }
-        if (typeof sanitizeMetadataSourceSelection === 'function') {
-            sanitizeMetadataSourceSelection({ quiet: true });
-        }
+        // the Settings metadata source picker and Spotify card follow the
+        // dispatch above (connections-metadata.tsx)
 
         // The dashboard service cards are React-rendered from the dispatch
         // above since the flip (service-cards.tsx) — only the sidebar half
@@ -4066,33 +4059,8 @@ async function fetchAndUpdateServiceStatus() {
     }
 }
 
-function syncPrimaryMetadataSourceAvailability(statusData) {
-    const select = document.getElementById('metadata-fallback-source');
-    if (!select) return;
-    if (!statusData) return;
-
-    const spotifyOption = select.querySelector('option[value="spotify"]');
-    const discogsOption = select.querySelector('option[value="discogs"]');
-
-    const spotifyAvailable = statusData?.authenticated === true;
-    if (spotifyOption) {
-        spotifyOption.dataset.unavailable = spotifyAvailable ? 'false' : 'true';
-        spotifyOption.textContent = spotifyAvailable ? 'Spotify' : '🔒 Spotify';
-        spotifyOption.title = spotifyAvailable
-            ? 'Spotify'
-            : 'Spotify authentication is required before this source can be selected.';
-    }
-
-    if (discogsOption) {
-        const discogsToken = document.getElementById('discogs-token');
-        const discogsAvailable = !!discogsToken?.value?.trim();
-        discogsOption.dataset.unavailable = discogsAvailable ? 'false' : 'true';
-        discogsOption.textContent = discogsAvailable ? 'Discogs' : '🔒 Discogs';
-        discogsOption.title = discogsAvailable
-            ? 'Discogs'
-            : 'Discogs personal access token is required before this source can be selected.';
-    }
-}
+// syncPrimaryMetadataSourceAvailability: the Settings metadata source picker
+// locks Spotify and Discogs itself (connections.ts sourceOptions)
 
 function getMetadataSourceLabel(source) {
     if (source === 'deezer') return 'Deezer';

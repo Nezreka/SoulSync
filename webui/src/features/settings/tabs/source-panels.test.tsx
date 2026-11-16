@@ -412,7 +412,7 @@ describe('Tidal', () => {
 describe('Qobuz', () => {
   it('shows what checkQobuzAuthStatus heard, and its sign-ins refresh it', async () => {
     shell.showToast = vi.fn();
-    shell.checkQobuzAuthStatus = vi.fn();
+    routes['GET /api/qobuz/auth/status'] = () => ({});
     routes['POST /api/qobuz/auth/login'] = () => ({ success: false, error: 'captcha' });
     routes['POST /api/qobuz/auth/token'] = () => ({ success: true });
     render(<QobuzPanel />);
@@ -435,10 +435,13 @@ describe('Qobuz', () => {
     expect(shell.showToast).toHaveBeenCalledWith('captcha', 'error');
     fireEvent.change(input('qobuz-download-token'), { target: { value: ' tok ' } });
     fireEvent.click(document.getElementById('qobuz-download-token-btn')!);
-    await waitFor(() => expect(shell.checkQobuzAuthStatus).toHaveBeenCalledOnce());
+    // a sign-in asks the server again (connections.ts checkQobuzAuthStatus)
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/qobuz/auth/status')).toHaveLength(1),
+    );
     expect(calls.find((c) => c.url === '/api/qobuz/auth/token')!.body).toEqual({ token: 'tok' });
     expect(input('qobuz-download-token').value).toBe('');
-    // settings.js heard the server: signed in
+    // the server says: signed in
     act(() => {
       window.dispatchEvent(
         new CustomEvent('soulsync:qobuz-auth', {
@@ -453,24 +456,18 @@ describe('Qobuz', () => {
     expect(document.getElementById('qobuz-auth-form')!.style.display).toBe('none');
     expect(status('qobuz-auth-user-info').textContent).toBe('Connected: Boulder (Studio)');
     delete shell.showToast;
-    delete shell.checkQobuzAuthStatus;
   });
 });
 
 describe('Deezer', () => {
-  it('saves the ARL and mirrors it into the Connections card, both ways', async () => {
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      '<input type="password" id="deezer-connection-arl">',
-    );
+  it('saves the ARL, the same key the Connections card holds', async () => {
     act(() => store.hydrate({ deezer_download: { arl: 'old' } }));
     render(<DeezerPanel store={store} />);
     expect(input('deezer-download-arl').value).toBe('old');
     fireEvent.change(input('deezer-download-arl'), { target: { value: 'fresh' } });
-    expect(input('deezer-connection-arl').value).toBe('fresh');
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({ deezer_download: { arl: 'fresh' } });
-    // the Connections card writes the same key through SoulSyncSettings.set
+    // the Connections card (connections-metadata.tsx) writes the same key
     act(() => store.set('deezer_download', 'arl', 'from-connections'));
     expect(input('deezer-download-arl').value).toBe('from-connections');
   });

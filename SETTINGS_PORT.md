@@ -53,24 +53,24 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Branch and worktree | done | `node_modules` is a Windows junction to the main checkout's. Tests run in the worktree. |
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
-| Tab: Connections | not started | 160 controls and buttons |
+| Tab: Connections | **in progress** (step 10a below) | 40 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal. Left: the Scrobbling and Extras cards (10b), Server Connections (10c), MetaSync (10d); the video side's cards and server row for the video pass. |
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
-| Tab: System | **done but Experimental** (steps 9a-9c below) | 61 of 63. Experimental (2) goes with Connections (step 10): the metadata source picker reads it. |
+| Tab: System | **done** (steps 9a-9c, and Experimental in 10a) | 63 of 63. |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and System but Experimental, 395 of 678 controls, 199 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 36 of 83 tests repointed (step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 437 of 678 controls, 234 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 43 of 83 tests repointed (step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 7,657 |
-| `webui/static/settings.js` | 10,187 | 4,134 |
+| `webui/index.html` | 12,823 | 7,136 |
+| `webui/static/settings.js` | 10,187 | 3,075 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +806,22 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Step 10a: Connections, part one: the metadata source, the Metadata cards, the tiles; Experimental (Nov 15 2026)
+
+**What.** `tabs/connections.ts` (the rules: the picker's options and locks, which source can be picked, MusicBrainz's check, the /status frames, Hydrabase's link, the Qobuz sign-in check), `tabs/connections-metadata.tsx` (the Metadata Source group with the Library discography source under it, the Spotify, iTunes, Deezer, Discogs, Tidal, Qobuz, MusicBrainz and Hydrabase cards, Experimental with its confirm), `tabs/connections-services.tsx` (the Music / Video tabs, the tiles, the modal). Slots: `metadata`, `services`, `services-metadata`, `musicbrainz`, `hydrabase`, and System's `experimental`.
+
+**The modal (bug caught in the browser).** The tiles first stayed vanilla, and moving a React card into the vanilla modal took its node out of its React root: typing in it did nothing. The tiles and modal are React now. A React card portals into a wrapper of its own and only the wrapper moves (React listens on a portal's container wherever it sits); the video side's cards, still vanilla, are lifted in and put back in their exact slot as before. A test fails if a React card is moved itself (negative-checked).
+
+**The picker.** Locks Spotify and Discogs once /status speaks (from `ss:service-status`, not a DOM write in `shared-helpers.js`, whose `syncPrimaryMetadataSourceAvailability` is gone); JioSaavn after MusicBrainz while switched on; Hydrabase last while connected; a saved source with no option yet shows nothing picked. A locked pick warns and stays put. A source that stops being pickable goes back to the last good one, else Deezer.
+
+**Differences.** That switch is saved at once; the old page showed it and saved it with its next save of anything. A disconnect the server already answered (`syncMetadataSourceSelection`, still on window for the rate limit modal) is shown, not saved again. The switch waits for a /status frame (the old page could switch Spotify away before the first one landed). The Library discography source posts only its key, not the whole settings blob it re-fetched. `focusServiceSettingsSection` only toasts now: the card it opened sat in the hidden group. The hidden accordion headers' status gradient and verify calls stay vanilla until 10b, where they go (nothing shows them: the group is hidden and the modal hides headers).
+
+**MusicBrainz.** A bad server address holds every save (`store.block`), and the page save toasts it through `SoulSyncSettings.musicbrainzError`, as `collectMusicBrainzServerSettings` refused the save.
+
+**Removed.** 35 functions from `settings.js` (the picker and Experimental helpers, the Spotify, Tidal, Deezer, Qobuz and Hydrabase actions, the MusicBrainz trio, the eight tile functions and their constants), their load and collector keys, the Deezer ARL mirror, the experimental modal from `index.html`, the status hooks in `core.js` and `shared-helpers.js`, and the injector in `library-discography-source.ts`.
+
+**Checked.** Parity against six frozen fixtures; `connections-metadata.test.tsx` 32 and `connections-services.test.tsx` 6. Settings, `src/test`, shell and dashboard folders: 2,201 pass. Browser: every value, the tiles, the modal, typing in it, Hydrabase's disconnect, the locks, the confirm and the saved keys the same; screenshots identical apart from sub-pixel text in three help lines.
+
 ## Change log
 
 Newest first. One entry per change on the branch.
@@ -844,13 +860,13 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `metadata-fallback-source` | Primary metadata source: {Spotify / Spotify (no auth) / iTunes / Apple Music / Deezer / Discogs / MusicBrainz} | music only | no |
+| select | `metadata-fallback-source` | Primary metadata source: {Spotify / Spotify (no auth) / iTunes / Apple Music / Deezer / Discogs / MusicBrainz} | music only | yes (step 10a) |
 
 **Service** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | × | both | no |
+| button |  | × | both | yes (step 10a) |
 
 **API Configuration Expand All** (music only, 1)
 
@@ -862,61 +878,61 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `spotify-client-id` | Client ID: | music only | no |
-| password | `spotify-client-secret` | Client Secret: | music only | no |
-| text | `spotify-redirect-uri` | Redirect URI: | music only | no |
-| button |  | 🔐 Authenticate | music only | no |
-| button | `spotify-disconnect-btn` | 🔌 Disconnect | music only | no |
-| button |  | Test Connection | music only | no |
-| checkbox | `metadata-spotify-free-enrichment` | Use Spotify (no auth) for background enrichment | music only | no |
+| text | `spotify-client-id` | Client ID: | music only | yes (step 10a) |
+| password | `spotify-client-secret` | Client Secret: | music only | yes (step 10a) |
+| text | `spotify-redirect-uri` | Redirect URI: | music only | yes (step 10a) |
+| button |  | 🔐 Authenticate | music only | yes (step 10a) |
+| button | `spotify-disconnect-btn` | 🔌 Disconnect | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
+| checkbox | `metadata-spotify-free-enrichment` | Use Spotify (no auth) for background enrichment | music only | yes (step 10a) |
 
 **iTunes / Apple Music** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `itunes-country` | Storefront Country: {United States (US) / United Kingdom (GB) / Canada (CA) / Australia (AU) / Germany (DE) /  | music only | no |
-| button |  | Test Connection | music only | no |
+| select | `itunes-country` | Storefront Country: {United States (US) / United Kingdom (GB) / Canada (CA) / Australia (AU) / Germany (DE) /  | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **Deezer (Favorites & Playlists)** (music only, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `deezer-app-id` | App ID: | music only | no |
-| password | `deezer-app-secret` | App Secret: | music only | no |
-| text | `deezer-redirect-uri` | Redirect URI: | music only | no |
-| button |  | 🔐 Authenticate | music only | no |
-| password | `deezer-connection-arl` | ARL Token: | music only | no |
-| button |  | Test Connection | music only | no |
+| text | `deezer-app-id` | App ID: | music only | yes (step 10a) |
+| password | `deezer-app-secret` | App Secret: | music only | yes (step 10a) |
+| text | `deezer-redirect-uri` | Redirect URI: | music only | yes (step 10a) |
+| button |  | 🔐 Authenticate | music only | yes (step 10a) |
+| password | `deezer-connection-arl` | ARL Token: | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **Discogs** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `discogs-token` | Personal Access Token: | music only | no |
-| button |  | Test Connection | music only | no |
+| password | `discogs-token` | Personal Access Token: | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **Tidal (Playlists & Metadata)** (music only, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `tidal-client-id` | Client ID: | music only | no |
-| password | `tidal-client-secret` | Client Secret: | music only | no |
-| text | `tidal-redirect-uri` | Redirect URI: | music only | no |
-| button |  | 🔐 Authenticate | music only | no |
-| button |  | Disconnect | music only | no |
-| button |  | Test Connection | music only | no |
+| text | `tidal-client-id` | Client ID: | music only | yes (step 10a) |
+| password | `tidal-client-secret` | Client Secret: | music only | yes (step 10a) |
+| text | `tidal-redirect-uri` | Redirect URI: | music only | yes (step 10a) |
+| button |  | 🔐 Authenticate | music only | yes (step 10a) |
+| button |  | Disconnect | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **Qobuz (Metadata & Enrichment)** (music only, 7)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Disconnect | music only | no |
-| email | `qobuz-connection-email` | Email: | music only | no |
-| password | `qobuz-connection-password` | Password: | music only | no |
-| button | `qobuz-connection-login-btn` | Connect Qobuz | music only | no |
-| password | `qobuz-connection-token` | Auth Token: | music only | no |
-| button | `qobuz-token-login-btn` | Connect with Token | music only | no |
-| button |  | Test Connection | music only | no |
+| button |  | Disconnect | music only | yes (step 10a) |
+| email | `qobuz-connection-email` | Email: | music only | yes (step 10a) |
+| password | `qobuz-connection-password` | Password: | music only | yes (step 10a) |
+| button | `qobuz-connection-login-btn` | Connect Qobuz | music only | yes (step 10a) |
+| password | `qobuz-connection-token` | Auth Token: | music only | yes (step 10a) |
+| button | `qobuz-token-login-btn` | Connect with Token | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **Concerts** (music only, 4)
 
@@ -963,10 +979,10 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| url | `musicbrainz-base-url` | MusicBrainz server URL | music only | no |
-| select | `musicbrainz-rate-mode` | MusicBrainz request rate {Fixed limit / No limit (adaptive)} | music only | no |
-| number | `musicbrainz-request-rate` | MusicBrainz request rate | music only | no |
-| button |  | Test Connection | music only | no |
+| url | `musicbrainz-base-url` | MusicBrainz server URL | music only | yes (step 10a) |
+| select | `musicbrainz-rate-mode` | MusicBrainz request rate {Fixed limit / No limit (adaptive)} | music only | yes (step 10a) |
+| number | `musicbrainz-request-rate` | MusicBrainz request rate | music only | yes (step 10a) |
+| button |  | Test Connection | music only | yes (step 10a) |
 
 **AcoustID Verification** (music only, 4)
 
@@ -991,10 +1007,10 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `hydrabase-url` | WebSocket URL: | music only | no |
-| password | `hydrabase-api-key` | API Key: | music only | no |
-| checkbox | `hydrabase-auto-connect` | Auto-connect on startup | music only | no |
-| button | `hydrabase-connect-btn` | Connect | music only | no |
+| text | `hydrabase-url` | WebSocket URL: | music only | yes (step 10a) |
+| password | `hydrabase-api-key` | API Key: | music only | yes (step 10a) |
+| checkbox | `hydrabase-auto-connect` | Auto-connect on startup | music only | yes (step 10a) |
+| button | `hydrabase-connect-btn` | Connect | music only | yes (step 10a) |
 | button |  | Test Spotify | music only | no |
 | button |  | Test Tidal | music only | no |
 | button |  | Test ListenBrainz | music only | no |
@@ -2000,8 +2016,8 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `experimental-jiosaavn-enabled` | Enable JioSaavn metadata source | music only | no |
-| checkbox | `experimental-bandcamp-enabled` | Enable Bandcamp search & enrichment | music only | no |
+| checkbox | `experimental-jiosaavn-enabled` | Enable JioSaavn metadata source | music only | yes (step 10a) |
+| checkbox | `experimental-bandcamp-enabled` | Enable Bandcamp search & enrichment | music only | yes (step 10a) |
 
 ### Logs (10)
 

@@ -71,6 +71,8 @@ function debouncedAutoSaveSettings(event) {
     const _t = event?.target;
     if (_t?.closest?.('[data-stg-react]')
         && !_t.closest('.src-config-panel:not([data-react-panel])')) return;
+    // a React service card lifted into the Services modal is out of its slot
+    if (_t?.closest?.('.api-service-frame[data-react-panel]')) return;
     // On the video side, a VIDEO field (TMDB key, region, autoplay...) saves
     // itself via /api/video/*, so it must not also fire this full save. Every
     // other field on the page - the shared tabs, System, Security - has no
@@ -146,245 +148,11 @@ function setSettingsSaveState(state) {
     }
 }
 
-function syncMetadataSourceSelection(source) {
-    const select = document.getElementById('metadata-fallback-source');
-    if (!select || !source) return;
-    const option = select.querySelector(`option[value="${source}"]`);
-    if (option) select.value = source;
-    select.dataset.lastValidSource = source;
-}
+// the metadata source picker and its rules, the Experimental switches and
+// their confirm modal: React (connections-metadata.tsx, connections.ts,
+// SETTINGS_PORT.md step 10a)
 
-function _isMetadataSourceSelectable(source) {
-    if (source === 'spotify') {
-        // Official Spotify needs a connected session.
-        return _lastStatusPayload?.spotify?.authenticated === true;
-    }
-    if (source === 'spotify_free') {
-        // No-creds Spotify only needs the SpotipyFree package installed —
-        // selecting it IS the opt-in, so it must NOT depend on having selected it.
-        return _lastStatusPayload?.spotify?.free_installed === true;
-    }
-    if (source === 'discogs') {
-        const token = document.getElementById('discogs-token');
-        return !!token?.value?.trim();
-    }
-    if (source === 'jiosaavn') {
-        return document.getElementById('experimental-jiosaavn-enabled')?.checked === true;
-    }
-    return true;
-}
 
-function syncJiosaavnMetadataSourceOption(enabled) {
-    const select = document.getElementById('metadata-fallback-source');
-    if (!select) return;
-
-    let option = select.querySelector('option[value="jiosaavn"]');
-    if (enabled) {
-        if (!option) {
-            option = document.createElement('option');
-            option.value = 'jiosaavn';
-            option.textContent = 'JioSaavn';
-            const anchor = select.querySelector('option[value="musicbrainz"]');
-            if (anchor?.nextSibling) {
-                select.insertBefore(option, anchor.nextSibling);
-            } else {
-                select.appendChild(option);
-            }
-        }
-        return;
-    }
-
-    if (select.value === 'jiosaavn') {
-        select.value = 'deezer';
-        select.dataset.lastValidSource = 'deezer';
-    }
-    option?.remove();
-}
-
-let _experimentalEnableResolver = null;
-
-function showExperimentalEnableDialog({ title, message }) {
-    if (_experimentalEnableResolver) {
-        _experimentalEnableResolver(false);
-        _experimentalEnableResolver = null;
-    }
-
-    const overlay = document.getElementById('experimental-enable-modal-overlay');
-    const titleEl = document.getElementById('experimental-enable-modal-title');
-    const messageEl = document.getElementById('experimental-enable-modal-message');
-    const ack = document.getElementById('experimental-enable-ack-checkbox');
-    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
-    if (!overlay || !titleEl || !messageEl || !ack || !confirmBtn) {
-        return Promise.resolve(false);
-    }
-
-    titleEl.textContent = title || 'Enable experimental feature';
-    messageEl.textContent = message || '';
-    ack.checked = false;
-    confirmBtn.disabled = true;
-
-    const onAckChange = () => {
-        confirmBtn.disabled = !ack.checked;
-    };
-    ack.onchange = onAckChange;
-
-    overlay.classList.remove('hidden');
-
-    return new Promise((resolve) => {
-        _experimentalEnableResolver = (result) => {
-            ack.onchange = null;
-            resolve(result);
-        };
-    });
-}
-
-function resolveExperimentalEnableDialog(confirmed) {
-    const overlay = document.getElementById('experimental-enable-modal-overlay');
-    const ack = document.getElementById('experimental-enable-ack-checkbox');
-    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
-    const ok = confirmed && ack?.checked;
-
-    if (overlay) overlay.classList.add('hidden');
-    if (ack) ack.checked = false;
-    if (confirmBtn) confirmBtn.disabled = true;
-
-    if (_experimentalEnableResolver) {
-        _experimentalEnableResolver(ok);
-        _experimentalEnableResolver = null;
-    }
-}
-
-function syncJiosaavnEnrichmentBubble(enabled) {
-    // Re-broadcast for the React dashboard (tools-seam rule: in the handler) —
-    // its JioSaavn orb shows/hides on this, since the container write below
-    // only reaches the vanilla markup.
-    window.dispatchEvent(new CustomEvent('ss:jiosaavn-experimental', { detail: { enabled: !!enabled } }));
-    // No container write since the dashboard flip — the JioSaavn orb is
-    // React-rendered and shows/hides on the dispatch above.
-    if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
-        refreshRateMonitorExperimentalVisibility();
-    }
-    if (enabled && typeof renderEnrichmentRail === 'function') {
-        renderEnrichmentRail();
-    }
-    // The chips replay is React's now: service-cards.tsx re-renders its
-    // cached enrichment payload on the ss:jiosaavn-experimental dispatch.
-}
-
-async function onExperimentalJiosaavnToggle(checkbox) {
-    if (!checkbox) return;
-
-    if (!checkbox.checked) {
-        syncJiosaavnMetadataSourceOption(false);
-        syncJiosaavnEnrichmentBubble(false);
-        debouncedAutoSaveSettings();
-        return;
-    }
-
-    checkbox.checked = false;
-
-    const acknowledged = await showExperimentalEnableDialog({
-        title: 'Enable JioSaavn',
-        message: 'JioSaavn uses a third-party public API proxy. Coverage and availability may change without notice. Once enabled, JioSaavn will appear as a metadata source on the Connections tab and in search.',
-    });
-
-    if (!acknowledged) return;
-
-    checkbox.checked = true;
-    syncJiosaavnMetadataSourceOption(true);
-    syncJiosaavnEnrichmentBubble(true);
-    debouncedAutoSaveSettings();
-}
-
-async function onExperimentalBandcampToggle(checkbox) {
-    if (!checkbox) return;
-
-    if (!checkbox.checked) {
-        debouncedAutoSaveSettings();
-        return;
-    }
-
-    checkbox.checked = false;
-
-    const acknowledged = await showExperimentalEnableDialog({
-        title: 'Enable Bandcamp',
-        message: 'Bandcamp has no official public search/metadata API — this uses Bandcamp\'s own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.',
-    });
-
-    if (!acknowledged) return;
-
-    checkbox.checked = true;
-    debouncedAutoSaveSettings();
-}
-
-function _metadataSourceFallback(source) {
-    if (source === 'spotify') return 'deezer';
-    return 'deezer';
-}
-
-function focusServiceSettingsSection(service, message) {
-    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
-    if (!card) return;
-
-    const header = card.querySelector('.stg-service-header');
-    if (!card.classList.contains('expanded') && header) {
-        toggleStgService(header);
-    }
-
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    const firstControl = card.querySelector('input, button');
-    if (firstControl) {
-        firstControl.focus({ preventScroll: true });
-    }
-
-    if (message) {
-        showToast(message, 'warning');
-    }
-}
-
-function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
-    const select = document.getElementById('metadata-fallback-source');
-    if (!select) return false;
-
-    const selectedSource = select.value || 'deezer';
-    if (_isMetadataSourceSelectable(selectedSource)) {
-        select.dataset.lastValidSource = selectedSource;
-        return false;
-    }
-
-    const lastValid = select.dataset.lastValidSource;
-    const fallbackSource = lastValid && lastValid !== selectedSource && _isMetadataSourceSelectable(lastValid)
-        ? lastValid
-        : _metadataSourceFallback(selectedSource);
-
-    if (fallbackSource && fallbackSource !== selectedSource) {
-        select.value = fallbackSource;
-    }
-    select.dataset.lastValidSource = fallbackSource;
-
-    if (!quiet) {
-        const message = selectedSource === 'discogs'
-            ? 'Discogs requires a personal access token before it can be selected as the primary metadata source.'
-            : 'Spotify must be authenticated before it can be selected as the primary metadata source.';
-        focusServiceSettingsSection(selectedSource, message);
-    }
-
-    return true;
-}
-
-function handleMetadataSourceChange(event) {
-    const select = event.target;
-    if (!select || select.id !== 'metadata-fallback-source') return;
-
-    const selectedSource = select.value;
-    if (_isMetadataSourceSelectable(selectedSource)) {
-        select.dataset.lastValidSource = selectedSource;
-        return;
-    }
-
-    sanitizeMetadataSourceSelection({ quiet: false });
-}
 
 let _settingsInitialized = false;
 // Tell password-manager extensions (Bitwarden / 1Password / LastPass) to ignore
@@ -447,19 +215,8 @@ function initializeSettings() {
         });
     }
 
-    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
-    if (metadataSourceSelect) {
-        metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
-    }
-    const discogsTokenInput = document.getElementById('discogs-token');
-    if (discogsTokenInput) {
-        discogsTokenInput.addEventListener('input', () => {
-            if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-                syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
-            }
-            sanitizeMetadataSourceSelection({ quiet: true });
-        });
-    }
+    // the metadata source picker follows /status and the Discogs token itself
+    // (connections-metadata.tsx)
 
     // Server toggle buttons
     const plexToggle = document.getElementById('plex-toggle');
@@ -486,15 +243,6 @@ function initializeSettings() {
     // Test connection buttons
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 
-    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
-    }
-    syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
-    syncMetadataSourceSelection(_lastStatusPayload?.metadata_source?.source);
-    sanitizeMetadataSourceSelection({ quiet: true });
-    if (metadataSourceSelect) {
-        metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
-    }
 }
 
 // resetFileOrganizationTemplates and validateFileOrganizationTemplates: the
@@ -502,289 +250,10 @@ function initializeSettings() {
 // organization.ts)
 
 // ── Connections: services as tiles ─────────────────────────────────────────
-//
-// 22 services lived in two "API Configuration" groups as nested accordions, so
-// finding out whether Last.fm was even configured meant scrolling a wall of
-// chevrons and opening them one at a time. The tiles answer that without
-// opening anything, and the media tabs stop the music side and the video side
-// being one undifferentiated list.
-//
-// The forms themselves are NOT rebuilt. A tile opens the real panel in a modal
-// by MOVING the node - never cloning it - so every id stays unique and all the
-// existing save/load/test code keeps working with no idea this happened. Same
-// contract the Sources tab runs on, and the reason it is worth restating: a
-// clone would duplicate ~200 field ids, and on this page a duplicated id is how
-// a save writes the wrong value into a real credential.
-//
-// Where a panel goes home is remembered as (parent, nextSibling) rather than a
-// shared holding container. It restores to the exact slot it came from, so the
-// accordion groups below keep their order even after a service has been opened.
-const SERVICE_KINDS = {
-    music: { label: 'Music', attr: 'data-service' },
-    video: { label: 'Video', attr: 'data-video-service' },
-};
-
-// Real brand art wherever the repo already has it. A service with no logo gets
-// a monogram on its own colour rather than a grey blob - the point of the grid
-// is to be recognisable at a glance, and a row of identical blobs is a list you
-// have to read anyway.
-const SERVICE_LOGOS = {
-    spotify: '/static/img/brands/spotify.png',
-    itunes: '/static/img/brands/itunes.png',
-    deezer: '/static/img/brands/deezer.png',
-    discogs: '/static/img/brands/discogs.svg',
-    tidal: '/static/img/brands/tidal.svg',
-    qobuz: '/static/img/brands/qobuz.svg',
-    lastfm: '/static/img/brands/lastfm.png',
-    genius: '/static/img/brands/genius.png',
-    musicbrainz: '/static/img/brands/musicbrainz.png',
-    listenbrainz: '/static/img/brands/listenbrainz.png',
-    tmdb: '/static/img/brands/tmdb.svg',
-    tvdb: '/static/img/brands/tvdb.svg',
-    ytextras: '/static/img/brands/youtube.svg',
-};
-
-// Marks that are dark artwork and vanish on a dark tile, same list the download
-// chain keeps for the same reason.
-const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
-
-// Services with no brand art in the repo. Rather than invent icons, these reuse
-// the glyphs the VIDEO DASHBOARD already shows for the same sources - so OMDb is
-// the same star in both places and the app keeps ONE vocabulary. A service with
-// neither a logo nor an established glyph falls back to its monogram; inventing
-// one here would be the start of a second, competing icon set.
-const SERVICE_GLYPHS = {
-    omdb: '\u2605',             // star - ratings, as on the dashboard
-    fanart: '\u{1F3A8}',        // palette - artwork
-    'artist-fanart': '\u{1F3A8}', // the same source, for artist artwork
-    opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
-    trakt: '\u2605',            // star - audience rating
-    nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
-};
-
-// Grouped by what each service does for you, same headings as the download
-// chain. Order inside a group is the order here, not page order. A service not
-// listed lands in "Other" so a new one can never vanish from the grid.
-const SERVICE_GROUPS = {
-    music: [
-        { label: 'Metadata', hint: 'artists, albums and tracks',
-          ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
-        { label: 'Scrobbling', hint: 'listening history and recommendations',
-          ids: ['lastfm', 'listenbrainz'] },
-        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks, cover art and artist artwork',
-          ids: ['genius', 'concerts', 'acoustid', 'pollinations', 'artist-fanart'] },
-    ],
-    video: [
-        { label: 'Metadata', hint: 'movies, shows and episodes',
-          ids: ['tmdb', 'tvdb', 'nokey'] },
-        { label: 'Ratings & lists', hint: 'scores and list collections',
-          ids: ['omdb', 'trakt', 'mdblist'] },
-        { label: 'Subtitles', hint: 'found and downloaded for your library',
-          ids: ['opensubtitles', 'subdl', 'subsource'] },
-        { label: 'Artwork & extras', hint: 'posters, fanart and trailers',
-          ids: ['fanart', 'ytextras'] },
-    ],
-};
-
-// Follow the side you are standing on, exactly like the download chain does.
-// Defaulting to music meant a video user landed on a grid of Spotify and Tidal
-// tiles with their own TMDB key nowhere in sight.
-let _svcKind = 'music';
-let _svcKindChosen = false;
-
-function _svcSyncKindToSide() {
-    if (_svcKindChosen) return;
-    _svcKind = document.body.getAttribute('data-side') === 'video' ? 'video' : 'music';
-}
-let _svcOpen = null;          // { id, parent, next } for the panel currently lifted
-
-function _svcFrames(kind) {
-    const attr = SERVICE_KINDS[kind]?.attr;
-    if (!attr) return [];
-    // Scoped to the CONNECTIONS tab. Unscoped this also picked up "Detail Pages",
-    // a video-preferences panel that lives on the Library tab and is not a
-    // service at all - it appeared in the grid as a connection you could
-    // configure, which it is not.
-    return Array.from(document.querySelectorAll(`#settings-page .api-service-frame[${attr}]`))
-        .filter(f => f.closest('[data-stg="connections"]'));
-}
-
-function _svcMeta(frame) {
-    const title = frame.querySelector('.service-title')?.textContent?.trim() || '';
-    const id = frame.getAttribute('data-service') || frame.getAttribute('data-video-service') || '';
-    const logo = SERVICE_LOGOS[id]
-        || frame.querySelector('.video-svc-logo')?.getAttribute('src')
-        || null;
-    const dot = frame.querySelector('.stg-service-dot');
-    const colour = dot?.style?.color || '';
-    const required = !!frame.querySelector('.stg-req-pill');
-    // "Deezer (Favorites & Playlists)" is a name plus an explanation; the tile
-    // shows the name and the modal shows the rest.
-    const paren = title.indexOf('(');
-    const name = (paren > 0 ? title.slice(0, paren) : title).trim();
-    return {
-        id, name,
-        detail: paren > 0 ? title.slice(paren + 1).replace(/\)\s*$/, '').trim() : '',
-        logo, colour, required,
-        inverted: INVERT_SERVICE_MARKS.has(id),
-        glyph: SERVICE_GLYPHS[id] || null,
-        monogram: (name.replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase(),
-    };
-}
-
-// A service counts as configured when it holds a non-empty credential. Read
-// from the live inputs, never from a cached settings object - the same rule the
-// library summaries follow, and for the same reason.
-function _svcConfigured(frame) {
-    const fields = frame.querySelectorAll('input[type="text"], input[type="password"], input[type="email"]');
-    if (fields.length) {
-        for (const f of fields) {
-            if (String(f.value || '').trim()) return true;
-        }
-        return false;
-    }
-    // keyless services (Community Data, YouTube Extras) are on/off instead
-    const toggles = frame.querySelectorAll('input[type="checkbox"]');
-    for (const t of toggles) {
-        if (t.checked) return true;
-    }
-    return null;          // nothing to judge by - say nothing rather than "off"
-}
-
-function buildServiceTiles() {
-    _svcSyncKindToSide();
-    const grid = document.getElementById('service-tile-grid');
-    const tabs = document.getElementById('svc-tabs');
-    if (!grid || !tabs) return;
-
-    tabs.innerHTML = Object.entries(SERVICE_KINDS).map(([k, spec]) =>
-        `<button type="button" role="tab" class="dlchain-tab${k === _svcKind ? ' active' : ''}" `
-        + `onclick="switchServiceKind('${k}')">${spec.label}</button>`).join('');
-
-    // the tab owns the whole tab, not just the grid: the matching side's server
-    // section comes with it, so what is on screen agrees with what the tab says
-    document.querySelectorAll('#settings-page .settings-group[data-svc-side]').forEach(g => {
-        g.classList.toggle('svc-side-active', g.getAttribute('data-svc-side') === _svcKind);
-    });
-
-    const frames = _svcFrames(_svcKind);
-    if (!frames.length) {
-        grid.innerHTML = '<div class="dlchain-empty">No services on this side yet.</div>';
-        return;
-    }
-    const attr = SERVICE_KINDS[_svcKind].attr;
-    const tile = (frame) => {
-        const id = frame.getAttribute(attr);
-        const m = _svcMeta(frame);
-        const set = _svcConfigured(frame);
-        const state = set === null ? 'na' : (set ? 'ok' : 'warn');
-        // real artwork first, then the app's own glyph for that source, then a
-        // monogram. each step is a real fallback, not a placeholder.
-        const fallback = m.glyph
-            ? `<span class="svc-glyph">${m.glyph}</span>`
-            : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`;
-        const art = m.logo
-            ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="" `
-              + `onerror="this.replaceWith(document.createRange().createContextualFragment(this.dataset.fb))" `
-              + `data-fb="${escapeHtml(fallback)}">`
-            : fallback;
-        const chip = m.required && !set
-            ? '<span class="src-tile-chip src-tile-chip--warn">required</span>'
-            : (set === null ? '<span class="src-tile-chip">no key needed</span>'
-               : set ? '<span class="src-tile-chip src-tile-chip--on">configured</span>'
-                     : '<span class="src-tile-chip">not set up</span>');
-        const brand = (m.colour || '').replace('#', '');
-        return `<button type="button" class="svc-tile${set ? ' is-active' : ''}" `
-             + `data-service-tile="${escapeHtml(id)}" onclick="openServiceModal('${escapeHtml(id)}')" `
-             + `style="--svc-brand: ${escapeHtml(m.colour || '#8a8a8a')}" `
-             + `title="Configure ${escapeHtml(m.name)}">`
-             + `<span class="src-tile-dot hss-${state}"></span>`
-             + `<span class="svc-tile-art">${art}</span>`
-             + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
-             + chip + '</button>';
-    };
-
-    const byId = new Map(frames.map(f => [f.getAttribute(attr), f]));
-    const groups = (SERVICE_GROUPS[_svcKind] || []).map(g => ({
-        ...g, frames: g.ids.map(id => byId.get(id)).filter(Boolean),
-    }));
-    const listed = new Set(groups.flatMap(g => g.ids));
-    groups.push({ label: 'Other', hint: '', frames: frames.filter(f => !listed.has(f.getAttribute(attr))) });
-
-    grid.innerHTML = groups.filter(g => g.frames.length).map(g =>
-        `<div class="src-group"><div class="src-group-head">`
-        + `<span class="src-group-label">${g.label}</span>`
-        + `<span class="src-group-count">${g.frames.length}</span>`
-        + (g.hint ? `<span class="src-group-hint">${g.hint}</span>` : '')
-        + `</div><div class="svc-tile-row">${g.frames.map(tile).join('')}</div></div>`).join('');
-}
-window.buildServiceTiles = buildServiceTiles;
-
-function switchServiceKind(kind) {
-    if (!SERVICE_KINDS[kind]) return;
-    _svcKindChosen = true;      // an explicit pick outranks the side default
-    _svcKind = kind;
-    buildServiceTiles();
-}
-window.switchServiceKind = switchServiceKind;
-
-function openServiceModal(id) {
-    const attr = SERVICE_KINDS[_svcKind].attr;
-    const frame = document.querySelector(`#settings-page .api-service-frame[${attr}="${CSS.escape(id)}"]`);
-    const overlay = document.getElementById('service-config-modal');
-    const body = document.getElementById('svc-modal-body');
-    if (!frame || !overlay || !body) return;
-    if (_svcOpen) closeServiceModal();          // never lift two panels at once
-
-    const m = _svcMeta(frame);
-    document.getElementById('svc-modal-title').textContent = m.name;
-    document.getElementById('svc-modal-sub').textContent = m.detail;
-    document.getElementById('svc-modal-icon').innerHTML = m.logo
-        ? `<img class="svc-mark${m.inverted ? ' is-inverted' : ''}" src="${escapeHtml(m.logo)}" alt="">`
-        : (m.glyph ? `<span class="svc-glyph">${m.glyph}</span>`
-                   : `<span class="svc-monogram">${escapeHtml(m.monogram)}</span>`);
-
-    // remember the exact slot so it goes back where it came from
-    _svcOpen = { id, attr, parent: frame.parentNode, next: frame.nextSibling };
-    body.appendChild(frame);
-    // the accordion inside is collapsed by default; in a modal it IS the content
-    frame.querySelector('.stg-service-body')?.style.setProperty('display', 'block');
-    overlay.hidden = false;
-    document.body.classList.add('src-modal-open');
-}
-window.openServiceModal = openServiceModal;
-
-function closeServiceModal() {
-    const overlay = document.getElementById('service-config-modal');
-    if (!overlay) return;
-    // home BEFORE hiding, so the panel's ids never sit inside a hidden modal
-    if (_svcOpen) {
-        const frame = document.querySelector(
-            `#settings-page .api-service-frame[${_svcOpen.attr}="${CSS.escape(_svcOpen.id)}"]`);
-        if (frame && _svcOpen.parent) {
-            frame.querySelector('.stg-service-body')?.style.removeProperty('display');
-            _svcOpen.parent.insertBefore(frame, _svcOpen.next);
-        }
-    }
-    _svcOpen = null;
-    overlay.hidden = true;
-    document.body.classList.remove('src-modal-open');
-    // an api key typed seconds before closing would otherwise sit on the 2s
-    // autosave timer with the modal gone and nothing on screen saying so
-    if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
-        clearTimeout(settingsAutoSaveTimer);
-        settingsAutoSaveTimer = null;
-        saveSettings(true);
-    }
-    buildServiceTiles();
-}
-window.closeServiceModal = closeServiceModal;
-
-document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    const overlay = document.getElementById('service-config-modal');
-    if (overlay && !overlay.hidden) closeServiceModal();
-});
+// The Music / Video tabs, the tiles and the modal a tile opens are React
+// (src/features/settings/tabs/connections-services.tsx, SETTINGS_PORT.md step
+// 10a). window.buildServiceTiles, switchServiceKind, openServiceModal and
+// closeServiceModal reach them from here and other pages.
 
 // ── Library tab: what each section currently SAYS ──────────────────────────
 //
@@ -1113,36 +582,12 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
-        syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
+        // the Spotify card's dot follows /status itself (connections-metadata.tsx)
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
     }
 }
 
-function syncSpotifySettingsAuthState(statusData) {
-    if (!statusData) return;
-
-    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
-    if (!card) return;
-
-    const header = card.querySelector('.stg-service-header');
-    const dot = card.querySelector('.stg-service-dot');
-    if (!header && !dot) return;
-
-    const authenticated = statusData?.authenticated === true;
-    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
-    const cooldown = !!(statusData?.post_ban_cooldown > 0);
-    const needsAttention = !authenticated || rateLimited || cooldown;
-
-    if (header) {
-        header.classList.toggle('status-configured', !needsAttention);
-        header.classList.toggle('status-missing', needsAttention);
-    }
-
-    if (dot) {
-        dot.style.color = needsAttention ? '#f1c40f' : '#1DB954';
-    }
-}
 
 function _stgSetCheckingState(service, isChecking) {
     const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
@@ -1428,36 +873,8 @@ async function loadSettingsData() {
         // the tabs ported to React read the same payload from their own store
         if (window.SoulSyncSettings) window.SoulSyncSettings.hydrate(settings);
 
-        // Populate Spotify settings
-        document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
-        document.getElementById('spotify-client-secret').value = settings.spotify?.client_secret || '';
-        document.getElementById('spotify-redirect-uri').value = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
-        document.getElementById('spotify-callback-display').textContent = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
-
-        // Populate Tidal settings
-        document.getElementById('tidal-client-id').value = settings.tidal?.client_id || '';
-        document.getElementById('tidal-client-secret').value = settings.tidal?.client_secret || '';
-        document.getElementById('tidal-redirect-uri').value = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
-        document.getElementById('tidal-callback-display').textContent = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
-
-        // Populate Deezer OAuth settings
-        document.getElementById('deezer-app-id').value = settings.deezer?.app_id || '';
-        document.getElementById('deezer-app-secret').value = settings.deezer?.app_secret || '';
-        document.getElementById('deezer-redirect-uri').value = settings.deezer?.redirect_uri || 'http://127.0.0.1:8008/deezer/callback';
-        document.getElementById('deezer-callback-display').textContent = settings.deezer?.redirect_uri || 'http://127.0.0.1:8008/deezer/callback';
-
-        // Add event listeners to update display URLs when input changes
-        document.getElementById('spotify-redirect-uri').addEventListener('input', function () {
-            document.getElementById('spotify-callback-display').textContent = this.value || 'http://127.0.0.1:8888/callback';
-        });
-
-        document.getElementById('tidal-redirect-uri').addEventListener('input', function () {
-            document.getElementById('tidal-callback-display').textContent = this.value || 'http://127.0.0.1:8889/tidal/callback';
-        });
-
-        document.getElementById('deezer-redirect-uri').addEventListener('input', function () {
-            document.getElementById('deezer-callback-display').textContent = this.value || 'http://127.0.0.1:8008/deezer/callback';
-        });
+        // Spotify, Tidal and Deezer (and their redirect lines): React
+        // (connections-metadata.tsx, SETTINGS_PORT.md step 10a)
 
         // Populate Plex settings
         const plexUrlInput = document.getElementById('plex-url');
@@ -1554,62 +971,9 @@ async function loadSettingsData() {
         const _fanartKey = document.getElementById('artist-fanart-api-key');
         if (_fanartKey) _fanartKey.value = settings.fanart?.api_key || '';
 
-        // Populate iTunes settings
-        document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
-
-        // Populate Discogs settings
-        document.getElementById('discogs-token').value = settings.discogs?.token || '';
-
-        // Populate Metadata source setting. 'Spotify Free' is stored as
-        // fallback_source='spotify' + spotify_free=true (so all downstream
-        // 'spotify' routing is unchanged) — map it back to the dropdown value.
-        const _fbSrc = settings.metadata?.fallback_source || 'deezer';
-        const _metaSel = (_fbSrc === 'spotify' && settings.metadata?.spotify_free === true)
-            ? 'spotify_free' : _fbSrc;
-        document.getElementById('metadata-fallback-source').value = _metaSel;
-        const _efEl = document.getElementById('metadata-spotify-free-enrichment');
-        // Default ON: unset (undefined) reads as enabled, matching the worker's
-        // config default (metadata.spotify_free_enrichment defaults True).
-        if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment !== false;
-
-        const _jiosaavnExp = document.getElementById('experimental-jiosaavn-enabled');
-        const jiosaavnEnabled = settings.experimental?.jiosaavn_enabled === true;
-        if (_jiosaavnExp) _jiosaavnExp.checked = jiosaavnEnabled;
-        syncJiosaavnMetadataSourceOption(jiosaavnEnabled);
-        syncJiosaavnEnrichmentBubble(jiosaavnEnabled);
-        if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
-            document.getElementById('metadata-fallback-source').value = 'jiosaavn';
-        }
-
-        const _bandcampExp = document.getElementById('experimental-bandcamp-enabled');
-        if (_bandcampExp) _bandcampExp.checked = settings.experimental?.bandcamp_enabled === true;
-
-        // Populate Hydrabase settings
-        const hbConfig = settings.hydrabase || {};
-        document.getElementById('hydrabase-url').value = hbConfig.url || '';
-        document.getElementById('hydrabase-api-key').value = hbConfig.api_key || '';
-        document.getElementById('hydrabase-auto-connect').checked = hbConfig.auto_connect || false;
-        // Check live connection status + add Hydrabase to fallback dropdown if connected
-        fetch('/api/hydrabase/status').then(r => r.json()).then(s => {
-            const btn = document.getElementById('hydrabase-connect-btn');
-            const statusEl = document.getElementById('hydrabase-settings-status');
-            if (s.connected) {
-                if (btn) btn.textContent = 'Disconnect';
-                if (statusEl) { statusEl.textContent = 'Connected'; statusEl.style.color = '#4caf50'; }
-                // Add Hydrabase to fallback source dropdown
-                const fbSelect = document.getElementById('metadata-fallback-source');
-                if (fbSelect && !fbSelect.querySelector('option[value="hydrabase"]')) {
-                    const opt = document.createElement('option');
-                    opt.value = 'hydrabase';
-                    opt.textContent = 'Hydrabase (P2P)';
-                    fbSelect.appendChild(opt);
-                }
-                // Restore selection if it was hydrabase
-                if ((settings.metadata?.fallback_source) === 'hydrabase') {
-                    fbSelect.value = 'hydrabase';
-                }
-            }
-        }).catch(() => { });
+        // iTunes, Discogs, the metadata source, the Spotify (no auth)
+        // enrichment switch, Experimental and Hydrabase (its connection
+        // included): React (connections-metadata.tsx, step 10a)
 
         // every Library folder, the spoken-word artists included: the Folders
         // card is React (library-folders.tsx, library-audiobooks.tsx)
@@ -1622,17 +986,8 @@ async function loadSettingsData() {
         // deezer_download and lidarr_download: their Sources panels are React
         // prowlarr, torrent_client, usenet_client and their download_source
         // keys: their Sources panels are React (source-panels-more.tsx)
-        // The Connections tab's Deezer card holds the same ARL as the Deezer
-        // source panel (React, source-panels.tsx). Typing here writes the
-        // panel's key; the panel writes this field back.
-        const _connArl = document.getElementById('deezer-connection-arl');
-        if (_connArl) _connArl.value = settings.deezer_download?.arl || '';
-        if (_connArl && _connArl.dataset.arlMirror !== '1') {
-            _connArl.dataset.arlMirror = '1';
-            _connArl.addEventListener('input', () => {
-                window.SoulSyncSettings?.set('deezer_download', 'arl', _connArl.value);
-            });
-        }
+        // the Connections tab's Deezer card and the Deezer source panel hold
+        // the same ARL (deezer_download.arl), both React
 
         // youtube.* and download_source.youtube_album_bundle: the YouTube source
         // panel is React (source-panels-more.tsx)
@@ -1641,7 +996,7 @@ async function loadSettingsData() {
         // max_workers: the System tab is React (system-tab.tsx)
 
         // Post-Processing: React (library-processing.tsx)
-        loadMusicBrainzServerSettings(settings);
+        // MusicBrainz server: React (connections-metadata.tsx)
         // File Organization and every template: the Organization card is React
         // (library-organization.tsx, library-audiobooks.tsx)
         // the audiobook settings: the Organization card is React (library-audiobooks.tsx)
@@ -1717,10 +1072,8 @@ async function loadSettingsData() {
         // their static descriptions rather than reporting an empty form as
         // "nothing enabled".
         if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
-        // the service tiles report which credentials are actually filled in, so
-        // they are only truthful once the form holds them. same reason as above:
-        // summarising an empty form would report every service as "not set up".
-        if (typeof buildServiceTiles === 'function') buildServiceTiles();
+        // the service tiles read the cards again after each load themselves
+        // (connections-services.tsx)
 
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -1743,6 +1096,7 @@ function _wireRedactedSecrets() {
         // writing its value from here would fight React for it
         if (el.closest('[data-stg-react]')
             && !el.closest('.src-config-panel:not([data-react-panel])')) return;
+        if (el.closest('.api-service-frame[data-react-panel]')) return;
         el.dataset.redactWired = '1';
         // Clear the mask on focus so the user types a fresh value, not on top
         // of the sentinel.
@@ -2130,70 +1484,6 @@ function toggleSettingHelp(iconEl) {
     }
 }
 
-async function toggleHydrabaseFromSettings() {
-    const statusEl = document.getElementById('hydrabase-settings-status');
-    const btn = document.getElementById('hydrabase-connect-btn');
-    const url = document.getElementById('hydrabase-url').value.trim();
-    const apiKey = document.getElementById('hydrabase-api-key').value.trim();
-
-    if (!url || !apiKey) {
-        if (statusEl) statusEl.textContent = 'URL and API Key required';
-        return;
-    }
-
-    // Save settings first
-    await saveSettings(true);
-
-    try {
-        // Check current status
-        const statusRes = await fetch('/api/hydrabase/status');
-        const statusData = await statusRes.json();
-
-        if (statusData.connected) {
-            // Disconnect
-            await fetch('/api/hydrabase/disconnect', { method: 'POST' });
-            if (btn) btn.textContent = 'Connect';
-            if (statusEl) { statusEl.textContent = 'Disconnected'; statusEl.style.color = 'rgba(255,255,255,0.4)'; }
-            // Remove from fallback dropdown + reset to iTunes if was selected
-            const fbSel2 = document.getElementById('metadata-fallback-source');
-            if (fbSel2) {
-                const hbOpt = fbSel2.querySelector('option[value="hydrabase"]');
-                if (hbOpt) {
-                    if (fbSel2.value === 'hydrabase') fbSel2.value = 'itunes';
-                    hbOpt.remove();
-                }
-            }
-            showToast('Hydrabase disconnected', 'info');
-        } else {
-            // Connect
-            const res = await fetch('/api/hydrabase/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, api_key: apiKey })
-            });
-            const data = await res.json();
-            if (data.success) {
-                if (btn) btn.textContent = 'Disconnect';
-                if (statusEl) { statusEl.textContent = 'Connected'; statusEl.style.color = '#4caf50'; }
-                // Add to fallback dropdown
-                const fbSel = document.getElementById('metadata-fallback-source');
-                if (fbSel && !fbSel.querySelector('option[value="hydrabase"]')) {
-                    const opt = document.createElement('option');
-                    opt.value = 'hydrabase';
-                    opt.textContent = 'Hydrabase (P2P)';
-                    fbSel.appendChild(opt);
-                }
-                showToast('Hydrabase connected', 'success');
-            } else {
-                if (statusEl) statusEl.textContent = data.error || 'Connection failed';
-                showToast('Hydrabase connection failed', 'error');
-            }
-        }
-    } catch (e) {
-        if (statusEl) statusEl.textContent = 'Error';
-        showToast('Hydrabase connection error', 'error');
-    }
-}
 
 // ── Music Library Paths ──
 // the extra audiobook folders: React (library-audiobooks.tsx)
@@ -2429,11 +1719,12 @@ async function saveSettings(quiet = false) {
         .map(part => part.trim())
         .filter(Boolean);
 
-    let musicBrainzServerSettings;
-    try {
-        musicBrainzServerSettings = collectMusicBrainzServerSettings();
-    } catch (error) {
-        if (!quiet) showToast(error.message, 'error');
+    // the MusicBrainz server fields refuse the save while they would not
+    // work. they are React (connections-metadata.tsx), which holds its own
+    // saves back too
+    const _mbErr = window.SoulSyncSettings?.musicbrainzError?.();
+    if (_mbErr) {
+        if (!quiet) showToast(_mbErr, 'error');
         return;
     }
 
@@ -2456,37 +1747,8 @@ async function saveSettings(quiet = false) {
         activeServer = window._persistedActiveServer;
     }
 
-    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
-    const discogsTokenInput = document.getElementById('discogs-token');
-    const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
-    let metadataSource = metadataSourceSelect?.value || 'deezer';
-    const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
-    const spotifyFreeInstalled = _lastStatusPayload?.spotify?.free_installed === true;
-    if (metadataSource === 'spotify' && !spotifySessionActive) {
-        metadataSource = _metadataSourceFallback('spotify');
-        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
-        if (!quiet) {
-            showToast('Spotify is disconnected, so the primary metadata source was switched.', 'warning');
-        }
-    } else if (metadataSource === 'spotify_free' && !spotifyFreeInstalled) {
-        metadataSource = _metadataSourceFallback('spotify_free');
-        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
-        if (!quiet) {
-            showToast('Spotify Free needs the SpotipyFree package installed.', 'warning');
-        }
-    } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
-        metadataSource = _metadataSourceFallback('discogs');
-        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
-        if (!quiet) {
-            showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
-        }
-    } else if (metadataSource === 'jiosaavn' && !document.getElementById('experimental-jiosaavn-enabled')?.checked) {
-        metadataSource = 'deezer';
-        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
-        if (!quiet) {
-            showToast('JioSaavn is not enabled — turn it on under Advanced → Experimental.', 'warning');
-        }
-    }
+    // the metadata source: React (connections-metadata.tsx). A source that
+    // cannot be picked switches as soon as it cannot, so a save never sends one
 
     // the optional "Playlist File Naming" template: a filename (no path
     // separator) that includes $title, as the server requires. The field is
@@ -2499,18 +1761,8 @@ async function saveSettings(quiet = false) {
 
     const settings = {
         active_media_server: activeServer,
-        spotify: {
-            client_id: document.getElementById('spotify-client-id').value,
-            client_secret: document.getElementById('spotify-client-secret').value,
-            redirect_uri: document.getElementById('spotify-redirect-uri').value,
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
-        tidal: {
-            client_id: document.getElementById('tidal-client-id').value,
-            client_secret: document.getElementById('tidal-client-secret').value,
-            redirect_uri: document.getElementById('tidal-redirect-uri').value,
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
+        // spotify, tidal (client_id, client_secret, redirect_uri): React
+        // (connections-metadata.tsx); embed_tags and tags: the Post-Processing card
         plex: {
             base_url: document.getElementById('plex-url').value,
             token: document.getElementById('plex-token').value
@@ -2579,32 +1831,9 @@ async function saveSettings(quiet = false) {
             access_token: document.getElementById('genius-access-token').value,
             // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
         },
-        itunes: {
-            country: document.getElementById('itunes-country').value || 'US',
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
-        discogs: {
-            token: document.getElementById('discogs-token').value,
-        },
-        metadata: {
-            // 'Spotify Free' is stored as the spotify source + a flag, so all
-            // downstream 'spotify' routing is unchanged.
-            fallback_source: metadataSource === 'spotify_free' ? 'spotify' : metadataSource,
-            spotify_free: metadataSource === 'spotify_free',
-            // Independent opt-in: run the enrichment worker on Spotify Free even
-            // when an official account is connected (spares the official quota).
-            spotify_free_enrichment: _cfgBool('metadata-spotify-free-enrichment')
-        },
-        experimental: {
-            jiosaavn_enabled: _cfgBool('experimental-jiosaavn-enabled'),
-            bandcamp_enabled: _cfgBool('experimental-bandcamp-enabled'),
-        },
+        // itunes, discogs, metadata, experimental and hydrabase: React
+        // (connections-metadata.tsx)
         // image_cache: the System tab is React (system-tab.tsx)
-        hydrabase: {
-            url: document.getElementById('hydrabase-url').value,
-            api_key: document.getElementById('hydrabase-api-key').value,
-            auto_connect: document.getElementById('hydrabase-auto-connect').checked
-        },
         // download_source: every key is React now (the chain, the Downloads
         // tab, and the YouTube, torrent and usenet source panels)
         tidal_download: {
@@ -2625,17 +1854,9 @@ async function saveSettings(quiet = false) {
         // qobuz (embed_tags, tags): the Post-Processing card is React
         // database: the System tab is React (system-tab.tsx)
         // metadata_enhancement: the Post-Processing card is React
-        musicbrainz: {
-            ...musicBrainzServerSettings,
-            // embed_tags, use_original_date_for_date and tags: the
-            // Post-Processing card is React (library-processing.tsx)
-        },
-        deezer: {
-            app_id: document.getElementById('deezer-app-id').value,
-            app_secret: document.getElementById('deezer-app-secret').value,
-            redirect_uri: document.getElementById('deezer-redirect-uri').value,
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
+        // musicbrainz (base_url, request_interval): React (connections-metadata.tsx);
+        // embed_tags, use_original_date_for_date and tags: the Post-Processing card
+        // deezer (app_id, app_secret, redirect_uri): React (connections-metadata.tsx)
         // audiodb (embed_tags, tags): the Post-Processing card is React
         // file_organization: the Organization card is React
         // mcp and lidarr_compat: the System tab is React (system-tab.tsx)
@@ -2789,36 +2010,6 @@ async function testConnection(service) {
 // the deezer card holds two logins: the oauth app (favorites, playlists) and an
 // ARL (playlists + downloads). testConnection('deezer') covers the public api and
 // the oauth token; the ARL has its own check, so run both and say what each found.
-async function testDeezerConnection() {
-    let arl = document.getElementById('deezer-connection-arl')?.value || '';
-    if (!arl.trim()) return testConnection('deezer');
-    // an untouched field holds the redaction mask; empty means "test the saved one" (#870)
-    if (arl === REDACTED_SECRET_SENTINEL) arl = '';
-    try {
-        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
-            clearTimeout(settingsAutoSaveTimer);
-            settingsAutoSaveTimer = null;
-            if (typeof saveSettings === 'function') await saveSettings(true);
-        }
-        showLoadingOverlay('Testing Deezer connection...');
-        const post = (url, body) => fetch(url, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        }).then(r => r.json()).catch(() => ({ success: false, error: 'request failed' }));
-        const [api, arlRes] = await Promise.all([
-            post(API.testConnection, { service: 'deezer' }),
-            post('/api/deezer-download/test', { arl }),
-        ]);
-        const apiMsg = api.success ? (api.message || 'Deezer reachable') : `Deezer failed: ${api.error}`;
-        const arlMsg = arlRes.success
-            ? `ARL: ${arlRes.user || 'Unknown'} (${arlRes.tier || 'Free'})`
-            : `ARL failed: ${arlRes.error || 'rejected'}`;
-        const ok = api.success && arlRes.success;
-        const warned = String(api.message || '').trim().startsWith('\u26a0');
-        showToast(`${apiMsg} · ${arlMsg}`, !ok ? 'error' : (warned ? 'warning' : 'success'), ok ? undefined : 'gs-connecting');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
 async function clearQuarantine() {
     if (!await showConfirmDialog({ title: 'Clear Quarantine', message: 'Delete all files in the quarantine folder? This cannot be undone.', confirmText: 'Delete', destructive: true })) return;
@@ -3038,47 +2229,7 @@ function updateStatusDisplays() {
     });
 }
 
-async function authenticateSpotify() {
-    try {
-        showLoadingOverlay('Saving credentials and starting Spotify authentication...');
-        // Save settings first to ensure client_id/client_secret are persisted
-        await saveSettings();
-        showToast('Spotify authentication started', 'success');
-        window._spotifyAuthWindow = window.open('/auth/spotify', '_blank');
-    } catch (error) {
-        console.error('Error authenticating Spotify:', error);
-        showToast('Failed to start Spotify authentication', 'error', 'gs-connecting');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
-async function disconnectSpotify() {
-    if (!await showConfirmDialog({
-        title: 'Disconnect Spotify',
-        message: 'Disconnect Spotify? Spotify-specific actions will stop until you reauthenticate.'
-    })) {
-        return;
-    }
-    try {
-        showLoadingOverlay('Disconnecting Spotify...');
-        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            showToast(data.message || 'Spotify disconnected.', 'success');
-            syncMetadataSourceSelection(data.source || 'deezer');
-            // Immediately refresh status to update UI
-            await fetchAndUpdateServiceStatus();
-        } else {
-            showToast(`Failed to disconnect: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error disconnecting Spotify:', error);
-        showToast('Failed to disconnect Spotify', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
 // ── Spotify Rate Limit Handling ───────────────────────────────────────────
 let _spotifyRateLimitShown = false;
@@ -3193,60 +2344,8 @@ function formatRateLimitDuration(seconds) {
     return `${s}s`;
 }
 
-async function authenticateTidal() {
-    try {
-        showLoadingOverlay('Saving credentials and starting Tidal authentication...');
-        // Save settings first to ensure credentials are persisted
-        await saveSettings();
-        showToast('Tidal authentication started', 'success');
-        window.open('/auth/tidal', '_blank');
-    } catch (error) {
-        console.error('Error authenticating Tidal:', error);
-        showToast('Failed to start Tidal authentication', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
-async function disconnectTidal() {
-    // Clear saved Tidal token. Use when re-authentication doesn't pick
-    // up newly-added scopes (existing token predates a scope expansion
-    // and `prompt=consent` alone isn't forcing fresh consent on this
-    // user's auth flow). After disconnect, click Authenticate again
-    // for a clean grant.
-    if (!confirm('Disconnect Tidal? Saved token will be cleared and you\'ll need to re-authenticate.')) {
-        return;
-    }
-    try {
-        showLoadingOverlay('Disconnecting Tidal...');
-        const resp = await fetch('/api/tidal/disconnect', { method: 'POST' });
-        const data = await resp.json();
-        if (resp.ok && data.success) {
-            showToast('Tidal disconnected. Click Authenticate to reconnect with current scopes.', 'success');
-        } else {
-            showToast(`Disconnect failed: ${data.error || 'unknown error'}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error disconnecting Tidal:', error);
-        showToast('Failed to disconnect Tidal', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
-async function authenticateDeezer() {
-    try {
-        showLoadingOverlay('Saving credentials and starting Deezer authentication...');
-        await saveSettings();
-        showToast('Deezer authentication started', 'success');
-        window.open('/auth/deezer', '_blank');
-    } catch (error) {
-        console.error('Error authenticating Deezer:', error);
-        showToast('Failed to start Deezer authentication', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
 // ===== Tidal Download Auth (Device Flow) =====
 
@@ -3254,127 +2353,9 @@ async function authenticateDeezer() {
 // QOBUZ AUTH FUNCTIONS
 // ===============================
 
-async function checkQobuzAuthStatus() {
-    try {
-        const resp = await fetch('/api/qobuz/auth/status');
-        const data = await resp.json();
 
-        // the Qobuz source panel is React (source-panels.tsx): it hears this
-        window.dispatchEvent(new CustomEvent('soulsync:qobuz-auth', { detail: data }));
 
-        // Update connections tab section
-        const connFormEl = document.getElementById('qobuz-connection-form');
-        const connLoggedInEl = document.getElementById('qobuz-connection-logged-in');
-        const connUserInfoEl = document.getElementById('qobuz-connection-user-info');
 
-        if (data.authenticated) {
-            const user = data.user || {};
-            const label = `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`;
-
-            if (connUserInfoEl) { connUserInfoEl.textContent = label; }
-            if (connLoggedInEl) connLoggedInEl.style.display = 'flex';
-            if (connFormEl) connFormEl.style.display = 'none';
-        } else {
-            if (connLoggedInEl) connLoggedInEl.style.display = 'none';
-            if (connFormEl) connFormEl.style.display = 'block';
-        }
-    } catch (e) {
-        console.error('Qobuz auth status check failed:', e);
-    }
-}
-
-async function loginQobuzFromConnections() {
-    const btn = document.getElementById('qobuz-connection-login-btn');
-    const statusEl = document.getElementById('qobuz-connection-status');
-    const email = document.getElementById('qobuz-connection-email').value.trim();
-    const password = document.getElementById('qobuz-connection-password').value;
-
-    if (!email || !password) {
-        showToast('Please enter your Qobuz email and password', 'warning');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Connecting...';
-    statusEl.textContent = '';
-
-    try {
-        const resp = await fetch('/api/qobuz/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            showToast('Qobuz connected successfully!', 'success');
-            document.getElementById('qobuz-connection-password').value = '';
-            checkQobuzAuthStatus();
-        } else {
-            statusEl.textContent = data.error || 'Login failed';
-            statusEl.style.color = '#ff5555';
-            showToast(data.error || 'Qobuz login failed', 'error');
-        }
-    } catch (error) {
-        console.error('Qobuz login error:', error);
-        statusEl.textContent = 'Connection error';
-        statusEl.style.color = '#ff5555';
-        showToast('Failed to connect to Qobuz', 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Connect Qobuz';
-    }
-}
-
-async function loginQobuzWithToken() {
-    const btn = document.getElementById('qobuz-token-login-btn');
-    const statusEl = document.getElementById('qobuz-token-status');
-    const token = document.getElementById('qobuz-connection-token').value.trim();
-
-    if (!token) {
-        showToast('Please paste your Qobuz auth token', 'warning');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Connecting...';
-    if (statusEl) statusEl.textContent = '';
-
-    try {
-        const resp = await fetch('/api/qobuz/auth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token }),
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            showToast('Qobuz connected via token!', 'success');
-            document.getElementById('qobuz-connection-token').value = '';
-            checkQobuzAuthStatus();
-        } else {
-            if (statusEl) { statusEl.textContent = data.error || 'Token login failed'; statusEl.style.color = '#ff5555'; }
-            showToast(data.error || 'Qobuz token login failed', 'error');
-        }
-    } catch (error) {
-        console.error('Qobuz token login error:', error);
-        if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.style.color = '#ff5555'; }
-        showToast('Failed to connect to Qobuz', 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Connect with Token';
-    }
-}
-
-async function logoutQobuz() {
-    try {
-        await fetch('/api/qobuz/auth/logout', { method: 'POST' });
-        showToast('Qobuz disconnected', 'success');
-        checkQobuzAuthStatus();
-    } catch (e) {
-        console.error('Qobuz logout error:', e);
-    }
-}
 
 const PATH_INPUT_IDS = {
     // the music and podcast folders lock themselves in the React Folders card
@@ -4091,44 +3072,4 @@ async function metasyncDisconnect() {
     }
 }
 
-// MUSICBRAINZ SERVER SETTINGS
-function loadMusicBrainzServerSettings(settings) {
-    document.getElementById('musicbrainz-base-url').value = settings.musicbrainz?.base_url || '';
-    const interval = Number(settings.musicbrainz?.request_interval ?? 1.05);
-    document.getElementById('musicbrainz-rate-mode').value = interval === 0 ? 'adaptive' : 'fixed';
-    document.getElementById('musicbrainz-request-rate').value = interval > 0
-        ? Number((1 / interval).toPrecision(6)) : 10;
-    updateMusicBrainzRateControls();
-}
-
-function updateMusicBrainzRateControls() {
-    document.getElementById('musicbrainz-request-rate').disabled =
-        document.getElementById('musicbrainz-rate-mode').value === 'adaptive';
-}
-
-function collectMusicBrainzServerSettings() {
-    const base_url = document.getElementById('musicbrainz-base-url').value.trim();
-    const adaptive = document.getElementById('musicbrainz-rate-mode').value === 'adaptive';
-    const rawRate = document.getElementById('musicbrainz-request-rate').value.trim();
-    const request_rate = Number(rawRate);
-    let serverHost = 'musicbrainz.org';
-    if (base_url) {
-        let url;
-        try { url = new URL(base_url); } catch (_) {
-            throw new Error('MusicBrainz server URL must start with http:// or https://.');
-        }
-        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-            throw new Error('Use a MusicBrainz HTTP(S) URL without credentials, query strings or fragments.');
-        }
-        serverHost = url.hostname.toLowerCase().replace(/\.$/, '');
-    }
-    if (adaptive && (serverHost === 'musicbrainz.org' || serverHost.endsWith('.musicbrainz.org'))) {
-        throw new Error('No limit (adaptive) is only for a self-hosted MusicBrainz server.');
-    }
-    if (!adaptive && (!rawRate || !Number.isFinite(request_rate) || request_rate <= 0)) {
-        throw new Error('MusicBrainz requests/second must be a positive number.');
-    }
-    const request_interval = adaptive ? 0 : 1 / request_rate;
-    return { base_url, request_interval };
-}
-// END MUSICBRAINZ SERVER SETTINGS
+// the MusicBrainz server settings: React (connections-metadata.tsx, connections.ts)

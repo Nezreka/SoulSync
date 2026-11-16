@@ -122,20 +122,17 @@ describe('help under each setting', () => {
     );
   });
 
-  it('finds a body for every info icon on the real page', () => {
+  it('leaves no vanilla info icon on the real page', () => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     document.body.replaceChildren(doc.getElementById('settings-page')!);
     help.initSettingHelpLines();
-    const icons = document.querySelectorAll(
-      '#settings-page .info-icon[onclick*="toggleSettingHelp"]',
-    );
-    const lines = document.querySelectorAll('#settings-page .stg-help-line');
-    // the vanilla icons only: 104 when the React port began, fewer with each
-    // tab it moves (their help lines are checked by each tab's parity test,
-    // src/features/settings/tabs/*.test.tsx). this test goes with the last tab
-    expect(icons.length).toBeGreaterThan(0);
-    // nearly every icon has a body; the handful that don't keep their icon
-    expect(lines.length).toBeGreaterThan(icons.length * 0.9);
+    // 104 when the React port began. the last went with Experimental
+    // (SETTINGS_PORT.md step 10a): every help line is React's now, and each
+    // tab's parity test checks its lines against the frozen markup
+    expect(
+      document.querySelectorAll('#settings-page .info-icon[onclick*="toggleSettingHelp"]'),
+    ).toHaveLength(0);
+    expect(document.querySelectorAll('#settings-page .stg-help-line')).toHaveLength(0);
   });
 });
 

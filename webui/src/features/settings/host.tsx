@@ -25,6 +25,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
+import { checkQobuzAuthStatus } from './tabs/connections';
+import {
+  ConnectionsTab,
+  musicbrainzError,
+  syncMetadataSourceSelection,
+} from './tabs/connections-metadata';
+import { servicesModel } from './tabs/connections-services';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';
@@ -71,6 +78,9 @@ export interface SoulSyncSettingsApi {
   templateErrors: () => string[];
   /** the Playlist File Naming rule, which the page save toasts on its own */
   playlistItemError: () => string | null;
+  /** what is wrong with the MusicBrainz server fields (Connections): the
+   *  page save refuses while it is set, and says so */
+  musicbrainzError: () => string | null;
 }
 
 declare global {
@@ -83,6 +93,7 @@ declare global {
 export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<SettingsTabProps>>> = {
   advanced: SystemTab,
   appearance: AppearanceTab,
+  connections: ConnectionsTab,
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
   library: LibraryTab,
@@ -118,6 +129,9 @@ export function createSettingsHost({
   const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
   const itemError = () => (tabs.library ? playlistItemError(store.getState().settings) : null);
   store.block(() => errors().length > 0 || !!itemError());
+  // nor would a MusicBrainz server address that does not work
+  const mbError = () => (tabs.connections ? musicbrainzError() : null);
+  store.block(() => !!mbError());
 
   function show(tab: string) {
     if (tabs[tab]) opened[tab] = (opened[tab] ?? 0) + 1;
@@ -174,6 +188,7 @@ export function createSettingsHost({
     set: (section, key, value) => store.set(section, key, value),
     templateErrors: errors,
     playlistItemError: itemError,
+    musicbrainzError: mbError,
   };
 }
 
@@ -189,6 +204,17 @@ export function mountSettingsHost(): void {
   shell.switchDownloadChain = (kind: string) => sourcesModel.switchChain(kind);
   shell.openSourceModal = (id: string) => sourcesModel.openModal(id);
   shell.closeSourceModal = () => sourcesModel.closeModal();
+  // the Sources tab's Qobuz probe and the Spotify rate limit modal's
+  // disconnect (settings.js) reach the Connections tab through these
+  shell.checkQobuzAuthStatus = checkQobuzAuthStatus;
+  shell.syncMetadataSourceSelection = (source: string) =>
+    syncMetadataSourceSelection(settingsStore, source);
+  // the Connections tiles (connections-services.tsx): the video side's
+  // service status card and the shell's service switch open them by these
+  shell.buildServiceTiles = () => servicesModel.rebuild();
+  shell.switchServiceKind = (kind: string) => servicesModel.switchKind(kind);
+  shell.openServiceModal = (id: string) => servicesModel.open(id);
+  shell.closeServiceModal = () => servicesModel.close();
   // this bundle is a deferred module: settings.js may have loaded the settings
   // and opened a tab before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;
