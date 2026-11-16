@@ -23,7 +23,7 @@ def _remux_into(src: Path, dst: Path, ffmpeg) -> None:
     subprocess.run(
         [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
          "-map", "0:a:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", str(dst)],
-        check=True, capture_output=True, text=True, timeout=300)
+        check=True, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
     if dst.stat().st_size <= 0:
         raise RuntimeError("empty output")
 

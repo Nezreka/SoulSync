@@ -144,7 +144,7 @@ def get_debug_info():
     # ffmpeg version
     try:
         import subprocess
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=5)
         first_line = result.stdout.split('\n')[0] if result.stdout else ''
         # e.g. "ffmpeg version 6.1.1 Copyright ..."
         info['ffmpeg'] = first_line.split('Copyright')[0].replace('ffmpeg version', '').strip() if first_line else 'installed (version unknown)'

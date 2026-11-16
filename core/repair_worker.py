@@ -7744,7 +7744,7 @@ class RepairWorker:
                 '-map_metadata', '0',
             ] + extra_args + ['-y', out_path]
 
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
 
             if proc.returncode != 0 or not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
                 if os.path.exists(out_path):

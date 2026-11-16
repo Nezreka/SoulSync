@@ -23,6 +23,7 @@ Pure SQL-over-a-cursor; no app singletons, so it tests against an in-memory DB.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 from utils.logging_config import get_logger
@@ -74,12 +75,36 @@ def find_existing_soulsync_album_id(
     with every shared song twice. A row with no release id yet still matches.
     """
     release = (release_id or "").strip().casefold()
+    provider = (source or '').strip().lower()
+    own_id = str(album_source_id or "").strip()
+
+    def _other_provider_release(album_id) -> bool:
+        # weezer's three self-titled albums share the name hash; the
+        # provider's own album id still tells them apart (#2110)
+        if not own_id or not provider or provider == 'musicbrainz':
+            return False
+        held = cursor.execute(
+            "SELECT spotify_id, external_ids FROM lib2_albums WHERE id = ?",
+            (album_id,)).fetchone()
+        if not held:
+            return False
+        if provider == 'spotify':
+            stored = held[0]
+        else:
+            try:
+                stored = (json.loads(held[1] or "{}") or {}).get(provider)
+            except (TypeError, ValueError, AttributeError):
+                stored = None
+        stored = str(stored or "").strip()
+        return bool(stored) and stored != own_id
 
     def _usable(row) -> bool:
         if not row:
             return False
         stored = str(row[1] or "").strip().casefold()
-        return not (release and stored and stored != release)
+        if release and stored and stored != release:
+            return False
+        return not _other_provider_release(row[0])
 
     if release:
         row = cursor.execute(
@@ -97,7 +122,6 @@ def find_existing_soulsync_album_id(
     if _usable(row):
         return int(row[0])
 
-    provider = (source or '').strip().lower()
     where, params = None, (album_source_id,)
     if album_source_id and provider:
         if provider in ('spotify', 'musicbrainz'):

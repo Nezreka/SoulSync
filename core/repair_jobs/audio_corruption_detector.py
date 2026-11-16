@@ -90,7 +90,7 @@ def check_flac_integrity(path: str) -> Tuple[bool, str]:
     if flac_bin:
         try:
             proc = subprocess.run([flac_bin, '-t', '-s', path],
-                                  capture_output=True, text=True, timeout=_DECODE_TIMEOUT_S)
+                                  capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_DECODE_TIMEOUT_S)
         except (subprocess.TimeoutExpired, OSError):
             return True, ''  # our own failure — don't flag a good file
         if proc.returncode != 0:
@@ -102,7 +102,7 @@ def check_flac_integrity(path: str) -> Tuple[bool, str]:
         try:
             proc = subprocess.run(
                 [ffmpeg_bin, '-v', 'error', '-nostdin', '-i', path, '-f', 'null', '-'],
-                capture_output=True, text=True, timeout=_DECODE_TIMEOUT_S)
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=_DECODE_TIMEOUT_S)
         except (subprocess.TimeoutExpired, OSError):
             return True, ''
         err = (proc.stderr or '').strip()

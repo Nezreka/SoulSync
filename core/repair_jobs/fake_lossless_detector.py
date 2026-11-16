@@ -245,7 +245,7 @@ def _analyze_file(fpath: str) -> dict:
             fpath
         ]
         probe_result = subprocess.run(
-            probe_cmd, capture_output=True, text=True, timeout=30
+            probe_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30
         )
         if probe_result.returncode != 0:
             return None
@@ -301,7 +301,7 @@ def _analyze_file(fpath: str) -> dict:
         ]
 
         hp_result = subprocess.run(
-            highpass_cmd, capture_output=True, text=True, timeout=60
+            highpass_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60
         )
 
         # Parse volumedetect output from stderr

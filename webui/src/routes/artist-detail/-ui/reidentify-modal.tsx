@@ -6,15 +6,17 @@ import {
   applyReidentifyRequest,
   fetchReidentifySources,
   rankReidentifyResults,
+  reidentifyReplaceDefault,
   reidentifyResultBits,
   reidentifySearchRequest,
+  rememberReidentifyReplace,
 } from '../-artist-detail.reidentify';
 
 /**
  * The re-identify modal (#889, openReidentifyModal library.js:7519): hero with
  * the current filing, source tabs (active source pre-selected, auto-searched
- * on open), ISRC-first results, and the replace-original checkbox defaulting
- * ON.
+ * on open), ISRC-first results, and the move-the-file checkbox, on unless
+ * this browser last turned it off (#2114).
  */
 export function ReidentifyModal({
   trackId,
@@ -46,7 +48,7 @@ export function ReidentifyModal({
     | { kind: 'results'; rows: ReidentifyResult[] }
   >({ kind: 'idle' });
   const [selected, setSelected] = useState<ReidentifyResult | null>(null);
-  const [replace, setReplace] = useState(true);
+  const [replace, setReplace] = useState(reidentifyReplaceDefault);
   const [staging, setStaging] = useState(false);
 
   const search = async (activeSource: string | null, value: string) => {
@@ -262,17 +264,20 @@ export function ReidentifyModal({
         <div className="reid-footer">
           <label
             className="reid-replace"
-            title="When on, the original file is deleted after the track is re-filed under the new release."
+            title="On: the file moves to the new release. Off: the old album keeps its copy and the new release gets another. Remembered for next time."
           >
             <input
               type="checkbox"
               id="reid-replace"
               checked={replace}
-              onChange={(e) => setReplace(e.target.checked)}
+              onChange={(e) => {
+                setReplace(e.target.checked);
+                rememberReidentifyReplace(e.target.checked);
+              }}
             />
             <span className="reid-replace-box" />
             <span className="reid-replace-text">
-              Replace the original file <em>(recommended)</em>
+              Move the file, don't keep a copy in the old album <em>(recommended)</em>
             </span>
           </label>
           <div className="reid-footer-actions">
