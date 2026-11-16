@@ -1217,8 +1217,9 @@ def tiles():
 
 
 def _react_cards():
-    """the service ids of the cards React renders, in page order"""
-    return re.findall(r'<ServiceCard\s+service="([a-z-]+)"', _read(_TABS + "connections-metadata.tsx"))
+    """the service ids of the cards React renders (steps 10a and 10b)"""
+    src = _read(_TABS + "connections-metadata.tsx") + _read(_TABS + "connections-extras.tsx")
+    return re.findall(r'<ServiceCard\s+service="([a-z-]+)"', src)
 
 
 def _fn(src, name):
@@ -1274,7 +1275,7 @@ def test_opening_a_service_moves_the_panel_and_never_clones_it(tiles):
     assert 'insertBefore(frame, lifted.next)' in cleanup, "the panel is not restored to its slot"
     # a React card is never moved itself: its wrapper is (React keeps hearing it)
     place = _fn(tiles, "useServicePlace")
-    assert 'body.appendChild(wrap)' in place and 'placeHome(slot, wrap)' in place
+    assert 'body.appendChild(wrap)' in place and 'placeHome(home, wrap)' in place
 
 
 def test_closing_a_service_lands_a_pending_key(tiles):
@@ -1313,7 +1314,11 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
     back. They are hidden on the GROUP, so a panel moved into the modal is no
     longer a descendant and renders normally.
     """
-    assert index.count('data-svc-legacy') == 2, "the legacy groups moved or multiplied"
+    # the music group is React (connections-extras.tsx, step 10b)
+    extras = _read(_TABS + "connections-extras.tsx")
+    assert index.count('data-svc-legacy') + extras.count('data-svc-legacy=""') == 2, (
+        "the legacy groups moved or multiplied"
+    )
 
     css = _read("webui/static/style.css")
     rule = re.search(r'#settings-page \.settings-group\[data-svc-legacy\]\s*\{([^}]*)\}', css)
@@ -1422,8 +1427,12 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     describes whose settings these ARE, which is a different question from which
     one is currently shown.
     """
-    assert index.count('data-svc-side=') == 2, "the two server sections are not both marked"
-    assert 'data-svc-side="music"' in index and 'data-svc-side="video"' in index
+    # the music section is React (connections-servers.tsx, step 10c)
+    servers = _read(_TABS + "connections-servers.tsx")
+    assert index.count('data-svc-side=') + servers.count('data-svc-side=') == 2, (
+        "the two server sections are not both marked"
+    )
+    assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in index
 
     build = _fn(tiles, "ServicesPart")
     assert 'data-svc-side' in build and 'svc-side-active' in build, (

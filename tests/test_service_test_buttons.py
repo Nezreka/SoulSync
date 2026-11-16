@@ -19,6 +19,13 @@ from core import connection_test
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = (ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+# the music cards are React (SETTINGS_PORT.md steps 10a, 10b): each is a
+# <ServiceCard service="..."> running to the next one, its tests testService()
+_TABS = ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+CARDS = "\n".join(
+    (_TABS / f).read_text(encoding="utf-8")
+    for f in ("connections-metadata.tsx", "connections-extras.tsx", "connections-servers.tsx")
+)
 
 # hydrabase's own Connect button is its test: it opens the socket and says so
 HAS_OWN_CHECK = {"hydrabase"}
@@ -42,12 +49,19 @@ def _connections_frames(attr):
 
 # ── the page ────────────────────────────────────────────────────────────────
 
+def _react_cards():
+    """(id, body) for each React music card, body running to the next card"""
+    starts = [(m.start(), m.group(1)) for m in re.finditer(r'<ServiceCard\s+service="([^"]+)"', CARDS)]
+    return [(sid, CARDS[pos:starts[i + 1][0] if i + 1 < len(starts) else pos + 20000])
+            for i, (pos, sid) in enumerate(starts)]
+
+
 def test_every_music_service_frame_has_a_test_button():
-    frames = _connections_frames("data-service")
+    frames = _react_cards()
     assert len(frames) >= 12
     missing = [sid for sid, body in frames
                if sid not in HAS_OWN_CHECK
-               and not re.search(r'onclick="test[A-Za-z]*Connection\(', body)]
+               and not re.search(r'testService\(store, |void test\(\)', body)]
     assert missing == []
 
 
@@ -63,6 +77,9 @@ def test_every_music_button_reaches_a_real_backend_branch():
     "Unknown service." which is worse than no button."""
     src = (ROOT / "core" / "connection_test.py").read_text(encoding="utf-8")
     called = set(re.findall(r"onclick=\"testConnection\('([a-z_]+)'\)", INDEX))
+    called |= set(re.findall(r"testService\(store, '([a-z_]+)'\)", CARDS))
+    called |= set(re.findall(r"testConnection\('([a-z_]+)', store\)", CARDS))
+    called |= set(re.findall(r"\['([a-z_]+)', '[^']+'\]", CARDS.split("const TEST_ROW", 1)[1].split("];", 1)[0]))
     assert {"concerts", "itunes", "musicbrainz", "discogs"} <= called
     unknown = [svc for svc in called
                if svc != "server" and f'service == "{svc}"' not in src]

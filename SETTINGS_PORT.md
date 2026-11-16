@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Branch and worktree | done | `node_modules` is a Windows junction to the main checkout's. Tests run in the worktree. |
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
-| Tab: Connections | **in progress** (steps 10a, 10b below) | 73 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal; 10b: every other music card and the rest of the hidden group. Left: Server Connections (10c), MetaSync (10d); the video side's cards and server row for the video pass. |
+| Tab: Connections | **in progress** (steps 10a-10c below) | 113 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal; 10b: every other music card and the rest of the hidden group; 10c: Server Connections. Left: MetaSync (10d); the video side's cards and server row for the video pass. |
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 470 of 678 controls, 243 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 48 of 83 tests repointed (step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 510 of 678 controls, 282 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 6,838 |
-| `webui/static/settings.js` | 10,187 | 2,784 |
+| `webui/index.html` | 12,823 | 6,554 |
+| `webui/static/settings.js` | 10,187 | 1,773 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +806,18 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Step 10c: Connections, part three: Server Connections (Nov 15 2026)
+
+**What.** `tabs/connections-servers.tsx`, slot `servers`: the five server toggles, Plex (its setup with Link to Plex, Manually Configure and View Configuration, the PIN link with its polling, re-link that keeps the address and checks the new token first, Clear Configuration), Jellyfin (with its timeout and its user and library pickers), Navidrome (its folder picker and the admin's playlist account), Music Assistant (its source picker, loaded quietly when it is set up), Standalone and Test Server. The library picks, the playlist account and the Music Assistant source go through their own endpoints as before; the connection fields are settings keys; the active server saves alone (`active_media_server`, through `setExtra`), and never from the video side. `testConnection` moved here too (on window for every card): a good Plex, Jellyfin or Navidrome test reloads that picker.
+
+**Removed.** 39 functions from `settings.js` (the Plex setup and PIN flow, the toggles, the Auto-detects, Music Assistant's, the eight library pickers moved from `beatport-ui.js`, the playlist account, `testConnection`, and the dead `updateMediaServerFields`, `cancelDetection`, `updateStatusDisplays`), the server load and the collector's last fields. The page-wide save reads no field now.
+
+**Differences.** An Auto-detect, or a picked Music Assistant source, saves at once (the old page wrote the field and waited for its next save). The `/api/media-servers` name list is not fetched: it only ever matched the five toggles on the page.
+
+**CSS (found in the browser).** `#settings-page .settings-group:first-child > h3` gave the group's heading 4px instead of 24px, because the group is now first in its slot (it never was first in its column). The rule leaves `[data-svc-side="music"]` out; every other group heading measured the same on both pages.
+
+**Checked.** Parity against a frozen fixture; `connections-servers.test.tsx` 15 (the toggles, Plex's views, the PIN link and re-link, the pickers with the cases `vanilla-settings-pickers` ran, the playlist account, Music Assistant, `testConnection`). Settings, `src/test`, shell and dashboard folders: 2,210 pass. Browser: each server's panel, values, pickers and saves the same; pixels identical (a focus caret aside).
+
 ### Step 10b: Connections, part two: the Scrobbling and Extras cards, the whole hidden group (Nov 15 2026)
 
 **What.** `tabs/connections-extras.tsx`: the Concerts, Last.fm, Genius, Pollinations, fanart.tv, AcoustID and ListenBrainz cards (Authorize Scrobbling, Clear Quarantine), and the music API Configuration group itself: its heading with Expand All and the row of test buttons. One slot, `api-music`, renders the group, and all fifteen music cards live in it (10a's three card slots folded into it); each portals into a wrapper kept before the test row. `tabs/connections-tab.tsx` dispatches the tab's parts.
@@ -1135,51 +1147,51 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button | `navidrome-toggle` | Navidrome | both | no |
-| button | `music_assistant-toggle` | Music Assistant | both | no |
-| button | `soulsync-toggle` | Standalone | both | no |
-| url | `plex-url` | Plex Server URL: | both | no |
-| button | `plex-autodetect-button` | Auto-detect | both | no |
-| password | `plex-token` | Plex Token: | both | no |
-| button | `plex-connect-button` | Connect | both | no |
-| select | `plex-music-library` | Music Library: {Loading...} | both | no |
-| button | `plex-config-action-button` | Clear Configuration | both | no |
-| button | `plex-relink-button` | Re-link with Plex | both | no |
-| button | `plex-link-to-plex-button` | Link to Plex (OAuth) | both | no |
-| button | `plex-manual-config-button` | Manually Configure Plex | both | no |
-| button | `plex-view-config-button` | View Configuration | both | no |
-| button | `plex-pin-refresh-button` | Generate New Code | both | no |
-| button |  | Cancel | both | no |
-| url | `jellyfin-url` | Jellyfin Server URL: | both | no |
-| password | `jellyfin-api-key` | API Key: | both | no |
-| button |  | Auto-detect | both | no |
-| button |  | Test | both | no |
-| number | `jellyfin-timeout` | API Timeout (seconds): | both | no |
-| select | `jellyfin-user` | Jellyfin User {Select User} | both | no |
-| select | `jellyfin-music-library` | Music Library {Select Library} | both | no |
-| url | `navidrome-url` | Navidrome Server URL: | both | no |
-| text | `navidrome-username` | Username: | both | no |
-| password | `navidrome-password` | Password: | both | no |
-| text | `navidrome-playlist-username` | Playlist account (optional): | both | no |
-| password | `navidrome-playlist-password` | Playlist account (optional): | both | no |
-| button |  | Save playlist account | both | no |
-| button | `navidrome-playlist-clear` | Use the account above | both | no |
-| select | `navidrome-music-folder` | Music Library {All Libraries} | both | no |
-| button |  | Auto-detect | both | no |
-| button |  | Test | both | no |
-| url | `music_assistant-url` | Music Assistant URL: | both | no |
-| button |  | Auto-detect | both | no |
-| password | `music_assistant-token` | Long-lived token: | both | no |
-| select | `music_assistant-source` | Music source {} | both | no |
-| text | `music_assistant-source-folder` | Source folder: | both | no |
-| button |  | Load sources | both | no |
+| button | `navidrome-toggle` | Navidrome | both | yes (step 10c) |
+| button | `music_assistant-toggle` | Music Assistant | both | yes (step 10c) |
+| button | `soulsync-toggle` | Standalone | both | yes (step 10c) |
+| url | `plex-url` | Plex Server URL: | both | yes (step 10c) |
+| button | `plex-autodetect-button` | Auto-detect | both | yes (step 10c) |
+| password | `plex-token` | Plex Token: | both | yes (step 10c) |
+| button | `plex-connect-button` | Connect | both | yes (step 10c) |
+| select | `plex-music-library` | Music Library: {Loading...} | both | yes (step 10c) |
+| button | `plex-config-action-button` | Clear Configuration | both | yes (step 10c) |
+| button | `plex-relink-button` | Re-link with Plex | both | yes (step 10c) |
+| button | `plex-link-to-plex-button` | Link to Plex (OAuth) | both | yes (step 10c) |
+| button | `plex-manual-config-button` | Manually Configure Plex | both | yes (step 10c) |
+| button | `plex-view-config-button` | View Configuration | both | yes (step 10c) |
+| button | `plex-pin-refresh-button` | Generate New Code | both | yes (step 10c) |
+| button |  | Cancel | both | yes (step 10c) |
+| url | `jellyfin-url` | Jellyfin Server URL: | both | yes (step 10c) |
+| password | `jellyfin-api-key` | API Key: | both | yes (step 10c) |
+| button |  | Auto-detect | both | yes (step 10c) |
+| button |  | Test | both | yes (step 10c) |
+| number | `jellyfin-timeout` | API Timeout (seconds): | both | yes (step 10c) |
+| select | `jellyfin-user` | Jellyfin User {Select User} | both | yes (step 10c) |
+| select | `jellyfin-music-library` | Music Library {Select Library} | both | yes (step 10c) |
+| url | `navidrome-url` | Navidrome Server URL: | both | yes (step 10c) |
+| text | `navidrome-username` | Username: | both | yes (step 10c) |
+| password | `navidrome-password` | Password: | both | yes (step 10c) |
+| text | `navidrome-playlist-username` | Playlist account (optional): | both | yes (step 10c) |
+| password | `navidrome-playlist-password` | Playlist account (optional): | both | yes (step 10c) |
+| button |  | Save playlist account | both | yes (step 10c) |
+| button | `navidrome-playlist-clear` | Use the account above | both | yes (step 10c) |
+| select | `navidrome-music-folder` | Music Library {All Libraries} | both | yes (step 10c) |
+| button |  | Auto-detect | both | yes (step 10c) |
+| button |  | Test | both | yes (step 10c) |
+| url | `music_assistant-url` | Music Assistant URL: | both | yes (step 10c) |
+| button |  | Auto-detect | both | yes (step 10c) |
+| password | `music_assistant-token` | Long-lived token: | both | yes (step 10c) |
+| select | `music_assistant-source` | Music source {} | both | yes (step 10c) |
+| text | `music_assistant-source-folder` | Source folder: | both | yes (step 10c) |
+| button |  | Load sources | both | yes (step 10c) |
 
 **Standalone Mode** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Verify Output Folder | both | no |
-| button |  | Test Server | both | no |
+| button |  | Verify Output Folder | both | yes (step 10c) |
+| button |  | Test Server | both | yes (step 10c) |
 
 **MetaSync** (both, 10)
 

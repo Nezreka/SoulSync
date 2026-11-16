@@ -27,6 +27,7 @@ import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { checkQobuzAuthStatus } from './tabs/connections';
 import { musicbrainzError, syncMetadataSourceSelection } from './tabs/connections-metadata';
+import { testConnection } from './tabs/connections-servers';
 import { servicesModel } from './tabs/connections-services';
 import { ConnectionsTab } from './tabs/connections-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
@@ -212,6 +213,8 @@ export function mountSettingsHost(): void {
   shell.switchServiceKind = (kind: string) => servicesModel.switchKind(kind);
   shell.openServiceModal = (id: string) => servicesModel.open(id);
   shell.closeServiceModal = () => servicesModel.close();
+  // every card's Test button, React's and the video side's vanilla ones
+  shell.testConnection = (service: string) => testConnection(service);
   // this bundle is a deferred module: settings.js may have loaded the settings
   // and opened a tab before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;

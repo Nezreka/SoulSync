@@ -72,15 +72,15 @@ def test_every_field_the_save_reads_exists_on_the_page(save_body, index):
     )
 
 
-def test_the_audit_is_actually_looking_at_something(save_body):
-    # A parse that silently found nothing would make the check above pass.
-    ids = _ids_read(save_body)
-    # fewer each step as tabs move to React (SETTINGS_PORT.md); a parse that
-    # found nothing would be well under this
-    assert len(ids) > 5, f"only found {len(ids)} fields; the parse is wrong"
-    # a field still in the vanilla save (acoustid-api-key was, until its card
-    # went React in SETTINGS_PORT.md step 10b)
-    assert "navidrome-url" in ids
+def test_the_save_reads_no_field_now(save_body):
+    """Every field on the music side is React since SETTINGS_PORT.md step 10c,
+    and saves only what changed: the page-wide save reads none off the page,
+    so it cannot write over a stored value from a field that is not there.
+    A field read here again would be a step backwards, and the check above
+    would be looking at it."""
+    assert _ids_read(save_body) == set()
+    # the parse still sees the save: its body is there to read
+    assert "SoulSyncSettings.flush()" in save_body
 
 
 def test_no_payload_field_blanks_a_missing_element(save_body):
@@ -108,9 +108,3 @@ def test_an_empty_string_the_user_typed_is_still_saved():
     assert "fallback !== undefined" in fn, "an empty value must still be sent"
 
 
-def test_the_helpers_are_used_widely(save_body):
-    # If most of the payload bypassed them the guard above would be hollow.
-    # the save shrinks as tabs move to React (SETTINGS_PORT.md: 14 left at
-    # step 9c, 4 at 10b, Music Assistant's, until Server Connections goes in
-    # 10c); a parse that found nothing would find none
-    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") >= 4
