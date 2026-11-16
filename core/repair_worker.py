@@ -4039,6 +4039,40 @@ class RepairWorker:
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
 
+        # #2150: the user corrects the finding. "keep_whole" says the whole
+        # credit is one artist, "split:A; B" is their own split of it. a name
+        # they join is remembered, so no splitter takes it apart again.
+        from core.repair_jobs.comma_artist_splitter import custom_split_parts
+        action = str(details.get('_fix_action') or '')
+        if action == 'keep_whole' or action.startswith('split:'):
+            if action == 'keep_whole':
+                parts, joined = [combined.strip()], [combined.strip()]
+            else:
+                try:
+                    parts, joined = custom_split_parts(combined, action[len('split:'):])
+                except ValueError as e:
+                    return {'success': False, 'error': str(e)}
+            if joined:
+                from core.imports.collab_artist import remember_kept_whole_names
+                try:
+                    remember_kept_whole_names(joined, self._config_manager)
+                except Exception as e:  # noqa: BLE001 - said once, nothing written yet
+                    logger.error("Could not save keep-whole names %s: %s", joined, e)
+                    return {'success': False, 'error': 'Could not save the name, nothing was changed'}
+            if len(parts) < 2:
+                return {'success': True, 'action': 'kept_whole',
+                        'message': f'"{parts[0]}" stays one artist and won\'t be split again'}
+            display = '; '.join(parts)
+            primary = parts[0]
+        else:
+            broken = self._comma_split_breaks_a_name(combined, parts)
+            if broken:
+                # filed before the name was known as one artist (an older
+                # scan made "K", "DA" out of "K/DA"): never write fragments
+                return {'success': False, 'error': (
+                    f'"{broken}" is one artist. Run Split Artists again for a fresh split, '
+                    f'or edit the split')}
+
         # Get file list from finding details
         file_infos = details.get('all_files') or details.get('files') or []
         files = [f.get('file_path') if isinstance(f, dict) else f for f in file_infos]
@@ -4206,6 +4240,35 @@ class RepairWorker:
                     'message': 'No files found on disk for this artist'}
         return {'success': False,
                 'error': f'No files re-tagged ({stale} stale, {missing} missing, {errors} errors)'}
+
+    def _comma_split_breaks_a_name(self, combined, parts):
+        """the first name in ``combined`` that is one artist (kept whole by
+        the user, or identified in the library) but that ``parts`` breaks
+        up. '' when the split leaves every such name whole (#2150)."""
+        from core.imports.collab_artist import kept_whole_keys, library_has_identified_artist
+        from core.repair_jobs.comma_artist_splitter import split_keeping_known
+
+        def _key(name):
+            return ' '.join(str(name or '').split()).casefold()
+
+        keys = kept_whole_keys(self._config_manager)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+
+            def _known(name):
+                return _key(name) in keys or library_has_identified_artist(name, conn=conn)
+
+            have = {_key(p) for p in parts}
+            for name in split_keeping_known(combined, [',', ';', '/', '&'], _known):
+                if _key(name) not in have and _known(name):
+                    return name
+        except Exception as e:  # noqa: BLE001 - the scan already checked, don't block on this
+            logger.debug("split check failed for %r: %s", combined, e)
+        finally:
+            if conn is not None:
+                conn.close()
+        return ''
 
     def _comma_split_files_from_db(self, entity_id, details):
         """Resolve an older finding's files from the Library-v2 catalogue."""

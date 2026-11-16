@@ -205,8 +205,8 @@ describe('finding labels', () => {
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(32);
     // 30 with library_unreachable (#2005). 3.6.1's duplicate_tracks lost its fixer to the native detector (G16-3)
     expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(30);
-    // 17 music + obsolete + the 10 video fix actions + the scan retirement
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(29);
+    // 18 music (kept_whole, #2150) + obsolete + the 10 video fix actions + the scan retirement
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(30);
   });
 
   it('labels known finding types', () => {

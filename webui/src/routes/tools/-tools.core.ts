@@ -345,6 +345,7 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   deleted_file: 'File Deleted',
   genres_cleaned: 'Genres Cleaned',
   artists_split: 'Artists Split',
+  kept_whole: 'Kept As One Artist',
   already_gone: 'Already Gone',
   fixed_track_number: 'Track # Fixed',
   applied_cover_art: 'Art Applied',
