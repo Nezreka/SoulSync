@@ -66,6 +66,9 @@ BACKGROUND_BASELINE = {
     "core/library2/missing_tracks.py": 1,
     "core/library2/monitor_sync.py": 1,
     "core/library2/native_enrich.py": 10,
+    # a split row (#2110) takes the merged row's shared flag; profiles' own
+    # choices are copied from lib2_monitor_rules beside it
+    "core/library2/release_split.py": 1,
     # the projection itself: the shared flag is one of its inputs
     "core/library2/wanted.py": 2,
 }
