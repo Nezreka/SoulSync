@@ -828,6 +828,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | `c73d14119` (step 10a) | **Connections: the metadata source, the Metadata cards, the service tiles and their modal are React**, and System's Experimental (System done). A React card moves into the modal by its own wrapper (found in the browser). |
 | Nov 15 | `4fc0293de` (step 9c) | **System: Security & Access is React**; the System tab is done but Experimental. |
 | Nov 15 | `19888f9d5` (step 9b) | **System: SoulSync API, Developer Mode, Artwork Cache and Developer are React.** The shell hands the weather preview init over on window. |
 | Nov 15 | `31099f899` (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
