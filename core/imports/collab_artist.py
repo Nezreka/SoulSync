@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import re
 
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.collab_artist")
+
 _SEPARATOR_RE = re.compile(
     r"^\s*(?:,|&|\+|/|;|×|x\s|and\s|with\s|vs\.?\s|feat\.?\s|ft\.?\s|featuring\s)",
     re.IGNORECASE,
@@ -155,6 +159,14 @@ def _prefix_of(combined: str, segments) -> str:
     return combined[:pos]
 
 
+def _safe_lookup(lookup, name) -> bool:
+    try:
+        return bool(lookup(name))
+    except Exception as exc:  # noqa: BLE001 - naming never fails over a lookup
+        logger.debug("artist lookup failed for %r: %s", name, exc)
+        return False
+
+
 def library_has_artist(name: str) -> bool:
     """does the library hold an artist by this name. False on any doubt."""
     name = str(name or "").strip()
@@ -178,21 +190,64 @@ def library_has_artist(name: str) -> bool:
                 pass
 
 
+def library_has_identified_artist(name: str) -> bool:
+    """does the library hold an artist by exactly this name that a provider
+    identified. False on any doubt."""
+    name = str(name or "").strip()
+    if not name:
+        return False
+    conn = None
+    try:
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        row = conn.execute(
+            "SELECT 1 FROM lib2_artists WHERE LOWER(name) = LOWER(?) "
+            "AND (COALESCE(spotify_id,'') <> '' OR COALESCE(musicbrainz_id,'') <> '' "
+            "OR COALESCE(external_ids,'{}') NOT IN ('','{}')) LIMIT 1", (name,)).fetchone()
+        return row is not None
+    except Exception:  # noqa: BLE001 - naming never fails over a lookup
+        return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception as exc:  # noqa: BLE001 - cleanup only
+                logger.debug("library lookup close failed: %s", exc)
+
+
 def collab_primary(album_artist: str, album_artists=None, track_artists=None,
-                   known_names=(), library_has=None) -> str:
+                   known_names=(), library_has=None, library_knows=None) -> str:
     """the album artist under 'first listed', '' when it stays as it is.
 
     one rule for the folder ($albumartist, both template builders) and the
     album artist tag, so a release never files under one name and tags
-    under another."""
+    under another.
+
+    ``library_knows(name)``: the library holds an identified artist by that
+    exact name. such a name is one artist whatever its words are: a track
+    credited to "Above" (or a library holding "Above" and "Beyond") never
+    turns "Above & Beyond" into a list (#2131). only a ";" or " / " still
+    reads as one, those are never part of an act's name."""
     primary = first_listed_artist(album_artist, album_artists)
+    if primary:
+        return primary
+    if (library_knows is not None and not _HARD_SEPARATOR_RE.search(str(album_artist or ""))
+            and _safe_lookup(library_knows, album_artist)):
+        return ""
     if not primary and track_artists:
         primary = listed_primary_of(album_artist, track_artists[0])
     if not primary:
         names = list(known_names or ())
         names.extend(album_artists or ())
         names.extend(track_artists or ())
-        primary = split_credit_primary(album_artist, names, library_has)
+        has = library_has
+        if library_knows is not None:
+            # an identified artist is a library artist too, so a lead the
+            # library knows ("Above & Beyond; Mat Zo") keeps its whole name
+            def has(name):
+                return ((library_has is not None and _safe_lookup(library_has, name))
+                        or _safe_lookup(library_knows, name))
+        primary = split_credit_primary(album_artist, names, has)
     return primary
 
 

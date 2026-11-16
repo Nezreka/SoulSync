@@ -518,6 +518,9 @@ def _build_post_process_context(
             'secondary_types': list(api_album.get('secondary_types') or []),
             'is_compilation': is_comp,
             'artists': [{'name': album_artist_name}],
+            # the library's own album: its artist is the release's, never a
+            # batch guess to distrust over a track by someone else (#2133)
+            '_library_album': True,
             # #1860: $explicit in a folder. the source's word, else the
             # library's, so a tag-mode album keeps the badge its import gave it
             'explicit': (api_album.get('explicit') if api_album.get('explicit') is not None
