@@ -1215,6 +1215,23 @@ def _rehome_and_delete_combined(
         conn.execute("DELETE FROM lib2_artists WHERE id=?", (combined_id,))
 
 
+def _identified_name_keys(conn, *, exclude_id: Optional[int] = None) -> set:
+    """normalized names of every artist a provider identified, the row
+    ``exclude_id`` aside."""
+    from core.library2.importer import normalize_name
+
+    keys = set()
+    for aid, name in conn.execute(
+            f"SELECT a.id, a.name FROM lib2_artists a WHERE a.canonical_artist_id IS NULL "
+            f"AND {_IDENTIFIED_SQL}"):
+        if exclude_id is not None and int(aid) == int(exclude_id):
+            continue
+        key = normalize_name(name or "")
+        if key:
+            keys.add(key)
+    return keys
+
+
 def smart_split_combined_artist(
     conn,
     artist_id: int,
@@ -1246,9 +1263,17 @@ def smart_split_combined_artist(
     if row is None:
         return None
 
-    from core.library2.importer import split_artist_credits
+    from core.library2.importer import normalize_name, split_known_artist_credits
 
-    components = split_artist_credits(row["name"])
+    # an artist the library already knows by a run of this name stays whole
+    # ("Above & Beyond & Mat Zo" is two artists), and a name the library
+    # already holds as an identified artist is that artist, not a list:
+    # "Above" and "Beyond" both resolve on their own (#2136)
+    identified = _identified_name_keys(conn, exclude_id=int(artist_id))
+    if normalize_name(row["name"] or "") in identified:
+        return None
+    components = split_known_artist_credits(
+        row["name"], lambda name: normalize_name(name) in identified)
     if len(components) < 2:
         return None
 
@@ -1640,6 +1665,19 @@ _IDENTIFIED_SQL = ("(COALESCE(a.spotify_id,'')<>'' OR COALESCE(a.musicbrainz_id,
                    "OR COALESCE(a.external_ids,'{}') NOT IN ('','{}'))")
 
 
+def _known_pieces(name: str, known_ids: Dict[str, int], own_id: int) -> List[str]:
+    """the parts of a combined credit, a run that spells an artist in
+    ``known_ids`` (normalized name -> id) kept whole. the credit's own row
+    never vouches for itself."""
+    from core.library2.importer import normalize_name, split_known_artist_credits
+
+    def _known(piece: str) -> bool:
+        aid = known_ids.get(normalize_name(piece))
+        return aid is not None and int(aid) != int(own_id)
+
+    return split_known_artist_credits(name, _known)
+
+
 def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -> int:
     """A collaboration name that owns nothing but provider catalogue rows.
 
@@ -1679,7 +1717,7 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
     cleared = 0
     for gid, name in candidates:
         gid = int(gid)
-        pieces = split_artist_credits(name or "")
+        pieces = _known_pieces(name or "", owners, gid)
         keys = [normalize_name(piece) for piece in pieces]
         if len(keys) < 2 or not all(key in owners for key in keys):
             continue
@@ -1752,6 +1790,67 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
     return cleared
 
 
+def drop_band_fragment_credits(conn) -> int:
+    """Take back the credits a blind split carved out of a band's name.
+
+    "Above & Beyond & Mat Zo" split on every "&" credited "Above" and
+    "Beyond" next to "Above & Beyond" on the same track, and those two
+    phantoms then named the reorganize folder ("Above") and the tags
+    ("Above (feat. Beyond)") (#2131, #2136). Only a track (or album) that
+    credits the whole name and every one of its parts loses the parts: a
+    real guest credit is never spelled exactly like that. Returns how many
+    credit rows went.
+    """
+    from core.library2.importer import normalize_name, split_artist_credits
+
+    ids_by_key: Dict[str, List[int]] = {}
+    wholes = []
+    for aid, name in conn.execute(
+            "SELECT id, name FROM lib2_artists WHERE canonical_artist_id IS NULL"):
+        key = normalize_name(name or "")
+        if not key:
+            continue
+        ids_by_key.setdefault(key, []).append(int(aid))
+        if _BAND_SEPARATOR_RE.search(name or ""):
+            wholes.append((int(aid), name))
+    dropped = 0
+    for whole_id, name in wholes:
+        pieces = split_artist_credits(name)
+        keys = [normalize_name(piece) for piece in pieces]
+        if len(keys) < 2 or normalize_name(name) in keys or not all(k in ids_by_key for k in keys):
+            continue
+        part_ids = [[i for i in ids_by_key[k] if i != whole_id] for k in keys]
+        if not all(part_ids):
+            continue
+        for table, column in (("lib2_track_artists", "track_id"),
+                              ("lib2_album_artists", "album_id")):
+            owners = {int(r[0]) for r in conn.execute(
+                f"SELECT {column} FROM {table} WHERE artist_id=?", (whole_id,))}
+            for ids in part_ids:
+                if not owners:
+                    break
+                marks = ",".join("?" for _ in ids)
+                owners &= {int(r[0]) for r in conn.execute(
+                    f"SELECT {column} FROM {table} WHERE artist_id IN ({marks})", ids)}
+            if not owners:
+                continue
+            every_part = [i for ids in part_ids for i in ids]
+            for owner in owners:
+                marks = ",".join("?" for _ in every_part)
+                dropped += conn.execute(
+                    f"DELETE FROM {table} WHERE {column}=? AND artist_id IN ({marks})",
+                    (owner, *every_part)).rowcount or 0
+            logger.info("dropped the parts of %r from %d %s", name, len(owners),
+                        "track(s)" if column == "track_id" else "album(s)")
+    if dropped:
+        conn.commit()
+    return dropped
+
+
+# a name a blind split would cut: the separators split_artist_credits uses
+_BAND_SEPARATOR_RE = re.compile(r"[,;/&×+]|\b(?:and|x|vs\.?)\b", re.IGNORECASE)
+
+
 def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, int], None]] = None,
                                    batch: int = 500) -> Dict[str, int]:
     """Clear guest-credit ghosts from the library's own knowledge, no network.
@@ -1786,6 +1885,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
             identified.setdefault(key, int(aid))
 
     unghosted = _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name)
+    fragments = drop_band_fragment_credits(conn)
 
     # every combined-looking credit that owns no album. One with an id or a
     # legacy id only qualifies for the anchored split below: a credit carrying
@@ -1802,7 +1902,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         "ORDER BY a.id").fetchall()
     ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
     stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
-             "collab_ghosts_cleared": unghosted}
+             "collab_ghosts_cleared": unghosted, "band_fragments_dropped": fragments}
     total = len(ghosts)
     for index, (gid, name, _monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
@@ -1812,7 +1912,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
             _rehome_and_delete_combined(conn, gid, target, [target])
             stats["merged"] += 1
         else:
-            pieces = split_artist_credits(name or "")
+            pieces = _known_pieces(name or "", identified, gid)
             keys = [normalize_name(piece) for piece in pieces]
             anchors = {normalize_name(r[0] or "") for r in conn.execute(
                 "SELECT DISTINCT pa.name FROM lib2_track_artists ta "
@@ -2107,6 +2207,7 @@ __all__ = [
     "clear_placeholder_artist_images",
     "identity_is_free",
     "smart_split_combined_artist",
+    "drop_band_fragment_credits",
     "enrich_native_artist_artwork",
     "default_artist_resolver",
     "default_artwork_fetcher",
