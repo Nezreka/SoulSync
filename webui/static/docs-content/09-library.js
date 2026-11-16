@@ -41,7 +41,7 @@ The **padlock** on an album or an artist is for when you have gone through it an
 - **Your own hands are never blocked** — editing, retagging or reorganizing a locked album from its page works as before
 - **Kept away** lists the jobs the lock turned back, so you can see it working
 - **Changed since your review** shows when a file of a locked album was replaced, renamed, added or removed outside SoulSync. **Mark reviewed again** clears it
-- **Lock and next** locks the album and opens the artist's next album that is not reviewed. The artist's toolbar shows the count, e.g. "14 of 20 reviewed"
+- **Lock and next** (on the album page) locks the album and opens the artist's next album that is not reviewed. On the artist page the padlock on an album row locks it and you stay on the page, so you can go down the list. The artist's toolbar shows the count, e.g. "14 of 20 reviewed"
 - **An artist's lock** covers the artist (photo, details, folder, match). Albums are locked one by one, so a new release still gets tagged; locking an artist offers **And all current albums**
 - Locking needs the admin profile. Everyone sees the padlock on what is locked
 
@@ -56,6 +56,7 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
 Management actions are part of the Library page; there is no separate Enhanced toggle.
 
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
+
 `
         },
         {
