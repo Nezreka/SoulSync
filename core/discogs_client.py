@@ -897,7 +897,10 @@ class DiscogsClient:
             if artist_name and release_artist:
                 # Get the primary artist (before any Feat./Ft./&)
                 primary = re.split(r'\s+(?:feat\.?|ft\.?|featuring)\s+', release_artist, flags=re.IGNORECASE)[0]
-                primary = re.split(r'\s*[&,]\s*', primary)[0].strip()
+                # the artist's own name first: "Above & Beyond" cut at the "&"
+                # is "Above", and every one of their releases was skipped (#2136)
+                if self._normalize_name(primary.strip()) != self._normalize_name(artist_name):
+                    primary = re.split(r'\s*[&,]\s*', primary)[0].strip()
                 # Check if our artist is the primary
                 if self._normalize_name(primary) != self._normalize_name(artist_name):
                     continue

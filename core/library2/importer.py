@@ -204,6 +204,56 @@ def split_artist_credits(*sources: str) -> List[str]:
     return out
 
 
+def split_known_artist_credits(raw: str, known: Callable[[str], bool]) -> List[str]:
+    """``split_artist_credits``, but a run of pieces that spells an artist
+    ``known`` already knows stays one name.
+
+    "Above & Beyond, Mat Zo" is two artists when "Above & Beyond" is known,
+    not three ("Above", "Beyond", "Mat Zo"): the blind split made those two
+    phantom artists, and every folder, tag and reorganize built on them
+    (#2131, #2136). the longest known run wins. a feat. marker is always a
+    boundary.
+    """
+    out: List[str] = []
+    seen: Set[str] = set()
+
+    def _known(name: str) -> bool:
+        try:
+            return bool(known(name))
+        except Exception as exc:  # noqa: BLE001 - a lookup never breaks a split
+            logger.debug("known-artist check failed for %r: %s", name, exc)
+            return False
+
+    def _add(name: str) -> None:
+        name = name.strip().strip("-").strip()
+        key = normalize_name(name)
+        if name and key and key not in seen:
+            seen.add(key)
+            out.append(name)
+
+    display = unwrap_bytes_repr(raw or "")
+    for chunk in _FEAT_RE.split(display):
+        # piece spans in the original text, so a merged run keeps its own
+        # spelling ("Above & Beyond", not "Above, Beyond")
+        spans = []
+        pos = 0
+        for sep in _LIST_SEP_RE.finditer(chunk):
+            spans.append((pos, sep.start()))
+            pos = sep.end()
+        spans.append((pos, len(chunk)))
+        spans = [(s, e) for s, e in spans if chunk[s:e].strip().strip("-").strip()]
+        i = 0
+        while i < len(spans):
+            taken = 1
+            for j in range(len(spans), i + 1, -1):
+                if _known(chunk[spans[i][0]:spans[j - 1][1]].strip()):
+                    taken = j - i
+                    break
+            _add(chunk[spans[i][0]:spans[i + taken - 1][1]])
+            i += taken
+    return out
+
+
 # "<frontman> & The <band>": the band an artist leads, filed on that artist's
 # own album ("Bob Marley & The Wailers" on Bob Marley's Legend, "Nick Cave &
 # The Bad Seeds", "Tom Petty and the Heartbreakers", "Marina and the
@@ -257,7 +307,9 @@ def _credit_names_for_import(
     if known_name(display):
         return [display]
 
-    pieces = split_artist_credits(display)
+    # a known band inside the credit stays whole: "Above & Beyond, Mat Zo"
+    # is two artists, never "Above", "Beyond" and "Mat Zo" (#2136)
+    pieces = split_known_artist_credits(display, known_name)
     if len(pieces) <= 1:
         return pieces
     if _EXPLICIT_CREDIT_RE.search(display):
@@ -3622,6 +3674,7 @@ __all__ = [
     "apply_monitoring_from_watchlist_wishlist",
     "reconcile_import_monitoring",
     "split_artist_credits",
+    "split_known_artist_credits",
     "leads_a_band",
     "featured_from_title",
     "normalize_name",

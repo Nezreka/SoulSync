@@ -16,7 +16,7 @@ from core.download_plugins.types import TrackResult, AlbumResult
 # Pure text helpers, no cycle back here (core.text imports only core.text).
 from core.text.source_title import strip_artist_prefix
 from core.imports.context import is_placeholder_album
-from core.text.title_match import is_trailing_version_qualifier
+from core.text.title_match import is_trailing_version_qualifier, numbers_conflict
 from core.text.track_prefix import strip_track_prefix
 
 
@@ -237,6 +237,9 @@ class MusicMatchingEngine:
         got = self.clean_album_name(candidate_album or '')
         if not wanted or not got:
             return 0.0
+        # 'Group Therapy 696' is another release, not a near miss (#2134)
+        if numbers_conflict(wanted_album or '', candidate_album or ''):
+            return 0.0
         sim = SequenceMatcher(None, wanted, got).ratio()
         if sim >= 0.85:
             return 0.10
@@ -302,6 +305,12 @@ class MusicMatchingEngine:
 
         # Standard similarity
         standard_ratio = SequenceMatcher(None, str1, str2).ratio()
+
+        # numbers name the release or part: 'group therapy 638' is not
+        # 'group therapy 160' however alike the letters are. same 0.30 as a
+        # version mismatch, so title + artist stays under every threshold (#2134)
+        if numbers_conflict(str1, str2):
+            return min(standard_ratio, 0.30)
 
         # Version vocabulary, shared by the prefix check and the divergent
         # check below.
@@ -970,6 +979,18 @@ class MusicMatchingEngine:
             return filename.split('||', 1)[1]
         return filename
 
+    @staticmethod
+    def _candidate_song_text(candidate_text: str) -> str:
+        """the song part of a result: no folders, extension, track number or
+        streaming id. those carry numbers of their own that say nothing about
+        which song it is."""
+        text = candidate_text or ''
+        if '||' in text:
+            return text.split('||', 1)[1]
+        text = re.split(r'[\\/]', text)[-1]
+        text = re.sub(r'\.[A-Za-z0-9]{2,5}$', '', text)
+        return strip_track_prefix(text)
+
     def calculate_slskd_match_confidence(self, spotify_track: SpotifyTrack, slskd_track: TrackResult) -> float:
         """
         Calculates a confidence score for a Soulseek track against a Spotify track.
@@ -986,6 +1007,13 @@ class MusicMatchingEngine:
         # The slskd filename is our primary source of truth, so normalize it
         candidate_text = self._candidate_text(slskd_track)
         slskd_filename_norm = self.normalize_string(candidate_text)
+
+        # numbers say which one it is: 'Messages Pt. 1 [ABGT696]' is not
+        # 'Messages Pt. 4 [ABGT696]', and neither is ABGT699's. char similarity
+        # scored them 0.97, so two slots of one episode got the same file (#2134)
+        if numbers_conflict(spotify_track.name or '', self._candidate_song_text(candidate_text)):
+            logger.debug(f"Number reject: '{spotify_track.name}' vs '{slskd_track.filename[:80]}'")
+            return 0.0
 
         # 1. Title Score: Use full-string similarity instead of substring matching
         # This prevents false positives like "Love" matching "Loveless"
@@ -1075,6 +1103,9 @@ class MusicMatchingEngine:
                         continue
                     seg_cleaned = self.normalize_string(segment)
                     if not seg_cleaned:
+                        continue
+                    # the 696 folder is not the 699 album, however alike (#2134)
+                    if numbers_conflict(album_name, segment):
                         continue
                     sim = SequenceMatcher(None, album_cleaned, seg_cleaned).ratio()
                     best_album_sim = max(best_album_sim, sim)

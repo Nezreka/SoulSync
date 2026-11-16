@@ -664,6 +664,7 @@ button.featureTag:disabled {
 
 .albumDateBadge,
 .albumSizeBadge,
+.albumRenameBadge,
 .qualityProfileBadge {
   display: inline-flex;
   align-items: center;
@@ -689,6 +690,31 @@ button.featureTag:disabled {
 .albumSizeBadge svg {
   width: 11px;
   height: 11px;
+}
+
+/* #2141: files not where the naming template puts them. a button: it opens
+ * Preview rename for the album */
+.albumRenameBadge {
+  font-family: inherit;
+  line-height: inherit;
+  background: rgba(var(--warning-rgb), 0.1);
+  color: var(--warning);
+  border: 1px solid rgba(var(--warning-rgb), 0.32);
+  cursor: pointer;
+}
+
+span.albumRenameBadge {
+  cursor: default;
+}
+
+button.albumRenameBadge:hover,
+button.albumRenameBadge:focus-visible {
+  background: rgba(var(--warning-rgb), 0.18);
+}
+
+/* holds a portaled dialog in the react tree only, so it takes no room */
+.portalHost {
+  display: contents;
 }
 
 /* Quality-profile badge — same lilac styling for both the album header and
@@ -3475,6 +3501,14 @@ button.statusWarn:disabled {
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* #2144: the popular flame, warm like plexamp's */
+.popularMark {
+  display: inline-flex;
+  align-self: center;
+  color: var(--warning-strong);
+  cursor: help;
 }
 
 .inlineMissingSuspected,

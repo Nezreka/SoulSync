@@ -221,6 +221,28 @@ describe('the padlock (#2046)', () => {
     expect(api.fetchArtistReview).toHaveBeenCalledWith(2, 5);
   });
 
+  it('#2143 locking from an album row leaves the row alone and stays on the page', async () => {
+    // the album row toggles on a click and opens the album page on two. the
+    // sheet is portaled, but react still bubbles its clicks to the row.
+    api.saveLock.mockResolvedValue(lock({ locked: true, scopes: ['tags'] }));
+    const rowClick = vi.fn();
+    render(
+      <div onClick={rowClick}>
+        <ReviewLockButton entity="album" id={5} name="Views" artistId={2} />
+      </div>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Lock Views as reviewed' }));
+    const sheet = await screen.findByRole('dialog');
+    fireEvent.click((await within(sheet).findAllByRole('switch'))[0]);
+    fireEvent.click(within(sheet).getAllByRole('switch')[0]);
+    // no "Lock and next" off the album page: it opened the next album
+    expect(within(sheet).queryByRole('button', { name: 'Lock and next' })).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Lock' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Views is locked', 'success'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rowClick).not.toHaveBeenCalled();
+  });
+
   it('an artist has its own switches, a review count, and takes its albums along', async () => {
     api.fetchLock.mockResolvedValue(
       lock({ entity_type: 'artist', entity_id: 2, review: { albums: 3, reviewed: 1 } }),

@@ -676,6 +676,8 @@ export interface LibraryV2Track {
   /** Plex/Jellyfin/Navidrome instances that recognised this imported track. */
   media_server_sources?: string[];
   is_missing?: boolean;
+  /** #2144: one of the album's most played tracks on Last.fm (album detail only). */
+  popular?: boolean;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;

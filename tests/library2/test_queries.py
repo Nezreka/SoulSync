@@ -1329,15 +1329,48 @@ def test_a_split_single_appears_on_the_second_artists_page(imported_conn):
     assert [a["title"] for a in data["appears_on"]] == ["Lead versus Other"]
 
 
+def _views_with(conn, name, *, album_role, lead_tracks):
+    """an artist on Drake's Views (2 tracks, one on disk): an album credit
+    with ``album_role``, and the lead credit on ``lead_tracks`` of its tracks."""
+    views = conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (name,)).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, ?)",
+                 (views, artist, album_role))
+    tracks = [r[0] for r in conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (views,))]
+    for position, track in enumerate(tracks):
+        lead = position < lead_tracks
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, ?, ?)", (track, artist, "primary" if lead else "featured",
+                                            0 if lead else 1))
+    return artist
+
+
 def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
-    """the index lists release artists: the album's primary artist, and a
-    primary album artist on a joint album too. Only featured guests drop out."""
-    views = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
-    partner = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Future')").lastrowid
-    imported_conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
-                          (views, partner))
+    """the index lists release artists: the album's primary artist, and the
+    lead on more than half a joint album's tracks. the artist page files that
+    album as their own too."""
+    partner = _views_with(imported_conn, "Future", album_role="featured", lead_tracks=2)
     names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
     assert {"Drake", "Future"} <= names and "Wizkid" not in names
+    assert [a["title"] for a in Q.get_artist(imported_conn, partner)["albums"]] == ["Views"]
+
+
+def test_a_guest_with_a_primary_album_credit_is_not_a_library_artist(imported_conn):
+    """#2142: a 2pac library listed nate dogg, outlawz and dr. dre beside him.
+    an album credit marked primary on someone else's album, with the guest
+    leading none (or only half) of its tracks, is not a release of their own:
+    their page files it under Appears On, and the index agrees."""
+    guest = _views_with(imported_conn, "Nate Dogg", album_role="primary", lead_tracks=0)
+    half = _views_with(imported_conn, "Outlawz", album_role="primary", lead_tracks=1)
+
+    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
+
+    assert "Drake" in names
+    assert "Nate Dogg" not in names and "Outlawz" not in names
+    for artist in (guest, half):
+        page = Q.get_artist(imported_conn, artist)
+        assert page["albums"] == [] and [a["title"] for a in page["appears_on"]] == ["Views"]
 
 
 def test_library_index_membership_searches_each_ownership_branch_by_index(imported_conn):
@@ -1353,8 +1386,10 @@ def test_library_index_membership_searches_each_ownership_branch_by_index(import
         )
     )
     assert "SCAN owned_al" not in plan, plan
+    assert "SCAN owned_ta" not in plan and "SCAN owned_la" not in plan, plan
     assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
-    assert "INDEX idx_lib2_album_artists_artist (artist_id=?)" in plan, plan
+    # #2142: the lead-credit branch starts from the artist's own credits
+    assert "INDEX idx_lib2_track_artists_artist (artist_id=?)" in plan, plan
 
 
 def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):

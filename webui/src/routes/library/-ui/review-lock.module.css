@@ -14,6 +14,11 @@
 
 /* -- the button -------------------------------------------------------- */
 
+/* holds the portaled sheet in the react tree only, so it takes no room */
+.sheetHost {
+  display: contents;
+}
+
 .button {
   display: inline-flex;
   flex: none;

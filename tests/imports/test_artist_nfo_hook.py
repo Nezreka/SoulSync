@@ -21,8 +21,8 @@ def _hook(monkeypatch, ensure_impl):
     import core.library.artist_nfo as artist_nfo
     calls = []
 
-    def fake_ensure(track_path, cfg):
-        calls.append((track_path, cfg))
+    def fake_ensure(track_path, cfg, **kwargs):
+        calls.append((track_path, cfg, kwargs))
         return ensure_impl(track_path, cfg)
 
     monkeypatch.setattr(artist_nfo, "ensure_artist_nfo_for_track", fake_ensure)
@@ -35,6 +35,13 @@ class TestMaybeWriteArtistNfo:
         ctx = {"_final_processed_path": "/lib/Artist/Album/processed.flac"}
         hook(ctx, "/lib/Artist/Album/original.flac", Config())
         assert calls and calls[0][0] == "/lib/Artist/Album/processed.flac"
+
+    def test_artwork_rides_the_same_switch(self, monkeypatch):
+        """#2138: the import asks for poster.jpg / background.jpg too."""
+        from core.library.artist_nfo import schedule_artist_artwork
+        hook, calls = _hook(monkeypatch, lambda p, c: (True, p))
+        hook({}, "/lib/Artist/Album/f.flac", Config())
+        assert calls[0][2].get("artwork") is schedule_artist_artwork
 
     def test_falls_back_to_final_path(self, monkeypatch):
         hook, calls = _hook(monkeypatch, lambda p, c: (True, p))

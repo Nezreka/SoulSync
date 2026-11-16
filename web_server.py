@@ -165,7 +165,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
-from core.imports.collab_artist import collab_primary, library_has_artist
+from core.imports.collab_artist import collab_primary, library_has_artist, library_has_identified_artist
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -14135,7 +14135,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         primary = collab_primary(
             _raw_album_artist, artists_list, context.get('_track_artists_list'),
             known_names=context.get('_collab_known_names') or (),
-            library_has=library_has_artist)
+            library_has=library_has_artist, library_knows=library_has_identified_artist)
         if primary:
             # raw list name: sanitize like every other value (#1954)
             album_artist_value = _sanitize_filename(primary)
