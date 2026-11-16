@@ -1004,7 +1004,15 @@ def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
     just opened. So the handler has to write it back.
     """
     headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
-    assert headers, "no section headers found"
+    # every collapsible section is React now (SETTINGS_PORT.md): its header
+    # is parts.tsx Section or the Library cards' LibrarySection, with the
+    # same three attributes
+    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
+    for f in ("parts.tsx", "library-card.tsx"):
+        src = (tabs / f).read_text(encoding="utf-8")
+        head = src.split('className="settings-section-header collapsed"', 1)[1]
+        head = head.split('<span className="settings-section-arrow"', 1)[0]
+        assert 'role="button"' in head and "tabIndex={0}" in head and 'aria-expanded="false"' in head, f
 
     for h in headers:
         if 'settings-section-static' in h:

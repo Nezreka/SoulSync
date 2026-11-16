@@ -1,0 +1,28 @@
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-video-only
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Import Lists</h3>
+                                        <span class="settings-section-hint">Auto-add movies &amp; shows from a
+                                            list</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-video-only>
+                                        <div class="settings-group" data-stg="discovery" data-video-only>
+                                            <!-- Import lists (arr-parity P6) -->
+                                            <div class="form-group" id="video-import-lists">
+                                                <label>Import lists:</label>
+                                                <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                                    Everything on a list enters acquisition automatically (movies →
+                                                    wishlist, shows → follow with the chosen monitor policy).
+                                                    Only NEW list members are added, so removing something never
+                                                    boomerangs back. Synced by the "Sync Import Lists" automation.
+                                                    Ref: a TMDB list id, a chart key (trending_movies, top_shows, …), an
+                                                    IMDb ls-id/URL — Plex Watchlist needs no ref.
+                                                </small>
+                                                <div id="vq-implist-rows"></div>
+                                                <button class="test-button" type="button" data-vq-implist-add>+ Add
+                                                    list</button>
+                                            </div>
+                                        </div>
+                                    </div>
+

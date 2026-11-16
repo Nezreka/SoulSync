@@ -134,24 +134,17 @@ def test_saving_seed_settings_cannot_clobber_the_download_chain():
     assert "seed_ratio_goal" in body and "download_path" in body
 
 
-def test_the_retired_video_source_picker_stays_hidden():
+def test_the_retired_video_source_picker_is_gone():
     """Two editors for the video chain lived on one tab. The old select and its
-    arrow list stay in the DOM - video-settings.js reads them on load - but they
-    must never render, or they drift against the widget again.
-
-    The rule needs !important twice over: updateVideoSourceUI() writes
-    style.display on the hybrid container, and .form-group sets display:flex,
-    which alone beats the [hidden] attribute.
+    arrow list stayed in the DOM, hidden, while video-settings.js read them on
+    load; nothing reads them now, so they went (SETTINGS_PORT.md video pass V3c)
+    and the chain widget is the one editor. They must not come back.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
-    assert index.count("data-video-legacy-source") == 3, "the legacy markers moved"
-    for m in re.finditer(r"<[^>]*data-video-legacy-source[^>]*>", index):
-        assert "hidden" in m.group(0), "a legacy source control lost its hidden attribute"
-
+    assert "data-video-legacy-source" not in index, "the retired source picker is back"
+    assert 'id="video-download-mode"' not in index and 'id="video-hybrid-rows"' not in index
     css = (_WEBUI / "static" / "style.css").read_text(encoding="utf-8")
-    rule = re.search(r"#settings-page \[data-video-legacy-source\]\s*{([^}]*)}", css)
-    assert rule, "no rule hiding the retired picker"
-    assert "display: none" in rule.group(1) and "!important" in rule.group(1)
+    assert "[data-video-legacy-source]" not in css
 
 
 def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
@@ -182,12 +175,11 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     # React: SETTINGS_PORT.md video pass V2c)
     prefs = (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
     assert "const TAB = 'library';" in prefs and 'id="video-monitor-specials"' in prefs
-    for pid, tab in (# #1822: import lists add to what you discover
-                     ("video-import-lists", "discovery"),):
-        at = index.index(f'id="{pid}"')
-        stg = index.rfind('data-stg=', 0, at)
-        found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
-        assert found == tab, f"{pid} is on the {found} tab, expected {tab}"
+    # #1822: import lists add to what you discover (React, video pass V3c)
+    lists = (tabs / "video-row-lists.tsx").read_text(encoding="utf-8")
+    section = lists.split("export function ImportListsSection(", 1)[1]
+    assert 'tab="discovery"' in section.split("</Section>", 1)[0]
+    assert 'id="video-import-lists"' in section
 
     # seeding has to be INSIDE the torrent panel, not merely on the same tab
     panels = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
@@ -202,42 +194,28 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     assert not orphans, f"the move orphaned these fields: {orphans}"
 
 
-def test_the_video_slskd_form_is_a_retired_duplicate():
+def test_the_video_slskd_form_is_gone():
     """Nine fields on the video Downloads tab wrote the SAME nine config keys as
     the music Soulseek panel - soulseek.slskd_url, api_key, search_timeout and
     the rest - via /api/video/downloads/slskd. One slskd instance, two forms, on
-    two different tabs, in two different styles.
+    two different tabs, and the clobber this page has been bitten by twice:
+    saveSlskd() posted EVERY field whenever any one changed.
 
-    It also carried the clobber this page has been bitten by twice now:
-    saveSlskd() posts EVERY field whenever any one changes, so changing a search
-    timeout on the video side re-posted whatever URL that form happened to be
-    holding - undoing a change made from the music side.
-
-    The Sources tab is shared and renders on the video side, so the Soulseek card
-    there is the single editor. The fields stay in the DOM (video-settings.js
-    reads them) but must never render. This also pins the 1:1 mapping, so the day
-    a field exists on one side only, this fails instead of quietly hiding it.
+    The Sources tab's Soulseek card is the single editor. The duplicate stayed
+    hidden while video-settings.js read it; nothing does now, so it went
+    (SETTINGS_PORT.md video pass V3c). It must not come back.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
-    at = index.index('id="video-slskd-container"')
-    tag = index[index.rfind("<div", 0, at):index.index(">", at) + 1]
-    assert 'data-dupe-of="soulseek-settings-container"' in tag
-    assert "hidden" in tag
-
+    assert 'id="video-slskd-container"' not in index and "video-slskd-" not in index
+    assert "data-dupe-of" not in index
     css = (_WEBUI / "static" / "style.css").read_text(encoding="utf-8")
-    rule = re.search(r"#settings-page \[data-dupe-of\]\s*{([^}]*)}", css)
-    assert rule and "display: none" in rule.group(1) and "!important" in rule.group(1)
-
-    # every video field must still have a music counterpart, or hiding it loses a setting
+    assert "[data-dupe-of]" not in css
     vjs = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    # the music Soulseek panel is React now (SETTINGS_PORT.md step 7f)
+    assert "saveSlskd" not in vjs and "/api/video/downloads/slskd" not in vjs
+    # the music Soulseek panel (React, SETTINGS_PORT.md step 7f) is the editor
     panel = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels.tsx").read_text(encoding="utf-8")
-    video = {i for i in re.findall(r"'(video-slskd-[a-z-]+)'", vjs) if not i.endswith("container")}
-    alias = {"search-min-delay": "search-min-delay-seconds", "auto-clear": "auto-clear-searches"}
-    for vid in sorted(video):
-        stem = vid[len("video-slskd-"):]
-        music = "soulseek-" + alias.get(stem, stem)
-        assert f'id="{music}"' in panel, f"{vid} has no music counterpart ({music}) - hiding it loses that setting"
+    for music in ("soulseek-url", "soulseek-api-key", "soulseek-search-timeout"):
+        assert f'id="{music}"' in panel, music
 
 
 def test_the_downloads_tab_holds_only_download_settings():
@@ -276,11 +254,14 @@ def test_the_downloads_tab_holds_only_download_settings():
     # the two that moved must not have crept back
     # #1822: notifications sit with the other connected services, import lists
     # on Discovery; neither belongs on Downloads
-    for stray, home in (("video-notifications", "connections"), ("video-import-lists", "discovery")):
-        at = markup.index(f'id="{stray}"')
-        stg = markup.rfind('data-stg="', 0, at)
-        tab = re.search(r'data-stg="([a-z]+)"', markup[stg:stg + 32]).group(1)
-        assert tab == home, f"{stray} is on the {tab} tab, expected {home}"
+    # (both React: video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
+    lists = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
+    for stray, section, home in (("video-notifications", "NotificationsSection", "connections"),
+                                 ("video-import-lists", "ImportListsSection", "discovery")):
+        body = lists.split(f"export function {section}(", 1)[1].split("\nexport function", 1)[0]
+        assert f'id="{stray}"' in body
+        assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
+        assert f'data-stg-react="{home}" data-stg-part=' in markup
 
 
 def test_the_video_save_button_cannot_write_a_retired_form():

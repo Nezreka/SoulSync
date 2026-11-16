@@ -8,6 +8,8 @@ by the Default profile with no way to pick another, and "Movie 4K" vs "TV
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from flask import Flask
 
@@ -197,6 +199,6 @@ def test_the_ui_has_the_picker_and_the_kind_defaults():
     # the kind defaults are React (SETTINGS_PORT.md, video pass V1)
     q = (root / "webui/src/features/settings/tabs/video-quality.tsx").read_text(encoding="utf-8")
     assert "data-vq-kind-default={kind}" in q
-    assert "['movie', 'New movies use'" in q and "['show', 'New shows use'" in q
+    assert re.search(r"\[\s*'movie',\s*'New movies use'", q) and re.search(r"\[\s*'show',\s*'New shows use'", q)
     assert "`${QUALITY_URL}/defaults`" in q
     assert 'data-stg-react="quality" data-stg-part="video"' in html

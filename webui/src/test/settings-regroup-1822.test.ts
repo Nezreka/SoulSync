@@ -9,13 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 const source = readFileSync(resolve(process.cwd(), 'static/settings.js'), 'utf8');
 
-function sectionTab(doc: Document, heading: string): string | null {
-  const h3 = [...doc.querySelectorAll('#settings-page h3')].find(
-    (el) => el.textContent?.trim() === heading,
-  );
-  return h3?.closest('[data-stg]')?.getAttribute('data-stg') ?? null;
-}
-
 describe('where sections live', () => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
@@ -49,10 +42,17 @@ describe('where sections live', () => {
   });
 
   it.each([
-    ['Notifications', 'connections'],
-    ['Import Lists', 'discovery'],
-  ])('%s is on %s', (heading, tab) => {
-    expect(sectionTab(doc, heading)).toBe(tab);
+    ['NotificationsSection', 'Notifications', 'connections', 'notifications'],
+    ['ImportListsSection', 'Import Lists', 'discovery', 'import-lists'],
+  ])('%s: %s is on %s (React, SETTINGS_PORT.md video pass V3c)', (fn, heading, tab, part) => {
+    const lists = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/video-row-lists.tsx'),
+      'utf8',
+    );
+    const body = lists.split(`export function ${fn}(`)[1].split('</Section>')[0];
+    expect(body).toContain(`tab="${tab}"`);
+    expect(body).toContain(`title="${heading}"`);
+    expect(html).toContain(`<div data-stg-react="${tab}" data-stg-part="${part}"`);
   });
 
   it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {

@@ -364,17 +364,18 @@ def test_video_enrichment_manager_isolated():
 
 
 def test_video_settings_module_referenced_and_isolated():
+    # every video settings section is React (SETTINGS_PORT.md video pass); the
+    # file is a note until the page itself goes React, and must stay inert
     assert "video/video-settings.js" in _INDEX
     stripped = _VSETTINGS_JS.strip()
-    assert stripped.startswith("/*") or stripped.startswith("(function")
-    assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
-    # the folder checker is the shared settings helper (folder-check.js), not music
-    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries",
-                                                                 "window.SoulSyncFolderCheck"}
-    assert "addEventListener" in _VSETTINGS_JS
-    assert "/api/video/libraries" in _VSETTINGS_JS
-    assert "soulsync:video-page-shown" in _VSETTINGS_JS
-    assert "'change'" in _VSETTINGS_JS  # saves on change, like the music selector
+    assert stripped.startswith("/*") and stripped.endswith("*/")
+    assert "window." not in _VSETTINGS_JS and "addEventListener" not in _VSETTINGS_JS
+    # each section loads on the video page being shown, and saves on change
+    tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
+    shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")
+    assert "document.addEventListener('soulsync:video-page-shown', heard)" in shown
+    server = (tabs / "video-server.ts").read_text(encoding="utf-8")
+    assert "export const LIBS_URL = '/api/video/libraries';" in server
 
 
 def test_video_worker_orbs_referenced_and_isolated():

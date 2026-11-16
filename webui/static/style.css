@@ -70664,14 +70664,6 @@ body.src-modal-open { overflow: hidden; }
     color: rgba(255, 255, 255, 0.34);
 }
 
-/* The retired video source picker. It stays in the DOM because
-   video-settings.js reads and writes it on load, but it must never be seen: the
-   shared chain widget is the single editor for the video chain now.
-
-   !important because updateVideoSourceUI() sets style.display on
-   #video-hybrid-container directly, and an inline style beats a plain rule -
-   and because .form-group sets display:flex, which beats [hidden] on its own. */
-#settings-page [data-video-legacy-source] { display: none !important; }
 
 
 /* ── Source brand colour ───────────────────────────────────────────────────────
@@ -70747,14 +70739,6 @@ body.src-modal-open { overflow: hidden; }
     box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3), var(--stg-lift);
 }
 
-/* A settings block that duplicates one elsewhere. It stays in the DOM because
-   JS still reads and writes its fields, but it must never render - the value of
-   data-dupe-of names the element that is the real editor.
-
-   !important for the same two reasons as the retired source picker: .form-group
-   and .settings-group both set display, which beats the [hidden] attribute on
-   its own, and some of these are toggled inline by their own scripts. */
-#settings-page [data-dupe-of] { display: none !important; }
 
 /* ── Settings: card groups ─────────────────────────────────────────────────────
    Ten identical cards in a flat column is a list you scan by reading every

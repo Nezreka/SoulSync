@@ -132,6 +132,12 @@ def test_api_is_admin_only_and_crud(db, monkeypatch):
 def test_wiring_and_ui():
     src = open("web_server.py", encoding="utf-8").read()
     assert "from core.video.notifications import handle_event" in src
-    assert 'id="vq-notify-rows"' in _INDEX and "data-vq-notify-add" in _INDEX
-    assert "NOTIFY_URL" in _SETTINGS_JS and "loadNotify()" in _SETTINGS_JS
-    assert "/test'" in _SETTINGS_JS or "NOTIFY_URL + '/test'" in _SETTINGS_JS
+    # the editor is React (video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
+    from pathlib import Path
+    ui = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" /
+          "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
+    assert 'id="vq-notify-rows"' in ui and "data-vq-notify-add" in ui
+    assert "createRows('/api/video/notifications')" in ui
+    assert "void notifications.load('connections');" in ui
+    assert "`${notifications.url}/test`" in ui
+    assert 'data-stg-part="notifications"' in _INDEX

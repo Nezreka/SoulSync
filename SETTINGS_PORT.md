@@ -62,16 +62,16 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
 | Tab: System | **done** (steps 9a-9c, and Experimental in 10a) | 63 of 63. |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
-| Video-only panels | not started | counted inside the tabs above |
+| Video-only panels | **done** (video pass V1-V3c) | Every video section is React; the retired source picker and slskd form are removed. |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 648 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (every tab's video side done; left: the page shell, step V4), 657 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 4,927 |
+| `webui/index.html` | 12,823 | 4,754 |
 | `webui/static/settings.js` | 10,187 | 1,442 |
-| `webui/static/video/video-settings.js` | 2,940 | 362 |
+| `webui/static/video/video-settings.js` | 2,940 | 19 (a note) |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -807,6 +807,16 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Video pass V3c: Notifications, Import Lists; the retired forms go (Nov 16 2026)
+
+**What.** `tabs/video-row-lists.tsx`: Notifications (slot `connections` / `notifications`: a Discord / webhook / Telegram connection per row, the events it hears, Test, add, delete) and Import Lists (slot `discovery` / `import-lists`: a TMDB / IMDb / Plex list per row, add, delete). Each loads each time the video settings page is shown (a non-admin's 403 leaves it empty, as before) and a row saves alone when a field changes, read off the page as the page did (the change is heard before React's own, so a pick is already in the field). Rows are drawn again only when the list loads, a row is added or removed, or a notification's type changes (its URL or token fields swap), as before.
+
+**Removed.** Everything left in `video-settings.js`: it is a note now, and goes with `settings.js` in V4 (twelve Python files read it at import). The retired video source picker and the hidden video slskd form, with their CSS rules: nothing read them since V2a and V3b. The stale "parked panels" comment in `index.html`.
+
+**Found by the pins.** `test_video_title_profile_choice` had failed since V1: oxfmt split the kind defaults over lines after the pin was repointed. It matches the words now, whatever the line breaks.
+
+**Checked.** Parity of both (Notifications without the retired picker); `video-row-lists.test.tsx` 11 (loads, a row's save and its body, a bad row's toast keeping what was typed, add, delete, the empty states, the 403, events in order, a type change swapping fields, Test; the redraw and the row lookup negative-checked); `settings-regroup-1822`, `settings-navigation` (now on the Sources tab's Download Sources group, the last vanilla one), `video-side-settings-save`; Python `test_video_download_config` (the retired forms are gone and stay gone), `test_video_import_lists`, `test_video_notifications`, `test_video_side_shell`, `test_settings_sources_tab` (the section toggles read parts.tsx and library-card.tsx now: no header is left in index.html), `test_video_title_profile_choice`. Settings suites 1,526 pass. Browser on the video side: both lists loaded, an event ticked, a type changed, Test, add, delete, a pick, a ref typed and left, the toasts and the server state after, all the same; pixels the same but the floating corner button and 1px of rounding.
+
 ### Video pass V3b: the video side's Server Connection (Nov 16 2026)
 
 **What.** `tabs/connections-video-server.tsx` (slot `connections` / `video-server`): the Plex / Jellyfin toggle (shows that server's fields and makes it the video server), each server's URL and secret with the note on what is missing (#1213: the re-read never writes over the field being typed in), Test (saves quietly first), the Jellyfin user, and the Movies, TV and other TV library picks (Scan and Anime ticks; Anime ticks Scan; the main pick keeps its Anime). `tabs/video-server.ts`: all of it, loaded each time the video settings page is shown, the credentials and libraries also saved quietly by the video side's save button.
@@ -1150,49 +1160,49 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `omdb-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test OMDb | video only | no |
+| button |  | Test OMDb | video only | yes (video pass V3a) |
 
 **fanart.tv (Artwork)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `fanart-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test fanart.tv | video only | no |
+| button |  | Test fanart.tv | video only | yes (video pass V3a) |
 
 **OpenSubtitles (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `opensubtitles-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test OpenSubtitles | video only | no |
+| button |  | Test OpenSubtitles | video only | yes (video pass V3a) |
 
 **SubDL (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `subdl-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test SubDL | video only | no |
+| button |  | Test SubDL | video only | yes (video pass V3a) |
 
 **SubSource (Subtitles)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `subsource-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test SubSource | video only | no |
+| button |  | Test SubSource | video only | yes (video pass V3a) |
 
 **Trakt (Audience Rating)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `trakt-api-key` | API Key (Client ID): | video only | yes (video pass V3a) |
-| button |  | Test Trakt | video only | no |
+| button |  | Test Trakt | video only | yes (video pass V3a) |
 
 **MDBList (List Collections)** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `mdblist-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test MDBList | video only | no |
+| button |  | Test MDBList | video only | yes (video pass V3a) |
 
 **Community Data (No Key)** (video only, 4)
 
@@ -1201,7 +1211,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | checkbox | `video-tvmaze-enabled` | TVmaze (TV community rating) | video only | yes (video pass V3a) |
 | checkbox | `video-anilist-enabled` | AniList (anime): links your anime to AniList by id and adds their roma | video only | yes (video pass V3a) |
 | checkbox | `video-wikidata-enabled` | Wikidata (official website link) | video only | yes (video pass V3a) |
-| button |  | Test Connections | video only | no |
+| button |  | Test Connections | video only | yes (video pass V3a) |
 
 **YouTube Extras (No Key)** (video only, 4)
 
@@ -1296,7 +1306,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | select | `video-download-mode` | Download Source: {Soulseek Only / Torrent Only (via Prowlarr) / Usenet Only (via Prowlarr) / Hybrid (Primary + | video only | yes (video pass V2a) |
-| button |  | + Add connection | video only | no |
+| button |  | + Add connection | video only | yes (video pass V3c) |
 
 ### Sources (80)
 

@@ -68,6 +68,14 @@ describe('the Save Settings button on the video side', () => {
   });
 });
 
+/** a field in a video-only block, on a shared tab */
+function videoOnlyProbe(doc: Document) {
+  const block = doc.createElement('div');
+  block.setAttribute('data-video-only', '');
+  block.innerHTML = '<input id="probe-video-only">';
+  doc.querySelector('#settings-page [data-stg="sources"]')!.appendChild(block);
+}
+
 describe('the music auto-save on the video side', () => {
   // the real function and its helper, with the page's globals stubbed around them
   function autosave(side: 'music' | 'video') {
@@ -122,8 +130,11 @@ return debouncedAutoSaveSettings;`;
   });
 
   it('skips a field inside a video-only block - it saves itself', () => {
-    const { scheduled } = autosave('video');
-    expect(scheduled('video-import-lists')).toBe(false);
+    const { doc, scheduled } = autosave('video');
+    // every video-only block is React now (SETTINGS_PORT.md video pass): one
+    // stands in, as the probe below does for the data-video-* hook
+    videoOnlyProbe(doc);
+    expect(scheduled('probe-video-only')).toBe(false);
   });
 
   it('skips a field wired by a data-video-* hook - it saves itself', () => {
@@ -141,8 +152,9 @@ return debouncedAutoSaveSettings;`;
   });
 
   it('is unchanged on the music side', () => {
-    const { scheduled } = autosave('music');
+    const { doc, scheduled } = autosave('music');
     expect(scheduled('security-oidc-only')).toBe(true);
-    expect(scheduled('video-import-lists')).toBe(true);
+    videoOnlyProbe(doc);
+    expect(scheduled('probe-video-only')).toBe(true);
   });
 });

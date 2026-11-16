@@ -30,21 +30,21 @@ it('uses one category bar instead of a second sidebar', () => {
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
   nav.switchSettingsTab('connections');
-  // a part still in the page's own markup (Import Lists, until the video pass
-  // ports it): its rows are what video-settings.js keeps
-  const rows = document.getElementById('vq-implist-rows') as HTMLElement;
-  rows.dataset.probe = 'kept';
-  const section = rows.closest('.settings-section-body') as HTMLElement;
-  const display = section.style.display;
-  nav.filterSettings('Import lists');
-  expect(section.style.display).toBe(display);
-  expect(document.getElementById('vq-implist-rows')).toBe(rows);
+  // the one group still in the page's own markup (the Sources tab's Download
+  // Sources heading; every other section is React, SETTINGS_PORT.md)
+  const group = document.querySelector(
+    '#settings-page .settings-group[data-stg="sources"]',
+  ) as HTMLElement;
+  group.dataset.probe = 'kept';
+  const display = group.style.display;
+  nav.filterSettings('Download Sources');
+  expect(group.style.display).toBe(display);
+  expect(document.querySelector('#settings-page .settings-group[data-stg="sources"]')).toBe(group);
   (document.querySelector('#stg-search-results button') as HTMLButtonElement).click();
   expect(document.querySelector('.stg-tab[aria-current="page"]')?.getAttribute('data-tab')).toBe(
-    'discovery',
+    'sources',
   );
-  expect(section.classList.contains('collapsed')).toBe(false);
-  expect(rows.dataset.probe).toBe('kept');
+  expect(group.dataset.probe).toBe('kept');
 });
 it('has an empty state and clearing search does not switch categories', () => {
   nav.switchSettingsTab('library');

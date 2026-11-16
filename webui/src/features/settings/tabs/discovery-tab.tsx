@@ -22,6 +22,7 @@ import {
   resolveDiscovery,
 } from './discovery';
 import { Section, helpBits, useDraft, useHelp } from './parts';
+import { ImportListsSection } from './video-row-lists';
 
 const TAB = 'discovery';
 
@@ -419,5 +420,6 @@ function Pool({ store }: SettingsTabProps) {
 }
 
 export function DiscoveryTab(props: SettingsTabProps) {
+  if (props.part === 'import-lists') return <ImportListsSection />;
   return props.part === 'pool' ? <Pool {...props} /> : <Main {...props} />;
 }
