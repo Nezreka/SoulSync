@@ -913,6 +913,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | `371d442de` (video pass V3a) | **The video side's API cards are React.** |
 | Nov 15 | `b7fef8fd7` (video pass V2c) | **Video Preferences is React; the Library tab is done.** Monitor Specials loads again (V2a had dropped it). |
 | Nov 15 | `a032b935c` (video pass V2b) | **The Organization card's Video panel is React.** The ignore switches stay off while embedded subs don't count. |
 | Nov 15 | `7876fb5a5` (video pass V2a) | **The Folders card's Video panel and the video downloads config are React** (with the Sources tab's video blocks). The seeding goals save when changed. |
