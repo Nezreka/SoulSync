@@ -1637,10 +1637,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail("page/limit must be integers")
         if page < 1 or not 1 <= limit <= 500:
             return _fail("page must be positive and limit must be between 1 and 500")
+        try:
+            # #2106: one artist's missing tracks, from their completeness count
+            artist_id = int(request.args.get("artist") or 0) or None
+        except (TypeError, ValueError):
+            return _fail("artist must be an integer")
         with closing(_conn()) as conn:
             lister = WV.list_missing if kind == "missing" else WV.list_cutoff_unmet
             rows, total = lister(conn, search=search, page=page, limit=limit,
-                                 profile_id=_intent_profile())
+                                 profile_id=_intent_profile(), artist_id=artist_id)
         total_pages = (total + limit - 1) // limit if limit else 0
         return jsonify({
             "success": True,
@@ -1770,6 +1775,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the old library page's filters: alphabet bar, has/no provider
             # id, and "could be better" (the live quality evaluator)
             quality = request.args.get("quality", "")
+            # #2106/#2107: completeness filters, sort direction, credit-only artists
+            from core.library2.artist_completeness import completeness_filters
+            completeness = completeness_filters(
+                completion=request.args.get("completion", ""),
+                missing_min=request.args.get("missing_min"),
+                missing_max=request.args.get("missing_max"),
+                pct_min=request.args.get("pct_min"),
+                pct_max=request.args.get("pct_max"))
             artists, total = Q.list_artists(conn, search=search, sort=sort,
                                             monitored=monitored, page=page, limit=limit,
                                             include_size="size" in include,
@@ -1778,7 +1791,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                             quality_filter=quality if quality == "upgradable" else "",
                                             include_upgradable="upgradable" in include,
                                             # #2046: reviewed | unreviewed
-                                            review_filter=request.args.get("review", ""))
+                                            review_filter=request.args.get("review", ""),
+                                            direction=request.args.get("dir", ""),
+                                            completeness=completeness,
+                                            credit=request.args.get("credit", ""))
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -1791,6 +1807,45 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "has_prev": page > 1, "has_next": page < total_pages,
             },
         })
+
+    @_route("/api/library/v2/artists/ids")
+    def lib2_list_artist_ids():
+        """#2109: every artist id the list's filters match, in list order, for
+        "select all" on the Library page. The same filters as the list."""
+        from core.library2.artist_completeness import completeness_filters
+        from core.library2.artist_reader import read_artist_page
+        quality = request.args.get("quality", "")
+        with closing(_conn()) as conn:
+            rows, total = read_artist_page(
+                conn, search=request.args.get("search", ""),
+                sort=request.args.get("sort", "name"),
+                monitored=request.args.get("monitored", "all"),
+                include_size=False,
+                letter=(request.args.get("letter") or "all").lower(),
+                source_filter=request.args.get("source", ""),
+                quality_filter=quality if quality == "upgradable" else "",
+                review_filter=request.args.get("review", ""),
+                direction=request.args.get("dir", ""),
+                completeness=completeness_filters(
+                    completion=request.args.get("completion", ""),
+                    missing_min=request.args.get("missing_min"),
+                    missing_max=request.args.get("missing_max"),
+                    pct_min=request.args.get("pct_min"),
+                    pct_max=request.args.get("pct_max")),
+                credit=request.args.get("credit", ""),
+                ids_only=True)
+        return jsonify({"success": True, "ids": [r["id"] for r in rows], "total": total})
+
+    @_route("/api/library/v2/artists/overview")
+    def lib2_artist_overview():
+        """#2107: the library at a glance, for the overview above the list.
+        ``part=upgrades`` is the could-be-better count on its own: it can take
+        a while the first time, so the rest never waits for it."""
+        from core.library2.library_overview import library_overview, upgrades_overview
+        with closing(_conn()) as conn:
+            if request.args.get("part") == "upgrades":
+                return jsonify({"success": True, **upgrades_overview(conn)})
+            return jsonify({"success": True, **library_overview(conn, profile_id=_profile())})
 
     @_route("/api/library/v2/artists/upgradable-counts")
     def lib2_artist_upgradable_counts():

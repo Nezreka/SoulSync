@@ -122,6 +122,21 @@ def _search_clause(search: str) -> Tuple[str, Dict[str, Any]]:
     )
 
 
+# #2106: one artist's tracks, by credit, the way the artist list counts them
+# (an alias member's credits are the canonical artist's). each step is an
+# index lookup: the alias members, then idx_lib2_track_artists_artist
+_ARTIST_TRACKS = (
+    "SELECT ta.track_id FROM lib2_track_artists ta"
+    " WHERE ta.artist_id IN (SELECT m.id FROM lib2_artists m WHERE m.id = :artist_id"
+    "  UNION SELECT m.id FROM lib2_artists m WHERE m.canonical_artist_id = :artist_id)")
+
+
+def _artist_clause(artist_id: Any) -> Tuple[str, Dict[str, Any]]:
+    if not artist_id:
+        return "", {}
+    return f" AND t.id IN ({_ARTIST_TRACKS})", {"artist_id": int(artist_id)}
+
+
 def _row_dict(row: Any) -> Dict[str, Any]:
     return {
         "track_id": row["track_id"],
@@ -142,7 +157,8 @@ def _row_dict(row: Any) -> Dict[str, Any]:
 
 
 def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
-                 profile_id: int = ADMIN_PROFILE_ID) -> Tuple[List[Dict[str, Any]], int]:
+                 profile_id: int = ADMIN_PROFILE_ID,
+                 artist_id: int | None = None) -> Tuple[List[Dict[str, Any]], int]:
     """Wanted tracks with no owned file, excluding consolidated duplicates.
 
     Pure-SQL pagination — "has no file" is a plain EXISTS check, no
@@ -152,6 +168,9 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
     like_sql, like_params = _search_clause(search)
+    artist_sql, artist_params = _artist_clause(artist_id)
+    like_sql += artist_sql
+    like_params.update(artist_params)
     fileless = _fileless_wanted_ids(conn, profile_id)
     # with the kept ids the rest of the rule is asked of those few rows only;
     # the + keeps sqlite on them, off the (profile_id, wanted) index that walks
@@ -192,7 +211,8 @@ _EVALUATION_CHUNK = 2000
 
 
 def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
-                      profile_id: int = ADMIN_PROFILE_ID) -> Tuple[List[Dict[str, Any]], int]:
+                      profile_id: int = ADMIN_PROFILE_ID,
+                      artist_id: int | None = None) -> Tuple[List[Dict[str, Any]], int]:
     """Wanted tracks with a file that doesn't meet their quality profile's
     cutoff yet.
 
@@ -205,6 +225,10 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     unmet = _cutoff_unmet_cached(conn, search=search, profile_id=profile_id)
+    if artist_id:
+        # the kept list is the whole library's; one artist is a slice of it
+        mine = {int(r[0]) for r in conn.execute(_ARTIST_TRACKS, {"artist_id": int(artist_id)})}
+        unmet = [row for row in unmet if int(row["track_id"]) in mine]
     total = len(unmet)
     offset = (page - 1) * limit
     # copies: the cached rows outlive this request

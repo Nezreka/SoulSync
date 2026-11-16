@@ -43,7 +43,8 @@ vi.mock('../-review-lock.api', async (original) => {
   };
 });
 
-import { ReviewLockButton, lockDate } from './review-lock';
+import { completionOverlay } from './library-v2-page';
+import { Padlock, ReviewLockButton, lockDate, lockedPresence } from './review-lock';
 
 const OPTIONS = [
   ['tags', 'Tags in the files'],
@@ -282,5 +283,34 @@ describe('lockDate', () => {
     expect(lockDate('2026-11-10 08:00:00')).toMatch(/2026/);
     expect(lockDate('')).toBe('');
     expect(lockDate('nonsense')).toBe('');
+  });
+});
+
+describe('#2119 a locked album is obvious and reads as finished', () => {
+  it('draws a closed, filled padlock when locked and an open empty one when not', () => {
+    const { container, rerender } = rtlRender(<Padlock locked={false} />);
+    const open = container.querySelector('svg')!;
+    const openShackle = open.querySelector('path')!.getAttribute('d');
+    expect(open.querySelector('rect')!.getAttribute('fill')).toBe('none');
+    expect(open.hasAttribute('data-locked')).toBe(false);
+    rerender(<Padlock locked />);
+    const closed = container.querySelector('svg')!;
+    expect(closed.querySelector('rect')!.getAttribute('fill')).toBe('currentColor');
+    expect(closed.hasAttribute('data-locked')).toBe(true);
+    // a different shape, not only a css turn that can go missing
+    expect(closed.querySelector('path')!.getAttribute('d')).not.toBe(openShackle);
+  });
+
+  it('shows what is on disk as the whole album once locked', () => {
+    expect(lockedPresence(2, 12, true)).toEqual({ present: 2, total: 2, locked: true });
+    expect(lockedPresence(2, 12, false)).toEqual({ present: 2, total: 12, locked: false });
+    // nothing on disk is not a finished album, lock or not
+    expect(lockedPresence(0, 12, true)).toEqual({ present: 0, total: 12, locked: false });
+  });
+
+  it('turns a locked release card green with its own count', () => {
+    const card = { owned: true, ownedTracks: 9, totalTracks: 10 };
+    expect(completionOverlay(card)).toEqual({ cls: 'partial', label: '9/10' });
+    expect(completionOverlay(card, true)).toEqual({ cls: 'completed', label: '9/9' });
   });
 });

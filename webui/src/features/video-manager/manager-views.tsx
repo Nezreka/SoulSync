@@ -3,6 +3,7 @@
 import clsx from 'clsx';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { cardGridStyle } from '@/components/card-size';
 import { cardFadeIn } from '@/routes/library/-ui/card-fade';
 
 import type { Facets, FileRow, Side, Sort, TitleRow } from './types';
@@ -116,6 +117,7 @@ export function PosterGrid({
   selected,
   selecting,
   loading,
+  cardSize = null,
   onToggle,
   onEdit,
 }: {
@@ -124,11 +126,17 @@ export function PosterGrid({
   selected: Set<number>;
   selecting: boolean;
   loading: boolean;
+  /** #2108: the chosen poster width, or null for the grid's own */
+  cardSize?: number | null;
   onToggle: (id: number, on?: boolean) => void;
   onEdit: (row: TitleRow) => void;
 }) {
   return (
-    <div className={clsx(s.grid, loading && s.dim)} data-selecting={selecting || undefined}>
+    <div
+      className={clsx(s.grid, loading && s.dim)}
+      style={cardGridStyle(cardSize)}
+      data-selecting={selecting || undefined}
+    >
       {rows.map((row, index) => {
         const picked = selected.has(row.id);
         const owned = row.episodes_owned ?? 0;

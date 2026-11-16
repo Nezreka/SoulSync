@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
+import { getShellProfileContext } from '@/platform/shell/bridge';
 import { isArtistView, lastNavigationFrom } from '@/platform/shell/last-navigation';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
@@ -16,6 +17,7 @@ import {
   libraryV2WantedQueryOptions,
 } from './-library-v2.api';
 import { libraryV2SearchSchema } from './-library-v2.types';
+import { recallIndex } from './-ui/library-collection';
 import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
@@ -46,6 +48,13 @@ export const Route = createFileRoute('/library')({
         });
     }
     guardPageAccess(context.shell.bridge, 'library');
+    // #2107: a plain visit (the sidebar, a bare link) opens the artist list
+    // the way you left it: view, sort, filters. anything in the url wins
+    if (cause === 'enter' && (!location.searchStr || location.searchStr === '?')) {
+      const remembered = recallIndex(getShellProfileContext(context.shell.bridge)?.profileId);
+      if (remembered && Object.keys(remembered).length > 0)
+        throw redirect({ to: '/library', search: remembered as never, replace: true });
+    }
     if (split > 0 && !search.artist && !search.album) {
       const source = discover.slice(0, split);
       const providerId = discover.slice(split + 1);
@@ -130,6 +139,14 @@ export const Route = createFileRoute('/library')({
     source: search.source,
     quality: search.quality,
     review: search.review,
+    dir: search.dir,
+    completion: search.completion,
+    missingMin: search.missingMin,
+    missingMax: search.missingMax,
+    pctMin: search.pctMin,
+    pctMax: search.pctMax,
+    credit: search.credit,
+    wantedArtist: search.wantedArtist,
   }),
   loader: async ({ context, deps }) => {
     // Warm the feature-flag check + first page of artists; never block on a
@@ -142,7 +159,12 @@ export const Route = createFileRoute('/library')({
     if (deps.section === 'songs' && !deps.album && !deps.artist) return;
     if (deps.section === 'wanted') {
       void context.queryClient.prefetchQuery(
-        libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
+        libraryV2WantedQueryOptions({
+          q: deps.q,
+          page: deps.page,
+          wantedKind: deps.wantedKind,
+          wantedArtist: deps.wantedArtist,
+        }),
       );
     } else if (deps.section === 'albums' && !deps.album && !deps.artist) {
       void context.queryClient.prefetchQuery(libraryV2AlbumsQueryOptions(deps));

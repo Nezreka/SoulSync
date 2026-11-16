@@ -13,8 +13,12 @@ import { UnifiedDownloadsPage } from './-ui/unified-downloads-page';
  * render would be stale by the time it painted. The controllers fetch on mount.
  */
 export const Route = createFileRoute('/active-downloads')({
-  validateSearch: (search: Record<string, unknown>): { media: 'music' | 'video' } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { media: 'music' | 'video'; open?: 'recycle' } => ({
     media: search.media === 'video' ? 'video' : 'music',
+    // #2128: the Library's recycle bin button lands straight on the bin
+    ...(search.open === 'recycle' ? { open: 'recycle' as const } : {}),
   }),
   beforeLoad: ({ context }) => {
     guardPageAccess(context.shell.bridge, 'active-downloads');

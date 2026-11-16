@@ -26,6 +26,11 @@ The Library page shows every artist in your collection as cards with images, alb
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")
 - **Reviewed filter** — All, Not reviewed, or Reviewed. An artist is reviewed when every album of theirs with files is locked
+- **Collection**: each artist card and table row shows owned / expected tracks with a bar, green when complete, amber when tracks are missing. Expected follows the artist's collection settings, so a release they leave out never counts as missing, and an artist whose release sizes were never looked up says **Not checked** instead of complete. Click **N missing** to see those tracks in Wanted
+- **Collection filters** live in the Filters menu: complete or incomplete, missing count and completion ranges, and artists only credited on other people's tracks. Sort by completion, missing tracks, could be better or incomplete albums, and turn any sort around with the arrow
+- **Overview** opens a summary above the list: artists, tracks owned, complete and incomplete collections, tracks missing, could be better, and Watchlist artists
+- **Card size** slider in the toolbar, separate for artist and album cards (and posters on the video library), with a reset. The list also remembers its view, sort, filters and scroll when you come back from an artist
+- **Select artists** with the checkbox on a card or row (shift-click for a range, or select the page or everything that matches). The bar can add or remove them from the Watchlist, run Automatic Search, refresh discographies, lock or unlock, and change the quality profile. It runs in the background, shows done, skipped and failed, and asks first before undoing anything
 
 #### Reviewed and locked
 

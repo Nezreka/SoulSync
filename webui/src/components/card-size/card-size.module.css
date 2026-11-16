@@ -1,0 +1,52 @@
+/* #2108: the card size slider, quiet in a toolbar beside the view switch */
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-pill);
+  background: var(--white-a04);
+}
+
+.icon {
+  flex: none;
+  fill: var(--text-3);
+}
+
+.slider {
+  width: 104px;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+.reset {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reset:hover {
+  background: var(--white-a08);
+  color: var(--text-1);
+}
+
+.reset:focus-visible,
+.slider:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .slider {
+    width: 80px;
+  }
+}

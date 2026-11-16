@@ -333,7 +333,7 @@
     // Routes in-app, no full reload. mode 'replace' (boot / deep link)
     // must not leave /video-downloads in history, or Back would bounce
     // straight back into this redirect.
-    function gotoUnifiedDownloads(mode) {
+    function gotoUnifiedDownloads(mode, extra) {
         _backStack = [];
         setActiveNav('video-downloads');
         // Reveal wiring, same mechanism showPage() drives for the legacy
@@ -346,7 +346,10 @@
         try {
             var wsr = window.SoulSyncWebRouter;
             if (wsr && typeof wsr.navigateToPage === 'function') {
-                wsr.navigateToPage('active-downloads', { query: { media: 'video' }, replace: replace });
+                var query = { media: 'video' };
+                // #2128: the Library's recycle bin button lands on the bin
+                if (extra && extra.open) query.open = extra.open;
+                wsr.navigateToPage('active-downloads', { query: query, replace: replace });
                 // No side flip here (there was one, in #1651): flipping is
                 // what stranded the side toggle — the toggle resumes the
                 // active-marked page, which is this hand-off, so every
@@ -355,8 +358,9 @@
                 return;
             }
         } catch (e) { /* fall through to a real redirect */ }
-        try { window.location.assign('/active-downloads?media=video'); }
-        catch (e2) { window.location.href = '/active-downloads?media=video'; }
+        var href = '/active-downloads?media=video' + (extra && extra.open ? '&open=' + extra.open : '');
+        try { window.location.assign(href); }
+        catch (e2) { window.location.href = href; }
     }
 
     // The video wishlist is the React /wishlist page on its video tabs (movies,
@@ -464,6 +468,8 @@
         catch (e2) { window.location.href = href; }
     }
     window.videoOpenCalendar = function (opts) { gotoUnifiedCalendar('push', opts); };
+    // #2128: the video Library's recycle bin button
+    window.videoOpenRecycleBin = function () { gotoUnifiedDownloads('push', { open: 'recycle' }); };
 
     // the video dashboard is the React /dashboard page on ?media=video: the
     // same hand-off as tools and the calendar.
