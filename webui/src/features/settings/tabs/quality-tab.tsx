@@ -53,6 +53,7 @@ import {
   rtSelectionIsLossless,
   withTargets,
 } from './quality';
+import { VideoQualitySections } from './video-quality';
 
 const TAB = 'quality';
 
@@ -292,7 +293,13 @@ function ManagerHelp() {
   );
 }
 
-export function QualityTab({ store }: SettingsTabProps) {
+/** the Quality tab: its music sections, and the video side's (video-quality.tsx) */
+export function QualityTab(props: SettingsTabProps) {
+  if (props.part === 'video') return <VideoQualitySections />;
+  return <MusicQualityTab {...props} />;
+}
+
+function MusicQualityTab({ store }: SettingsTabProps) {
   const state = useSyncExternalStore(store.subscribe, store.getState);
 
   const [ladder, setLadderState] = useState<Ladder>(EMPTY_LADDER);

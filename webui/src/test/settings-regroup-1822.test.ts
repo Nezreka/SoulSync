@@ -28,10 +28,19 @@ describe('where sections live', () => {
     expect(html).toContain('<div data-stg-react="connections" data-stg-part="metasync"');
   });
 
+  it('Video Quality is on quality (React, SETTINGS_PORT.md video pass V1)', () => {
+    const section = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/video-quality.tsx'),
+      'utf8',
+    );
+    expect(section).toContain("const TAB = 'quality';");
+    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Quality"/);
+    expect(html).toContain('<div data-stg-react="quality" data-stg-part="video"');
+  });
+
   it.each([
     ['Notifications', 'connections'],
     ['Import Lists', 'discovery'],
-    ['Video Quality', 'quality'],
     ['Video Preferences', 'library'],
   ])('%s is on %s', (heading, tab) => {
     expect(sectionTab(doc, heading)).toBe(tab);

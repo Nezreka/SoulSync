@@ -9,14 +9,19 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
-const JS = read('static/video/video-settings.js');
+// the chips are React (src/features/settings/tabs/video-quality.tsx, SETTINGS_PORT.md video pass V1)
+const JS = read('src/features/settings/tabs/video-quality.tsx');
 const CSS = read('static/video/video-side.css');
 
 describe('audio language chips', () => {
   it('are pick chips, not reject chips', () => {
-    expect(JS).toContain(`class="vq-chip vq-chip--pick' + (on ? ' on' : '') + '" data-vq-lang="`);
+    expect(JS).toContain(
+      "className={on ? 'vq-chip vq-chip--pick on' : 'vq-chip vq-chip--pick'}\n                        data-vq-lang={k}",
+    );
     // the reject chips keep the plain class
-    expect(JS).toMatch(/class="vq-chip' \+ \(on \? ' on' : ''\) \+ '" data-vq-reject="/);
+    expect(JS).toContain(
+      "className={on ? 'vq-chip on' : 'vq-chip'}\n                        data-vq-reject={k}",
+    );
   });
 
   it('a picked language is the accent with a tick, out-ranking the red ⊘', () => {

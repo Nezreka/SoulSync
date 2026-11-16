@@ -56,7 +56,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Connections | **done for music** (steps 10a-10d below) | 123 of 160, and System's Experimental (2): the metadata source, every music service card, the tiles and their modal, Server Connections, MetaSync. Left for the video pass: the video side's service cards (26), its Server Connection (9) and Notifications (2). |
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
-| Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
+| Tab: Quality | **done** (steps 6 and V1 below) | 67 of 67: the music sections (step 6) and Video Quality, Custom Formats and YouTube Quality (video pass V1). |
 | Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
@@ -65,12 +65,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side (Discovery, Quality, Downloads, Sources, Library, System and Connections without their video-only parts), 520 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality done), 560 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 6,385 |
+| `webui/index.html` | 12,823 | 6,111 |
 | `webui/static/settings.js` | 10,187 | 1,480 |
+| `webui/static/video/video-settings.js` | 2,940 | 2,404 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +807,16 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Video pass V1: the Quality tab's video sections (Nov 15 2026)
+
+**What.** `tabs/video-quality.tsx`, slot `quality`/`video`: Video Quality (the profile bar with New, rename and Delete, each kind's default profile, the ladder with its arrows and switches, Upgrade until, Never grab, the codec, HDR and audio tie-breakers, REPACK, the audio language and its chips, Save to, the max and preferred sizes and the seeders floor), Custom Formats (rows, the per-profile override, add, delete, the minimum score) and YouTube Quality. They save through `/api/video/downloads/quality*` and `/youtube-quality` as before, each change at once, and a typed field or a slider commits on the browser's change event (leaving it, letting go), as it did. `tabs/video-shown.ts` hears `soulsync:video-page-shown` for the video settings page (the sections load on it) and adds the video sections' saves to the shared save button on the video side (a capture-phase click, as `video-settings.js` did).
+
+**Removed.** The quality block from `video-settings.js` (about 530 lines, its constants and the two save-button entries). One `escA` stays: of the two the file declared, the later one, in that block, is the one every row builder used (a later function declaration wins), so it was kept as it was.
+
+**Found in the browser.** The two YouTube checkbox labels sat 4px closer: the markup had a space between them.
+
+**Checked.** Parity against a frozen fixture; `video-quality.test.tsx` 9 (loading on the page shown, every edit saved to the Default or a named profile, a slider saving on letting go (negative-checked), the formats, the kind defaults, YouTube Quality, the save button on the video side only). Repointed: `test_video_custom_formats`, `test_video_quality_profiles`, `test_video_title_profile_choice`, `test_video_download_config`, `video-audio-language-chip`, `video-release-rank-why`, `settings-regroup-1822`. Browser (the video side): every value, both profiles, the posted saves identical; pixels identical but sub-pixel text.
+
 ### Step 10d: Connections, part four: MetaSync; the music side done (Nov 15 2026)
 
 **What.** `tabs/connections-metasync.tsx`, slot `metasync`: pairing (Connect, the code and ID, finish), the MetaSync URL, the manual local key, the pool URL and key, Send pool key, Save, Refresh status, the status readout with its lines, and Disconnect. Its fields are not settings keys: they go through `/api/metasync` as before, and it loads each time Connections opens (it was the tab switch's `loadMetaSyncSettings`), auto-detecting the node once while nothing is set.
@@ -1404,56 +1415,56 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select |  | {Default} | both | no |
-| text |  |  | both | no |
-| button |  | + New profile | both | no |
-| button |  | Delete | both | no |
-| select |  | New movies use Default {Default} | both | no |
-| select |  | New shows use Default {Default} | both | no |
-| select | `vq-cutoff` | {4K · 2160p / 1080p / 720p / 480p (SD) / Best available — never stop upgrading} | both | no |
-| button |  | Any | both | no |
-| button |  | HEVC / x265 | both | no |
-| button |  | AV1 | both | no |
-| button |  | Don't care | both | no |
-| button |  | Prefer | both | no |
-| button |  | Require | both | no |
-| button |  | Any | both | no |
-| button |  | Surround | both | no |
-| button |  | Lossless | both | no |
-| button |  | Atmos | both | no |
-| checkbox | `vq-prefer-repack` | Prefer REPACK / PROPER re-releases | both | no |
-| button |  | Don't care | both | no |
-| button |  | Prefer | both | no |
-| button |  | Require | both | no |
-| button |  | Main library | both | no |
-| button |  | 4K library | both | no |
-| range | `vq-movie-size` |  | both | no |
-| range | `vq-episode-size` |  | both | no |
-| range | `vq-movie-pref` |  | both | no |
-| range | `vq-episode-pref` |  | both | no |
-| range | `vq-min-seeders` |  | both | no |
+| select |  | {Default} | both | yes (video pass V1) |
+| text |  |  | both | yes (video pass V1) |
+| button |  | + New profile | both | yes (video pass V1) |
+| button |  | Delete | both | yes (video pass V1) |
+| select |  | New movies use Default {Default} | both | yes (video pass V1) |
+| select |  | New shows use Default {Default} | both | yes (video pass V1) |
+| select | `vq-cutoff` | {4K · 2160p / 1080p / 720p / 480p (SD) / Best available — never stop upgrading} | both | yes (video pass V1) |
+| button |  | Any | both | yes (video pass V1) |
+| button |  | HEVC / x265 | both | yes (video pass V1) |
+| button |  | AV1 | both | yes (video pass V1) |
+| button |  | Don't care | both | yes (video pass V1) |
+| button |  | Prefer | both | yes (video pass V1) |
+| button |  | Require | both | yes (video pass V1) |
+| button |  | Any | both | yes (video pass V1) |
+| button |  | Surround | both | yes (video pass V1) |
+| button |  | Lossless | both | yes (video pass V1) |
+| button |  | Atmos | both | yes (video pass V1) |
+| checkbox | `vq-prefer-repack` | Prefer REPACK / PROPER re-releases | both | yes (video pass V1) |
+| button |  | Don't care | both | yes (video pass V1) |
+| button |  | Prefer | both | yes (video pass V1) |
+| button |  | Require | both | yes (video pass V1) |
+| button |  | Main library | both | yes (video pass V1) |
+| button |  | 4K library | both | yes (video pass V1) |
+| range | `vq-movie-size` |  | both | yes (video pass V1) |
+| range | `vq-episode-size` |  | both | yes (video pass V1) |
+| range | `vq-movie-pref` |  | both | yes (video pass V1) |
+| range | `vq-episode-pref` |  | both | yes (video pass V1) |
+| range | `vq-min-seeders` |  | both | yes (video pass V1) |
 
 **Custom Formats** (both, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | + Add format | both | no |
-| number | `vq-min-format-score` | Minimum format score (this profile): | both | no |
+| button |  | + Add format | both | yes (video pass V1) |
+| number | `vq-min-format-score` | Minimum format score (this profile): | both | yes (video pass V1) |
 
 **YouTube Quality** (both, 10)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| select | `yq-resolution` | {Best available / 8K · 4320p / 4K · 2160p / 1440p / 1080p / 720p / 480p …} | both | no |
-| button |  | Best | both | no |
-| button |  | AV1 | both | no |
-| button |  | VP9 | both | no |
-| button |  | H.264 | both | no |
-| button |  | MP4 | both | no |
-| button |  | MKV | both | no |
-| button |  | WebM | both | no |
-| checkbox | `yq-60fps` | Prefer 60fps when available | both | no |
-| checkbox | `yq-hdr` | Allow HDR (off = always grab SDR) | both | no |
+| select | `yq-resolution` | {Best available / 8K · 4320p / 4K · 2160p / 1440p / 1080p / 720p / 480p …} | both | yes (video pass V1) |
+| button |  | Best | both | yes (video pass V1) |
+| button |  | AV1 | both | yes (video pass V1) |
+| button |  | VP9 | both | yes (video pass V1) |
+| button |  | H.264 | both | yes (video pass V1) |
+| button |  | MP4 | both | yes (video pass V1) |
+| button |  | MKV | both | yes (video pass V1) |
+| button |  | WebM | both | yes (video pass V1) |
+| checkbox | `yq-60fps` | Prefer 60fps when available | both | yes (video pass V1) |
+| checkbox | `yq-hdr` | Allow HDR (off = always grab SDR) | both | yes (video pass V1) |
 
 **Music Quality** (both, 15)
 

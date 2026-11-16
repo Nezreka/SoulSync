@@ -309,8 +309,16 @@ def test_the_video_save_button_cannot_write_a_retired_form():
         "the video save button posts the retired slskd form again"
     )
     # the savers that legitimately belong to the video side stay
-    for keep in ("saveConn", "saveDownloads", "saveQuality", "saveYtQuality"):
+    for keep in ("saveConn", "saveDownloads"):
         assert keep in chain, f"{keep} was dropped from the video save chain"
+    # Video Quality and YouTube Quality are React and add their own savers to
+    # the same capture-phase click (SETTINGS_PORT.md, video pass V1)
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
+    shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")
+    assert "if (!(event.target as Element | null)?.closest?.('#save-settings')) return;" in shown
+    assert "true,\n  );" in shown  # capture phase
+    quality = (tabs / "video-quality.tsx").read_text(encoding="utf-8")
+    assert quality.count("useEffect(() => onVideoSave(() => save()), [])") == 2
 
     wiring = js.split("function wireSlskd", 1)[-1][:1200] if "function wireSlskd" in js else js
     assert "addEventListener('change', function () { saveSlskd(true); })" not in js, (

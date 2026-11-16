@@ -19,6 +19,8 @@ from database.video_database import VideoDatabase
 _ROOT = Path(__file__).resolve().parent.parent
 _SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+# the Video Quality and Custom Formats editor is React (SETTINGS_PORT.md, video pass V1)
+_QUALITY = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "video-quality.tsx").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -151,14 +153,14 @@ def test_formats_api_crud(client):
 
 
 def test_settings_ui_has_the_formats_editor():
-    assert 'id="vq-format-rows"' in _INDEX and "data-vq-format-add" in _INDEX
-    assert 'id="vq-min-format-score"' in _INDEX
-    assert "QUALITY_URL + '/formats'" in _SETTINGS_JS
-    assert "format_scores" in _SETTINGS_JS       # per-profile override column
-    assert "renderFormats()" in _SETTINGS_JS
+    assert 'id="vq-format-rows"' in _QUALITY and 'data-vq-format-add=""' in _QUALITY
+    assert 'id="vq-min-format-score"' in _QUALITY
+    assert "`${QUALITY_URL}/formats`" in _QUALITY
+    assert "format_scores" in _QUALITY       # per-profile override column
+    assert "function CustomFormats(" in _QUALITY and "<CustomFormats" in _QUALITY
 
 
 def test_settings_ui_labels_every_quality_tier():
     import core.video.quality_profile as qp
     for key in qp.TIERS:
-        assert "'%s':" % key in _SETTINGS_JS
+        assert ("'%s':" % key in _QUALITY) or ("  %s:" % key in _QUALITY)
