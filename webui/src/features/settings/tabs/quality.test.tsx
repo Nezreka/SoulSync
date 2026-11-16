@@ -399,6 +399,20 @@ describe('saving', () => {
     expect(store.hasPending()).toBe(false);
   });
 
+  it('a profile opened after the first load failed is one its edits save to', async () => {
+    shell._settingsAutosaveOff = true;
+    routes['GET /api/quality-profile'] = () => ({ success: false, error: 'db down' });
+    tab();
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(document.querySelectorAll('.qp-profile-row')).toHaveLength(2));
+    fireEvent.click(screen.getByText('Strict'));
+    await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
+    fireEvent.click(box('quality-fallback-enabled'));
+    expect(store.hasPending()).toBe(true);
+    await act(() => store.flush());
+    expect(saves('/api/quality-profile/custom/2/update')).toHaveLength(1);
+  });
+
   it('a new visit reloads the default, unless an edit is waiting to be saved', async () => {
     shell._settingsAutosaveOff = true;
     await loaded();
@@ -669,6 +683,30 @@ describe('the profile panel', () => {
     expect(document.getElementById('qp-editing-banner')!.style.display).toBe('none');
     // the last profile cannot be deleted
     expect(screen.queryAllByTitle(/^Delete/)).toHaveLength(0);
+  });
+
+  it('deleting a profile drops its edit not saved yet, so nothing is stuck retrying', async () => {
+    shell._settingsAutosaveOff = true;
+    routes['DELETE /api/quality-profile/custom/2'] = () => ({ success: true, profiles: [ROWS[0]] });
+    await loaded();
+    fireEvent.click(screen.getByText('Strict'));
+    await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
+    fireEvent.click(box('quality-fallback-enabled'));
+    expect(store.hasPending()).toBe(true);
+    routes['GET /api/quality-profile/custom'] = () => ({ success: true, profiles: [ROWS[0]] });
+    fireEvent.click(screen.getAllByTitle(/^Delete/)[1]);
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith("Deleted 'Strict'", 'success'),
+    );
+    expect(store.hasPending()).toBe(false);
+    expect(await act(() => store.flush())).toBe(true);
+    expect(saves('/api/quality-profile/custom/2/update')).toEqual([]);
+    // and the next visit reloads the default again
+    const before = calls.filter((c) => c.url === '/api/quality-profile').length;
+    act(() => store.hydrate({}));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/quality-profile').length).toBe(before + 1),
+    );
   });
 
   it('Auto-Import toggles on and back off', async () => {

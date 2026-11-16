@@ -217,6 +217,41 @@ describe('the settings store', () => {
     expect(posted).toHaveLength(2);
   });
 
+  it('a saved setting refreshes the status dots at once, an autosave too', async () => {
+    const refresh = vi.fn();
+    (shell as unknown as Record<string, unknown>)._forceServiceStatusRefresh = refresh;
+    const store = make();
+    store.set('active_media_server', 'server', 'navidrome');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(posted).toHaveLength(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // a failed save does not, nor one with only its own savers
+    answer = () => Promise.resolve({ success: false });
+    store.set('active_media_server', 'server', 'plex');
+    expect(await store.flush()).toBe(false);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    answer = () => Promise.resolve({ success: true });
+    expect(await store.flush()).toBe(true);
+    store.setExtra('discovery.hemisphere', 'southern', () => Promise.resolve(true));
+    expect(await store.flush()).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    delete (shell as unknown as Record<string, unknown>)._forceServiceStatusRefresh;
+  });
+
+  it('a queued saver can be read, and dropped by its own key alone', async () => {
+    const store = make();
+    const saver = vi.fn(() => Promise.resolve(true));
+    store.setExtra('quality.profile.1', 'a', saver);
+    store.setExtra('quality.profile.12', 'b', saver);
+    expect(store.queuedExtra('quality.profile.1')).toBe('a');
+    expect(store.queuedExtra('quality.profile.2')).toBeUndefined();
+    store.dropExtra('quality.profile.1');
+    expect(store.queuedExtra('quality.profile.1')).toBeUndefined();
+    expect(store.queuedExtra('quality.profile.12')).toBe('b');
+    expect(await store.flush()).toBe(true);
+    expect(saver.mock.calls).toEqual([['b']]);
+  });
+
   it('flush with nothing pending posts nothing', async () => {
     const store = make();
     expect(await store.flush()).toBe(true);

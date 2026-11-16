@@ -11,7 +11,7 @@ import { initWeatherPreviewSettings } from '@/shell/weather-preview-settings';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
-import { SystemTab } from './system-tab';
+import { cacheBytes, SystemTab } from './system-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -326,5 +326,14 @@ describe('SoulSync API, Developer Mode, Artwork Cache', () => {
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({ image_cache: { max_cache_mb: 2048, thumbnails: false } });
     delete shell.showConfirmDialog;
+  });
+});
+
+describe('the artwork cache size', () => {
+  it('reads as _imgCacheBytes did, an empty cache as 0 MB', () => {
+    expect(cacheBytes(0)).toBe('0 MB');
+    expect(cacheBytes(undefined)).toBe('0 MB');
+    expect(cacheBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+    expect(cacheBytes(3 * 1024 * 1024 * 1024)).toBe('3.00 GB');
   });
 });

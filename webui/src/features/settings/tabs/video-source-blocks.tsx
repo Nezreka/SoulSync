@@ -9,7 +9,7 @@
  * them), so an edit to one alone could be lost: each saves now.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useCommit } from './commit';
 import { useVideoDownloads, videoDownloads } from './video-downloads';
@@ -26,6 +26,9 @@ const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ?
 
 export function VideoSeedingGoals() {
   const { config, loads } = useVideoDownloads();
+  // shown on the Sources tab of both sides: the config it edits loads with
+  // it (once a page), not only with the Library tab or the video side
+  useEffect(() => void videoDownloads.load(), []);
   const [indexers, setIndexers] = useState<Indexer[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const rules = (config?.seed_overrides || {}) as Rules;
@@ -206,6 +209,7 @@ export function VideoSeedingGoals() {
 
 export function VideoUsenetBlocks() {
   const { config } = useVideoDownloads();
+  useEffect(() => void videoDownloads.load(), []);
   return (
     <>
       <div className="form-group" id="video-usenet-remove-completed-group">

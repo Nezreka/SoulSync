@@ -288,7 +288,13 @@ describe('the service cards', () => {
     });
     expect(el('spotify-redirect-uri').value).toBe('http://127.0.0.1:8888/callback');
     expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
+    // emptied, it stays empty while the new one is typed; the shown callback
+    // falls back to the default, as #spotify-callback-display did
+    fireEvent.change(el('spotify-redirect-uri'), { target: { value: '' } });
+    expect(el('spotify-redirect-uri').value).toBe('');
+    expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
     fireEvent.change(el('spotify-redirect-uri'), { target: { value: 'https://me.example/cb' } });
+    expect(el('spotify-redirect-uri').value).toBe('https://me.example/cb');
     expect(el('spotify-callback-display').textContent).toBe('https://me.example/cb');
     fireEvent.change(el('spotify-client-id'), { target: { value: 'b' } });
     fireEvent.click(el('metadata-spotify-free-enrichment'));

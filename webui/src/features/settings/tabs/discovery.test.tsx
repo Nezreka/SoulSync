@@ -236,6 +236,32 @@ describe('Discovery Pool Settings', () => {
     expect(posted).toEqual([]);
   });
 
+  it('a pick not saved yet stays on screen when Settings is opened again', async () => {
+    shell._settingsAutosaveOff = true;
+    const first = pool();
+    act(() => store.hydrate({}));
+    const lookback = () =>
+      document.getElementById('discovery-lookback-period') as HTMLSelectElement;
+    const hemisphere = () => document.getElementById('discovery-hemisphere') as HTMLSelectElement;
+    await waitFor(() => expect(lookback().value).toBe('90'));
+    // not the server's, nor the field's own first value
+    fireEvent.change(lookback(), { target: { value: 'all' } });
+    // Settings is left and opened again: the page loads its settings again
+    first.unmount();
+    pool();
+    act(() => store.hydrate({}));
+    await waitFor(() => expect(hemisphere().value).toBe('southern'));
+    expect(lookback().value).toBe('all');
+    // only the one with nothing queued was asked for again
+    expect(
+      calls.filter((c) => c.url === '/api/discovery/lookback-period' && c.method === 'GET'),
+    ).toHaveLength(1);
+    expect(await store.flush()).toBe(true);
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([
+      { url: '/api/discovery/lookback-period', method: 'POST', body: { period: 'all' } },
+    ]);
+  });
+
   it('a failed lookback is the warning it was, beside "saved"', async () => {
     vi.stubGlobal(
       'fetch',

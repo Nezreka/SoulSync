@@ -9,14 +9,27 @@
  * (two would pad twice); `active` is kept for the stylesheet's `:has()`.
  */
 
-import type { ComponentType, ReactNode } from 'react';
+import { type ComponentType, type ReactNode, useEffect } from 'react';
 
 import type { SettingsTabProps } from './host';
 
 import { SETTINGS_TABS } from './host';
-import { usePageTabs } from './page-tabs';
+import { pageTabs, usePageTabs } from './page-tabs';
 import { type SettingsStore, settingsStore } from './settings-store';
-import { filterSettings, saveSettings, switchSettingsTab } from './shell';
+
+/** the shell's functions, as the shell bundle put them on window (shell.ts
+ *  in src/shell/index.ts): one copy of its state (the pending tab, the save
+ *  button's timer), not a second in this bundle */
+type ShellWindow = Window & {
+  switchSettingsTab?: (tab: string) => void;
+  filterSettings?: (query: string) => void;
+  saveSettings?: (quiet?: boolean) => Promise<void>;
+  initializeSettings?: () => void;
+};
+const shell = () => window as ShellWindow;
+const switchSettingsTab = (tab: string) => shell().switchSettingsTab?.(tab);
+const filterSettings = (query: string) => shell().filterSettings?.(query);
+const saveSettings = (quiet: boolean) => shell().saveSettings?.(quiet);
 
 const TABS: Array<[key: string, label: string, path: string]> = [
   [
@@ -112,6 +125,29 @@ export function SettingsPage({
   store?: SettingsStore;
   tabs?: Partial<Record<string, ComponentType<SettingsTabProps>>>;
 }) {
+  // a visit starts with no tab open and none opened yet, as the first did:
+  // the next visit's tabs mount as on the first
+  useEffect(() => () => pageTabs.reset(), []);
+  // the password managers kept off fields React adds after the page opened
+  // (rows added, fields shown later), as off every field the vanilla page had
+  // at load. init.js's own sweep leaves password fields alone
+  useEffect(() => {
+    const page = document.getElementById('settings-page');
+    if (!page) return;
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        shell().initializeSettings?.();
+      });
+    });
+    observer.observe(page, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
   const slot = (tab: string, part?: string) => (
     <Slot key={`${tab}/${part ?? ''}`} tab={tab} part={part} store={store} tabs={tabs} />
   );

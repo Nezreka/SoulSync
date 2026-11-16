@@ -308,23 +308,22 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
   const [status, setStatus] = useState<Status>({ text: '' });
   const [button, setButton] = useState({ text: 'Link Tidal Account', disabled: false });
   const [code, setCode] = useState<{ uri: string; code: string } | null>(null);
+  // the device link's poll runs until it completes or fails, Settings open or
+  // not: the page's was never torn down, and its "linked" toast reached the
+  // user wherever they were
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(
-    () => () => {
-      if (poll.current) clearInterval(poll.current);
-    },
-    [],
-  );
 
   async function check() {
     try {
       const data = await json('/api/tidal/download/auth/status');
+      // the label only: a link still waiting keeps its button off
+      // (checkTidalDownloadAuthStatus never touched it)
       if (data.authenticated) {
         setStatus({ text: 'Authenticated', color: OK });
-        setButton({ text: 'Re-link Tidal Account', disabled: false });
+        setButton((b) => ({ ...b, text: 'Re-link Tidal Account' }));
       } else {
         setStatus({ text: 'Not authenticated', color: WARN });
-        setButton({ text: 'Link Tidal Account', disabled: false });
+        setButton((b) => ({ ...b, text: 'Link Tidal Account' }));
       }
     } catch {
       setStatus((s) => ({ ...s, text: '' }));

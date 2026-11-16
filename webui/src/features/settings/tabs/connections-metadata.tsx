@@ -44,7 +44,14 @@ import {
   statusFrames,
 } from './connections';
 import { useServicePlace } from './connections-services';
-import { helpBits, REDACTED_SECRET_SENTINEL, SecretInput, Section, useHelp } from './parts';
+import {
+  helpBits,
+  REDACTED_SECRET_SENTINEL,
+  SecretInput,
+  Section,
+  useDraft,
+  useHelp,
+} from './parts';
 import { text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
@@ -373,17 +380,21 @@ function useRedirect({
   const loads = useLoads(store);
   const fallback = REDIRECT_DEFAULTS[section];
   const value = loads ? text(sec(settings, section).redirect_uri || fallback) : '';
+  // what was typed stays on screen, an emptied field too: the page filled the
+  // default once, on load, and showed what was typed after it
+  const draft = useDraft(value, (raw) => store.set(section, 'redirect_uri', raw));
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
   return {
     input: (
       <input
         type="text"
         id={`${id}-redirect-uri`}
         placeholder={fallback}
-        value={value}
-        onChange={(event) => store.set(section, 'redirect_uri', event.target.value)}
+        value={draft.value}
+        onChange={(event) => draft.onChange(event.target.value)}
       />
     ),
-    shown: value || fallback,
+    shown: draft.value || fallback,
   };
 }
 

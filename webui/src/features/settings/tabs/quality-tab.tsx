@@ -396,6 +396,10 @@ function MusicQualityTab({ store }: SettingsTabProps) {
   const show = (profile: ServerProfile, all: boolean) => {
     setLadder(ladderFrom(profile, now.current.ladder));
     if (all) setExtras(extrasFrom(profile, now.current.extras));
+    // a profile on screen is one its edits save to, however it got there
+    // (the first load failing included)
+    now.current.ready = true;
+    setReady(true);
   };
 
   async function loadRows() {
@@ -649,6 +653,9 @@ function MusicQualityTab({ store }: SettingsTabProps) {
       if (data.success) {
         // the profile on screen is gone: back to the live default, as on a fresh load
         if (now.current.editingId === id) setEditingId(null);
+        // and an edit of it not saved yet has nowhere to go: it would fail
+        // (404) on every save after, and hold every later visit's load
+        store.dropExtra(`${SAVE_KEY}${id}`);
         // deleting may have cleared Auto-Import or made another profile the
         // default: both show on the rows, so they come from the server
         await loadRows();

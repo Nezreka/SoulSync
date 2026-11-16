@@ -33,6 +33,7 @@ type ShellWindow = Window & {
   _settingsLoadFailed?: boolean;
   _suppressSettingsAutoSave?: boolean;
   setSettingsSaveState?: (state: SaveState) => void;
+  _forceServiceStatusRefresh?: () => void;
 };
 
 export interface SettingsState {
@@ -74,9 +75,13 @@ export interface SettingsStore {
   setExtra: (key: string, value: unknown, save: ExtraSaver) => void;
   /** true while a value whose key starts with `prefix` waits to be saved */
   hasExtra: (prefix: string) => boolean;
+  /** the value a queued save under this key will send, if one is queued */
+  queuedExtra: (key: string) => unknown;
   /** forget the values waiting under `prefix` (a quality preset switch
    *  replaces the profile they were edits of) */
   dropExtras: (prefix: string) => void;
+  /** drops the one queued save under this key */
+  dropExtra: (key: string) => void;
   /** save what is pending now. true when nothing was pending or the save worked. */
   flush: () => Promise<boolean>;
   hasPending: () => boolean;
@@ -212,6 +217,9 @@ export function createSettingsStore({
         }
         store.setState({ error: null });
         show(hasPending() ? 'pending' : 'saved');
+        // the sidebar's server and source dots follow a saved setting at once,
+        // as after every save of the page's (saveSettings, autosaves too)
+        if (Object.keys(body).length > 0) shell()._forceServiceStatusRefresh?.();
         return true;
       } finally {
         saving = null;
@@ -261,7 +269,12 @@ export function createSettingsStore({
       extras[key] = { value, save };
       queue();
     },
+    queuedExtra: (key) => (key in extras ? extras[key].value : undefined),
     hasExtra: (prefix) => Object.keys(extras).some((key) => key.startsWith(prefix)),
+    dropExtra(key) {
+      delete extras[key];
+      if (!hasPending()) cancel();
+    },
     dropExtras(prefix) {
       for (const key of Object.keys(extras)) if (key.startsWith(prefix)) delete extras[key];
       // the save status stays as it is: the vanilla page may have its own

@@ -7,7 +7,7 @@
 import { cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsPage } from '@/features/settings/settings-page';
 import {
@@ -20,12 +20,24 @@ import {
 
 // the page's globals, stubbed partly
 const shell = window as unknown as Record<string, unknown>;
+// the page's buttons call the shell bundle's functions on window
+// (src/shell/index.ts puts them there)
+const SHELL = { saveSettings, switchSettingsTab };
+beforeEach(() => {
+  Object.assign(shell, SHELL);
+});
 
 afterEach(() => {
   cleanup();
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
-  for (const k of ['SoulSyncSettings', 'showToast', '_settingsLoadFailed', '_settingsPayload'])
+  for (const k of [
+    'SoulSyncSettings',
+    'showToast',
+    '_settingsLoadFailed',
+    '_settingsPayload',
+    ...Object.keys(SHELL),
+  ])
     delete shell[k];
 });
 

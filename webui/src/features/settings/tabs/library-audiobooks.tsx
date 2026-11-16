@@ -288,6 +288,7 @@ export function AudiobookFoldersPanel({
         <div className="form-group">
           <label>Audiobooks Folder (output):</label>
           <LockedPath
+            loads={loads}
             id="audiobooks-path"
             check={{ 'data-folder-check': 'audiobooks', 'data-folder-label': 'Audiobooks folder' }}
             placeholder={loads && isDocker(settings) ? '/app/audiobooks' : './audiobooks'}

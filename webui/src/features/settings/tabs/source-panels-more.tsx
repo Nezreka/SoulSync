@@ -15,7 +15,7 @@ import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } fro
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { HelpIcon, SecretInput, helpBits, useHelp } from './parts';
+import { HelpIcon, SecretInput, helpBits, useDraft, useHelp } from './parts';
 import {
   BAD,
   CHECKING,
@@ -362,6 +362,34 @@ const SEED_HINT = (
   </>
 );
 
+/** a client's category: what is typed stays on screen (emptied, it stays
+ *  empty while the next one is typed); blank saves the default, as _cfgStr's
+ *  fallback did. a settings load shows the stored one again */
+function CategoryInput({
+  id,
+  store,
+  value,
+  save,
+}: {
+  id: string;
+  store: SettingsStore;
+  value: string;
+  save: (value: string) => void;
+}) {
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  const draft = useDraft(value, (raw) => save(raw || 'soulsync'));
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input
+      type="text"
+      id={id}
+      placeholder="soulsync"
+      value={draft.value}
+      onChange={(event) => draft.onChange(event.target.value)}
+    />
+  );
+}
+
 export function TorrentPanel({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const t = (settings.torrent_client || {}) as Record<string, unknown>;
@@ -436,13 +464,11 @@ export function TorrentPanel({ store }: { store: SettingsStore }) {
             label="Category / Label:"
             help="SoulSync tags every torrent it adds with this label so it's easy to spot in your client. Deluge needs the Label plugin installed for this to stick."
           >
-            <input
-              type="text"
+            <CategoryInput
               id="torrent-client-category"
-              placeholder="soulsync"
+              store={store}
               value={str(t.category, 'soulsync')}
-              // blank saves the default, as _cfgStr's fallback did
-              onChange={(event) => set('category', event.target.value || 'soulsync')}
+              save={(value) => set('category', value)}
             />
           </Field>
           <Field
@@ -739,12 +765,11 @@ export function UsenetPanel({ store }: { store: SettingsStore }) {
             label="Category / Label:"
             help="SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder."
           >
-            <input
-              type="text"
+            <CategoryInput
               id="usenet-client-category"
-              placeholder="soulsync"
+              store={store}
               value={str(u.category, 'soulsync')}
-              onChange={(event) => set('category', event.target.value || 'soulsync')}
+              save={(value) => set('category', value)}
             />
           </Field>
           <Field

@@ -344,25 +344,39 @@ function Pool({ store }: SettingsTabProps) {
   // each time the page loads its settings, as loadSettingsData did
   useEffect(() => {
     if (loads === 0) return;
+    // a pick not saved yet (autosave off) is what the save button sends: it
+    // stays on screen, as the old page's dropdown kept it until the next load
+    const queued = (key: string) => {
+      const value = store.queuedExtra(key);
+      return typeof value === 'string' ? value : null;
+    };
     void (async () => {
-      try {
-        const data = (await (await fetch('/api/discovery/lookback-period')).json()) as {
-          period?: string;
-        };
-        if (data.period) setLookback(String(data.period));
-      } catch (error) {
-        console.error('Error loading discovery lookback period:', error);
-      }
-      try {
-        const data = (await (await fetch('/api/discovery/hemisphere')).json()) as {
-          hemisphere?: string;
-        };
-        if (data.hemisphere) setHemisphere(data.hemisphere);
-      } catch (error) {
-        console.error('Error loading hemisphere setting:', error);
-      }
+      const keptLookback = queued('discovery.lookback_period');
+      const keptHemisphere = queued('discovery.hemisphere');
+      if (keptLookback !== null) setLookback(keptLookback);
+      if (keptHemisphere !== null) setHemisphere(keptHemisphere);
+      if (keptLookback === null)
+        try {
+          const data = (await (await fetch('/api/discovery/lookback-period')).json()) as {
+            period?: string;
+          };
+          if (data.period && store.queuedExtra('discovery.lookback_period') === undefined)
+            setLookback(String(data.period));
+        } catch (error) {
+          console.error('Error loading discovery lookback period:', error);
+        }
+      if (keptHemisphere === null)
+        try {
+          const data = (await (await fetch('/api/discovery/hemisphere')).json()) as {
+            hemisphere?: string;
+          };
+          if (data.hemisphere && store.queuedExtra('discovery.hemisphere') === undefined)
+            setHemisphere(data.hemisphere);
+        } catch (error) {
+          console.error('Error loading hemisphere setting:', error);
+        }
     })();
-  }, [loads]);
+  }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Section tab={TAB} title="Discovery Pool Settings" hint="Lookback & hemisphere" side="music">

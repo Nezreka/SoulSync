@@ -112,7 +112,14 @@ export function createSettingsHost({
   // page refused its whole save (validateFileOrganizationTemplates)
   const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
   const itemError = () => (tabs.library ? playlistItemError(store.getState().settings) : null);
-  store.block(() => errors().length > 0 || !!itemError());
+  store.block(() => {
+    if (errors().length > 0) return true;
+    // the Playlist File Naming rule says why on every save it holds, the
+    // autosave's too, as saveSettings did even when quiet
+    const item = itemError();
+    if (item) window.showToast?.(item, 'error');
+    return !!item;
+  });
   // nor would a MusicBrainz server address that does not work
   const mbError = () => (tabs.connections ? musicbrainzError() : null);
   store.block(() => !!mbError());

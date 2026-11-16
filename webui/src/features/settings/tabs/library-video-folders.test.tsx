@@ -209,6 +209,36 @@ describe('the folders', () => {
     await waitFor(() => expect(posts().at(-1)?.movies_additional_paths).toEqual(['/movies3']));
   });
 
+  it("removing a folder takes its own row and status line, not the last one's", async () => {
+    answers['GET /api/video/downloads/config'] = {
+      ...CONFIG,
+      movies_additional_paths: ['/a', '/b', '/c'],
+    };
+    panel();
+    await shown();
+    const list = document.getElementById('video-movies-additional-paths')!;
+    // folder-check.js puts a status line after each row
+    for (const row of list.querySelectorAll('[data-folder-row]')) {
+      const line = document.createElement('div');
+      line.className = 'folder-check';
+      line.textContent = `status ${(row.querySelector('input') as HTMLInputElement).value}`;
+      row.after(line);
+    }
+    fireEvent.click(list.querySelector('[data-folder-row] button')!);
+    await waitFor(() => expect(list.querySelectorAll('[data-folder-row]')).toHaveLength(2));
+    // each row is still followed by its own status line
+    expect(
+      [...list.querySelectorAll('[data-folder-row]')].map((row) => [
+        (row.querySelector('input') as HTMLInputElement).value,
+        row.nextElementSibling?.textContent,
+      ]),
+    ).toEqual([
+      ['/b', 'status /b'],
+      ['/c', 'status /c'],
+    ]);
+    expect([...list.querySelectorAll('input')].map((i) => i.value)).toEqual(['/b', '/c']);
+  });
+
   it('a 4K folder shows only while its switch is on; switched off it keeps its path', async () => {
     panel();
     await shown();

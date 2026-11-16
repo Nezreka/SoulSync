@@ -126,15 +126,23 @@ export function LockedPath({
   onChange,
   placeholder,
   check,
+  loads,
 }: {
   id: string;
+  /** what the field shows when the settings load (a default when unset) */
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   check?: Record<string, string>;
+  /** the settings loads: each shows the stored value again */
+  loads?: number;
 }) {
   const [open, setOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  // what was typed stays on screen, an emptied field too: loadSettingsData
+  // filled the default once, and the field showed what was typed after it
+  const draft = useDraft(value, onChange);
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="path-input-group">
       <input
@@ -144,8 +152,8 @@ export function LockedPath({
         {...check}
         placeholder={placeholder}
         readOnly={!open}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        value={draft.value}
+        onChange={(event) => draft.onChange(event.target.value)}
       />
       <button
         className={open ? 'browse-button' : 'browse-button locked'}

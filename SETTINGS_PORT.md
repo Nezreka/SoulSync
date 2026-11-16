@@ -807,6 +807,41 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### The review: the port read line by line against dev (Nov 16 2026)
+
+**How.** Six reviewers read the port against `52f2190d7` (`settings.js`, `video-settings.js`, `index.html`, `init.js`), each on one area: Connections, Sources and the chain, Downloads/Quality/Discovery/Appearance/Logs, Library and System, the video side, and the page shell and routing. Each finding was checked in the code before anything was changed.
+
+**Fixed (each with a test that fails without the fix).**
+- The shell had two copies: the page and the route imported `shell.ts` into the main bundle, so the save button's "saved" timer and the pending tab lived apart from the shell bundle's. They now call the shell bundle's functions on `window` (`openSettingsPage` joins its exports), so there is one copy. A tab asked for before the page is on screen works again.
+- A revisit mounted the tabs as the last visit left them: the last tab open, every tab "opened". So Logs started its tail, System fetched its info, and the weather and MetaSync loaded on mount. The tab state now resets when the page unmounts.
+- The particles preset and the Help menu's tour read `.page.active`, which is now `#webui-react-root`, so they got no page. `init.js` and `helper.js` skip the React root and fall back to `currentPage`, as they already did for the other React pages.
+- Autosaves no longer refreshed `/status`. The store calls `_forceServiceStatusRefresh` after every good save that posted settings, as `saveSettings(true)` did.
+- A bad Playlist File Naming value held autosaves without a word. The store's hold now toasts the reason, as the quiet save did.
+- Emptied fields filled their default straight back in: the Library folders, the audiobooks folder, the Spotify/Tidal/Deezer redirect URIs and the torrent/usenet category. What is typed stays on screen, an emptied field included. The default is saved where the collector saved it, and a settings load shows the stored value again.
+- Tidal: reopening the modal during a device link turned its button back on, and leaving Settings stopped the link's poll. The check sets only the label now, and the poll runs until the link completes or fails.
+- Quality: deleting a profile with an unsaved edit left a save that failed forever and blocked every later reload. Deleting now drops it. A profile opened after the first load failed now saves its edits.
+- Discovery: a pick not saved yet (autosave off) was replaced by the server's value on the next visit. The queued pick stays on screen.
+- Artwork Cache: an empty cache read "0.0 MB". It reads "0 MB" again.
+- MetaSync auto-detect ran on every visit. It runs once a page load, as `_msAutoDetectTried` did.
+- Password fields React adds after the page opens are marked for the password managers too.
+- Video: the seeding and usenet blocks on the Sources tab load the downloads config themselves. Before, they did nothing until the Library tab loaded it. The extra video folder rows have keys that stay with them, so removing one row no longer leaves another row's folder-check line behind.
+
+**Recorded, not changed (minor, or better than the original).**
+- **Page state on revisit.** Settings is a route now, so leaving it resets what lived only in the page: expanded sections, the Sources filesystem note, the Library card picks, and the Qobuz card on Connections (it shows the login form until a check or a login).
+- **Saved at once.** slskd Auto-detect and a custom accent colour save immediately. The old page saved them only with the next save.
+- **Accent colour.** The Custom picker shows the saved colour even while a preset is selected.
+- **Kept, not reset.** A saved Hydrabase source that is not connected yet is kept. The old page overwrote it with Deezer on the next save.
+- **Unknown saved values.** A value missing from a dropdown shows the first option and saves nothing; the old page showed it blank and saved `''` on the next save. This covers concurrency, stream source, preferred version, sync mode, visualizer, lookback and the iTunes country.
+- **AcoustID.** "enabled" reads `=== true`.
+- **Plex.** Plex Auto-detect hides the URL and token actions at once.
+- **Folder lists.** Removing the last extra music folder shows the "No paths configured" note. The Sample Studio "default" label is always on the first row.
+- **Quality.** An edit made before the profile list arrives goes to the old default route (as when the list fails to load).
+- **`window.closeSourceModal`.** It no longer flushes (nothing calls it; the modal's own close does).
+- **Video side.** Its gate is split in two. Monitor Specials and the drive map are inert after a failed load. MDBList saves when left. Quality redraws from the reply. The Custom Formats empty hint can flash. A failed kind-default save snaps back. Whisper controls stay off until loaded. An unknown region shows United States. The Add buttons work before the load. Opening video Settings while on it does not reload (the vanilla side returned early too).
+- **Pending tab timing.** The old page reset to Connections on its own open, so a caller switching sooner than its load lost. The new page keeps the asked-for tab. At the callers' 400 ms both land on the asked-for tab.
+
+**Checked.** The new tests. Negative checks: each of the 17 fixes undone, its test fails, and the fix restored. The Settings, shell, route and app folders all pass. Browser against dev: a tab asked for after navigating, the particles preset, the helper's page, and a revisit after Logs are the same. With `init.js` put back, the particles preset is `webui-react-root`.
+
 ### Step V4c: the page is a React route; the port is done (Nov 16 2026)
 
 **What.** `settings-page.tsx`: index.html's `#settings-page`, as React, with the same markup, ids and classes; each tab renders its parts into the slot wrappers it had (`data-stg-react` / `data-stg-part`), so the shell's tab switch, search and keyboard (`shell.ts`) and every stylesheet work on it unchanged. It is `<div id="settings-page" class="active">`, not a `.page`: `#webui-react-root` is that `.page` now (two would pad twice), and `active` keeps the stylesheet's `:has()` rule. Its inline handlers (the tabs, the search, the Sources tab's filesystem note, the save button) are React handlers doing the same. `page-tabs.ts`: which tab is open and how often each was opened, set by the host's `show()` and read by the page (the host rendered the tabs into slots before). `src/routes/settings/route.tsx`: `/settings`, `isReactOwned()` with the legacy controller, the admin guard, and on each visit what `init.js` did (`openSettingsPage`: the autosave held while the form fills, the first tab, the load, the blacklist count); on `?media=video` it then tells the video sections the page was shown, as `video-side.js` did. A tab asked for before the page is on screen (callers navigate, then switch after 60 to 400 ms) is the one it opens on. The manifest says `react`. On the video side `video-settings` hands off to `/settings?media=video` like Tools and Automations (`HANDED_OFF`, `parseSharedPath`, `gotoUnifiedSettings`, revealed with the React pages; out of `SHARED_PAGES`).
@@ -963,6 +998,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | (the review) | **The port read line by line against dev.** 17 differences fixed (one shell copy, revisits start fresh, particles and Help find the page, autosaves refresh the status dots, emptied fields stay empty, Tidal, Quality, Discovery); the rest recorded. |
 | Nov 16 | `ee53c8b34` (step V4c) | **Settings is a React route.** The video side's settings are `/settings?media=video`. |
 | Nov 16 | `1e96eae14` (step V4b) | **`settings.js` is gone.** Its shell is `shell.ts`, in the shell bundle; searching no longer saves. |
 | Nov 16 | `ed93e5658` (step V4a) | The support modal, Hydrabase, the dashboard test and the rate-limit modal moved to `pages-extra.js`. |

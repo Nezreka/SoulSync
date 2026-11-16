@@ -116,6 +116,27 @@ describe('the card', () => {
     expect([guide('docker'), guide('native')]).toEqual([false, true]);
   });
 
+  it('an emptied folder stays empty while typed, and a load shows the stored one', async () => {
+    act(() => store.hydrate({ soulseek: { transfer_path: '/music' } }));
+    card();
+    const transfer = input('transfer-path');
+    fireEvent.click(transfer.nextElementSibling!);
+    fireEvent.change(transfer, { target: { value: '' } });
+    // not the default filled straight back in
+    expect(transfer.value).toBe('');
+    fireEvent.change(transfer, { target: { value: '/mnt' } });
+    expect(transfer.value).toBe('/mnt');
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().soulseek).toEqual({ transfer_path: '/mnt' });
+    // left empty, empty is saved (as the collector did) and the next load
+    // shows the default, as loadSettingsData filled it
+    fireEvent.change(transfer, { target: { value: '' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(posted.at(-1)).toEqual({ soulseek: { transfer_path: '' } });
+    act(() => store.hydrate({ soulseek: { transfer_path: '' } }));
+    expect(transfer.value).toBe('./Transfer');
+  });
+
   it('locked fields unlock to type, and each folder saves its key', async () => {
     act(() => store.hydrate({ soulseek: { transfer_path: '/music' } }));
     card();

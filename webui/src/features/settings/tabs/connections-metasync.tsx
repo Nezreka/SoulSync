@@ -122,6 +122,10 @@ function statusLines(s: Answer, nodeUrl: string): ReactNode[] {
   return lines;
 }
 
+/** _msAutoDetectTried: one auto-detect a page load, not one a Settings visit
+ *  (the page unmounts when it is left; SETTINGS_PORT.md step V4c) */
+export const detectTried = { done: false };
+
 export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
   const [nodeUrl, setNodeUrl] = useState('');
   const [poolUrl, setPoolUrl] = useState('');
@@ -134,7 +138,6 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
   const [detail, setDetail] = useState<ReactNode[]>([]);
   const nodeField = useRef<HTMLInputElement>(null);
   const poolField = useRef<HTMLInputElement>(null);
-  const tried = useRef(false);
   // what the status line reads for the Open MetaSync link: the field as it is
   const nodeNow = useRef('');
   nodeNow.current = nodeUrl;
@@ -196,8 +199,8 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
       );
       await refreshStatus();
       // auto-detect once a page load, only while there is nothing to lose
-      if (!tried.current && !data.local_key_set && !nodeNow.current.trim()) {
-        tried.current = true;
+      if (!detectTried.done && !data.local_key_set && !nodeNow.current.trim()) {
+        detectTried.done = true;
         const found = await detect();
         if (found)
           setStatus(`Found MetaSync on this machine at ${found} — click Connect to pair with it.`);

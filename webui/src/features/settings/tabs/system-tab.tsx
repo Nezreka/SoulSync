@@ -861,7 +861,8 @@ type CacheStatus = {
 
 /** _imgCacheBytes */
 export function cacheBytes(n: number | undefined) {
-  const mb = (n || 0) / (1024 * 1024);
+  if (!n) return '0 MB';
+  const mb = n / (1024 * 1024);
   return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
 }
 

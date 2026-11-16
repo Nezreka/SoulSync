@@ -388,6 +388,56 @@ describe('Tidal', () => {
     delete shell.showToast;
   });
 
+  it('a link still waiting keeps its button off when reopened, and its poll runs on after Settings is left', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    shell.showToast = vi.fn();
+    document.body.insertAdjacentHTML('beforeend', '<div id="source-config-home" hidden></div>');
+    routes['GET /api/tidal/download/auth/status'] = () => ({ authenticated: false });
+    routes['POST /api/tidal/download/auth/start'] = () => ({
+      success: true,
+      verification_uri: 'https://link.tidal.com/X',
+      user_code: 'X',
+    });
+    let state = 'pending';
+    routes['GET /api/tidal/download/auth/check'] = () => ({ status: state });
+    const view = render(
+      <>
+        <SourceModal model={model} />
+        <TidalPanel model={model} />
+      </>,
+    );
+    act(() => model.openModal('tidal'));
+    await waitFor(() =>
+      expect(status('tidal-download-auth-status').textContent).toBe('Not authenticated'),
+    );
+    const button = () => document.getElementById('tidal-download-auth-btn') as HTMLButtonElement;
+    fireEvent.click(button());
+    await waitFor(() => expect(button().textContent).toBe('Waiting for approval...'));
+    act(() => model.closeModal());
+    act(() => model.openModal('tidal'));
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await waitFor(() => expect(button().textContent).toBe('Link Tidal Account'));
+    // the label follows the check, the button stays off
+    expect(button().disabled).toBe(true);
+    act(() => model.closeModal());
+    // Settings is left: the link still lands, and says so
+    view.unmount();
+    state = 'completed';
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith(
+        'Tidal download account linked successfully',
+        'success',
+      ),
+    );
+    const checks = calls.filter((c) => c.url === '/api/tidal/download/auth/check').length;
+    await act(() => vi.advanceTimersByTimeAsync(9000));
+    expect(calls.filter((c) => c.url === '/api/tidal/download/auth/check').length).toBe(checks);
+    vi.useRealTimers();
+    document.getElementById('source-config-home')?.remove();
+    delete shell.showToast;
+  });
+
   it('a start that fails says so and resets the button', async () => {
     shell.showToast = vi.fn();
     routes['POST /api/tidal/download/auth/start'] = () => ({

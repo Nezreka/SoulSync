@@ -198,6 +198,9 @@ describe('the torrent client', () => {
     fireEvent.change(input('torrent-stall-timeout'), { target: { value: '' } });
     fireEvent.change(input('torrent-min-seeders'), { target: { value: '-3' } });
     fireEvent.change(input('torrent-client-category'), { target: { value: '' } });
+    // emptied, it stays empty on screen (the next word is typed into it);
+    // the default is what is saved
+    expect(input('torrent-client-category').value).toBe('');
     fireEvent.change(input('music-seed-ratio'), { target: { value: '1.5' } });
     fireEvent.change(document.getElementById('torrent-stall-action')!, {
       target: { value: 'pause' },

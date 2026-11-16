@@ -380,6 +380,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             <div className="form-group">
               <label>Download Folder (input):</label>
               <LockedPath
+                loads={loads}
                 id="download-path"
                 check={{
                   ...MUSIC_CHECK,
@@ -397,6 +398,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             <div className="form-group">
               <label>Music Library Folder (output):</label>
               <LockedPath
+                loads={loads}
                 id="transfer-path"
                 check={{ ...MUSIC_CHECK, 'data-folder-label': 'Music library folder' }}
                 placeholder="./Transfer"
@@ -428,6 +430,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             <div className="form-group">
               <label>Import Folder:</label>
               <LockedPath
+                loads={loads}
                 id="staging-path"
                 check={{
                   ...MUSIC_CHECK,
@@ -442,6 +445,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             <div className="form-group">
               <label>Music Videos Dir:</label>
               <LockedPath
+                loads={loads}
                 id="music-videos-path"
                 check={{ ...MUSIC_CHECK, 'data-folder-label': 'Music videos folder' }}
                 placeholder="./MusicVideos"
@@ -461,6 +465,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
               }
             >
               <LockedPath
+                loads={loads}
                 id="playlists-materialize-path"
                 check={{ ...MUSIC_CHECK, 'data-folder-label': 'Playlists folder' }}
                 placeholder="./Playlists"
@@ -540,6 +545,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
               }
             >
               <LockedPath
+                loads={loads}
                 id="m3u-entry-base-path"
                 placeholder="e.g. /mnt/music (leave empty to use paths as stored)"
                 value={text(m3u.entry_base_path)}
@@ -648,6 +654,7 @@ export function FoldersCard({ store }: SettingsTabProps) {
             <div className="form-group">
               <label>Podcasts Folder (output):</label>
               <LockedPath
+                loads={loads}
                 id="podcasts-path"
                 check={{ 'data-folder-check': 'podcasts', 'data-folder-label': 'Podcasts folder' }}
                 placeholder={isDocker(settings) ? '/app/podcasts' : './podcasts'}

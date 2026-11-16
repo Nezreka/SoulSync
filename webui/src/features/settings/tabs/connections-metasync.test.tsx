@@ -8,7 +8,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { shape, vanilla } from './__fixtures__/shape';
-import { MetaSyncSection } from './connections-metasync';
+import { detectTried, MetaSyncSection } from './connections-metasync';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -16,6 +16,7 @@ let calls: Array<{ url: string; method: string; body?: unknown }>;
 let answers: Record<string, unknown>;
 
 beforeEach(() => {
+  detectTried.done = false;
   calls = [];
   answers = {};
   vi.stubGlobal(
@@ -110,6 +111,18 @@ describe('MetaSync', () => {
       ),
     );
     expect(el('metasync-node-url').value).toBe('http://localhost:8790');
+  });
+
+  it('a second visit in the same page load does not look again', async () => {
+    answers['GET /api/metasync'] = { success: true, local_key_set: false };
+    answers['POST /api/metasync/detect'] = { success: true, found: false };
+    const first = render(<MetaSyncSection opened={1} />);
+    await waitFor(() => expect(sent('POST', '/api/metasync/detect')).toHaveLength(1));
+    first.unmount();
+    render(<MetaSyncSection opened={1} />);
+    await waitFor(() => expect(sent('GET', '/api/metasync')).toHaveLength(2));
+    await act(async () => {});
+    expect(sent('POST', '/api/metasync/detect')).toHaveLength(1);
   });
 
   it('pairs: the code and ID show, finishing hides them', async () => {

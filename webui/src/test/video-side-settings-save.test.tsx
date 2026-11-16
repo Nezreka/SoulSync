@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsPage } from '@/features/settings/settings-page';
 import { createSettingsStore } from '@/features/settings/settings-store';
+import { saveSettings } from '@/features/settings/shell';
 
 /**
  * The Settings page is shared, so on the video side it shows every music field
@@ -27,6 +28,8 @@ async function click(side: 'music' | 'video') {
   vi.stubGlobal('fetch', fetcher);
   const w = window as unknown as Record<string, unknown>;
   w.SoulSyncSettings = { flush: async () => true };
+  // the button calls the shell bundle's save on window (src/shell/index.ts)
+  w.saveSettings = saveSettings;
   render(<SettingsPage tabs={{}} />);
   const button = document.getElementById('save-settings');
   expect(button, 'the Save Settings button is gone').not.toBeNull();
@@ -39,6 +42,7 @@ async function click(side: 'music' | 'video') {
   cleanup();
   vi.unstubAllGlobals();
   delete w.SoulSyncSettings;
+  delete w.saveSettings;
   return { posts, event };
 }
 

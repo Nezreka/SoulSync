@@ -16,6 +16,7 @@ import {
   initializeSettings,
   landPendingSettingsSave,
   loadSettingsData,
+  openSettingsPage,
   openSourceConfig,
   probeSourceOnOpen,
   saveSettings,
@@ -177,6 +178,7 @@ export const SHELL_WINDOW_EXPORTS = {
   refreshOidcOnlySettingsStatus,
   // settings.js (ported nov 16, SETTINGS_PORT.md step V4b)
   initializeSettings,
+  openSettingsPage,
   switchSettingsTab,
   loadSettingsData,
   saveSettings,

@@ -2195,7 +2195,7 @@ function openHelperMenu() {
     floatBtn.classList.add('menu-open');
 
     // Detect current page for contextual tour suggestion
-    const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+    const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
     const suggestedTourId = PAGE_TOUR_MAP[currentPage];
     const suggestedTour = suggestedTourId ? HELPER_TOURS[suggestedTourId] : null;
 
@@ -2572,7 +2572,7 @@ function showTourStep() {
 
     // Navigate to the correct page if needed
     if (step.page) {
-        const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+        const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
         if (currentPage !== step.page) {
             navigateToPage(step.page);
         }
@@ -3767,7 +3767,7 @@ function activateTroubleshootMode() {
     _troubleshootActive = true;
 
     // We need to be on the dashboard to scan service cards
-    const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+    const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
     if (currentPage !== 'dashboard') {
         navigateToPage('dashboard');
         setTimeout(() => _runTroubleshootScan(), 400);

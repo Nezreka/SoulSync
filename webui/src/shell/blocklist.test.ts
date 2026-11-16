@@ -198,6 +198,7 @@ describe('the window contract', () => {
       'openPersonalSettings',
       'openServiceSwitchModal',
       'openServiceSwitchSettings',
+      'openSettingsPage',
       'openSourceConfig',
       'openTrackDetail',
       'openWatchlistHistoryModal',

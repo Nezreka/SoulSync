@@ -106,9 +106,10 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
-            // React-owned pages have no .page.active node — the shell's
-            // currentPage covers both worlds.
-            const activePage = document.querySelector('.page.active');
+            // React-owned pages render inside #webui-react-root (itself a .page)
+            // and have no page node of their own — the shell's currentPage
+            // covers both worlds.
+            const activePage = document.querySelector('.page.active:not(#webui-react-root)');
             const activeId = activePage
                 ? activePage.id.replace('-page', '')
                 : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -162,7 +163,7 @@ function applyReduceEffects(enabled) {
         if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
     } else {
         // Restore only what the user's own toggles still allow.
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -224,7 +225,7 @@ function applyMaxPerformance(enabled) {
     } else {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);

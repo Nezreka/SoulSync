@@ -116,6 +116,16 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
   const list = useRef<HTMLDivElement>(null);
   const [focusLast, setFocusLast] = useState(false);
   const commitAll = useCommit<HTMLDivElement>(() => void videoDownloads.save());
+  // a key per row that stays with it: removing one row must take that row's
+  // element (and the status line folder-check.js put after it), not the last
+  const ids = useRef<{ loads: number; list: number[]; next: number }>({
+    loads: -1,
+    list: [],
+    next: 0,
+  });
+  if (ids.current.loads !== loads) ids.current = { loads, list: [], next: 0 };
+  while (ids.current.list.length < rows.length) ids.current.list.push(ids.current.next++);
+  if (ids.current.list.length > rows.length) ids.current.list.length = rows.length;
 
   useEffect(() => {
     if (!focusLast) return;
@@ -138,7 +148,7 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
       >
         {rows.map((value, i) => (
           <div
-            key={`${loads}-${i}`}
+            key={`${loads}-${ids.current.list[i]}`}
             data-folder-row=""
             style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}
           >
@@ -163,6 +173,7 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
                 // folder-check.js's status line for this row goes with it
                 const status = event.currentTarget.closest('[data-folder-row]')?.nextElementSibling;
                 if (status && status.classList.contains('folder-check')) status.remove();
+                ids.current.list.splice(i, 1);
                 void videoDownloads.change({ [key]: rows.filter((_, j) => j !== i) });
                 refreshChecks();
               }}

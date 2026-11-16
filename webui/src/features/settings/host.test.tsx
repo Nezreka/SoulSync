@@ -61,6 +61,45 @@ describe('the settings host', () => {
     expect(text()).toEqual(['ui 1 open', 'weather 1 open', 'whole 1']);
   });
 
+  it('a new visit mounts its tabs closed, not as the last visit left them', async () => {
+    const seen: string[] = [];
+    const Part = ({ part, opened, active }: SettingsTabProps) => {
+      seen.push(`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`);
+      return null;
+    };
+    const tabs = { logs: Part };
+    const host = createSettingsHost({ tabs, effects: [] });
+    const first = render(<SettingsPage tabs={tabs} />);
+    await act(async () => host.show('logs'));
+    first.unmount();
+    seen.length = 0;
+    render(<SettingsPage tabs={tabs} />);
+    expect(seen[0]).toBe('whole 0');
+  });
+
+  it("the page's buttons call the shell bundle's functions, one copy of its state", () => {
+    const w = window as unknown as Record<string, unknown>;
+    w.switchSettingsTab = vi.fn();
+    w.saveSettings = vi.fn(() => Promise.resolve());
+    render(<SettingsPage tabs={{}} />);
+    (document.querySelector('[data-tab="logs"]') as HTMLButtonElement).click();
+    expect(w.switchSettingsTab).toHaveBeenCalledWith('logs');
+    (document.getElementById('save-settings') as HTMLButtonElement).click();
+    expect(w.saveSettings).toHaveBeenCalledWith(false);
+    delete w.switchSettingsTab;
+    delete w.saveSettings;
+  });
+
+  it('fields added after the page opened are kept from the password managers too', async () => {
+    const w = window as unknown as Record<string, unknown>;
+    const mark = vi.fn();
+    w.initializeSettings = mark;
+    render(<SettingsPage tabs={{}} />);
+    document.getElementById('settings-page')!.append(document.createElement('input'));
+    await vi.waitFor(() => expect(mark).toHaveBeenCalledTimes(1));
+    delete w.initializeSettings;
+  });
+
   it('loading the settings runs what opening Settings applies, once the payload is good', () => {
     const seen: unknown[] = [];
     const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
@@ -104,6 +143,33 @@ describe('the settings host', () => {
     expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
     expect(host.hasPending()).toBe(false);
     delete (window as Window & { _settingsAutosaveOff?: boolean })._settingsAutosaveOff;
+  });
+
+  it('a bad Playlist File Naming holds the autosave and says why, as the quiet save did', async () => {
+    const posted: unknown[] = [];
+    const toast = vi.fn();
+    window.showToast = toast;
+    const store = createSettingsStore({
+      post: (body) => {
+        posted.push(body);
+        return Promise.resolve({ success: true });
+      },
+      delay: 0,
+    });
+    createSettingsHost({ tabs: { library: () => null }, store });
+    store.set('file_organization', 'templates', { playlist_item: '$position - $artist' });
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        'Playlist File Naming must include $title so every file has a name.',
+        'error',
+      ),
+    );
+    expect(posted).toEqual([]);
+    expect(store.hasPending()).toBe(true);
+    store.set('file_organization', 'templates', { playlist_item: '$position - $title' });
+    expect(await store.flush()).toBe(true);
+    expect(posted).toHaveLength(1);
+    delete window.showToast;
   });
 
   it('catches up when the page loaded its settings before this bundle ran', () => {

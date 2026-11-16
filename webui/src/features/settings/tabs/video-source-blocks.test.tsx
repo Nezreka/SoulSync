@@ -8,7 +8,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { videoDownloads } from './video-downloads';
-import { VideoSeedingGoals } from './video-source-blocks';
+import { VideoSeedingGoals, VideoUsenetBlocks } from './video-source-blocks';
 
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 let answers: Record<string, unknown>;
@@ -76,5 +76,33 @@ describe('per-indexer seed rules', () => {
     expect(calls.find((c) => c.method === 'POST')!.body!.seed_overrides).toEqual({
       '7': { ratio: 0 },
     });
+  });
+});
+
+describe('the blocks load the config they edit', () => {
+  it('on their own, so the Sources tab works before the Library tab was opened', async () => {
+    answers['GET /api/video/downloads/config'] = {
+      seed_ratio_goal: 2,
+      usenet_remove_completed: 'files',
+    };
+    render(
+      <>
+        <VideoSeedingGoals />
+        <VideoUsenetBlocks />
+      </>,
+    );
+    await waitFor(() =>
+      expect(
+        (document.getElementById('video-usenet-remove-completed') as HTMLSelectElement).value,
+      ).toBe('files'),
+    );
+    expect((document.getElementById('video-seed-ratio') as HTMLInputElement).value).toBe('2');
+    // once, for both
+    expect(calls.filter((c) => c.url === '/api/video/downloads/config')).toHaveLength(1);
+    fireEvent.change(document.getElementById('video-usenet-remove-completed')!, {
+      target: { value: 'off' },
+    });
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body!.usenet_remove_completed).toBe('off');
   });
 });

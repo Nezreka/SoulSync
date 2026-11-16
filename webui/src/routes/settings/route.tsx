@@ -2,7 +2,6 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useLayoutEffect } from 'react';
 
 import { SettingsPage } from '@/features/settings/settings-page';
-import { openSettingsPage } from '@/features/settings/shell';
 import { LegacyRouteController } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
@@ -43,7 +42,8 @@ function SettingsRoutePage() {
   // each visit opens the page as init.js did (the first tab, the load), once
   // its markup is in the document
   useLayoutEffect(() => {
-    void openSettingsPage();
+    // the shell bundle's (window): one copy of its state, the pending tab too
+    void (window as Window & { openSettingsPage?: () => Promise<void> }).openSettingsPage?.();
     if (media === 'video')
       document.dispatchEvent(
         new CustomEvent('soulsync:video-page-shown', { detail: 'video-settings' }),
