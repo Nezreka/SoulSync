@@ -43,16 +43,7 @@ let settingsAutoSaveTimer = null;
 // (syncPreferExplicitState and syncRetryConditionalRows lived here: Filtering
 // and Retry Logic are React now, src/features/settings/tabs/downloads-tab.tsx)
 
-// Sign in with OIDC: the provider's settings (and the admin's connect row
-// inside them) only mean something while the toggle is on, so they hide when
-// it is off. Hidden fields keep their values and still save, so switching
-// OIDC off and on again loses nothing.
-function syncOidcProviderBlock() {
-    const toggle = document.getElementById('security-oidc-signin');
-    const block = document.getElementById('security-oidc-provider');
-    if (block) block.hidden = !(toggle && toggle.checked);
-}
-window.syncOidcProviderBlock = syncOidcProviderBlock;
+// syncOidcProviderBlock: Security & Access is React (system-security.tsx)
 
 // (the Quality tab's controls are React and save to their profile themselves:
 // src/features/settings/tabs/quality-tab.tsx)
@@ -1694,103 +1685,7 @@ async function loadSettingsData() {
 
         // Logging: the System tab is React (system-tab.tsx)
 
-        // Load security settings
-        try {
-            const requirePin = settings.security?.require_pin_on_launch || false;
-            document.getElementById('security-require-pin').checked = requirePin;
-
-            // CORS origins — stored verbatim as the user typed (string).
-            const corsOrigins = settings.security?.cors_origins || '';
-            const corsField = document.getElementById('security-cors-origins');
-            if (corsField) corsField.value = corsOrigins;
-
-            // Reverse-proxy mode + auth-proxy header (default off / empty).
-            const trustProxy = document.getElementById('security-trust-proxy');
-            if (trustProxy) trustProxy.checked = settings.security?.trust_reverse_proxy || false;
-            const authHeader = document.getElementById('security-auth-proxy-header');
-            if (authHeader) authHeader.value = settings.security?.auth_proxy_header || '';
-            const reqLogin = document.getElementById('security-require-login');
-            if (reqLogin) reqLogin.checked = settings.security?.require_login || false;
-            const plexSignin = document.getElementById('security-plex-signin');
-            if (plexSignin) plexSignin.checked = settings.security?.plex_signin || false;
-            const plexCreate = document.getElementById('security-plex-signin-auto-create');
-            if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
-            const plexDl = document.getElementById('security-plex-signin-can-download');
-            if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
-            const oidcOn = document.getElementById('security-oidc-signin');
-            if (oidcOn) oidcOn.checked = settings.security?.oidc_signin || false;
-            const oidcOnly = document.getElementById('security-oidc-only');
-            if (oidcOnly) oidcOnly.checked = settings.security?.oidc_only || false;
-            syncOidcProviderBlock();
-            for (const [id, key] of [
-                ['security-oidc-issuer', 'oidc_issuer'],
-                ['security-oidc-client-id', 'oidc_client_id'],
-                ['security-oidc-client-secret', 'oidc_client_secret'],
-                ['security-oidc-button-label', 'oidc_button_label'],
-                ['security-oidc-icon-url', 'oidc_icon_url'],
-                ['security-oidc-required-group', 'oidc_required_group'],
-                ['security-oidc-groups-claim', 'oidc_groups_claim'],
-                ['security-oidc-scopes', 'oidc_scopes'],
-                ['security-oidc-redirect-uri', 'oidc_redirect_uri'],
-            ]) {
-                const el = document.getElementById(id);
-                if (el) el.value = settings.security?.[key] || '';
-            }
-            const oidcCreate = document.getElementById('security-oidc-signin-auto-create');
-            if (oidcCreate) oidcCreate.checked = settings.security?.oidc_signin_auto_create !== false;
-            const oidcDl = document.getElementById('security-oidc-signin-can-download');
-            if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
-            // the address to register at the provider, as this browser sees it
-            const oidcCb = document.getElementById('security-oidc-callback-url');
-            if (oidcCb) {
-                // the browser's own address first, then what the server will
-                // really send the provider. behind a proxy that hides https
-                // they differ, and only the server's one matters (RileyRabbit).
-                oidcCb.textContent = window.location.origin + window.SoulSyncURL.resolve('/api/auth/oidc/callback');
-                const oidcWarn = document.getElementById('security-oidc-callback-warn');
-                fetch('/api/auth/oidc/available').then(r => r.ok ? r.json() : null).then(d => {
-                    if (!d || !d.callback_url) return;
-                    oidcCb.textContent = d.callback_url;
-                    if (!oidcWarn) return;
-                    const sent = d.callback_url.split(':')[0];
-                    const page = window.location.protocol.replace(':', '');
-                    oidcWarn.hidden = sent === page;
-                }).catch(() => { /* keep the browser's guess */ });
-            }
-            const signupSides = document.getElementById('security-signup-sides');
-            if (signupSides) {
-                const sides = settings.security?.signup_sides;
-                signupSides.value = ['music', 'video', 'both'].includes(sides) ? sides : 'music';
-            }
-            const signupLimit = document.getElementById('security-signup-request-limit');
-            if (signupLimit) signupLimit.value = settings.security?.signup_request_limit ?? 0;
-            const signupDays = document.getElementById('security-signup-request-limit-days');
-            if (signupDays) signupDays.value = settings.security?.signup_request_limit_days ?? 7;
-
-            // Check if admin has a PIN set
-            const profilesRes = await fetch('/api/profiles');
-            const profilesData = await profilesRes.json();
-            const adminProfile = (profilesData.profiles || []).find(p => p.is_admin);
-            const adminHasPin = adminProfile?.has_pin || false;
-
-            // Show/hide PIN setup vs change sections
-            document.getElementById('security-pin-setup').style.display = adminHasPin ? 'none' : 'block';
-            document.getElementById('security-change-pin-section').style.display = adminHasPin ? 'block' : 'none';
-
-            // If no PIN, disable the toggle
-            if (!adminHasPin) {
-                document.getElementById('security-require-pin').checked = false;
-                document.getElementById('security-require-pin').disabled = true;
-            }
-
-            // Login: the "Require login" toggle is gated on an admin password —
-            // visually locked until Step 1 is done (anti-lockout, made obvious).
-            updateRequireLoginGate(adminProfile?.has_password || false);
-            // Show already-saved password/recovery state (vs looking unset).
-            applyLoginSavedState(adminProfile);
-        } catch (error) {
-            console.error('Error loading security settings:', error);
-        }
+        // Security & Access: the System tab is React (system-security.tsx)
 
         // Check dev mode status
         try {
@@ -2774,55 +2669,9 @@ async function saveSettings(quiet = false) {
         // ui_appearance: the Appearance tab and the System tab's autosave
         // switch are React and save their own keys of it
         // youtube: its Sources panel is React (source-panels-more.tsx)
-        security: {
-            require_pin_on_launch: _cfgBool('security-require-pin'),
-            cors_origins: _cfgStr('security-cors-origins', { trim: true }),
-            trust_reverse_proxy: _cfgBool('security-trust-proxy'),
-            auth_proxy_header: _cfgStr('security-auth-proxy-header', { trim: true }),
-            require_login: _cfgBool('security-require-login'),
-            plex_signin: _cfgBool('security-plex-signin'),
-            plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
-            plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
-            oidc_signin: _cfgBool('security-oidc-signin'),
-            oidc_only: _cfgBool('security-oidc-only'),
-            oidc_issuer: _cfgStr('security-oidc-issuer', { trim: true }),
-            oidc_client_id: _cfgStr('security-oidc-client-id', { trim: true }),
-            oidc_client_secret: _cfgStr('security-oidc-client-secret'),
-            oidc_button_label: _cfgStr('security-oidc-button-label', { trim: true }),
-            oidc_icon_url: _cfgStr('security-oidc-icon-url', { trim: true }),
-            oidc_required_group: _cfgStr('security-oidc-required-group', { trim: true }),
-            oidc_groups_claim: _cfgStr('security-oidc-groups-claim', { trim: true }),
-            oidc_scopes: _cfgStr('security-oidc-scopes', { trim: true }),
-            oidc_redirect_uri: _cfgStr('security-oidc-redirect-uri', { trim: true }),
-            oidc_signin_auto_create: _cfgBool('security-oidc-signin-auto-create'),
-            oidc_signin_default_can_download: _cfgBool('security-oidc-signin-can-download'),
-            signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
-            signup_request_limit: _cfgInt('security-signup-request-limit', 0),
-            signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),
-        }
+        // security: Security & Access is React (system-security.tsx), with
+        // the cors_origins warning
     };
-
-    // Validate cors_origins entries — backend silently filters malformed
-    // values, so warn the user up-front if any line doesn't look like a
-    // URL (or the special '*' token). One-shot toast; doesn't block save.
-    const corsRaw = settings.security.cors_origins;
-    if (corsRaw) {
-        const entries = corsRaw.replace(/\n/g, ',').split(',')
-            .map(s => s.trim())
-            .filter(s => s);
-        const invalid = entries.filter(e => {
-            if (e === '*') return false;
-            // Accept scheme://host[:port] only — no path, query, or fragment.
-            // Engineio compares Origin against {scheme}://{host} exactly.
-            return !/^https?:\/\/[^\s/?#]+$/i.test(e);
-        });
-        if (invalid.length) {
-            showToast(
-                `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
-                'warning'
-            );
-        }
-    }
 
     // (this save used to put the live default profile's values back into the
     // quality keys while another profile was open, so it could not overwrite

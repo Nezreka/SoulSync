@@ -560,6 +560,9 @@ declare global {
     weatherPreviewPresets?: () => Array<{ key: string; label: string }>;
     /** ...and wiring its controls once the React System tab renders them */
     initWeatherPreviewSettings?: () => void;
+    /** src/shell/oidc-signin.ts / oidc-only.ts: the OIDC boxes in Security & Access */
+    initOidcAdminStatus?: () => void;
+    refreshOidcOnlySettingsStatus?: () => Promise<void>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
     /** init.js - the active profile, or null before profiles load */

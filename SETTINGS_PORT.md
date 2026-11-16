@@ -60,18 +60,18 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Tab: Library | **done for music and audiobooks** (steps 8a-8d below) | 176 of 236: Folders, Organization, Post-Processing, Import. Left for the video pass: the Folders and Organization Video panels (parked) and Video Preferences. |
 | Tab: Discovery | **done for music** (step 4 below) | 11 of 12 controls ported. Left: Import Lists (video only, `video-settings.js`), for the video pass. Checked in a browser: identical, 0 pixels differ. |
 | Tab: Appearance | **done** (step 2 below) | 14 of 14 controls ported. Checked in a browser against the old page: pixel-identical. |
-| Tab: System | **in progress** (steps 9a, 9b below) | 25 of 63: Saving, Database Settings, Database Maintenance, Logging, SoulSync API, Developer Mode, Artwork Cache, Developer. Next: Security & Access (9c). Experimental (2) goes with Connections (step 10): the metadata source picker reads it. |
+| Tab: System | **done but Experimental** (steps 9a-9c below) | 61 of 63. Experimental (2) goes with Connections (step 10): the metadata source picker reads it. |
 | Tab: Logs | **done** (step 3 below) | 10 of 10 controls ported. Checked in a browser against the old page: same states, same requests, screenshots differ by 1 pixel (the help button dot). |
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 7 of 9 tabs (Discovery, Quality, Downloads, Sources and Library without their video-only parts) and System started, 359 of 678 controls, 198 of 333 `settings.js` functions removed, 34 of 83 tests repointed (step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and System but Experimental, 395 of 678 controls, 199 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 36 of 83 tests repointed (step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 8,029 |
-| `webui/static/settings.js` | 10,187 | 4,285 |
-| `webui/static/init.js` | 5,264 | 5,209 |
+| `webui/index.html` | 12,823 | 7,657 |
+| `webui/static/settings.js` | 10,187 | 4,134 |
+| `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
 
@@ -790,12 +790,29 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Checked.** Parity of both slots (the developer one with its lists filled the way the page filled them); `system-tab.test.tsx` now 14; the shell contract test; `test_dashboard_seam` repointed (Activate dispatches from React); the Python files near it pass. Browser: every loaded value, the key list, the profiles, the cache, the weather preview from the page and the setup preview opening; pixels 0 on all four.
 
+### Step 9c: System, part three: Security & Access (Nov 15 2026)
+
+**What.** `tabs/system-security.tsx`, slot `security`: the PIN (setup, the lock switch, Change PIN), user accounts (the admin password, the recovery question, Require login, Sign in with Plex and its two defaults, Sign in with OIDC with its provider block, the admin's own connection and OIDC only, the sign-up defaults and request limit) and the reverse proxy group. The PIN, password and recovery question save through `/api/profiles/1/set-*` as `init.js` did; the rest are `security.*` keys through the store.
+
+**The locks, kept.** No PIN: the lock switch is off and locked, and asking for it opens the setup (also while a PIN is being changed). No admin password: Require login is off and locked, with the lock words. The server still refuses login without a password whichever save asks. The lock switch saves at once (a flush), as `handleSecurityPinToggle` did.
+
+**The shell's two boxes.** `oidc-signin.ts` draws the admin's connection row and `oidc-only.ts` the OIDC-only status; they did it at start, when the boxes were in `index.html`. The shell now hands `initOidcAdminStatus` and a new `refreshOidcOnlySettingsStatus` over on window, and the section calls them once mounted. React leaves those boxes' contents alone. **Bug caught in the browser:** the boxes were rendered with an inline `dangerouslySetInnerHTML` object, and React 19 compares that by identity, so every render wrote the default button back over the shell's row. Both objects are constants now, and a test fails if the shell's drawing is lost on a re-render (negative-checked).
+
+**Removed.** `syncOidcProviderBlock` and the security load block from `settings.js`, the collector's `security` section with its cors check (the section warns once typing stops, as the save did), and 8 helpers from `init.js` (`saveLoginPassword`, `updateRequireLoginGate`, `applyLoginSavedState`, `handleRecoveryQuestionChange`, `saveRecoveryQuestion`, `saveSecurityPin`, `handleSecurityPinToggle`, `showChangeSecurityPin`; `profilePinError` stays for the profile manager).
+
+**Differences.** Saves send only what changed: a locked Require login is shown off but not written off (the old next save wrote `false`).
+
+**Checked.** Parity against a frozen fixture; `system-security.test.tsx` 10 (the PIN and password flows and their locks, the recovery question, the OIDC block, every saved key, the cors warning, the shell's boxes kept); `oidc-provider-block-toggle` and `signup-defaults-settings` rewritten to run the section. End of the tab: the whole frontend suite, 12,448 pass and 9 failures in 5 files outside Settings that pass alone (load timeouts); the full Python run (96 files) 2,347 pass and 2 count floors repointed. Browser: every loaded value, the lock words, the password unlocking Require login, four changes saved the same; pixels identical.
+
+**Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
+
 ## Change log
 
 Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | (step 9c) | **System: Security & Access is React**; the System tab is done but Experimental. |
 | Nov 15 | `19888f9d5` (step 9b) | **System: SoulSync API, Developer Mode, Artwork Cache and Developer are React.** The shell hands the weather preview init over on window. |
 | Nov 15 | `31099f899` (step 9a) | **System: Saving, Database Settings, Database Maintenance and Logging are React.** |
 | Nov 15 | `ec8e0b660` (step 8d) | **Post-Processing and Import are React; the Library tab is done** (but its video panels). The Playlist File Naming rule now holds React saves too. |
@@ -1863,52 +1880,52 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `security-new-pin` | Step 1 — Set admin PIN: | both | no |
-| password | `security-confirm-pin` | Step 1 — Set admin PIN: | both | no |
-| button | `security-save-pin-btn` | Save PIN | both | no |
-| checkbox | `security-require-pin` | Require PIN to access SoulSync | both | no |
-| button |  | Change PIN | both | no |
+| password | `security-new-pin` | Step 1 — Set admin PIN: | both | yes (step 9c) |
+| password | `security-confirm-pin` | Step 1 — Set admin PIN: | both | yes (step 9c) |
+| button | `security-save-pin-btn` | Save PIN | both | yes (step 9c) |
+| checkbox | `security-require-pin` | Require PIN to access SoulSync | both | yes (step 9c) |
+| button |  | Change PIN | both | yes (step 9c) |
 
 **👤 User accounts (login) per-person · best for public access** (both, 28)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `security-login-password` | Step 1 — Admin login password: | both | no |
-| password | `security-login-password-confirm` | Step 1 — Admin login password: | both | no |
-| button |  | Save Password | both | no |
-| select | `security-recovery-question` | Step 2 (recommended) — Password recovery question: {— Select a question — / What was the name of your first pe | both | no |
-| text | `security-recovery-custom` | Step 2 (recommended) — Password recovery question: | both | no |
-| text | `security-recovery-answer` | Step 2 (recommended) — Password recovery question: | both | no |
-| button |  | Save Recovery Question | both | no |
-| checkbox | `security-require-login` | Step 3 — Require login (username + password) | both | no |
-| checkbox | `security-plex-signin` | Sign in with Plex | both | no |
-| checkbox | `security-plex-signin-auto-create` | Let new Plex users sign up (off: only people who already have a Plex p | both | no |
-| checkbox | `security-plex-signin-can-download` | New Plex profiles can download (off: request-only) | both | no |
-| checkbox | `security-oidc-signin` | Sign in with OIDC | both | no |
-| text | `security-oidc-issuer` | Issuer URL: | both | no |
-| text | `security-oidc-client-id` | Client ID: | both | no |
-| password | `security-oidc-client-secret` | Client secret: | both | no |
-| text | `security-oidc-button-label` | Button label: | both | no |
-| text | `security-oidc-icon-url` | Icon URL (optional) : | both | no |
-| text | `security-oidc-required-group` | Required group (optional) : | both | no |
-| text | `security-oidc-groups-claim` | Groups claim: | both | no |
-| text | `security-oidc-scopes` | Scopes: | both | no |
-| text | `security-oidc-redirect-uri` | Callback URL override (optional) : | both | no |
-| checkbox | `security-oidc-signin-auto-create` | Let new OIDC users sign up (off: only accounts already connected to a | both | no |
-| checkbox | `security-oidc-signin-can-download` | New OIDC profiles can download (off: request-only) | both | no |
-| button |  | Connect my admin account | both | no |
-| checkbox | `security-oidc-only` | OIDC only: turn off every other way to sign in | both | no |
-| select | `security-signup-sides` | New sign-ups start on {Music / Movies & TV / Music and Movies & TV} | both | no |
-| number | `security-signup-request-limit` | Request limit for new sign-ups | both | no |
-| number | `security-signup-request-limit-days` | Request limit for new sign-ups | both | no |
+| password | `security-login-password` | Step 1 — Admin login password: | both | yes (step 9c) |
+| password | `security-login-password-confirm` | Step 1 — Admin login password: | both | yes (step 9c) |
+| button |  | Save Password | both | yes (step 9c) |
+| select | `security-recovery-question` | Step 2 (recommended) — Password recovery question: {— Select a question — / What was the name of your first pe | both | yes (step 9c) |
+| text | `security-recovery-custom` | Step 2 (recommended) — Password recovery question: | both | yes (step 9c) |
+| text | `security-recovery-answer` | Step 2 (recommended) — Password recovery question: | both | yes (step 9c) |
+| button |  | Save Recovery Question | both | yes (step 9c) |
+| checkbox | `security-require-login` | Step 3 — Require login (username + password) | both | yes (step 9c) |
+| checkbox | `security-plex-signin` | Sign in with Plex | both | yes (step 9c) |
+| checkbox | `security-plex-signin-auto-create` | Let new Plex users sign up (off: only people who already have a Plex p | both | yes (step 9c) |
+| checkbox | `security-plex-signin-can-download` | New Plex profiles can download (off: request-only) | both | yes (step 9c) |
+| checkbox | `security-oidc-signin` | Sign in with OIDC | both | yes (step 9c) |
+| text | `security-oidc-issuer` | Issuer URL: | both | yes (step 9c) |
+| text | `security-oidc-client-id` | Client ID: | both | yes (step 9c) |
+| password | `security-oidc-client-secret` | Client secret: | both | yes (step 9c) |
+| text | `security-oidc-button-label` | Button label: | both | yes (step 9c) |
+| text | `security-oidc-icon-url` | Icon URL (optional) : | both | yes (step 9c) |
+| text | `security-oidc-required-group` | Required group (optional) : | both | yes (step 9c) |
+| text | `security-oidc-groups-claim` | Groups claim: | both | yes (step 9c) |
+| text | `security-oidc-scopes` | Scopes: | both | yes (step 9c) |
+| text | `security-oidc-redirect-uri` | Callback URL override (optional) : | both | yes (step 9c) |
+| checkbox | `security-oidc-signin-auto-create` | Let new OIDC users sign up (off: only accounts already connected to a | both | yes (step 9c) |
+| checkbox | `security-oidc-signin-can-download` | New OIDC profiles can download (off: request-only) | both | yes (step 9c) |
+| button |  | Connect my admin account | both | yes (step 9c) |
+| checkbox | `security-oidc-only` | OIDC only: turn off every other way to sign in | both | yes (step 9c) |
+| select | `security-signup-sides` | New sign-ups start on {Music / Movies & TV / Music and Movies & TV} | both | yes (step 9c) |
+| number | `security-signup-request-limit` | Request limit for new sign-ups | both | yes (step 9c) |
+| number | `security-signup-request-limit-days` | Request limit for new sign-ups | both | yes (step 9c) |
 
 **🌐 Reverse proxy & remote access** (both, 3)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `security-trust-proxy` | Behind a reverse proxy | both | no |
-| text | `security-auth-proxy-header` | ↳ Auth proxy user header (optional) : | both | no |
-| textarea | `security-cors-origins` | Allowed WebSocket Origins: | both | no |
+| checkbox | `security-trust-proxy` | Behind a reverse proxy | both | yes (step 9c) |
+| text | `security-auth-proxy-header` | ↳ Auth proxy user header (optional) : | both | yes (step 9c) |
+| textarea | `security-cors-origins` | Allowed WebSocket Origins: | both | yes (step 9c) |
 
 **Database Settings** (both, 1)
 
@@ -2031,7 +2048,7 @@ Every top-level function, with its line today. A function is removed when the la
 | `syncAcoustidRequireVerifiedVisibility` | 46 | yes (step 6) |
 | `syncPreferExplicitState` | 55 | yes (step 5) |
 | `syncRetryConditionalRows` | 72 | yes (step 5) |
-| `syncOidcProviderBlock` | 89 | no |
+| `syncOidcProviderBlock` | 89 | yes (step 9c) |
 | `_qpHandleProfileControlChange` | 116 | yes (step 6) |
 | `_isVideoOwnedField` | 125 | no |
 | `debouncedAutoSaveSettings` | 131 | no |
@@ -2427,7 +2444,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/mobile-css-batch2.test.ts` | no |
 | `webui/src/test/music-size-limit-settings.test.ts` | yes (step 5, now `.tsx`) |
 | `webui/src/test/musicbrainz-settings.test.ts` | no |
-| `webui/src/test/oidc-provider-block-toggle.test.ts` | no |
+| `webui/src/test/oidc-provider-block-toggle.test.ts` | yes (step 9c) |
 | `webui/src/test/outside-text-is-escaped.test.ts` | yes (step 7g) |
 | `webui/src/test/quality-release-import-mode.test.ts` | yes (step 6, now `.tsx`) |
 | `webui/src/test/settings-autosave-toggle.test.ts` | yes (step 6) |
@@ -2440,7 +2457,7 @@ These pin `settings.js`, `video-settings.js` or `#settings-page` by source or by
 | `webui/src/test/settings-source-tiles-chains.test.ts` | yes (step 7a, now `.tsx`) |
 | `webui/src/test/settings-video-library-load.test.ts` | yes (step 8a) |
 | `webui/src/test/settings-video-tv-libraries.test.ts` | no |
-| `webui/src/test/signup-defaults-settings.test.ts` | no |
+| `webui/src/test/signup-defaults-settings.test.ts` | yes (step 9c) |
 | `webui/src/test/soulseek-observed-speed-settings.test.ts` | no |
 | `webui/src/test/vanilla-crossfile.test.ts` | no |
 | `webui/src/test/vanilla-settings-pickers.test.ts` | no |

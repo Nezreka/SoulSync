@@ -49,8 +49,10 @@ def _sent_sections() -> set:
 def test_the_page_sends_something_at_all():
     # A parse that quietly finds nothing would make every check below pass.
     sent = _sent_sections()
-    assert len(sent) > 30, sent
-    assert "spotify" in sent
+    # fewer as tabs move to React and save their own sections (SETTINGS_PORT.md:
+    # 27 at step 9c); the Connections tab's still go through this save
+    assert len(sent) > 10, sent
+    assert {"spotify", "plex", "jellyfin", "lastfm"} <= sent
 
 
 def test_every_section_the_page_sends_is_persisted():

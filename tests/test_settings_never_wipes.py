@@ -110,6 +110,7 @@ def test_an_empty_string_the_user_typed_is_still_saved():
 
 def test_the_helpers_are_used_widely(save_body):
     # If most of the payload bypassed them the guard above would be hollow.
-    # (the save shrinks as tabs move to React, SETTINGS_PORT.md: 40 left at
-    # step 8d)
-    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 25
+    # the save shrinks as tabs move to React (SETTINGS_PORT.md: 14 left at
+    # step 9c, with Connections the last big user); a parse that found nothing
+    # would find none
+    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 5

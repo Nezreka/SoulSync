@@ -16,6 +16,7 @@ import type { SettingsTabProps } from '../host';
 import { AUTOSAVE_DELAY_MS, type SettingsStore } from '../settings-store';
 import { helpBits, Section, useHelp } from './parts';
 import { text } from './source-panels';
+import { SecuritySection } from './system-security';
 
 const TAB = 'advanced';
 type Section_ = Record<string, unknown>;
@@ -1169,6 +1170,7 @@ function DeveloperSection() {
 /** the System tab, part by part */
 export function SystemTab(props: SettingsTabProps) {
   if (props.part === 'saving') return <SavingSection store={props.store} />;
+  if (props.part === 'security') return <SecuritySection {...props} />;
   if (props.part === 'database') return <DatabaseSections {...props} />;
   if (props.part === 'tools') return <ToolSections {...props} />;
   if (props.part === 'developer') return <DeveloperSection />;

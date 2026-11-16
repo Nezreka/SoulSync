@@ -48,7 +48,7 @@ import {
   openPersonalSettings,
   saveMyAccountToken,
 } from './my-accounts';
-import { initOidcOnlyAdmin } from './oidc-only';
+import { initOidcOnlyAdmin, refreshOidcOnlySettingsStatus } from './oidc-only';
 import { initOidcAdminStatus, initOidcSignIn } from './oidc-signin';
 import {
   closeDownloadOriginsModal,
@@ -157,6 +157,10 @@ export const SHELL_WINDOW_EXPORTS = {
   // ...whose controls the React System tab renders and wires through this
   // (the shell is its own bundle: an import would be a second weather state)
   initWeatherPreviewSettings,
+  // the OIDC boxes inside Security & Access, drawn once the React System tab
+  // has put them on the page (SETTINGS_PORT.md step 9c)
+  initOidcAdminStatus,
+  refreshOidcOnlySettingsStatus,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);

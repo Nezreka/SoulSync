@@ -159,6 +159,18 @@ export function renderSettingsStatus(box: HTMLElement, st: OidcOnlyStatus | null
   }
 }
 
+/** the Settings status lines under the OIDC-only switch, drawn again: the
+ *  React System tab calls this once it has put the box on the page (the shell
+ *  is its own bundle, so it reaches this through window) */
+export async function refreshOidcOnlySettingsStatus(
+  isAdmin: () => boolean = () => window.getCurrentProfileContext?.()?.isAdmin === true,
+): Promise<void> {
+  if (!isAdmin()) return;
+  const box = document.getElementById(SETTINGS_ID);
+  if (!box) return;
+  renderSettingsStatus(box, await readOidcOnlyStatus());
+}
+
 /** wire both, once an admin is signed in */
 export function initOidcOnlyAdmin(
   isAdmin: () => boolean = () => window.getCurrentProfileContext?.()?.isAdmin === true,
