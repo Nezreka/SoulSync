@@ -347,6 +347,30 @@ def apply_sync_errors(
     return log_line, 'warning'
 
 
+def apply_refresh_errors(
+    errors: int,
+    messages: List[str],
+    result: Dict[str, Any],
+    log_line: str,
+    log_type: str,
+) -> tuple:
+    """Same as ``apply_sync_errors`` for the REFRESH phase. A playlist whose
+    source returned nothing was counted, then dropped, so the run read as a
+    clean "completed, 0 refreshed" (#2147).
+
+    Sets ``result['refresh_errors']`` always, and adds to ``result['error']``
+    when something failed. Returns the possibly downgraded
+    ``(log_line, log_type)``."""
+    errors = int(errors or 0)
+    result['refresh_errors'] = str(errors)
+    if errors <= 0:
+        return log_line, log_type
+    message = 'Refresh failed: ' + '; '.join(list(messages or []) or [f'{errors} playlist(s)'])
+    result['error'] = f"{message}. {result['error']}" if result.get('error') else message
+    log_line += f', {errors} playlist refresh{"es" if errors != 1 else ""} failed'
+    return log_line, 'warning'
+
+
 def run_wishlist_phase(
     deps: AutomationDeps,
     automation_id: Optional[str],

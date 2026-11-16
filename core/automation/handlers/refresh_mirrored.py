@@ -9,7 +9,7 @@ source, leaving the handler responsible only for:
 - filtering mirrors that can't be refreshed (``file``, user playlists, a
   beatport mirror that isn't a live list),
 - extracting upstream URLs from the stored ``description`` for URL-
-  backed sources (``spotify_public``, ``youtube``),
+  backed sources (``spotify_public``, ``youtube``, ``itunes_link``),
 - the Spotify-public → authenticated-Spotify fallback (uses the
   ``spotify`` adapter when the user is signed in so the mirror keeps
   album art),
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
 from core.profile_context import get_background_profile
-from core.playlists.source_refs import require_refresh_url
+from core.playlists.source_refs import URL_BACKED_SOURCES, require_refresh_url
 from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
 from core.playlists import auto_identify
 from core.playlists.user_playlists import has_upstream
@@ -34,14 +34,14 @@ from core.playlists.sources.base import (
     SOURCE_SPOTIFY,
     SOURCE_SPOTIFY_PUBLIC,
     SOURCE_TIDAL,
-    SOURCE_YOUTUBE,
 )
 
 
 # Sources that store the upstream URL in ``description`` (because their
 # ``source_playlist_id`` is a deterministic hash, not the native ID).
 # The refresh path has to recover the URL before calling the adapter.
-_URL_BACKED_SOURCES = {SOURCE_SPOTIFY_PUBLIC, SOURCE_YOUTUBE}
+# itunes_link was missing, so it got the hash and never refreshed (#2147).
+_URL_BACKED_SOURCES = URL_BACKED_SOURCES
 
 
 def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
@@ -141,7 +141,10 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 log_line=f'Error: {pl.get("name", "?")} — {str(e)}',
                 log_type='error',
             )
-    return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
+    # the pipeline puts these in its result, so a run that refreshed nothing
+    # doesn't read as a clean one (#2147)
+    return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors)),
+            '_error_messages': errors}
 
 
 def _maybe_discover(

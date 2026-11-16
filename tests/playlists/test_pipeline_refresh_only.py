@@ -144,3 +144,26 @@ def test_a_failed_sync_is_reported_not_a_clean_completion(db):
     )
     assert result['sync_errors'] == '1'
     assert 'Navidrome playlist write failed' in result['error']
+
+
+def test_a_failed_refresh_is_reported_not_a_clean_completion(db):
+    """#2147: a refresh that got nothing from the source was counted, then
+    dropped: the run read "completed, playlists_refreshed: 0"."""
+    pl_id = db.get_mirrored_playlists(1)[0]['id']
+    progress = []
+    deps = _minimal_deps(get_database=lambda: db,
+                         update_progress=lambda _aid, **k: progress.append(k))
+    result = pipeline.run_mirrored_playlist_pipeline(
+        {'playlist_id': str(pl_id), 'profile_id': 1, '_automation_id': 'mirrored_x',
+         'refresh_only': True},
+        deps,
+        refresh_fn=lambda cfg, deps: {
+            'refreshed': '0', 'errors': '1',
+            '_error_messages': ['Road Trip: no tracks returned from source']},
+        sync_one_fn=lambda *a, **k: {},
+        sync_and_wishlist_fn=lambda *a, **k: {'synced': 0, 'skipped': 0, 'wishlist_queued': 0},
+    )
+    assert result['refresh_errors'] == '1'
+    assert result['error'] == 'Refresh failed: Road Trip: no tracks returned from source'
+    assert progress[-1]['log_type'] == 'warning'
+    assert '1 playlist refresh failed' in progress[-1]['log_line']
