@@ -893,6 +893,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 15 | `a032b935c` (video pass V2b) | **The Organization card's Video panel is React.** The ignore switches stay off while embedded subs don't count. |
 | Nov 15 | `7876fb5a5` (video pass V2a) | **The Folders card's Video panel and the video downloads config are React** (with the Sources tab's video blocks). The seeding goals save when changed. |
 | Nov 15 | `16fc2f2b8` (video pass V1) | **Video Quality, Custom Formats and YouTube Quality are React; the Quality tab is done.** `video-shown.ts` carries the video page's load and save-button hooks. |
 | Nov 15 | `f795cbb36` (step 10d) | **Connections: MetaSync is React; every tab's music side is done.** The video group's Expand All is back (gone with 10b). |
