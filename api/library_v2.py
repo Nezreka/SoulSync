@@ -2836,6 +2836,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail(str(exc), exc.status)
         return jsonify({"success": True, **result})
 
+    @_route("/api/library/v2/artists/<int:artist_id>/rename-check")
+    def lib2_artist_rename_check(artist_id):
+        """#2141: how many files of each album Preview rename would move, one
+        time-bounded slice at a time (``?start=`` from the last ``next``)."""
+        from core.library2.rename_check import check_artist_renames
+
+        # renaming is the admin's, so is the hint that offers it
+        if not _is_admin():
+            return jsonify({"success": True, "enabled": False, "reason": "admin",
+                            "albums": {}, "tracks": [], "next": None, "total": 0})
+        start = request.args.get("start", default=0, type=int) or 0
+        result = check_artist_renames(get_database(), config_manager, artist_id, start=start)
+        return jsonify({"success": True, **result})
+
     @_route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``

@@ -12,6 +12,7 @@ import {
   fetchLibraryV2ReorganizeQueueSnapshot,
   LIBRARY_V2_QUERY_KEY,
   previewLibraryV2AlbumReorganize,
+  RENAME_CHECK_QUERY_KEY,
 } from '../-library-v2.api';
 import { FilePathCellBody } from './file-path-cell';
 import styles from './library-v2-page.module.css';
@@ -128,6 +129,14 @@ export function AlbumReorganizeModal({
     allReleases?.artistName ?? '',
     watchingBulk,
   );
+
+  // #2141: the artist page's "to rename" counts are stale once files moved
+  const finished =
+    queueItem?.status === 'done' ||
+    (watchingBulk && bulkProgress !== null && !bulkProgress.running && bulkProgress.queued === 0);
+  useEffect(() => {
+    if (finished) void queryClient.invalidateQueries({ queryKey: RENAME_CHECK_QUERY_KEY });
+  }, [finished, queryClient]);
 
   // The plan is computed from the catalogue, so it does not vary by source or
   // mode and the query key has nothing else to depend on.
@@ -390,6 +399,10 @@ export function ArtistReorganizeAllModal({
   const [previewAlbum, setPreviewAlbum] = useState<{ id: number; title: string } | null>(null);
   const releasesWithFiles = albums.filter((a) => a.tracks_present > 0);
   const progress = useArtistReorganizeQueueProgress(artistName, watching);
+  const finished = watching && progress !== null && !progress.running && progress.queued === 0;
+  useEffect(() => {
+    if (finished) void queryClient.invalidateQueries({ queryKey: RENAME_CHECK_QUERY_KEY });
+  }, [finished, queryClient]);
 
   async function apply() {
     setBusy(true);

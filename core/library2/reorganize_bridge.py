@@ -126,10 +126,9 @@ def enqueue_album_reorganize(db: Any, lib2_album_id: int) -> Dict[str, Any]:
     )
 
 
-def enqueue_artist_reorganize_all(db: Any, lib2_artist_id: int) -> Dict[str, Any]:
-    """Enqueue every album of one lib2 artist for reorganize (docs §50)."""
-    from core.reorganize_queue import get_queue
-
+def artist_reorganize_albums(db: Any, lib2_artist_id: int) -> list:
+    """Every album with files of one lib2 artist and its aliases, the set
+    Rename / Organize All works on."""
     with closing(db._get_connection()) as conn:
         artist = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (int(lib2_artist_id),)).fetchone()
         if artist is None:
@@ -142,7 +141,14 @@ def enqueue_artist_reorganize_all(db: Any, lib2_artist_id: int) -> Dict[str, Any
     for artist_id in group:
         for album in db.get_artist_albums_for_reorganize(artist_id):
             albums_by_id[str(album["album_id"])] = album
-    albums = list(albums_by_id.values())
+    return list(albums_by_id.values())
+
+
+def enqueue_artist_reorganize_all(db: Any, lib2_artist_id: int) -> Dict[str, Any]:
+    """Enqueue every album of one lib2 artist for reorganize (docs §50)."""
+    from core.reorganize_queue import get_queue
+
+    albums = artist_reorganize_albums(db, lib2_artist_id)
     if not albums:
         raise ReorganizeBridgeError("No albums found for this artist", status=404)
 
@@ -163,5 +169,6 @@ __all__ = [
     "catalogue_preview_fn",
     "preview_album_reorganize",
     "enqueue_album_reorganize",
+    "artist_reorganize_albums",
     "enqueue_artist_reorganize_all",
 ]

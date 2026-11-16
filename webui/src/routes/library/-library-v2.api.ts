@@ -1748,6 +1748,60 @@ export async function previewLibraryV2AlbumReorganize(
   );
 }
 
+/** #2141: how many files of each album Preview rename would move. */
+export interface LibraryV2RenameCheck {
+  /** false while organizing is off, the template doesn't render, or for a non-admin */
+  enabled: boolean;
+  /** album id: files there that aren't where the template puts them */
+  albums: Record<string, number>;
+  /** the tracks those files belong to */
+  tracks: number[];
+}
+
+interface RenameCheckSlice extends Ok, LibraryV2RenameCheck {
+  next: number | null;
+}
+
+/** kept apart from LIBRARY_V2_QUERY_KEY: every library write invalidates that,
+ *  and this plans every album of the artist. a reorganize refreshes it. */
+export const RENAME_CHECK_QUERY_KEY = ['library-v2-rename-check'] as const;
+
+/** the server plans in time-bounded slices; walk them all */
+export async function fetchLibraryV2ArtistRenameCheck(
+  artistId: number,
+  signal?: AbortSignal,
+): Promise<LibraryV2RenameCheck> {
+  const out: LibraryV2RenameCheck = { enabled: true, albums: {}, tracks: [] };
+  let start: number | null = 0;
+  // a slice plans at least one album, so this ends; the cap is a backstop
+  for (let slice = 0; start !== null && slice < 1000; slice += 1) {
+    const page: RenameCheckSlice = await lib2Json<RenameCheckSlice>(
+      apiClient.get(`library/v2/artists/${artistId}/rename-check`, {
+        searchParams: { start },
+        signal,
+        timeout: 60_000,
+      }),
+      'Rename check failed',
+    );
+    if (!page.enabled) return { enabled: false, albums: {}, tracks: [] };
+    Object.assign(out.albums, page.albums);
+    out.tracks.push(...page.tracks);
+    start = page.next;
+  }
+  return out;
+}
+
+export function libraryV2ArtistRenameCheckQueryOptions(artistId: number) {
+  return queryOptions({
+    queryKey: [...RENAME_CHECK_QUERY_KEY, artistId],
+    queryFn: ({ signal }) => fetchLibraryV2ArtistRenameCheck(artistId, signal),
+    enabled: artistId > 0,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
 /** Enqueue one lib2 album for reorganize — returns immediately, the queue
  *  worker processes items FIFO (docs §50). */
 export async function applyLibraryV2AlbumReorganize(

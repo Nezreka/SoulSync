@@ -230,3 +230,31 @@ def test_reorganize_all_404_for_missing_artist(api):
     client, _db, _ids = api
     resp = client.post("/api/library/v2/artists/999999/reorganize-all", json={})
     assert resp.status_code == 404
+
+
+# -- rename check (#2141) ----------------------------------------------------
+
+
+def test_rename_check_counts_off_the_preview_plan(monkeypatch, api):
+    """#2141: the artist page's count comes from the planner Preview rename
+    shows, per album with files, and says when the walk is done."""
+    client, _db, ids = api
+
+    def fake_plan(conn, album_id, **kwargs):
+        moving = {"track_id": album_id * 10, "matched": True, "file_exists": True,
+                  "new_path": "x/y.flac", "unchanged": False}
+        tracks = [moving, {**moving, "track_id": album_id * 10 + 1, "unchanged": True}]
+        if album_id == ids["album"]:
+            tracks.append({**moving, "track_id": album_id * 10 + 2})
+        return {"success": True, "status": "planned", "tracks": tracks}
+
+    monkeypatch.setattr(
+        "core.library2.reorganize_plan.plan_album_reorganize", fake_plan, raising=True)
+    resp = client.get(f"/api/library/v2/artists/{ids['artist']}/rename-check")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["enabled"] is True and body["next"] is None and body["total"] == 2
+    assert body["albums"][str(ids["album"])] == 2
+    assert sorted(body["albums"].values()) == [1, 2]
+    assert ids["album"] * 10 + 1 not in body["tracks"]
+    assert ids["album"] * 10 + 2 in body["tracks"] and len(body["tracks"]) == 3
