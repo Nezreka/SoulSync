@@ -36,7 +36,7 @@ from typing import Callable, List, Mapping, Optional, Sequence
 from core.imports.paths import sanitize_filename
 from core.playlists.managed_artifacts import (
     MANIFEST_DIR, MATERIALIZE_LOCK, artifact_fingerprint, entry_is_owned,
-    load_manifest, safe_output_dir, save_manifest,
+    fingerprint_matches, load_manifest, safe_output_dir, save_manifest,
 )
 
 MATERIALIZE_MODES = ("symlink", "copy")
@@ -217,7 +217,8 @@ def materialize_one(
                 copy_fn(real_path, temporary)
                 outcome = "fellback"
         if replace_owned:
-            if expected_fingerprint is not None and artifact_fingerprint(dest_path) != expected_fingerprint:
+            if expected_fingerprint is not None and not fingerprint_matches(
+                    artifact_fingerprint(dest_path), expected_fingerprint):
                 raise FileExistsError("Managed playlist destination changed while preparing its replacement")
             os.replace(temporary, dest_path)
         else:
@@ -442,7 +443,9 @@ def _rebuild_playlist_folder(
             owned[name] = {"source": real, "fingerprint": artifact_fingerprint(dest)}
         elif outcome == "unchanged" and verified:
             # Keep the fingerprint verified before the freshness check; re-reading
-            # it here would adopt an edit made in between.
+            # it here would adopt an edit made in between. Legacy keys in the
+            # stored fingerprint ride along harmlessly: fingerprint_matches
+            # ignores them, so no migration is needed.
             owned[name] = {**record, "source": real}
         elif outcome == "unchanged" and not record and _adoptable(real, dest, mode):
             # a 3.6.1 folder's entry: what this rebuild would have written, so

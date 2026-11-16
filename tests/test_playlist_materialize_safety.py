@@ -319,6 +319,8 @@ def test_manifest_directory_symlink_is_refused(tmp_path):
 
 
 def test_same_size_mtime_edit_survives_on_filesystems_with_creation_only_ctime(tmp_path, monkeypatch):
+    # ctime no longer feeds ownership at all; this now pins that the sha256
+    # alone catches a same-size, mtime-restored edit on such a filesystem.
     from core.playlists import managed_artifacts
 
     source = _audio(tmp_path / "Music" / "song.flac")
@@ -406,3 +408,538 @@ def test_unchanged_result_does_not_adopt_user_edit_after_initial_ownership_check
     assert destination.read_bytes() == b"user edits after initial check"
     assert summary.removed_stale == 0
 
+
+def _settled_fingerprint(path):
+    """Fingerprint a just-created file: its timestamps can still settle
+    during its first reads on some filesystems (observed on this VM's),
+    which artifact_fingerprint's race check rightly reads as a change and
+    answers None - so read once to settle, then require an answer."""
+    from core.playlists.managed_artifacts import artifact_fingerprint
+
+    artifact_fingerprint(path)
+    result = artifact_fingerprint(path) or artifact_fingerprint(path)
+    assert result is not None
+    return result
+
+
+def _shifted_stat(value):
+    return SimpleNamespace(
+        st_dev=value.st_dev + 9999, st_ino=value.st_ino + 12345,
+        st_mode=value.st_mode, st_nlink=value.st_nlink, st_uid=value.st_uid,
+        st_gid=value.st_gid, st_size=value.st_size,
+        st_atime=value.st_atime, st_mtime=value.st_mtime, st_ctime=value.st_ctime,
+        st_atime_ns=value.st_atime_ns, st_mtime_ns=value.st_mtime_ns,
+        st_ctime_ns=value.st_ctime_ns + 1000000,
+        st_blksize=getattr(value, "st_blksize", 0), st_blocks=getattr(value, "st_blocks", 0),
+        st_flags=getattr(value, "st_flags", 0), st_rdev=getattr(value, "st_rdev", 0),
+        st_file_attributes=getattr(value, "st_file_attributes", 0),
+        st_reparse_tag=getattr(value, "st_reparse_tag", 0),
+        st_birthtime=getattr(value, "st_birthtime", 0))
+
+
+def _remount_shift(monkeypatch):
+    """Simulate a remount: patching managed_artifacts.os patches the global
+    os module, so every lstat/fstat in the process reports a different
+    device, inode and ctime - a whole-volume identity change, consistently
+    across lstat and fstat so the fingerprint's internal identity check
+    still passes. That reach includes os.path.islink/lexists in callers,
+    which read the same patched lstat (only st_mode, which is preserved)."""
+    from core.playlists import managed_artifacts
+
+    real_lstat = managed_artifacts.os.lstat
+    real_fstat = managed_artifacts.os.fstat
+    monkeypatch.setattr(managed_artifacts.os, "lstat",
+                        lambda path, *a, **k: _shifted_stat(real_lstat(path, *a, **k)))
+    monkeypatch.setattr(managed_artifacts.os, "fstat",
+                        lambda fd, *a, **k: _shifted_stat(real_fstat(fd, *a, **k)))
+
+
+def _manifest_for(root, folder):
+    for path in (Path(root) / ".soulsync-playlist-manifests").glob("*.json"):
+        value = json.loads(path.read_text())
+        if value.get("folder") == folder:
+            return path, value
+    raise AssertionError(f"no manifest for {folder}")
+
+
+def _make_legacy_fingerprint(root, folder, name):
+    path, value = _manifest_for(root, folder)
+    fingerprint = value["entries"][name]["fingerprint"]
+    fingerprint.update({"device": 424242, "inode": 989898, "ctime_ns": 111})
+    path.write_text(json.dumps(value))
+
+
+def test_copy_ownership_survives_remount_identity_change(tmp_path, monkeypatch):
+    from core.playlists.managed_artifacts import load_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    _remount_shift(monkeypatch)
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert "song.flac" in load_manifest(root, first.playlist_dir)["entries"]
+    os.chmod(copied, 0o600 if (copied.stat().st_mode & 0o7777) != 0o600 else 0o644)
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+
+def test_legacy_manifest_fingerprint_with_identity_keys_still_owned(tmp_path):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = tmp_path / "Playlists"
+    first = rebuild_playlist_folder(str(root), "Mix", [source], "copy")
+    _make_legacy_fingerprint(root, "Mix", "song.flac")
+    summary = rebuild_playlist_folder(str(root), "Mix", [source], "copy")
+    assert summary.failed == 0
+    # No migration: a verified-unchanged record keeps its legacy keys; the
+    # comparator ignoring them is what keeps it owned.
+    _, value = _manifest_for(root, "Mix")
+    assert "device" in value["entries"]["song.flac"]["fingerprint"]
+    pruned = rebuild_playlist_folder(str(root), "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not (Path(first.playlist_dir) / "song.flac").exists()
+
+
+def test_legacy_owned_copy_can_be_replaced_after_source_change(tmp_path):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = tmp_path / "Playlists"
+    first = rebuild_playlist_folder(str(root), "Mix", [source], "copy")
+    _make_legacy_fingerprint(root, "Mix", "song.flac")
+    Path(source).write_bytes(b"new source bytes, longer than before")
+    summary = rebuild_playlist_folder(str(root), "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert summary.copied == 1
+    assert (Path(first.playlist_dir) / "song.flac").read_bytes() == b"new source bytes, longer than before"
+
+
+def test_remount_does_not_relax_content_check(tmp_path, monkeypatch):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    original_stat = copied.stat()
+    assert len(b"modified audio") == len(b"original audio")
+    copied.write_bytes(b"modified audio")  # same byte length as original
+    os.utime(copied, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    _remount_shift(monkeypatch)
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 1
+    assert any("Managed playlist destination was changed" in error for error in summary.errors)
+    assert copied.read_bytes() == b"modified audio"
+    # No prune leg here: the failed rebuild above already popped the record,
+    # so a following prune rebuild would evaluate nothing. Prune-under-edit
+    # is covered by test_remount_prune_first_keeps_edited_copy.
+
+
+def test_symlink_ownership_survives_device_change(tmp_path, monkeypatch):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source])
+    link = Path(first.playlist_dir) / "song.flac"
+    assert link.is_symlink()
+    _remount_shift(monkeypatch)
+    pruned = rebuild_playlist_folder(root, "Mix", [])
+    assert pruned.removed_stale == 1
+    assert not os.path.lexists(link)
+    # A retargeted link not being owned is pinned in isolation by
+    # test_symlink_target_is_the_proof_when_size_and_mtime_match.
+
+
+def test_fingerprint_missing_required_key_is_not_owned(tmp_path):
+    from core.playlists.managed_artifacts import entry_is_owned, load_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = tmp_path / "Playlists"
+    built = rebuild_playlist_folder(str(root), "Mix", [source], "copy")
+    path, value = _manifest_for(root, "Mix")
+    del value["entries"]["song.flac"]["fingerprint"]["sha256"]
+    path.write_text(json.dumps(value))
+    record = load_manifest(str(root), built.playlist_dir)["entries"]["song.flac"]
+    dest = Path(built.playlist_dir) / "song.flac"
+    assert not entry_is_owned(str(dest), record)
+    pruned = rebuild_playlist_folder(str(root), "Mix", [], "copy")
+    assert pruned.removed_stale == 0
+    assert dest.read_bytes() == b"original audio"
+
+    linked = rebuild_playlist_folder(str(root), "Links", [source])
+    path, value = _manifest_for(root, "Links")
+    del value["entries"]["song.flac"]["fingerprint"]["target"]
+    path.write_text(json.dumps(value))
+    record = load_manifest(str(root), linked.playlist_dir)["entries"]["song.flac"]
+    link = Path(linked.playlist_dir) / "song.flac"
+    assert not entry_is_owned(str(link), record)
+    pruned = rebuild_playlist_folder(str(root), "Links", [])
+    assert pruned.removed_stale == 0
+    assert link.is_symlink()
+
+
+def test_fingerprint_shape_is_remount_stable_only(tmp_path):
+    from core.playlists.managed_artifacts import artifact_fingerprint
+
+    regular = tmp_path / "song.flac"
+    regular.write_bytes(b"original audio")
+    captured = _settled_fingerprint(str(regular))
+    assert set(captured) == {"mode", "size", "mtime_ns", "sha256"}
+    link = tmp_path / "link.flac"
+    link.symlink_to(regular)
+    assert set(artifact_fingerprint(str(link))) == {"mode", "size", "mtime_ns", "target"}
+
+
+def test_symlink_target_is_the_proof_when_size_and_mtime_match(tmp_path):
+    if os.utime not in os.supports_follow_symlinks:
+        pytest.skip("platform has no lutimes to restore a symlink's mtime")
+    from core.playlists.managed_artifacts import (
+        artifact_fingerprint, entry_is_owned, load_manifest)
+
+    first_source = _audio(tmp_path / "Music" / "aaaa.flac")
+    other_source = _audio(tmp_path / "Music" / "bbbb.flac", b"other audio!")
+    root = str(tmp_path / "Playlists")
+    built = rebuild_playlist_folder(root, "Mix", [first_source])
+    link = Path(built.playlist_dir) / "aaaa.flac"
+    record = load_manifest(root, built.playlist_dir)["entries"]["aaaa.flac"]
+    before = artifact_fingerprint(str(link))
+    original = os.lstat(link)
+    link.unlink()
+    # Same target-string length, so size matches too; only the target differs.
+    link.symlink_to(os.path.relpath(other_source, start=link.parent))
+    os.utime(link, ns=(original.st_atime_ns, original.st_mtime_ns), follow_symlinks=False)
+    after = artifact_fingerprint(str(link))
+    assert {k: v for k, v in after.items() if k != "target"} == {
+        k: v for k, v in before.items() if k != "target"}
+    assert after["target"] != before["target"]
+    assert not entry_is_owned(str(link), record)
+
+
+def test_legacy_symlink_record_repairs_after_source_move(tmp_path):
+    from core.playlists.materialize import update_materialized_paths
+
+    source = _audio(tmp_path / "Music" / "old.flac")
+    root = tmp_path / "Playlists"
+    built = rebuild_playlist_folder(str(root), "Mix", [source])
+    _make_legacy_fingerprint(root, "Mix", "old.flac")
+    moved = tmp_path / "Music" / "renamed.flac"
+    Path(source).rename(moved)
+    assert update_materialized_paths(str(root), {source: str(moved)}) == 1
+    assert (Path(built.playlist_dir) / "old.flac").resolve() == moved
+    assert rebuild_playlist_folder(str(root), "Mix", []).removed_stale == 1
+
+
+def test_remount_prune_first_keeps_edited_copy(tmp_path, monkeypatch):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    original_stat = copied.stat()
+    copied.write_bytes(b"modified audio")
+    os.utime(copied, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    _remount_shift(monkeypatch)
+    # The prune rebuild is the FIRST rebuild after the edit, so its gate
+    # evaluates the still-present record.
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 0
+    assert copied.read_bytes() == b"modified audio"
+
+
+def test_fingerprint_matches_rejects_malformed_inputs(tmp_path):
+    import stat as stat_module
+
+    from core.playlists.managed_artifacts import artifact_fingerprint, fingerprint_matches
+
+    regular = tmp_path / "song.flac"
+    regular.write_bytes(b"original audio")
+    current = _settled_fingerprint(str(regular))
+    assert fingerprint_matches(current, dict(current))
+    assert not fingerprint_matches(None, current)
+    assert not fingerprint_matches(current, None)
+    assert not fingerprint_matches(current, "not a dict")
+    assert not fingerprint_matches(current, {**current, "sha256": None})
+    missing = dict(current)
+    del missing["size"]
+    assert not fingerprint_matches(current, missing)
+    assert not fingerprint_matches(missing, current)
+    directory = {**current, "mode": stat_module.S_IFDIR | 0o755}
+    assert not fingerprint_matches(directory, dict(directory))
+    assert not fingerprint_matches({**current, "mode": True}, {**current, "mode": 1})
+    floated = {key: (float(value) if isinstance(value, int) else value)
+               for key, value in current.items()}
+    assert not fingerprint_matches(current, floated)
+    # Per-key isolation on the stored side: each numeric key float-typed in
+    # turn, and a bool that is numerically equal to the genuine value.
+    assert not fingerprint_matches(current, {**current, "size": float(current["size"])})
+    assert fingerprint_matches(current, {**current, "mtime_ns": float(current["mtime_ns"])})  # mtime is never compared
+    synthetic = {"mode": current["mode"], "size": 1, "mtime_ns": 5, "sha256": "x"}
+    assert not fingerprint_matches(synthetic, {**synthetic, "size": True})
+    # Out-of-range stored modes must yield False, never raise: a corrupted
+    # manifest can carry any JSON int, and stat.S_IFMT would OverflowError.
+    assert not fingerprint_matches(current, {**current, "mode": -0o100644})
+    assert not fingerprint_matches(current, {**current, "mode": 2**70 + 0o100644})
+    assert not fingerprint_matches({**current, "mode": -5}, current)
+    from core.playlists.managed_artifacts import entry_is_owned
+    assert not entry_is_owned(str(regular), {"fingerprint": {**current, "mode": -5}})
+    assert not entry_is_owned(str(regular), {"fingerprint": None})
+    link = tmp_path / "link.flac"
+    link.symlink_to(regular)
+    link_current = artifact_fingerprint(str(link))
+    assert fingerprint_matches(link_current, dict(link_current))
+    assert not fingerprint_matches(link_current, {**link_current, "target": None})
+
+
+def test_legacy_symlink_record_prunes_via_rebuild(tmp_path):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = tmp_path / "Playlists"
+    built = rebuild_playlist_folder(str(root), "Mix", [source])
+    _make_legacy_fingerprint(root, "Mix", "song.flac")
+    pruned = rebuild_playlist_folder(str(root), "Mix", [])
+    assert pruned.removed_stale == 1
+    assert not os.path.lexists(Path(built.playlist_dir) / "song.flac")
+
+
+def test_fingerprint_matches_ignores_permission_bits():
+    import stat as stat_module
+
+    from core.playlists.managed_artifacts import fingerprint_matches
+
+    current = {"mode": stat_module.S_IFREG | 0o644, "size": 3, "mtime_ns": 5, "sha256": "x"}
+    assert fingerprint_matches(current, {**current, "mode": stat_module.S_IFREG | 0o600})
+    link = {"mode": stat_module.S_IFLNK | 0o777, "size": 3, "mtime_ns": 5, "target": "t"}
+    assert fingerprint_matches(link, {**link, "mode": stat_module.S_IFLNK | 0o755})
+
+
+def test_fingerprint_matches_rejects_type_change():
+    import stat as stat_module
+
+    from core.playlists.managed_artifacts import fingerprint_matches
+
+    regular = {"mode": stat_module.S_IFREG | 0o644, "size": 3, "mtime_ns": 5, "sha256": "x"}
+    link = {"mode": stat_module.S_IFLNK | 0o777, "size": 3, "mtime_ns": 5, "target": "t"}
+    assert not fingerprint_matches(link, regular)
+    assert not fingerprint_matches(regular, link)
+    # A crafted record carrying BOTH proof keys gains nothing either way:
+    # the type check runs before the proof key is picked from current's type.
+    both = {"size": 3, "mtime_ns": 5, "sha256": "x", "target": "t"}
+    assert not fingerprint_matches(link, {**both, "mode": stat_module.S_IFREG | 0o644})
+    assert not fingerprint_matches(regular, {**both, "mode": stat_module.S_IFLNK | 0o777})
+
+
+def test_legacy_record_with_different_permission_bits_matches(tmp_path):
+    import stat as stat_module
+
+    from core.playlists.managed_artifacts import fingerprint_matches
+
+    regular = tmp_path / "song.flac"
+    regular.write_bytes(b"original audio")
+    current = _settled_fingerprint(str(regular))
+    other_perm = 0o600 if (current["mode"] & 0o7777) != 0o600 else 0o644
+    legacy = {**current, "device": 424242, "inode": 989898, "ctime_ns": 111,
+              "mode": stat_module.S_IFREG | other_perm}
+    assert fingerprint_matches(current, legacy)
+
+
+def test_chmod_after_materialize_still_prunes(tmp_path):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    before_perm = copied.stat().st_mode & 0o7777
+    os.chmod(copied, 0o600 if before_perm != 0o600 else 0o644)
+    assert (copied.stat().st_mode & 0o7777) != before_perm
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+
+def test_identical_replacement_is_treated_as_owned(tmp_path):
+    # Pins the documented tradeoff: a byte-identical original moved or
+    # copied onto our copy (mv, cp, cp -p, rsync -a) is indistinguishable
+    # from our copy, so it is managed - and pruned - as one.
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    original_stat = copied.stat()
+    replacement = tmp_path / "replacement.flac"
+    replacement.write_bytes(b"original audio")
+    os.utime(replacement, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    os.replace(replacement, copied)
+    assert copied.stat().st_ino != original_stat.st_ino
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+    # A plain cp (identical bytes, fresh timestamps) counts as ours too:
+    # mtime is not part of ownership.
+    second = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(second.playlist_dir) / "song.flac"
+    plain = tmp_path / "plain-copy.flac"
+    shutil.copyfile(source, plain)
+    os.replace(plain, copied)
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+
+def test_remount_owned_copy_can_be_replaced_after_source_change(tmp_path, monkeypatch):
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    _remount_shift(monkeypatch)
+    Path(source).write_bytes(b"new source bytes, longer than before")
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert summary.copied == 1
+    assert (Path(first.playlist_dir) / "song.flac").read_bytes() == b"new source bytes, longer than before"
+
+
+def test_remount_repairs_owned_link_after_source_move(tmp_path, monkeypatch):
+    from core.playlists.materialize import update_materialized_paths
+
+    source = _audio(tmp_path / "Music" / "old.flac")
+    root = str(tmp_path / "Playlists")
+    built = rebuild_playlist_folder(root, "Mix", [source])
+    _remount_shift(monkeypatch)
+    moved = tmp_path / "Music" / "renamed.flac"
+    Path(source).rename(moved)
+    assert update_materialized_paths(root, {source: str(moved)}) == 1
+    assert (Path(built.playlist_dir) / "old.flac").resolve() == moved
+
+
+@pytest.mark.parametrize("shift_ns", [-57, 1_000_000_000, 3_600_000_000_000])
+def test_mtime_shift_keeps_ownership(tmp_path, shift_ns):
+    # mtime is not part of ownership: a shift (a CIFS server's rounded time
+    # replacing the client's cached exact one, a FAT tz= remount) must not
+    # break the entry - it stays ours, rebuilds cleanly, and still prunes.
+    from core.playlists.managed_artifacts import load_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    original = copied.stat()
+    os.utime(copied, ns=(original.st_atime_ns, original.st_mtime_ns + shift_ns))
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert "song.flac" in load_manifest(root, first.playlist_dir)["entries"]
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+
+def test_fingerprint_matches_ignores_mtime(tmp_path):
+    from core.playlists.managed_artifacts import fingerprint_matches
+
+    regular = tmp_path / "song.flac"
+    regular.write_bytes(b"original audio")
+    current = _settled_fingerprint(str(regular))
+    assert fingerprint_matches(current, {**current, "mtime_ns": current["mtime_ns"] + 12345})
+    missing = dict(current)
+    del missing["mtime_ns"]
+    assert fingerprint_matches(current, missing)
+    assert fingerprint_matches(current, {**current, "mtime_ns": "not an int"})
+
+
+def test_symlink_recreated_to_same_target_is_owned(tmp_path):
+    # Pins the tradeoff: a symlink's whole content is its target, so a link
+    # recreated to the same target (new mtime, new inode) counts as ours.
+    from core.playlists.managed_artifacts import entry_is_owned, load_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    built = rebuild_playlist_folder(root, "Mix", [source])
+    link = Path(built.playlist_dir) / "song.flac"
+    record = load_manifest(root, built.playlist_dir)["entries"]["song.flac"]
+    target = os.readlink(link)
+    link.unlink()
+    link.symlink_to(target)
+    assert entry_is_owned(str(link), record)
+    pruned = rebuild_playlist_folder(root, "Mix", [])
+    assert pruned.removed_stale == 1
+    assert not os.path.lexists(link)
+
+
+def test_hardlinked_replacement_is_treated_as_owned(tmp_path):
+    # A hardlink of the library original at the destination is byte-identical
+    # to our copy, so it counts as ours and prunes - only the extra name
+    # goes, the library file itself is untouched.
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    hardlink = tmp_path / "hardlink.flac"
+    os.link(source, hardlink)
+    os.replace(hardlink, copied)
+    assert copied.stat().st_ino == Path(source).stat().st_ino
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+    assert Path(source).read_bytes() == b"original audio"
+
+
+def test_remount_and_mtime_shift_together_keep_ownership(tmp_path, monkeypatch):
+    from core.playlists.managed_artifacts import load_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    original = copied.stat()
+    os.utime(copied, ns=(original.st_atime_ns, original.st_mtime_ns + 3_600_000_000_000))
+    _remount_shift(monkeypatch)
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert "song.flac" in load_manifest(root, first.playlist_dir)["entries"]
+    pruned = rebuild_playlist_folder(root, "Mix", [], "copy")
+    assert pruned.removed_stale == 1
+    assert not copied.exists()
+
+
+def test_symlink_size_is_not_part_of_ownership(tmp_path):
+    # A link's size is just its target's length and some drivers report it
+    # differently; only the target itself is compared.
+    from core.playlists.managed_artifacts import artifact_fingerprint, fingerprint_matches
+
+    target = tmp_path / "song.flac"
+    target.write_bytes(b"original audio")
+    link = tmp_path / "link.flac"
+    link.symlink_to(target)
+    current = artifact_fingerprint(str(link))
+    assert fingerprint_matches(current, {**current, "size": current["size"] + 999})
+
+
+def test_identical_replacement_is_replaced_when_source_changes(tmp_path):
+    # The replace half of the pinned tradeoff: a byte-identical file placed
+    # on our copy counts as ours, so a later source change replaces it
+    # through the ownership gate like any managed copy.
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    plain = tmp_path / "plain-copy.flac"
+    shutil.copyfile(source, plain)
+    os.replace(plain, copied)
+    Path(source).write_bytes(b"new source bytes, longer than before")
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 0
+    assert summary.copied == 1
+    assert copied.read_bytes() == b"new source bytes, longer than before"
+
+
+def test_post_bug_dropped_record_is_not_recovered_but_file_is_preserved(tmp_path):
+    # Pins the documented limitation: an install already hit by #2137 has
+    # manifests whose records were dropped by the old comparator. This fix
+    # does not re-adopt those entries (the manifest is marked
+    # legacy_adopted and holds no record for the file) - the stale copy
+    # stays unmanaged and is preserved, never overwritten or pruned.
+    from core.playlists.managed_artifacts import save_manifest
+
+    source = _audio(tmp_path / "Music" / "song.flac")
+    root = str(tmp_path / "Playlists")
+    first = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    copied = Path(first.playlist_dir) / "song.flac"
+    save_manifest(root, first.playlist_dir,
+                  {"version": 1, "folder": "Mix", "entries": {}, "legacy_adopted": True})
+    Path(source).write_bytes(b"new source bytes, longer than before")
+    summary = rebuild_playlist_folder(root, "Mix", [source], "copy")
+    assert summary.failed == 1
+    assert copied.read_bytes() == b"original audio"
