@@ -731,14 +731,16 @@ export function OrganizationCard({ store }: SettingsTabProps) {
               checked={library.write_artist_nfo === true}
               onChange={(event) => store.set('library', 'write_artist_nfo', event.target.checked)}
             />{' '}
-            <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
+            <span>Write artist.nfo and artwork (Plex / Jellyfin / Kodi / Emby)</span>
           </label>
           <div className="help-text" style={{ marginTop: '6px' }}>
             When an import creates an artist folder, also write a Kodi-format <em>artist.nfo</em>{' '}
             containing the artist's name and MusicBrainz artist ID, so Jellyfin / Kodi / Emby
-            identify the artist instead of guessing by name. An existing <em>artist.nfo</em> with a
-            different ID is never overwritten. To backfill folders you already have, run the{' '}
-            <em>Artist NFO Backfill</em> repair job.
+            identify the artist instead of guessing by name. A folder with no artist artwork also
+            gets <em>poster.jpg</em> and <em>background.jpg</em> (fanart.tv, TheAudioDB or Deezer),
+            which Plex reads as local art. Nothing already in the folder is replaced, an{' '}
+            <em>artist.nfo</em> with a different ID included. To backfill folders you already have,
+            run the <em>Artist NFO Backfill</em> repair job.
           </div>
         </div>
       </div>

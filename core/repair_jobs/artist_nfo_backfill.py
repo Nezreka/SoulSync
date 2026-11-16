@@ -25,20 +25,33 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.artist_nfo_backfill")
 
 
+def _write_artwork(folder: str, name: str, mbid: str) -> None:
+    """#2138: poster.jpg / background.jpg beside the nfo, when the folder has none."""
+    from core.library.artist_image import write_artist_artwork
+
+    for kind, (ok, detail) in write_artist_artwork(folder, name, mbid).items():
+        if ok:
+            logger.info("Artist NFO backfill: wrote %s %s", kind, detail)
+        else:
+            logger.debug("Artist NFO backfill: %s skipped for %s: %s", kind, folder, detail)
+
+
 @register_job
 class ArtistNfoBackfillJob(RepairJob):
     job_id = 'artist_nfo_backfill'
     display_name = 'Artist NFO Backfill'
-    description = 'Writes artist.nfo files with MusicBrainz artist IDs for Jellyfin/Kodi/Emby'
+    description = 'Writes artist.nfo files with MusicBrainz artist IDs, plus poster.jpg and background.jpg'
     help_text = (
         'Backfills a Kodi-format artist.nfo into each artist folder of artists that have '
         'a MusicBrainz artist ID in the database but no artist.nfo on disk yet. The nfo '
         'contains the artist name (matching the ALBUMARTIST tag exactly) and the '
         'MusicBrainz artist ID, so Jellyfin/Kodi/Emby identifies the artist correctly '
-        'instead of guessing by name.\n\n'
-        'Only artist folders are touched, only when no artist.nfo exists, and never '
-        'when the folder already has one with a different MBID (hand-corrected files '
-        'are respected). Run this once after enabling "Write artist.nfo" in Settings, '
+        'instead of guessing by name. A folder with no artist photo or background also '
+        'gets poster.jpg and background.jpg (fanart.tv, TheAudioDB, Deezer), which Plex '
+        'reads as local artwork.\n\n'
+        'Only artist folders are touched and nothing already there is replaced: '
+        'an artist.nfo with a different MBID, or a photo you picked, stays as it '
+        'is. Run this once after enabling "Write artist.nfo" in Settings, '
         'or any time you want existing folders to get the file — future imports write '
         'it automatically when the setting is on.'
     )
@@ -99,7 +112,8 @@ class ArtistNfoBackfillJob(RepairJob):
                 # <name> still comes from the file's own ALBUMARTIST tag.
                 ok, detail = ensure_artist_nfo_for_track(
                     resolved, context.config_manager, force=True,
-                    fallback_mbid=mbid, fallback_name=artist_name)
+                    fallback_mbid=mbid, fallback_name=artist_name,
+                    artwork=_write_artwork)
                 if ok:
                     result.auto_fixed += 1
                     logger.info("Artist NFO backfill: wrote %s", detail)

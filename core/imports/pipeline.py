@@ -1119,7 +1119,8 @@ def _record_completed_import_side_effects(
     record_library_history_download(context)
     return True
 def _maybe_write_artist_nfo(context: dict, final_path: str, config_manager) -> None:
-    """#1449: optional artist.nfo (Jellyfin/Kodi/Emby) in the artist folder.
+    """#1449: optional artist.nfo (Jellyfin/Kodi/Emby) in the artist folder,
+    plus poster.jpg / background.jpg when missing (#2138).
 
     Idempotent (skips when the nfo exists) and never raises — a sidecar
     must not break the import. Called on every path where a file actually
@@ -1127,9 +1128,11 @@ def _maybe_write_artist_nfo(context: dict, final_path: str, config_manager) -> N
     stream-processor-variant paths).
     """
     try:
-        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        from core.library.artist_nfo import ensure_artist_nfo_for_track, schedule_artist_artwork
+        # #2138: poster.jpg / background.jpg ride the same switch
         _nfo_ok, _nfo_detail = ensure_artist_nfo_for_track(
-            context.get('_final_processed_path', final_path), config_manager)
+            context.get('_final_processed_path', final_path), config_manager,
+            artwork=schedule_artist_artwork)
         if _nfo_ok:
             logger.info(f"artist.nfo written: {_nfo_detail}")
     except Exception as _nfo_err:  # noqa: BLE001 — best effort sidecar

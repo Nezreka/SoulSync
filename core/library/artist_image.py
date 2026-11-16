@@ -20,6 +20,7 @@ with `tmp_path` fixtures.
 from __future__ import annotations
 
 import os
+import re
 from typing import Iterable, Optional, Tuple
 
 import requests
@@ -90,6 +91,103 @@ def find_artist_folder(track_paths: Iterable[str], artist_name: str) -> str:
             if folder and _folder_key(os.path.basename(folder.rstrip("/\\"))) == want:
                 return folder
     return ""
+
+
+_ARTIST_FOLDER_TEMPLATES = (
+    ("album_path", "$albumartist/$albumartist - $album/$track - $title"),
+    ("single_path", "$albumartist/$albumartist - $title/$title"),
+)
+
+
+def template_artist_levels(templates) -> list:
+    """the folder level (0 = right under the library root) the album and
+    single templates name after the artist.
+
+    ``$albumartist/Album/$albumartist - $album/...`` is level 0 even though the
+    album folder sits two below the artist (#2138). a template with no folder
+    of the artist's own (compilations, "$albumartist - $album/...") has no
+    level."""
+    from core.imports.paths import _ARTIST_TOKEN_RE
+
+    templates = templates if isinstance(templates, dict) else {}
+    levels = []
+    for key, default in _ARTIST_FOLDER_TEMPLATES:
+        template = templates.get(key)
+        if not isinstance(template, str) or not template.strip():
+            template = default
+        folders = template.replace("\\", "/").split("/")[:-1]
+        for level, segment in enumerate(folders):
+            if _ARTIST_TOKEN_RE.search(segment):
+                # "$albumartist - $album" is an album folder named after the
+                # artist, not the artist's folder
+                if "$" not in _ARTIST_TOKEN_RE.sub("", segment) and level not in levels:
+                    levels.append(level)
+                break
+    return levels
+
+
+def _words(name: str) -> list:
+    from core.text.normalize import normalize_for_comparison
+
+    return re.findall(r"[^\W_]+", normalize_for_comparison(name or ""))
+
+
+def folder_is_named_for(folder_name: str, artist_name: str) -> bool:
+    """the folder name starts with the artist's name, word for word.
+
+    "3JS (Nederpop trio)" is 3JS's folder when the template adds a
+    disambiguation (#2138). only trusted at the level the template puts the
+    artist, where an album folder ("3JS - Nu") can't be mistaken for it."""
+    want = _words(artist_name)
+    have = _words(folder_name)
+    return bool(want) and have[:len(want)] == want
+
+
+def _containing_root(path: str, roots) -> str:
+    best = ""
+    for root in roots or ():
+        if not root:
+            continue
+        try:
+            root = os.path.realpath(root)
+            if os.path.commonpath((root, path)) == root and len(root) > len(best):
+                best = root
+        except (OSError, ValueError):
+            continue
+    return best
+
+
+def locate_artist_folder(track_path: str, artist_name: str, roots, templates) -> str:
+    """the artist's folder for a track in the library, or "" when it can't be told.
+
+    "one up from the album folder" (derive_artist_folder) is only right for
+    Artist/Album/track. a template like Artist/Album/Artist - Album/track put
+    artist.nfo in the "Album" folder (#2138). so the folder comes from the
+    library root down, at the level the naming template puts the artist, when
+    it carries the artist's name. failing that, the topmost folder below the
+    root named exactly after the artist. never a library root.
+    """
+    if not track_path or not isinstance(track_path, str):
+        return ""
+    track_dir = os.path.dirname(os.path.realpath(track_path))
+    root = _containing_root(track_dir, roots)
+    if root:
+        rel = os.path.relpath(track_dir, root)
+        parts = [] if rel in (".", "") else rel.split(os.sep)
+        for level in template_artist_levels(templates):
+            if level < len(parts) and folder_is_named_for(parts[level], artist_name):
+                return os.path.join(root, *parts[:level + 1])
+        ancestors = [os.path.join(root, *parts[:i + 1]) for i in range(len(parts))]
+        want = _folder_key(artist_name)
+        for folder in ancestors:
+            if want and _folder_key(os.path.basename(folder)) == want:
+                return folder
+        # no folder carries the name: a compilation ("Compilations/Album")
+        # or a layout we can't read. no guess, a wrong artist.nfo is worse
+        # than none.
+        return ""
+    # outside every known root: only the nearest folders, and only by name
+    return find_artist_folder([track_path], artist_name)
 
 
 def pick_artist_image_url(artist_obj) -> Optional[str]:
@@ -188,10 +286,93 @@ def write_artist_jpg(
     return True, target
 
 
+POSTER_FILENAME = "poster.jpg"
+BACKGROUND_FILENAME = "background.jpg"
+# what plex / jellyfin / kodi already read as the artist's photo or
+# background. any of them in the folder means the user (or an earlier run)
+# picked one, so nothing new is written beside it.
+_PHOTO_STEMS = ("poster", "artist", "folder", "thumb")
+_BACKGROUND_STEMS = ("background", "backdrop", "fanart", "art")
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".tbn")
+
+
+def _has_image(names, stems) -> bool:
+    for name in names:
+        stem, ext = os.path.splitext(name.casefold())
+        if stem in stems and ext in _IMAGE_EXTS:
+            return True
+    return False
+
+
+def _write_new_file(folder: str, filename: str, data: bytes) -> Tuple[bool, str]:
+    """write ``filename`` only when nothing by that name is there."""
+    target = os.path.join(folder, filename)
+    if os.path.lexists(target):
+        return False, f"{filename} already exists"
+    tmp = target + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        if os.path.lexists(target):  # appeared while we wrote: theirs wins
+            os.remove(tmp)
+            return False, f"{filename} already exists"
+        os.replace(tmp, target)
+    except OSError as exc:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError as cleanup:
+            logger.debug("artist artwork temp cleanup failed for %s: %s", tmp, cleanup)
+        return False, f"write failed: {exc}"
+    return True, target
+
+
+def write_artist_artwork(folder: str, artist_name: str, mbid: str = "", *,
+                         artwork=None) -> dict:
+    """poster.jpg (the artist's photo) and background.jpg (the wide art) in
+    the artist folder, for plex and anything else that reads local artwork
+    (#2138).
+
+    pictures come from the same HD sources the metadata updater pushes to
+    plex/jellyfin (fanart.tv, TheAudioDB, Deezer), tied to the artist by
+    MusicBrainz id. a folder that already has a photo or background (poster,
+    artist, folder, fanart, backdrop...) keeps it: nothing is overwritten.
+    returns {"poster": (ok, detail), "background": (ok, detail)} for what
+    was tried. ``artwork`` swaps in the artist_artwork module for tests.
+    """
+    if not folder or not os.path.isdir(folder) or not str(artist_name or "").strip():
+        return {}
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return {}
+    need_photo = not _has_image(names, _PHOTO_STEMS)
+    need_background = not _has_image(names, _BACKGROUND_STEMS)
+    if not need_photo and not need_background:
+        return {}
+    if artwork is None:
+        from core.metadata import artist_artwork as artwork
+    found = artwork.candidates(str(artist_name).strip(), mbid=str(mbid or "").strip())
+    results = {}
+    if need_photo:
+        picked = artwork.first_that_fits(found.get("photos") or [], artwork.fits_photo)
+        results["poster"] = (_write_new_file(folder, POSTER_FILENAME, picked[0])
+                             if picked else (False, "no photo found"))
+    if need_background:
+        picked = artwork.first_that_fits(found.get("backgrounds") or [], artwork.fits_background)
+        results["background"] = (_write_new_file(folder, BACKGROUND_FILENAME, picked[0])
+                                 if picked else (False, "no background found"))
+    return results
+
+
 __all__ = [
     "derive_artist_folder",
     "find_artist_folder",
+    "folder_is_named_for",
+    "locate_artist_folder",
+    "template_artist_levels",
     "pick_artist_image_url",
     "download_image_bytes",
+    "write_artist_artwork",
     "write_artist_jpg",
 ]
