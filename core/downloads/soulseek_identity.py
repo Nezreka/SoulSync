@@ -23,6 +23,7 @@ from functools import lru_cache
 from typing import Any, Sequence
 
 from core.text.normalize import normalize_for_comparison
+from core.text.title_match import numbers_conflict
 from core.text.track_prefix import parse_track_prefix
 
 
@@ -266,6 +267,10 @@ def match_track(target: Any, candidate: Any, *, album: str = '') -> IdentityResu
             and bool(_VERSION_WORD.search(variant.title[len(wanted):]))
         )
         if not exact_title and not versioned_title:
+            # a near title with other numbers is another part or episode,
+            # not a weak edge: ABGT696's Pt. 2 filled ABGT699's Pt. 1 (#2134)
+            if numbers_conflict(wanted, variant.title):
+                continue
             best_similarity = max(
                 best_similarity, SequenceMatcher(None, wanted, variant.title).ratio(),
             )

@@ -526,6 +526,40 @@ def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
     return _digit_tokens(title_a) != _digit_tokens(title_b)
 
 
+_DIGIT_RUN_RE = re.compile(r"\d+")
+_YEAR_RUN_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def _title_numbers(text: str) -> frozenset:
+    out = set()
+    for run in _DIGIT_RUN_RE.findall(text or ""):
+        # a year is a remaster or edition date, not which release it is
+        if _YEAR_RUN_RE.fullmatch(run):
+            continue
+        out.add(run.lstrip("0") or "0")
+    return frozenset(out)
+
+
+def numbers_conflict(title_a: str, title_b: str) -> bool:
+    """True when both titles carry numbers and they say different things.
+
+    'Group Therapy 696' is never 'Group Therapy 699', and 'Messages Pt. 1
+    [ABGT696]' is never 'Messages Pt. 4 [ABGT696]' (#2134). char similarity
+    scores those 0.94 to 0.98, so every fuzzy matcher waved them through.
+
+    looser than :func:`numeric_tokens_differ` on purpose, so it is safe in
+    the shared matchers: digit runs only ('abgt696' and '696' agree, '01' is
+    '1'), years are ignored, a side with no numbers never conflicts, and one
+    side holding extra numbers is fine ('No. 9' vs 'No. 9, Op. 125', a file
+    name's '[24-96]'). it only fires when each side has a number the other
+    lacks."""
+    a = _title_numbers(title_a)
+    b = _title_numbers(title_b)
+    if not a or not b:
+        return False
+    return not (a <= b or b <= a)
+
+
 def base_title_before_dash(title: str) -> str:
     """The base title before Spotify's ' - <qualifier>' version separator.
 
@@ -615,6 +649,7 @@ __all__ = [
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",
+    "numbers_conflict",
     "base_title_before_dash",
     "choose_best_title_candidate",
     "recording_version_markers",

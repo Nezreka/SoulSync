@@ -141,6 +141,12 @@ def titles_are_same_release(wanted: Any, candidate: Any) -> bool:
     still decides whether the titles are *close*, this decides whether the
     thing that makes them differ is allowed to be folded away.
     """
+    from core.text.title_match import numbers_conflict
+
+    # the signature only reads a number at the very end, and 'Group Therapy
+    # 701 (DJ Mix)' ends in 'mix', so 702 passed as the same release (#2134)
+    if numbers_conflict(str(wanted or ""), str(candidate or "")):
+        return False
     return _title_variant_signature(wanted) == _title_variant_signature(candidate)
 
 
