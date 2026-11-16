@@ -65,7 +65,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 646 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 648 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
@@ -1136,14 +1136,14 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `tmdb-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test TMDB | video only | no |
+| button |  | Test TMDB | video only | yes (video pass V3a) |
 
 **TVDB** (video only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
 | password | `tvdb-api-key` | API Key: | video only | yes (video pass V3a) |
-| button |  | Test TVDB | video only | no |
+| button |  | Test TVDB | video only | yes (video pass V3a) |
 
 **OMDb (Ratings)** (video only, 2)
 
@@ -1912,14 +1912,14 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `video-billboard-autoplay` | Autoplay trailers in the billboard | both | no |
-| select | `video-watch-region` | Where-to-watch region United States United Kingdom Canada Australia Ir {United States / United Kingdom / Canad | both | no |
+| checkbox | `video-billboard-autoplay` | Autoplay trailers in the billboard | both | yes (video pass V2c) |
+| select | `video-watch-region` | Where-to-watch region United States United Kingdom Canada Australia Ir {United States / United Kingdom / Canad | both | yes (video pass V2c) |
 
 **Monitoring** (both, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `video-monitor-specials` | Monitor Specials (season 0) | both | no |
+| checkbox | `video-monitor-specials` | Monitor Specials (season 0) | both | yes (video pass V2c) |
 
 ### Discovery (12)
 
