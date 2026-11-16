@@ -109,6 +109,7 @@ class ConfigManager:
         # Download sources
         'soulseek.api_key',
         'deezer_download.arl',
+        'soundcloud_download.oauth_token',
         'lidarr_download.api_key',
         'prowlarr.api_key',
         'torrent_client.password',
@@ -787,11 +788,11 @@ class ConfigManager:
                 "remove_completed": "off",
             },
             "soundcloud_download": {
-                # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
-                # added later, with credentials living under a "session" subkey
-                # alongside Tidal/Qobuz. No quality knob: anonymous SoundCloud
-                # caps at the upload's transcoding (typically 128 kbps MP3 or
-                # AAC). yt-dlp resolves bestaudio at download time.
+                # a free account's oauth_token cookie. with it, a track whose
+                # uploader turned on the free download comes as the original
+                # file instead of the ~128 kbps stream (#2116). empty stays
+                # anonymous. never go+, that needs a paid account.
+                "oauth_token": "",
             },
             "listenbrainz": {
                 "base_url": "",

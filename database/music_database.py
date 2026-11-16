@@ -10128,34 +10128,32 @@ class MusicDatabase:
                 if server_source:
                     # Server mappings are counted only where owned file evidence
                     # exists; the server never owns the catalogue row itself.
+                    from core.library2.sql_util import on_server_sql
+                    on_sql, on_params = on_server_sql('artist', 'a', server_source)
                     cursor.execute(
-                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE ("
-                        "EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                        "WHERE m.entity_type='artist' AND m.entity_id=a.id "
-                        "AND m.server_source=?) OR a.server_source=?) AND EXISTS (SELECT 1 FROM lib2_albums al "
+                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE "
+                        + on_sql + " AND EXISTS (SELECT 1 FROM lib2_albums al "
                         "JOIN lib2_tracks t ON t.album_id=al.id JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE al.primary_artist_id=a.id AND "
                         "f.path IS NOT NULL AND TRIM(f.path)<>'' AND "
                         "COALESCE(f.file_state,'active')='active'" + owner + ")",
-                        (server_source, server_source))
+                        on_params)
                     artist_count = cursor.fetchone()[0]
 
+                    on_sql, on_params = on_server_sql('album', 'al', server_source)
                     cursor.execute(
-                        "SELECT COUNT(*) FROM lib2_albums al WHERE (EXISTS (SELECT 1 "
-                        "FROM lib2_media_server_mappings m WHERE m.entity_type='album' "
-                        "AND m.entity_id=al.id AND m.server_source=?) OR al.server_source=?) AND "
+                        "SELECT COUNT(*) FROM lib2_albums al WHERE " + on_sql + " AND "
                         "EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE t.album_id=al.id AND f.path IS NOT NULL "
                         "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active'"
                         + owner + ")",
-                        (server_source, server_source))
+                        on_params)
                     album_count = cursor.fetchone()[0]
 
+                    on_sql, on_params = on_server_sql('track', 't', server_source)
                     cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t "
-                                   f"WHERE (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                                   f"WHERE m.entity_type='track' AND m.entity_id=t.id "
-                                   f"AND m.server_source=?) OR t.server_source=?) AND {_owned_track()}",
-                                   (server_source, server_source))
+                                   f"WHERE {on_sql} AND {_owned_track()}",
+                                   on_params)
                     track_count = cursor.fetchone()[0]
                 return {
                     'artists': artist_count,
@@ -12256,10 +12254,10 @@ class MusicDatabase:
                    "WHERE files.path IS NOT NULL AND files.path != ''")
             params: list = [server_source or ""]
             if server_source:
-                sql += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                        "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
-                        "AND m.server_source=?) OR tracks.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+                sql += " AND " + on_sql
+                params.extend(on_params)
             cursor.execute(sql, params)
             return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
                     for r in cursor.fetchall()]
@@ -12414,11 +12412,10 @@ class MusicDatabase:
 
         # Add server filter if specified
         if server_source:
-            where_conditions.append(
-                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
-                "OR tracks.server_source=?)")
-            params.extend((server_source, server_source))
+            from core.library2.sql_util import on_server_sql
+            on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+            where_conditions.append(on_sql)
+            params.extend(on_params)
 
         if not where_conditions:
             return []
@@ -12591,11 +12588,10 @@ class MusicDatabase:
             where_parts.insert(0, scope[0])
             params[:0] = scope[1]
         if server_source:
-            where_parts.append(
-                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
-                "OR tracks.server_source=?)")
-            params.extend((server_source, server_source))
+            from core.library2.sql_util import on_server_sql
+            on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+            where_parts.append(on_sql)
+            params.extend(on_params)
 
         from core.library2.sql_util import owned_in_library_sql, in_library_sql, scoped_primary_file_join
         where_clause = " AND ".join(where_parts) + owned_in_library_sql("track", "tracks")
@@ -12746,11 +12742,10 @@ class MusicDatabase:
                     params.extend(ids)
 
             if server_source:
-                where_conditions.append(
-                    "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                    "m.entity_type='album' AND m.entity_id=albums.id AND m.server_source=?) "
-                    "OR albums.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('album', 'albums', server_source)
+                where_conditions.append(on_sql)
+                params.extend(on_params)
 
             if not where_conditions:
                 # If no search criteria, return empty list
@@ -13164,13 +13159,10 @@ class MusicDatabase:
 
                         conn = self._get_connection()
                         cursor = conn.cursor()
-                        source_filter = (
-                            "AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                            "WHERE m.entity_type='track' AND m.entity_id=t.id "
-                            "AND m.server_source=?) OR t.server_source=?)" if server_source else ""
-                        )
-                        params = [album_candidate.id] + (
-                            [server_source, server_source] if server_source else [])
+                        from core.library2.sql_util import on_server_sql
+                        on_sql, on_params = on_server_sql('track', 't', server_source)
+                        source_filter = "AND " + on_sql if server_source else ""
+                        params = [album_candidate.id] + (on_params if server_source else [])
                         mapping_projection = "NULL AS requested_server_id"
                         mapping_params = []
                         # an album's missing slots (completeness, discography,
@@ -13789,10 +13781,10 @@ class MusicDatabase:
                     params: list = list(artist_ids)
                     src = ""
                     if server_source:
-                        src = (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                               "WHERE m.entity_type='album' AND m.entity_id=albums.id "
-                               "AND m.server_source=?) OR albums.server_source = ?)")
-                        params.extend((server_source, server_source))
+                        from core.library2.sql_util import on_server_sql
+                        on_sql, on_params = on_server_sql('album', 'albums', server_source)
+                        src = " AND " + on_sql
+                        params.extend(on_params)
                     params.append(limit)
                     from core.library2.sql_util import owned_in_library_sql, in_library_sql
                     src += owned_in_library_sql("album", "albums")
@@ -13867,10 +13859,10 @@ class MusicDatabase:
                      f"WHERE ta.artist_id IN ({placeholders}))")
             params: list = list(artist_ids) * 2
             if server_source:
-                where += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                          "WHERE m.entity_type='track' AND m.entity_id=t.id "
-                          "AND m.server_source=?) OR t.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('track', 't', server_source)
+                where += " AND " + on_sql
+                params.extend(on_params)
             params.append(limit)
             from core.library2.sql_util import (
                 owned_in_library_sql,

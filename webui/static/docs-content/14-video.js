@@ -265,6 +265,8 @@ Studios are also a discovery vector: if you love everything A24 puts out, follow
             title: 'Fresh Releases Board',
             lede: 'A live torrent board from EXT.to — cached, matched, and instant to open.',
             body: `
+The **Releases** tab on the Search page searches release names directly: with torrents on, every torrent indexer you have in Prowlarr (private trackers included) plus EXT.to, in every category, and says which indexers answered and with how many. **Show all** lists every result past the first 25.
+
 The **Fresh Releases** tab on the Search page is a live torrent board sourced from **EXT.to** — the Movies and TV torrent sections for Day, Week, and Month, parsed from the EXT.to homepage into rows carrying size, file count, age, seeders, and leechers.
 
 ## How the board stays warm
@@ -483,6 +485,8 @@ A show's numbers count like you'd read them: **Specials** and episodes that have
 
 If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
 
+A movie has **Manual search…** in its **⋯** menu, in your library or not: the same release picker an episode has, for when you want one particular version.
+
 On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures. **Grab season** searches and grabs each missing episode on its own with the show's quality profile, so every episode is tracked separately and one that fails or times out doesn't stop the rest. To grab the whole season as one pack instead, use the season's search and pick a pack from the results.
 `
         },
@@ -526,7 +530,7 @@ Point at **Up to date** to see when each was last asked. **Refresh** asks all th
 
 | Action | What it does |
 |--------|--------------|
-| **Find an upgrade / Search releases** | The manual search for that movie or that one episode. |
+| **Find an upgrade / Manual search** | The manual search for that movie or that one episode. |
 | **Move to another episode…** | For a file filed under the wrong episode. Pick the right one; where SoulSync can reach the file it is renamed for the new episode so your media server agrees. |
 | **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
 | **Search subtitles** | The manual subtitle search, for that file. |
@@ -602,6 +606,8 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
 Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
+
+**Edit the query.** Manual search opens with its query in a box at the top (\`Primal S02E03\`, \`Dune 2021\`). Leave it and the usual search runs, with the title's ids. Change it (add \`MULTi\`, a group, another spelling) and press **Search**: every source gets exactly what you typed, like Prowlarr's own search, and the results are still judged against the title.
 
 **Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB, language contains japanese) matched on all or any of them. **Language** reads the audio language tags in a release's name, by name or code, and **dual** or **multi** finds the dual audio ones; a release with no language tag is usually the original audio only. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
 
@@ -1369,19 +1375,41 @@ registerDocsSection({
     icon: '🎬',
     pages: [
         {
+            id: 'vimp-folder',
+            title: 'Import Folder',
+            lede: 'Drop movies and episodes in one folder and SoulSync files them into your libraries.',
+            body: `
+The video side's answer to the music **Import** page. Set an **Import folder** under **Settings → Library → Video folders**, then drop movie or episode files (or whole folders) in it. Open **Import** in the sidebar to see what SoulSync found.
+
+For each file or folder it reads the names with the same release parser the downloads use, then finds the title on TMDB:
+
+- a loose file with \`S02E03\` in its name is that **episode**,
+- a folder whose files carry episode numbers is a **show** (every season in it),
+- anything else is a **movie** (the largest video in a folder, never the sample).
+
+Each entry shows the title it matched and how sure it is: **Sure match** (the title and year agree), **Check the match**, or **No match**. Press **Import** to bring it in as shown, or **Change…** to pick the right title (and the season and episode for a loose file).
+
+Imports go through the same importer a finished download uses: your naming template, the Movies / TV / anime / 4K library the title belongs in, upgrade and replace rules, subtitles beside the file, NFO and artwork, the wishlist and the download history. A file the importer refuses (a sample, not an upgrade) moves to **Needs a hand** below, where you can place it by hand.
+
+> [!TIP]
+> Tick **Import sure matches automatically** and a sure match is imported on its own once it has finished copying in, like the music side's auto-import. Anything SoulSync isn't sure about waits for you.
+
+> [!NOTE]
+> Keep the import folder apart from your download folder. Imported files leave the folder; what's left (an nfo, a sample) stays for you to clear.
+`
+        },
+        {
             id: 'vimp-failed',
-            title: 'Failed Imports',
+            title: 'Needs a Hand',
             lede: 'When a download can\'t be placed automatically, put it where it belongs by hand.',
             body: `
-When a completed download can't be automatically placed into the library — ambiguous match, unexpected folder layout — it lands in **Failed Imports**. From there you can:
+When a completed download (or an import folder file) can't be placed into the library automatically (a sample, a wrong episode, not an upgrade), it lands under **Needs a hand** on the Import page. From there you can:
 
 - **Place** it manually into the correct title, or
 - **Dismiss** it if it doesn't belong in your library.
 
 > [!NOTE]
-> The Import page is hidden from the sidebar nav — you reach it through the **Manual Import** button on failed items in [Downloads](#video-downloads). Manual import placement mutates the library on disk, so it's **admin-only**.
-
-This is the video equivalent of the music side's manual import step.
+> Placing files changes the library on disk, so the Import page is **admin-only**.
 `
         },
     ]
@@ -1431,7 +1459,7 @@ A hearing-impaired track counts for a plain request. A forced track never does, 
 
 **Forced subtitles.** Switch on **Also grab forced subtitles** to fetch a \`<video>.<lang>.forced.srt\` per language as well: just the lines for scenes in another language, for watching without full subtitles. Most titles have none, so these often stay missing. Whisper never makes forced tracks.
 
-**Retries and upgrades.** Misses retry in the background with backoff (1h, 2h, 4h … up to a week) within a per-provider **daily quota**. Downloaded subtitles are re-checked every 24h: if a clearly better one appears (it beats the current score by the upgrade delta) it replaces the old one, and if the subtitle disappeared from disk it's fetched again. Your own picks from **Search subtitles** (the **CC** button on a detail page) are never auto-replaced.
+**Retries and upgrades.** Misses retry in the background with backoff (1h, 2h, 4h … up to a week) within a per-provider **daily quota**. Downloaded subtitles are re-checked every 24h: if a clearly better one appears (it beats the current score by the upgrade delta) it replaces the old one, and if the subtitle disappeared from disk it's fetched again. Your own picks from **Search subtitles** (the **CC** button on a detail page) are never auto-replaced. When the file already has the language, as a sidecar or inside the video, **Search subtitles** says so, and those count as having it, so SoulSync does not keep searching. A track inside the video with no language tag counts by its title (Français, English SDH). Picture subtitles (PGS, VobSub) count too, but can't be saved as a separate file.
 
 **Your existing library.** New imports are covered automatically. For everything you already own (including titles added straight to Plex or Jellyfin), turn on the **Missing Subtitles** job on the **Tools** page. It checks the whole library on a schedule (weekly by default) with the rules above and queues what's missing; titles that already have subtitles are just recorded as had. Turn on its **Dry Run** setting to review first: you get one finding per movie or show, and approving one queues it.
 `

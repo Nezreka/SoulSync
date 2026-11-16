@@ -74,3 +74,44 @@ def test_upgradable_counts_route_answers_for_the_listed_ids(api):  # noqa: F811
     assert payload == {"success": True, "counts": {str(ids["artist"]): 0, "999": 0}}
     assert client.get("/api/library/v2/artists/upgradable-counts?ids=x").status_code == 400
     assert client.get("/api/library/v2/artists/upgradable-counts").get_json()["counts"] == {}
+
+
+def test_artists_route_takes_completeness_sorts_and_filters(api):  # noqa: F811
+    """#2106/#2107: completion sorts, direction and filters reach the list."""
+    client, _db, _ids = api
+    for query in ("sort=completion", "sort=missing&dir=asc", "sort=name&dir=desc",
+                  "completion=incomplete", "missing_min=1&pct_max=90", "credit=featured"):
+        payload = client.get(f"/api/library/v2/artists?{query}").get_json()
+        assert payload["success"] is True, query
+    row = client.get("/api/library/v2/artists").get_json()["artists"][0]
+    assert row["completion"] in ("complete", "incomplete", "unchecked", "unknown")
+    assert "unverified_albums" in row
+
+
+def test_overview_route(api):  # noqa: F811
+    """#2107: the library overview, and its could-be-better part apart."""
+    client, _db, _ids = api
+    payload = client.get("/api/library/v2/artists/overview").get_json()
+    assert payload["success"] is True
+    assert {"artists", "owned_tracks", "missing_tracks", "complete_artists",
+            "incomplete_artists", "unchecked_artists", "watchlist_artists"} <= set(payload)
+    upgrades = client.get("/api/library/v2/artists/overview?part=upgrades").get_json()
+    assert upgrades["success"] is True and "upgrade_artists" in upgrades
+
+
+def test_wanted_route_takes_an_artist(api):  # noqa: F811
+    """#2106: the missing count links to that artist's missing tracks."""
+    client, _db, ids = api
+    payload = client.get(f"/api/library/v2/wanted?artist={ids['artist']}").get_json()
+    assert payload["success"] is True
+    assert all(row["artist"]["id"] == ids["artist"] for row in payload["tracks"])
+    assert client.get("/api/library/v2/wanted?artist=x").status_code == 400
+
+
+def test_artist_ids_route_for_select_all(api):  # noqa: F811
+    """#2109: every id the filters match, for the bulk bar's select all."""
+    client, _db, ids = api
+    payload = client.get("/api/library/v2/artists/ids").get_json()
+    assert payload["success"] is True
+    assert payload["ids"] == [ids["artist"]] and payload["total"] == 1
+    assert client.get("/api/library/v2/artists/ids?letter=x").get_json()["ids"] == []

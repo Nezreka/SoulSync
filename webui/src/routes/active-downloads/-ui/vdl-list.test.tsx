@@ -66,6 +66,20 @@ function list(rows: VdlDownload[], over: Record<string, unknown> = {}) {
 }
 
 describe('the row', () => {
+  it('puts the release languages under the quality tag (#2120)', () => {
+    const { container } = list([
+      dl({ release_langs: { audio: [], multi: true, subs: ['fr'], subbed: true } }),
+    ]);
+    const tags = container.querySelector('.dlc-meta .dlc-tags');
+    expect(tags?.querySelector('.dlc-tag')?.textContent).toBe('2160p WEB-DL');
+    expect(tags?.querySelector('.dlc-tag-lang')?.textContent).toBe('MULTi · FR subs');
+  });
+
+  it('shows no language tag when the name tags none', () => {
+    const { container } = list([dl()]);
+    expect(container.querySelector('.dlc-tag-lang')).toBeNull();
+  });
+
   it('shows progress, speed and time left while downloading, cancel on the side', () => {
     const { container, cardActions } = list([dl()]);
     expect(container.querySelector('.dlc-meta')?.textContent).toContain('42%');

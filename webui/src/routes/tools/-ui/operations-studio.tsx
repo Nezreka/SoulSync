@@ -622,7 +622,8 @@ export function OperationsStudio({
         <div className="tools-section-head">
           <h3 className="tools-section-title">Areas</h3>
           <span className="tools-section-blurb">
-            The jobs grouped by what they look after. Put an area on its schedule, or check it now.
+            The jobs grouped by what they look after. Put an area on its schedule, or run all of its
+            jobs now, scheduled or not.
           </span>
         </div>
 
@@ -730,7 +731,7 @@ export function OperationsStudio({
                   className="operations-pillar-scan-btn"
                   disabled={isRunning}
                   onClick={() => void handlePillarScan(pillar)}
-                  title={`Check ${pillar.title} now`}
+                  title={`Run every job in ${pillar.title} now, scheduled or not`}
                 >
                   {isRunning ? 'Checking…' : 'Check now'}
                 </button>

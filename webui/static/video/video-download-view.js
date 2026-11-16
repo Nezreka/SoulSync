@@ -1942,9 +1942,24 @@
         if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
         if (!document.querySelector('.vms-overlay, .vgm-overlay')) document.body.style.overflow = '';
     }
+    // The text a search starts from, the same shape core.video.slskd_search
+    // .build_query writes: 'Title S01E02', 'Title S01', 'Title 2021', 'Title'.
+    // Manual search prefills its box with it (#2121).
+    function manualDefaultQuery(opts) {
+        opts = opts || {};
+        var t = String(opts.title || '').trim();
+        var scope = opts.scope || (opts.episode != null ? 'episode' : 'season');
+        var pad = function (n) { n = parseInt(n, 10); return (n < 10 ? '0' : '') + n; };
+        var hasNum = function (n) { return n != null && n !== '' && !isNaN(parseInt(n, 10)); };
+        if (scope === 'episode' && hasNum(opts.season) && hasNum(opts.episode)) return t + ' S' + pad(opts.season) + 'E' + pad(opts.episode);
+        if (scope === 'season' && hasNum(opts.season)) return t + ' S' + pad(opts.season);
+        if (scope === 'movie' && opts.year) return (t + ' ' + opts.year).trim();
+        return t;
+    }
     function manualSearch(opts) {
         opts = opts || {};
         var scope = opts.scope || (opts.episode != null ? 'episode' : 'season');
+        var defaultQuery = manualDefaultQuery(opts);
         var scopeLabel = scope === 'episode'
             ? ('S' + opts.season + 'E' + opts.episode)
             : scope === 'movie'
@@ -1960,6 +1975,12 @@
                     '<div class="vms-title">' + esc(opts.title || '') + '</div>' +
                     '<div class="vms-scope">' + esc(scopeLabel) + '</div>' +
                     '<div class="vms-prof" data-vms-prof></div>' +
+                    // the query, prefilled and editable, like prowlarr's own search (#2121)
+                    '<form class="vms-query" data-vms-query-form role="search">' +
+                        '<input class="vms-query-input" type="search" data-vms-query aria-label="Search for" ' +
+                            'autocomplete="off" spellcheck="false" value="' + esc(defaultQuery) + '">' +
+                        '<button class="vms-query-btn" type="submit">Search</button>' +
+                    '</form>' +
                     '<div class="vms-sub" data-vms-sub>Searching your sources…</div>' +
                 '</div>' +
                 '<div class="vms-body" data-vms-body data-vgm-dl-content></div>' +
@@ -1991,6 +2012,11 @@
         });
         var onKey = function (e) { if (e.key === 'Escape') { _closeManual(ov); document.removeEventListener('keydown', onKey); } };
         document.addEventListener('keydown', onKey);
+        var queryInput = ov.querySelector('[data-vms-query]');
+        ov.querySelector('[data-vms-query-form]').addEventListener('submit', function (e) {
+            e.preventDefault();
+            runAll();
+        });
 
         var profHost = ov.querySelector('[data-vms-prof]');
         loadTitleProfile(profHost, function () { return body._opts || {}; },
@@ -2011,7 +2037,12 @@
             var srcs = sourcesFromConfig(c).filter(function (s) { return SRC_META[s] && REAL[s]; });
             if (!srcs.length) srcs = ['soulseek'];
             var sub = ov.querySelector('[data-vms-sub]');
-            if (sub) sub.textContent = 'Searching ' + srcs.map(function (s) { return SRC_META[s].name; }).join(' · ') + '…';
+            // the box as typed. left as prefilled, the usual search runs (ids,
+            // structured and scene queries); edited, exactly what was typed
+            var typed = String((queryInput && queryInput.value) || '').trim();
+            var custom = typed && typed !== defaultQuery ? typed : null;
+            if (sub) sub.textContent = 'Searching ' + srcs.map(function (s) { return SRC_META[s].name; }).join(' · ') +
+                (custom ? ' for “' + custom + '”' : '') + '…';
             body.innerHTML = srcs.map(function (s) {
                 return '<div class="vms-src" data-vms-src="' + s + '">' +
                     '<div class="vms-src-head">' + (SRC_META[s].emoji || '') + ' ' + esc(SRC_META[s].name) + '</div>' +
@@ -2020,9 +2051,11 @@
             }).join('');
             srcs.forEach(function (s) {
                 var res = body.querySelector('[data-vms-results-for="' + s + '"]');
-                searchInto(ov, res, { scope: scope, title: opts.title, season: opts.season,
+                var params = { scope: scope, title: opts.title, season: opts.season,
                     year: opts.year || null,   // movies search title+year (same as the get-modal)
-                    episode: (scope === 'episode' ? opts.episode : null), source: s }, []);
+                    episode: (scope === 'episode' ? opts.episode : null), source: s };
+                if (custom) params.query = custom;
+                searchInto(ov, res, params, []);
             });
         });
         }

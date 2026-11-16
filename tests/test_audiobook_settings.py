@@ -151,7 +151,7 @@ def test_the_folder_path_input_can_be_unlocked(panel):
     # Every other output path has an unlock button; the React one is the
     # shared LockedPath, read-only until Unlock
     import re
-    assert re.search(r'<LockedPath\s+id="audiobooks-path"', panel)
+    assert re.search(r'<LockedPath\s+(?:\w+=\{[^{}]*\}\s+)*id="audiobooks-path"', panel)
 
 
 def _saves(panel: str, key: str) -> bool:

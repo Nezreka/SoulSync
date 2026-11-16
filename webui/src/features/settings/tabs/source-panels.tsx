@@ -184,7 +184,14 @@ export async function soundcloudStatus(): Promise<Status> {
   }
 }
 
-export function SoundcloudPanel({ model = sourcesModel }: { model?: SourcesModel }) {
+export function SoundcloudPanel({
+  store,
+  model = sourcesModel,
+}: {
+  store: SettingsStore;
+  model?: SourcesModel;
+}) {
+  const settings = useSettings(store);
   const [status, setStatus] = useState<Status>({ text: '' });
   const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
 
@@ -208,6 +215,24 @@ export function SoundcloudPanel({ model = sourcesModel }: { model?: SourcesModel
           <br />
           <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the upload (anonymous tier).
           SoundCloud doesn't expose lossless audio to anyone.
+        </div>
+      </div>
+      {/* #2116: a signed-in free account gets the original file where the
+          uploader turned downloads on */}
+      <div className="form-group">
+        <label>SoundCloud OAuth Token (optional):</label>
+        <SecretInput
+          id="soundcloud-download-oauth-token"
+          className="form-input"
+          placeholder="Paste your oauth_token cookie here"
+          value={text(settings.soundcloud_download?.oauth_token)}
+          onChange={(value) => store.set('soundcloud_download', 'oauth_token', value)}
+        />
+        <div className="setting-help-text">
+          With a free SoundCloud account signed in, tracks whose uploader turned on the free
+          Download button come as the original file instead of the 128 kbps stream. Everything else
+          still uses the stream. To get it: log into soundcloud.com, open DevTools (F12),
+          Application, Cookies, and copy the <code>oauth_token</code> value.
         </div>
       </div>
       <TestRow
@@ -1290,7 +1315,7 @@ export function SourcePanels({ store, part }: SettingsTabProps) {
     return (
       <>
         <DeezerPanel store={store} />
-        <SoundcloudPanel />
+        <SoundcloudPanel store={store} />
         <LidarrPanel store={store} />
       </>
     );

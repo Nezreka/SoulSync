@@ -29,6 +29,7 @@ const TAB = LIBRARY_TAB;
 type ShellTools = Window & {
   SoulSyncFolderCheck?: { refresh: (group: string) => void };
   showToast?: (message: string, type?: string) => void;
+  navigateToPage?: (page: string) => void;
 };
 
 function refreshChecks(...groups: string[]) {
@@ -254,7 +255,13 @@ export function FoldersCard({ store }: SettingsTabProps) {
   const fallback = 'Downloads, library & extra folders';
 
   // ── rebuild playlist folders ──
-  const [rebuild, setRebuild] = useState<{ busy: boolean; text: string; color: string }>({
+  const [rebuild, setRebuild] = useState<{
+    busy: boolean;
+    text: string;
+    color: string;
+    /** nothing to rebuild: say where the switch is (#2112) */
+    none?: boolean;
+  }>({
     busy: false,
     text: '',
     color: '',
@@ -283,14 +290,22 @@ export function FoldersCard({ store }: SettingsTabProps) {
         copied += r.copied || 0;
         removed += r.removed_stale || 0;
       }
-      setRebuild({
-        busy: false,
-        color: '#4caf50',
-        text:
-          n === 0
-            ? 'No "organize by playlist" playlists to rebuild yet.'
-            : `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`,
-      });
+      setRebuild(
+        n === 0
+          ? {
+              // the switch lives on each playlist, not here, and people
+              // looked for it in this panel (#2112)
+              busy: false,
+              color: '#4caf50',
+              none: true,
+              text: 'No playlists have Organize by playlist on yet. Turn it on per playlist: ',
+            }
+          : {
+              busy: false,
+              color: '#4caf50',
+              text: `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`,
+            },
+      );
       (window as ShellTools).showToast?.('Playlist folders rebuilt', 'success');
     } catch (error) {
       setRebuild({
@@ -460,7 +475,8 @@ export function FoldersCard({ store }: SettingsTabProps) {
                   Where <strong>Organize by playlist</strong> builds playlist folders — as shortcuts
                   into your library, so songs are never stored twice. Keep this{' '}
                   <strong>outside</strong> your music library folder so your media server doesn't
-                  scan the same tracks twice.
+                  scan the same tracks twice. Organize by playlist is turned on per playlist:
+                  Playlists, a playlist's ⋯ menu, Settings.
                 </>
               }
             >
@@ -492,6 +508,22 @@ export function FoldersCard({ store }: SettingsTabProps) {
                     style={{ marginTop: '6px', ...(rebuild.color ? { color: rebuild.color } : {}) }}
                   >
                     {rebuild.text}
+                    {rebuild.none && (
+                      <>
+                        <a
+                          href="/sync"
+                          onClick={(event) => {
+                            const go = (window as ShellTools).navigateToPage;
+                            if (typeof go !== 'function') return;
+                            event.preventDefault();
+                            void go('sync');
+                          }}
+                        >
+                          Playlists
+                        </a>
+                        , open a playlist's ⋯ menu, Settings.
+                      </>
+                    )}
                   </div>
                 </div>
               }

@@ -10,6 +10,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  CardSizeSlider,
+  cardGridStyle,
+  useCardSize,
+  type CardSizeRange,
+} from '@/components/card-size';
 import { PageBar, PageFrame, PageHeader, PagePills, PageSearch } from '@/components/page-header';
 
 import type {
@@ -101,6 +107,9 @@ function ViewSwitch({ value, onChange }: { value: ViewMode; onChange: (v: ViewMo
   );
 }
 
+/** #2108: the poster grid's card size; base is its own desktop width */
+const POSTER_SIZES: CardSizeRange = { min: 110, max: 300, base: 156 };
+
 export function ManagerPage() {
   const [tab, setTab] = useState<Tab>(() => remembered<Tab>('vmgr:tab', 'movies'));
   const [view, setViewState] = useState<ViewMode>(() =>
@@ -134,6 +143,7 @@ export function ManagerPage() {
   /** the last run that moved files, offered back as Undo */
   const [undoable, setUndoable] = useState<Undoable | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [posterSize, setPosterSize] = useCardSize('vmgr:posterSize', POSTER_SIZES);
   const side: Side = tab === 'shows' ? 'shows' : 'movies';
   const requestRef = useRef(0);
 
@@ -368,6 +378,30 @@ export function ManagerPage() {
         subtitle={status}
         actions={
           <>
+            {restricted ? null : (
+              <button
+                type="button"
+                className="pgf-btn"
+                title="Recycle bin: deleted files you can still restore"
+                aria-label="Recycle bin"
+                onClick={() => window.videoOpenRecycleBin?.()}
+              >
+                {/* #2128: the bin was three clicks deep in Downloads */}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
             {restricted || tab === 'channels' ? null : (
               <button
                 type="button"
@@ -425,6 +459,14 @@ export function ManagerPage() {
         end={
           tab === 'channels' ? null : (
             <>
+              {restricted || view !== 'posters' ? null : (
+                <CardSizeSlider
+                  label="Poster size"
+                  size={posterSize}
+                  range={POSTER_SIZES}
+                  onChange={setPosterSize}
+                />
+              )}
               {restricted ? null : <ViewSwitch value={view} onChange={setView} />}
               <PageSearch
                 value={filters.search}
@@ -575,6 +617,7 @@ export function ManagerPage() {
               selected={selected}
               selecting={selecting}
               loading={loading}
+              cardSize={posterSize}
               onToggle={toggle}
               onEdit={(row) => setEditing({ kind: row.kind, id: row.id })}
             />

@@ -1,12 +1,16 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getRouteApi } from '@tanstack/react-router';
+import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { apiClient, readJson } from '@/app/api-client';
 import { useProfile } from '@/platform/shell/route-controllers';
 
 import type { LibrarySearch as SongsSearch } from '../-library-v2.songs';
-import type { LibraryV2AlbumListItem, LibraryV2ArtistSummary } from '../-library-v2.types';
+import type {
+  LibraryV2AlbumListItem,
+  LibraryV2ArtistSummary,
+  LibraryV2CompletionFilter,
+} from '../-library-v2.types';
 
 import { LIBRARY_V2_QUERY_KEY, libraryV2AlbumQueryOptions } from '../-library-v2.api';
 import { albumQueueRows, queueableRows } from '../-library-v2.play';
@@ -185,8 +189,97 @@ type LibraryFilterSearch = {
   source: string;
   quality: '' | 'upgradable';
   review: '' | 'reviewed' | 'unreviewed';
+  completion: LibraryV2CompletionFilter;
+  missingMin: number | undefined;
+  missingMax: number | undefined;
+  pctMin: number | undefined;
+  pctMax: number | undefined;
+  credit: '' | 'featured' | 'all';
   page: number;
 };
+
+/** #2107: the collection filter's choices, in the menu and on the chips */
+const COMPLETION_LABELS: Record<LibraryV2CompletionFilter, string> = {
+  '': 'All',
+  complete: 'Complete',
+  incomplete: 'Missing tracks',
+  none_owned: 'Nothing owned',
+  unchecked: 'Not checked',
+};
+
+const CREDIT_LABELS = {
+  '': 'Release artists',
+  featured: 'Featured only',
+  all: 'Both',
+} as const;
+
+function rangeLabel(min: number | undefined, max: number | undefined, unit = ''): string {
+  if (min !== undefined && max !== undefined) return `${min}${unit} to ${max}${unit}`;
+  if (min !== undefined) return `${min}${unit} or more`;
+  return `${max}${unit} or fewer`;
+}
+
+/** a from / to pair of number boxes, applied a moment after typing stops */
+function RangeRow({
+  label,
+  min,
+  max,
+  limit,
+  onChange,
+}: {
+  label: string;
+  min: number | undefined;
+  max: number | undefined;
+  limit?: number;
+  onChange: (min: number | undefined, max: number | undefined) => void;
+}) {
+  const [low, setLow] = useState(min === undefined ? '' : String(min));
+  const [high, setHigh] = useState(max === undefined ? '' : String(max));
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const parse = (raw: string) => {
+    if (raw.trim() === '') return undefined;
+    const value = Math.max(0, Math.floor(Number(raw)));
+    if (!Number.isFinite(value)) return undefined;
+    return limit === undefined ? value : Math.min(limit, value);
+  };
+  const apply = (nextLow: string, nextHigh: string) => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => onChange(parse(nextLow), parse(nextHigh)), 450);
+  };
+  return (
+    <div className={extras.range} role="group" aria-label={label}>
+      <span>{label}</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={limit}
+        placeholder="0"
+        aria-label={`${label} from`}
+        value={low}
+        onChange={(e) => {
+          setLow(e.target.value);
+          apply(e.target.value, high);
+        }}
+      />
+      <span aria-hidden="true">to</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={limit}
+        placeholder={limit === undefined ? 'any' : String(limit)}
+        aria-label={`${label} to`}
+        value={high}
+        onChange={(e) => {
+          setHigh(e.target.value);
+          apply(low, e.target.value);
+        }}
+      />
+    </div>
+  );
+}
 
 /** dev's lists: the artist list filters by the Watchlist, the album list by
  *  the Wishlist (Library v2 called both "monitoring") */
@@ -225,7 +318,11 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
     (search.monitored !== 'all' ? 1 : 0) +
     (search.source ? 1 : 0) +
     (!albums && search.quality === 'upgradable' ? 1 : 0) +
-    (!albums && search.review ? 1 : 0);
+    (!albums && search.review ? 1 : 0) +
+    (!albums && search.completion ? 1 : 0) +
+    (!albums && (search.missingMin !== undefined || search.missingMax !== undefined) ? 1 : 0) +
+    (!albums && (search.pctMin !== undefined || search.pctMax !== undefined) ? 1 : 0) +
+    (!albums && search.credit ? 1 : 0);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -279,6 +376,60 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
               ))}
             </div>
           </section>
+          {albums ? null : (
+            <section>
+              <h4>Collection</h4>
+              <div className={extras.segmented} role="group" aria-label="Filter by collection">
+                {(Object.keys(COMPLETION_LABELS) as LibraryV2CompletionFilter[]).map((value) => (
+                  <button
+                    key={value || 'all'}
+                    type="button"
+                    aria-pressed={search.completion === value}
+                    onClick={() => set({ completion: value })}
+                  >
+                    {COMPLETION_LABELS[value]}
+                  </button>
+                ))}
+              </div>
+              <RangeRow
+                label="Missing tracks"
+                min={search.missingMin}
+                max={search.missingMax}
+                onChange={(min, max) => set({ missingMin: min, missingMax: max })}
+              />
+              <RangeRow
+                label="Complete %"
+                min={search.pctMin}
+                max={search.pctMax}
+                limit={100}
+                onChange={(min, max) => set({ pctMin: min, pctMax: max })}
+              />
+            </section>
+          )}
+          {albums ? null : (
+            <section>
+              <h4>Artists</h4>
+              <div className={extras.segmented} role="group" aria-label="Which artists">
+                {(['', 'featured', 'all'] as const).map((value) => (
+                  <button
+                    key={value || 'release'}
+                    type="button"
+                    aria-pressed={search.credit === value}
+                    title={
+                      value === 'featured'
+                        ? 'Artists only credited on other people’s tracks'
+                        : value === ''
+                          ? 'Artists with releases of their own (the usual list)'
+                          : undefined
+                    }
+                    onClick={() => set({ credit: value })}
+                  >
+                    {CREDIT_LABELS[value]}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           {albums ? null : (
             <section>
               <button
@@ -385,6 +536,30 @@ export function LibraryActiveFilters({
       clear: { review: '' },
     });
   }
+  if (!albums && search.completion) {
+    chips.push({
+      key: 'completion',
+      label: COMPLETION_LABELS[search.completion],
+      clear: { completion: '' },
+    });
+  }
+  if (!albums && (search.missingMin !== undefined || search.missingMax !== undefined)) {
+    chips.push({
+      key: 'missing',
+      label: `Missing ${rangeLabel(search.missingMin, search.missingMax)}`,
+      clear: { missingMin: undefined, missingMax: undefined },
+    });
+  }
+  if (!albums && (search.pctMin !== undefined || search.pctMax !== undefined)) {
+    chips.push({
+      key: 'pct',
+      label: `Complete ${rangeLabel(search.pctMin, search.pctMax, '%')}`,
+      clear: { pctMin: undefined, pctMax: undefined },
+    });
+  }
+  if (!albums && search.credit) {
+    chips.push({ key: 'credit', label: CREDIT_LABELS[search.credit], clear: { credit: '' } });
+  }
   if (chips.length === 0) return null;
   return (
     <div className={extras.chips}>
@@ -410,7 +585,20 @@ export function LibraryActiveFilters({
         <button
           type="button"
           className={extras.chipsClear}
-          onClick={() => set({ monitored: 'all', source: '', quality: '', review: '' })}
+          onClick={() =>
+            set({
+              monitored: 'all',
+              source: '',
+              quality: '',
+              review: '',
+              completion: '',
+              missingMin: undefined,
+              missingMax: undefined,
+              pctMin: undefined,
+              pctMax: undefined,
+              credit: '',
+            })
+          }
         >
           Clear all
         </button>
@@ -431,6 +619,24 @@ export function LibraryRadioButton() {
       onClick={() => void window.startLibraryRadio?.()}
     >
       <LineIcon name="radio" /> Radio
+    </button>
+  );
+}
+
+/** #2128: the recycle bin was three clicks deep in Downloads. this goes
+ *  straight to it (Downloads, Review, Deleted). */
+export function LibraryRecycleBinButton({ media = 'music' }: { media?: 'music' | 'video' }) {
+  const navigate = useNavigate();
+  const label = 'Recycle bin: deleted files you can still restore';
+  return (
+    <button
+      type="button"
+      className={`${styles.btnGhost} ${extras.iconButton}`}
+      title={label}
+      aria-label="Recycle bin"
+      onClick={() => void navigate({ to: '/active-downloads', search: { media, open: 'recycle' } })}
+    >
+      <LineIcon name="trash" />
     </button>
   );
 }

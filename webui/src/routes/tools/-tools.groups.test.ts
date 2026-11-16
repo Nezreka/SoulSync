@@ -19,6 +19,7 @@ import {
   groupWeight,
   healthBand,
   healthBandLabel,
+  jobFilterOptions,
   libraryHealth,
   fixAllSafePlan,
   safeFixablePending,
@@ -469,5 +470,84 @@ describe('the trend line', () => {
   it('puts the highest value at the top of the box', () => {
     // SVG y grows downward, so the max must land at y=0.
     expect(sparklinePoints([0, 10], 100, 20)).toBe('0.0,20.0 100.0,0.0');
+  });
+});
+
+describe('jobFilterOptions (#2113)', () => {
+  const job = (job_id: string, display_name: string) =>
+    ({ job_id, display_name, enabled: true, is_running: false, interval_hours: 24 }) as never;
+  const jobs = [
+    job('track_number_repair', 'Track Number Repair'),
+    job('album_tag_consistency', 'Album Tag Consistency'),
+    job('quality_profile_audit', 'Quality Profile Audit'),
+    job('lyrics', 'Lyrics Filler'),
+  ];
+  const types: FindingTypeInfo[] = [
+    {
+      type: 'album_tag_inconsistency',
+      label: 'Album Tag Drift',
+      verb: null,
+      fixable: false,
+      destructive: false,
+    },
+    {
+      type: 'track_number_mismatch',
+      label: 'Track Number Mismatch',
+      verb: null,
+      fixable: false,
+      destructive: false,
+    },
+  ];
+  const groups = [
+    group({
+      finding_type: 'album_tag_inconsistency',
+      pending: 3,
+      total: 3,
+      job_ids: ['album_tag_consistency'],
+    }),
+    group({
+      finding_type: 'track_number_mismatch',
+      dismissed: 2,
+      total: 2,
+      job_ids: ['track_number_repair'],
+    }),
+    group({
+      finding_type: 'quality_upgrade',
+      pending: 1,
+      total: 1,
+      job_ids: ['quality_profile_audit'],
+    }),
+    group({
+      finding_type: 'quality_unknown',
+      pending: 1,
+      total: 1,
+      job_ids: ['quality_profile_audit'],
+    }),
+  ];
+
+  it('names a job after the finding it raises, A to Z, and hides empty ones', () => {
+    expect(jobFilterOptions(jobs, groups, types, 'pending')).toEqual([
+      { value: 'album_tag_consistency', label: 'Album Tag Drift' },
+      { value: 'quality_profile_audit', label: 'Quality Profile Audit' },
+    ]);
+    expect(jobFilterOptions(jobs, groups, types, '').map((o) => o.label)).toEqual([
+      'Album Tag Drift',
+      'Quality Profile Audit',
+      'Track Number Mismatch',
+    ]);
+  });
+
+  it('keeps the picked job even with nothing under this status', () => {
+    const labels = jobFilterOptions(jobs, groups, types, 'pending', 'track_number_repair');
+    expect(labels.map((o) => o.value)).toContain('track_number_repair');
+  });
+
+  it('shows every job by its own name before the groups load', () => {
+    expect(jobFilterOptions(jobs, [], types, 'pending').map((o) => o.label)).toEqual([
+      'Album Tag Consistency',
+      'Lyrics Filler',
+      'Quality Profile Audit',
+      'Track Number Repair',
+    ]);
   });
 });

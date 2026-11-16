@@ -54,6 +54,9 @@ CUE = {'item_id': 702, 'provider': 'library', 'name': 'Cue part', 'duration': 10
        'artists': [], 'external_ids': [], 'provider_mappings': [_mapping('Artist A/Album B/all.flac::2')]}
 
 
+BUILTIN_MAPPING = {'item_id': 'x', 'provider_domain': 'builtin', 'provider_instance': 'builtin'}
+
+
 class Fake:
     """Records every command; answers from a script keyed by command."""
 
@@ -61,7 +64,7 @@ class Fake:
         self.calls = []
         self.tasks = {}
         self.playlists = {1: {'item_id': 1, 'name': 'Mix', 'is_editable': True, 'owner': 'rob', 'metadata': {},
-                              'tracks': [TRACK]}}
+                              'provider_mappings': [BUILTIN_MAPPING], 'tracks': [TRACK]}}
         self.next_id = 2
 
     def __call__(self, command, args):
@@ -103,10 +106,13 @@ class Fake:
         if command == 'music/playlists/playlist_tracks':
             return [{**t, 'position': i} for i, t in enumerate(self.playlists[int(args['item_id'])]['tracks'])]
         if command == 'music/playlists/create_playlist':
+            if args.get('provider_instance_or_domain') != 'builtin':
+                # what 2.10 answers for 'library' (#2111)
+                raise MusicAssistantError('music/playlists/create_playlist: HTTP 500')
             pid = self.next_id
             self.next_id += 1
             self.playlists[pid] = {'item_id': pid, 'name': args['name'], 'is_editable': True, 'owner': 'rob',
-                                   'metadata': {}, 'tracks': []}
+                                   'metadata': {}, 'provider_mappings': [BUILTIN_MAPPING], 'tracks': []}
             return self.playlists[pid]
         if command == 'music/playlists/add_playlist_tracks':
             pl = self.playlists[int(args['db_playlist_id'])]
@@ -360,3 +366,71 @@ def test_scan_hints_and_wrappers_report_the_server(client):
     assert client.get_cache_stats()['artists_cached'] == 1
     client.clear_cache()
     assert client.get_cache_stats()['artists_cached'] == 0
+
+
+class _T:
+    def __init__(self, key):
+        self.ratingKey = key
+
+
+def _spotify_playlist(fake, name='Mix'):
+    """a spotify playlist the user owns: editable, but not music assistant's."""
+    fake.playlists[9] = {'item_id': 9, 'name': name, 'is_editable': True, 'owner': 'rob', 'metadata': {},
+                         'provider_mappings': [{'item_id': 'sp', 'provider_domain': 'spotify',
+                                                'provider_instance': 'spotify--x'}],
+                         'tracks': [TRACK] * 14}
+
+
+def test_a_streaming_services_playlist_is_never_found_or_written(client):
+    """#2111: a same-named spotify playlist was found by name and reconciled,
+    and music assistant cut the real spotify playlist down to one track."""
+    client.fake.playlists.pop(1)
+    _spotify_playlist(client.fake, 'My Playlist')
+    assert client.get_all_playlists() == []
+    assert client.get_playlist_by_name('My Playlist') is None
+    assert client.get_playlist_by_id('9') is None
+
+    assert client.reconcile_playlist('My Playlist', [_T('700')]) is True
+    assert len(client.fake.playlists[9]['tracks']) == 14  # untouched
+    new = [p for k, p in client.fake.playlists.items() if k != 9]
+    assert [p['name'] for p in new] == ['My Playlist']
+    assert client.delete_playlist('9') is False and 9 in client.fake.playlists
+
+
+def test_playlists_are_created_on_the_builtin_provider(client):
+    """#2111: 'library' is not a provider on 2.10, create_playlist 500'd."""
+    assert client.create_playlist('Fresh', [_T('700')]) == '2'
+    sent = [a for c, a in client.fake.calls if c == 'music/playlists/create_playlist']
+    assert sent == [{'name': 'Fresh', 'provider_instance_or_domain': 'builtin'}]
+
+
+def test_is_connected_reconnects_after_a_restart(client, monkeypatch):
+    """#2111: after either side restarted it read "not connected" until a
+    manual test. it now retries, at most every RECONNECT_INTERVAL."""
+    import core.music_assistant_client as mac
+    now = [1000.0]
+    monkeypatch.setattr(mac.time, 'monotonic', lambda: now[0])
+    assert client.is_connected() is True  # fresh start: connects on its own
+    infos = sum(1 for c, _ in client.fake.calls if c == 'info')
+
+    client._connected = False  # the server went away
+    client._last_connect_attempt = now[0]
+    assert client.is_connected() is False  # throttled
+    assert sum(1 for c, _ in client.fake.calls if c == 'info') == infos
+    now[0] += mac.RECONNECT_INTERVAL
+    assert client.is_connected() is True
+
+
+def test_a_dropped_connection_is_forgotten(monkeypatch):
+    """#2111: a transport failure clears the cached connection so the next
+    call reconnects instead of failing against a stale flag."""
+    import requests
+    monkeypatch.setattr('core.music_assistant_client.config_manager.get',
+                        lambda key, default=None: {'base_url': 'http://ma:8095', 'token': 'tok'}
+                        if key == 'music_assistant' else default)
+    c = MusicAssistantClient()
+    c._connected = True
+    monkeypatch.setattr(c._session, 'post', lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError('refused')))
+    with pytest.raises(MusicAssistantError):
+        c._call('music/playlists/library_items')
+    assert c._connected is False

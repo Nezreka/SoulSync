@@ -1028,6 +1028,113 @@ function Compose({ panel }: { panel: { current: HTMLElement | null } }) {
 
 // ── the panel ──
 
+// ── the import folder (#2129) ──
+
+/** its own endpoint: the Import page reads and flips the same settings */
+export const IMPORT_FOLDER_URL = '/api/video/import/folder/settings';
+
+/** loadImportFolder / saveImportFolder: loaded with each load of the
+ *  downloads config, saved (both fields, read off the page) when one changes */
+function ImportFolder() {
+  const { loads } = useVideoDownloads();
+  const [path, setPath] = useState('');
+  const [auto, setAuto] = useState(false);
+  const [open, setOpen] = useState(false);
+  const pathEl = useRef<HTMLInputElement | null>(null);
+  const autoEl = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!loads) return;
+    let live = true;
+    void (async () => {
+      try {
+        const r = await fetch(IMPORT_FOLDER_URL, { headers: { Accept: 'application/json' } });
+        const d = r.ok ? ((await r.json()) as { path?: string; auto?: boolean } | null) : null;
+        if (!live || !d) return;
+        setPath(d.path || '');
+        setAuto(!!d.auto);
+        shell().SoulSyncFolderCheck?.refresh('video');
+      } catch {
+        // as before: a failed load leaves the fields as they are
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [loads]);
+
+  async function save() {
+    try {
+      const r = await fetch(IMPORT_FOLDER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          path: pathEl.current ? pathEl.current.value : '',
+          auto: !!autoEl.current?.checked,
+        }),
+      });
+      if (!r.ok) throw new Error('save');
+      toast('Import folder saved', 'success');
+    } catch {
+      toast('Couldn\u2019t save the import folder', 'error');
+    }
+  }
+  const commitPath = useCommit<HTMLInputElement>(() => void save());
+  const commitAuto = useCommit<HTMLInputElement>(() => void save());
+
+  return (
+    <div className="form-group">
+      <label htmlFor="video-import-folder-path">Import folder (optional):</label>
+      <div className="path-input-group">
+        <input
+          type="text"
+          id="video-import-folder-path"
+          readOnly={!open}
+          placeholder="/media/import"
+          data-folder-check="video"
+          data-folder-role="input"
+          data-folder-label="Import folder"
+          ref={(el) => {
+            pathEl.current = el;
+            commitPath(el);
+          }}
+          value={path}
+          onChange={(event) => setPath(event.target.value)}
+        />
+        <button
+          type="button"
+          className={open ? 'browse-button' : 'browse-button locked'}
+          onClick={() => {
+            setOpen(!open);
+            if (!open) setTimeout(() => pathEl.current?.focus(), 0);
+          }}
+        >
+          {open ? 'Lock' : 'Unlock'}
+        </button>
+      </div>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          id="video-import-folder-auto"
+          ref={(el) => {
+            autoEl.current = el;
+            commitAuto(el);
+          }}
+          checked={auto}
+          onChange={(event) => setAuto(event.target.checked)}
+        />{' '}
+        Import sure matches automatically
+      </label>
+      <Help>
+        Drop movie or episode files (or whole folders) here and they show on the Import page with
+        the title SoulSync found. They're filed into your libraries with your naming template,
+        exactly like a download. With the box ticked, a sure match is imported on its own once it
+        has finished copying. Keep it apart from the download folder.
+      </Help>
+    </div>
+  );
+}
+
 function Help({ children }: { children: ReactNode }) {
   return <div className="setting-help-text">{children}</div>;
 }
@@ -1168,6 +1275,7 @@ export function VideoFoldersPanel({
             Music changes with it.
           </Help>
         </div>
+        <ImportFolder />
       </div>
 
       <div className="settings-group" data-stg={TAB}>

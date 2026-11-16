@@ -169,8 +169,26 @@ class SoundcloudClient(DownloadSourcePlugin):
         return self.is_available()
 
     def is_authenticated(self) -> bool:
-        """Anonymous-only client — always False until OAuth tier ships."""
-        return False
+        """True when a free account's oauth token is set (#2116)."""
+        return bool(self._oauth_token())
+
+    @staticmethod
+    def _oauth_token() -> str:
+        """the logged-in free account's token, from the soundcloud.com
+        ``oauth_token`` cookie. pasted with or without the "OAuth " prefix."""
+        token = str(config_manager.get('soundcloud_download.oauth_token', '') or '').strip()
+        if token.lower().startswith('oauth '):
+            token = token[6:].strip()
+        return token
+
+    def _auth_opts(self) -> Dict[str, Any]:
+        """yt-dlp login opts. logged in, yt-dlp offers the uploader's original
+        file (format "download") when the api says downloadable and downloads
+        are left, and prefers it over the ~128 kbps stream. it trusts those api
+        flags, never "FREE DL" in a title. a 401/403 there falls back to the
+        stream on its own. never a go+ stream, that needs a paid account."""
+        token = self._oauth_token()
+        return {'username': 'oauth', 'password': token} if token else {}
 
     async def check_connection(self) -> bool:
         """Run a tiny SoundCloud query to verify the network path works."""
@@ -324,6 +342,7 @@ class SoundcloudClient(DownloadSourcePlugin):
             'no_warnings': True,
             'skip_download': True,
             'noplaylist': False,
+            **self._auth_opts(),
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             return ydl.extract_info(url, download=False)
@@ -366,13 +385,19 @@ class SoundcloudClient(DownloadSourcePlugin):
         # worker has everything it needs without re-querying SoundCloud.
         filename = f"{sc_track_id}||{url}||{display_name}"
 
+        # a full extraction lists the formats: "download" is the uploader's
+        # original file, offered only when the api allows it (#2116)
+        original = next((f for f in entry.get('formats') or []
+                         if isinstance(f, dict) and f.get('format_id') == 'download'), None)
+        original_ext = str((original or {}).get('ext') or '').lower()
+
         track_result = TrackResult(
             username='soundcloud',
             filename=filename,
-            size=0,
-            bitrate=128,                # Anonymous SoundCloud cap
+            size=int((original or {}).get('filesize') or 0),
+            bitrate=None if original else 128,   # 128: the anonymous stream
             duration=duration_ms,
-            quality='mp3',
+            quality=original_ext or 'mp3',
             free_upload_slots=999,
             upload_speed=999_999,
             queue_length=0,
@@ -386,6 +411,9 @@ class SoundcloudClient(DownloadSourcePlugin):
                 'permalink_url': url,
                 'uploader': uploader or None,
                 'duration_seconds': duration_seconds,
+                'official_download': bool(original),
+                'quality_label': (f"Official free download ({original_ext or 'original'})"
+                                  if original else 'Stream (~128 kbps)'),
             },
         )
         return track_result
@@ -528,15 +556,28 @@ class SoundcloudClient(DownloadSourcePlugin):
             # the worker decides whether to retry from another source.
             'retries': 1,
             'fragment_retries': 1,
+            **self._auth_opts(),
         }
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(permalink_url, download=True)
         except Exception as exc:
-            # Cover yt_dlp.utils.DownloadError + everything else.
-            logger.warning(f"SoundCloud download failed for '{display_name}': {exc}")
-            return None
+            if not opts.get('password'):
+                # Cover yt_dlp.utils.DownloadError + everything else.
+                logger.warning(f"SoundCloud download failed for '{display_name}': {exc}")
+                return None
+            # the official download failed part way (expired link, cdn error):
+            # take the stream instead of giving up on the track (#2116)
+            logger.warning(f"SoundCloud original download failed for '{display_name}', "
+                           f"falling back to the stream: {exc}")
+            opts = {**opts, 'format': 'bestaudio[format_id!=download]/best[format_id!=download]'}
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(permalink_url, download=True)
+            except Exception as retry_exc:
+                logger.warning(f"SoundCloud download failed for '{display_name}': {retry_exc}")
+                return None
 
         if not isinstance(info, dict):
             logger.warning(f"SoundCloud yt-dlp returned no info dict for '{display_name}'")

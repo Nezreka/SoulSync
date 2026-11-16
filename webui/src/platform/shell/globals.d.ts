@@ -660,6 +660,8 @@ declare global {
     videoEnrichmentPrime?: () => void;
     /** video-side.js: the calendar on a day, optionally with an episode open. */
     videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
+    /** #2128: the video Library's recycle bin button (video-side.js) */
+    videoOpenRecycleBin?: () => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.

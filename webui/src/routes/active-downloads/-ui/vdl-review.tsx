@@ -37,6 +37,11 @@ const toast = (message: string, type: string) => window.showToast?.(message, typ
  */
 const vdlReviewSubStore = { sub: 'recycle' as VdlReviewSub };
 
+/** #2128: the review pane opens on the recycle bin next time it mounts */
+export function showVideoRecycleBin(): void {
+  vdlReviewSubStore.sub = 'recycle';
+}
+
 async function confirmed(options: {
   title: string;
   message: string;

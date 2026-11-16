@@ -1,0 +1,240 @@
+/* #2106/#2107: collection completeness on the artist cards and table, the
+   sort direction button and the library overview. green is complete, amber
+   is missing tracks, anything not yet known stays quiet. */
+
+.meter {
+  --meter-rgb: var(--accent-rgb);
+
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.meter[data-completion='complete'] {
+  --meter-rgb: var(--success-rgb);
+}
+
+.meter[data-completion='incomplete'] {
+  --meter-rgb: var(--warning-rgb);
+}
+
+.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.counts {
+  color: rgba(var(--meter-rgb), 0.95);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.meter[data-completion='unchecked'] .counts,
+.meter[data-completion='unknown'] .counts {
+  color: var(--text-2);
+}
+
+.percent {
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  position: relative;
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgba(var(--meter-rgb), 0.9);
+  transition: width var(--dur-base, 220ms) var(--ease-out);
+}
+
+.meter[data-completion='unchecked'] .fill,
+.meter[data-completion='unknown'] .fill {
+  background: var(--white-a35);
+}
+
+.missing,
+.state {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.missing {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--warning-rgb));
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.missing:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.missing:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.state {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.meter[data-completion='complete'] .state {
+  color: rgb(var(--success-rgb));
+}
+
+/* the card: the meter sits under the name, over the photo's dark foot */
+.card {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  padding: 0 16px 14px;
+  pointer-events: none;
+}
+
+.card .missing {
+  pointer-events: auto;
+}
+
+.card .counts,
+.card .state,
+.card .missing {
+  text-shadow: 0 1px 4px var(--black-a80);
+}
+
+/* room under the name for the meter */
+:global(.library-artist-card)[data-collection] :global(.library-artist-info) {
+  padding-bottom: 62px;
+}
+
+.row {
+  width: 100%;
+  max-width: 200px;
+}
+
+/* -- the sort ---------------------------------------------------------- */
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dirButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 10px;
+}
+
+.dirButton svg {
+  transition: transform var(--dur-fast) ease;
+}
+
+.dirDown {
+  transform: rotate(180deg);
+}
+
+.toggleOn {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+/* -- the overview ------------------------------------------------------ */
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-md);
+  background: var(--white-a03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.stat {
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+button.stat:hover {
+  border-color: var(--white-a14);
+  background: var(--white-a06);
+}
+
+button.stat:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.statValue {
+  color: var(--text-1);
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.stat[data-tone='good'] .statValue {
+  color: rgb(var(--success-rgb));
+}
+
+.stat[data-tone='warn'] .statValue {
+  color: rgb(var(--warning-rgb));
+}
+
+.statLabel {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill,
+  .dirButton svg {
+    transition: none;
+  }
+}

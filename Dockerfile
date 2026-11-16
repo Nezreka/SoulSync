@@ -120,8 +120,11 @@ COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/
 # soulsync, the album-bundle copy fails with "[Errno 13] Permission denied:
 # 'storage'" because /app itself is root-owned and the soulsync UID can't
 # create a top-level dir there.
-RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts && \
-    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts
+# NOTE: /app/podcasts, /app/audiobooks and /app/Playlists are the default
+# podcast, audiobook and playlist folders. not pre-baked, the first podcast
+# download or playlist folder failed with permission denied (#2111).
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts /app/podcasts /app/audiobooks /app/Playlists && \
+    chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts /app/podcasts /app/audiobooks /app/Playlists
 
 # Create defaults directory and copy template files
 # These will be used by entrypoint.sh to initialize empty volumes

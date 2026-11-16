@@ -214,5 +214,32 @@ describe('the card', () => {
       ),
     );
     expect(shell.showToast).toHaveBeenCalledWith('Playlist folders rebuilt', 'success');
+    expect(document.querySelector('#playlists-rebuild-status a')).toBeNull();
+  });
+
+  it('with nothing to rebuild, says where Organize by playlist is and links there (#2112)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true, count: 0, results: [] }),
+        } as Response),
+      ),
+    );
+    const nav = vi.fn();
+    shell.navigateToPage = nav;
+    card();
+    fireEvent.click(document.getElementById('playlists-rebuild-btn')!);
+    const status = document.getElementById('playlists-rebuild-status')!;
+    await waitFor(() => expect(status.textContent).toContain('Turn it on per playlist'));
+    expect(status.textContent).toBe(
+      "No playlists have Organize by playlist on yet. Turn it on per playlist: Playlists, open a playlist's ⋯ menu, Settings.",
+    );
+    const link = status.querySelector('a')!;
+    expect(link.getAttribute('href')).toBe('/sync');
+    fireEvent.click(link);
+    expect(nav).toHaveBeenCalledWith('sync');
+    delete shell.navigateToPage;
   });
 });

@@ -50,6 +50,12 @@ FILE_SOURCE_DOMAINS = ('filesystem_local', 'filesystem_smb')
 #: The provider instance or domain that addresses Music Assistant's own
 #: library in ``music/*/get`` and ``*_tracks`` commands.
 LIBRARY = 'library'
+#: Music Assistant's own playlist provider. playlists are created there, and
+#: only playlists that live there are SoulSync's to write (#2111). 'library'
+#: is not a provider, create_playlist on it fails with ProviderUnavailable.
+BUILTIN = 'builtin'
+#: how often a dropped connection is retried on its own
+RECONNECT_INTERVAL = 30.0
 PAGE_SIZE = 500
 TASK_DONE = ('finished', 'completed', 'success', 'done')
 TASK_FAILED = ('failed', 'error', 'cancelled', 'canceled')
@@ -208,6 +214,7 @@ class MusicAssistantClient(MediaServerBase):
         self.user_name: Optional[str] = None
         self.last_fetch_failed = False
         self._connected = False
+        self._last_connect_attempt = 0.0
         self._transport = transport
         self._session = requests.Session()
         self._timeout = 30
@@ -295,6 +302,7 @@ class MusicAssistantClient(MediaServerBase):
         try:
             response = self._session.post(f"{self.base_url}/api", json=body, headers=headers, timeout=self._timeout)
         except requests.RequestException as exc:
+            self._connected = False
             raise MusicAssistantError(f"{command}: {exc}") from exc
         if response.status_code == 401:
             raise MusicAssistantError(f"{command}: authentication required (HTTP 401); check the token")
@@ -344,6 +352,7 @@ class MusicAssistantClient(MediaServerBase):
     def ensure_connection(self) -> bool:
         if self._connected:
             return True
+        self._last_connect_attempt = time.monotonic()
         if not self.base_url:
             logger.warning("Music Assistant: no URL configured")
             return False
@@ -364,6 +373,11 @@ class MusicAssistantClient(MediaServerBase):
             return False
 
     def is_connected(self) -> bool:
+        # nothing reconnected after either side restarted, so it read "not
+        # connected" until someone pressed test. retry now and then (#2111)
+        if (not self._connected and self.base_url and self.token
+                and time.monotonic() - self._last_connect_attempt >= RECONNECT_INTERVAL):
+            self.ensure_connection()
         return self._connected
 
     def test_connection(self) -> Tuple[bool, str]:
@@ -697,7 +711,16 @@ class MusicAssistantClient(MediaServerBase):
         except MusicAssistantError as exc:
             logger.error("Music Assistant playlists fetch failed: %s", exc)
             return []
-        return [self._playlist_info(i) for i in items if i.get('is_editable', True)]
+        return [self._playlist_info(i) for i in items if i.get('is_editable', True) and self._is_own_playlist(i)]
+
+    @staticmethod
+    def _is_own_playlist(item: Optional[Dict[str, Any]]) -> bool:
+        """Music Assistant's own playlists only. a spotify playlist you own
+        is editable too, and music assistant writes edits through to
+        spotify: a same-named mirror reconciled it down to one track (#2111)."""
+        mappings = (item or {}).get('provider_mappings') or []
+        return bool(mappings) and all(
+            BUILTIN in (m.get('provider_domain'), m.get('provider_instance')) for m in mappings)
 
     def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         wanted = (name or '').strip().lower()
@@ -713,7 +736,7 @@ class MusicAssistantClient(MediaServerBase):
             item = self._call('music/playlists/get', item_id=str(playlist_id), provider_instance_id_or_domain=LIBRARY)
         except MusicAssistantError:
             return None
-        return self._playlist_info(item) if item else None
+        return self._playlist_info(item) if item and self._is_own_playlist(item) else None
 
     def get_playlist_tracks(self, playlist_id: str) -> List[MusicAssistantTrack]:
         if not self.ensure_connection():
@@ -818,7 +841,7 @@ class MusicAssistantClient(MediaServerBase):
                                    update={'item_id': str(playlist_id), 'provider': LIBRARY, 'name': name,
                                            'media_type': 'playlist', 'provider_mappings': []})
                     return str(playlist_id) if self._add_tracks(playlist_id, tracks) else False
-            created = self._call('music/playlists/create_playlist', name=name, provider_instance_or_domain=LIBRARY) or {}
+            created = self._call('music/playlists/create_playlist', name=name, provider_instance_or_domain=BUILTIN) or {}
             new_id = created.get('item_id') if isinstance(created, dict) else None
             if new_id is None:
                 logger.error("Music Assistant create_playlist '%s' returned no id", name)
@@ -903,6 +926,10 @@ class MusicAssistantClient(MediaServerBase):
 
     def delete_playlist(self, playlist_id: str) -> bool:
         if not self.ensure_connection():
+            return False
+        if not self.get_playlist_by_id(playlist_id):
+            # gone, or a streaming service's playlist: never ours to remove
+            logger.error("Music Assistant delete_playlist %s: not a Music Assistant playlist", playlist_id)
             return False
         try:
             self._call('music/playlists/remove', item_id=str(playlist_id))

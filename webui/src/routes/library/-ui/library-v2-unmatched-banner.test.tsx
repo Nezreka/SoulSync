@@ -48,6 +48,8 @@ function baseHandlers() {
 
 describe('the unmatched-imports banner', () => {
   beforeEach(() => {
+    // the list remembers how you left it (#2107): each test starts fresh
+    window.localStorage.clear();
     window.SoulSyncWebShellBridge = createShellBridge();
   });
 
@@ -417,16 +419,16 @@ describe('the unmatched-imports banner', () => {
     expect(container.querySelector('.library-unmatched-banner')).toBeNull();
   });
 
-  it('says nothing when there is a count but nowhere to send you', async () => {
-    // Without an artist to open, "3 tracks need fixing" is a dead end.
+  it('needs no artist to send you to: the review is where it goes', async () => {
+    // the banner used to open an artist page, so no artist meant no banner.
+    // it opens the review now, which every count has
     server.use(
       ...baseHandlers(),
       http.get('/api/library/unmatched-summary', () =>
         HttpResponse.json({ success: true, count: 3, artist_id: null }),
       ),
     );
-    const { container } = renderLibrary();
-    await screen.findByPlaceholderText('Filter artists…');
-    expect(container.querySelector('.library-unmatched-banner')).toBeNull();
+    renderLibrary();
+    expect(await screen.findByRole('button', { name: 'Review' })).toBeInTheDocument();
   });
 });

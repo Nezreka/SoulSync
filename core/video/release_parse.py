@@ -148,9 +148,9 @@ _MULTI_RX = re.compile(_EDGE_L + r"(?:multi|dual(?:[ ._-]?audio)?"
                        + _EDGE_R, re.I)
 
 
-def parse_languages(title: Any) -> tuple:
-    """(audio language codes, multi) from a release name's tags. only the part
-    after the title counts, so 'The.French.Dispatch.2021...' isn't french."""
+def _tag_tail(title: Any):
+    """the part of a release name after the title, where the scene puts its
+    tags. None when there is no year or quality token to cut at."""
     t = str(title or "")
     cut = None
     years = list(_YEAR_TOKEN.finditer(t))
@@ -159,11 +159,49 @@ def parse_languages(title: Any) -> tuple:
     m = _META_BOUNDARY.search(t)
     if m and _spaces(t[:m.start()]) and (cut is None or m.start() < cut):
         cut = m.start()
-    if cut is None:
+    return None if cut is None else t[cut:]
+
+
+def parse_languages(title: Any) -> tuple:
+    """(audio language codes, multi) from a release name's tags. only the part
+    after the title counts, so 'The.French.Dispatch.2021...' isn't french."""
+    tail = _tag_tail(title)
+    if tail is None:
         return [], False
-    tail = t[cut:]
     codes = [code for code, rx in _LANG_RX if rx.search(tail)]
     return codes, bool(_MULTI_RX.search(tail))
+
+
+# subtitle tags. VOSTFR / VOSTA style (original audio, subs in that language),
+# SUBFRENCH, FRENCH.SUBS, ESubs, and the language-less ones (MULTiSUBS, SUBBED).
+_SUB_PREFIX = {"fr": "vostfr|vost|subfrench|subfr|stfr", "en": "esubs?|subeng|vosta|engsubs?",
+               "de": "subgerman|subger", "it": "subita", "es": "subspa|subesp|vose"}
+_SUB_LANG_RX = [
+    (code, re.compile(_EDGE_L + "(?:" + "|".join(filter(None, (
+        _SUB_PREFIX.get(code),
+        "(?:" + words + ")[ ._-]?(?:subs?|subbed|subtitles?)"))) + ")" + _EDGE_R, re.I))
+    for code, words in _LANG_TAGS
+]
+_SUBS_ANY_RX = re.compile(_EDGE_L + r"(?:multi[ ._-]?subs?|subbed|subs|subtitles|hardsubs?)" + _EDGE_R,
+                          re.I)
+
+
+def parse_subtitle_tags(title: Any) -> tuple:
+    """(subtitle language codes, subbed) from a release name's tags. ``subbed``
+    is true for any subtitle tag, a language-less one (MULTiSUBS) included."""
+    tail = _tag_tail(title)
+    if tail is None:
+        return [], False
+    codes = [code for code, rx in _SUB_LANG_RX if rx.search(tail)]
+    return codes, bool(codes) or bool(_SUBS_ANY_RX.search(tail))
+
+
+def release_languages(title: Any) -> dict:
+    """what a release name says about its languages: audio codes, multi, and
+    the subtitles it carries. empty when the name tags none (#2120)."""
+    audio, multi = parse_languages(title)
+    subs, subbed = parse_subtitle_tags(title)
+    return {"audio": audio, "multi": multi, "subs": subs, "subbed": subbed}
 
 
 def parse_release(title: Any) -> dict:

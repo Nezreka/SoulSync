@@ -765,7 +765,8 @@ describe('filters', () => {
     const options = [
       ...(document.getElementById('repair-findings-job-filter') as HTMLSelectElement).options,
     ].map((option) => option.textContent);
-    expect(options).toEqual(['All Jobs', 'Orphan File Detector', 'Dead File Cleaner']);
+    // A to Z (#2113)
+    expect(options).toEqual(['All findings', 'Dead File Cleaner', 'Orphan File Detector']);
   });
 
   it('filters the inbox by job, counted by the server for that job', async () => {

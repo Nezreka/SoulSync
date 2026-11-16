@@ -565,6 +565,18 @@ describe('Deezer', () => {
 });
 
 describe('SoundCloud', () => {
+  it('the OAuth token (#2116) loads and saves as its own key; a saved one stays masked', async () => {
+    act(() => store.hydrate({ soundcloud_download: { oauth_token: '__redacted_unchanged__' } }));
+    render(<SoundcloudPanel store={store} model={model} />);
+    const token = document.getElementById('soundcloud-download-oauth-token') as HTMLInputElement;
+    expect(token.type).toBe('password');
+    expect(token.value).toBe('__redacted_unchanged__');
+    fireEvent.focus(token);
+    fireEvent.change(token, { target: { value: 'tok123' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(posted.at(-1)).toEqual({ soundcloud_download: { oauth_token: 'tok123' } });
+  });
+
   it('reports the three states and checks itself when its modal opens', async () => {
     document.body.insertAdjacentHTML('beforeend', '<div id="source-config-home" hidden></div>');
     const reply = { available: true, reachable: false };
@@ -572,7 +584,7 @@ describe('SoundCloud', () => {
     render(
       <>
         <SourceModal model={model} />
-        <SoundcloudPanel model={model} />
+        <SoundcloudPanel store={store} model={model} />
       </>,
     );
     expect(calls).toHaveLength(0);

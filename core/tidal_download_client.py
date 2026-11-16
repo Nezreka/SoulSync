@@ -1070,7 +1070,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
                 ],
                 check=True,
                 capture_output=True,
-                text=True,
+                text=True, encoding='utf-8', errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(

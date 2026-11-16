@@ -313,3 +313,40 @@ describe('the rules', () => {
     expect(drivePrefix('/a/b', '/x/y')).toBeNull();
   });
 });
+
+describe('the import folder (#2129)', () => {
+  const URL = '/api/video/import/folder/settings';
+  const sent = () => calls.filter((c) => c.method === 'POST' && c.url === URL).map((c) => c.body);
+
+  it('loads with the downloads config, and saves both fields when one changes', async () => {
+    answers[`GET ${URL}`] = { path: '/imports', auto: true };
+    panel();
+    await shown();
+    await waitFor(() => expect(el('video-import-folder-path').value).toBe('/imports'));
+    expect(el('video-import-folder-auto').checked).toBe(true);
+    expect(el('video-import-folder-path').readOnly).toBe(true);
+    // its own endpoint, never the downloads config
+    expect(posts()).toEqual([]);
+    fireEvent.click(el('video-import-folder-path').nextElementSibling!);
+    expect(el('video-import-folder-path').readOnly).toBe(false);
+    typeAndLeave(el('video-import-folder-path'), '/drop');
+    await waitFor(() => expect(sent()).toEqual([{ path: '/drop', auto: true }]));
+    expect(shell.showToast).toHaveBeenCalledWith('Import folder saved', 'success');
+    fireEvent.click(el('video-import-folder-auto'));
+    await waitFor(() => expect(sent()).toHaveLength(2));
+    expect(sent()[1]).toEqual({ path: '/drop', auto: false });
+    expect(el('video-import-folder-auto').checked).toBe(false);
+    expect(posts()).toEqual([]);
+  });
+
+  it('a failed save says so', async () => {
+    answers[`GET ${URL}`] = { path: '', auto: false };
+    answers[`POST ${URL}`] = 503;
+    panel();
+    await shown();
+    fireEvent.click(el('video-import-folder-auto'));
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith('Couldn\u2019t save the import folder', 'error'),
+    );
+  });
+});

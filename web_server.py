@@ -3771,6 +3771,9 @@ def _regenerate_batch_m3u(batch, tracks):
         active_server = config_manager.get_active_media_server()
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
+        # the batch only has what it downloaded, a mirror's m3u is the whole playlist (#2111)
+        from core.playlists.batch_m3u import playlist_m3u_tracks
+        tracks = playlist_m3u_tracks(batch, tracks, db)
 
         # Resolve file paths from library DB
         from collections import defaultdict
@@ -24214,6 +24217,15 @@ try:
     _ensure_video_download_monitor(_get_video_db)
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
+
+# the video import folder's automatic pass (#2129). it checks its own setting
+# every pass, so it costs a sleep when the folder isn't set up.
+try:
+    from core.video.import_folder import ensure_started as _ensure_video_import_folder
+    from api.video import get_video_db as _get_video_db_for_import
+    _ensure_video_import_folder(_get_video_db_for_import)
+except Exception:
+    logger.warning("could not start the video import folder worker", exc_info=True)
 
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and

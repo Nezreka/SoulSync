@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -27,6 +27,7 @@ function renderRoute(entries = ['/library']) {
 let requested: string[] = [];
 let requestedWrites: string[] = [];
 let canWrite = true;
+let artistRows: Record<string, unknown>[] = [{ id: 1, name: 'Aphex Twin' }];
 
 const artistsRequests = () => requested.filter((u) => u.includes('library/v2/artists'));
 
@@ -37,6 +38,7 @@ describe('library route (live)', () => {
     requested = [];
     requestedWrites = [];
     canWrite = true;
+    artistRows = [{ id: 1, name: 'Aphex Twin' }];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -78,7 +80,7 @@ describe('library route (live)', () => {
         } else if (url.includes('library/v2/artists')) {
           body = {
             success: true,
-            artists: [{ id: 1, name: 'Aphex Twin' }],
+            artists: artistRows,
             pagination: {
               page: 1,
               limit: 75,
@@ -216,4 +218,115 @@ describe('library route (live)', () => {
     const { router } = renderRoute();
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/library'));
   });
+
+  // #2106: the cards show the table's owned / expected, and the missing count
+  // opens that artist's missing tracks
+  it('shows completeness on a card and opens the missing tracks (#2106)', async () => {
+    artistRows = [
+      {
+        id: 1,
+        name: '311',
+        track_count: 345,
+        tracks_present: 341,
+        tracks_missing: 4,
+        completion: 'incomplete',
+        genres: [],
+      },
+      {
+        id: 2,
+        name: '10 Years',
+        track_count: 140,
+        tracks_present: 140,
+        completion: 'complete',
+        genres: [],
+      },
+      {
+        id: 3,
+        name: 'Nothing Yet',
+        track_count: 0,
+        tracks_present: 0,
+        completion: 'unknown',
+        genres: [],
+      },
+    ];
+    const { router } = renderRoute(['/library']);
+    expect(await screen.findByText('341 / 345 tracks', {}, { timeout: 10_000 })).toBeTruthy();
+    expect(screen.getByText(/Complete$/)).toBeTruthy();
+    // nothing expected is never "complete"
+    expect(screen.getByText('Nothing expected yet')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '4 missing' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        section: 'wanted',
+        wantedKind: 'missing',
+        wantedArtist: 1,
+      }),
+    );
+    await waitFor(() =>
+      expect(requested.some((u) => u.includes('library/v2/wanted') && u.includes('artist=1'))).toBe(
+        true,
+      ),
+    );
+  }, 30_000);
+
+  it('sorts by completion either way round (#2107)', async () => {
+    renderRoute(['/library']);
+    const select = await screen.findByLabelText('Sort artists', {}, { timeout: 10_000 });
+    fireEvent.change(select, { target: { value: 'completion' } });
+    await waitFor(() =>
+      expect(artistsRequests().some((u) => u.includes('sort=completion'))).toBe(true),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /turn around/ }));
+    await waitFor(() => expect(artistsRequests().some((u) => u.includes('dir=desc'))).toBe(true));
+  }, 30_000);
+
+  it('passes the collection filters from the url (#2107)', async () => {
+    renderRoute(['/library?completion=incomplete&missingMin=2&pctMax=90&credit=featured']);
+    await waitFor(() => expect(artistsRequests()).not.toEqual([]));
+    const url = new URL(artistsRequests().at(-1)!, 'http://x');
+    expect(url.searchParams.get('completion')).toBe('incomplete');
+    expect(url.searchParams.get('missing_min')).toBe('2');
+    expect(url.searchParams.get('pct_max')).toBe('90');
+    expect(url.searchParams.get('credit')).toBe('featured');
+  });
+
+  it('opens a plain /library the way you left the list (#2107)', async () => {
+    const first = renderRoute(['/library?view=table&sort=missing&completion=incomplete']);
+    await waitFor(() => expect(artistsRequests()).not.toEqual([]));
+    first.unmount();
+    const { router } = renderRoute(['/library']);
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        view: 'table',
+        sort: 'missing',
+        completion: 'incomplete',
+      }),
+    );
+    // anything in the url wins over what was remembered
+    const again = renderRoute(['/library?sort=name']);
+    await waitFor(() => expect(again.router.state.location.search).toMatchObject({ sort: 'name' }));
+    expect(again.router.state.location.search).not.toHaveProperty('completion', 'incomplete');
+  }, 30_000);
+
+  it('adds several artists to the Watchlist at once (#2109)', async () => {
+    artistRows = [
+      { id: 1, name: 'Alpha', monitored: false, track_count: 1, tracks_present: 1, genres: [] },
+      { id: 2, name: 'Beta', monitored: false, track_count: 1, tracks_present: 1, genres: [] },
+      { id: 3, name: 'Gamma', monitored: true, track_count: 1, tracks_present: 1, genres: [] },
+    ];
+    renderRoute(['/library']);
+    const first = await screen.findByLabelText('Select Alpha', {}, { timeout: 10_000 });
+    fireEvent.click(first);
+    // shift-click takes the range in page order
+    fireEvent.click(screen.getByLabelText('Select Gamma'), { shiftKey: true });
+    expect(await screen.findByText('3 artists selected')).toBeTruthy();
+    // the cards have their own add buttons: this is the bar's
+    const bar = screen.getByRole('region', { name: 'Selected artists' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Add to Watchlist' }));
+    await waitFor(() =>
+      expect(requestedWrites.filter((w) => w.includes('/monitor'))).toHaveLength(2),
+    );
+    // Gamma was already on it: skipped, not sent
+    expect(requestedWrites.some((w) => w.includes('artists/3/monitor'))).toBe(false);
+  }, 30_000);
 });

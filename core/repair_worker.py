@@ -1482,9 +1482,23 @@ class RepairWorker:
             self.thread.join(timeout=2)
         logger.info("Repair worker stopped")
 
+    def _sync_master(self) -> bool:
+        """the switch the automation engine gates scheduled jobs on, which is
+        also the automations page's music toggle. the tools page showed its
+        own saved copy, so flipping it on in automations left tools saying
+        "disabled" while jobs ran (#2113). read it from where it lives."""
+        try:
+            raw = self.db.get_metadata('automation_master_music_enabled')
+        except Exception as e:  # noqa: BLE001 - keep the last known state
+            logger.debug("Could not read the automations master: %s", e)
+            raw = None
+        if raw is not None and str(raw).strip() != '':
+            self.enabled = str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+        return self.enabled
+
     def toggle(self) -> bool:
         """Toggle master enabled state. Returns new state."""
-        self.set_enabled(not self.enabled)
+        self.set_enabled(not self._sync_master())
         logger.info("Repair worker %s", "enabled" if self.enabled else "disabled")
         return self.enabled
 
@@ -1548,6 +1562,7 @@ class RepairWorker:
     # Stats
     # ------------------------------------------------------------------
     def get_stats(self) -> Dict[str, Any]:
+        self._sync_master()
         is_actually_running = self.running and (self.thread is not None and self.thread.is_alive())
         is_idle = (
             is_actually_running
@@ -7729,7 +7744,7 @@ class RepairWorker:
                 '-map_metadata', '0',
             ] + extra_args + ['-y', out_path]
 
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
 
             if proc.returncode != 0 or not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
                 if os.path.exists(out_path):

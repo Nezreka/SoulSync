@@ -142,6 +142,8 @@ const lastList = (kind: 'artists' | 'albums') => {
 };
 
 beforeEach(() => {
+  // the list remembers how you left it (#2107): each test starts fresh
+  window.localStorage.clear();
   artistRows = [artist()];
   albumRows = [album()];
   upgradable = {};

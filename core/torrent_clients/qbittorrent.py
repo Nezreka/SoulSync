@@ -19,7 +19,7 @@ import requests as http_requests
 
 from core.settings import config_manager
 from core.async_utils import run_control
-from core.torrent_clients.base import TorrentStatus, normalize_client_url
+from core.torrent_clients.base import TorrentStatus, normalize_client_url, tracker_host
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.qbittorrent")
@@ -434,6 +434,10 @@ class QBittorrentAdapter:
             ratio=float(item['ratio']) if item.get('ratio') is not None else None,
             seeding_time=int(item['seeding_time']) if isinstance(item.get('seeding_time'), (int, float)) else None,
             category=str(item.get('category') or '') or None,
+            # the tracker qbittorrent is talking to, empty while none answers
+            tracker=tracker_host(item.get('tracker')),
+            # pausedUP / stoppedUP map to completed, still stopped all the same
+            paused=str(item.get('state') or '').startswith(('paused', 'stopped')),
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

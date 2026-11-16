@@ -807,6 +807,17 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Dev merged in before the merge to dev (Nov 16 2026)
+
+**What.** Dev had moved 29 commits, and three of them changed the vanilla Settings page this branch removed. Each is ported to React, and its frozen fixture took dev's markup, so the parity tests check the new field against what dev shipped.
+- **#2116 SoundCloud.** The OAuth token field (masked as a saved secret) saves `soundcloud_download.oauth_token`.
+- **#2112 Playlist folders.** The Playlists Folder help names where Organize by playlist is turned on. An empty rebuild says so and links to Playlists, through `navigateToPage('sync')`.
+- **#2129 Video import folder.** It loads with each downloads config load, from its own endpoint. Both fields save when one changes, with dev's toasts.
+
+`index.html` keeps the page's comment and dev's Import nav and page. Dev's tests that read `settings.js` or `video-settings.js` (the rebuild hint, the import folder setting, the video library load count) now read the React sections.
+
+**Checked.** The new tests, the ported fixtures, the build and types, and dev's changed Python tests (300 pass).
+
 ### The review: the port read line by line against dev (Nov 16 2026)
 
 **How.** Six reviewers read the port against `52f2190d7` (`settings.js`, `video-settings.js`, `index.html`, `init.js`), each on one area: Connections, Sources and the chain, Downloads/Quality/Discovery/Appearance/Logs, Library and System, the video side, and the page shell and routing. Each finding was checked in the code before anything was changed.
@@ -998,6 +1009,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | (dev merged in) | **Dev's Settings changes, ported.** The SoundCloud OAuth token (#2116), the playlist folders' hint and the empty rebuild's link (#2112), the video import folder (#2129); their frozen fixtures took dev's markup. |
 | Nov 16 | (cleanup) | **`video-settings.js` is gone** (it was a note since V3c), with its script tag; the 12 Python files that read it now read the React sections or check it stays gone. |
 | Nov 16 | (the review) | **The port read line by line against dev.** 17 differences fixed (one shell copy, revisits start fresh, particles and Help find the page, autosaves refresh the status dots, emptied fields stay empty, Tidal, Quality, Discovery); the rest recorded. |
 | Nov 16 | `ee53c8b34` (step V4c) | **Settings is a React route.** The video side's settings are `/settings?media=video`. |

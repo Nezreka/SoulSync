@@ -58,6 +58,7 @@ import {
   AdlUnverifiedRow,
 } from './adl-review';
 import { useReportActive } from './dl-header';
+import { useOpenRecycleBin } from './use-open-recycle-bin';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -103,6 +104,11 @@ export function ActiveDownloadsPage() {
     };
   }, []);
   const reviewing = state.filter === 'unverified';
+  // #2128: the Library's recycle bin button: Review, then Deleted
+  useOpenRecycleBin(() => {
+    downloads.setFilter('unverified');
+    verification.setSubView('deleted');
+  });
 
   const refresh = useCallback(() => void downloads.refresh(), [downloads]);
   const refreshQuarantine = useCallback(

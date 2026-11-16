@@ -1,0 +1,135 @@
+/* #2109: the selection bar over the artist list, and the checkboxes. it sits
+   above the list while you scroll, quiet until something is picked. */
+
+.bar {
+  position: sticky;
+  top: 8px;
+  z-index: var(--z-sticky, 20);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: 0 14px 40px var(--black-a60);
+}
+
+.lead,
+.actions,
+.progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.lead strong {
+  color: var(--text-1);
+  font-size: 13.5px;
+}
+
+.actions {
+  gap: 8px;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--accent-rgb));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.link:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.progress {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  position: relative;
+  display: block;
+  flex: 1 1 120px;
+  max-width: 260px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgb(var(--accent-rgb));
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.errors {
+  overflow: hidden;
+  max-width: 320px;
+  color: var(--danger-light);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+/* on a card: under the Watchlist toggle, shown on hover or once anything
+   is picked */
+.cardCheck {
+  position: absolute;
+  top: 46px;
+  left: 14px;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+:global(.library-artist-card):hover .cardCheck,
+.cardCheck:focus-visible,
+.cardCheck:checked,
+:global(.library-artists-grid)[data-selecting] .cardCheck {
+  opacity: 1;
+}
+
+:global(.library-artist-card)[data-selected] {
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.85),
+    0 4px 16px var(--black-a30);
+}
+
+@media (hover: none) {
+  .cardCheck {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill,
+  .cardCheck {
+    transition: none;
+  }
+}

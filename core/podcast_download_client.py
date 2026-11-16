@@ -25,6 +25,11 @@ from core.podcast_client import PodcastEpisode
 
 logger = get_logger("podcast_download")
 
+
+class PodcastFolderNotWritable(RuntimeError):
+    """the podcast folder can't be created or written. raised, not a None
+    return, so the download says why instead of "download failed" (#2111)."""
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -309,6 +314,9 @@ class PodcastDownloadClient:
 
         Returns:
             Absolute path string of the saved file, or None on failure.
+
+        Raises:
+            PodcastFolderNotWritable: the destination folder can't be made.
         """
         if dest_dir:
             dest = Path(dest_dir)
@@ -357,7 +365,9 @@ class PodcastDownloadClient:
             target_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             logger.error("Cannot create destination directory %s: %s", target_dir, exc)
-            return None
+            raise PodcastFolderNotWritable(
+                f"Podcast folder is not writable: {dest} ({exc.strerror or exc}). "
+                "Mount it in docker or pick another Podcasts Folder in Settings.") from exc
 
         filepath = _collision_safe_path(target_dir / (filename + ext))
 

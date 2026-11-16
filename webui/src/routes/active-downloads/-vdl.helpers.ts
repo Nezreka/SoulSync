@@ -4,7 +4,14 @@
  * rewrite behaves identically and every branch is unit-testable.
  */
 
-import type { VdlBlockEntry, VdlDownload, VdlFilter, VdlSearchCtx, VdlView } from './-vdl.types';
+import type {
+  VdlBlockEntry,
+  VdlDownload,
+  VdlFilter,
+  VdlReleaseLangs,
+  VdlSearchCtx,
+  VdlView,
+} from './-vdl.types';
 
 import { VDL_ACTIVE_STATUSES, VDL_FAILED_STATUSES, VDL_REMOVABLE_STATUSES } from './-vdl.types';
 
@@ -377,4 +384,24 @@ export function vdlBlockSxe(b: VdlBlockEntry): string {
   return b.season_number != null && b.episode_number != null
     ? `S${vdlPad2(b.season_number)}E${vdlPad2(b.episode_number)}`
     : '';
+}
+
+/* ── languages (#2120) ─────────────────────────────────────────────────── */
+
+/**
+ * The release's languages in scene shorthand, for the tag under the quality
+ * one: "MULTi FR · FR subs", "FR", "EN subs", "subs". Empty when the name tags
+ * nothing, which usually means the original audio only.
+ */
+export function vdlLangLabel(l: VdlReleaseLangs | null | undefined): string {
+  if (!l) return '';
+  const up = (codes: string[] | undefined) => (codes ?? []).map((c) => c.toUpperCase()).join(' ');
+  const audio = up(l.audio);
+  const parts: string[] = [];
+  if (l.multi) parts.push(audio ? `MULTi ${audio}` : 'MULTi');
+  else if (audio) parts.push(audio);
+  const subs = up(l.subs);
+  if (subs) parts.push(`${subs} subs`);
+  else if (l.subbed) parts.push('subs');
+  return parts.join(' · ');
 }

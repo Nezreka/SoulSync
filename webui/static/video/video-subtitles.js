@@ -529,6 +529,19 @@
     );
   }
 
+  // What the file already has in the searched language, in words (#2126).
+  // tracks: the search's in_file list. '' when there is nothing.
+  function inFileNote(tracks, lang) {
+    if (!tracks || !tracks.length) return '';
+    var inside = tracks.filter(function (t) { return t.where === 'embedded'; });
+    var name = esc(langLabel(lang));
+    if (!inside.length) return 'This file already has ' + name + ' subtitles beside it.';
+    var pictures = inside.every(function (t) { return t.bitmap; });
+    return 'This file already has ' + name + ' subtitles inside it' +
+      (pictures ? ' (picture subtitles: players show them, they can\u2019t be saved as a separate file).' : '.') +
+      ' SoulSync counts them, so it won\u2019t keep searching for them.';
+  }
+
   // The Bazarr-style manual search: pick a language, search, pick a result.
   // A manually downloaded subtitle is the user's explicit pick — the UI says
   // so, and the backend protects manual picks from auto-upgrade.
@@ -619,6 +632,14 @@
         .then(function (body) {
           if (!document.body.contains(ov)) return;
           var cands = (body && body.candidates) || [];
+          var have = inFileNote((body && body.in_file) || [], lang);
+          if (!cands.length && have) {
+            // the subs are already there, often only inside the video (#2126)
+            box.innerHTML =
+              '<div class="vsub-hint vsub-hint--center">' + have +
+              ' Your subtitle sites have nothing more for it.</div>';
+            return;
+          }
           if (!cands.length) {
             box.innerHTML =
               '<div class="vsub-hint vsub-hint--center">No ' +
@@ -631,6 +652,7 @@
             return;
           }
           box.innerHTML =
+            (have ? '<div class="vsub-hint">' + have + '</div>' : '') +
             '<div class="vsub-rhead"><span>Title</span><span>Provider</span>' +
             '<span style="text-align:right">Score</span><span style="text-align:right">Downloads</span><span></span></div>' +
             cands.map(resultRow).join('');

@@ -16,10 +16,11 @@ import { fetchVideoHistoryCount } from '../-vdl.api';
 import { useVideoDownloads } from '../-vdl.use-downloads';
 import { AdlClientsTab } from './adl-clients';
 import { useReportActive } from './dl-header';
+import { useOpenRecycleBin } from './use-open-recycle-bin';
 import { VdlHeader } from './vdl-header';
 import { VdlHistoryModal } from './vdl-history';
 import { VdlList, useVdlCanImport } from './vdl-list';
-import { VdlReviewPane, useVdlReview } from './vdl-review';
+import { VdlReviewPane, showVideoRecycleBin, useVdlReview } from './vdl-review';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -31,6 +32,11 @@ export function VideoDownloadsView() {
   useReportActive('video', dl.counts.active);
   const review = useVdlReview();
   const [historyOpen, setHistoryOpen] = useState(false);
+  // #2128: the Library's recycle bin button: Review, on the bin
+  useOpenRecycleBin(() => {
+    showVideoRecycleBin();
+    dl.setView('review');
+  });
   // #2029: only one video library's downloads; offered once two show up
   const [library, setLibrary] = useState('');
   const libraryNames = useMemo(

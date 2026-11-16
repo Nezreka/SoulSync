@@ -80,7 +80,12 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { describeFinding, readApplied, tagChangeLabel } from '../-tools.finding-copy';
-import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
+import {
+  fixAllSafePlan,
+  jobFilterOptions,
+  safeFixablePending,
+  visibleGroups,
+} from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
@@ -1471,6 +1476,11 @@ export function FindingsSurface({
   const bar = findingsBulkBarState(selected.size, items?.length || 0, total);
   const pagination = findingsPagination(total, serverPage, pageSize);
   const runningJobs = jobs.filter((job) => job.is_running).length;
+  /** the job filter in the list's own words, A to Z, only what has results (#2113) */
+  const jobOptions = useMemo(
+    () => jobFilterOptions(jobs, groups, types, statusFilter, jobFilter),
+    [jobs, groups, types, statusFilter, jobFilter],
+  );
   const statusCount = (value: string) => {
     if (!counts) return null;
     if (value === 'pending') return counts.pending || 0;
@@ -1913,10 +1923,10 @@ export function FindingsSurface({
               setPage(0);
             }}
           >
-            <option value="">All Jobs</option>
-            {jobs.map((job) => (
-              <option value={job.job_id} key={job.job_id}>
-                {job.display_name}
+            <option value="">All findings</option>
+            {jobOptions.map((option) => (
+              <option value={option.value} key={option.value}>
+                {option.label}
               </option>
             ))}
           </select>

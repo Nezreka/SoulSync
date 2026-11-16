@@ -985,7 +985,7 @@ describe('the one-page movie', () => {
     routes['/acquisition'] = () => ({ success: true, total: 1, counts: { failed: 1 } });
     render(<LibraryTab kind="movie" id={7} />);
     const row = (await screen.findByText('A download for this movie is stuck')).closest('li')!;
-    fireEvent.click(within(row).getByRole('button', { name: 'Search releases' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Manual search' }));
     expect(search).toHaveBeenCalledWith('movie');
   });
 

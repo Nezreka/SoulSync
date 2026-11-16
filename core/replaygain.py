@@ -96,7 +96,7 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            text=True,
+            text=True, encoding='utf-8', errors='replace',
             timeout=120
         )
     except FileNotFoundError as exc:

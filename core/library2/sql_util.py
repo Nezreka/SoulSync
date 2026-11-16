@@ -500,6 +500,28 @@ def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIEN
             f" ORDER BY {primary_order('pf')} LIMIT 1)")
 
 
-__all__ = ["ANY_OWNER", "in_library_sql", "library_index_artist_ids_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "owned_sql",
-           "owner_clause", "scoped_primary_file_join",
+#: the active-server name of standalone mode, where SoulSync's own files are the library
+STANDALONE_SERVER = "soulsync"
+
+
+def on_server_sql(entity_type: str, alias: str, server_source: Optional[str]) -> tuple:
+    """``(sql, params)``: ``alias`` is on ``server_source``, by a mapping or
+    by the row's own stamp.
+
+    standalone has no server to recognise anything, so a row nobody stamped
+    (full refresh, an import made under another mode) counts as its own.
+    the callers still ask for a live file, so a fileless catalogue row never
+    passes (#2111)."""
+    if not _VALID_IDENTIFIER.match(alias) or entity_type not in ("artist", "album", "track"):
+        raise ValueError(f"Invalid on_server_sql args: {entity_type!r} {alias!r}")
+    sql = ("(EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+           f"WHERE m.entity_type='{entity_type}' AND m.entity_id={alias}.id "
+           f"AND m.server_source=?) OR {alias}.server_source=?")
+    if server_source == STANDALONE_SERVER:
+        sql += f" OR {alias}.server_source IS NULL"
+    return sql + ")", [server_source, server_source]
+
+
+__all__ = ["ANY_OWNER", "in_library_sql", "library_index_artist_ids_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "on_server_sql", "owned_sql",
+           "owner_clause", "STANDALONE_SERVER", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

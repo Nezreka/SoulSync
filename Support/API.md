@@ -2429,6 +2429,8 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 - `rank`: the values it's compared on, best first: `[accepted, quality, formats, tiebreak, size_fit, availability, size_bytes]`. Results come back sorted by it, and the wishlist, RSS sync, upgrades and download retries sort by the same values.
 - `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
 
+A `query` in the search body (`/downloads/search/start`, `/downloads/search`) is run as typed on every source: one text search, no ids or structured search added. Leave it out for the usual search.
+
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 
 #### Video libraries (web UI session API, admin)

@@ -40,6 +40,27 @@
                                                         change it and Music changes with it.
                                                     </div>
                                                 </div>
+                                                <div class="form-group">
+                                                    <label for="video-import-folder-path">Import folder (optional):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-import-folder-path" readonly
+                                                            placeholder="/media/import" data-folder-check="video"
+                                                            data-folder-role="input" data-folder-label="Import folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-import-folder', this)">Unlock</button>
+                                                    </div>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-import-folder-auto">
+                                                        Import sure matches automatically
+                                                    </label>
+                                                    <div class="setting-help-text">Drop movie or episode files (or
+                                                        whole folders) here and they show on the Import page with the
+                                                        title SoulSync found. They're filed into your libraries with your
+                                                        naming template, exactly like a download. With the box ticked,
+                                                        a sure match is imported on its own once it has finished copying.
+                                                        Keep it apart from the download folder.
+                                                    </div>
+                                                </div>
                                             </div>
 
                                             <div class="settings-group" data-stg="library">

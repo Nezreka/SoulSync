@@ -106,7 +106,9 @@ def test_selecting_one_warns_immediately(js):
 
 
 def test_the_warning_has_somewhere_to_render(js):
-    index = _read("webui/index.html")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    from tests.support.settings_page import index_with_settings_page
+    index = index_with_settings_page()
     assert 'data-stg-part="youtube"' in index
     panel = _youtube(js)
     assert 'id="youtube-cookie-abe-warning"' in panel

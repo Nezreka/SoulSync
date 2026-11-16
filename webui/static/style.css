@@ -63142,7 +63142,9 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     background: var(--black-a20); flex-wrap: wrap;
 }
 .reid-replace { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
-.reid-replace input { display: none; }
+/* the library page's .trackTable/.modal tick box rule outranked the plain
+   one and drew the real box beside this one (#2114) */
+.reid-modal .reid-replace input[type='checkbox'] { display: none; }
 .reid-replace-box {
     width: 20px; height: 20px; border-radius: var(--radius-sm); flex: 0 0 20px;
     border: 2px solid var(--white-a18); transition: all var(--dur-quick) ease; display: grid; place-items: center;

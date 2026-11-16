@@ -548,7 +548,9 @@ body[data-side="video"] .dashboard-header-sweep {
     /* the polish section's copy overrides this max-width; it stays because
        video-detail-page-measure.test.ts pins it */
     position: relative; z-index: 2; max-width: 720px; padding: 0 0 52px 56px;
-    animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    /* backwards, not both: a rise held at its end keeps an identity transform,
+       which traps the fixed More menu inside the clipped billboard (#2124) */
+    animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 .vd-title {
     font-size: clamp(2.6em, 5vw, 4.4em); line-height: 0.98; font-weight: 900; margin: 0 0 18px;
@@ -716,6 +718,13 @@ body[data-side="video"] .dashboard-header-sweep {
     background: rgba(16, 18, 24, 0.97); border: 1px solid var(--white-a12);
     box-shadow: 0 18px 46px var(--black-a55); backdrop-filter: blur(14px);
 }
+/* Once opened, the page pins it to the screen (placeMoreMenu in video-detail.js):
+   up or down, whichever side has the room, never taller than what you can see.
+   Fixed is what gets it past the billboard's overflow and the scroll edge, which
+   cut the top items off a long menu (#2124). */
+.vd-more .vd-more-menu.vd-more-menu--placed { position: fixed; bottom: auto; margin: 0; }
+/* the hero sits under the sticky back button; lift it while its menu is open */
+.vd-bb-content:has(.vd-more--open) { z-index: 9; }
 .vd-more-menu .vd-manage-btn {
     width: 100%; justify-content: flex-start; margin: 0; background: transparent;
     border-color: transparent; box-shadow: none;
@@ -4606,6 +4615,26 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vimp-btn--danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
 .vimp-btn--danger:disabled { opacity: 0.45; cursor: default; }
 
+/* the import folder (#2129): a section head with the folder and the auto switch,
+   then the same cards as the queue below it */
+.vimp-folder { margin-bottom: 28px; }
+.vimp-section-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; }
+.vimp-section-h { margin: 0; font-size: 15px; font-weight: 700; color: var(--text-1); }
+.vimp-folder-path { flex: 1; min-width: 0; font-size: 12px; color: var(--text-3);
+    font-family: 'JetBrains Mono', ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vimp-auto { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.vimp-auto input { accent-color: rgb(var(--accent-rgb)); }
+.vimp-folder-note { padding: 18px 16px; border-radius: var(--radius-card); font-size: 13px; color: var(--text-3);
+    background: var(--white-a04); border: 1px dashed var(--white-a12); }
+.vimp-folder-note[hidden] { display: none; }
+.vimp-card--folder { cursor: default; }
+.vimp-folder-why { margin-top: 5px; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+    .vimp-folder-path { flex-basis: 100%; order: 3; }
+    .vimp-card--folder .vimp-card-row { flex-wrap: wrap; }
+    .vimp-card--folder .vimp-card-side { width: 100%; justify-content: flex-end; }
+}
+
 .vimp-state { text-align: center; padding: 64px 20px; }
 .vimp-state-ic { font-size: 38px; color: #6cd391; }
 .vimp-state-title { font-size: 17px; font-weight: 700; color: #fff; margin-top: 10px; }
@@ -4626,7 +4655,12 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vimp-kindtab { padding: 7px 16px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 700;
     color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a10); }
 .vimp-kindtab--on { color: #06210f; background: rgb(var(--accent-rgb)); border-color: transparent; }
-.vimp-search { padding: 0 20px 10px; }
+/* the modal lives on body, outside .vd-page and its [hidden] rule */
+.vimp-modal [hidden] { display: none; }
+.vimp-search { position: relative; padding: 0 20px 10px; }
+.vimp-search-icon { position: absolute; left: 32px; top: 12px; width: 16px; height: 16px;
+    color: var(--text-3); pointer-events: none; }
+.vimp-search .vimp-search-input { padding-left: 36px; }
 .vimp-search-input { width: 100%; padding: 10px 13px; border-radius: var(--radius-control); font-size: 14px; color: #fff;
     background: var(--white-a05); border: 1px solid var(--white-a14); }
 .vimp-search-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); }
@@ -4855,6 +4889,14 @@ body[data-side="video"] #gsearch-aura {
 .vms-sub { font-size: 12px; color: var(--white-a45); margin-top: 8px; }
 .vms-prof { margin-top: 10px; }
 .vms-prof[hidden] { display: none; }
+/* the editable query, prefilled with what the search starts from (#2121) */
+.vms-query { display: flex; gap: 8px; margin-top: 12px; }
+.vms-query-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: var(--radius-md);
+    border: 1px solid var(--white-a12); background: var(--white-a06); color: var(--text-1); font: inherit; font-size: 13.5px; }
+.vms-query-input:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 1px; }
+.vms-query-btn { flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--white-a12);
+    background: var(--white-a10); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.vms-query-btn:hover { background: var(--white-a14); }
 /* the title's quality profile picker (Get + Manual search) */
 .vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
@@ -5719,6 +5761,9 @@ body[data-side="video"] #gsearch-aura {
     display: inline-flex; align-items: center; min-height: 22px; border-radius: var(--radius-sm); font-size: 10.5px; font-weight: 800;
 }
 .vsr-basic-query-label { color: rgba(255,255,255,0.42); text-transform: uppercase; letter-spacing: 0.06em; }
+/* every result past the first page of a releases source (#2127) */
+.vsr-basic-more { display: block; margin: 10px auto 0; }
+
 .vsr-basic-query-chip {
     max-width: min(360px, 100%); padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: rgba(255,255,255,0.68); background: rgba(0,0,0,0.18); border: 1px solid var(--white-a07);
