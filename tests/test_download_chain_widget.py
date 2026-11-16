@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parents[1]
 _KINDS = ("music", "video", "audiobooks")
 
@@ -50,7 +52,8 @@ def js():
 
 @pytest.fixture(scope="module")
 def index():
-    return _read("webui/index.html")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    return index_with_settings_page()
 
 
 # the chain, the tiles and the sources model are React since step 7a

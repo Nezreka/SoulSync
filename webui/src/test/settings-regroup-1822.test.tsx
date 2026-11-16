@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SettingsPage } from '@/features/settings/settings-page';
 import { switchSettingsTab } from '@/features/settings/shell';
 import { withHelpLines } from '@/features/settings/tabs/__fixtures__/shape';
 import { helpFirstLine } from '@/features/settings/tabs/parts';
@@ -10,7 +12,9 @@ import { helpFirstLine } from '@/features/settings/tabs/parts';
 // held notifications, metasync and the sidebar weather. Sections now sit where
 // people look for them, and each setting says what it does under it.
 
-const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+// the page is React (settings-page.tsx, SETTINGS_PORT.md step V4c): its own
+// markup, with the slots each tab renders into, as index.html had it
+const html = renderToStaticMarkup(<SettingsPage tabs={{}} />);
 
 describe('where sections live', () => {
   const doc = new DOMParser().parseFromString(html, 'text/html');

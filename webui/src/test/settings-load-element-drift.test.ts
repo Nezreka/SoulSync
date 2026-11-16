@@ -9,7 +9,11 @@ import { describe, expect, it } from 'vitest';
 // this way — referenced in the load path, never added to the page.
 // the load is shell.ts's (settings.js's until SETTINGS_PORT.md step V4b)
 const source = readFileSync(resolve(process.cwd(), 'src/features/settings/shell.ts'), 'utf8');
-const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+// the page's markup is settings-page.tsx since SETTINGS_PORT.md step V4c; the
+// Hydrabase nav link is still the shell's (index.html)
+const html =
+  readFileSync(resolve(process.cwd(), 'index.html'), 'utf8') +
+  readFileSync(resolve(process.cwd(), 'src/features/settings/settings-page.tsx'), 'utf8');
 
 function loadSettingsIds(): string[] {
   const start = source.indexOf('export async function loadSettingsData()');
@@ -23,7 +27,7 @@ function loadSettingsIds(): string[] {
 }
 
 describe('settings load element drift guard', () => {
-  it('every id loadSettingsData touches exists in index.html', () => {
+  it('every id loadSettingsData touches exists on the page', () => {
     const ids = loadSettingsIds();
     // no settings field is left in the load: every one is React since
     // SETTINGS_PORT.md step 10c. What it still touches is the page's own

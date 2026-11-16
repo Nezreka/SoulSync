@@ -1,7 +1,9 @@
+import { cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { SettingsPage } from '@/features/settings/settings-page';
 import { createSettingsStore } from '@/features/settings/settings-store';
 
 /**
@@ -14,56 +16,46 @@ import { createSettingsStore } from '@/features/settings/settings-store';
  * auto-save stood down for every field on that side. Reported live: tick OIDC
  * only on the video side, Save, reload - unticked.
  *
- * Runs the real video-settings.js and the real auto-save against the real page.
+ * Runs the real page and its save button, and the real settings store.
  */
 
-const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
-const HTML = read('index.html');
-const VIDEO = read('static/video/video-settings.js');
-
-function page(side: 'music' | 'video') {
-  const doc = new DOMParser().parseFromString(HTML, 'text/html');
-  doc.body.setAttribute('data-side', side);
-  return doc;
+/** the page's save button (settings-page.tsx, SETTINGS_PORT.md step V4c),
+ *  clicked on one side; what it posted */
+async function click(side: 'music' | 'video') {
+  document.body.setAttribute('data-side', side);
+  const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response('{}'));
+  vi.stubGlobal('fetch', fetcher);
+  const w = window as unknown as Record<string, unknown>;
+  w.SoulSyncSettings = { flush: async () => true };
+  render(<SettingsPage tabs={{}} />);
+  const button = document.getElementById('save-settings');
+  expect(button, 'the Save Settings button is gone').not.toBeNull();
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+  button!.dispatchEvent(event);
+  await new Promise((r) => setTimeout(r, 20));
+  const posts = fetcher.mock.calls
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([url]) => url);
+  cleanup();
+  vi.unstubAllGlobals();
+  delete w.SoulSyncSettings;
+  return { posts, event };
 }
 
 describe('the Save Settings button on the video side', () => {
-  function click(side: 'music' | 'video') {
-    const doc = page(side);
-    const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response('{}'));
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    new Function('document', 'window', 'fetch', VIDEO)(doc, {}, fetcher);
-    doc.dispatchEvent(new Event('DOMContentLoaded'));
-    // stands in for settings.js handleManualSaveClick, which is bound to the
-    // button itself (bubble phase) by initializeSettings
-    const musicSave = vi.fn();
-    const button = doc.getElementById('save-settings');
-    expect(button, 'the Save Settings button is gone').not.toBeNull();
-    button!.addEventListener('click', musicSave);
-    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
-    button!.dispatchEvent(event);
-    const posts = fetcher.mock.calls
-      .filter(([, init]) => init?.method === 'POST')
-      .map(([url]) => url);
-    return { musicSave, posts, event };
-  }
-
-  it('lets the music save run too; the video settings save themselves', () => {
-    const { musicSave, posts, event } = click('video');
-    expect(musicSave).toHaveBeenCalledTimes(1);
+  it('lets the music save run too; the video settings save themselves', async () => {
+    const { posts, event } = await click('video');
     expect(event.defaultPrevented).toBe(false);
-    // every video section is React now and adds its own save to the same
-    // capture-phase click (video-shown.ts); their tests press it:
-    // connections-video-server.test.tsx, connections-video-api.test.tsx,
-    // video-quality.test.tsx, library-video-folders.test.tsx,
-    // library-video-prefs.test.tsx. this file has nothing of its own to post
-    expect(posts).toEqual([]);
+    // the page's own save, which every shared and System field goes through
+    expect(posts.filter((u) => u === '/api/settings')).toHaveLength(1);
+    // and the video sections' own (each adds its save to the same capture-phase
+    // click, video-shown.ts; their tests press it too)
+    expect(posts.some((u) => u.startsWith('/api/video/'))).toBe(true);
   });
 
-  it('leaves the music side alone', () => {
-    const { musicSave, posts } = click('music');
-    expect(musicSave).toHaveBeenCalledTimes(1);
-    expect(posts).toEqual([]);
+  it('leaves the music side alone', async () => {
+    const { posts } = await click('music');
+    expect(posts).toEqual(['/api/settings']);
   });
 });
 

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -82,9 +84,9 @@ def test_the_dev_console_boxes_are_excluded(js):
 def test_every_settings_textarea_is_either_bound_or_deliberately_skipped():
     """A guard against the next textarea being added and silently not saving —
     which is the whole bug, and it sat there unnoticed."""
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     start = index.index('id="settings-page"')
-    page = index[start:index.index('<!-- ═══ LOGS TAB', start)]
+    page = index[start:index.index('data-stg-react="logs"', start)]
     # none is left in the page's markup: each is a React tab's, bound above
     assert re.findall(r"<textarea[^>]*>", page) == []
 

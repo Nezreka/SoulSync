@@ -7,12 +7,15 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { SettingsPage } from '@/features/settings/settings-page';
 import { saveSettings, setSettingsSaveState } from '@/features/settings/shell';
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
-const HTML = read('index.html');
+// the page is React (settings-page.tsx, SETTINGS_PORT.md step V4c)
+const HTML = renderToStaticMarkup(<SettingsPage tabs={{}} />);
 const HELPER = read('static/helper.js');
 const STORE = read('src/features/settings/settings-store.ts');
 

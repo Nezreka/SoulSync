@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 _SOURCE_CONTAINERS = (
@@ -53,7 +55,8 @@ def _read(rel: str) -> str:
 
 @pytest.fixture(scope="module")
 def index():
-    return _read("webui/index.html")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    return index_with_settings_page()
 
 
 @pytest.fixture(scope="module")
@@ -127,7 +130,9 @@ def _test_all(model: str) -> str:
 
 def test_the_tab_exists(index):
     assert 'data-tab="sources"' in index
-    assert "switchSettingsTab('sources')" in index
+    # the tab buttons are React (settings-page.tsx, SETTINGS_PORT.md step V4c)
+    page = _read("webui/src/features/settings/settings-page.tsx")
+    assert "onClick={() => switchSettingsTab(key)}" in page
 
 
 def test_the_tab_is_available_on_both_sides(index):
@@ -873,7 +878,7 @@ def test_the_library_tab_speaks_one_card_language():
     Grouping by which side a setting came from is an implementation detail
     leaking into the layout.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     titles, groups = _library_cards(markup)
@@ -1123,7 +1128,7 @@ def test_the_two_sides_name_their_sections_the_same_way():
     """Folders and Organization are shared cards, each retaining both media
     contexts so neither music nor video settings disappear in consolidation.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     titles, _ = _library_cards(markup)
@@ -1194,7 +1199,7 @@ def test_no_two_cards_share_a_name():
     Video Folders. A duplicate title anywhere on the settings page means two
     sections are claiming the same subject.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     from collections import Counter

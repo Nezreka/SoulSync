@@ -4677,24 +4677,8 @@ async function loadPageData(pageId) {
             // loadPageData only runs for legacy-kind pages. The vanilla page it
             // used to call lived in pages-extra.js and is deleted, along with
             // #playlist-explorer-page.
-            case 'settings':
-                // Suppress auto-save while the form is being populated, so opening
-                // Settings no longer fires a spurious full save (4 POSTs + backend
-                // service re-init) on every visit. (the page's shell is
-                // src/features/settings/shell.ts, in the shell bundle)
-                window._suppressSettingsAutoSave = true;
-                try {
-                    initializeSettings();
-                    switchSettingsTab('connections');
-                    await loadSettingsData();
-                    // the quality profile loads with the settings: the Quality
-                    // tab is React (src/features/settings/tabs/quality-tab.tsx)
-                    // (the API keys load with the System tab, system-tab.tsx)
-                    loadBlacklistCount();
-                } finally {
-                    window._suppressSettingsAutoSave = false;
-                }
-                break;
+            // 'settings' is React (src/routes/settings/route.tsx, SETTINGS_PORT.md
+            // step V4c): it opens the page itself, as this case did
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
                 try {

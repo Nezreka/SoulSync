@@ -14,6 +14,8 @@ and connections-metadata.tsx renders the group into it.
 from html.parser import HTMLParser
 from pathlib import Path
 
+from tests.support.settings_page import index_with_settings_page
+
 _INDEX = Path(__file__).resolve().parents[1] / "webui" / "index.html"
 _TSX = (
     Path(__file__).resolve().parents[1]
@@ -47,7 +49,8 @@ def _slot_ancestors():
     p = _Ancestors(
         lambda a: a.get("data-stg-react") == "connections" and a.get("data-stg-part") == "metadata"
     )
-    p.feed(_INDEX.read_text(encoding="utf-8"))
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    p.feed(index_with_settings_page())
     assert p.found, "the metadata source slot is gone from index.html"
     return p.found
 

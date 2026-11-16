@@ -191,7 +191,9 @@ def test_the_ui_has_the_picker_and_the_kind_defaults():
     root = Path(__file__).resolve().parents[1]
     view = (root / "webui/static/video/video-download-view.js").read_text(encoding="utf-8")
     settings = (root / "webui/static/video/video-settings.js").read_text(encoding="utf-8")
-    html = (root / "webui/index.html").read_text(encoding="utf-8")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    from tests.support.settings_page import index_with_settings_page
+    html = index_with_settings_page()
     # Get + Manual search pick the title's profile and save it on the title
     assert "data-vdl-profile" in view and "/api/video/downloads/quality/choose" in view
     assert "data-vms-prof" in view and "/api/video/downloads/quality/for?" in view

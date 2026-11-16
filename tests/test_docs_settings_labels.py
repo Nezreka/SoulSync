@@ -39,8 +39,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parent.parent
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+# the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+_INDEX = index_with_settings_page()
 _SETTINGS_JS = (_ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 _DOCS_DIR = _ROOT / "webui" / "static" / "docs-content"
 # The Tools page is React-rendered (webui/src); its card titles and button

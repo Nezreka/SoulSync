@@ -108,6 +108,7 @@ def test_the_config_module_stays_cheap_to_import():
     assert pulled < 120, "download_config now drags in %d modules" % pulled
 
 
+from tests.support.settings_page import index_with_settings_page
 _WEBUI = Path(__file__).resolve().parents[1] / "webui"
 
 
@@ -228,7 +229,8 @@ def test_the_downloads_tab_holds_only_download_settings():
     download setting, it is background machinery, so it sits in Advanced with
     import lists and logging.
     """
-    index = (_WEBUI / "index.html").read_text(encoding="utf-8")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     titles = []

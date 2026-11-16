@@ -1,40 +1,37 @@
 /**
- * The host that puts a ported Settings tab into the vanilla page
- * (SETTINGS_PORT.md): settings.js calls window.SoulSyncSettings, and a tab
- * that is registered fills its slot once.
+ * The host the page's shell calls (SETTINGS_PORT.md): window.SoulSyncSettings.
+ * The page renders every tab into its slots (settings-page.tsx, step V4c); the
+ * host tells it which tab is open, and each tab how often it was opened.
  */
 
-import { act } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost, mountSettingsHost, type SettingsTabProps } from './host';
+import { pageTabs } from './page-tabs';
+import { SettingsPage } from './settings-page';
 import { createSettingsStore } from './settings-store';
-
-function page(slots: string[]) {
-  document.body.innerHTML = `<div id="settings-page">
-    <button class="stg-tab active" data-tab="appearance"></button>
-    ${slots.map((tab) => `<div data-stg="${tab}" data-stg-react="${tab}"></div>`).join('')}
-  </div>`;
-}
 
 function Appearance({ store }: SettingsTabProps) {
   return <p>visualizer {String(store.getState().settings.ui_appearance?.sidebar_visualizer)}</p>;
 }
 
 afterEach(() => {
+  cleanup();
   document.body.innerHTML = '';
+  pageTabs.reset();
   delete window.SoulSyncSettings;
   delete (window as Window & { _settingsPayload?: unknown })._settingsPayload;
 });
 
 describe('the settings host', () => {
-  it('fills a ported tab once and leaves other tabs to the vanilla page', async () => {
-    page(['appearance', 'logs']);
+  it('a registered tab fills its slots once; an unregistered one leaves them empty', async () => {
     const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
     const host = createSettingsHost({ tabs: { appearance: Appearance }, store, effects: [] });
     host.hydrate({ ui_appearance: { sidebar_visualizer: 'wave' } });
+    render(<SettingsPage store={store} tabs={{ appearance: Appearance }} />);
     await act(async () => host.show('appearance'));
-    const slot = document.querySelector('[data-stg-react="appearance"]')!;
+    const slot = document.querySelector('[data-stg-react="appearance"][data-stg-part="ui"]')!;
     expect(slot.textContent).toBe('visualizer wave');
     const first = slot.firstElementChild;
     await act(async () => host.show('appearance'));
@@ -44,22 +41,24 @@ describe('the settings host', () => {
     expect(host.ported()).toEqual(['appearance']);
   });
 
-  it('a tab with several slots gets each its part, and every ported tab is on the page', async () => {
-    document.body.innerHTML = `<div id="settings-page">
-      <div data-stg-react="appearance" data-stg-part="ui"></div>
-      <div data-stg-react="appearance" data-stg-part="weather"></div>
-      <div data-stg-react="logs"></div></div>`;
-    const Part = ({ part, opened }: SettingsTabProps) => <p>{`${part ?? 'whole'} ${opened}`}</p>;
-    const host = createSettingsHost({ tabs: { appearance: Part, logs: Part }, effects: [] });
-    // opening Logs puts Appearance on the page too: the settings search reads
-    // every tab, and settings.js is about to hide what is not the open tab
-    host.show('logs');
+  it('a tab with several slots gets each its part, and every tab is on the page', async () => {
+    const Part = ({ part, opened, active }: SettingsTabProps) => (
+      <p>{`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`}</p>
+    );
+    const tabs = { appearance: Part, logs: Part };
+    const host = createSettingsHost({ tabs, effects: [] });
+    render(<SettingsPage tabs={tabs} />);
     const text = () =>
-      [...document.querySelectorAll('[data-stg-react]')].map((el) => el.textContent);
-    expect(text()).toEqual(['ui 0', 'weather 0', 'whole 1']);
+      [...document.querySelectorAll('[data-stg-react="appearance"], [data-stg-react="logs"]')].map(
+        (el) => el.textContent,
+      );
+    // opening Logs leaves Appearance on the page too: the settings search reads
+    // every tab, and the shell is about to hide what is not the open tab
+    await act(async () => host.show('logs'));
+    expect(text()).toEqual(['ui 0', 'weather 0', 'whole 1 open']);
     // opening a tab again tells it so (the weather tile reloads on arrival)
     await act(async () => host.show('appearance'));
-    expect(text()).toEqual(['ui 1', 'weather 1', 'whole 1']);
+    expect(text()).toEqual(['ui 1 open', 'weather 1 open', 'whole 1']);
   });
 
   it('loading the settings runs what opening Settings applies, once the payload is good', () => {
@@ -83,8 +82,7 @@ describe('the settings host', () => {
     error.mockRestore();
   });
 
-  it('a tab with no slot on the page is not an error', () => {
-    page([]);
+  it('a tab with no page on screen is not an error', () => {
     const host = createSettingsHost({ tabs: { appearance: Appearance } });
     expect(() => host.show('appearance')).not.toThrow();
     expect(() => host.show('nope')).not.toThrow();
@@ -109,7 +107,6 @@ describe('the settings host', () => {
   });
 
   it('catches up when the page loaded its settings before this bundle ran', () => {
-    page([]);
     (window as Window & { _settingsPayload?: unknown })._settingsPayload = {
       ui_appearance: { sidebar_visualizer: 'mirror' },
     };

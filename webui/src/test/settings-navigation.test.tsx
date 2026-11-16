@@ -1,18 +1,18 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { SettingsPage } from '@/features/settings/settings-page';
 import { filterSettings, switchSettingsTab } from '@/features/settings/shell';
 
 // the tab switch and the search are shell.ts's (settings.js's, until
-// SETTINGS_PORT.md step V4b), run here on the page's own markup
-const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+// SETTINGS_PORT.md step V4b), run here on the page (React since step V4c;
+// its shell without the tabs)
 const nav = { switchSettingsTab, filterSettings };
 beforeEach(() => {
-  const parsed = new DOMParser().parseFromString(html, 'text/html');
-  document.body.replaceChildren(parsed.getElementById('settings-page')!);
+  render(<SettingsPage tabs={{}} />);
   Element.prototype.scrollIntoView = vi.fn();
 });
+afterEach(cleanup);
 it('uses one category bar instead of a second sidebar', () => {
   expect(document.querySelectorAll('.stg-category-nav .stg-tabbar')).toHaveLength(1);
   // #1822: Discovery got its own tab, everything else regrouped into the eight
@@ -21,8 +21,8 @@ it('uses one category bar instead of a second sidebar', () => {
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
   nav.switchSettingsTab('connections');
-  // the one group still in the page's own markup (the Sources tab's Download
-  // Sources heading; every other section is React, SETTINGS_PORT.md)
+  // the page's own group (the Sources tab's Download Sources heading; every
+  // other section is a tab's, SETTINGS_PORT.md)
   const group = document.querySelector(
     '#settings-page .settings-group[data-stg="sources"]',
   ) as HTMLElement;

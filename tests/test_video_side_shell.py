@@ -14,7 +14,9 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
+from tests.support.settings_page import index_with_settings_page
+# the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+_INDEX = index_with_settings_page()
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
 _INIT_JS = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
 _DASH_DIR = _ROOT / "webui" / "src" / "routes" / "dashboard" / "-video"
@@ -258,12 +260,16 @@ def test_scan_module_referenced_and_isolated():
 
 
 def test_video_settings_reuses_real_music_settings_page():
-    # The video Settings nav shows the actual #settings-page (identically, for
-    # now) via CSS + the shared loadPageData loader — not a video subpage.
-    assert "'video-settings': 'settings'" in _JS or '"video-settings": "settings"' in _JS
-    assert "loadPageData" in _JS
+    # The video Settings nav shows the one Settings page, not a video subpage:
+    # the React /settings page on ?media=video since SETTINGS_PORT.md step V4c,
+    # handed off like Tools and the calendar, and revealed with them.
+    assert "'video-settings': 'settings'" not in _JS
+    assert "'video-settings': 1" in _JS.split("var HANDED_OFF = {", 1)[1].split("};", 1)[0]
+    assert "wsr.navigateToPage('settings', { query: { media: 'video' }, replace: replace });" in _JS
+    assert "if (path === '/settings') return media === 'video' ? 'video-settings' : null;" in _JS
     css = _CSS_PATH.read_text(encoding="utf-8")
-    assert 'data-video-page="video-settings"] #settings-page' in css
+    assert 'data-video-page="video-settings"] #webui-react-root' in css
+    assert 'data-video-page="video-settings"] #settings-page' not in css
     assert 'data-video-page="video-settings"] #video-page-host' in css
 
 

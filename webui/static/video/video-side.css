@@ -158,16 +158,11 @@ body[data-side="video"] .page.video-page {
 /* ── Shared pages: show the REAL music page on the video side ───────────── */
 /* The shared Settings page is filtered per side: video-only groups/sections carry
    data-video-only, music-only ones carry data-music-only (plus the per-tab rules
-   below hide whole music tabs on the video side). The id selector + extra
-   attribute outrank the blanket music-page hide rule. */
-body[data-side="video"][data-video-page="video-settings"] #settings-page {
-    display: block !important;
-}
-body[data-side="video"][data-video-page="video-settings"] #video-page-host {
-    display: none !important;
-}
+   below hide whole music tabs on the video side). It is the React /settings page
+   on ?media=video, revealed with the other React pages below. */
 /* Help & Docs is the SAME docs page as the music side — reuse it verbatim (it'll
-   carry both music + video docs). Same reveal mechanism as Settings above. */
+   carry both music + video docs). The id selector + extra attribute outrank the
+   blanket music-page hide rule. */
 body[data-side="video"][data-video-page="video-help"] #help-page {
     display: block !important;
 }
@@ -200,7 +195,9 @@ body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root,
    the shared vanilla one, in this shell's own automations subpage: while it
    is open the React page puts vauto-building on the body, and the screen
    goes back to the video host until it closes. */
-body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #webui-react-root {
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #webui-react-root,
+/* Settings too (/settings?media=video, SETTINGS_PORT.md step V4c) */
+body[data-side="video"][data-video-page="video-settings"] #webui-react-root {
     display: block !important;
 }
 body[data-side="video"][data-video-page="video-downloads"] #video-page-host,
@@ -208,7 +205,8 @@ body[data-side="video"][data-video-page="video-wishlist"] #video-page-host,
 body[data-side="video"][data-video-page="video-tools"] #video-page-host,
 body[data-side="video"][data-video-page="video-calendar"] #video-page-host,
 body[data-side="video"][data-video-page="video-dashboard"] #video-page-host,
-body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #video-page-host {
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #video-page-host,
+body[data-side="video"][data-video-page="video-settings"] #video-page-host {
     display: none !important;
 }
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV

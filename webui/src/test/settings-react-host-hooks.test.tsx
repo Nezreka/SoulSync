@@ -4,10 +4,12 @@
  * settings it loaded, and its save. Run, not read.
  */
 
+import { cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { SettingsPage } from '@/features/settings/settings-page';
 import {
   initializeSettings,
   loadSettingsData,
@@ -20,6 +22,7 @@ import {
 const shell = window as unknown as Record<string, unknown>;
 
 afterEach(() => {
+  cleanup();
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
   for (const k of ['SoulSyncSettings', 'showToast', '_settingsLoadFailed', '_settingsPayload'])
@@ -120,13 +123,12 @@ describe('the shell hands over to the React tabs', () => {
   });
 
   it("the page wires no field of its own: every control is a React tab's; the button saves", async () => {
-    // the search box is the one input left in the page's markup: each letter
-    // typed in it used to queue a whole save
-    document.body.innerHTML = `<div id="settings-page">
-      <input type="text" id="stg-search-input">
-      <button id="save-settings" data-state="idle"><span></span></button></div>`;
+    // the search box is the page's one input of its own: each letter typed in
+    // it used to queue a whole save. the page (settings-page.tsx, step V4c)
+    // without its tabs
     const fetcher = respond({ success: true });
     shell.SoulSyncSettings = { flush: vi.fn(async () => true) };
+    render(<SettingsPage tabs={{}} />);
     initializeSettings();
     document
       .getElementById('stg-search-input')!

@@ -202,7 +202,9 @@
     // reveals the music page; we trigger its loader once shown. Help & Docs is the
     // same docs page as the music side (it'll host video + music docs together);
     // Settings is the shared, per-side-filtered settings page.
-    var SHARED_PAGES = { 'video-settings': 'settings', 'video-help': 'help', 'video-chat': 'chat' };
+    // (Settings is the React /settings page on ?media=video since
+    // SETTINGS_PORT.md step V4c: handed off by gotoUnifiedSettings below)
+    var SHARED_PAGES = { 'video-help': 'help', 'video-chat': 'chat' };
 
     function readSide() {
         try {
@@ -366,7 +368,7 @@
     var VIDEO_WISHLIST_TABS = { movies: 1, tv: 1, youtube: 1 };
     // video pages that are really a React route on a video tab: navigate()
     // hands them off, so their /video-<page> url never stays in the bar.
-    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1, 'video-automations': 1 };
+    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1, 'video-automations': 1, 'video-settings': 1 };
     function lastVideoWishlistTab() {
         try {
             var t = sessionStorage.getItem('soulsync.videoWishlistTab');
@@ -392,6 +394,9 @@
         // /automations?media=video is the video side's automations (the music
         // automations page on the rows the engine tags owned_by 'video')
         if (path === '/automations') return media === 'video' ? 'video-automations' : null;
+        // /settings?media=video is the video side's settings (the one page,
+        // its video sections loading on the video side)
+        if (path === '/settings') return media === 'video' ? 'video-settings' : null;
         if (path !== '/wishlist') return null;
         if (!VIDEO_WISHLIST_TABS[media]) return null;
         try { sessionStorage.setItem('soulsync.videoWishlistTab', media); } catch (e2) { /* ignore */ }
@@ -487,6 +492,28 @@
     // the same hand-off as the dashboard. the builder is still the shared
     // vanilla one, in this shell's own automations subpage: the React page
     // puts vauto-building on the body while it is open (see video-side.css).
+    // the video side's settings are the React /settings page on ?media=video
+    // (SETTINGS_PORT.md step V4c): the same hand-off as automations. The page
+    // tells the video sections it was shown, as showPage did for the shared
+    // vanilla page.
+    function gotoUnifiedSettings(mode) {
+        _backStack = [];
+        setActiveNav('video-settings');
+        document.body.setAttribute('data-video-page', 'video-settings');
+        var replace = mode === 'replace' || mode === 'restore';
+        var here = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/\/+$/, '');
+        if (mode === 'restore' && here === '/settings') return;
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('settings', { query: { media: 'video' }, replace: replace });
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        try { window.location.assign('/settings?media=video'); }
+        catch (e2) { window.location.href = '/settings?media=video'; }
+    }
+
     function gotoUnifiedAutomations(mode) {
         _backStack = [];
         setActiveNav('video-automations');
@@ -534,6 +561,7 @@
         if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }
         if (pageId === 'video-dashboard') { gotoUnifiedDashboard(mode); return; }
         if (pageId === 'video-automations') { gotoUnifiedAutomations(mode); return; }
+        if (pageId === 'video-settings') { gotoUnifiedSettings(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

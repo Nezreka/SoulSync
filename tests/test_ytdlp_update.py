@@ -226,8 +226,9 @@ def test_a_timeout_is_reported_rather_than_swallowed():
 # the same file, source-panels-more.tsx.
 
 def _html() -> str:
-    from pathlib import Path
-    return Path("webui/index.html").read_text(encoding="utf-8")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    from tests.support.settings_page import index_with_settings_page
+    return index_with_settings_page()
 
 
 def _panels() -> str:
@@ -274,7 +275,8 @@ def test_the_tile_renders_on_both_sides():
     tab = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 32]).group(1)
     assert tab == "sources", f"the updater is on the {tab} tab, not with its source"
     home = index.index('id="source-config-home"')
-    assert home < at < index.index("end source-config-home", home)
+    # inside the parked panels: before the modal's slot, which follows them
+    assert home < at < index.index('data-stg-part="modal"', home)
     assert '<Panel id="youtube-settings-container"' in _youtube(), (
         "no longer inside the YouTube panel - which is the whole reason it moved"
     )

@@ -282,21 +282,35 @@ export function markCredentialFieldsNoAutofill(root: ParentNode = document) {
   }
 }
 
-let initialized = false;
-
-/** wired once for the life of the page */
+/** the page, each time it is opened: the password managers kept off its
+ *  fields. (the save button is the page's own, settings-page.tsx; every
+ *  control is React and saves through its store: the page's own autosave
+ *  listened to no field any more but the search box, where each letter typed
+ *  queued a whole save. it is gone, SETTINGS_PORT.md step V4b) */
 export function initializeSettings() {
-  if (initialized) return;
-  initialized = true;
   const page = document.getElementById('settings-page');
   if (page) markCredentialFieldsNoAutofill(page);
-  // the save button saves now (a React tab's queued save goes out with it).
-  // (every control is React and saves through its store: the page's own
-  // autosave listened to no field any more but the search box, where each
-  // letter typed queued a whole save. it is gone)
-  document
-    .getElementById('save-settings')
-    ?.addEventListener('click', () => void saveSettings(false));
+}
+
+/** a tab asked for while the page is not on screen (a caller navigates to
+ *  Settings, then switches tab after a moment): the page opens on it */
+let pendingTab: string | null = null;
+
+/** what opening Settings does each visit, as init.js did for the vanilla
+ *  page: the autosave held off while the form fills, the first tab, the load */
+export async function openSettingsPage() {
+  const w = shell();
+  w._suppressSettingsAutoSave = true;
+  try {
+    initializeSettings();
+    const tab = pendingTab ?? 'connections';
+    pendingTab = null;
+    switchSettingsTab(tab);
+    await loadSettingsData();
+    (w.loadBlacklistCount as (() => void) | undefined)?.();
+  } finally {
+    w._suppressSettingsAutoSave = false;
+  }
 }
 
 // ── the tabs ──
@@ -329,6 +343,10 @@ export const TAB_TITLES: Record<string, { title: string; sub: string }> = {
 };
 
 export function switchSettingsTab(tab: string) {
+  if (!document.getElementById('settings-page')) {
+    pendingTab = tab;
+    return;
+  }
   const search = document.getElementById('stg-search-input') as HTMLInputElement | null;
   const results = document.getElementById('stg-search-results');
   if (search) search.value = '';
