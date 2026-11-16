@@ -4,7 +4,7 @@ Everything about moving the Settings page from vanilla JS to React. Updated with
 
 - **Branch:** `settings-react` (worktree `../SoulSync-settings-react`), off dev `52f2190d7`
 - **Started:** Nov 14 2026
-- **Last updated:** Nov 15 2026 (steps 1 to 5 done: the scaffold, Appearance, Logs, Discovery, Downloads without the chain)
+- **Last updated:** Nov 16 2026 (every tab and the page itself are React; next: the line-by-line review)
 
 ## Goal
 
@@ -963,6 +963,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | `ee53c8b34` (step V4c) | **Settings is a React route.** The video side's settings are `/settings?media=video`. |
 | Nov 16 | `1e96eae14` (step V4b) | **`settings.js` is gone.** Its shell is `shell.ts`, in the shell bundle; searching no longer saves. |
 | Nov 16 | `ed93e5658` (step V4a) | The support modal, Hydrabase, the dashboard test and the rate-limit modal moved to `pages-extra.js`. |
 | Nov 16 | `5772e28b8` (video pass V3c) | **Notifications and Import Lists are React; every video section is.** The retired source picker and slskd form are gone. |
