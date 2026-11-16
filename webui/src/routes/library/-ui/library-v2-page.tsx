@@ -10023,16 +10023,10 @@ function AlbumBlock({
             tracksPresent={album.tracks_present}
           />
           <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
+          {/* #2143: no "Lock and next" here. it opened the next album's page,
+              and on the artist page you lock one row after another in place */}
           {album.tracks_present > 0 ? (
-            <ReviewLockButton
-              entity="album"
-              id={album.id}
-              name={album.title}
-              artistId={artistId}
-              onOpenAlbum={(next) =>
-                void navigate({ search: (previous) => ({ ...previous, album: next }) })
-              }
-            />
+            <ReviewLockButton entity="album" id={album.id} name={album.title} artistId={artistId} />
           ) : null}
           <IconActionButton
             icon="automatic"

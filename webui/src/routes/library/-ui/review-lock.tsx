@@ -170,14 +170,19 @@ export function ReviewLockButton({
         ) : null}
       </button>
       {open ? (
-        <ReviewLockSheet
-          entity={entity}
-          id={id}
-          name={name}
-          artistId={artistId}
-          onOpenAlbum={onOpenAlbum}
-          onClose={() => setOpen(false)}
-        />
+        // #2143: the sheet is portaled to the body, but its clicks still bubble
+        // up the react tree to whatever holds the padlock. on an album row that
+        // toggled the row, and two quick presses opened the album page.
+        <span className={styles.sheetHost} onClick={(event) => event.stopPropagation()}>
+          <ReviewLockSheet
+            entity={entity}
+            id={id}
+            name={name}
+            artistId={artistId}
+            onOpenAlbum={onOpenAlbum}
+            onClose={() => setOpen(false)}
+          />
+        </span>
       ) : null}
     </>
   );
