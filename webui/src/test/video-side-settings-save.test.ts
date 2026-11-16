@@ -49,20 +49,16 @@ describe('the Save Settings button on the video side', () => {
     return { musicSave, posts, event };
   }
 
-  it('saves the video settings and lets the music save run too', () => {
+  it('lets the music save run too; the video settings save themselves', () => {
     const { musicSave, posts, event } = click('video');
     expect(musicSave).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(false);
-    for (const url of [
-      '/api/video/server-config',
-      '/api/video/libraries',
-    ]) {
-      expect(posts, `${url} was not saved`).toContain(url);
-    }
-    // the downloads config, Video Quality, YouTube Quality, Video Preferences
-    // and the API keys are React and save from the same capture-phase click
-    // (video-shown.ts); their tests press it: video-quality.test.tsx,
-    // library-video-folders.test.tsx, library-video-prefs.test.tsx
+    // every video section is React now and adds its own save to the same
+    // capture-phase click (video-shown.ts); their tests press it:
+    // connections-video-server.test.tsx, connections-video-api.test.tsx,
+    // video-quality.test.tsx, library-video-folders.test.tsx,
+    // library-video-prefs.test.tsx. this file has nothing of its own to post
+    expect(posts).toEqual([]);
   });
 
   it('leaves the music side alone', () => {

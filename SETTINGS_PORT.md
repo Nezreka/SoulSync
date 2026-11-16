@@ -65,13 +65,13 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 636 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** all 9 tabs on the music side, and the video pass under way (Quality and Library done, Connections under way), 646 of 678 controls, 295 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 53 of 83 tests repointed (step 10c: `test_navidrome_login_endpoints`, `test_service_test_buttons`, `test_settings_never_wipes` (the save reads no field now), `vanilla-crossfile`, `settings-load-element-drift`, and `vanilla-settings-pickers` deleted for the React picker tests; step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 5,029 |
+| `webui/index.html` | 12,823 | 4,927 |
 | `webui/static/settings.js` | 10,187 | 1,442 |
-| `webui/static/video/video-settings.js` | 2,940 | 702 |
+| `webui/static/video/video-settings.js` | 2,940 | 362 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -807,6 +807,18 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Video pass V3b: the video side's Server Connection (Nov 16 2026)
+
+**What.** `tabs/connections-video-server.tsx` (slot `connections` / `video-server`): the Plex / Jellyfin toggle (shows that server's fields and makes it the video server), each server's URL and secret with the note on what is missing (#1213: the re-read never writes over the field being typed in), Test (saves quietly first), the Jellyfin user, and the Movies, TV and other TV library picks (Scan and Anime ticks; Anime ticks Scan; the main pick keeps its Anime). `tabs/video-server.ts`: all of it, loaded each time the video settings page is shown, the credentials and libraries also saved quietly by the video side's save button.
+
+**Removed.** The server code from `video-settings.js` (`loadServer` to `save`, their wiring, `esc`) and its save-button hook: every video section is React now and adds its saver in `video-shown.ts`. `video-settings.js` is Import Lists, Notifications and the retired slskd form.
+
+**Found in the browser.** The section came out 20px shorter: in its slot it is a first child, so `.settings-group:first-child > h3` took its heading's top padding (as the music server group did in 10c). The rule excludes both server groups now (`:not([data-svc-side])`).
+
+**Differences.** The save button no longer posts the library picks before they have loaded (the page posted its "Loading..." selects' empty values over the saved picks).
+
+**Checked.** Parity (`video-server.vanilla.html`); `connections-video-server.test.tsx` 9 (load, saves, toggle, Test, the user, the ticks in page order, the status, the save button; Anime-ticks-Scan negative-checked); `video-settings-conn` and `settings-video-tv-libraries` now run the React section with their cases unchanged (the focus guard negative-checked); `video-side-settings-save`; Python `test_settings_sources_tab` (7 pins: the services, the legacy groups, the two server sections, their copy, one row per setting, the groups; and `test_library_headers_report_what_is_set_not_what_is_inside`, which V2c had left failing: it now reads Video Preferences' own summary), `test_video_download_config` (the save hooks), `test_video_side_shell`. Settings suites 1,515 pass. Browser: every loaded value, option, note, the user, the ticks, the status, a key, two ticks, a new main pick, a user, Test and the toggle, the toasts and the server state after, all the same; pixels the same but 2-level noise.
+
 ### Video pass V3a: the video side's API Configuration (Nov 16 2026)
 
 **What.** `tabs/connections-video-api.tsx` (slot `connections` / `api-video`): the hidden group and its 11 cards (TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSource, Trakt, MDBList, Community Data, YouTube Extras), each portalled into a wrapper that the tiles move into the services modal, as the music cards are (`useServicePlace` takes the side now). `tabs/video-keys.ts`: the 9 keys and 6 switches, loaded each time the video settings page is shown and all posted when one changes (a key when its field is left, a switch at once), quietly from the video side's save button; Test (`testVideoServices`: save quietly, test each, only the switched-on ones of a keyless card).
@@ -1197,21 +1209,21 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | checkbox | `video-ryd-enabled` | Return YouTube Dislike (like/dislike estimates) | video only | yes (video pass V3a) |
 | checkbox | `video-sponsorblock-enabled` | SponsorBlock (crowd-sourced segments) | video only | yes (video pass V3a) |
 | checkbox | `video-dearrow-enabled` | DeArrow (crowd-sourced better titles) | video only | yes (video pass V3a) |
-| button |  | Test Connections | video only | no |
+| button |  | Test Connections | video only | yes (video pass V3a) |
 
 **Server Connection** (video only, 9)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text |  | Plex Server URL: | video only | no |
-| password |  | Plex Token: | video only | no |
-| button |  | Test Connection | video only | no |
-| text |  | Jellyfin Server URL: | video only | no |
-| password |  | API Key: | video only | no |
-| button |  | Test Connection | video only | no |
-| select |  | Jellyfin User {Select User} | video only | no |
-| select |  | Movies Library: {Loading...} | video only | no |
-| select |  | TV Shows Library: {Loading...} | video only | no |
+| text |  | Plex Server URL: | video only | yes (video pass V3b) |
+| password |  | Plex Token: | video only | yes (video pass V3b) |
+| button |  | Test Connection | video only | yes (video pass V3b) |
+| text |  | Jellyfin Server URL: | video only | yes (video pass V3b) |
+| password |  | API Key: | video only | yes (video pass V3b) |
+| button |  | Test Connection | video only | yes (video pass V3b) |
+| select |  | Jellyfin User {Select User} | video only | yes (video pass V3b) |
+| select |  | Movies Library: {Loading...} | video only | yes (video pass V3b) |
+| select |  | TV Shows Library: {Loading...} | video only | yes (video pass V3b) |
 
 **Server Connections** (both, 38)
 

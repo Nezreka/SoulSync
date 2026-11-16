@@ -1051,6 +1051,8 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
     tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
     react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
+    # and Video Preferences, its own Section (SETTINGS_PORT.md video pass V2c)
+    react += "\n" + (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
     react_slots = re.findall(r'summaryKey="([^"]+)"', react)
     # the Library tab's media cards (steps 8a, 8b) render their summary span
     # themselves, with the same fallback attribute the markup had
@@ -1080,8 +1082,11 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     assert computed <= set(slots), f"computed but never shown: {computed - set(slots)}"
 
     # and they read the real inputs rather than a cached copy of the settings
+    # (every Library summary is React since SETTINGS_PORT.md video pass V2c,
+    # checked above; the vanilla map is empty until settings.js goes)
     engine = js.split('const LIBRARY_SUMMARIES', 1)[1].split('function refreshLibrarySummaries', 1)[0]
-    assert 'getElementById' in engine
+    if computed:
+        assert 'getElementById' in engine
     assert 'settings.' not in engine, "reading a settings object instead of the live fields"
 
 
@@ -1236,6 +1241,14 @@ def _fn(src, name):
     return src[start:src.index("\n}\n", start)]
 
 
+def _video_cards():
+    """the React video cards' ids (SETTINGS_PORT.md video pass V3a), each a
+    <Card service="..."> whose frame carries data-video-service={service}"""
+    cards = _read(_TABS + "connections-video-api.tsx")
+    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    return re.findall(r'<Card\s+service="([^"]+)"', cards)
+
+
 def test_every_service_has_a_handle_a_tile_can_use(index):
     """22 services live in two "API Configuration" groups as nested accordions.
     The tiles are built by querying for those frames, so each one needs a stable
@@ -1249,6 +1262,8 @@ def test_every_service_has_a_handle_a_tile_can_use(index):
     music = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-service="([^"]+)"', index)
     music += _react_cards()
     video = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-video-service="([^"]+)"', index)
+    # the video cards are React (connections-video-api.tsx, video pass V3a)
+    video += _video_cards()
     assert len(music) >= 12, f"only {len(music)} music services carry a handle"
     assert len(video) >= 10, f"only {len(video)} video services carry a handle"
     assert not (set(music) & set(video)), "a service id is claimed by both sides"
@@ -1323,7 +1338,8 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
     longer a descendant and renders normally.
     """
     # the music group is React (connections-extras.tsx, step 10b)
-    extras = _read(_TABS + "connections-extras.tsx")
+    # and so is the video group (connections-video-api.tsx, video pass V3a)
+    extras = _read(_TABS + "connections-extras.tsx") + _read(_TABS + "connections-video-api.tsx")
     assert index.count('data-svc-legacy') + extras.count('data-svc-legacy=""') == 2, (
         "the legacy groups moved or multiplied"
     )
@@ -1436,11 +1452,13 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     one is currently shown.
     """
     # the music section is React (connections-servers.tsx, step 10c)
+    # and the video section too (connections-video-server.tsx, video pass V3b)
     servers = _read(_TABS + "connections-servers.tsx")
-    assert index.count('data-svc-side=') + servers.count('data-svc-side=') == 2, (
+    video = _read(_TABS + "connections-video-server.tsx")
+    assert index.count('data-svc-side=') + servers.count('data-svc-side=') + video.count('data-svc-side=') == 2, (
         "the two server sections are not both marked"
     )
-    assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in index
+    assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in video
 
     build = _fn(tiles, "ServicesPart")
     assert 'data-svc-side' in build and 'svc-side-active' in build, (
@@ -1485,20 +1503,13 @@ def test_both_server_sections_use_the_same_copy_style(index):
     reads as a warning rather than as an explanation; this one had been missed
     because the two sections could never be seen at the same time.
     """
-    at = index.index('data-svc-side="video"')
-    d, seg = 0, None
-    for m in re.finditer(r"<(/?)div\b[^>]*?(/?)>", index[index.rfind("<div", 0, at):]):
-        if m.group(2) == "/":
-            continue
-        d += -1 if m.group(1) else 1
-        if d == 0:
-            start = index.rfind("<div", 0, at)
-            seg = index[start:start + m.end()]
-            break
-    assert seg, "could not read the video server section"
-    assert 'class="callback-help"' not in seg, (
+    # the video section is React (connections-video-server.tsx, video pass V3b)
+    seg = _read(_TABS + "connections-video-server.tsx")
+    assert 'data-svc-side="video"' in seg, "could not read the video server section"
+    assert 'className="callback-help"' not in seg, (
         "the video server copy is back on the off-scale italic class"
     )
+    assert '<p className="setting-help-text"' in seg
 
 
 def test_the_server_toggles_are_one_control_on_both_sides():
@@ -1551,24 +1562,16 @@ def test_a_server_row_is_one_setting_per_row(index):
 
     One setting per row, same as everywhere else on the page.
     """
-    at = index.index('video-library-selectors')
-    start = index.rfind('<div', 0, at)
-    window = index[start:start + 1400]
-    selects = re.findall(r'data-video-lib-select="(\w+)"', window)
-    assert set(selects) == {'movies', 'tv'}, selects
-
-    # each select must sit in its OWN form-group
-    for lib in ('movies', 'tv'):
-        pos = index.index(f'data-video-lib-select="{lib}"')
-        owner = index.rfind('<div class="form-group', 0, pos)
-        # no second select between that form-group opening and this one
-        between = index[owner:pos]
-        assert between.count('data-video-lib-select') == 0, (
-            f"the {lib} selector shares a row with another control"
-        )
+    # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
+    src = _read(_TABS + "connections-video-server.tsx")
+    rows = re.findall(r'<div className="form-group video-library-selectors">(.*?)</div>', src, re.S)
+    assert len(rows) == 2, rows
+    # each select sits in its OWN form-group
+    assert [re.findall(r'<LibrarySelect kind="(\w+)"', r) for r in rows] == [["movies"], ["tv"]]
+    assert 'data-video-lib-select={kind}' in src
 
     # the caption is help text, not a row
-    assert 'setting-help-text video-library-note' in index
+    assert 'className="setting-help-text video-library-note"' in src
 
 
 def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
@@ -1759,7 +1762,7 @@ def test_every_connections_service_sits_in_a_named_group(index, tiles):
     grouped = set(re.findall(r"'([a-z]+)'", lists))
     connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
     ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections)) | {
-        i for i in _react_cards() if re.fullmatch(r'[a-z]+', i)
+        i for i in _react_cards() + _video_cards() if re.fullmatch(r'[a-z]+', i)
     }
     assert len(ids) >= 20, f"only found {len(ids)} services, the page split is off"
     assert ids - grouped == set(), f"services with no group: {sorted(ids - grouped)}"

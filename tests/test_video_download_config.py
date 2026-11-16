@@ -304,20 +304,26 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     write from there races the music panel's own save.
     """
     js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    save_handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
-    chain = save_handler.split("Promise.all([", 1)[1].split("])", 1)[0]
-    assert "saveSlskd" not in chain, (
-        "the video save button posts the retired slskd form again"
-    )
+    # every video section is React (SETTINGS_PORT.md video pass): the save
+    # button's capture listener is video-shown.ts, and each section adds its
+    # saver there. video-settings.js has none left, and nothing posts slskd
+    assert "#save-settings" not in js, "video-settings.js has its own save hook again"
+    savers = [p for p in tabs.glob("*.ts*") if "onVideoSave(" in p.read_text(encoding="utf-8")
+              and not p.name.endswith((".test.tsx", ".test.ts")) and p.name != "video-shown.ts"]
+    for p in savers:
+        assert "/api/video/downloads/slskd" not in p.read_text(encoding="utf-8"), (
+            f"{p.name} posts the retired slskd form from the video save button"
+        )
     # the savers that legitimately belong to the video side stay
-    assert "saveConn" in chain, "saveConn was dropped from the video save chain"
+    server = (tabs / "video-server.ts").read_text(encoding="utf-8")
+    assert "onVideoSave(() => Promise.all([videoServer.saveConn(true), videoServer.saveLibs(true)]));" in server
     # the downloads config is React and saves from the same click (video-downloads.ts)
     downloads = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-downloads.ts").read_text(encoding="utf-8")
     assert "onVideoSave(() => videoDownloads.save());" in downloads
     # Video Quality and YouTube Quality are React and add their own savers to
     # the same capture-phase click (SETTINGS_PORT.md, video pass V1)
-    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
     shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")
     assert "if (!(event.target as Element | null)?.closest?.('#save-settings')) return;" in shown
     assert "true,\n  );" in shown  # capture phase
@@ -343,9 +349,10 @@ def test_the_video_save_button_saves_the_whole_page():
     The capture listener must flush the video savers and let the click through
     to the button's own handler, and it must not claim a save of its own.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
-    handler = handler.split("}, true);", 1)[0]
+    # the capture listener is video-shown.ts (SETTINGS_PORT.md video pass)
+    shown = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-shown.ts").read_text(encoding="utf-8")
+    handler = shown.split("?.closest?.('#save-settings')) return;", 1)[1]
+    handler = handler.split("true,\n  );", 1)[0]
     for blocker in ("stopImmediatePropagation", "stopPropagation", "preventDefault"):
         assert blocker not in handler, f"the video save button still calls {blocker}"
     assert "'Settings saved'" not in handler, (

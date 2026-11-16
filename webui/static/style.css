@@ -50101,9 +50101,9 @@ tr.tag-diff-same {
 #settings-page .settings-group > h3::after {
     display: none !important;
 }
-/* the music Server Connections group is first in its React slot (SETTINGS_PORT.md
-   step 10c), never first in its column: the video server group comes before it */
-#settings-page .settings-group:first-child:not([data-svc-side="music"]) > h3 { padding-top: 4px; }
+/* the two server groups are each first in their React slot (SETTINGS_PORT.md
+   step 10c, video pass V3b), never first in their column */
+#settings-page .settings-group:first-child:not([data-svc-side]) > h3 { padding-top: 4px; }
 
 /* Active section — accent bar + brighter title when interacting */
 #settings-page .settings-group:hover > h3,

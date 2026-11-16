@@ -270,9 +270,12 @@ def test_video_settings_reuses_real_music_settings_page():
 def test_video_library_mapping_ui_present_and_video_only():
     # Movies/TV selectors live next to the music library selector, marked
     # data-video-only so they show only on the video side.
-    assert 'data-video-lib-select="movies"' in _INDEX
-    assert 'data-video-lib-select="tv"' in _INDEX
-    assert "data-video-only" in _INDEX
+    # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
+    section = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+               "connections-video-server.tsx").read_text(encoding="utf-8")
+    assert '<LibrarySelect kind="movies" />' in section and '<LibrarySelect kind="tv" />' in section
+    assert 'data-video-lib-select={kind}' in section
+    assert 'data-video-only=""' in section
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'body[data-side="music"] [data-video-only]' in css  # video bits hidden on music side
     # ...and the music-library picker is hidden on the video side.
