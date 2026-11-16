@@ -72,6 +72,7 @@ The Library exposes provider links and matching actions on catalogue entities. T
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
 - Fixing an artist's match also fixes it on **your watchlist**, so new releases are scanned for the right artist. Only your own watchlist changes, and never onto an ID another watched artist already uses
+- **Other versions…** in an album's **⋯** menu is the edition picker (like Picard's): it lists the album's releases from its MusicBrainz release group and the same-titled releases on your primary source, each with its track count, date, country, format and label, the current one marked. A search box finds one that is not listed, kept to that artist. Pick one to see what changes (track count, how your files line up) and confirm: the album then follows that release, the same as a manual match on its chip. Your files stay as they are, so run **Preview Retag** afterwards to write it into their tags
 - Run per-service **enrichment** from the Enrich dropdown to pull in metadata from a specific source
 - Matched services show as clickable badges linking to the entity on that service's website
 
