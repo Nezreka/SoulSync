@@ -181,6 +181,20 @@ describe('describeFinding: the fix line is never a guess', () => {
     expect(describeFinding(corrupt, 'Something Else').fix).toBe('');
   });
 
+  it('a release pair that is blocked never promises a merge (#2146)', () => {
+    const pair = (eligible: boolean) => ({
+      finding_type: 'native_duplicate_releases',
+      title: 'Duplicate release: Ark',
+      details: { album: 'Ark', merge_eligible: eligible },
+    });
+    expect(describeFinding(pair(true), 'Review Merge').fix).toBe(
+      'Review Merge joins them under one release. Every file and edition is kept.',
+    );
+    expect(describeFinding(pair(false), 'Review Merge').fix).toBe(
+      "These can't be merged yet. The reason is below.",
+    );
+  });
+
   it('a finding with no fix button gets no fix line', () => {
     expect(describeFinding(corrupt, null).fix).toBe('');
     expect(describeFinding(scan({ title: 'S' }, { genre: 'mismatch' })).fix).toBe('');

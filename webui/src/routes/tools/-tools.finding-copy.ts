@@ -416,11 +416,15 @@ const WRITERS: Record<string, Writer> = {
     fix: `${verb} keeps the best copy and moves the others to quarantine, where they can be restored.`,
   }),
 
-  native_duplicate_releases: (finding, _d, s, verb) => ({
+  native_duplicate_releases: (finding, d, s, verb) => ({
     title: s.album || withoutPrefix(finding.title),
     sub: s.artist,
     problem: 'Two entries in your library look like the same release.',
-    fix: `${verb} joins them under one release. Every file and edition is kept.`,
+    // #2146: a blocked pair can't be merged, so don't promise it
+    fix:
+      d.merge_eligible === true
+        ? `${verb} joins them under one release. Every file and edition is kept.`
+        : "These can't be merged yet. The reason is below.",
   }),
 
   duplicate_tracks: (finding, _d, s) => ({
