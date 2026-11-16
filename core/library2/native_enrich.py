@@ -1797,23 +1797,34 @@ def drop_band_fragment_credits(conn) -> int:
     "Beyond" next to "Above & Beyond" on the same track, and those two
     phantoms then named the reorganize folder ("Above") and the tags
     ("Above (feat. Beyond)") (#2131, #2136). Only a track (or album) that
-    credits the whole name and every one of its parts loses the parts: a
-    real guest credit is never spelled exactly like that. Returns how many
-    credit rows went.
+    credits the whole band and every one of its parts loses the parts: a
+    real guest credit is never spelled exactly like that.
+
+    The band has to be a provider-identified artist: "bbno$, So Loki" with
+    no id is itself a split-able credit, not a band, and bbno$ keeps his.
+    The album's own primary artist is never left without its credit: an
+    unidentified part ("Foam" on Foam and Sand's album) hands the album to
+    the band, an identified one (a real solo name) keeps the album and its
+    credits, nothing guessed. Returns how many credit rows went.
     """
     from core.library2.importer import normalize_name, split_artist_credits
 
     ids_by_key: Dict[str, List[int]] = {}
+    identified: set = set()
     wholes = []
-    for aid, name in conn.execute(
-            "SELECT id, name FROM lib2_artists WHERE canonical_artist_id IS NULL"):
+    for aid, name, has_id in conn.execute(
+            f"SELECT a.id, a.name, {_IDENTIFIED_SQL} FROM lib2_artists a "
+            "WHERE a.canonical_artist_id IS NULL"):
         key = normalize_name(name or "")
         if not key:
             continue
         ids_by_key.setdefault(key, []).append(int(aid))
-        if _BAND_SEPARATOR_RE.search(name or ""):
+        if has_id:
+            identified.add(int(aid))
+        if has_id and _BAND_SEPARATOR_RE.search(name or ""):
             wholes.append((int(aid), name))
     dropped = 0
+    rehomed = 0
     for whole_id, name in wholes:
         pieces = split_artist_credits(name)
         keys = [normalize_name(piece) for piece in pieces]
@@ -1822,27 +1833,48 @@ def drop_band_fragment_credits(conn) -> int:
         part_ids = [[i for i in ids_by_key[k] if i != whole_id] for k in keys]
         if not all(part_ids):
             continue
-        for table, column in (("lib2_track_artists", "track_id"),
-                              ("lib2_album_artists", "album_id")):
+        every_part = [i for ids in part_ids for i in ids]
+        marks = ",".join("?" for _ in every_part)
+        # albums first, so a track of a re-homed album sees the band as primary
+        for table, column in (("lib2_album_artists", "album_id"),
+                              ("lib2_track_artists", "track_id")):
             owners = {int(r[0]) for r in conn.execute(
                 f"SELECT {column} FROM {table} WHERE artist_id=?", (whole_id,))}
             for ids in part_ids:
                 if not owners:
                     break
-                marks = ",".join("?" for _ in ids)
+                id_marks = ",".join("?" for _ in ids)
                 owners &= {int(r[0]) for r in conn.execute(
-                    f"SELECT {column} FROM {table} WHERE artist_id IN ({marks})", ids)}
-            if not owners:
-                continue
-            every_part = [i for ids in part_ids for i in ids]
-            for owner in owners:
-                marks = ",".join("?" for _ in every_part)
+                    f"SELECT {column} FROM {table} WHERE artist_id IN ({id_marks})", ids)}
+            done = 0
+            for owner in sorted(owners):
+                if column == "album_id":
+                    primary = conn.execute(
+                        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (owner,)).fetchone()
+                else:
+                    primary = conn.execute(
+                        "SELECT al.primary_artist_id FROM lib2_tracks t "
+                        "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?", (owner,)).fetchone()
+                primary_id = int(primary[0]) if primary and primary[0] is not None else None
+                if primary_id in every_part:
+                    if column == "track_id" or primary_id in identified:
+                        # a real artist (or an album not re-homed above) keeps it
+                        continue
+                    conn.execute("UPDATE lib2_albums SET primary_artist_id=?, "
+                                 "updated_at=CURRENT_TIMESTAMP WHERE id=?", (whole_id, owner))
+                    conn.execute("UPDATE lib2_album_artists SET role='primary' "
+                                 "WHERE album_id=? AND artist_id=?", (owner, whole_id))
+                    rehomed += 1
                 dropped += conn.execute(
                     f"DELETE FROM {table} WHERE {column}=? AND artist_id IN ({marks})",
                     (owner, *every_part)).rowcount or 0
-            logger.info("dropped the parts of %r from %d %s", name, len(owners),
-                        "track(s)" if column == "track_id" else "album(s)")
-    if dropped:
+                done += 1
+            if done:
+                logger.info("dropped the parts of %r from %d %s", name, done,
+                            "track(s)" if column == "track_id" else "album(s)")
+    if dropped or rehomed:
+        logger.info("band fragments: %d credit row(s) dropped, %d album(s) back on their band",
+                    dropped, rehomed)
         conn.commit()
     return dropped
 

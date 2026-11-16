@@ -176,3 +176,73 @@ def test_a_real_guest_next_to_a_band_is_left_alone(conn):
 
     assert NE.drop_band_fragment_credits(conn) == 0
     assert _credits(conn, track) == ["Simon & Garfunkel", "Paul Simon"]
+
+
+def _album_credits(conn, album):
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT a.name, aa.role FROM lib2_album_artists aa JOIN lib2_artists a ON a.id=aa.artist_id "
+        "WHERE aa.album_id=?", (album,))}
+
+
+def _primary(conn, album):
+    return conn.execute("SELECT a.name FROM lib2_albums al JOIN lib2_artists a "
+                        "ON a.id=al.primary_artist_id WHERE al.id=?", (album,)).fetchone()[0]
+
+
+def _credit_album(conn, album, artist, role):
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,?)",
+                 (album, artist, role))
+
+
+def test_an_album_filed_under_a_phantom_part_goes_back_to_the_band(conn):
+    """live shape: 'Circle 59' had primary "Foam" (no id) while "Foam and Sand"
+    sat on it as a featured credit. dropping Foam's credit alone would leave
+    the album filed under an artist nothing credits."""
+    band = _artist(conn, "Foam and Sand", spotify="1auVJGxP1B7a0GYbD6G6dd")
+    foam, sand = _artist(conn, "Foam"), _artist(conn, "Sand")
+    guest = _artist(conn, "Stegonaute", spotify="st")
+    album = _album(conn, foam)
+    for artist, role in ((band, "featured"), (foam, "primary"), (sand, "featured"),
+                         (guest, "featured")):
+        _credit_album(conn, album, artist, role)
+    track = _track(conn, album, [band, foam, sand, guest])
+
+    NE.drop_band_fragment_credits(conn)
+
+    assert _primary(conn, album) == "Foam and Sand"
+    assert _album_credits(conn, album) == {"Foam and Sand": "primary", "Stegonaute": "featured"}
+    assert _credits(conn, track) == ["Foam and Sand", "Stegonaute"]
+
+
+def test_a_real_solo_artist_keeps_its_album(conn):
+    """Drew Holcomb is a real artist with an id: his album and credits stay,
+    even next to "Drew Holcomb & the Neighbors" and a phantom "the Neighbors"."""
+    drew = _artist(conn, "Drew Holcomb", spotify="0Obcl00RkSejk0z0m4vUwT")
+    band = _artist(conn, "Drew Holcomb & the Neighbors", spotify="dhn")
+    neighbors = _artist(conn, "the Neighbors")
+    ellie = _artist(conn, "Ellie Holcomb", spotify="eh")
+    album = _album(conn, drew)
+    for artist, role in ((drew, "primary"), (band, "featured"), (neighbors, "featured"),
+                         (ellie, "featured")):
+        _credit_album(conn, album, artist, role)
+    track = _track(conn, album, [drew, band, neighbors, ellie])
+
+    NE.drop_band_fragment_credits(conn)
+
+    assert _primary(conn, album) == "Drew Holcomb"
+    assert _album_credits(conn, album) == {
+        "Drew Holcomb": "primary", "Drew Holcomb & the Neighbors": "featured",
+        "the Neighbors": "featured", "Ellie Holcomb": "featured"}
+    assert _credits(conn, track) == [
+        "Drew Holcomb", "Drew Holcomb & the Neighbors", "the Neighbors", "Ellie Holcomb"]
+
+
+def test_an_unidentified_credit_string_is_not_a_band(conn):
+    """live shape: "bbno$, So Loki" (no id) on bbno$'s own track. it is a
+    credit list, not a band, so bbno$ and So Loki keep theirs."""
+    bbno = _artist(conn, "bbno$", spotify="41X1TR6hrK8Q2ZCpp2EqCz")
+    combined, loki = _artist(conn, "bbno$, So Loki"), _artist(conn, "So Loki")
+    track = _track(conn, _album(conn, bbno), [bbno, combined, loki])
+
+    assert NE.drop_band_fragment_credits(conn) == 0
+    assert _credits(conn, track) == ["bbno$", "bbno$, So Loki", "So Loki"]
