@@ -2234,6 +2234,17 @@ def _album_identity_disagrees(own_album: Dict[str, Any], album_ctx: Any) -> bool
     return False
 
 
+def album_context_vouched(track_info: Any, album_ctx: Any) -> bool:
+    """an album context nobody guessed: the library's own album (reorganize)
+    or the album the user typed in (manual download). its artist is the
+    release's album artist even when no track performs on it, a dj mix or a
+    label comp ("Group Therapy" by Above & Beyond), so a track by someone
+    else is not a sign the context was poisoned (#2133, #2135)."""
+    if isinstance(album_ctx, dict) and album_ctx.get("_library_album"):
+        return True
+    return isinstance(track_info, dict) and bool(track_info.get("_manual_metadata"))
+
+
 def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explicit_artist):
     """Pure function (R4F3): evaluate whether the batch album context is
     poisoned, without running the full metadata extraction.
@@ -2314,9 +2325,11 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     # Artists credit is a genuine multi-artist compilation — both stay
     # trusted. Empty ground truth never fires.
     _ctx_album_id = str(album_ctx.get("id") or "").strip()
+    _ctx_vouched = album_context_vouched(track_info_ctx, album_ctx)
     _ctx_artist_norm = (own_album_artist or "").strip().casefold()
     _ctx_artist_untrusted = (
-        bool(track_own_artists)
+        not _ctx_vouched
+        and bool(track_own_artists)
         and bool(_ctx_artist_norm)
         and _ctx_artist_norm != "unknown artist"
         and _ctx_artist_norm not in VARIOUS_ARTIST_NAMES
@@ -2342,7 +2355,7 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
                 )
 
     # Wires 1 and 2 (skipped when wire 3 already fired).
-    if not batch_album_distrusted:
+    if not batch_album_distrusted and not _ctx_vouched:
         claimed_album_artist = explicit_name or own_album_artist
         claimed_norm = (claimed_album_artist or "").strip().casefold()
         ctx_album_name = (album_ctx.get("name") or "").strip()
