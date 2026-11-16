@@ -284,6 +284,22 @@ describe('SoulSync API, Developer Mode, Artwork Cache', () => {
     });
   });
 
+  it('Seerr loads and saves its switch and fallback profile (#2151)', async () => {
+    act(() => store.hydrate({ seerr_compat: { enabled: true, profile_id: 4 } }));
+    part('tools');
+    expect(input('seerr-compat-enabled').checked).toBe(true);
+    await waitFor(() => expect(input('seerr-compat-profile').value).toBe('4'));
+    expect(
+      [...document.querySelectorAll('#seerr-compat-profile option')].map((o) => o.textContent),
+    ).toEqual(['Admin', 'Kid (needs approval)']);
+    // the lidarr list keeps its own value
+    expect(input('lidarr-compat-profile').value).toBe('1');
+    fireEvent.click(input('seerr-compat-enabled'));
+    fireEvent.change(input('seerr-compat-profile'), { target: { value: '1' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ seerr_compat: { enabled: false, profile_id: 1 } });
+  });
+
   it('dev mode: activates, and the status follows every switch of it', async () => {
     part('tools');
     const nav = document.createElement('div');

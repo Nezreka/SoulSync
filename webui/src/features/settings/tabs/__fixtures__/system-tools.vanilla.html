@@ -140,6 +140,40 @@
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            <!-- Seerr compatible API (#2151) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Seerr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets apps built for Seerr (Jellyseerr, Overseerr), like
+                                                    Litefin's Jellyfin plugin, discover and request movies and
+                                                    shows through SoulSync's video side. In the app, set the Seerr
+                                                    URL to <code>http://&lt;host&gt;:8008/seerr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Each Jellyfin user
+                                                    requests as the profile linked to their Jellyfin account, or
+                                                    the profile with the same name.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="seerr-compat-enabled">
+                                                        Answer as Seerr at /seerr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Jellyfin users with no profile request as:</label>
+                                                    <select id="seerr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        A profile that can download gets requests on its wishlist
+                                                        right away. One without download rights sends them to the
+                                                        Requests page for approval first.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div><!-- end SoulSync API body -->
 
