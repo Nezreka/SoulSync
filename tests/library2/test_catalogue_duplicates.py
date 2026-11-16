@@ -116,6 +116,22 @@ def test_stale_merge_is_rejected_without_partial_changes(library):
         assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 2
 
 
+def test_refused_merge_is_logged(library, monkeypatch):
+    """#2146: a refused merge was only a toast, the log said nothing."""
+    from core.library2 import catalogue_duplicates
+    _artist, albums, tracks = ark_pair(library)
+    _result, findings = scan(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET title='Ark (Live)' WHERE id=?", (tracks[1],))
+        conn.commit()
+    warned = []
+    monkeypatch.setattr(catalogue_duplicates.logger, "warning", lambda *a, **k: warned.append(a))
+    result = catalogue_duplicates.merge_catalogue_duplicate(library[0], findings[0]["details"], albums[0])
+    assert result["success"] is False
+    assert len(warned) == 1
+    assert "changed" in str(warned[0][-1]).lower()
+
+
 def test_auto_merge_requires_opt_in_and_two_uncontradicted_release_ids(library):
     _artist, _albums, _tracks = ark_pair(library, same_release=True)
     assert scan(library)[0].auto_fixed == 0

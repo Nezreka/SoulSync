@@ -1807,12 +1807,10 @@ def _register_automation_handlers():
             return None
 
     def _itunes_link_parser_for_registry(url):
-        # ``parse_itunes_link_endpoint`` is a Flask route handler; the
-        # actual parsing work needs the underlying helpers. For now
-        # we punt — Phase 2 will lift the parsing into a pure helper
-        # the adapter can call directly. Refresh of itunes_link
-        # mirrors is not yet wired (current handler skips them).
-        return None
+        # the same parse the paste route runs. this was a stub returning
+        # None, so an Apple Music mirror never refreshed (#2147)
+        from core.playlists.itunes_link import fetch_itunes_link
+        return fetch_itunes_link(url, _get_itunes_client)
 
     # Discovery callable for the LB / Last.fm adapters' ``discover_tracks``.
     # Wraps the pure ``match_mb_tracks`` helper with the live matching

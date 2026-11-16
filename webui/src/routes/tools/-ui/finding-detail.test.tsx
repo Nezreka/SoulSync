@@ -238,6 +238,28 @@ describe('Catalogue duplicate review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Merge into release #1125' }));
     expect(choose).toHaveBeenCalledWith(1, 'merge-1125');
     expect(container.textContent).not.toContain('quarantine');
+    expect(container.textContent).not.toContain("Can't merge yet");
+  });
+
+  it('says up front why a blocked pair cannot be merged (#2146)', () => {
+    // the buttons were disabled with the reasons as loose lines, so they read
+    // as live buttons that did nothing
+    const { container } = render(
+      <FindingDetail
+        finding={catalogueFinding(false)}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+      />,
+    );
+    const note = screen.getByRole('note');
+    expect(note.textContent).toContain("Can't merge yet");
+    expect(note.textContent).toContain('An acquisition is still active.');
+    expect(note.textContent).toContain('run the Duplicate Detector again');
+    expect(container.textContent).not.toContain('Select the release group to keep');
+    expect(screen.getByRole('button', { name: 'Merge into release #1125' })).toHaveAttribute(
+      'title',
+      "Can't merge yet, the reason is above",
+    );
   });
 
   it('explains an active-download blocker and disables merging', () => {
@@ -248,7 +270,7 @@ describe('Catalogue duplicate review', () => {
         onApplyCoverArt={vi.fn()}
       />,
     );
-    expect(screen.getByText('An acquisition is still active.')).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent('An acquisition is still active.');
     expect(screen.getByRole('button', { name: 'Merge into release #995' })).toBeDisabled();
   });
 });

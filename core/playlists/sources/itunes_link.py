@@ -1,9 +1,8 @@
 """iTunes / Apple Music link playlist source adapter.
 
-Wraps the iTunes-link parsing logic that currently lives in
-``web_server.py`` (commit 718eb0cb). Phase 0 doesn't move it — adapter
-takes a parser callable that returns the parsed-playlist dict matching
-the ``parse_itunes_link_endpoint`` response shape::
+Takes a parser callable (``core.playlists.itunes_link.fetch_itunes_link``
+in the app, wired in ``web_server.py``) that returns the parsed-playlist
+dict matching the ``parse_itunes_link_endpoint`` response shape::
 
     {
         'id', 'type', 'name', 'subtitle', 'url', 'url_hash',
@@ -36,8 +35,8 @@ class ITunesLinkPlaylistSource(PlaylistSource):
 
     def __init__(self, parser: Callable[[str], Optional[dict]]):
         """``parser(url)`` returns the parsed playlist dict, or ``None``
-        if the URL is invalid / unreachable. Injected by ``web_server.py``
-        at startup, pointing at the existing module-level helpers."""
+        (or raises with the reason) when the link can't be read. Injected
+        by ``web_server.py`` at startup."""
         self._parser = parser
 
     def is_authenticated(self) -> bool:

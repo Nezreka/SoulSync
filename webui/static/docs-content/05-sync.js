@@ -220,6 +220,7 @@ On Plex, an admin also gets **Tag in Plex**: it adds a mood (the playlist's name
 
 - **Adopt into My Playlists**: a playlist made on the server instead of in SoulSync offers to be adopted. It becomes one of your playlists under the same name, each track stays paired with the server track it came from (so a sync never drops one it can't match), and syncing it updates that same server playlist
 - Smart playlists, and any playlist the server won't let you edit, are never offered for adoption. The server builds those, so they stay as they are
+- On Jellyfin, a playlist SoulSync makes is private to the account it syncs as. To share one with everyone, open it in Jellyfin and turn on public there: later syncs update it in place and leave that alone. Playlists older versions made are public; change them the same way if you want them private
 
 ## Cover art
 

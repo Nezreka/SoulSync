@@ -582,15 +582,26 @@ function CatalogueDuplicateReview({
   if (details.schema !== 'native_duplicate_releases/v1' || albums.length !== 2) {
     return <p>This release review needs a fresh scan before it can be applied.</p>;
   }
+  // #2146: a blocked pair showed its merge buttons disabled with the reasons
+  // as loose lines above, so the buttons read as broken. say why up front.
+  const blocked = details.merge_eligible !== true;
+  const reasons = list<string>(details.blocked_reasons);
   return (
     <>
-      <p>
-        Select the release group to keep. Both provider editions, all audio files and Wishlist
-        entries are retained under that release.
-      </p>
-      {list<string>(details.blocked_reasons).map((reason) => (
-        <p key={reason}>{reason}</p>
-      ))}
+      {blocked ? (
+        <div className="repair-finding-error-banner repair-merge-blocked" role="note">
+          <span className="repair-finding-error-title">Can't merge yet</span>
+          <span className="repair-finding-error-text">
+            {reasons.length ? reasons.join(' ') : 'This pair was not proven to be one release.'}{' '}
+            Once that changes, run the Duplicate Detector again to recheck.
+          </span>
+        </div>
+      ) : (
+        <p>
+          Select the release group to keep. Both provider editions, all audio files and Wishlist
+          entries are retained under that release.
+        </p>
+      )}
       {albums.map((album) => (
         <section className="repair-detail-subitem" key={album.album_id}>
           <strong>
@@ -616,7 +627,8 @@ function CatalogueDuplicateReview({
             type="button"
             className="repair-btn"
             aria-label={'Merge into release #' + album.album_id}
-            disabled={details.merge_eligible !== true}
+            title={blocked ? "Can't merge yet, the reason is above" : undefined}
+            disabled={blocked}
             onClick={() => onKeepDuplicate(finding.id, 'merge-' + album.album_id)}
           >
             Merge into release #{album.album_id}
