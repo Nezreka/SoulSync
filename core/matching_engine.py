@@ -306,6 +306,12 @@ class MusicMatchingEngine:
         # Standard similarity
         standard_ratio = SequenceMatcher(None, str1, str2).ratio()
 
+        # numbers name the release or part: 'group therapy 638' is not
+        # 'group therapy 160' however alike the letters are. same 0.30 as a
+        # version mismatch, so title + artist stays under every threshold (#2134)
+        if numbers_conflict(str1, str2):
+            return min(standard_ratio, 0.30)
+
         # Version vocabulary, shared by the prefix check and the divergent
         # check below.
         remaster_keywords = ['remaster', 'remastered']
