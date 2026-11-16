@@ -951,6 +951,7 @@ Newest first. One entry per change on the branch.
 
 | Date | Commit | What changed |
 |---|---|---|
+| Nov 16 | `1e96eae14` (step V4b) | **`settings.js` is gone.** Its shell is `shell.ts`, in the shell bundle; searching no longer saves. |
 | Nov 16 | `5772e28b8` (video pass V3c) | **Notifications and Import Lists are React; every video section is.** The retired source picker and slskd form are gone. |
 | Nov 16 | `31fc736bb` (video pass V3b) | **The video side's Server Connection is React.** |
 | Nov 16 | `371d442de` (video pass V3a) | **The video side's API cards are React.** |
