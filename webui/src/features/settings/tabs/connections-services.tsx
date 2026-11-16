@@ -17,7 +17,6 @@
 import {
   createContext,
   type CSSProperties,
-  type ReactNode,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -159,18 +158,22 @@ function useServices(model: ServicesModel = servicesModel) {
 
 // ── a React card's place: its wrapper, at home or in the modal ──
 
-/** the slot a part's cards live in while closed */
-export const ServiceHome = createContext<() => HTMLElement | null>(() => null);
+/** the group the cards live in while closed (the hidden API Configuration
+ *  group): they sit after its heading, before the row of test buttons */
+export const ServiceHome = createContext<HTMLElement | null>(null);
 
 function placeHome(home: HTMLElement, wrap: HTMLElement) {
-  home.appendChild(wrap);
+  const before = home.querySelector(':scope > .api-test-buttons');
   // back in page order, whichever came home last
-  const wraps = [...home.children].filter((c) => (c as HTMLElement).dataset.svcWrap !== undefined);
+  const wraps = [
+    wrap,
+    ...[...home.children].filter((c) => (c as HTMLElement).dataset.svcWrap !== undefined),
+  ];
   wraps
     .sort(
       (a, b) => Number((a as HTMLElement).dataset.order) - Number((b as HTMLElement).dataset.order),
     )
-    .forEach((c) => home.appendChild(c));
+    .forEach((c) => home.insertBefore(c, before));
 }
 
 /**
@@ -191,10 +194,7 @@ export function useServicePlace(service: string, order: number) {
   useLayoutEffect(() => {
     const body = document.getElementById('svc-modal-body');
     if (isOpen && body) body.appendChild(wrap);
-    else {
-      const slot = home();
-      if (slot) placeHome(slot, wrap);
-    }
+    else if (home) placeHome(home, wrap);
   }, [isOpen, home, wrap]);
   useEffect(() => () => wrap.remove(), [wrap]);
   return { wrap, open: isOpen };
@@ -527,15 +527,4 @@ export function ServicesPart({
       </div>
     </>
   );
-}
-
-/** a part whose cards portal themselves: the slot is their home */
-export function CardsHome({ part, children }: { part: string; children: ReactNode }) {
-  const [home] = useState(
-    () => () =>
-      document.querySelector<HTMLElement>(
-        `[data-stg-react="connections"][data-stg-part="${part}"]`,
-      ),
-  );
-  return <ServiceHome.Provider value={home}>{children}</ServiceHome.Provider>;
 }

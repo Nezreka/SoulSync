@@ -53,7 +53,7 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Branch and worktree | done | `node_modules` is a Windows junction to the main checkout's. Tests run in the worktree. |
 | Inventory of every control | done | Generated from `index.html`; the tables below. Regenerate with the script in `scrap/settingsx` in the main checkout if the markup changes on dev. |
 | Scaffold (host, store, save status) | **done** (step 1 below) | The page looks and behaves exactly as before: no tab is registered, so nothing mounts. |
-| Tab: Connections | **in progress** (step 10a below) | 40 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal. Left: the Scrobbling and Extras cards (10b), Server Connections (10c), MetaSync (10d); the video side's cards and server row for the video pass. |
+| Tab: Connections | **in progress** (steps 10a, 10b below) | 73 of 160, and System's Experimental (2). 10a: the metadata source, the Metadata service cards, the tiles and their modal; 10b: every other music card and the rest of the hidden group. Left: Server Connections (10c), MetaSync (10d); the video side's cards and server row for the video pass. |
 | Tab: Sources | **done** (steps 7a-7g below) | Every tile, the modal and all eleven panels are React. Three video-owned blocks inside the torrent and usenet panels stay vanilla until the video pass (parked, step 7g). |
 | Tab: Downloads | **done for music** (steps 5 and 7a below) | 23 of 32 ported: Source Settings (the download chain), Download Behaviour, Retry Logic, Album Publishing, Filtering. Left: the video slskd form (9, video only), for the video pass. Checked in a browser: identical apart from listed differences. |
 | Tab: Quality | **done for music** (step 6 below) | 27 of 67 ported: Music Quality (the ranked target list, presets, upgrade, search, fallback), Quality on Import, Album Releases, Post-Download Conversion, Audio Verification, the Quality Profiles panel and its Manage overview. Left: Video Quality, Custom Formats, YouTube Quality (40, video only), for the video pass. Checked in a browser: identical, 0 pixels differ. |
@@ -65,12 +65,12 @@ Break up the two biggest frontend files by porting Settings to React, **with no 
 | Video-only panels | not started | counted inside the tabs above |
 | Flip route to React, delete the vanilla files | not started | |
 
-**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 437 of 678 controls, 234 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 43 of 83 tests repointed (step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
+**Progress:** 8 of 9 tabs (Discovery, Quality, Downloads, Sources, Library and System without their video-only parts) and Connections under way, 470 of 678 controls, 243 of 333 `settings.js` functions removed (and 8 security helpers from `init.js`), 48 of 83 tests repointed (step 10b: `test_lastfm_username_setting`, `test_listenbrainz_username_setting`, `test_quality_profile_preview_nudge`, the floors in `test_settings_never_wipes` and `settings-load-element-drift`; step 10a: `test_dashboard_seam`, `test_settings_metadata_source_reachable`, `test_settings_sources_tab` (the tile pins), `library-discography-source`, `source-panels`, `settings-regroup-1822`, and `musicbrainz-settings` deleted for the React card's test; step 9c: `oidc-provider-block-toggle`, `signup-defaults-settings`, and the count floors in `test_settings_never_wipes` and `test_settings_persist_whitelist`; step 9b: `test_dashboard_seam`, the shell window contract; step 9a reworked `settings-autosave-toggle` and `settings-regroup-1822`; step 8d: `test_settings_persist_whitelist`, `test_settings_templates_exposed`, and the counts in `test_settings_never_wipes` and `settings-load-element-drift`; step 8c reworked `test_audiobook_settings`, `test_download_chain_widget`, `sources.test`, `settings-source-autotest`, `settings-source-tiles-chains`; step 8b: `imports/test_artist_letter`, `imports/test_compilation_album_artist`, `imports/test_unicode_substitution_1867`, `test_audiobook_settings`; step 8a: `test_m3u_prefix_rewrite`, `test_m3u_relative_paths`, `test_music_disk_guard`, `test_settings_paths_ux`, `settings-library-tabs`, `settings-video-library-load`; `settings-source-autotest`, `settings-source-tiles-chains`, `test_amazon_retired`, `test_hybrid_source_unready_ui`, `test_youtube_failure_is_reported`, `downloads/test_download_pool_and_healing`, plus step 7a's rework of `test_download_chain_widget` and `test_settings_sources_tab`; `settings-regroup-1822`, `test_docs_settings_labels`, `test_settings_sources_tab`, `music-size-limit-settings`, `test_download_chain_widget`, `test_explicit_preference`, `test_preferred_version`, `test_source_search_timeout`, `test_video_download_config`, `test_quality_profile_preview_nudge`, `quality/test_lossless`, `quality-release-import-mode`, `settings-autosave-toggle`, `settings-load-element-drift`).
 
 | File | At the start | Now |
 |---|---|---|
-| `webui/index.html` | 12,823 | 7,136 |
-| `webui/static/settings.js` | 10,187 | 3,075 |
+| `webui/index.html` | 12,823 | 6,838 |
+| `webui/static/settings.js` | 10,187 | 2,784 |
 | `webui/static/init.js` | 5,264 | 5,011 |
 
 ## Next: step 7, Sources and the download chain (plan, Nov 15 2026)
@@ -806,6 +806,16 @@ The Filtering header's live summary (`library-filtering`) is rendered by the tab
 
 **Environment note.** After the move to the new WSL home, `.venv/bin/python` pointed at `/usr/bin/python`, which the new install lacks; it now points at `/usr/bin/python3.12` (same version).
 
+### Step 10b: Connections, part two: the Scrobbling and Extras cards, the whole hidden group (Nov 15 2026)
+
+**What.** `tabs/connections-extras.tsx`: the Concerts, Last.fm, Genius, Pollinations, fanart.tv, AcoustID and ListenBrainz cards (Authorize Scrobbling, Clear Quarantine), and the music API Configuration group itself: its heading with Expand All and the row of test buttons. One slot, `api-music`, renders the group, and all fifteen music cards live in it (10a's three card slots folded into it); each portals into a wrapper kept before the test row. `tabs/connections-tab.tsx` dispatches the tab's parts.
+
+**Removed.** `authorizeLastfmScrobbling`, `clearQuarantine`, `toggleAllServiceAccordions`, the header gradient and verify code (`applyServiceStatusGradients`, four `_stg*` helpers, `_stgRefreshAfterSave`, its call after a save and on opening the tab), and the cards' load and collector keys. `toggleStgService` stays as a two-line toggle for the video side's still-vanilla cards.
+
+**Differences.** The gradient and the verify warnings are gone: nothing showed them (the group is hidden, the modal hides headers). Saves send only what changed: an untouched empty key (Last.fm's secret, Pollinations' key) is no longer written back as empty.
+
+**Checked.** Parity of the whole group against one fixture (the 10a card fixtures folded in); `connections-extras.test.tsx` 6; the Settings, `src/test`, shell and dashboard folders pass. Browser: every value and tile the same, the edits and Clear Quarantine save and toast the same; screenshots identical but sub-pixel text.
+
 ### Step 10a: Connections, part one: the metadata source, the Metadata cards, the tiles; Experimental (Nov 15 2026)
 
 **What.** `tabs/connections.ts` (the rules: the picker's options and locks, which source can be picked, MusicBrainz's check, the /status frames, Hydrabase's link, the Qobuz sign-in check), `tabs/connections-metadata.tsx` (the Metadata Source group with the Library discography source under it, the Spotify, iTunes, Deezer, Discogs, Tidal, Qobuz, MusicBrainz and Hydrabase cards, Experimental with its confirm), `tabs/connections-services.tsx` (the Music / Video tabs, the tiles, the modal). Slots: `metadata`, `services`, `services-metadata`, `musicbrainz`, `hydrabase`, and System's `experimental`.
@@ -873,7 +883,7 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Expand All | music only | no |
+| button |  | Expand All | music only | yes (step 10b) |
 
 **Spotify** (music only, 7)
 
@@ -939,42 +949,42 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `concerts-ticketmaster-api-key` | Ticketmaster API Key: | music only | no |
-| text | `concerts-country` | Concerts near you (country): | music only | no |
-| text | `concerts-setlistfm-api-key` | Setlist.fm API Key: | music only | no |
-| button |  | Test Connection | music only | no |
+| text | `concerts-ticketmaster-api-key` | Ticketmaster API Key: | music only | yes (step 10b) |
+| text | `concerts-country` | Concerts near you (country): | music only | yes (step 10b) |
+| text | `concerts-setlistfm-api-key` | Setlist.fm API Key: | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **Last.fm** (music only, 6)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `lastfm-api-key` | API Key: | music only | no |
-| password | `lastfm-api-secret` | API Secret: | music only | no |
-| text | `lastfm-username` | Username: | music only | no |
-| checkbox | `lastfm-scrobble-enabled` | Scrobble plays to Last.fm | music only | no |
-| button |  | Authorize Scrobbling | music only | no |
-| button |  | Test Connection | music only | no |
+| password | `lastfm-api-key` | API Key: | music only | yes (step 10b) |
+| password | `lastfm-api-secret` | API Secret: | music only | yes (step 10b) |
+| text | `lastfm-username` | Username: | music only | yes (step 10b) |
+| checkbox | `lastfm-scrobble-enabled` | Scrobble plays to Last.fm | music only | yes (step 10b) |
+| button |  | Authorize Scrobbling | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **Genius** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `genius-access-token` | Client Access Token: | music only | no |
-| button |  | Test Connection | music only | no |
+| password | `genius-access-token` | Client Access Token: | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **Pollinations** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `pollinations-api-key` | API Key (optional): | music only | no |
-| button |  | Test Connection | music only | no |
+| password | `pollinations-api-key` | API Key (optional): | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **fanart.tv** (music only, 2)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| password | `artist-fanart-api-key` | API Key (optional): | music only | no |
-| button |  | Test Connection | music only | no |
+| password | `artist-fanart-api-key` | API Key (optional): | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **MusicBrainz** (music only, 4)
 
@@ -989,20 +999,20 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| checkbox | `acoustid-enabled` | Enable Download Verification | music only | no |
-| password | `acoustid-api-key` | Application API Key: | music only | no |
-| button |  | Test Connection | music only | no |
-| button |  | Clear Quarantine | music only | no |
+| checkbox | `acoustid-enabled` | Enable Download Verification | music only | yes (step 10b) |
+| password | `acoustid-api-key` | Application API Key: | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
+| button |  | Clear Quarantine | music only | yes (step 10b) |
 
 **ListenBrainz** (music only, 5)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| text | `listenbrainz-base-url` | API Base URL: | music only | no |
-| password | `listenbrainz-token` | User Token: | music only | no |
-| text | `listenbrainz-username` | Username (optional): | music only | no |
-| checkbox | `listenbrainz-scrobble-enabled` | Scrobble plays to ListenBrainz | music only | no |
-| button |  | Test Connection | music only | no |
+| text | `listenbrainz-base-url` | API Base URL: | music only | yes (step 10b) |
+| password | `listenbrainz-token` | User Token: | music only | yes (step 10b) |
+| text | `listenbrainz-username` | Username (optional): | music only | yes (step 10b) |
+| checkbox | `listenbrainz-scrobble-enabled` | Scrobble plays to ListenBrainz | music only | yes (step 10b) |
+| button |  | Test Connection | music only | yes (step 10b) |
 
 **Hydrabase** (music only, 10)
 
@@ -1012,18 +1022,18 @@ Every control and button in the settings markup, grouped by the tab it shows on 
 | password | `hydrabase-api-key` | API Key: | music only | yes (step 10a) |
 | checkbox | `hydrabase-auto-connect` | Auto-connect on startup | music only | yes (step 10a) |
 | button | `hydrabase-connect-btn` | Connect | music only | yes (step 10a) |
-| button |  | Test Spotify | music only | no |
-| button |  | Test Tidal | music only | no |
-| button |  | Test ListenBrainz | music only | no |
-| button |  | Test AcoustID | music only | no |
-| button |  | Test Last.fm | music only | no |
-| button |  | Test Genius | music only | no |
+| button |  | Test Spotify | music only | yes (step 10b) |
+| button |  | Test Tidal | music only | yes (step 10b) |
+| button |  | Test ListenBrainz | music only | yes (step 10b) |
+| button |  | Test AcoustID | music only | yes (step 10b) |
+| button |  | Test Last.fm | music only | yes (step 10b) |
+| button |  | Test Genius | music only | yes (step 10b) |
 
 **API Configuration Expand All** (video only, 1)
 
 | Kind | id | Label | Side | Ported |
 |---|---|---|---|---|
-| button |  | Expand All | video only | no |
+| button |  | Expand All | video only | yes (step 10b) |
 
 **TMDB** (video only, 2)
 

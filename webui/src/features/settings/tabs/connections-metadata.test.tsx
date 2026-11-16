@@ -11,11 +11,11 @@ import { createSettingsStore, type SettingsPayload, type SettingsStore } from '.
 import { shape, vanilla, withHelpLines } from './__fixtures__/shape';
 import { hydrabaseLink, musicbrainzKeys, musicbrainzRate } from './connections';
 import {
-  ConnectionsTab,
   ExperimentalSection,
   musicbrainzError,
   syncMetadataSourceSelection,
 } from './connections-metadata';
+import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -109,13 +109,11 @@ describe('each part is the markup it replaced', () => {
     expect(shape(container)).toEqual(shape(old));
   });
 
-  it.each([
-    ['services-metadata', 'connections-services-a.vanilla.html'],
-    ['musicbrainz', 'connections-musicbrainz.vanilla.html'],
-    ['hydrabase', 'connections-hydrabase.vanilla.html'],
-  ])('%s', (name, fixture) => {
-    const { container } = part(name);
-    expect(shape(unwrapped(container))).toEqual(shape(withHelpLines(vanilla(fixture))));
+  it('the music API Configuration group, every card in it', () => {
+    const { container } = part('api-music');
+    expect(shape(unwrapped(container))).toEqual(
+      shape(withHelpLines(vanilla('connections-api-music.vanilla.html'))),
+    );
   });
 
   it('Experimental, and its confirm in the page body', () => {
@@ -279,7 +277,7 @@ describe('Experimental', () => {
 
 describe('the service cards', () => {
   it('each field saves its key; the redirect line follows the field', async () => {
-    part('services-metadata');
+    part('api-music');
     loaded({
       spotify: { client_id: 'a', client_secret: '__redacted_unchanged__' },
       deezer: {},
@@ -312,7 +310,7 @@ describe('the service cards', () => {
   });
 
   it('the Spotify dot turns amber when it needs attention (the tiles read it)', () => {
-    part('services-metadata');
+    part('api-music');
     const dot = () =>
       document.querySelector<HTMLElement>('[data-service="spotify"] .stg-service-dot')!;
     expect(dot().style.color).toBe('rgb(29, 185, 84)');
@@ -323,7 +321,7 @@ describe('the service cards', () => {
   });
 
   it('a test saves what is waiting first', async () => {
-    part('services-metadata');
+    part('api-music');
     loaded({ discogs: {} });
     store.set('discogs', 'token', 'x');
     fireEvent.click(
@@ -334,7 +332,7 @@ describe('the service cards', () => {
   });
 
   it('Deezer with an ARL tests both logins and says both', async () => {
-    part('services-metadata');
+    part('api-music');
     loaded({ deezer_download: { arl: '__redacted_unchanged__' } });
     answers['/api/test-connection'] = { success: true, message: 'Deezer ok' };
     answers['/api/deezer-download/test'] = { success: true, user: 'me', tier: 'Premium' };
@@ -353,7 +351,7 @@ describe('the service cards', () => {
   });
 
   it('Qobuz follows its sign-in, and signs in by token', async () => {
-    part('services-metadata');
+    part('api-music');
     act(() => {
       window.dispatchEvent(
         new CustomEvent('soulsync:qobuz-auth', {
@@ -408,7 +406,7 @@ describe('MusicBrainz', () => {
 
   it('a bad address holds every save back until it is put right', async () => {
     store.block(() => !!musicbrainzError());
-    part('musicbrainz');
+    part('api-music');
     loaded({ musicbrainz: { base_url: '', request_interval: 1.05 } });
     expect(el('musicbrainz-request-rate').value).toBe('0.952381');
     fireEvent.change(el('musicbrainz-base-url'), { target: { value: 'mirror' } });
@@ -430,7 +428,7 @@ describe('MusicBrainz', () => {
 describe('Hydrabase', () => {
   it('a load that finds it connected says so, and the button disconnects it', async () => {
     answers['/api/hydrabase/status'] = { connected: true };
-    part('hydrabase');
+    part('api-music');
     loaded({ hydrabase: { url: 'ws://h', api_key: 'k', auto_connect: true } });
     await waitFor(() => expect(el('hydrabase-settings-status').textContent).toBe('Connected'));
     expect(el('hydrabase-connect-btn').textContent).toBe('Disconnect');
@@ -444,7 +442,7 @@ describe('Hydrabase', () => {
   });
 
   it('needs both fields to connect', () => {
-    part('hydrabase');
+    part('api-music');
     loaded({ hydrabase: { url: 'ws://h' } });
     fireEvent.click(el('hydrabase-connect-btn'));
     expect(el('hydrabase-settings-status').textContent).toBe('URL and API Key required');

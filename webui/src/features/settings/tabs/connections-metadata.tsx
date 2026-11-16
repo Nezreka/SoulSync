@@ -20,7 +20,6 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { SettingsTabProps } from '../host';
 import type { SettingsPayload, SettingsStore } from '../settings-store';
 
 import {
@@ -44,7 +43,7 @@ import {
   type StatusFrame,
   statusFrames,
 } from './connections';
-import { CardsHome, ServicesPart, useServicePlace } from './connections-services';
+import { useServicePlace } from './connections-services';
 import { helpBits, REDACTED_SECRET_SENTINEL, SecretInput, Section, useHelp } from './parts';
 import { text, useSettings } from './source-panels';
 
@@ -271,7 +270,7 @@ export function MetadataSourceGroup({ store }: { store: SettingsStore }) {
 /** one service's card as the API Configuration group had it. the header
  *  is hidden wherever the card shows (the group is hidden, the tile modal
  *  hides headers); the tiles read its dot's colour */
-function ServiceCard({
+export function ServiceCard({
   service,
   colour,
   title,
@@ -322,11 +321,18 @@ const CARD_ORDER = [
   'discogs',
   'tidal',
   'qobuz',
+  'concerts',
+  'lastfm',
+  'genius',
+  'pollinations',
+  'artist-fanart',
   'musicbrainz',
+  'acoustid',
+  'listenbrainz',
   'hydrabase',
 ];
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="form-group">
       <label>{label}</label>
@@ -335,7 +341,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function TestButton({ onClick }: { onClick: () => void }) {
+export function TestButton({ onClick }: { onClick: () => void }) {
   return (
     <button className="test-button" type="button" onClick={onClick}>
       Test Connection
@@ -344,7 +350,7 @@ function TestButton({ onClick }: { onClick: () => void }) {
 }
 
 /** a text field for one key, as settings.js loaded it (`|| ''`) */
-function useText(store: SettingsStore, section: string, key: string) {
+export function useText(store: SettingsStore, section: string, key: string) {
   const settings = useSettings(store);
   return {
     value: text(sec(settings, section)[key] || ''),
@@ -1527,21 +1533,4 @@ export function ExperimentalSection({ store }: { store: SettingsStore }) {
       <EnableDialog asking={asking} close={close} />
     </>
   );
-}
-
-// ── the tab ──
-
-export function ConnectionsTab({ store, part = '', opened }: SettingsTabProps) {
-  if (part === 'metadata') return <MetadataSourceGroup store={store} />;
-  if (part === 'services') return <ServicesPart opened={opened} />;
-  // the service cards portal into wrappers kept in their slot (connections-services.tsx)
-  const cards =
-    part === 'services-metadata' ? (
-      <MetadataServiceCards store={store} />
-    ) : part === 'musicbrainz' ? (
-      <MusicbrainzCard store={store} />
-    ) : part === 'hydrabase' ? (
-      <HydrabaseCard store={store} />
-    ) : null;
-  return cards ? <CardsHome part={part}>{cards}</CardsHome> : null;
 }

@@ -162,7 +162,7 @@ def test_full_settings_save_never_writes_profile_keys(settings_js):
     these keys while another profile was open. It sends none of them now, so
     there is nothing for it to overwrite the default with."""
     start = settings_js.index("async function saveSettings(")
-    end = settings_js.index("\nasync function authorizeLastfmScrobbling", start)
+    end = settings_js.index("\n}\n", start)
     # its comments say where these keys went; only the code counts
     save = re.sub(r"//[^\n]*", "", settings_js[start:end])
     for control_id in BUNDLE_CONTROLS:

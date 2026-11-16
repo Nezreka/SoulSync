@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { settingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
-import { ConnectionsTab } from './connections-metadata';
 import { servicesModel, ServicesPart } from './connections-services';
+import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -47,9 +47,7 @@ function page() {
   root.id = 'settings-page';
   root.innerHTML = `
     <div data-stg-react="connections" data-stg-part="services" style="display: contents"></div>
-    <div class="settings-group" data-stg="connections" data-svc-legacy>
-      <div data-stg-react="connections" data-stg-part="services-metadata" style="display: contents"></div>
-    </div>
+    <div data-stg-react="connections" data-stg-part="api-music" style="display: contents"></div>
     <div class="settings-group" data-stg="connections" data-svc-legacy>
       <div class="api-service-frame stg-service" data-video-service="omdb">
         <div class="stg-service-header"><span class="stg-service-dot" style="color: #f5c518;"></span>
@@ -63,12 +61,9 @@ function page() {
   document.body.append(root);
   const slot = (part: string) => root.querySelector<HTMLElement>(`[data-stg-part="${part}"]`)!;
   render(<ServicesPart />, { container: slot('services') });
-  render(
-    <ConnectionsTab store={settingsStore} part="services-metadata" opened={0} active={false} />,
-    {
-      container: slot('services-metadata'),
-    },
-  );
+  render(<ConnectionsTab store={settingsStore} part="api-music" opened={0} active={false} />, {
+    container: slot('api-music'),
+  });
   return root;
 }
 
@@ -87,8 +82,18 @@ describe('the tiles', () => {
     act(() => settingsStore.hydrate({ discogs: { token: 'tok' }, spotify: {} }));
     await waitFor(() => expect(tile('discogs')).not.toBeNull());
     const groups = [...document.querySelectorAll('.src-group-label')].map((g) => g.textContent);
-    expect(groups).toEqual(['Metadata']);
-    expect(document.querySelector('.src-group-count')!.textContent).toBe('6');
+    expect(groups).toEqual(['Metadata', 'Scrobbling', 'Extras']);
+    expect([...document.querySelectorAll('.src-group-count')].map((g) => g.textContent)).toEqual([
+      '8',
+      '2',
+      '5',
+    ]);
+    // the order the groups list, not the page's
+    expect(
+      [...document.querySelectorAll('.src-group')][0]
+        .querySelectorAll('[data-service-tile]')[0]
+        .getAttribute('data-service-tile'),
+    ).toBe('musicbrainz');
     expect(tile('discogs').className).toBe('svc-tile is-active');
     expect(tile('discogs').querySelector('.src-tile-chip')!.textContent).toBe('configured');
     // the redirect field holds its default, so Spotify reads as set up (as before)
@@ -144,10 +149,28 @@ describe('the modal', () => {
     // heard: the store holds it, and closing sent it on its way
     expect(settingsStore.getState().settings.deezer).toEqual({ app_id: 'dz' });
     await waitFor(() => expect(settingsStore.hasPending()).toBe(false));
-    const home = root.querySelector('[data-stg-part="services-metadata"]')!;
+    const home = root.querySelector('[data-stg-part="api-music"] > [data-svc-legacy]')!;
     expect(
       [...home.querySelectorAll('[data-service]')].map((f) => f.getAttribute('data-service')),
-    ).toEqual(['spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz']);
+    ).toEqual([
+      'spotify',
+      'itunes',
+      'deezer',
+      'discogs',
+      'tidal',
+      'qobuz',
+      'concerts',
+      'lastfm',
+      'genius',
+      'pollinations',
+      'artist-fanart',
+      'musicbrainz',
+      'acoustid',
+      'listenbrainz',
+      'hydrabase',
+    ]);
+    // and the test row stays last
+    expect(home.lastElementChild!.className).toBe('api-test-buttons');
   });
 
   it('a vanilla card is lifted in and put back exactly where it was', () => {

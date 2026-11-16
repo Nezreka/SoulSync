@@ -26,12 +26,9 @@ import { settingsStore, type SettingsPayload, type SettingsStore } from './setti
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { checkQobuzAuthStatus } from './tabs/connections';
-import {
-  ConnectionsTab,
-  musicbrainzError,
-  syncMetadataSourceSelection,
-} from './tabs/connections-metadata';
+import { musicbrainzError, syncMetadataSourceSelection } from './tabs/connections-metadata';
 import { servicesModel } from './tabs/connections-services';
+import { ConnectionsTab } from './tabs/connections-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';

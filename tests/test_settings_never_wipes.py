@@ -77,10 +77,10 @@ def test_the_audit_is_actually_looking_at_something(save_body):
     ids = _ids_read(save_body)
     # fewer each step as tabs move to React (SETTINGS_PORT.md); a parse that
     # found nothing would be well under this
-    assert len(ids) > 40, f"only found {len(ids)} fields; the parse is wrong"
-    # a field still in the vanilla save (prowlarr-url was, until its Sources
-    # panel went React in SETTINGS_PORT.md step 7g)
-    assert "acoustid-api-key" in ids
+    assert len(ids) > 5, f"only found {len(ids)} fields; the parse is wrong"
+    # a field still in the vanilla save (acoustid-api-key was, until its card
+    # went React in SETTINGS_PORT.md step 10b)
+    assert "navidrome-url" in ids
 
 
 def test_no_payload_field_blanks_a_missing_element(save_body):
@@ -111,6 +111,6 @@ def test_an_empty_string_the_user_typed_is_still_saved():
 def test_the_helpers_are_used_widely(save_body):
     # If most of the payload bypassed them the guard above would be hollow.
     # the save shrinks as tabs move to React (SETTINGS_PORT.md: 14 left at
-    # step 9c, with Connections the last big user); a parse that found nothing
-    # would find none
-    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 5
+    # step 9c, 4 at 10b, Music Assistant's, until Server Connections goes in
+    # 10c); a parse that found nothing would find none
+    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") >= 4

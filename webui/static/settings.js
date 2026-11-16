@@ -402,10 +402,8 @@ function switchSettingsTab(tab) {
     // fill their dots themselves when their tab opens: sources-tab.tsx)
     // (the live log viewer starts and stops itself: its React tab is told
     // whether it is the open tab, src/features/settings/host.tsx)
-    // Refresh the green/yellow header gradient when arriving on Connections
-    if (tab === 'connections') {
-        try { applyServiceStatusGradients(); } catch (e) { }
-    }
+    // (the service cards' header gradient went with step 10b: nothing showed
+    // those headers, the group is hidden and the Services modal hides them)
 
     // Update active section title & subtitle in the detail header
     const titles = {
@@ -550,193 +548,14 @@ document.addEventListener('keydown', (e) => {
 
 
 
-// ── Settings → Connections: per-service status gradient + verify wiring ──
-// Gradient shows green when the user has filled in credentials, yellow when empty.
-// It's based purely on config presence (cheap, no API calls). The verify layer —
-// which runs on expand / Expand All — surfaces whether those credentials actually
-// work, via an inline warning bar inside the expanded panel.
-
-let _stgServiceStatusState = {};  // service -> {configured: bool}
-let _stgServiceVerifyInFlight = {};  // service -> true while a verify call is running
-
-async function applyServiceStatusGradients() {
-    try {
-        const resp = await fetch('/api/settings/config-status');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        _stgServiceStatusState = data || {};
-        document.querySelectorAll('#settings-page .stg-service[data-service]').forEach(card => {
-            const service = card.getAttribute('data-service');
-            const header = card.querySelector('.stg-service-header');
-            if (!service || !header) return;
-            const configured = !!(data[service] && data[service].configured);
-            header.classList.toggle('status-configured', configured);
-            header.classList.toggle('status-missing', !configured);
-            // Ensure the header has a spinner placeholder for the verify-checking state
-            if (!header.querySelector('.stg-service-verify-spinner')) {
-                const spinner = document.createElement('span');
-                spinner.className = 'stg-service-verify-spinner';
-                // Insert before the chevron on the right
-                const chevron = header.querySelector('.stg-service-chevron');
-                if (chevron) header.insertBefore(spinner, chevron);
-                else header.appendChild(spinner);
-            }
-        });
-        // the Spotify card's dot follows /status itself (connections-metadata.tsx)
-    } catch (e) {
-        console.warn('[Settings Status] Failed to apply gradients:', e);
-    }
-}
-
-
-function _stgSetCheckingState(service, isChecking) {
-    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
-    if (!card) return;
-    const header = card.querySelector('.stg-service-header');
-    const body = card.querySelector('.stg-service-body');
-    if (header) {
-        header.classList.toggle('status-checking', !!isChecking);
-        // Lazy-create the spinner element so it's there even if
-        // applyServiceStatusGradients() hasn't run yet.
-        if (!header.querySelector('.stg-service-verify-spinner')) {
-            const spinner = document.createElement('span');
-            spinner.className = 'stg-service-verify-spinner';
-            const chevron = header.querySelector('.stg-service-chevron');
-            if (chevron) header.insertBefore(spinner, chevron);
-            else header.appendChild(spinner);
-        }
-    }
-    if (!body) return;
-    const existing = body.querySelector('.stg-service-verify-status');
-    if (isChecking) {
-        if (!existing) {
-            const status = document.createElement('div');
-            status.className = 'stg-service-verify-status';
-            status.textContent = 'Testing connection…';
-            body.insertBefore(status, body.firstChild);
-        }
-    } else if (existing) {
-        existing.remove();
-    }
-}
-
-function _stgShowVerifyWarning(service, message) {
-    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
-    if (!card) return;
-    const body = card.querySelector('.stg-service-body');
-    if (!body) return;
-    const existing = body.querySelector('.stg-service-warning');
-    if (existing) existing.remove();
-    const warning = document.createElement('div');
-    warning.className = 'stg-service-warning';
-    warning.innerHTML = `
-        <span class="stg-service-warning-icon">&#9888;</span>
-        <span class="stg-service-warning-text"></span>
-    `;
-    warning.querySelector('.stg-service-warning-text').textContent =
-        message || 'Connection test failed.';
-    body.insertBefore(warning, body.firstChild);
-}
-
-function _stgClearVerifyWarning(service) {
-    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
-    if (!card) return;
-    const existing = card.querySelector('.stg-service-warning');
-    if (existing) existing.remove();
-}
-
-async function _stgRefreshAfterSave() {
-    // Called after a successful settings save. Cheap gradient refresh always,
-    // plus re-verify any cards the user currently has expanded (so they see
-    // immediate feedback on credentials they just edited). Collapsed cards
-    // keep their cached verify result until the user expands them.
-    try {
-        await applyServiceStatusGradients();
-        const expandedServices = Array.from(
-            document.querySelectorAll('#settings-page .stg-service.expanded[data-service]')
-        )
-            .map(card => card.getAttribute('data-service'))
-            .filter(Boolean);
-        if (expandedServices.length > 0) {
-            _stgVerifyServices(expandedServices, { force: true });
-        }
-    } catch (e) {
-        console.warn('[Settings Status] Post-save refresh failed:', e);
-    }
-}
-
-async function _stgVerifyServices(services, { force = false } = {}) {
-    if (!services || !services.length) return {};
-    // Mark all as checking immediately so the user sees spinners/status lines
-    services.forEach(svc => {
-        _stgServiceVerifyInFlight[svc] = true;
-        _stgSetCheckingState(svc, true);
-        _stgClearVerifyWarning(svc);
-    });
-    try {
-        const url = '/api/settings/verify' + (force ? '?force=true' : '');
-        const resp = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ services })
-        });
-        const data = await resp.json();
-        services.forEach(svc => {
-            _stgServiceVerifyInFlight[svc] = false;
-            _stgSetCheckingState(svc, false);
-            const result = data[svc];
-            if (result && result.success === false) {
-                _stgShowVerifyWarning(svc, result.error || result.message || '');
-            }
-        });
-        return data;
-    } catch (e) {
-        console.warn('[Settings Verify] Network error:', e);
-        services.forEach(svc => {
-            _stgServiceVerifyInFlight[svc] = false;
-            _stgSetCheckingState(svc, false);
-            _stgShowVerifyWarning(svc, 'Unable to reach the verification endpoint.');
-        });
-        return {};
-    }
-}
-
+// ── Settings → Connections: the service cards ──
+// The music cards are React (connections-metadata.tsx, connections-extras.tsx,
+// SETTINGS_PORT.md steps 10a and 10b), and their header gradient and verify
+// calls are gone: nothing showed those headers. The video side's cards are
+// still vanilla, and their hidden headers still call this.
 function toggleStgService(el) {
-    const service = el.closest('.stg-service');
-    if (service) {
-        const wasExpanded = service.classList.contains('expanded');
-        service.classList.toggle('expanded');
-        // Fire verify when expanding a single card (not on collapse). The backend
-        // caches per service for 5 min, so rapid expand/collapse won't re-ping.
-        if (!wasExpanded) {
-            const serviceName = service.getAttribute('data-service');
-            if (serviceName && !_stgServiceVerifyInFlight[serviceName]) {
-                _stgVerifyServices([serviceName]);
-            }
-        }
-    }
+    el.closest('.stg-service')?.classList.toggle('expanded');
 }
-function toggleAllServiceAccordions(btn) {
-    const services = document.querySelectorAll('#settings-page .stg-service');
-    const allExpanded = Array.from(services).every(s => s.classList.contains('expanded'));
-    const willExpand = !allExpanded;
-    services.forEach(s => s.classList.toggle('expanded', willExpand));
-    btn.textContent = allExpanded ? 'Expand All' : 'Collapse All';
-
-    // On Expand All, fire a single batched verify for every service that has a
-    // data-service attribute. Backend caps concurrency at 3 to avoid rate limits.
-    // Skipped on Collapse All.
-    if (willExpand) {
-        const serviceNames = Array.from(services)
-            .map(s => s.getAttribute('data-service'))
-            .filter(Boolean)
-            .filter(name => !_stgServiceVerifyInFlight[name]);
-        if (serviceNames.length > 0) {
-            _stgVerifyServices(serviceNames);
-        }
-    }
-}
-
 
 // The download chains (music, video, audiobooks), the source registry the
 // chain and the Sources tiles read, each source's connection state and Test
@@ -932,44 +751,8 @@ async function loadSettingsData() {
         // Populate Soulseek settings
         // the rest of soulseek.*: its Sources panel is React (source-panels.tsx)
 
-        // Populate ListenBrainz settings
-        document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
-        document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
-        const _lbUser = document.getElementById('listenbrainz-username');
-        if (_lbUser) _lbUser.value = settings.listenbrainz?.username || '';
-
-        // Populate AcoustID settings
-        document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
-        document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
-        // require_verified: the Quality tab is React (it is a quality profile setting)
-
-        // Populate Last.fm settings
-        const _tmKey = document.getElementById('concerts-ticketmaster-api-key');
-        if (_tmKey) _tmKey.value = settings.concerts?.ticketmaster_api_key || '';
-        const _slfmKey = document.getElementById('concerts-setlistfm-api-key');
-        if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
-        const _concertCountry = document.getElementById('concerts-country');
-        if (_concertCountry) _concertCountry.value = settings.concerts?.country || '';
-        document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
-        document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
-        const _lfmUser = document.getElementById('lastfm-username');
-        if (_lfmUser) _lfmUser.value = settings.lastfm?.username || '';
-        document.getElementById('lastfm-scrobble-enabled').checked = settings.lastfm?.scrobble_enabled === true;
-        const lfmStatus = document.getElementById('lastfm-scrobble-status');
-        if (lfmStatus) {
-            lfmStatus.textContent = settings.lastfm?.session_key ? 'Authorized' : 'Not authorized';
-        }
-
-        // Populate ListenBrainz scrobble toggle
-        document.getElementById('listenbrainz-scrobble-enabled').checked = settings.listenbrainz?.scrobble_enabled === true;
-
-        // Populate Genius settings
-        document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
-        const _pollinationsKey = document.getElementById('pollinations-api-key');
-        if (_pollinationsKey) _pollinationsKey.value = settings.pollinations?.api_key || '';
-        // the music card's own id: the video side's fanart.tv card owns 'fanart-api-key'
-        const _fanartKey = document.getElementById('artist-fanart-api-key');
-        if (_fanartKey) _fanartKey.value = settings.fanart?.api_key || '';
+        // ListenBrainz, AcoustID, Concerts, Last.fm (its authorized line too),
+        // Genius, Pollinations and fanart.tv: React (connections-extras.tsx, step 10b)
 
         // iTunes, Discogs, the metadata source, the Spotify (no auth)
         // enrichment switch, Experimental and Hydrabase (its connection
@@ -1789,48 +1572,9 @@ async function saveSettings(quiet = false) {
             // download_path, transfer_path, min_free_disk_gb: the Folders card is React
             // preferred_version: the Downloads tab (Filtering) is React
         },
-        listenbrainz: {
-            base_url: document.getElementById('listenbrainz-base-url').value,
-            token: document.getElementById('listenbrainz-token').value,
-            username: _cfgStr('listenbrainz-username', { trim: true }),
-            scrobble_enabled: document.getElementById('listenbrainz-scrobble-enabled').checked,
-        },
-        acoustid: {
-            api_key: document.getElementById('acoustid-api-key').value,
-            enabled: document.getElementById('acoustid-enabled').checked,
-            // require_verified: the Quality tab is React, and saves it with
-            // its profile (the server copies the default profile into config)
-        },
-        concerts: {
-            ticketmaster_api_key: _cfgStr('concerts-ticketmaster-api-key', { trim: true }),
-            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true }),
-            // ?. not || '': an absent field must stay undefined, or a save wipes it
-            country: _cfgStr('concerts-country', { trim: true })?.toUpperCase()
-        },
-        lastfm: {
-            // _cfgStr rather than .value: this input is absent on the video
-            // side, and reading .value off a missing element is how a save
-            // wipes a stored setting.
-            username: _cfgStr('lastfm-username', { trim: true }),
-            api_key: document.getElementById('lastfm-api-key').value,
-            api_secret: document.getElementById('lastfm-api-secret').value,
-            scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
-        fanart: {
-            // _cfgStr: undefined when the field is absent, so a save there
-            // doesn't wipe the stored key
-            api_key: _cfgStr('artist-fanart-api-key', { trim: true }),
-        },
-        pollinations: {
-            // _cfgStr: undefined when the field is absent (video side), so a
-            // save there doesn't wipe the stored key
-            api_key: _cfgStr('pollinations-api-key', { trim: true }),
-        },
-        genius: {
-            access_token: document.getElementById('genius-access-token').value,
-            // embed_tags and tags: the Post-Processing card is React (library-processing.tsx)
-        },
+        // listenbrainz, acoustid, concerts, lastfm (username, api_key, api_secret,
+        // scrobble_enabled), fanart, pollinations and genius: React
+        // (connections-extras.tsx, step 10b); the tags of each: the Post-Processing card
         // itunes, discogs, metadata, experimental and hydrabase: React
         // (connections-metadata.tsx)
         // image_cache: the System tab is React (system-tab.tsx)
@@ -1934,7 +1678,6 @@ async function saveSettings(quiet = false) {
             // the button says Saved, a toast on every keystroke was noise
             setSettingsSaveState('saved');
             _forceServiceStatusRefresh();
-            _stgRefreshAfterSave();
         } else {
             setSettingsSaveState('error');
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
@@ -1948,22 +1691,6 @@ async function saveSettings(quiet = false) {
     }
 }
 
-async function authorizeLastfmScrobbling() {
-    try {
-        // Save settings first so API secret is stored
-        await saveSettings();
-        const resp = await fetch('/api/lastfm/auth-url');
-        const data = await resp.json();
-        if (data.success && data.url) {
-            window.open(data.url, '_blank', 'width=600,height=500');
-            showToast('Authorize SoulSync in the Last.fm window that opened', 'info');
-        } else {
-            showToast(data.error || 'Could not generate auth URL', 'error');
-        }
-    } catch (e) {
-        showToast('Failed to start Last.fm authorization', 'error');
-    }
-}
 
 async function testConnection(service) {
     try {
@@ -2011,24 +1738,6 @@ async function testConnection(service) {
 // ARL (playlists + downloads). testConnection('deezer') covers the public api and
 // the oauth token; the ARL has its own check, so run both and say what each found.
 
-async function clearQuarantine() {
-    if (!await showConfirmDialog({ title: 'Clear Quarantine', message: 'Delete all files in the quarantine folder? This cannot be undone.', confirmText: 'Delete', destructive: true })) return;
-    try {
-        showLoadingOverlay('Clearing quarantine folder...');
-        const response = await fetch('/api/quarantine/clear', { method: 'POST' });
-        const result = await response.json();
-        if (result.success) {
-            showToast(result.message || 'Quarantine cleared', 'success');
-        } else {
-            showToast(`Failed to clear quarantine: ${result.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error clearing quarantine:', error);
-        showToast('Failed to clear quarantine', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
 
 // ======================== API Key Management ========================
 

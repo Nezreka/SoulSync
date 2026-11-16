@@ -24,8 +24,11 @@ function loadSettingsIds(): string[] {
 describe('settings load element drift guard', () => {
   it('every id loadSettingsData touches exists in index.html', () => {
     const ids = loadSettingsIds();
-    // the load still touches fields (fewer as tabs move to React, SETTINGS_PORT.md)
-    expect(ids.length).toBeGreaterThan(20);
+    // the load still touches fields (fewer as tabs move to React,
+    // SETTINGS_PORT.md: the media servers' at step 10b); a parse that found
+    // nothing would find none
+    expect(ids.length).toBeGreaterThan(5);
+    expect(ids).toContain('navidrome-url');
     const missing = ids.filter((id) => !html.includes(`id="${id}"`));
     expect(missing).toEqual([]);
   });
