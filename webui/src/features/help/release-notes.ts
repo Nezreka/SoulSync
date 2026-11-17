@@ -99,6 +99,11 @@ export const RELEASES: Release[] = [
         anchor: 'shell.activity',
       },
       {
+        title: 'Help, rebuilt',
+        desc: 'The ? opens help beside the page: answers for what is happening there, Ctrl K to search help, settings and actions from anywhere, Health with a fix for each problem, a bug report with secrets removed, log downloads and three short tours.',
+        anchor: 'shell.help',
+      },
+      {
         title: 'Other versions',
         desc: 'An album’s ⋯ menu lists the release’s other editions with track count, year, country and label, plus a search for that artist. It shows what changes before it switches (thanks wolf39us, #2145).',
         page: 'library',
