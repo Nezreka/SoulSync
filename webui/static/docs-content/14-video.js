@@ -1352,7 +1352,7 @@ From the Enrichment view you can:
             title: 'Server Activity',
             lede: 'Tautulli-style live streams and watch history without leaving SoulSync.',
             body: `
-A **Server Activity** drawer shows live Plex streams and recent watch history app-wide — who's watching what, on which device, with transcoding details. It's the Tautulli glanceable view, built in, so you can see what's playing without leaving SoulSync.
+A **Server Activity** drawer shows live Plex streams and recent watch history app-wide — who's watching what, on which device, with transcoding details. It's the Tautulli glanceable view, built in, so you can see what's playing without leaving SoulSync. Only admins see it: the button, the drawer and its endpoints are hidden from other profiles.
 `
         },
         {

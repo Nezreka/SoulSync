@@ -1828,6 +1828,13 @@ function updateProfileIndicator() {
     // for non-admins so it doesn't look interactive.
     const statusSection = document.querySelector('.status-section--clickable');
     if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
+    // and the panel itself is the admin's (#2155): which services the server
+    // runs on and whether they're up. /status stays open (search and the
+    // source pickers read it), only the panel goes.
+    const statusAdmin = !!currentProfile.is_admin || currentProfile.id === 1;
+    document.querySelectorAll('.status-section').forEach((el) => {
+        el.style.display = statusAdmin ? '' : 'none';
+    });
 
     // My Account (your media server identity + your own music services) is
     // inert for the admin, who uses the app's accounts and the full Settings

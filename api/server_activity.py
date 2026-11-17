@@ -3,7 +3,7 @@
 bodies byte-identical; only the decorator changed.
 """
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
 
 from utils.logging_config import get_logger
 
@@ -26,6 +26,21 @@ bp = Blueprint('server_activity', __name__)
 
 def create_blueprint():
     return bp
+
+
+# who is watching what, on which device, from where: the admin's (#2155).
+# an admin-minted api key passes too (the companion extension reads it).
+# the image proxy stays open: library and search thumbs on a jellyfin
+# server load through it for every profile, and it only hands back artwork.
+_OPEN_PATHS = ('/api/server-activity/image',)
+
+
+@bp.before_request
+def _admin_sees_server_activity():
+    if request.path in _OPEN_PATHS:
+        return None
+    from core.profile_context import admin_or_api_key_refusal
+    return admin_or_api_key_refusal()
 
 @bp.route('/api/server-activity')
 def get_server_activity():
@@ -69,10 +84,8 @@ def get_server_activity_stats():
 @bp.route('/api/server-activity/stop', methods=['POST'])
 def stop_server_activity_stream():
     """Terminate an active stream with a message (Tautulli's kill move).
-    Admin-only — a shared server shouldn't let anyone end others' streams."""
+    admin only (the blueprint gate): a shared server shouldn't let anyone end others' streams."""
     try:
-        if not getattr(g, 'is_admin', False):
-            return jsonify({"ok": False, "error": "Admin only."}), 403
         body = request.get_json(silent=True) or {}
         from core.server_activity import stop_session
         res = stop_session(str(body.get("session_key") or ""), str(body.get("message") or ""))

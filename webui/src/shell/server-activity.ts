@@ -768,6 +768,7 @@ function build(): void {
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 function open(): void {
+  if (!viewerIsAdmin()) return;
   if (!drawer) build();
   isOpen = true;
   _scrim().classList.add('visible');
@@ -867,6 +868,29 @@ function startBadgePoll(): void {
     if (!isOpen) void refresh();
   }, 20000);
 }
+function stopBadgePoll(): void {
+  if (badgePoll) {
+    clearInterval(badgePoll);
+    badgePoll = null;
+  }
+}
+
+// who's watching what is the admin's (#2155). nothing runs until the profile
+// is known, and a non-admin never gets the button or a single poll.
+export function viewerIsAdmin(): boolean {
+  const ctx = window.getCurrentProfileContext?.();
+  return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+}
+export function applyProfile(): void {
+  if (viewerIsAdmin()) {
+    startBadgePoll();
+    return;
+  }
+  stopBadgePoll();
+  if (isOpen) close();
+  setSupported(false);
+  setBadge(0);
+}
 
 window.ServerActivity = {
   toggle,
@@ -876,8 +900,9 @@ window.ServerActivity = {
   _onSocket: onSocket,
   _wantsLive: () => isOpen && tab === 'activity',
 };
+window.addEventListener('ss:webui-profile-context-changed', applyProfile);
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startBadgePoll);
+  document.addEventListener('DOMContentLoaded', applyProfile);
 } else {
-  startBadgePoll();
+  applyProfile();
 }

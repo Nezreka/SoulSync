@@ -35,7 +35,7 @@ from core.edition_grouping import (
 from core.search import by_id as _search_by_id
 from core.search import orchestrator as _search_orchestrator
 from core.metadata.cache import get_metadata_cache
-from core.profile_context import get_current_profile_id
+from core.profile_context import admin_only, get_current_profile_id
 from utils.logging_config import get_logger
 
 logger = get_logger("web_server")
@@ -416,6 +416,7 @@ def get_artist_detail(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/library/debug-photos')
+@admin_only
 def debug_library_photos():
     """Debug endpoint to check artist photo URLs"""
     try:
