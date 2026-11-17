@@ -934,10 +934,6 @@ declare global {
     showLaunchPinScreen?: () => void;
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
-
-    /** Ask the tools page to show whichever tab holds `selector`. True when it
-     *  had to switch, so the caller knows to wait a frame before measuring. */
-    revealToolsTabFor?: (selector: string) => boolean;
   }
 }
 

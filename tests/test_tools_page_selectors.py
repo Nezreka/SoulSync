@@ -164,53 +164,6 @@ def _all_classes() -> set[str]:
     return classes
 
 
-# The `.page` divs are flat siblings inside #main-content, so each one runs from
-# its own opening tag to the next one — and the last runs to the /main-content
-# marker. That beats depth-counting the tags: an HTML tag walker has to get void
-# elements, self-closing SVG children, multi-line comment banners and quoted
-# attributes all correct, and getting any of them wrong silently truncates a
-# region (mine closed #tools-page at 248 lines instead of 424, which quietly
-# hid three of the seven help buttons from the coverage test below).
-_MAIN_CONTENT_END = "<!-- /main-content -->"
-
-
-def _page_spans() -> dict[str, tuple[int, int]]:
-    """page id -> (first line, last line) of its `<div class="page">` block."""
-    lines = _html().split("\n")
-    starts: list[tuple[int, str]] = []
-    end_of_pages = len(lines)
-    for lineno, line in enumerate(lines, 1):
-        match = re.search(r'<div class="page" id="([^"]+)"', line)
-        if match:
-            starts.append((lineno, match.group(1)))
-        elif _MAIN_CONTENT_END in line and starts:
-            end_of_pages = lineno - 1
-            break
-
-    assert starts, "found no `<div class=\"page\">` blocks in index.html"
-    spans: dict[str, tuple[int, int]] = {}
-    for position, (lineno, page_id) in enumerate(starts):
-        following = starts[position + 1][0] - 1 if position + 1 < len(starts) else end_of_pages
-        spans[page_id] = (lineno, following)
-    return spans
-
-
-def _page_of_id() -> dict[str, str]:
-    """id -> the page id containing it. Ids outside every page are absent."""
-    spans = _page_spans()
-    mapping: dict[str, str] = {}
-    for lineno, line in enumerate(_html().split("\n"), 1):
-        found = re.findall(r'\bid="([^"]+)"', line)
-        if not found:
-            continue
-        for page_id, (start, end) in spans.items():
-            if start <= lineno <= end:
-                for element_id in found:
-                    mapping.setdefault(element_id, page_id.replace("-page", ""))
-                break
-    return mapping
-
-
 # P7 moved the Tools markup out of index.html and into React. These guards follow
 # it: the contract they protect (a `?` button with no help entry, a class selector
 # that matches nothing) is unchanged, only the file that renders it moved.
@@ -333,72 +286,6 @@ def test_every_tool_help_button_has_help_content():
 
     missing = [tool for tool in declared if tool not in keys]
     assert not missing, f"tools page help buttons with no TOOL_HELP_CONTENT entry: {missing}"
-
-
-def test_helper_page_hints_never_route_to_a_page_without_the_element():
-    """helper.js's search jumps to `_guessPageFromSelector(selector)` and then
-    looks for the element there. All eight tool cards were listed under
-    'dashboard' while living in #tools-page, so every hit navigated away and
-    found nothing.
-
-    A selector with no hint at all is tolerated (it just doesn't navigate); a
-    hint pointing at the WRONG page is not.
-    """
-    src = _read(STATIC / "helper.js")
-    hints_block = re.search(r"const pageHints = \{(.*?)\n    \};", src, re.S)
-    assert hints_block, "could not find pageHints in helper.js"
-
-    hints: list[tuple[str, list[str]]] = []
-    for line in hints_block.group(1).strip().split("\n"):
-        match = re.match(r"\s*'([^']+)':\s*\[(.*)\],?\s*$", line)
-        if match:
-            patterns = [p.strip().strip("'") for p in match.group(2).split(",") if p.strip()]
-            hints.append((match.group(1), patterns))
-    assert hints, "parsed no pageHints entries"
-
-    def guess(selector: str) -> str | None:
-        lowered = selector.lower()
-        for page, patterns in hints:
-            for pattern in patterns:
-                if pattern.lower() in lowered:
-                    return page
-        return None
-
-    page_of = _page_of_id()
-
-    offenders = []
-    for selector in re.findall(r"^\s{4}'(#[^']+)':\s*\{", src, re.M):
-        base = selector[1:].split(" ")[0].split(".")[0]
-        actual = page_of.get(base)
-        if actual is None:
-            continue  # not a page-scoped element (global chrome, or JS-created)
-        guessed = guess(selector)
-        if guessed is not None and guessed != actual:
-            offenders.append(f"{selector} routes to '{guessed}' but lives on '{actual}'")
-    assert not offenders, "helper.js page hints point at the wrong page:\n  " + "\n  ".join(offenders)
-
-
-def test_setup_step_selectors_live_on_the_page_the_step_names():
-    """SETUP_STEPS navigates to `page` then highlights `selector`; the first-scan
-    step pointed at the dashboard while #db-updater-card is on the tools page."""
-    src = _read(STATIC / "helper.js")
-    page_of = _page_of_id()
-
-    steps = re.search(r"const SETUP_STEPS = \[(.*?)\n\];", src, re.S)
-    assert steps, "could not find SETUP_STEPS in helper.js"
-
-    offenders = []
-    for line in steps.group(1).split("\n"):
-        page = re.search(r"page:\s*'([^']+)'", line)
-        selector = re.search(r"selector:\s*'#([\w-]+)'", line)
-        if not (page and selector):
-            continue
-        actual = page_of.get(selector.group(1))
-        if actual is not None and actual != page.group(1):
-            offenders.append(
-                f"step selector #{selector.group(1)} is on '{actual}' but the step navigates to '{page.group(1)}'"
-            )
-    assert not offenders, "SETUP_STEPS navigates to the wrong page:\n  " + "\n  ".join(offenders)
 
 
 # Files this PR converted end to end. stats-automations.js is deliberately NOT

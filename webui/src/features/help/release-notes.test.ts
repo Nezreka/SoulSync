@@ -18,14 +18,12 @@ import {
   compareVersions,
   currentRelease,
   installReleaseNotes,
-  legacyWhatsNew,
   modalSections,
   releasedNotes,
   type Release,
 } from './release-notes';
 import { ANCHORS } from './tours/anchors';
 
-const HELPER = readFileSync(resolve(process.cwd(), 'static/helper.js'), 'utf8');
 const DOWNLOADS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
 
 afterEach(() => {
@@ -130,44 +128,24 @@ describe('the version modal’s sections', () => {
   });
 });
 
-describe('helper.js', () => {
-  type Legacy = { WHATS_NEW: Record<string, unknown[]>; VERSION_MODAL_SECTIONS: unknown[] };
-  // indirect eval: the consts live in the eval's own scope, so read them out at the end
-  const runHelper = (): Legacy =>
-    (0, eval)(`${HELPER}\n;({ WHATS_NEW, VERSION_MODAL_SECTIONS })`) as Legacy;
-
-  it('writes no release notes of its own', () => {
-    expect(HELPER).toMatch(/const WHATS_NEW = \{\};/);
-    expect(HELPER).toMatch(/const VERSION_MODAL_SECTIONS = \[\];/);
-    for (const item of release.items) expect(HELPER).not.toContain(item.desc);
-  });
-
-  it('fills WHATS_NEW and VERSION_MODAL_SECTIONS from the one file, in their old shapes', () => {
-    document.body.innerHTML = '<button class="version-button">v3.6.7</button>';
-    installReleaseNotes();
-    const legacy = runHelper();
-    expect(legacy.WHATS_NEW).toEqual(legacyWhatsNew('3.6.7'));
-    const rows = legacy.WHATS_NEW['3.6.7'];
-    expect(rows[0]).toEqual({ date: 'November 2026 · 3.6.7' });
-    expect(rows.at(-1)).toEqual({ title: 'Earlier versions', desc: release.earlier!.desc });
-    expect(rows[1]).toEqual({
-      title: 'Settings, rebuilt',
-      desc: release.items[0].desc,
-      page: 'settings',
-    });
-    expect(legacy.VERSION_MODAL_SECTIONS).toEqual(modalSections('3.6.7'));
-  });
-
-  it('fills them when the bundle publishes after helper.js ran', () => {
+describe('the window bridge', () => {
+  it('installReleaseNotes publishes the notes and says so', () => {
     delete window.SoulSyncReleaseNotes;
     document.body.innerHTML = '<button class="version-button">v3.6.7</button>';
-    const legacy = runHelper();
-    expect(legacy.VERSION_MODAL_SECTIONS).toEqual([]);
     const ready = vi.fn();
     window.addEventListener(RELEASE_NOTES_READY, ready, { once: true });
     installReleaseNotes();
-    expect(ready).toHaveBeenCalled();
-    expect(legacy.VERSION_MODAL_SECTIONS).toEqual(modalSections('3.6.7'));
-    expect(Object.keys(legacy.WHATS_NEW)).toEqual(['3.6.7']);
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(window.SoulSyncReleaseNotes?.latestVersion()).toBe('3.6.7');
+    expect(window.SoulSyncReleaseNotes?.modalSections()).toEqual(modalSections('3.6.7'));
+  });
+
+  it('importing the module publishes nothing: mountHelpHost installs it', () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/features/help/release-notes.ts'), 'utf8');
+    expect(src).not.toMatch(/^installReleaseNotes\(\);/m);
+    const host = readFileSync(resolve(process.cwd(), 'src/features/help/host.tsx'), 'utf8');
+    const mount = host.slice(host.indexOf('export function mountHelpHost'));
+    expect(mount).toContain('installReleaseNotes();');
+    expect(mount).toContain('installTours();');
   });
 });

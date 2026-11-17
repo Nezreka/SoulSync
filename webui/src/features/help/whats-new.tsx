@@ -25,7 +25,6 @@ import {
 } from './release-notes';
 import { useHelpStore } from './store';
 import { isAnchorId } from './tours/anchors';
-// the tour engine installs on import: this view is loaded at startup
 import { showMe } from './tours/index';
 import { findAnchor, goTo, pageAllowed } from './tours/navigate';
 import { Button, Label, Placeholder } from './ui';

@@ -17,9 +17,11 @@ import { createRoot } from 'react-dom/client';
 
 import { getHealth, getStatus, getUpdateInfo, mergeStatus, statusFromHealth } from './api';
 import { currentPageId, viewerIsAdmin } from './page';
+import { installReleaseNotes } from './release-notes';
 import { closePalette, isPaletteOpen, openPalette } from './search/palette';
 import { BUTTON_ID, HelpSheet, PHONE_QUERY } from './sheet';
 import { needsAdmin, useHelpStore } from './store';
+import { installTours } from './tours/index';
 import { isViewId } from './views';
 
 const HOST_ID = 'soulsync-help-root';
@@ -250,6 +252,10 @@ export function mountHelpHost(): void {
   el.id = HOST_ID;
   // after the floating buttons, so the shared top layer puts the sheet over them on a phone
   document.body.appendChild(el);
+  // the version modal reads the notes, and a page's "Tour: ..." row needs the
+  // tours offered, before anyone opens the sheet
+  installReleaseNotes();
+  installTours();
   installHelpApi();
   installHelpKeys();
   createRoot(el).render(<HelpHost />);

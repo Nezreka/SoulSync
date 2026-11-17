@@ -121,7 +121,7 @@ export function TourLayer() {
     if (!shown || !target) return;
     const r = target.getBoundingClientRect();
     if (r.top < 0 || r.bottom > window.innerHeight) {
-      target.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
     }
     let frame = 0;
     const tick = () => {

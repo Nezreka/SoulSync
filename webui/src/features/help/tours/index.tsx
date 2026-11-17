@@ -9,8 +9,9 @@
  * window.SoulSyncTours = { start(id), list(), running() } for the vanilla
  * side and the palette.
  *
- * It runs on import: whats-new.tsx imports it, and the sheet's outlet
- * imports that at startup, so the listener is there from the first page.
+ * mountHelpHost() (host.tsx) calls it as the bundle starts, so the listener
+ * and the page offers are there from the first page. Importing this file
+ * does nothing on its own.
  */
 
 import { createRoot, type Root } from 'react-dom/client';
@@ -101,7 +102,5 @@ export function uninstallTours(): void {
   delete window.SoulSyncTours;
   installed = false;
 }
-
-installTours();
 
 export { START_TOUR_EVENT, TOURS, useTourStore };

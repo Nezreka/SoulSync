@@ -6,11 +6,10 @@
  *   - The version modal behind the sidebar's version button (downloads.js
  *     showVersionInfo): the highlight sections built by modalSections().
  *
- * The vanilla side reads them from window.SoulSyncReleaseNotes, which this
- * module publishes as soon as the bundle runs (and announces with
- * ss:release-notes-ready). helper.js keeps its WHATS_NEW and
- * VERSION_MODAL_SECTIONS names filled from here until P7 deletes the old
- * helper modes.
+ * The vanilla side reads them from window.SoulSyncReleaseNotes, which
+ * installReleaseNotes() publishes (and announces with ss:release-notes-ready).
+ * mountHelpHost() calls it as the bundle starts, so the version button can be
+ * clicked before anyone opens the help sheet.
  *
  * At release time, edit only this file:
  *   1. Replace RELEASES[0] with the new version: its month, headline,
@@ -255,27 +254,6 @@ export function modalSections(build?: string | null): ModalSection[] {
   return sections;
 }
 
-// ── helper.js's old shape, for its modes until P7 removes them ──────────
-
-export type LegacyWhatsNewEntry = { date: string } | { title: string; desc: string; page?: string };
-
-export function legacyWhatsNew(build?: string | null): Record<string, LegacyWhatsNewEntry[]> {
-  const out: Record<string, LegacyWhatsNewEntry[]> = {};
-  for (const release of releasedNotes(build)) {
-    const rows: LegacyWhatsNewEntry[] = [{ date: `${release.month} · ${release.version}` }];
-    for (const item of release.items) {
-      rows.push(
-        item.page
-          ? { title: item.title, desc: item.desc, page: item.page }
-          : { title: item.title, desc: item.desc },
-      );
-    }
-    if (release.earlier) rows.push({ title: 'Earlier versions', desc: release.earlier.desc });
-    out[release.version] = rows;
-  }
-  return out;
-}
-
 // ── the window bridge ───────────────────────────────────────────────────
 
 export const RELEASE_NOTES_READY = 'ss:release-notes-ready';
@@ -286,8 +264,6 @@ export interface ReleaseNotesBridge {
   latestVersion: (build?: string | null) => string | null;
   /** the version modal's sections */
   modalSections: (build?: string | null) => ModalSection[];
-  /** helper.js's WHATS_NEW shape */
-  whatsNew: (build?: string | null) => Record<string, LegacyWhatsNewEntry[]>;
 }
 
 declare global {
@@ -303,11 +279,6 @@ export function installReleaseNotes(): void {
     releases: RELEASES,
     latestVersion: (b) => currentRelease(build(b))?.version ?? null,
     modalSections: (b) => modalSections(build(b)),
-    whatsNew: (b) => legacyWhatsNew(build(b)),
   };
   window.dispatchEvent(new CustomEvent(RELEASE_NOTES_READY));
 }
-
-// published as soon as the bundle runs: the version button can be clicked
-// before anyone opens the help sheet
-installReleaseNotes();
