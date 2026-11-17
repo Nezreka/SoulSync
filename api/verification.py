@@ -14,6 +14,7 @@ import os
 
 from flask import Blueprint, jsonify
 
+from core.downloads.asked_vs_got import history_asked_and_got
 from core.profile_context import admin_only, get_current_profile_id
 from core.search import stream as _search_stream
 from utils.async_helpers import run_async
@@ -402,12 +403,16 @@ def wrong_song_verification_item(history_id):
         row = _get_library_history_row(history_id)
         if not row:
             return jsonify({"success": False, "error": "History entry not found"}), 404
-        title = (row.get('source_track_title') or '').strip()
+        # the ask is the row's title/artist_name. source_track_title is what
+        # the source called the wrong file, so wishlisting that went hunting
+        # for the wrong song again.
+        asked, _got = history_asked_and_got(row)
+        title = asked['title']
         if not title:
             return jsonify({"success": False, "error": (
                 "There's no record of which song was asked for, so it can't be "
                 "searched again. Delete it and add the song yourself.")}), 400
-        artist = (row.get('source_artist') or '').strip()
+        artist = asked['artist']
         album = (row.get('album_name') or '').strip()
         track = {
             'id': str(row.get('source_track_id') or f"review_{history_id}"),

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from core.downloads.asked_vs_got import history_asked_and_got
 from core.downloads.candidate_pool import DECODE_USERNAMES, display_name_for
 
 
@@ -127,18 +128,14 @@ def build_track_detail(task: Dict[str, Any], history: Optional[Dict[str, Any]] =
         detail['acoustid_result'] = history.get('acoustid_result') or ''
         detail['source'] = history.get('download_source') or detail['source']
         detail['thumb_url'] = history.get('thumb_url') or ''
-        detail['downloaded'] = {
-            'title': history.get('title') or '',
-            'artist': history.get('artist_name') or '',
-            'album': history.get('album_name') or '',
-        }
-        detail['expected'] = {
-            'title': history.get('source_track_title') or '',
-            'artist': history.get('source_artist') or '',
-        }
+        # title/artist_name are the ask, source_* are what the source
+        # handed over. the two used to land the other way round here.
+        asked, got = history_asked_and_got(history)
+        detail['expected'] = asked
+        detail['downloaded'] = got
         # Fall back to history values when the task had none.
-        detail['title'] = detail['title'] or detail['downloaded']['title']
-        detail['artist'] = detail['artist'] or detail['downloaded']['artist']
-        detail['album'] = detail['album'] or detail['downloaded']['album']
+        detail['title'] = detail['title'] or asked['title']
+        detail['artist'] = detail['artist'] or asked['artist']
+        detail['album'] = detail['album'] or (history.get('album_name') or '')
 
     return detail

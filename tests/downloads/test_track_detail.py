@@ -69,7 +69,7 @@ def test_history_enriches_provenance():
         'title': 'N95', 'artist_name': 'Kendrick Lamar', 'album_name': 'Mr. Morale',
         'quality': 'FLAC 16bit', 'file_path': '/lib/N95.flac', 'acoustid_result': 'error',
         'download_source': 'Soulseek', 'thumb_url': 'http://x/cover.jpg',
-        'source_track_title': 'N95', 'source_artist': 'Kendrick Lamar',
+        'source_track_title': '01 - N95 (clean)', 'source_artist': 'kendrick_lamar',
     }
     d = build_track_detail(task, history)
     assert d['file_path'] == '/lib/N95.flac'
@@ -77,8 +77,11 @@ def test_history_enriches_provenance():
     assert d['acoustid_result'] == 'error'
     assert d['source'] == 'Soulseek'
     assert d['thumb_url'] == 'http://x/cover.jpg'
-    assert d['downloaded'] == {'title': 'N95', 'artist': 'Kendrick Lamar', 'album': 'Mr. Morale'}
+    # in-app chat (makiel): these two used to be the other way round.
+    # title/artist_name are the ask, source_* are what the source handed over
     assert d['expected'] == {'title': 'N95', 'artist': 'Kendrick Lamar'}
+    assert d['downloaded'] == {'title': '01 - N95 (clean)', 'artist': 'kendrick_lamar'}
+    assert d['album'] == 'Mr. Morale'
 
 
 def test_history_fills_missing_title_from_task():
