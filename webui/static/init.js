@@ -1757,12 +1757,21 @@ async function toggleProfileQuickSwitch() {
     openProfileQuickSwitch(button, profiles);
 }
 
+// who the quick switch offers: nobody for a member in login mode (#2162),
+// otherwise every other profile that can be opened
+function pfQuickSwitchTargets(profiles, me, loginMode) {
+    if (!me || (loginMode && !me.is_admin)) return [];
+    return (profiles || []).filter(p => p.id !== me.id && !(p.disabled && !p.is_admin));
+}
+
 function openProfileQuickSwitch(button, profiles) {
     pfCloseMenus(false);
     const me = currentProfile;
     if (!me) return;
-    // turned-off profiles can't be opened, so they aren't offered here
-    const others = profiles.filter(p => p.id !== me.id && !(p.disabled && !p.is_admin));
+    // turned-off profiles can't be opened, so they aren't offered here.
+    // in login mode a member signs in as themselves and nobody else, so
+    // there's no one to switch to (#2162; the server lists only them too)
+    const others = pfQuickSwitchTargets(profiles, me, profileLoginMode);
     const menu = pfEl('div', { class: 'pf-popover', id: 'profile-quick-switch', role: 'menu', 'aria-label': 'Profiles' });
 
     const item = (children, run, extra = '') => {

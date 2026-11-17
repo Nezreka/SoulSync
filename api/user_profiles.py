@@ -18,7 +18,7 @@ from flask import Blueprint, jsonify, request, session
 
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
-from core.permissions import may_manage_profile, profile_view_for
+from core.permissions import may_manage_profile, profiles_listed_for
 from core.profile_context import admin_only, is_admin_request
 
 from utils.logging_config import get_logger
@@ -472,13 +472,15 @@ def _qs_server_available(server):
 
 @bp.route('/api/profiles', methods=['GET'])
 def list_profiles():
-    """List all profiles"""
+    """the profiles this viewer may see: everyone for an admin and for the
+    household picker, only their own for a member in login mode (#2162)"""
     try:
         database = get_database()
         viewer_id = get_current_profile_id()
         viewer_is_admin = is_admin_request()
-        profiles = [profile_view_for(p, viewer_id=viewer_id, viewer_is_admin=viewer_is_admin)
-                    for p in database.get_all_profiles()]
+        profiles = profiles_listed_for(database.get_all_profiles(), viewer_id=viewer_id,
+                                       viewer_is_admin=viewer_is_admin,
+                                       login_mode=bool(_require_login_enabled()))
         return jsonify({'success': True, 'profiles': profiles,
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise

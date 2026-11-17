@@ -149,6 +149,12 @@ A short (4–20 digits) code asked **when anyone opens the profile**, for privac
 
 Used for **signing in when login mode is on** — separate from the PIN. Set it in your own profile editor or let an admin set it for you. Setting a password signs out every other browser on that profile; the one that changed it stays in.
 
+## Who you can see
+
+In login mode everyone signs in as themselves, so a member's profile menu has no **Switch to** list and SoulSync never tells them who else has a profile. Edit my profile, Profile & account and Sign out stay. Admins still see everyone and can switch with that profile's password.
+
+Without login mode (the household picker), the picker shows every profile before anyone opens one, so the **Switch to** list stays for everyone. Turned-off profiles are left out.
+
 ## Recovery question
 
 Any profile (or an admin for them) can set a **recovery question and answer** as a backup way in. The sign-in screen's forgot-password flow asks the question and, on a correct answer, lets the profile set a new login password.

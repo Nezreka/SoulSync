@@ -101,6 +101,34 @@ def profile_view_for(profile: Dict[str, Any], *, viewer_id, viewer_is_admin: boo
     return {k: profile.get(k) for k in PUBLIC_PROFILE_FIELDS if k in profile}
 
 
+def profiles_listed_for(profiles, *, viewer_id, viewer_is_admin: bool, login_mode: bool):
+    """the profiles this viewer may list, each as profile_view_for shows it.
+
+    login mode (#2162): everyone signs in with their own password, so a
+    member has no one to switch to and no business knowing who else is on
+    the server. they get their own profile and nothing else. the household
+    picker is different: it lists every card before anyone opens a profile,
+    so the cards stay listed there (hiding them from a signed-in member
+    would hide nothing). admins see everyone either way."""
+    if login_mode and not viewer_is_admin:
+        try:
+            me = int(viewer_id) if viewer_id is not None else None
+        except (TypeError, ValueError):
+            me = None
+        if me is None:
+            return []
+        profiles = [p for p in profiles if _same_id(p.get("id"), me)]
+    return [profile_view_for(p, viewer_id=viewer_id, viewer_is_admin=viewer_is_admin)
+            for p in profiles]
+
+
+def _same_id(value, me: int) -> bool:
+    try:
+        return int(value) == me
+    except (TypeError, ValueError):
+        return False
+
+
 # api prefixes that belong to exactly one page. a profile whose page list
 # leaves the page out gets a 403 from these too, not just a hidden button.
 # shared apis (stats feed the dashboard, automations feed sync, podcasts feed
@@ -132,5 +160,6 @@ def page_denied(path: str, allowed_pages, is_admin: bool) -> bool:
 
 
 __all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
-           "may_manage_profile", "may_cancel_download", "profile_view_for", "PUBLIC_PROFILE_FIELDS",
+           "may_manage_profile", "may_cancel_download", "profile_view_for", "profiles_listed_for",
+           "PUBLIC_PROFILE_FIELDS",
            "PAGE_EXCLUSIVE_APIS", "page_for_path", "page_denied"]
