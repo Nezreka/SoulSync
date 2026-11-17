@@ -18,6 +18,7 @@ from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
 from core.imports.collab_artist import collab_primary, library_has_artist, library_has_identified_artist
 from core.imports.compilation import is_various_artists_credit, is_various_artists_name
+from core.imports.library_names import library_names, swap_credit
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,
@@ -837,8 +838,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
         if primary:
             # the list's name is raw: unsanitized, a collab album went to
             # "L.A.B." and a solo one to "L.A.B" (#1954), and a "/" in it
-            # made an extra folder
-            album_artist_value = sanitize_filename(primary)
+            # made an extra folder. the library's name for it when it has
+            # another one (#2165)
+            album_artist_value = sanitize_filename(
+                swap_credit(primary, context.get("_library_names")))
         elif artists_list and len(artists_list) == 1:
             itunes_artist_id = context.get("_itunes_artist_id")
             if itunes_artist_id and ("," in album_artist_value or " & " in album_artist_value):
@@ -847,7 +850,8 @@ def _replace_template_variables(template: str, context: dict) -> str:
                     if resolved_client and hasattr(resolved_client, "resolve_primary_artist"):
                         resolved = resolved_client.resolve_primary_artist(itunes_artist_id)
                         if resolved and resolved != album_artist_value:
-                            album_artist_value = sanitize_filename(resolved)
+                            album_artist_value = sanitize_filename(
+                                swap_credit(resolved, context.get("_library_names")))
                 except Exception as e:
                     logger.debug("resolve primary artist failed: %s", e)
 
@@ -1439,6 +1443,19 @@ def _artist_identity(artist_context, source) -> dict:
     }
 
 
+def _with_library_names(template_context: dict, context, artist_context) -> None:
+    """name the folder after the library artist the download belongs to
+    (#2165): the source can call them "Machine Gun Kelly" while the library,
+    which finds them by id, calls them "mgk". only whole credits change, so a
+    feature keeps its own name."""
+    names = library_names(context, artist_context)
+    if not names:
+        return
+    template_context["_library_names"] = names
+    for key in ("artist", "albumartist"):
+        template_context[key] = swap_credit(template_context.get(key), names)
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -1771,6 +1788,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             # #1859: who the album artist is, for $albumartistinfo and friends
             **_artist_identity(artist_context, source),
         }
+        _with_library_names(template_context, context, artist_context)
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
         # lookup happened to succeed, so a cache miss or an offline provider filed
@@ -1998,6 +2016,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "album_explicit": resolve_album_explicit(_album_ctx, track_info),
         **_artist_identity(artist_context, source),
     }
+    _with_library_names(template_context, context, artist_context)
 
     folder_path, filename_base = get_file_path_from_template(template_context, "single_path")
     if filename_base:

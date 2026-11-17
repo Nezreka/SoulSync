@@ -308,6 +308,15 @@ def set_field_override(
     ).fetchone() is None:
         raise MetadataOverrideError("metadata entity not found", status=404)
     value = _validated_value(spec, value)
+    if entity_type == "artist" and field_name == "name":
+        # #2165: the artist's name names its folder and tags too. another
+        # artist going by it (proven another by its ids) would share a folder
+        from core.imports.library_names import name_taken_by
+        taken = name_taken_by(conn, entity_id, value)
+        if taken:
+            raise MetadataOverrideError(
+                f"{taken['name']} in your library is a different artist with that name. "
+                "Pick a name that tells them apart.", status=409)
     try:
         value_json = json.dumps(
             value,
@@ -332,6 +341,7 @@ def set_field_override(
                updated_at=CURRENT_TIMESTAMP""",
         (entity_type, entity_id, field_name, value_json, 1, reason),
     )
+    _names_changed(entity_type, field_name)
     row = conn.execute(
         """SELECT * FROM lib2_metadata_overrides
             WHERE entity_type=? AND entity_id=? AND field_name=?""",
@@ -359,7 +369,20 @@ def clear_field_override(
             WHERE entity_type=? AND entity_id=? AND field_name=?""",
         (entity_type, int(entity_id), field_name),
     )
+    _names_changed(entity_type, field_name)
     return bool(result.rowcount)
+
+
+def _names_changed(entity_type: str, field_name: str) -> None:
+    """a pinned artist name is what the next download is filed under (#2165):
+    drop the cached answers so it doesn't wait out their 30 seconds."""
+    if entity_type != "artist" or field_name != "name":
+        return
+    try:
+        from core.imports.library_names import clear_cache
+        clear_cache()
+    except Exception:  # noqa: BLE001, S110 - a cache that lives on is only 30s stale
+        pass
 
 
 def get_field_overrides(
