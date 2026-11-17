@@ -1,0 +1,102 @@
+/* the pieces inside an On this page answer (pages/kit.tsx): the rows that
+   name what's stuck, the quiet second line, a folder path. tokens only. */
+
+.why {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.whyRow {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border-radius: var(--radius-control);
+  background: var(--white-a04);
+}
+
+.whyRow[data-plain] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.art {
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.whyText {
+  min-width: 0;
+}
+
+.whyTitle {
+  display: block;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.whySub {
+  display: block;
+  overflow: hidden;
+  color: var(--white-a65);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.whyRow[data-wrap] .whySub {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  color: var(--white-a65);
+  font-size: 12.5px;
+}
+
+.path {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.bar {
+  overflow: hidden;
+  height: 4px;
+  margin: 2px 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.act[aria-busy='true'] {
+  opacity: 0.6;
+  cursor: progress;
+}
