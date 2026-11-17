@@ -861,6 +861,9 @@ function FindingDetailBody({
       const checked = list<string>(d.checked_sources);
       if (checked.length) rows.push(['Checked against', checked.join(', ')]);
       if (d.track_count != null) rows.push(['Tracks affected', text(d.track_count)]);
+      // the split changes the library; the files follow through Re-tag and
+      // Reorganize (docs/library-v2-data-flow.md)
+      if (d.library_v2_native) rows.push(['Files', 'Re-tag and Reorganize check them after the split']);
 
       const chips = commaSplitChips(d);
       const tracks = list<{ title?: string; album?: string; file_path?: string }>(d.tracks);
@@ -871,8 +874,8 @@ function FindingDetailBody({
           {media}
           <TagChangeTable
             rows={artistChanges}
-            beforeLabel="In the files now"
-            afterLabel="After Split Artists"
+            beforeLabel="In your library now"
+            afterLabel="After the split"
           />
           <DetailGrid rows={rows} />
           <div style={{ margin: '8px 0 2px', fontWeight: 600 }}>Splits into</div>
