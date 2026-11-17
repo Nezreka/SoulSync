@@ -9927,6 +9927,7 @@ def reidentify_apply():
 
 
 @app.route('/api/library/artist/<artist_id>', methods=['PUT'])
+@admin_only
 def update_library_artist(artist_id):
     """Update artist metadata fields."""
     try:
@@ -9942,6 +9943,7 @@ def update_library_artist(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/album/<album_id>', methods=['PUT'])
+@admin_only
 def update_library_album(album_id):
     """Update album metadata fields."""
     try:
@@ -9957,6 +9959,7 @@ def update_library_album(album_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/track/<track_id>', methods=['PUT'])
+@admin_only
 def update_library_track(track_id):
     """Update track metadata fields."""
     try:
@@ -9972,6 +9975,7 @@ def update_library_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/tracks/batch', methods=['PUT'])
+@admin_only
 def batch_update_library_tracks():
     """Batch update multiple tracks with the same field values."""
     try:
