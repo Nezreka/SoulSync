@@ -993,23 +993,120 @@ def _same_song(leftover: Any, kept: Any, album_title: Any, artist_name: Any) -> 
     return not all(lengths) or abs(lengths[0] - lengths[1]) <= _SAME_SONG_MS
 
 
-def fold_leftover_rows(conn: Any) -> Dict[str, int]:
-    """every leftover row in the library, not only the ones a removal just
-    made. a file that moved to another row of its album (a retag, a
-    re-identify) left its old row behind with no removal to fold it, so the
-    album read 14 of 24 (#2094). Does not commit."""
+def fold_leftover_rows(conn: Any, album_ids=None) -> Dict[str, int]:
+    """every leftover row in the library (or in ``album_ids``), not only the
+    ones a removal just made. a file that moved to another row of its album
+    (a retag, a re-identify) left its old row behind with no removal to fold
+    it, so the album read 14 of 24 (#2094). Does not commit."""
     live = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
-    ids = [int(r[0]) for r in conn.execute(
-        f"""SELECT t.id FROM lib2_tracks t
-             WHERE t.album_id IS NOT NULL AND t.track_number IS NOT NULL
-               AND NOT EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})
+    scope, params = "", []
+    if album_ids is not None:
+        albums = sorted({int(a) for a in album_ids})
+        if not albums:
+            return {"leftover_tracks_folded": 0}
+        scope = f" AND album_id IN ({','.join('?' for _ in albums)})"
+        params = albums
+    # positions held by two rows first: one pass over the album/position
+    # index, 0.25 s on 320k tracks where walking every track took 2.7 s
+    rows = [(int(r[0]), int(r[1])) for r in conn.execute(
+        f"""WITH slots AS MATERIALIZED (
+                SELECT album_id, COALESCE(disc_number, 1) AS disc, track_number
+                  FROM lib2_tracks
+                 WHERE album_id IS NOT NULL AND track_number IS NOT NULL{scope}
+                 GROUP BY album_id, COALESCE(disc_number, 1), track_number
+                HAVING COUNT(*) > 1)
+            SELECT t.id, t.album_id FROM slots s
+              JOIN lib2_tracks t ON t.album_id=s.album_id AND t.track_number=s.track_number
+                                AND COALESCE(t.disc_number, 1)=s.disc
+             WHERE NOT EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})
                AND EXISTS(SELECT 1 FROM lib2_tracks o
                            WHERE o.album_id=t.album_id AND o.id<>t.id
                              AND o.track_number=t.track_number
-                             AND COALESCE(o.disc_number, 1)=COALESCE(t.disc_number, 1)
+                             AND COALESCE(o.disc_number, 1)=s.disc
                              AND EXISTS(SELECT 1 FROM lib2_track_files f
-                                         WHERE f.track_id=o.id AND {live}))""")]
+                                         WHERE f.track_id=o.id AND {live}))""", params)]
+    # a reviewed and locked album keeps its tracklist as the person left it
+    open_albums = {album for album in {a for _t, a in rows} if not _reviewed(conn, "album", album)}
+    ids = [track for track, album in rows if album in open_albums]
     return {"leftover_tracks_folded": fold_fileless_twins(conn, ids) if ids else 0}
+
+
+def fold_leftovers_after_scan(database: Any) -> int:
+    """the leftover sweep as a scan's last step. a scan is what sees a file
+    move to another row, and nothing else ran the sweep: it only ran at the
+    end of the one-time library upgrade, so a library past that never got it
+    (#2094). best effort, a scan never fails on it."""
+    try:
+        with closing(database._get_connection()) as conn:
+            folded = fold_leftover_rows(conn)["leftover_tracks_folded"]
+            if folded:
+                conn.commit()
+            return folded
+    except Exception as exc:  # noqa: BLE001 - the scan itself is done
+        logger.warning("leftover track rows not folded after the scan: %s", exc)
+        return 0
+
+
+_LIVE_FILE = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
+
+
+def _leftover_and_slot(conn: Any, track_id: int):
+    """a fileless row of an album, and the rows with a file at its position.
+    (None, []) when the row has a file or no position."""
+    row = conn.execute(
+        f"""SELECT t.id, t.album_id, t.title, t.track_number, COALESCE(t.disc_number, 1) AS disc,
+                   COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration,
+                   (SELECT a.title FROM lib2_albums a WHERE a.id=t.album_id) AS album_title,
+                   (SELECT ar.name FROM lib2_albums a JOIN lib2_artists ar ON ar.id=a.primary_artist_id
+                     WHERE a.id=t.album_id) AS artist_name,
+                   EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {_LIVE_FILE}) AS has_file
+              FROM lib2_tracks t WHERE t.id=?""", (int(track_id),)).fetchone()
+    if row is None or row["has_file"] or row["album_id"] is None or row["track_number"] is None:
+        return None, []
+    slot = conn.execute(
+        f"""SELECT t.id, t.title, COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration
+              FROM lib2_tracks t
+             WHERE t.album_id=? AND t.id<>? AND t.track_number=?
+               AND COALESCE(t.disc_number, 1)=?
+               AND EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {_LIVE_FILE})""",
+        (row["album_id"], row["id"], row["track_number"], row["disc"])).fetchall()
+    return row, slot
+
+
+def _fold_leftover_into(conn: Any, row: Any, keep: Any) -> None:
+    """the leftover goes into the row that kept the file at its position"""
+    cursor = conn.cursor()
+    track_id = int(row["id"])
+    played = max((v for v in (row["last_played"], keep["last_played"]) if v), default=None)
+    cursor.execute("UPDATE lib2_tracks SET play_count=?, last_played=? WHERE id=?",
+                   (int(row["plays"]) + int(keep["plays"]), played, keep["id"]))
+    # the removed files stay on record, under the track that is left
+    cursor.execute("UPDATE lib2_track_files SET track_id=?, is_primary=0 WHERE track_id=?",
+                   (keep["id"], track_id))
+    cursor.execute(
+        "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+        "WHERE entity_type='track' AND entity_id=?", (keep["id"], track_id))
+    cursor.execute("DELETE FROM lib2_media_server_mappings "
+                   "WHERE entity_type='track' AND entity_id=?", (track_id,))
+    # a wish for the leftover is a wish for a song that is right there
+    try:
+        from core.library2.mirror_outbox import enqueue_tracks
+        profiles = {1} | {int(r[0]) for r in conn.execute(
+            """SELECT profile_id FROM lib2_wanted_tracks WHERE track_id=?
+               UNION SELECT profile_id FROM lib2_monitor_rules
+                WHERE entity_type='track' AND entity_id=?""",
+            (track_id, track_id)) if r[0] is not None}
+        for profile_id in sorted(profiles):
+            enqueue_tracks(conn, [track_id], False, profile_id=profile_id)
+    except Exception as exc:  # noqa: BLE001 - the fold stands without the un-mirror
+        logger.debug("un-mirror for a folded leftover track skipped: %s", exc)
+    try:
+        from core.library2.catalogue_identity import record_redirect
+        record_redirect(conn, "track", track_id, int(keep["id"]), {}, {"folded": "fileless_twin"})
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("redirect for a folded leftover track skipped: %s", exc)
+    cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
+    _delete_placeholder_track(cursor, track_id)
 
 
 def fold_fileless_twins(conn: Any, track_ids) -> int:
@@ -1024,65 +1121,49 @@ def fold_fileless_twins(conn: Any, track_ids) -> int:
     move to the track that has the file, its removed-file records travel
     along as history, and its wishes are withdrawn. A track with no such twin
     is a missing track and stays. Does not commit."""
-    live = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
-    cursor = conn.cursor()
     folded = 0
     for track_id in sorted({int(t) for t in track_ids or ()}):
-        row = conn.execute(
-            f"""SELECT t.id, t.album_id, t.title, t.track_number, COALESCE(t.disc_number, 1) AS disc,
-                       COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration,
-                       (SELECT a.title FROM lib2_albums a WHERE a.id=t.album_id) AS album_title,
-                       (SELECT ar.name FROM lib2_albums a JOIN lib2_artists ar ON ar.id=a.primary_artist_id
-                         WHERE a.id=t.album_id) AS artist_name,
-                       EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live}) AS has_file
-                  FROM lib2_tracks t WHERE t.id=?""", (track_id,)).fetchone()
-        if row is None or row["has_file"] or row["album_id"] is None or row["track_number"] is None:
+        row, slot = _leftover_and_slot(conn, track_id)
+        if row is None:
             continue
-        twins = [t for t in conn.execute(
-            f"""SELECT t.id, t.title, COALESCE(t.play_count, 0) AS plays, t.last_played, t.duration
-                  FROM lib2_tracks t
-                 WHERE t.album_id=? AND t.id<>? AND t.track_number=?
-                   AND COALESCE(t.disc_number, 1)=?
-                   AND EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})""",
-            (row["album_id"], track_id, row["track_number"], row["disc"])).fetchall()
-            if _same_song(row, t, row["album_title"], row["artist_name"])]
+        twins = [t for t in slot if _same_song(row, t, row["album_title"], row["artist_name"])]
         if len(twins) != 1:
             continue
-        keep = twins[0]
-        played = max((v for v in (row["last_played"], keep["last_played"]) if v), default=None)
-        cursor.execute("UPDATE lib2_tracks SET play_count=?, last_played=? WHERE id=?",
-                       (int(row["plays"]) + int(keep["plays"]), played, keep["id"]))
-        # the removed files stay on record, under the track that is left
-        cursor.execute("UPDATE lib2_track_files SET track_id=?, is_primary=0 WHERE track_id=?",
-                       (keep["id"], track_id))
-        cursor.execute(
-            "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
-            "WHERE entity_type='track' AND entity_id=?", (keep["id"], track_id))
-        cursor.execute("DELETE FROM lib2_media_server_mappings "
-                       "WHERE entity_type='track' AND entity_id=?", (track_id,))
-        # a wish for the leftover is a wish for a song that is right there
-        try:
-            from core.library2.mirror_outbox import enqueue_tracks
-            profiles = {1} | {int(r[0]) for r in conn.execute(
-                """SELECT profile_id FROM lib2_wanted_tracks WHERE track_id=?
-                   UNION SELECT profile_id FROM lib2_monitor_rules
-                    WHERE entity_type='track' AND entity_id=?""",
-                (track_id, track_id)) if r[0] is not None}
-            for profile_id in sorted(profiles):
-                enqueue_tracks(conn, [track_id], False, profile_id=profile_id)
-        except Exception as exc:  # noqa: BLE001 - the fold stands without the un-mirror
-            logger.debug("un-mirror for a folded leftover track skipped: %s", exc)
-        try:
-            from core.library2.catalogue_identity import record_redirect
-            record_redirect(conn, "track", track_id, int(keep["id"]), {}, {"folded": "fileless_twin"})
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("redirect for a folded leftover track skipped: %s", exc)
-        cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
-        _delete_placeholder_track(cursor, track_id)
+        _fold_leftover_into(conn, row, twins[0])
         folded += 1
     if folded:
         logger.info("Folded %d leftover track row(s) into the copy that kept its file", folded)
     return folded
+
+
+class LeftoverError(ValueError):
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def remove_leftover_track(conn: Any, track_id: int) -> Dict[str, Any]:
+    """a person takes a leftover row off its album: a row with no file at a
+    position where another row has the file. it folds into that row the way
+    the sweep does (plays, mappings and history move over), so it is the
+    sweep with the person deciding it is the same song (#2094: no way to
+    remove a row with no file by hand). a row alone at its position is a
+    missing track and stays. Does not commit."""
+    exists = conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?", (int(track_id),)).fetchone()
+    if not exists:
+        raise LeftoverError("Track not found", 404)
+    row, slot = _leftover_and_slot(conn, track_id)
+    if row is None:
+        raise LeftoverError("This track has a file, remove the file instead", 409)
+    if not slot:
+        raise LeftoverError("No other row at this position has a file, so this is a missing track", 409)
+    if len(slot) > 1:
+        raise LeftoverError("More than one row at this position has a file", 409)
+    keep = slot[0]
+    _fold_leftover_into(conn, row, keep)
+    logger.info("Removed leftover track row %s, folded into %s by hand", row["id"], keep["id"])
+    return {"removed_track_id": int(row["id"]), "kept_track_id": int(keep["id"]),
+            "kept_title": keep["title"]}
 
 
 def _move_overrides(conn: Any, entity_type: str, source_id: int, target_id: int) -> None:
@@ -1417,5 +1498,6 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
     return stats
 
 
-__all__ = ["fold_fileless_twins", "fold_leftover_rows", "fold_server_twins", "merge_artist_twins",
+__all__ = ["LeftoverError", "fold_fileless_twins", "fold_leftover_rows", "fold_leftovers_after_scan",
+           "fold_server_twins", "merge_artist_twins", "remove_leftover_track",
            "repair_duplicate_artists"]

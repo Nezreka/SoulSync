@@ -294,7 +294,11 @@ import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
 import { OwnedArtistReorganizeQueue } from './owned-artist-reorganize-queue';
 import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
-import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
+import {
+  AlbumUnlockMenuItem,
+  OwnedTrackMoreMenu,
+  leftoverSlotKeepers,
+} from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumRenameBadge, renameHintTitle, useRenameCheck } from './rename-hint';
@@ -1138,6 +1142,10 @@ function refreshSummary(result: LibraryV2JobState['result']): string {
   if (count('recovered')) parts.push(`${count('recovered')} back`);
   if (count('missing_confirmed')) parts.push(`${count('missing_confirmed')} now missing`);
   if (count('missing_suspected')) parts.push(`${count('missing_suspected')} unverified`);
+  if (count('leftover_tracks_folded'))
+    parts.push(
+      `${count('leftover_tracks_folded')} leftover row${count('leftover_tracks_folded') === 1 ? '' : 's'} with no file folded`,
+    );
   const drifting = count('path_drift') - count('path_repointed');
   if (drifting > 0) parts.push(`${drifting} needing review in Stale Index Paths`);
   return `Refresh & Scan: ${parts.join(', ')}.`;
@@ -11832,6 +11840,7 @@ export function AlbumTrackTable({
   const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
 
   const sortedTracks = sortTracks(album.tracks, sort);
+  const slotKeepers = leftoverSlotKeepers(album.tracks);
   const selectableIds = album.tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
   const selectedTracks = album.tracks.filter((t) => t.id != null && selected.has(t.id as number));
@@ -12227,6 +12236,7 @@ export function AlbumTrackTable({
               currentArtistId={currentArtistId}
               onOpenArtist={onOpenArtist}
               wouldRename={track.id != null && Boolean(renameTrackIds?.has(track.id))}
+              slotKeeper={track.id != null ? slotKeepers.get(track.id) : undefined}
             />
           ))}
         </tbody>
@@ -12476,6 +12486,8 @@ type TrackRowProps = {
   onOpenArtist?: OpenTrackArtist;
   /** #2141: its file isn't where the naming template puts it */
   wouldRename?: boolean;
+  /** #2094: a row with no file, and the row at its position that has the file */
+  slotKeeper?: { id: number; title: string };
 };
 
 type TrackArtist = { id: number; name: string };
@@ -12571,6 +12583,7 @@ function TrackRow(props: TrackRowProps) {
     currentArtistId,
     onOpenArtist,
     wouldRename = false,
+    slotKeeper,
   } = props;
   const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
@@ -12999,6 +13012,7 @@ function TrackRow(props: TrackRowProps) {
             albumId={entityBase.albumId}
             albumTitle={albumTitle}
             artistName={track.artists.map((a) => a.name).join(', ')}
+            slotKeeper={slotKeeper}
           />
           {track.id ? (
             <TrackDetailButton

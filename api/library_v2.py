@@ -5253,6 +5253,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
         return jsonify({"success": True, "track_id": track_id, "file_id": file_id})
 
+    @_route("/api/library/v2/tracks/<int:track_id>/remove-leftover", methods=["POST"])
+    def lib2_remove_leftover_track(track_id):
+        """take a row with no file off its album when another row at its
+        position has the file (#2094). it folds into that row."""
+        from core.library2.dedup_repair import LeftoverError, remove_leftover_track
+        from core.library2.mirror_outbox import drain_since, queue_mark
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            mark = queue_mark(conn)
+            try:
+                result = remove_leftover_track(conn, track_id)
+            except LeftoverError as e:
+                return _fail(str(e), e.status)
+            conn.commit()
+        # its own wishlist withdrawals, not a backlog in front of them
+        try:
+            drain_since(db, mark)
+        except Exception as e:  # noqa: BLE001 - the row is gone, the mirror catches up later
+            logger.debug("outbox drain after leftover removal skipped: %s", e)
+        return jsonify({"success": True, **result})
+
     @_route("/api/library/v2/tracks/<int:track_id>/move-file", methods=["POST"])
     def lib2_move_track_file(track_id):
         """Move this track's file link onto another track (single↔album move).
@@ -6195,6 +6216,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         states.extend((_coerce_tags(r[0]).get('_validation') or {}).get('status', 'unknown') for r in conn.execute(
                             f"SELECT tags_json FROM lib2_track_files WHERE id IN ({','.join('?' for _ in ids)})", ids))
                     scan_stats.update(metadata_issues=states.count('issues'), metadata_unknown=states.count('unknown'))
+                    # a row a moved file left behind at its own position (#2094)
+                    from core.library2.dedup_repair import fold_leftover_rows
+                    folded = fold_leftover_rows(conn, album_ids)["leftover_tracks_folded"]
+                    if folded:
+                        conn.commit()
+                        scan_stats["leftover_tracks_folded"] = folded
                 # A scan is the moment we learn a file is gone or back, and
                 # acquisition is the consumer of exactly that. Handing it over
                 # here — scoped to the tracks that actually changed — is what
