@@ -182,6 +182,13 @@ def _can_send() -> bool:
         return False
 
 
+def _can_use_shared_account() -> bool:
+    """may this caller read and act as the shared soulseek account (its
+    private messages, its notes on users)? the same people who may send as
+    it: the admin, and members once the admin turns member sending on."""
+    return _can_send()
+
+
 def _clean_message(payload) -> str | None:
     msg = str((payload or {}).get("message") or "").strip()
     if not msg:
@@ -1050,7 +1057,10 @@ def create_blueprint() -> Blueprint:
             db = _db()
             if db is not None:
                 out["history"] = db.get_user_download_stats(username)
-                out["note"] = db.get_chat_user_note(username)
+                # the note is the shared account's, like its private messages
+                out["note_editable"] = _can_use_shared_account()
+                if out["note_editable"]:
+                    out["note"] = db.get_chat_user_note(username)
         except Exception:
             logger.debug("chat: user history/note failed", exc_info=True)
         return jsonify(out)
@@ -1058,6 +1068,8 @@ def create_blueprint() -> Blueprint:
     @bp.route("/api/chat/user/<path:username>/note", methods=["POST"])
     def chat_user_note_set(username):
         """Save the local, private note for a user ('' clears it)."""
+        if not _can_use_shared_account():
+            return jsonify({"error": "Notes on the shared Soulseek account are the admin's"}), 403
         db = _db()
         if db is None:
             return jsonify({"error": "database unavailable"}), 503
@@ -2258,6 +2270,10 @@ def create_blueprint() -> Blueprint:
         client = _client()
         if client is None:
             return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        # private messages are the shared account's: a member who may not act
+        # as it gets an empty list, not the admin's inbox
+        if not _can_use_shared_account():
+            return jsonify({"conversations": [], "can_send": False})
         try:
             convos = _run_async(client.get_conversations())
         except Exception as e:
@@ -2270,6 +2286,8 @@ def create_blueprint() -> Blueprint:
         client = _client()
         if client is None:
             return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
+        if not _can_use_shared_account():
+            return jsonify({"error": "Private messages on the shared Soulseek account are the admin's"}), 403
         try:
             convo = _run_async(client.get_conversation(username))
             # Reading a conversation marks it read (clears slskd's unread flag).

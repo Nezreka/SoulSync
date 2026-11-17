@@ -6412,6 +6412,9 @@
             var status = (res.ok && res.body.status) || {};
             var hist = (res.ok && res.body.history) || null;
             var note = (res.ok && typeof res.body.note === 'string') ? res.body.note : '';
+            // notes belong to the shared soulseek account: only shown to who
+            // may act as it (the server leaves note_editable off otherwise)
+            var noteEditable = !!(res.ok && res.body.note_editable);
             var rows = [];
             var pres = status.presence || status.status ||
                 (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : null));
@@ -6447,7 +6450,7 @@
                         '</div>';
                 }
                 // private local note ("great jazz rips") — never leaves this install
-                html += '<div class="chat-card-note">' +
+                if (noteEditable) html += '<div class="chat-card-note">' +
                     '<textarea class="chat-card-note-input" data-chat-card-note ' +
                         'placeholder="Private note about ' + attr(name) + '\u2026" ' +
                         'maxlength="2000" rows="2">' + esc(note) + '</textarea>' +
