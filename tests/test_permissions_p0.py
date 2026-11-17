@@ -558,6 +558,21 @@ def test_a_profile_made_the_old_way_later_is_mapped_next_boot(tmp_path):
     assert source == "template" and P.cache_matches(db.get_profile(pid), eff) == []
 
 
+def test_verify_keeps_a_profile_the_policy_would_change_on_its_columns():
+    # a profile made the old way after the admin set a ceiling: following a
+    # template would cap it, so it stays on its columns and gets a look
+    tpls = [{"id": i + 1, "slug": t["slug"], "perms": t["perms"]} for i, t in enumerate(P.BUILTIN_TEMPLATES)]
+    downloader = legacy_row(allowed_sides="both", can_download=True)
+    assert P.match_template(downloader, tpls)["ok"]
+    out = P.match_template(downloader, tpls, {"music.get": "ask"})
+    assert not out["ok"] and out["template_id"] is None and out["overrides"] == {}
+    assert "can_download" in out["reasons"][-1]
+    # a tv ceiling the one cached rating can't show: only the strict verify sees it
+    teen = legacy_row(allowed_sides="both", can_download=False, max_rating="PG-13")
+    out = P.match_template(teen, tpls, {"tv.max_rating": "PG"})
+    assert not out["ok"] and "tv.max_rating" in out["reasons"][-1]
+
+
 def test_mapping_is_skipped_whole_when_the_policy_is_unreadable(tmp_path):
     db, _ = build_install(tmp_path, "single_admin")
     db.set_metadata("perm_policy", "{broken")
