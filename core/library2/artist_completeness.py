@@ -2,15 +2,19 @@
 
 The artist list already shows "owned / total" per row, worked out live for
 the 75 artists on screen. Sorting or filtering by it needs the same numbers
-for every artist, and that is one pass over every track (~5 s on a 311k-track
+for every artist, and that is one pass over every track (~6 s on a 311k-track
 library), so the answer is kept until the library changes.
 
-The rule is the artist list's own (``artist_reader.read_artist_page``):
+One rule (``rule_ctes``), read by the list's live numbers
+(``artist_reader.read_artist_page``) and by the kept pass here:
 
-- a track counts when it is wanted (or monitored) or has a file that is not
-  deleted, so a release the artist's collection settings leave out is never
-  "missing";
-- it is present when a file is there and not confirmed missing.
+- an artist on the Watchlist: a track counts when it is wanted (or
+  monitored) or has a file that is not deleted, so a release their collection
+  settings leave out is never "missing";
+- an artist nobody watches wants nothing, so for them it's the albums you
+  have: every release of theirs with anything on disk counts whole (#2106
+  follow-up), plus anything wanted;
+- a track is present when a file is there and not confirmed missing.
 
 An artist is only complete when something is expected, all of it is here and
 every release of theirs has a known size. A release nobody has asked a
@@ -84,6 +88,7 @@ def _scope_parts() -> Dict[str, Any]:
     from .sql_util import intent_profile_id, monitored_sql, owner_clause, scope_visibility_sql
     return {
         "intent": int(intent_profile_id()),
+        "artist_monitored": monitored_sql("artist", "wa"),
         "track_monitored": monitored_sql("track", "t"),
         "album_monitored": monitored_sql("album", "al"),
         "tf_owner": owner_clause(column="tf.owner_profile_id"),
@@ -91,44 +96,187 @@ def _scope_parts() -> Dict[str, Any]:
     }
 
 
-# one row per counted track: the same CASEs as read_artist_page's track_stats
-_TRACKS_SQL = """
-    SELECT t.id, t.album_id,
-           MAX(CASE WHEN tf.id IS NOT NULL
-                     AND COALESCE(tf.file_state, 'active')
-                         NOT IN ('missing_confirmed', 'deleted')
-                    THEN 1 ELSE 0 END) AS present
-      FROM lib2_tracks t
-      LEFT JOIN lib2_wanted_tracks w ON w.track_id = t.id AND w.profile_id = {intent}
-      LEFT JOIN lib2_track_files tf ON tf.track_id = t.id{tf_owner}
-     GROUP BY t.id
-    HAVING MAX(CASE WHEN COALESCE(w.wanted, {track_monitored}) = 1
-                      OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
-                    THEN 1 ELSE 0 END) = 1
+# The rule, as SQL, read by the list's live numbers (artist_reader's page) and
+# by the kept pass below, so the cards and the sorts can't disagree.
+#
+# A track is counted when it is wanted (or monitored) or has a file that is
+# not deleted, and present when that file is not confirmed missing. That is
+# the whole rule for an artist on the Watchlist: their collection settings
+# say what is wanted.
+#
+# An artist nobody watches wants nothing, so that rule only ever counted what
+# is owned ("1 / 1, complete" beside a 14 track album with one track here).
+# For them it's the albums you have: every release of theirs (the album's
+# primary artist) with anything on disk counts whole, its size the larger of
+# what the provider said and the rows we hold, and every track of theirs on
+# another album they hold something from counts too. A release they hold
+# nothing of only counts what is wanted on it.
+#
+# Watched means the artist, or any alias in its group, is monitored the way
+# this library reads it (the Watchlist mirror for the shared library, the
+# profile's own rule for an own library).
+#
+# ``{members}`` is a CTE of (member_id, canonical_id): every artist for the
+# kept pass, the page's alias groups for the list. ``{scope_tracks}`` picks
+# which tracks to look at: all of them for the kept pass, the ones the page's
+# artists are credited on or hold a release of for the list.
+_RULE_CTES = """
+    cc_watch AS MATERIALIZED (
+        SELECT cm.canonical_id AS artist_id, COALESCE(MAX({artist_monitored}), 0) AS watched
+          FROM {members} cm
+          CROSS JOIN lib2_artists wa ON wa.id = cm.member_id
+         GROUP BY cm.canonical_id
+    ),
+    -- the artist's own releases, as the list counts them (album artist or a
+    -- primary album credit). lead: the album's primary artist, the only
+    -- claim strong enough to count the whole release (the junction's
+    -- 'primary' role also sits on guests of compilations)
+    cc_release AS MATERIALIZED (
+        SELECT r.artist_id, r.album_id, MAX(r.lead) AS lead,
+               MAX(al.expected_track_count IS NULL) AS unknown_size,
+               MAX(COALESCE(al.expected_track_count, 0)) AS expected,
+               MAX(al.origin = 'library' OR {album_monitored} = 1) AS listed
+          FROM (SELECT cm.canonical_id AS artist_id, aa.album_id, 0 AS lead
+                  FROM {members} cm
+                  CROSS JOIN lib2_album_artists aa ON aa.artist_id = cm.member_id
+                 WHERE aa.role = 'primary'
+                UNION ALL
+                SELECT cm.canonical_id, al.id, 1
+                  FROM {members} cm
+                  CROSS JOIN lib2_albums al ON al.primary_artist_id = cm.member_id) r
+          CROSS JOIN lib2_albums al ON al.id = r.album_id
+         WHERE {album_visible}
+         GROUP BY r.artist_id, r.album_id
+    ),
+    -- one row per track looked at: counted by the wanted rule, held (a file
+    -- that is not deleted), present (and not confirmed missing)
+    cc_track AS MATERIALIZED (
+        SELECT t.id AS track_id, t.album_id,
+               MAX(CASE WHEN COALESCE(w.wanted, {track_monitored}) = 1
+                          OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
+                        THEN 1 ELSE 0 END) AS counted,
+               MAX(CASE WHEN tf.id IS NOT NULL
+                         AND COALESCE(tf.file_state, 'active') <> 'deleted'
+                        THEN 1 ELSE 0 END) AS held,
+               MAX(CASE WHEN tf.id IS NOT NULL
+                         AND COALESCE(tf.file_state, 'active')
+                             NOT IN ('missing_confirmed', 'deleted')
+                        THEN 1 ELSE 0 END) AS present
+          FROM {scope_tracks}
+          LEFT JOIN lib2_wanted_tracks w ON w.track_id = t.id AND w.profile_id = {intent}
+          LEFT JOIN lib2_track_files tf ON tf.track_id = t.id{tf_owner}
+         GROUP BY t.id
+    ),
+    cc_album AS MATERIALIZED (
+        SELECT album_id, COUNT(*) AS track_rows, SUM(present) AS present,
+               SUM(counted) AS counted, SUM(counted * present) AS counted_present,
+               MAX(held) AS held
+          FROM cc_track
+         WHERE album_id IS NOT NULL
+         GROUP BY album_id
+    ),
+    -- an unwatched artist's releases that count whole
+    cc_whole AS MATERIALIZED (
+        SELECT r.artist_id, r.album_id,
+               MAX(r.expected, a.track_rows) AS size, a.present
+          FROM cc_release r
+          JOIN cc_watch cw ON cw.artist_id = r.artist_id AND cw.watched = 0
+          JOIN cc_album a ON a.album_id = r.album_id AND a.held = 1
+         WHERE r.lead = 1
+    ),
+    -- the artist's credited tracks per album, an alias and its canonical
+    -- artist both credited being one track
+    cc_credit AS (
+        SELECT c.artist_id, ct.album_id, COUNT(*) AS credited,
+               SUM(ct.counted) AS counted, SUM(ct.present) AS present, MAX(ct.held) AS held
+          FROM (SELECT DISTINCT cm.canonical_id AS artist_id, ta.track_id
+                  FROM {members} cm
+                  CROSS JOIN lib2_track_artists ta ON ta.artist_id = cm.member_id) c
+          JOIN cc_track ct ON ct.track_id = c.track_id
+         GROUP BY c.artist_id, ct.album_id
+    ),
+    cc_tally AS (
+        SELECT c.artist_id,
+               SUM(CASE WHEN cw.watched = 0 AND c.held = 1 AND c.album_id IS NOT NULL
+                        THEN c.credited ELSE c.counted END) AS total,
+               SUM(c.present) AS present
+          FROM cc_credit c
+          JOIN cc_watch cw ON cw.artist_id = c.artist_id
+         WHERE NOT EXISTS (SELECT 1 FROM cc_whole wh
+                            WHERE wh.artist_id = c.artist_id AND wh.album_id = c.album_id)
+         GROUP BY c.artist_id
+        UNION ALL
+        SELECT artist_id, SUM(size), SUM(present) FROM cc_whole GROUP BY artist_id
+    ),
+    -- per release: one whose size nobody has looked up can hide missing
+    -- tracks, so the artist is not "complete"; and how many are short
+    cc_release_stats AS (
+        SELECT r.artist_id,
+               SUM(r.listed * r.unknown_size) AS unverified_albums,
+               SUM(CASE WHEN wh.album_id IS NOT NULL THEN wh.present < wh.size
+                        WHEN r.listed = 1 AND a.counted > 0 THEN a.counted_present < a.counted
+                        ELSE 0 END) AS incomplete_albums
+          FROM cc_release r
+          LEFT JOIN cc_whole wh ON wh.artist_id = r.artist_id AND wh.album_id = r.album_id
+          LEFT JOIN cc_album a ON a.album_id = r.album_id
+         GROUP BY r.artist_id
+    ),
+    cc_completeness AS (
+        SELECT cw.artist_id,
+               COALESCE(tl.total, 0) AS total, COALESCE(tl.present, 0) AS present,
+               COALESCE(rs.unverified_albums, 0) AS unverified_albums,
+               COALESCE(rs.incomplete_albums, 0) AS incomplete_albums,
+               cw.watched
+          FROM cc_watch cw
+          LEFT JOIN (SELECT artist_id, SUM(total) AS total, SUM(present) AS present
+                       FROM cc_tally GROUP BY artist_id) tl ON tl.artist_id = cw.artist_id
+          LEFT JOIN cc_release_stats rs ON rs.artist_id = cw.artist_id
+    )"""
+
+# the kept pass: every artist, every track
+_ALL_MEMBERS = """
+    cc_members AS MATERIALIZED (
+        SELECT id AS member_id, COALESCE(canonical_artist_id, id) AS canonical_id
+          FROM lib2_artists
+    ),"""
+
+# the list's page: the tracks its artists are credited on, and every track of
+# the releases that are theirs. each step is an index seek from the page
+_PAGE_SCOPE_TRACKS = """(
+            SELECT ta.track_id AS id
+              FROM {members} cm
+              CROSS JOIN lib2_track_artists ta ON ta.artist_id = cm.member_id
+            UNION
+            SELECT st.id
+              FROM cc_release r
+              CROSS JOIN lib2_tracks st ON st.album_id = r.album_id
+          ) s
+          CROSS JOIN lib2_tracks t ON t.id = s.id"""
+
+
+def rule_ctes(members: str, parts: Optional[Dict[str, Any]] = None, *,
+              whole_library: bool = False) -> str:
+    """The completeness rule as CTEs ending in ``cc_completeness`` (artist_id,
+    total, present, unverified_albums, incomplete_albums, watched), one row per
+    canonical artist in ``members``. Splice after ``WITH`` (or after the
+    caller's own CTEs and a comma)."""
+    parts = parts or _scope_parts()
+    scope_tracks = "lib2_tracks t" if whole_library else _PAGE_SCOPE_TRACKS.format(members=members)
+    return _RULE_CTES.format(members=members, scope_tracks=scope_tracks, **parts)
+
+
+_LIBRARY_SQL = "WITH" + _ALL_MEMBERS + "{rule}" + """
+    SELECT artist_id, total, present, incomplete_albums, unverified_albums
+      FROM cc_completeness
+    UNION ALL
+    -- the whole library's wanted tracks, owned and not (the overview, which
+    -- opens the Wanted list on the missing ones)
+    SELECT NULL, SUM(counted), SUM(counted * present), 0, 0 FROM cc_track
 """
 
-# who is credited on each track, folded onto the canonical artist
-_CREDITS_SQL = """
-    SELECT ta.track_id, COALESCE(m.canonical_artist_id, m.id)
-      FROM lib2_track_artists ta
-      JOIN lib2_artists m ON m.id = ta.artist_id
-"""
 
-# the artist's own releases, as the list counts them (album artist or a
-# primary album credit), that the library holds or wants
-_OWN_RELEASES_SQL = """
-    SELECT COALESCE(m.canonical_artist_id, m.id), al.id, al.expected_track_count IS NULL
-      FROM lib2_album_artists aa
-      JOIN lib2_artists m ON m.id = aa.artist_id
-      JOIN lib2_albums al ON al.id = aa.album_id
-     WHERE aa.role = 'primary' AND (al.origin = 'library' OR {album_monitored} = 1)
-       AND {album_visible}
-    UNION
-    SELECT COALESCE(m.canonical_artist_id, m.id), al.id, al.expected_track_count IS NULL
-      FROM lib2_albums al
-      JOIN lib2_artists m ON m.id = al.primary_artist_id
-     WHERE (al.origin = 'library' OR {album_monitored} = 1) AND {album_visible}
-"""
+def library_sql(parts: Optional[Dict[str, Any]] = None) -> str:
+    return _LIBRARY_SQL.format(rule=rule_ctes("cc_members", parts, whole_library=True))
 
 
 @dataclass(frozen=True)
@@ -140,58 +288,18 @@ class LibraryFacts:
 
 def compute(conn, parts: Optional[Dict[str, Any]] = None) -> LibraryFacts:
     """Every artist's completeness, worked out now."""
-    parts = parts or _scope_parts()
-    tracks: Dict[int, Tuple[int, int]] = {}
-    album_total: Dict[int, int] = {}
-    album_present: Dict[int, int] = {}
-    owned = 0
-    for track_id, album_id, present in conn.execute(_TRACKS_SQL.format(**parts)):
-        present = 1 if present else 0
-        tracks[int(track_id)] = (int(album_id or 0), present)
-        owned += present
-        if album_id is not None:
-            album_total[album_id] = album_total.get(album_id, 0) + 1
-            album_present[album_id] = album_present.get(album_id, 0) + present
-
-    total: Dict[int, int] = {}
-    present_by: Dict[int, int] = {}
-    seen = set()
-    for track_id, artist_id in conn.execute(_CREDITS_SQL):
+    artists: Dict[int, Completeness] = {}
+    counted = owned = 0
+    for artist_id, total, present, incomplete, unverified in conn.execute(library_sql(parts)):
         if artist_id is None:
+            counted, owned = int(total or 0), int(present or 0)
             continue
-        fact = tracks.get(int(track_id))
-        if fact is None:
+        if not (total or incomplete or unverified):
             continue
-        pair = (int(artist_id), int(track_id))
-        # an alias member and its canonical artist both credited: one track
-        if pair in seen:
-            continue
-        seen.add(pair)
-        total[pair[0]] = total.get(pair[0], 0) + 1
-        present_by[pair[0]] = present_by.get(pair[0], 0) + fact[1]
-
-    incomplete: Dict[int, int] = {}
-    unverified: Dict[int, int] = {}
-    for artist_id, album_id, unknown_size in conn.execute(_OWN_RELEASES_SQL.format(**parts)):
-        if artist_id is None:
-            continue
-        artist_id = int(artist_id)
-        expected = album_total.get(album_id, 0)
-        if expected and album_present.get(album_id, 0) < expected:
-            incomplete[artist_id] = incomplete.get(artist_id, 0) + 1
-        if unknown_size:
-            unverified[artist_id] = unverified.get(artist_id, 0) + 1
-
-    artists = {
-        artist_id: Completeness(
-            total=total.get(artist_id, 0),
-            present=present_by.get(artist_id, 0),
-            incomplete_albums=incomplete.get(artist_id, 0),
-            unverified_albums=unverified.get(artist_id, 0))
-        for artist_id in set(total) | set(incomplete) | set(unverified)
-    }
-    return LibraryFacts(artists=artists, owned_tracks=owned,
-                        missing_tracks=len(tracks) - owned)
+        artists[int(artist_id)] = Completeness(
+            total=int(total or 0), present=int(present or 0),
+            incomplete_albums=int(incomplete or 0), unverified_albums=int(unverified or 0))
+    return LibraryFacts(artists=artists, owned_tracks=owned, missing_tracks=counted - owned)
 
 
 # -- the kept answer ---------------------------------------------------------

@@ -99,12 +99,12 @@ def test_list_artists_stats(imported_conn):
     assert drake["album_count"] == 1
     assert drake["single_count"] == 1
     # §16.2: 'Views' is only partially owned (Hotline Bling has no file), so the
-    # album is no longer blanket-monitored and its missing track is not wanted —
-    # the index stat therefore counts only owned-or-wanted tracks (both present
-    # 'One Dance' cuts), not the un-wanted missing one.
-    assert drake["track_count"] == 2
+    # album is no longer blanket-monitored and its missing track is not wanted.
+    # Drake isn't on the Watchlist, so the count is the albums you have
+    # (#2106 follow-up): Views' missing track counts, as missing.
+    assert drake["track_count"] == 3
     assert drake["tracks_present"] == 2
-    assert drake["tracks_missing"] == 0
+    assert drake["tracks_missing"] == 1
     assert "Wizkid" not in by_name
     wizkid = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Wizkid'").fetchone()[0]
     assert Q.get_artist(imported_conn, wizkid)["in_library"] is True
@@ -553,7 +553,8 @@ def test_list_artists_search_and_totals_include_alias_members(imported_conn):
     assert [artist["id"] for artist in artists] == [drake_id]
     assert artists[0]["album_count"] == 2
     assert artists[0]["single_count"] == 1
-    assert artists[0]["track_count"] == 3
+    # the albums you have: Views' missing track counts too (#2106 follow-up)
+    assert artists[0]["track_count"] == 4
     assert artists[0]["tracks_present"] == 3
     assert artists[0]["total_size_bytes"] == 10777
 
@@ -1217,7 +1218,7 @@ def test_list_artists_can_skip_the_disk_space_rollup(imported_conn):
     # Everything the collapsed list actually renders is unchanged.
     assert by_name["Drake"]["album_count"] == 1
     assert by_name["Drake"]["single_count"] == 1
-    assert by_name["Drake"]["track_count"] == 2
+    assert by_name["Drake"]["track_count"] == 3
     assert by_name["Drake"]["tracks_present"] == 2
     assert by_name["Drake"]["total_size_bytes"] == 0
 
@@ -1422,7 +1423,11 @@ def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):
     conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE id=?", (file_id,))
     conn.commit()
     after = {a["name"]: a for a in Q.list_artists(conn)[0]}["Drake"]
-    assert after["track_count"] == before["track_count"] - 1
+    # the guest verse on someone else's album he holds nothing of never counts
+    assert before["track_count"] == before["tracks_present"] + 1
+    # nothing of that release is left, so it no longer counts at all (the
+    # albums you have, #2106 follow-up), and nothing reads as missing
+    assert after["track_count"] < before["track_count"]
     assert after["tracks_missing"] == 0
 
 

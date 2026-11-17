@@ -274,6 +274,10 @@ export interface LibraryV2ArtistSummary {
   /** #2106: complete is only ever said when something is expected and every
    *  release's size is known */
   completion?: LibraryV2Completion;
+  /** what the count is against: a Watchlist artist's collection settings
+   *  (missing tracks are in Wanted) or, for anyone else, the albums you have
+   *  (missing tracks are on the artist's page) */
+  completeness_basis?: 'watchlist' | 'albums';
 }
 
 /** One row of the album browse (`GET /api/library/v2/albums`). */
