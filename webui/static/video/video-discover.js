@@ -42,11 +42,27 @@
     // Session-memoized GET → JSON for the list endpoint, so revisiting Discover /
     // paging / reopening a category is instant and doesn't re-hit TMDB. (Ownership
     // is re-stamped server-side; caching for a session is fine.)
+    // A list call that never answers used to leave its rail on the skeleton for
+    // good (#2158), so every call gets a deadline: past it the promise rejects
+    // and the caller shows its retry. Resolves null for a non-OK answer.
+    var LIST_TIMEOUT_MS = 25000;
     function cachedFetch(url) {
         if (listCache[url]) return Promise.resolve(listCache[url]);
-        return fetch(url, { headers: { Accept: 'application/json' } })
+        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timer = null;
+        var call = fetch(url, ctl ? { headers: { Accept: 'application/json' }, signal: ctl.signal }
+                                  : { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) { if (d) listCache[url] = d; return d; });
+        var deadline = new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+                if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+                reject(new Error('timeout'));
+            }, LIST_TIMEOUT_MS);
+        });
+        return Promise.race([call, deadline]).then(
+            function (d) { clearTimeout(timer); return d; },
+            function (err) { clearTimeout(timer); throw err; });
     }
 
     // ── the rail stack (personalized + curated + genre + decade) ──────────────
@@ -976,15 +992,21 @@
             '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
         '</div>';
     }
+    // The skeleton has the card's shape (poster + two text lines) so the row
+    // doesn't jump when the posters land.
+    function skeletonHtml() {
+        return '<div class="vdsc-skel" aria-hidden="true">' + Array(9).join(
+            '<div class="vdsc-skel-card"><div class="vdsc-skel-poster"></div>' +
+            '<div class="vdsc-skel-line"></div><div class="vdsc-skel-line vdsc-skel-line--short"></div></div>') +
+            '</div>';
+    }
     // A lazy rail (skeleton until scrolled into view, then filled by fillShelf).
     function lazyShelfHtml(sh) {
         var rankCls = sh.ranked ? ' vdsc-shelf--ranked' : '';
         var rankAttr = sh.ranked ? ' data-vdsc-ranked="1"' : '';
         return '<section class="vdsc-shelf' + rankCls + '"' + rankAttr + ' data-vdsc-q="' + esc(sh.q) + '" data-vdsc-title="' + esc(sh.title) + '">' +
             '<div class="vdsc-shelf-head"><h3 class="vdsc-shelf-title">' + esc(sh.title) + '</h3>' + shelfNav(true) + '</div>' +
-            '<div class="vdsc-rail" data-vdsc-rail>' +
-                '<div class="vdsc-skel">' + Array(8).join('<div class="vdsc-skel-card"></div>') + '</div>' +
-            '</div>' +
+            '<div class="vdsc-rail" data-vdsc-rail aria-busy="true">' + skeletonHtml() + '</div>' +
         '</section>';
     }
     // A pre-filled rail (async personalized rows already carry their items — no skeleton).
@@ -1023,7 +1045,35 @@
             return html;
         }).join('');
         wireJumpNav(host);
+        spyJumpNav(host);
         observeShelves();
+    }
+    // The chip for the group you're reading lights up, so the nav says where
+    // you are instead of floating above the page.
+    function spyJumpNav(host) {
+        if (state.spy) { state.spy.disconnect(); state.spy = null; }
+        var nav = $('[data-vdsc-jumpnav]', host);
+        if (!nav || !('IntersectionObserver' in window)) return;
+        var mark = function (id) {
+            var chips = nav.querySelectorAll('[data-jump]');
+            for (var i = 0; i < chips.length; i++) {
+                var on = chips[i].getAttribute('data-jump') === id;
+                chips[i].classList.toggle('vdsc-jump--on', on);
+                if (on) {
+                    chips[i].setAttribute('aria-current', 'true');
+                    var c = chips[i];
+                    if (c.offsetLeft < nav.scrollLeft || c.offsetLeft + c.offsetWidth > nav.scrollLeft + nav.clientWidth) {
+                        try { nav.scrollTo({ left: c.offsetLeft - 16, behavior: 'smooth' }); } catch (e) { nav.scrollLeft = c.offsetLeft - 16; }
+                    }
+                } else chips[i].removeAttribute('aria-current');
+            }
+        };
+        // a thin band a third of the way down the screen: whichever group crosses it is "here"
+        state.spy = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) { if (en.isIntersecting) mark(en.target.getAttribute('data-group')); });
+        }, { rootMargin: '-30% 0px -65% 0px' });
+        var groups = host.querySelectorAll('.vdsc-group');
+        for (var i = 0; i < groups.length; i++) state.spy.observe(groups[i]);
     }
     // Smooth-scroll to a group when its jump chip is clicked (delegated, wired once).
     function wireJumpNav(host) {
@@ -1101,20 +1151,53 @@
         var q = shelf.getAttribute('data-vdsc-q') +
             (ranked ? (hideOwned ? '&hide_owned=1' : '')
                     : (hideOwned ? '&hide_owned=1' : '&pages=2'));
-        cachedFetch(LIST_URL + '?' + q)
-            .then(function (d) {
-                var items = (d && d.items) || [];
-                if (ranked) items = items.slice(0, 10);
-                if (!items.length) { shelf.remove(); pruneGroup(grp); return; }   // drop empty shelves
-                if (rail) {
-                    rail.innerHTML = ranked
-                        ? items.map(function (it, i) { return rankedCard(it, i + 1); }).join('')
-                        : items.map(card).join('');
-                    stagger(rail); hydrateGet(rail);
-                }
-                shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
-            })
-            .catch(function () { shelf.remove(); pruneGroup(grp); });
+        var tries = 0;
+        // Every outcome replaces the skeleton (#2158): cards, gone (an honest
+        // empty row hides, its group too once nothing is left), or a short
+        // "couldn't load" line with Try again. A failure gets one quiet retry
+        // first, so a blip doesn't show an error at all.
+        var settle = function (d) {
+            if (!shelf.isConnected) return;   // a rebuild replaced this shelf
+            var failed = !d || !Array.isArray(d.items);
+            if (failed) {
+                if (tries++ < 1) { setTimeout(attempt, SHELF_RETRY_MS); return; }
+                shelfFailed(shelf);
+                return;
+            }
+            var items = d.items;
+            if (ranked) items = items.slice(0, 10);
+            if (!items.length) { shelf.remove(); pruneGroup(grp); return; }   // drop empty shelves
+            if (rail) {
+                rail.innerHTML = ranked
+                    ? items.map(function (it, i) { return rankedCard(it, i + 1); }).join('')
+                    : items.map(card).join('');
+                rail.removeAttribute('aria-busy');
+                stagger(rail); hydrateGet(rail);
+            }
+            shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
+        };
+        var attempt = function () {
+            cachedFetch(LIST_URL + '?' + q).then(settle, function () { settle(null); });
+        };
+        attempt();
+    }
+    var SHELF_RETRY_MS = 1500;
+    // A rail that couldn't load: one quiet line in place of the skeleton, so
+    // the page doesn't keep a poster-tall hole, and a way to try again.
+    function shelfFailed(shelf) {
+        var rail = $('[data-vdsc-rail]', shelf);
+        shelf.classList.add('vdsc-shelf--failed');
+        if (!rail) return;
+        rail.removeAttribute('aria-busy');
+        rail.innerHTML = '<div class="vdsc-rail-msg" role="status"><span>Couldn\u2019t load this row.</span>' +
+            '<button class="vdsc-rail-retry" type="button" data-vdsc-retry>Try again</button></div>';
+    }
+    function retryShelf(shelf) {
+        var rail = $('[data-vdsc-rail]', shelf);
+        shelf.classList.remove('vdsc-shelf--failed');
+        shelf.removeAttribute('data-vdsc-loaded');
+        if (rail) { rail.setAttribute('aria-busy', 'true'); rail.innerHTML = skeletonHtml(); }
+        fillShelf(shelf);
     }
 
     // Eager tile art: the browse strip sits ABOVE the genre rails, so painting
@@ -1518,6 +1601,12 @@
             }
             var applyBtn = e.target.closest('[data-vdsc-apply]');
             if (applyBtn) { applyFilter(); syncFilterBar(); return; }
+            var retry = e.target.closest('[data-vdsc-retry]');
+            if (retry) {
+                var rshelf = retry.closest('.vdsc-shelf');
+                if (rshelf) retryShelf(rshelf);
+                return;
+            }
             var seeall = e.target.closest('[data-vdsc-seeall]');
             if (seeall) {
                 var shelf = seeall.closest('.vdsc-shelf');
