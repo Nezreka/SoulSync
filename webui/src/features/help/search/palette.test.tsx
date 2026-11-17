@@ -5,7 +5,6 @@
  */
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { installHelpKeys, uninstallHelpKeys } from '../host';
@@ -14,7 +13,6 @@ import { loadDocs } from './docs';
 import { installRealDocs } from './docs.test-utils';
 import { Palette, closePalette, isPaletteOpen, openPalette, usePalette } from './palette';
 import { RECENT_KEY } from './rank';
-
 
 type G = Window & { isPageAllowed?: (id: string) => boolean };
 const g = window as unknown as G;

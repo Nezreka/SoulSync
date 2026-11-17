@@ -15,6 +15,7 @@ import { registeredPageIds } from './pages';
 import {
   RELEASES,
   RELEASE_NOTES_READY,
+  type ReleaseNotesBridge,
   compareVersions,
   currentRelease,
   installReleaseNotes,
@@ -136,8 +137,10 @@ describe('the window bridge', () => {
     window.addEventListener(RELEASE_NOTES_READY, ready, { once: true });
     installReleaseNotes();
     expect(ready).toHaveBeenCalledTimes(1);
-    expect(window.SoulSyncReleaseNotes?.latestVersion()).toBe('3.6.7');
-    expect(window.SoulSyncReleaseNotes?.modalSections()).toEqual(modalSections('3.6.7'));
+    // typed again: tsc narrows the property to never after the delete
+    const bridge = window.SoulSyncReleaseNotes as ReleaseNotesBridge | undefined;
+    expect(bridge?.latestVersion()).toBe('3.6.7');
+    expect(bridge?.modalSections()).toEqual(modalSections('3.6.7'));
   });
 
   it('importing the module publishes nothing: mountHelpHost installs it', () => {

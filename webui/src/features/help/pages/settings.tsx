@@ -17,12 +17,7 @@ import { TAB_TITLES } from '@/features/settings/shell';
 
 import type { HealthFinding, HealthFix } from '../api';
 
-import {
-  registerPageHelp,
-  type AnswerContext,
-  type PageAnswer,
-  type PageHeading,
-} from './index';
+import { registerPageHelp, type AnswerContext, type PageAnswer, type PageHeading } from './index';
 import { Act, Acts, findingAnswers, readArticle, sentence, useHealthFindings } from './kit';
 
 type Media = 'music' | 'video';

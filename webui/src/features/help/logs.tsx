@@ -13,11 +13,11 @@ import type { ViewProps } from './view-props';
 
 import a from './admin.module.css';
 import { allLogsURL, getLogs, logDownloadURL, startDownload } from './api';
+import { openSettings } from './fixes';
 import { ago, formatBytes } from './format';
 import { Glyph } from './glyphs';
 import h from './help.module.css';
 import { Icon } from './icons';
-import { openSettings } from './fixes';
 import { Switch } from './switch';
 import { Label } from './ui';
 

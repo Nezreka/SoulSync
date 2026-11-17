@@ -30,8 +30,8 @@ import {
   fetchReviewQueueSummary,
   fetchTaskDetail,
 } from '@/routes/active-downloads/-adl.api';
-import { musicDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { downloadFailureSummary } from '@/routes/active-downloads/-adl.helpers';
+import { musicDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
 
 import type { HealthFinding } from '../api';

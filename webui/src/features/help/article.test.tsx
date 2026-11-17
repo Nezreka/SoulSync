@@ -9,7 +9,6 @@ import { installRealDocs } from './search/docs.test-utils';
 import { Markdown } from './search/markdown';
 import { useHelpStore } from './store';
 
-
 beforeAll(async () => {
   installRealDocs();
   await loadDocs();

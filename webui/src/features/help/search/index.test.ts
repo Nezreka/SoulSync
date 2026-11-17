@@ -3,7 +3,6 @@
  * sidebar's own answer for pages, ranking across kinds, the hand-off.
  */
 
-import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ACTIONS, actionsFor } from './actions';
@@ -21,7 +20,6 @@ import {
   type Viewer,
 } from './index';
 import { RECENT_KEY, noteRecent } from './rank';
-
 
 type G = Window & {
   isPageAllowed?: (id: string) => boolean;

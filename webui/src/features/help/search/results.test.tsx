@@ -13,7 +13,6 @@ import { loadDocs } from './docs';
 import { installRealDocs } from './docs.test-utils';
 import { RECENT_KEY } from './rank';
 
-
 beforeAll(async () => {
   installRealDocs();
   await loadDocs();

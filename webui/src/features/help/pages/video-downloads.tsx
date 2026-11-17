@@ -15,6 +15,7 @@
 
 import type { VdlDownload } from '@/routes/active-downloads/-vdl.types';
 
+import { videoDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { vdlBackups } from '@/routes/active-downloads/-dl.format';
 import {
   blockVideoRelease,
@@ -22,7 +23,6 @@ import {
   fetchVideoDownloads,
   retryVideoDownload,
 } from '@/routes/active-downloads/-vdl.api';
-import { videoDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import {
   vdlCanBlock,
   vdlCardTitle,

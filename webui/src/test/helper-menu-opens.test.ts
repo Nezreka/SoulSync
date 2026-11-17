@@ -115,7 +115,7 @@ describe('the help button', () => {
     expect(w._helperPageId()).toBe('library');
   });
 
-  it('helper.js binds no keys at all: ?, F1, Ctrl K and Esc are the sheet\'s', () => {
+  it("helper.js binds no keys at all: ?, F1, Ctrl K and Esc are the sheet's", () => {
     expect(HELPER).not.toContain("'keydown'");
     expect(HELPER).not.toContain('"keydown"');
   });
@@ -205,7 +205,10 @@ describe('Ctrl/Cmd K has one owner', () => {
         if (ent.isDirectory()) {
           if (ent.name === 'dist' || ent.name === 'node_modules') continue;
           walk(path);
-        } else if (/\.(js|ts|tsx)$/.test(ent.name) && !/\.test(-utils)?\.|\.d\.ts$/.test(ent.name)) {
+        } else if (
+          /\.(js|ts|tsx)$/.test(ent.name) &&
+          !/\.test(-utils)?\.|\.d\.ts$/.test(ent.name)
+        ) {
           out.push(path);
         }
       }
@@ -224,7 +227,8 @@ describe('Ctrl/Cmd K has one owner', () => {
       lines.forEach((line, i) => {
         if (!kCheck.test(line)) return;
         const near = lines.slice(Math.max(0, i - 3), i + 4).join('\n');
-        if (/ctrlKey|metaKey/.test(near)) owners.push(relative(process.cwd(), file).replace(/\\/g, '/'));
+        if (/ctrlKey|metaKey/.test(near))
+          owners.push(relative(process.cwd(), file).replace(/\\/g, '/'));
       });
     }
     expect([...new Set(owners)]).toEqual(['src/features/help/host.tsx']);

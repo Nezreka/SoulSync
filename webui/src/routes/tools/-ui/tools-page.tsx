@@ -9,7 +9,7 @@
  * The `#tools-page` id IS kept: style.css scopes the cards' rules under it.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import type { ToolsMedia } from '../-tools.media';
 

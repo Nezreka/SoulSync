@@ -16,7 +16,10 @@ function settingsPage(visible = true): HTMLInputElement {
     '<div id="settings-page"><input id="stg-search-input" /><input id="other-field" /></div>';
   const page = document.getElementById('settings-page')!;
   // jsdom has no layout: offsetParent is how the shell tells the page is showing
-  Object.defineProperty(page, 'offsetParent', { configurable: true, get: () => (visible ? document.body : null) });
+  Object.defineProperty(page, 'offsetParent', {
+    configurable: true,
+    get: () => (visible ? document.body : null),
+  });
   return document.getElementById('stg-search-input') as HTMLInputElement;
 }
 

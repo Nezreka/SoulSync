@@ -373,9 +373,7 @@ describe('one poll, not two', () => {
     expect(polls).toBe(0);
     act(() => detach());
     await waitFor(() => expect(polls).toBeGreaterThan(0));
-    await waitFor(() =>
-      expect(titles(container)[0]).toBe('Why are 3 downloads stuck in Queued?'),
-    );
+    await waitFor(() => expect(titles(container)[0]).toBe('Why are 3 downloads stuck in Queued?'));
   });
 
   it('the page publishes each poll while it is mounted, and stops when it unmounts', async () => {

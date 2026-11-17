@@ -5,7 +5,6 @@ import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload, AdlFilter } from './-
 
 import { fetchBatchHistory, fetchDownloads } from './-adl.api';
 import { isTerminalPhase } from './-adl.batch';
-import { musicDownloadsFeed } from './-dl.feed';
 import {
   ADL_BATCH_HISTORY_POLL_MS,
   ADL_FILTER_STATUSES,
@@ -14,6 +13,7 @@ import {
   ADL_REVIEW_STATUSES,
   BATCH_FADE_SECONDS,
 } from './-adl.types';
+import { musicDownloadsFeed } from './-dl.feed';
 
 export interface AdlDownloadsState {
   downloads: AdlDownload[];

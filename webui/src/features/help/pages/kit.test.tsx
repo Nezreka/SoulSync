@@ -29,7 +29,9 @@ beforeEach(() => {
       posted.push({ url: '/api/test-connection', body: await request.json() });
       return HttpResponse.json({ success: true, message: 'Connected to Jellyfin' });
     }),
-    http.post('*/api/enrichment/spotify/resume', () => HttpResponse.json({ success: false, error: 'Still rate limited' })),
+    http.post('*/api/enrichment/spotify/resume', () =>
+      HttpResponse.json({ success: false, error: 'Still rate limited' }),
+    ),
     http.get('*/api/help/health', ({ request }) => {
       if (new URL(request.url).searchParams.get('fresh')) fresh += 1;
       return HttpResponse.json({ status: 'ok', findings: [] });
@@ -55,7 +57,12 @@ describe('a fix from an answer', () => {
     const clicked = vi.fn();
     nav.addEventListener('click', clicked);
     document.body.appendChild(nav);
-    await runFix({ label: 'Open Library folders', kind: 'settings', tab: 'library', media: 'video' });
+    await runFix({
+      label: 'Open Library folders',
+      kind: 'settings',
+      tab: 'library',
+      media: 'video',
+    });
     expect(window._switchAppSide).toHaveBeenCalledWith('video');
     expect(clicked).toHaveBeenCalledTimes(1);
     expect(window.switchSettingsTab).toHaveBeenCalledWith('library');
@@ -64,7 +71,13 @@ describe('a fix from an answer', () => {
   it("a post says the server's own words, and the answers re-read Health", async () => {
     const done = vi.fn();
     await runFix(
-      { label: 'Test again', kind: 'post', url: '/api/test-connection', body: { service: 'jellyfin' }, recheck: true },
+      {
+        label: 'Test again',
+        kind: 'post',
+        url: '/api/test-connection',
+        body: { service: 'jellyfin' },
+        recheck: true,
+      },
       done,
     );
     expect(posted).toEqual([{ url: '/api/test-connection', body: { service: 'jellyfin' } }]);
@@ -75,7 +88,10 @@ describe('a fix from an answer', () => {
 
   it('a refused post says why and checks nothing again', async () => {
     const done = vi.fn();
-    await runFix({ label: 'Resume', kind: 'post', url: '/api/enrichment/spotify/resume', recheck: true }, done);
+    await runFix(
+      { label: 'Resume', kind: 'post', url: '/api/enrichment/spotify/resume', recheck: true },
+      done,
+    );
     expect(window.showToast).toHaveBeenCalledWith('Still rate limited', 'error');
     expect(fresh).toBe(0);
     expect(done).not.toHaveBeenCalled();
@@ -98,7 +114,10 @@ describe('a fix from an answer', () => {
   it('openSettings, from an answer, gets the sheet out of the way on a phone', () => {
     const before = window.matchMedia;
     window.matchMedia = ((q: string) =>
-      ({ matches: q.includes('max-width'), media: q }) as MediaQueryList) as typeof window.matchMedia;
+      ({
+        matches: q.includes('max-width'),
+        media: q,
+      }) as MediaQueryList) as typeof window.matchMedia;
     try {
       useHelpStore.getState().openSheet();
       openSettings('downloads');

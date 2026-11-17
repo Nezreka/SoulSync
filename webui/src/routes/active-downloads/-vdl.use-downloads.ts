@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { VdlDownload, VdlFilter, VdlMeta, VdlView, VdlYtMeta } from './-vdl.types';
 
+import { videoDownloadsFeed } from './-dl.feed';
 import {
   blockAndRetryFailedVideoDownloads,
   blockVideoRelease,
@@ -35,7 +36,6 @@ import {
   vdlMetaURL,
   vdlRowType,
 } from './-vdl.helpers';
-import { videoDownloadsFeed } from './-dl.feed';
 import { VDL_POLL_ACTIVE_MS, VDL_POLL_IDLE_MS } from './-vdl.types';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
