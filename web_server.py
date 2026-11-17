@@ -9014,6 +9014,7 @@ def manual_search_for_task(task_id):
 
 
 @app.route('/api/scan/request', methods=['POST'])
+@admin_only
 def request_media_scan():
     """
     Request a media library scan.
@@ -9072,6 +9073,7 @@ def clear_all_searches():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/maintain', methods=['POST'])
+@admin_only
 def maintain_search_history():
     """
     Maintain search history by keeping only recent searches.
@@ -10139,6 +10141,7 @@ _reconcile_ids_lock = threading.Lock()
 
 
 @app.route('/api/library/reconcile-embedded-ids', methods=['POST'])
+@admin_only
 def reconcile_embedded_ids():
     """Scan every library file for embedded provider IDs and gap-fill them
     into the DB so enrichment workers skip the API lookup. Runs in the
@@ -10813,6 +10816,7 @@ def library_log_play_eligible():
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
+@admin_only
 def library_enrich_entity():
     """Trigger enrichment of a specific entity from a single service.
     Body: { entity_type: 'artist'|'album'|'track', entity_id: str, service: str,
@@ -11202,6 +11206,7 @@ def library_clear_match():
 
 @app.route('/api/library/album/<album_id>/import-existing-track', methods=['POST'])
 @app.route('/api/library/album/<album_id>/missing-track/import-existing', methods=['POST'])
+@admin_only
 def library_import_existing_track_for_missing_slot(album_id):
     """Use an existing library file as source audio for a missing album slot.
 
@@ -11267,6 +11272,7 @@ def get_blacklist():
 
 
 @app.route('/api/library/blacklist', methods=['POST'])
+@admin_only
 def add_to_blacklist():
     """Add a download source to the blacklist."""
     try:
@@ -11285,6 +11291,7 @@ def add_to_blacklist():
 
 
 @app.route('/api/library/blacklist/<int:blacklist_id>', methods=['DELETE'])
+@admin_only
 def remove_from_blacklist(blacklist_id):
     """Remove an entry from the blacklist."""
     try:
@@ -15246,6 +15253,7 @@ _init_duplicate_cleaner(
 )
 
 @app.route('/api/duplicate-cleaner/start', methods=['POST'])
+@admin_only
 def start_duplicate_cleaner():
     """Start the duplicate cleaner"""
     with duplicate_cleaner_lock:
@@ -15282,6 +15290,7 @@ def get_duplicate_cleaner_status():
         return jsonify(state_copy)
 
 @app.route('/api/duplicate-cleaner/stop', methods=['POST'])
+@admin_only
 def stop_duplicate_cleaner():
     """Stop the duplicate cleaner (sets a stop flag)"""
     with duplicate_cleaner_lock:
@@ -20902,6 +20911,7 @@ def _get_lb_discover_playlists(playlist_type):
 # ── listenbrainz + lastfm radio endpoints live in api/listenbrainz_routes.py ─
 
 @app.route('/api/metadata/start', methods=['POST'])
+@admin_only
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
     global metadata_update_worker, metadata_update_runtime_worker, metadata_update_state
@@ -21006,6 +21016,7 @@ def start_metadata_update():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/stop', methods=['POST'])
+@admin_only
 def stop_metadata_update():
     """Stop the metadata update process"""
     global metadata_update_state
