@@ -45,9 +45,26 @@ _SOURCES = ("spotify", "deezer")
 ONLINE_REFRESH = True
 
 
+# what a credit refresh learned about a provider track id, one-artist answers
+# included (the snapshot keeps only lists of two or more), so a reader that
+# asked once never makes the refresh ask again
+LIB2_CREDIT_CHECKS_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_credit_checks (
+    source TEXT NOT NULL,                             -- 'spotify' | 'deezer'
+    provider_id TEXT NOT NULL,                        -- the track's id there
+    names_json TEXT NOT NULL DEFAULT '[]',            -- its credited artists
+    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (source, provider_id)
+) WITHOUT ROWID
+"""
+# a provider can re-credit a track; an answer this old is asked again
+CREDIT_CHECK_TTL_DAYS = 180
+
+
 def ensure_provider_credits_schema(cursor: Any) -> None:
     """The snapshot table, its provider-id index and the cleanup triggers."""
     cursor.execute(LIB2_PROVIDER_CREDITS_DDL)
+    cursor.execute(LIB2_CREDIT_CHECKS_DDL)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_provider_credits_artist "
                    "ON lib2_provider_credits(source, source_artist_id)")
     for entity, table in (("track", "lib2_tracks"), ("album", "lib2_albums")):
@@ -405,6 +422,119 @@ def schedule_match_credits(database: Any, entity_type: str, entity_id: int,
         return None
 
 
-__all__ = ["drop_source_credits", "ensure_provider_credits_schema",
+def checked_track_credits(conn: Any, track_id: Any) -> list:
+    """``[(source, names)]`` the credit refresh recorded for this track's
+    current provider ids, fresh ones only. Never raises."""
+    out = []
+    try:
+        from core.library2.worker_support import stored_provider_id
+        for service in _SOURCES:
+            provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
+            if not provider_id:
+                continue
+            row = conn.execute(
+                "SELECT names_json FROM lib2_credit_checks WHERE source=? AND provider_id=? "
+                "AND checked_at >= datetime('now', ?)",
+                (service, provider_id, f"-{CREDIT_CHECK_TTL_DAYS} days")).fetchone()
+            if row is not None:
+                import json
+                names = [str(n) for n in json.loads(row[0] or "[]") if str(n or "").strip()]
+                out.append((service, names))
+    except Exception as exc:  # noqa: BLE001 - a reader never fails on the ledger
+        logger.debug("credit checks for track %s not read: %s", track_id, exc)
+    return out
+
+
+def _record_check(conn: Any, service: str, provider_id: str, artists: list) -> None:
+    import json
+    names = [str(a.get("name") if isinstance(a, dict) else a or "").strip() for a in artists]
+    conn.execute(LIB2_CREDIT_CHECKS_DDL)
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_credit_checks(source, provider_id, names_json, checked_at)"
+        " VALUES(?, ?, ?, CURRENT_TIMESTAMP)",
+        (service, str(provider_id), json.dumps([n for n in names if n], ensure_ascii=False)))
+
+
+def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterable[str]] = None,
+                         *, match: bool = True) -> bool:
+    """Make sure the library holds a track's credit list from each of
+    ``services`` (Spotify, Deezer; default both), for readers that need it
+    (the Split Artists job, the credit healers). Uses the writers that exist:
+
+    - a track with no id at a service is matched there first by the native
+      enrichment (``enrich_native_entity_for_service``), when ``match``
+    - a track with an id gets its credits fetched by id and stored as its
+      snapshot (``link_credited_artists``, which also credits every guest
+      the library has); the answer, a one-artist one too, is recorded in
+      ``lib2_credit_checks``
+
+    A service the track already has a snapshot or a fresh check for is not
+    asked. Returns whether anything new was stored. Never raises: a reader
+    without the data decides from what it has."""
+    if not ONLINE_REFRESH:
+        return False
+    from core.library2 import locks
+
+    allowed = None if services is None else set(services)
+    wanted = [s for s in _SOURCES if allowed is None or s in allowed]
+    stored_any = False
+    for service in wanted:
+        conn = None
+        try:
+            from core.library2.worker_support import stored_provider_id
+            conn = database._get_connection()
+            if locks.blocks_entity("track", track_id, "metadata", "Credit refresh", conn=conn):
+                continue
+            provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
+            has_snapshot = conn.execute(
+                "SELECT 1 FROM lib2_provider_credits WHERE entity_type='track' AND entity_id=?"
+                " AND source=? LIMIT 1", (int(track_id), service)).fetchone() is not None
+            if has_snapshot or (provider_id and any(
+                    s == service for s, _n in checked_track_credits(conn, track_id))):
+                continue
+            if not provider_id and match:
+                from core.library2.native_enrich import enrich_native_entity_for_service
+                result = enrich_native_entity_for_service(conn, "track", int(track_id), service)
+                conn.commit()
+                if (result or {}).get("success") and (result or {}).get("source", service) == service:
+                    provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
+            if not provider_id:
+                continue
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            logger.debug("credit refresh for track %s via %s skipped: %s", track_id, service, exc)
+            continue
+        finally:
+            if conn is not None:
+                conn.close()
+        # the provider call runs with no connection open
+        try:
+            artists = _fetch_credits(service, "track", provider_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("credit fetch for track %s via %s failed: %s", track_id, service, exc)
+            artists = None
+        if artists is None:
+            continue  # unreachable: nothing recorded, asked again next time
+        conn = None
+        try:
+            from core.library2.worker_support import stored_provider_id
+            conn = database._get_connection()
+            if locks.blocks_entity("track", track_id, "metadata", "Credit refresh", conn=conn):
+                continue
+            if str(stored_provider_id(conn, "track", track_id, service) or "") != provider_id:
+                continue  # matched again while the fetch ran
+            link_credited_artists(conn, "track", int(track_id), service, artists)
+            _record_check(conn, service, provider_id, artists)
+            conn.commit()
+            stored_any = True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("credits for track %s via %s not stored: %s", track_id, service, exc)
+        finally:
+            if conn is not None:
+                conn.close()
+    return stored_any
+
+
+__all__ = ["checked_track_credits", "drop_source_credits", "ensure_provider_credits_schema",
+           "ensure_track_credits",
            "link_credited_artists", "materialize_artist_credits",
            "refresh_match_credits", "schedule_match_credits"]

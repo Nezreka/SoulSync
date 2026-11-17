@@ -32,6 +32,7 @@ _EXPECTED_TABLES = {
     "lib2_artist_rollup",
     # Provider credit snapshots, linked when a guest artist joins (A04).
     "lib2_provider_credits",
+    "lib2_credit_checks",
     "lib2_catalogue_redirects", "lib2_catalogue_provider_aliases",
     # The Songs tab's search index (upstream #1906 speed): the FTS5 table with
     # its shadow tables, the dirty queue and the build/count state.
