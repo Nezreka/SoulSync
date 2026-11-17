@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
  */
 
 const INIT = readFileSync(resolve(process.cwd(), 'static/init.js'), 'utf8');
+// the sidebar rule updateProfileIndicator hands the nav to (#2156)
+const NAV = readFileSync(resolve(process.cwd(), 'static/profile-nav.js'), 'utf8');
 
 function extract(name: string): string {
   const start = INIT.indexOf(`function ${name}() {`);
@@ -25,6 +27,7 @@ function run(profile: Profile) {
       <span id="profile-indicator-name"></span><button id="profile-indicator-button"></button></div>
     <div class="status-section status-section--clickable" data-music-only>music status</div>
     <div class="status-section status-section--clickable" data-video-only>video status</div>`;
+  new Function(NAV)();
   const fn = new Function(
     'currentProfile',
     'renderProfileAvatar',
