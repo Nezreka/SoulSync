@@ -242,3 +242,38 @@ describe('the live viewer', () => {
     expect(unsubscribed).toBe(1);
   });
 });
+
+describe('Download', () => {
+  afterEach(() => {
+    delete window.SoulSyncHelp;
+  });
+
+  it("opens the help sheet's Logs view: every log, its backups, secrets removed", () => {
+    const open = vi.fn();
+    window.SoulSyncHelp = {
+      open,
+      close: vi.fn(),
+      toggle: vi.fn(),
+      isOpen: () => false,
+      openSearch: vi.fn(),
+    };
+    render(<LogsTab {...props(false, 0)} />);
+    fireEvent.click(screen.getByText('Download'));
+    expect(open).toHaveBeenCalledWith('logs');
+  });
+
+  it('without the sheet, downloads every log as one zip, still redacted', () => {
+    const hrefs: string[] = [];
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        hrefs.push(this.getAttribute('href') ?? '');
+      });
+    render(<LogsTab {...props(false, 0)} />);
+    fireEvent.click(screen.getByText('Download'));
+    expect(hrefs).toHaveLength(1);
+    expect(hrefs[0]).toMatch(/\/api\/help\/logs\/download-all$/);
+    expect(hrefs[0]).not.toContain('raw');
+    click.mockRestore();
+  });
+});
