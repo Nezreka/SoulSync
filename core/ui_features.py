@@ -182,6 +182,42 @@ def _admin_key(profile_id: int) -> str:
 
 
 _DEFAULT_KEY = "ui_features_default"
+_CARRIED_KEY = "ui_features_admin_carried_2164"
+
+
+def carry_over_2157(db) -> bool:
+    """once: #2157 kept the admin's set in the member key. a profile locked by
+    hand couldn't write that key itself, so for one with lock "1", a stored
+    member key and no admin key yet, that list is what the admin last saved
+    and what they see today. move it to the admin key so nothing changes for
+    them and the editor shows it as the admin's. unlocked profiles keep theirs.
+    a failure logs and tries again on the next read. True once it has run."""
+    try:
+        if db.get_metadata(_CARRIED_KEY) == "1":
+            return True
+        getter = getattr(db, "get_all_profiles", None)
+        if getter is None:
+            return False
+        for profile in getter() or []:
+            if not admin_sets(profile):
+                continue
+            pid = int(profile["id"])
+            if db.get_metadata(_lock_key(pid)) != "1" or db.get_metadata(_admin_key(pid)) is not None:
+                continue
+            raw = db.get_metadata(_key(pid))
+            if raw is None:
+                continue
+            clean = json.dumps(normalize_off(raw))
+            db.set_metadata(_admin_key(pid), clean)
+            if db.get_metadata(_admin_key(pid)) != clean:
+                raise RuntimeError(f"couldn't carry over profile {pid}")
+            db.delete_metadata(_key(pid))
+            logger.info("features: carried profile %s's locked set over to the admin layer (#2164)", pid)
+        db.set_metadata(_CARRIED_KEY, "1")
+        return True
+    except Exception as e:  # noqa: BLE001 - nothing lost, try again next read
+        logger.warning("features: carrying #2157 locked sets over failed, will retry: %s", e)
+        return False
 
 
 def _profile(db, profile_id: Optional[int]) -> Optional[Dict[str, Any]]:
@@ -307,6 +343,7 @@ def load_off(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = 
     member's own pick never wins (#2164). never a part it can't hide."""
     if profile_id is None:
         return []
+    carry_over_2157(db)
     profile = profile if profile is not None else _profile(db, profile_id)
     if not admin_sets(profile):
         stored = _stored_off(db, profile_id) or []
@@ -471,6 +508,7 @@ def admin_payload(db, profile_id: int) -> Dict[str, Any]:
     """the profile payload plus what the admin's editor needs (#2164): the
     set the admin controls (what a lock shows) and the member's own pick,
     kept apart so the editor never passes one off as the other."""
+    carry_over_2157(db)
     profile = _profile(db, profile_id)
     body = profile_payload(db, profile_id)
     body["set_off"] = admin_set_off(db, profile_id, profile)
@@ -600,7 +638,7 @@ __all__ = ["FEATURES", "FEATURE_IDS", "GROUPS", "PRESETS", "normalize_off", "pre
            "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear", "has_chosen",
            "admin_sets", "fixed_on", "offered", "load_default", "save_default", "follows_default",
            "is_locked", "set_locked", "reset", "profile_payload", "default_payload",
-           "admin_set_off", "own_off", "save_admin_off", "admin_lock", "reset_own", "admin_payload",
+           "admin_set_off", "own_off", "carry_over_2157", "save_admin_off", "admin_lock", "reset_own", "admin_payload",
            "BACKGROUND_FEATURES", "feature_for_automation", "everyone_hid", "load_paused",
            "set_paused", "background_paused", "background_state",
            "payload"]

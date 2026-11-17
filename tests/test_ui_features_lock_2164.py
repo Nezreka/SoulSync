@@ -40,6 +40,9 @@ class _FakeDb:
     def get_profile(self, pid):
         return self.profiles.get(pid)
 
+    def get_all_profiles(self):
+        return list(self.profiles.values())
+
 
 def _member(pid):
     return {'id': pid, 'is_admin': False, 'allowed_sides': 'both', 'allowed_pages': None}
@@ -181,6 +184,72 @@ def test_admins_have_one_layer():
     assert db.get_metadata('ui_features_admin:1') is None
     assert uf.load_off(db, 1) == ['chat']
     assert uf.own_off(db, 1) is None
+
+
+# ── #2157-era data carries over once ─────────────────────────────────────────
+
+def _old_locked(db, pid, off):
+    """what #2157 stored: the admin's set in the member key, locked by hand"""
+    db.rows[f'ui_features_off:{pid}'] = json.dumps(off)
+    db.rows[f'ui_features_locked:{pid}'] = '1'
+
+
+def test_a_2157_locked_set_carries_over_and_shows_the_same():
+    db = _FakeDb([_member(2)])
+    _old_locked(db, 2, ['chat', 'stats'])
+    assert uf.load_off(db, 2) == uf.normalize_off(['chat', 'stats'])
+    assert db.get_metadata('ui_features_off:2') is None
+    assert json.loads(db.get_metadata('ui_features_admin:2')) == uf.normalize_off(['chat', 'stats'])
+    body = uf.admin_payload(db, 2)
+    assert body['set_off'] == uf.normalize_off(['chat', 'stats']) and body['admin_set'] is True
+    assert body['own_off'] is None and body['locked'] is True
+
+
+def test_the_carry_over_leaves_unlocked_and_already_set_profiles_alone():
+    db = _FakeDb([_member(2), _member(3), _member(4), ADMIN])
+    db.rows['ui_features_off:2'] = json.dumps(['discover'])          # unlocked: theirs
+    _old_locked(db, 3, ['chat'])
+    db.rows['ui_features_admin:3'] = json.dumps(['tools'])           # already carried
+    db.rows['ui_features_off:4'] = json.dumps(['podcasts'])
+    db.rows['ui_features_locked:4'] = '0'                             # unlocked by hand
+    _old_locked(db, 1, ['chat'])                                      # admins have one layer
+    uf.carry_over_2157(db)
+    assert db.get_metadata('ui_features_off:2') == json.dumps(['discover'])
+    assert db.get_metadata('ui_features_admin:2') is None
+    assert db.get_metadata('ui_features_admin:3') == json.dumps(['tools'])
+    assert db.get_metadata('ui_features_off:4') == json.dumps(['podcasts'])
+    assert db.get_metadata('ui_features_admin:4') is None
+    assert db.get_metadata('ui_features_off:1') == json.dumps(['chat'])
+    assert uf.load_off(db, 2) == ['discover'] and uf.load_off(db, 4) == ['podcasts']
+
+
+def test_the_carry_over_runs_once():
+    db = _FakeDb([_member(2)])
+    assert uf.carry_over_2157(db) is True
+    assert db.get_metadata('ui_features_admin_carried_2164') == '1'
+    # a member key written after the pass is never touched again
+    _old_locked(db, 2, ['chat'])
+    uf.load_off(db, 2)
+    assert db.get_metadata('ui_features_off:2') == json.dumps(['chat'])
+    assert db.get_metadata('ui_features_admin:2') is None
+
+
+def test_a_failed_carry_over_tries_again_next_read():
+    class Flaky(_FakeDb):
+        fail = True
+
+        def get_all_profiles(self):
+            if self.fail:
+                raise RuntimeError('db busy')
+            return super().get_all_profiles()
+
+    db = Flaky([_member(2)])
+    _old_locked(db, 2, ['chat'])
+    assert uf.carry_over_2157(db) is False
+    assert db.get_metadata('ui_features_admin_carried_2164') is None
+    db.fail = False
+    assert uf.load_off(db, 2) == ['chat']
+    assert db.get_metadata('ui_features_admin:2') == json.dumps(['chat'])
 
 
 # ── page access, the other layer ─────────────────────────────────────────────
