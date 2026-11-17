@@ -5,7 +5,7 @@
  * add and invite flows, and that a member never sees any of it.
  */
 
-import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +14,9 @@ import { settingsStore } from '../../settings-store';
 import { servePeople, signInAs } from './__fixtures__/people-msw';
 import { PeopleTab } from './people-tab';
 
-const editorPresent = Object.keys(import.meta.glob('./editor/index.ts')).length > 0;
+// piece E's sheet: a row opens it; it answers false when it can't open
+const editor = vi.hoisted(() => ({ open: vi.fn((..._args: unknown[]) => true) }));
+vi.mock('./editor/index.ts', () => ({ openPersonEditor: editor.open }));
 
 function show() {
   return render(<PeopleTab store={settingsStore} opened={1} active />);
@@ -156,22 +158,41 @@ describe('the people home', () => {
     expect(openProfileEditor).toHaveBeenCalledWith({ mode: 'create' });
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
     expect(openInviteCreator).toHaveBeenCalled();
-    if (!editorPresent) {
-      fireEvent.keyDown(rowOf('Maya'), { key: 'Enter' });
-      await waitFor(() =>
-        expect(openProfileEditor).toHaveBeenLastCalledWith({
-          mode: 'edit',
-          profile: expect.objectContaining({ id: 3, name: 'Maya' }),
-        }),
-      );
-      fireEvent.click(rowOf('Boulder'));
-      await waitFor(() =>
-        expect(openProfileEditor).toHaveBeenLastCalledWith({
-          mode: 'self',
-          profile: expect.objectContaining({ id: 1 }),
-        }),
-      );
-    }
+    fireEvent.keyDown(rowOf('Maya'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(editor.open).toHaveBeenLastCalledWith(3, { onOpenPolicy: expect.any(Function) }),
+    );
+    // "Change it there" in the sheet opens the Global policy pill
+    const hooks = editor.open.mock.calls.at(-1)![1] as { onOpenPolicy: () => void };
+    act(() => hooks.onOpenPolicy());
+    expect(screen.getByRole('tab', { name: 'Global policy' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(openProfileEditor).not.toHaveBeenCalledWith(expect.objectContaining({ mode: 'edit' }));
+  });
+
+  it('falls back to the old editor when the sheet cannot open', async () => {
+    servePeople();
+    const openProfileEditor = vi.fn();
+    Object.assign(window, { openProfileEditor });
+    editor.open.mockReturnValueOnce(false).mockReturnValueOnce(false);
+    show();
+    await screen.findByText('Maya', { selector: 'div' });
+    fireEvent.keyDown(rowOf('Maya'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(openProfileEditor).toHaveBeenLastCalledWith({
+        mode: 'edit',
+        profile: expect.objectContaining({ id: 3, name: 'Maya' }),
+      }),
+    );
+    fireEvent.click(rowOf('Boulder'));
+    await waitFor(() =>
+      expect(openProfileEditor).toHaveBeenLastCalledWith({
+        mode: 'self',
+        profile: expect.objectContaining({ id: 1 }),
+      }),
+    );
   });
 
   it('lists again when a profile modal closes or the editor saves', async () => {
