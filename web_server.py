@@ -18902,6 +18902,11 @@ def start_missing_tracks_process(playlist_id):
     A single, robust endpoint to kick off the entire missing tracks workflow.
     It creates a batch and starts the master worker in the background.
     """
+    # same check as download_missing: a profile with downloads off asks through
+    # the wishlist (a request the admin approves), it doesn't start a batch here
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json() or {}
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
