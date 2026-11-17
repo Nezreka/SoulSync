@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
 
+import { pageTabs } from '@/features/settings/page-tabs';
+
 import { HelpHost, installHelpApi, installHelpKeys, uninstallHelpKeys } from './host';
 import { pageIdFrom } from './page';
 import { registerPageHelp } from './pages';
@@ -394,6 +396,58 @@ describe('on this page', () => {
     expect(within(here).getByText('Live')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /Download Manager/ })).toBeInTheDocument();
     registerPageHelp({ id: 'active-downloads', useAnswers: undefined });
+  });
+
+  it('Read more opens the article inside the sheet, and Back comes home', async () => {
+    serve();
+    const docsPage = vi.fn();
+    window.navigateToDocsSection = docsPage;
+    mount();
+    act(() => window.SoulSyncHelp!.open());
+    const dialog = await screen.findByRole('dialog', { name: 'Help' });
+    const row = within(dialog).getByRole('button', { name: /Download Manager/ });
+    fireEvent.click(row);
+    const top = useHelpStore.getState().stack.at(-1);
+    expect(top?.view).toBe('article');
+    expect(top?.params?.id).toBeTruthy();
+    expect(useHelpStore.getState().open).toBe(true);
+    // never off to the Help & Docs page
+    expect(docsPage).not.toHaveBeenCalled();
+    act(() => useHelpStore.getState().back());
+    expect(useHelpStore.getState().stack.at(-1)?.view).toBe('home');
+    delete window.navigateToDocsSection;
+  });
+
+  it('Settings names the tab you are on, and follows it', async () => {
+    serve();
+    window.history.replaceState(null, '', '/settings');
+    pageTabs.reset();
+    act(() => pageTabs.show('downloads'));
+    mount();
+    act(() => window.SoulSyncHelp!.open());
+    const dialog = await screen.findByRole('dialog', { name: 'Help' });
+    const here = within(dialog).getByRole('region', { name: 'On this page: Settings, Downloads' });
+    expect(within(here).getByRole('heading', { name: 'Settings, Downloads' })).toBeInTheDocument();
+    expect(here).toHaveTextContent('Queue behavior, retries, publishing, and what gets filtered out.');
+    act(() => pageTabs.show('advanced'));
+    expect(
+      within(dialog).getByRole('region', { name: 'On this page: Settings, System' }),
+    ).toBeInTheDocument();
+    pageTabs.reset();
+  });
+
+  it('a member on Settings keeps the plain heading', async () => {
+    serve();
+    window.history.replaceState(null, '', '/settings');
+    pageTabs.reset();
+    act(() => pageTabs.show('downloads'));
+    mount(MEMBER);
+    act(() => window.SoulSyncHelp!.open());
+    const dialog = await screen.findByRole('dialog', { name: 'Help' });
+    expect(within(dialog).getByRole('region', { name: 'On this page: Settings' })).toHaveTextContent(
+      'Your own accounts, sign-in and what you see.',
+    );
+    pageTabs.reset();
   });
 
   it('What’s new carries the version chip until it is opened', async () => {

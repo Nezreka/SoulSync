@@ -5,7 +5,7 @@
  * points at the Issues they already have (plan 4.10).
  */
 
-import type { UseAnswers } from './pages';
+import type { PageHeading, UseAnswers, UseHeading } from './pages';
 import type { ViewProps } from './view-props';
 
 import './pages/register';
@@ -15,7 +15,7 @@ import {
   DISCORD_URL,
   GITHUB_ISSUES_URL,
   goToPage,
-  openArticle,
+  openArticleInSheet,
   openDocsHome,
   openExternal,
 } from './links';
@@ -127,16 +127,50 @@ function sentence(titles: string[]): string {
 
 // ── on this page ────────────────────────────────────────────────────────
 
-function OnThisPage({ entry, isAdmin, page }: { entry: PageHelp; isAdmin: boolean; page: string }) {
-  const summary = (!isAdmin && entry.memberSummary) || entry.summary;
+function OnThisPage(props: { entry: PageHelp; isAdmin: boolean; page: string }) {
+  const { entry } = props;
+  // keyed by page, as the answers are: a new page is a new component
+  return entry.useHeading ? (
+    <LiveHere key={entry.id} useHeading={entry.useHeading} {...props} />
+  ) : (
+    <Here heading={null} {...props} />
+  );
+}
+
+function LiveHere({
+  useHeading,
+  ...props
+}: {
+  useHeading: UseHeading;
+  entry: PageHelp;
+  isAdmin: boolean;
+  page: string;
+}) {
+  const heading = useHeading({ page: props.page, isAdmin: props.isAdmin });
+  return <Here heading={heading} {...props} />;
+}
+
+function Here({
+  entry,
+  isAdmin,
+  page,
+  heading,
+}: {
+  entry: PageHelp;
+  isAdmin: boolean;
+  page: string;
+  heading: PageHeading | null;
+}) {
+  const title = heading?.title || entry.title;
+  const summary = (!isAdmin && entry.memberSummary) || heading?.summary || entry.summary;
   return (
-    <section className={s.here} aria-label={`On this page: ${entry.title}`}>
+    <section className={s.here} aria-label={`On this page: ${title}`}>
       <div className={s.hereTop}>
         <span className={s.hereIcon} aria-hidden="true">
           <Icon name={entry.icon} size={16} />
         </span>
         <div>
-          <h4 className={s.hereTitle}>{entry.title}</h4>
+          <h4 className={s.hereTitle}>{title}</h4>
           {summary ? <p className={s.hereDesc}>{summary}</p> : null}
         </div>
       </div>
@@ -187,7 +221,7 @@ function ReadMore({ entry, isAdmin }: { entry: PageHelp; isAdmin: boolean }) {
             title={a.title}
             sub={a.lede}
             end="chev"
-            onClick={() => openArticle(a.id)}
+            onClick={() => openArticleInSheet(a.id)}
           />
         ))}
         {tour ? (

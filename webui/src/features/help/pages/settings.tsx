@@ -13,11 +13,17 @@
  */
 
 import { usePageTabs } from '@/features/settings/page-tabs';
+import { TAB_TITLES } from '@/features/settings/shell';
 
 import type { HealthFinding, HealthFix } from '../api';
 
-import { registerPageHelp, type AnswerContext, type PageAnswer } from './index';
-import { Act, Acts, findingAnswers, readArticle, useHealthFindings } from './kit';
+import {
+  registerPageHelp,
+  type AnswerContext,
+  type PageAnswer,
+  type PageHeading,
+} from './index';
+import { Act, Acts, findingAnswers, readArticle, sentence, useHealthFindings } from './kit';
 
 type Media = 'music' | 'video';
 
@@ -111,5 +117,37 @@ function makeUseSettingsAnswers(media: Media) {
 export const useMusicSettingsAnswers = makeUseSettingsAnswers('music');
 export const useVideoSettingsAnswers = makeUseSettingsAnswers('video');
 
-registerPageHelp({ id: 'settings', useAnswers: useMusicSettingsAnswers });
-registerPageHelp({ id: 'video-settings', useAnswers: useVideoSettingsAnswers });
+/**
+ * "Settings, Downloads" and what that tab is for, in the page's own words
+ * (shell.ts TAB_TITLES, the header the tab shows). A member's Settings is
+ * their account, so they keep the plain heading.
+ */
+export function settingsHeading(tab: string, media: Media, isAdmin = true): PageHeading | null {
+  const t = TAB_TITLES[tab];
+  if (!t || !isAdmin) return null;
+  return {
+    title: `${media === 'video' ? 'Video Settings' : 'Settings'}, ${t.title}`,
+    summary: sentence(t.sub),
+  };
+}
+
+function makeUseSettingsHeading(media: Media) {
+  return function useSettingsHeading(ctx: AnswerContext): PageHeading | null {
+    const { tab } = usePageTabs();
+    return settingsHeading(tab, media, ctx.isAdmin);
+  };
+}
+
+export const useMusicSettingsHeading = makeUseSettingsHeading('music');
+export const useVideoSettingsHeading = makeUseSettingsHeading('video');
+
+registerPageHelp({
+  id: 'settings',
+  useAnswers: useMusicSettingsAnswers,
+  useHeading: useMusicSettingsHeading,
+});
+registerPageHelp({
+  id: 'video-settings',
+  useAnswers: useVideoSettingsAnswers,
+  useHeading: useVideoSettingsHeading,
+});

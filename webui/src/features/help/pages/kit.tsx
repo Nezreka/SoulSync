@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { getHealth, request, type HealthFinding, type HealthFix } from '../api';
 import hs from '../help.module.css';
 import { Icon, type IconName } from '../icons';
-import { openExternal } from '../links';
+import { openArticleInSheet, openExternal } from '../links';
 import { useHelpStore } from '../store';
 import s from './answers.module.css';
 
@@ -298,9 +298,7 @@ export function goHref(href: string): void {
 }
 
 /** a docs article, read inside the sheet */
-export function readArticle(id: string): void {
-  useHelpStore.getState().push({ view: 'article', params: { id } });
-}
+export const readArticle = openArticleInSheet;
 
 /** a Settings tab on this side or the video side ('downloads', media 'video') */
 export function openSettings(tab: string, media?: 'video'): void {

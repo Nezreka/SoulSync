@@ -45,6 +45,19 @@ export interface AnswerContext {
 
 export type UseAnswers = (ctx: AnswerContext) => PageAnswer[];
 
+/** what the heading says right now, over the entry's own title and summary */
+export interface PageHeading {
+  title?: string;
+  summary?: string;
+}
+
+/**
+ * A hook, like useAnswers, for a page whose heading follows its own state:
+ * Settings names the tab you're on ("Settings, Downloads"). null keeps the
+ * entry's title and summary.
+ */
+export type UseHeading = (ctx: AnswerContext) => PageHeading | null;
+
 export interface TourRef {
   id: string;
   title: string;
@@ -64,6 +77,7 @@ export interface PageHelp {
   adminArticles?: ArticleRef[];
   tour?: TourRef;
   useAnswers?: UseAnswers;
+  useHeading?: UseHeading;
 }
 
 const registry = new Map<string, PageHelp>();

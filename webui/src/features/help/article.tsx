@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import type { ViewProps } from './view-props';
 
 import s from './article.module.css';
-import { openArticle, openDocsHome } from './links';
+import { openArticleInDocs, openDocsHome } from './links';
 import { findArticle, loadDocs, loadedDocs, type DocsArticle } from './search/docs';
 import { Markdown } from './search/markdown';
 import { useHelpStore } from './store';
@@ -86,7 +86,7 @@ export function ArticleView({ entry }: ViewProps) {
         </h3>
         {article.lede ? <p className={s.lede}>{article.lede}</p> : null}
         <div className={s.open}>
-          <Button icon="book" onClick={() => openArticle(article.id)}>
+          <Button icon="book" onClick={() => openArticleInDocs(article.id)}>
             Open in Help & Docs
           </Button>
         </div>
@@ -95,7 +95,7 @@ export function ArticleView({ entry }: ViewProps) {
         <Markdown source={article.body} onArticle={openHere} />
       </div>
       <footer className={s.foot}>
-        <Button kind="ghost" icon="book" onClick={() => openArticle(article.id)}>
+        <Button kind="ghost" icon="book" onClick={() => openArticleInDocs(article.id)}>
           Read it on the Help & Docs page
         </Button>
       </footer>

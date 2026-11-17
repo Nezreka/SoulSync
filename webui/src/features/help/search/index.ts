@@ -25,7 +25,7 @@ import {
 import type { DocsArticle } from './docs';
 
 import '../pages/register';
-import { goToPage } from '../links';
+import { goToPage, openArticleInSheet } from '../links';
 import { isVideoSide } from '../page';
 import { pageHelpFor } from '../pages';
 import { useHelpStore } from '../store';
@@ -260,11 +260,7 @@ export function articleItems(docs: DocsArticle[] | null): SearchItem[] {
 }
 
 /** an article is read in the sheet, from the inline results or the palette */
-export function openArticleInSheet(id: string): void {
-  const store = useHelpStore.getState();
-  if (store.open) store.push({ view: 'article', params: { id } });
-  else store.openSheet({ view: 'article', params: { id } });
-}
+export { openArticleInSheet };
 
 export function viewerFromStore(): Viewer {
   const st = useHelpStore.getState();

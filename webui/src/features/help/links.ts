@@ -1,6 +1,7 @@
 /** where the sheet sends people: in-app pages, docs articles, the community */
 
 import { isVideoSide } from './page';
+import { useHelpStore } from './store';
 
 export const DISCORD_URL = 'https://discord.gg/wGvKqVQwmy';
 export const GITHUB_ISSUES_URL = 'https://github.com/Nezreka/SoulSync/issues';
@@ -15,8 +16,18 @@ export function goToPage(pageId: string, options?: Record<string, unknown>): voi
   void window.navigateToPage?.(pageId, options);
 }
 
-/** a docs article, on the Help & Docs page (the sheet's own reader is P3's) */
-export function openArticle(id: string): void {
+/**
+ * A docs article, read in the sheet: from Home's Read more, a Learn more, a
+ * search result or the palette. Back returns to where it was opened.
+ */
+export function openArticleInSheet(id: string): void {
+  const store = useHelpStore.getState();
+  if (store.open) store.push({ view: 'article', params: { id } });
+  else store.openSheet({ view: 'article', params: { id } });
+}
+
+/** the same article on the full Help & Docs page (the reader's way out) */
+export function openArticleInDocs(id: string): void {
   if (typeof window.navigateToDocsSection === 'function') window.navigateToDocsSection(id);
   else goToPage(isVideoSide() ? 'video-help' : 'help');
 }
