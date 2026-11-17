@@ -4,14 +4,16 @@ Opt-in and purely additive. A blank/absent ``weather.location`` means the
 feature is off; GET then returns ``snapshot: null`` / ``scene: null`` and the
 sidebar renders nothing.
 
-Auth model (matches the project's legacy-route posture):
-- ``GET /api/weather`` is undecorated. ``get_current_profile_id()`` defaults
-  to profile 1 with no session, so on single-admin installs with no
-  login/PIN there is no network gate at all; on multi-profile installs any
-  profile may read it (the weather line renders in every profile's sidebar).
-- The three PUTs carry ``@admin_only`` from ``core.profile_context``, so on
-  multi-profile installs only admins can change the location, units, or
-  toggle. On single-admin installs the decorator is a no-op.
+Whose weather (#2163): every request answers for the profile asking.
+- Admins read and change the install's weather, the config keys below. On a
+  single-admin install with no login/PIN ``get_current_profile_id()`` is 1,
+  so nothing changes there.
+- Everyone else has their own: the same keys, kept per profile in the
+  database (``_ProfileWeather``). A member with no location of their own sees
+  no weather line at all, never the admin's place, temperature or clock.
+  Their PUTs only ever write their own copy.
+- A request with no profile (signed out, locked) gets the feature-off
+  payload and may not write.
 
 Config keys (dot-notation via ConfigManager):
 - ``weather.location`` — raw user string (zip or city). Blank = feature off.
@@ -52,7 +54,10 @@ config and sidecar for refetching.
 Persistence: the forecast snapshot lives in a small sidecar JSON file next
 to the app config (``sidebar_weather_snapshot.json``) — NOT in the main
 config — so the 30-minute refresh cadence never rewrites the whole app
-config, and restarts keep the last snapshot + its units/coords.
+config, and restarts keep the last snapshot + its units/coords. That file
+is the install's (the admin's) only. Members' snapshots live in a small
+in-memory cache keyed by units + coords, so the install's entry is never
+replaced by someone else's town.
 
 Failure posture: all Open-Meteo HTTP has a 10s timeout. A failed refresh
 serves the stale snapshot when one exists, otherwise ``snapshot: null`` —
@@ -63,13 +68,14 @@ from __future__ import annotations
 
 import json
 import threading
+from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 from flask import Blueprint, jsonify, request
 
-from core.profile_context import admin_only
 from utils.logging_config import get_logger
 
 logger = get_logger("api.sidebar_weather")
@@ -78,6 +84,7 @@ bp = Blueprint("sidebar_weather", __name__)
 
 # Injected by configure() at boot.
 config_manager = None
+get_database = None
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -131,9 +138,94 @@ _CONDITION_TEXT = {
 _cache = {"snapshot": None, "units": None, "latitude": None, "longitude": None}
 _cache_lock = threading.Lock()
 
+# members' snapshots (#2163): {(units, lat, lon): entry}, memory only, the
+# oldest dropped past the cap. weather is public data per place, so two
+# members in one town share an entry.
+_member_cache: "OrderedDict[tuple, dict]" = OrderedDict()
+MEMBER_CACHE_MAX = 64
 
-def configure(*, config_manager):
+
+def configure(*, config_manager, get_database=None):
     globals()["config_manager"] = config_manager
+    globals()["get_database"] = get_database
+
+
+def _db():
+    if get_database is not None:
+        return get_database()
+    from database.music_database import get_database as _default
+    return _default()
+
+
+class _ProfileWeather:
+    """a member's own weather settings (#2163), the same dot keys as the
+    install config so every helper reads either one. kept as one json row in
+    the database metadata table, no schema change."""
+
+    def __init__(self, db, profile_id):
+        self._db = db
+        self._key = f"weather_profile:{int(profile_id)}"
+        self._data = None
+        self._batching = False
+
+    def _load(self):
+        if self._data is None:
+            try:
+                raw = self._db.get_metadata(self._key)
+                data = json.loads(raw) if raw else {}
+            except Exception as exc:  # noqa: BLE001 - unreadable reads as unset
+                logger.debug("sidebar weather: profile settings unreadable: %s", exc)
+                data = {}
+            self._data = data if isinstance(data, dict) else {}
+        return self._data
+
+    @staticmethod
+    def _field(key):
+        return key[len("weather."):] if key.startswith("weather.") else key
+
+    def get(self, key, default=None):
+        return self._load().get(self._field(key), default)
+
+    def set(self, key, value):
+        self._load()[self._field(key)] = value
+        if not self._batching:
+            self._save()
+
+    def _save(self):
+        self._db.set_metadata(self._key, json.dumps(self._load()))
+
+    @contextmanager
+    def batch(self):
+        self._batching = True
+        try:
+            yield
+        finally:
+            self._batching = False
+            self._save()
+
+
+def _viewer_settings():
+    """(settings, shared) for this request: an admin gets the install config
+    (shared=True), anyone else their own copy, a request with no profile
+    (None, False)."""
+    from core import profile_context
+    if profile_context.is_admin_request():
+        return config_manager, True
+    pid = profile_context.get_current_profile_id()
+    if pid is None:
+        return None, False
+    try:
+        return _ProfileWeather(_db(), int(pid)), False
+    except (TypeError, ValueError):
+        return None, False
+
+
+def forget_profile(db, profile_id):
+    """a deleted profile's weather goes with it"""
+    try:
+        db.delete_metadata(f"weather_profile:{int(profile_id)}")
+    except Exception as exc:  # noqa: BLE001 - a leftover row is harmless
+        logger.debug("sidebar weather: forget %s failed: %s", profile_id, exc)
 
 
 def create_blueprint():
@@ -361,30 +453,32 @@ def _save_sidecar(snapshot, units, latitude, longitude):
         logger.warning("sidebar weather: could not persist snapshot: %s", exc)
 
 
-def _use_celsius():
+def _use_celsius(cfg=None):
     """False for US locations (degF), True elsewhere; default False unset."""
-    value = config_manager.get("weather.use_celsius", None)
+    cfg = config_manager if cfg is None else cfg
+    value = cfg.get("weather.use_celsius", None)
     if value is None:
         return False
     return bool(value)
 
 
-def _location_payload():
+def _location_payload(cfg=None):
     """Configured location block, or None when the feature is off."""
-    query = (config_manager.get("weather.location", "") or "").strip()
+    cfg = config_manager if cfg is None else cfg
+    query = (cfg.get("weather.location", "") or "").strip()
     if not query:
         return None
     try:
-        lat = float(config_manager.get("weather.latitude"))
-        lon = float(config_manager.get("weather.longitude"))
+        lat = float(cfg.get("weather.latitude"))
+        lon = float(cfg.get("weather.longitude"))
     except (TypeError, ValueError):
         return None
     return {
         "query": query,
-        "name": config_manager.get("weather.location_name") or query,
+        "name": cfg.get("weather.location_name") or query,
         "latitude": lat,
         "longitude": lon,
-        "country_code": config_manager.get("weather.country_code"),
+        "country_code": cfg.get("weather.country_code"),
     }
 
 
@@ -420,6 +514,40 @@ def _entry_usable(entry, units, latitude, longitude):
     if not _entry_matches(entry, units, latitude, longitude):
         return False
     return _snapshot_age_seconds(entry["snapshot"]) < CACHE_TTL_SECONDS
+
+
+def _member_key(units, latitude, longitude):
+    return (units, round(float(latitude), 4), round(float(longitude), 4))
+
+
+def _remember_member_snapshot(snapshot, units, latitude, longitude):
+    key = _member_key(units, latitude, longitude)
+    with _cache_lock:
+        _member_cache[key] = {"snapshot": snapshot, "units": units,
+                              "latitude": latitude, "longitude": longitude}
+        _member_cache.move_to_end(key)
+        while len(_member_cache) > MEMBER_CACHE_MAX:
+            _member_cache.popitem(last=False)
+
+
+def _get_member_snapshot(location, units):
+    """a member's snapshot: the shared install entry and sidecar are never
+    read or written here. fresh cached, else refresh, else the stale entry
+    for these coords+units, else None. Never raises."""
+    latitude = location["latitude"]
+    longitude = location["longitude"]
+    key = _member_key(units, latitude, longitude)
+    with _cache_lock:
+        entry = dict(_member_cache.get(key) or {})
+    if _entry_usable(entry, units, latitude, longitude):
+        return entry["snapshot"]
+    try:
+        snapshot = fetch_snapshot(latitude, longitude, units == "celsius")
+    except Exception as exc:  # noqa: BLE001 — any failure serves stale/null
+        logger.warning("sidebar weather: profile forecast refresh failed: %s", exc)
+        return entry["snapshot"] if _entry_matches(entry, units, latitude, longitude) else None
+    _remember_member_snapshot(snapshot, units, latitude, longitude)
+    return snapshot
 
 
 def _get_snapshot(location):
@@ -517,14 +645,24 @@ def _display_snapshot(snapshot):
     }
 
 
-def _weather_payload():
-    enabled = bool(config_manager.get("weather.enabled", True))
-    location = _location_payload()
-    units = "celsius" if _use_celsius() else "fahrenheit"
+def _off_payload():
+    """what a request with no profile gets: the feature off, nothing else"""
+    return {"success": True, "enabled": False, "location": None,
+            "units": "fahrenheit", "snapshot": None, "scene": None,
+            "holidays": False, "own": False}
+
+
+def _weather_payload(cfg=None, shared=True):
+    """the weather for these settings. shared=True is the install's (the
+    admin's) and uses its cache + sidecar; a member's own uses theirs."""
+    cfg = config_manager if cfg is None else cfg
+    enabled = bool(cfg.get("weather.enabled", True))
+    location = _location_payload(cfg)
+    units = "celsius" if _use_celsius(cfg) else "fahrenheit"
     snapshot = None
     scene = None
     if enabled and location:
-        snapshot = _get_snapshot(location)
+        snapshot = _get_snapshot(location) if shared else _get_member_snapshot(location, units)
         if snapshot:
             current = snapshot.get("current") or {}
             # Raw wind: the >= 15 mph threshold compares the unrounded
@@ -541,7 +679,9 @@ def _weather_payload():
         "snapshot": snapshot,
         "scene": scene,
         # holiday decorations in the sidebar, on unless turned off
-        "holidays": bool(config_manager.get("weather.holidays", True)),
+        "holidays": bool(cfg.get("weather.holidays", True)),
+        # a member's own weather, not the install's (#2163)
+        "own": not shared,
     }
 
 
@@ -551,14 +691,23 @@ def _weather_payload():
 
 @bp.route("/api/weather", methods=["GET"])
 def get_weather():
-    # Undecorated, like the project's other legacy routes: no network gate
-    # on single-admin installs; any profile may read on multi-profile ones.
-    return jsonify(_weather_payload())
+    # the asking profile's weather (#2163): the install's for an admin, their
+    # own for anyone else, off with no profile
+    cfg, shared = _viewer_settings()
+    if cfg is None:
+        return jsonify(_off_payload())
+    return jsonify(_weather_payload(cfg, shared))
+
+
+def _no_profile():
+    return jsonify({"success": False, "error": "Pick a profile first"}), 403
 
 
 @bp.route("/api/weather/location", methods=["PUT"])
-@admin_only
 def put_weather_location():
+    cfg, shared = _viewer_settings()
+    if cfg is None:
+        return _no_profile()
     data = request.get_json(silent=True) or {}
     if "location" not in data:
         return jsonify({"success": False, "error": "location is required"}), 400
@@ -568,9 +717,11 @@ def put_weather_location():
     query = raw.strip()
     if not query:
         # empty string clears the location -> feature off
-        _clear_location_config()
-        _clear_cached_snapshot()
-        return jsonify(_weather_payload())
+        _clear_location_config(cfg)
+        if shared:
+            # only the install's snapshot is the install's to drop
+            _clear_cached_snapshot()
+        return jsonify(_weather_payload(cfg, shared))
 
     try:
         geo = geocode_location(query)
@@ -589,7 +740,7 @@ def put_weather_location():
     # Capture the previous coords BEFORE overwriting the config: a failed
     # refresh must not wipe a good stale snapshot when the location is
     # effectively unchanged (see the except branch below).
-    prev_location = _location_payload()
+    prev_location = _location_payload(cfg)
     prev_coords = (prev_location["latitude"], prev_location["longitude"]) \
         if prev_location else None
 
@@ -597,13 +748,13 @@ def put_weather_location():
     # (US -> degF, everything else -> degC); flippable afterwards.
     use_celsius = geo["country_code"] != "US"
     units = "celsius" if use_celsius else "fahrenheit"
-    with config_manager.batch():
-        config_manager.set("weather.location", query)
-        config_manager.set("weather.location_name", geo["name"])
-        config_manager.set("weather.latitude", geo["latitude"])
-        config_manager.set("weather.longitude", geo["longitude"])
-        config_manager.set("weather.country_code", geo["country_code"])
-        config_manager.set("weather.use_celsius", use_celsius)
+    with cfg.batch():
+        cfg.set("weather.location", query)
+        cfg.set("weather.location_name", geo["name"])
+        cfg.set("weather.latitude", geo["latitude"])
+        cfg.set("weather.longitude", geo["longitude"])
+        cfg.set("weather.country_code", geo["country_code"])
+        cfg.set("weather.use_celsius", use_celsius)
 
     # refresh now so the response carries a live snapshot; a failed fetch
     # still leaves the location saved (stale snapshot preserved when the
@@ -615,12 +766,16 @@ def put_weather_location():
         logger.warning("sidebar weather: initial forecast fetch failed: %s", exc)
         # Only clear when the coords actually changed, or when the sidecar
         # holds nothing servable for these coords/units: a failed refresh
-        # for unchanged coords preserves the stale snapshot.
-        if ((prev_coords != (geo["latitude"], geo["longitude"]))
-                or not _entry_matches(_load_sidecar(), units,
-                                      geo["latitude"], geo["longitude"])):
+        # for unchanged coords preserves the stale snapshot. a member's
+        # cache is keyed by coords, so it never needs clearing.
+        if shared and ((prev_coords != (geo["latitude"], geo["longitude"]))
+                       or not _entry_matches(_load_sidecar(), units,
+                                             geo["latitude"], geo["longitude"])):
             _clear_cached_snapshot()
     else:
+        if not shared:
+            _remember_member_snapshot(snapshot, units, geo["latitude"], geo["longitude"])
+            return jsonify(_weather_payload(cfg, shared))
         # Lock guards only the in-memory dict mutation; the sidecar write
         # (disk I/O) happens after the lock is released.
         with _cache_lock:
@@ -628,47 +783,51 @@ def put_weather_location():
                            "latitude": geo["latitude"],
                            "longitude": geo["longitude"]})
         _save_sidecar(snapshot, units, geo["latitude"], geo["longitude"])
-    return jsonify(_weather_payload())
+    return jsonify(_weather_payload(cfg, shared))
+
+
+def _put_flag(key, field):
+    """one on/off weather setting for the asking profile, or (response, code)"""
+    cfg, _shared = _viewer_settings()
+    if cfg is None:
+        return _no_profile()
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        return jsonify({"success": False, "error": "enabled is required"}), 400
+    enabled = bool(data["enabled"])
+    cfg.set(key, enabled)
+    return jsonify({"success": True, field: enabled})
 
 
 @bp.route("/api/weather/display", methods=["PUT"])
-@admin_only
 def put_weather_display():
-    data = request.get_json(silent=True) or {}
-    if "enabled" not in data:
-        return jsonify({"success": False, "error": "enabled is required"}), 400
-    enabled = bool(data["enabled"])
-    config_manager.set("weather.enabled", enabled)
-    return jsonify({"success": True, "enabled": enabled})
+    return _put_flag("weather.enabled", "enabled")
 
 
 @bp.route("/api/weather/holidays", methods=["PUT"])
-@admin_only
 def put_weather_holidays():
-    data = request.get_json(silent=True) or {}
-    if "enabled" not in data:
-        return jsonify({"success": False, "error": "enabled is required"}), 400
-    enabled = bool(data["enabled"])
-    config_manager.set("weather.holidays", enabled)
-    return jsonify({"success": True, "holidays": enabled})
+    return _put_flag("weather.holidays", "holidays")
 
 
 @bp.route("/api/weather/units", methods=["PUT"])
-@admin_only
 def put_weather_units():
+    cfg, shared = _viewer_settings()
+    if cfg is None:
+        return _no_profile()
     data = request.get_json(silent=True) or {}
     if "use_celsius" not in data:
         return jsonify({"success": False, "error": "use_celsius is required"}), 400
     use_celsius = bool(data["use_celsius"])
-    config_manager.set("weather.use_celsius", use_celsius)
+    cfg.set("weather.use_celsius", use_celsius)
     # the cached snapshot is in the old units -> next payload refreshes
-    return jsonify(_weather_payload())
+    return jsonify(_weather_payload(cfg, shared))
 
 
-def _clear_location_config():
-    with config_manager.batch():
-        config_manager.set("weather.location", "")
-        config_manager.set("weather.location_name", "")
-        config_manager.set("weather.latitude", None)
-        config_manager.set("weather.longitude", None)
-        config_manager.set("weather.country_code", None)
+def _clear_location_config(cfg=None):
+    cfg = config_manager if cfg is None else cfg
+    with cfg.batch():
+        cfg.set("weather.location", "")
+        cfg.set("weather.location_name", "")
+        cfg.set("weather.latitude", None)
+        cfg.set("weather.longitude", None)
+        cfg.set("weather.country_code", None)

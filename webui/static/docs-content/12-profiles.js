@@ -124,6 +124,10 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Your sidebar weather
+
+The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.
+
 ## Scrobbling your plays
 
 Your own plays can scrobble to your own accounts, from the moment you turn it on (nothing older is sent):
@@ -148,6 +152,12 @@ A short (4–20 digits) code asked **when anyone opens the profile**, for privac
 ## Login password
 
 Used for **signing in when login mode is on** — separate from the PIN. Set it in your own profile editor or let an admin set it for you. Setting a password signs out every other browser on that profile; the one that changed it stays in.
+
+## Who you can see
+
+In login mode everyone signs in as themselves, so a member's profile menu has no **Switch to** list and SoulSync never tells them who else has a profile. Edit my profile, Profile & account and Sign out stay. Admins still see everyone and can switch with that profile's password.
+
+Without login mode (the household picker), the picker shows every profile before anyone opens one, so the **Switch to** list stays for everyone. Turned-off profiles are left out.
 
 ## Recovery question
 
