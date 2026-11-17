@@ -67,11 +67,12 @@ PENDING_DELETION_FILES = {
 # but scoped to TOKENS, because the file itself is very much alive.
 #
 # The floating global search bar was removed from index.html (it duplicated the
-# Search page). Its controller in downloads.js was deliberately left in place:
-# initGlobalSearch bails on `if (!input || !bar || !results) return;`, so it is
-# inert, and keeping it meant the bar could be restored by putting the markup
-# back. The cost is these lookups, whose ids left with the markup and survive
-# only as .gsearch-* CSS classes.
+# Search page). Its controller in downloads.js was left in place. Its
+# initGlobalSearch went later (help P7): it bound Ctrl/Cmd K and / on every page,
+# and Ctrl/Cmd K belongs to the help palette. It also wrote the results panel's
+# inner markup, so gsearch-fallback-banner lost its id with it. The cost is
+# these lookups, whose ids left with the markup and survive only as .gsearch-*
+# CSS classes.
 #
 # NOT added to KNOWN_CLASS_AS_ID for the reason that list states: it means
 # "real unfixed bugs in live features", and these are neither.
@@ -86,6 +87,7 @@ RETIRED_MARKUP_TOKENS = {
     ("downloads.js", "gsearch-aura"),
     ("downloads.js", "gsearch-shortcut"),
     ("downloads.js", "gsearch-clear"),
+    ("downloads.js", "gsearch-fallback-banner"),
 }
 
 KNOWN_CLASS_AS_ID = {

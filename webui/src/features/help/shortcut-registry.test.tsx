@@ -60,6 +60,7 @@ describe('the registry', () => {
       'player.volume',
       'player.mute',
       'docs.search',
+      'settings.search',
       'tour.step',
     ]) {
       expect(ids).toContain(id);

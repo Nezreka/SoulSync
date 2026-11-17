@@ -5,8 +5,8 @@
  * hands over to the React help sheet, window.SoulSyncHelp
  * (features/help/host.tsx). This runs the real helper.js.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -192,5 +192,41 @@ describe('the first launch pointer', () => {
     expect(document.querySelector('.helper-first-launch-tip')).not.toBeNull();
     w.toggleHelperMode();
     expect(document.querySelector('.helper-first-launch-tip')).toBeNull();
+  });
+});
+
+describe('Ctrl/Cmd K has one owner', () => {
+  /** every handwritten script under static and src: no tests, no build */
+  function sources(): string[] {
+    const out: string[] = [];
+    const walk = (dir: string) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (ent.name === 'dist' || ent.name === 'node_modules') continue;
+          walk(path);
+        } else if (/\.(js|ts|tsx)$/.test(ent.name) && !/\.test(-utils)?\.|\.d\.ts$/.test(ent.name)) {
+          out.push(path);
+        }
+      }
+    };
+    walk(resolve(process.cwd(), 'static'));
+    walk(resolve(process.cwd(), 'src'));
+    return out;
+  }
+
+  it('only the help host binds it (the Settings search and the old global search took it first)', () => {
+    const kCheck = /(key|toLowerCase\(\))\s*[!=]==?\s*['"][kK]['"]/;
+    const owners: string[] = [];
+    for (const file of sources()) {
+      const text = readFileSync(file, 'utf8');
+      const lines = text.split('\n');
+      lines.forEach((line, i) => {
+        if (!kCheck.test(line)) return;
+        const near = lines.slice(Math.max(0, i - 3), i + 4).join('\n');
+        if (/ctrlKey|metaKey/.test(near)) owners.push(relative(process.cwd(), file).replace(/\\/g, '/'));
+      });
+    }
+    expect([...new Set(owners)]).toEqual(['src/features/help/host.tsx']);
   });
 });

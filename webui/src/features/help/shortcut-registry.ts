@@ -178,6 +178,14 @@ export const SHORTCUTS: Shortcut[] = [
     source: { file: 'src/routes/calendar/-ui/calendar-page.tsx', has: 'goToday();' },
   },
   {
+    id: 'settings.search',
+    group: 'pages',
+    label: 'Search settings',
+    where: 'Settings',
+    keys: [['/']],
+    source: { file: 'src/features/settings/shell.ts', has: "if (e.key !== '/' || e.ctrlKey" },
+  },
+  {
     id: 'audiobooks.search',
     group: 'pages',
     label: 'Search audiobooks',
