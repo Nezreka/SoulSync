@@ -487,6 +487,7 @@
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
         renderActions(d);
+        loadTitleStatus(d);
         renderHealth(d);
         renderEssentials(d);
         renderTypeChip(d);
@@ -989,24 +990,24 @@
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
         if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
-            if (!d._req_checked) {
-                d._req_checked = true;
-                fetch('/api/video/requests?status=pending', { headers: { 'Accept': 'application/json' } })
-                    .then(function (r) { return r.ok ? r.json() : null; })
-                    .then(function (res) {
-                        var mine = !!(res && res.requests && res.requests.some(function (x) {
-                            return x.kind === d.kind && String(x.tmdb_id) === String(d.tmdb_id);
-                        }));
-                        if (mine !== !!d._req_pending) { d._req_pending = mine; if (data === d) renderActions(d); }
-                    }).catch(function () { /* keep the plain button */ });
-            }
-            var asked = !!d._req_pending;
+            // what the button says comes from the title's status (#2160,
+            // loadTitleStatus): your own ask, or already on its way, is a
+            // disabled state; someone else's ask can be joined
+            var rq = d._ts ? d._ts.request : (d._req_pending ? 'mine' : 'open');
+            var reqLook = {
+                mine: ['✓', 'Requested', true, 'You asked for this. You’ll hear when it’s decided'],
+                on_the_way: ['✓', 'On the way', true, 'Already coming, nothing to ask for'],
+                others: ['🙋', 'Ask too', false, 'Someone already asked. Ask too and you’ll hear when it’s decided'],
+            }[rq] || ['🙋', 'Request', false, ''];
             var reqBtn =
-                '<button class="library-artist-watchlist-btn vd-action-main' + (asked ? ' watching' : '') +
-                '" type="button" data-vd-act="request"' + (asked ? ' disabled' : '') + '>' +
-                '<span class="watchlist-icon">' + (asked ? '✓' : '🙋') + '</span>' +
-                '<span class="watchlist-text">' + (asked ? 'Requested' : 'Request') + '</span></button>';
-            if (!primary) primary = reqBtn; else companions += reqBtn;
+                '<button class="library-artist-watchlist-btn vd-action-main' + (reqLook[2] ? ' watching' : '') +
+                '" type="button" data-vd-act="request"' + (reqLook[2] ? ' disabled' : '') +
+                (reqLook[3] ? ' title="' + esc(reqLook[3]) + '"' : '') + '>' +
+                '<span class="watchlist-icon">' + reqLook[0] + '</span>' +
+                '<span class="watchlist-text">' + reqLook[1] + '</span></button>';
+            if (rq !== 'available') {
+                if (!primary) primary = reqBtn; else companions += reqBtn;
+            }
         }
         // Movies are terminal — no "watch for new" follow, so they get the shared
         // Get control (unowned → add/download, owned → re-download / upgrade). It
@@ -2079,7 +2080,7 @@
         var cb = window.VideoGet ? VideoGet.cardButton({ kind: simKind, tmdbId: s.tmdb_id,
             title: s.title, poster: s.poster, status: s.status, source: 'tmdb' }) : '';
         // Ownership arrives stamped from the engine; wishlist state hydrates
-        // after render (VideoWishState) — owned wins and skips the wish check.
+        // after render (VideoTitleStatus, #2160) with the title's status.
         var owned = s.library_id != null;
         var chip = owned ? '<span class="vd-sim-wishchip vd-sim-wishchip--owned">In Library</span>' : '';
         return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
@@ -4308,9 +4309,47 @@
             .then(function (res) {
                 if (res && res.in_library) d.owned = true;
                 else if (res && res.ok) d._req_pending = true;
-                else { btn.disabled = false; return; }
-                if (data === d) renderActions(d);
+                else if (!(res && res.on_the_way)) { btn.disabled = false; return; }
+                // the status block and the button catch up from the server
+                d._ts = null;
+                if (data === d) { renderActions(d); loadTitleStatus(d); }
             });
+    }
+
+    // ── where it stands (#2160): the status block above the actions ─────────
+    // requested (and by whom, names for admins), approved, searching,
+    // downloading with its percent, failed, partly here with its seasons. the
+    // request button reads the same answer. while something is moving it
+    // looks again every 5s, while it waits on an admin or a search every 30s.
+    var _tsTimer = null, _tsSeq = 0;
+    function stopTitleStatus() { if (_tsTimer) { clearTimeout(_tsTimer); _tsTimer = null; } }
+    function loadTitleStatus(d) {
+        stopTitleStatus();
+        var host = q('[data-vd-title-status]');
+        var ok = d && d.source !== 'youtube' && (d.kind === 'movie' || d.kind === 'show') &&
+            d.tmdb_id && window.VideoTitleStatus;
+        if (!ok) { if (host) { host.hidden = true; host.innerHTML = ''; } return; }
+        var seq = ++_tsSeq;
+        window.VideoTitleStatus.fetchOne(d.kind, d.tmdb_id).then(function (s) {
+            if (seq !== _tsSeq || data !== d) return;
+            var h = q('[data-vd-title-status]');
+            var html = s ? window.VideoTitleStatus.blockHtml(s) : null;
+            if (h) { h.innerHTML = html || ''; h.hidden = !html; }
+            var before = d._ts ? d._ts.request : null;
+            d._ts = s;
+            if (s && s.request !== before) renderActions(d);
+            if (!s) return;
+            var wait = window.VideoTitleStatus.isLive(s) ? 5000
+                : (s.status === 'pending' || s.status === 'processing' || s.status === 'failed') ? 30000 : 0;
+            if (wait) {
+                _tsTimer = setTimeout(function () {
+                    _tsTimer = null;
+                    if (data !== d) return;
+                    if (document.hidden) { _tsTimer = setTimeout(function () { loadTitleStatus(d); }, wait); return; }
+                    loadTitleStatus(d);
+                }, wait);
+            }
+        });
     }
 
     function toggleMissing() {
@@ -4842,12 +4881,17 @@
         });
         // Kill the billboard trailer (audio!) when navigating to a non-detail page.
         document.addEventListener('soulsync:video-page-shown', function (e) {
-            if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') { stopBillboardTrailer(); stopDlTracking(); }
+            if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') { stopBillboardTrailer(); stopDlTracking(); stopTitleStatus(); }
         });
         // A grab started anywhere (inline buttons or the get-modal) — pick up live
         // progress for this show's episode rows.
         document.addEventListener('soulsync:video-download-started', function () {
             if (data && data.kind === 'show') startDlTracking();
+        });
+        // a grab, an ask or a wishlist change moves the status block too (#2160)
+        ['soulsync:video-download-started', 'soulsync:video-requests-changed',
+            'soulsync:video-wishlist-changed'].forEach(function (ev) {
+            document.addEventListener(ev, function () { if (data && data.source !== 'youtube') loadTitleStatus(data); });
         });
         // Keep the movie Get button's "In Wishlist" state fresh — re-check whenever
         // the wishlist changes (e.g. after the Get modal adds/removes this movie).

@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.video import title_status
+
 # seerr's enums (server/constants/media.ts, server/lib/permissions.ts)
 STATUS_UNKNOWN = 1
 STATUS_PENDING = 2
@@ -72,48 +74,23 @@ def _date(item: Dict[str, Any]) -> Optional[str]:
 def show_status_from_coverage(seasons: Dict[int, tuple]) -> Optional[int]:
     """available when every aired episode is in the library, partial when
     some are, None when none are. ``seasons`` is {season: (aired, owned)}."""
-    aired = sum(a for a, _o in seasons.values())
-    owned = sum(o for _a, o in seasons.values())
-    if not aired or not owned:
-        return None
-    return STATUS_AVAILABLE if owned >= aired else STATUS_PARTIAL
+    return title_status.seerr_code(title_status.coverage_status(seasons))
 
 
 def media_status(kind: str, *, owned: bool, coverage: Optional[Dict[int, tuple]] = None,
                  state: Optional[Dict[str, bool]] = None) -> Optional[int]:
-    """the one status seerr shows on a card. library first, then whether
-    soulsync is getting it (wishlist, a followed show, an approved request),
-    then a request still waiting. None: nobody asked for it."""
-    state = state or {}
-    if owned:
-        if kind == "movie":
-            return STATUS_AVAILABLE
-        if coverage:
-            st = show_status_from_coverage(coverage)
-            if st is not None:
-                return st
-        else:
-            # owned but no aired episode known yet: trust the library row
-            return STATUS_AVAILABLE
-    if state.get("wished") or state.get("approved") or state.get("followed"):
-        return STATUS_PROCESSING
-    if state.get("pending"):
-        return STATUS_PENDING
-    return None
+    """the one status seerr shows on a card, from the rule the video pages
+    use too (core/video/title_status.py, #2160). None: nobody asked for it."""
+    return title_status.seerr_code(
+        title_status.title_status(kind, owned=owned, coverage=coverage, state=state))
 
 
 def season_statuses(coverage: Dict[int, tuple], wished_seasons: Iterable[int] = ()) -> List[Dict[str, int]]:
     """mediaInfo.seasons: per season what the library has, or processing when
     its episodes are on a wishlist."""
-    out: Dict[int, int] = {}
-    for sn, (aired, owned) in (coverage or {}).items():
-        if sn and aired and owned:
-            out[int(sn)] = STATUS_AVAILABLE if owned >= aired else STATUS_PARTIAL
-    for sn in wished_seasons or ():
-        if sn and int(sn) not in out:
-            out[int(sn)] = STATUS_PROCESSING
-    return [{"id": sn, "seasonNumber": sn, "status": st, "status4k": STATUS_UNKNOWN}
-            for sn, st in sorted(out.items())]
+    return [{"id": s["season"], "seasonNumber": s["season"],
+             "status": title_status.seerr_code(s["status"]), "status4k": STATUS_UNKNOWN}
+            for s in title_status.season_states(coverage, wished_seasons)]
 
 
 def media_info(kind: str, tmdb_id: int, status: Optional[int], *, seasons=None,

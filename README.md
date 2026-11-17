@@ -445,7 +445,7 @@ Plus a background YouTube upload-date enricher.
 
 - **Watchlist → wishlist → download**: follow shows, people, studios and YouTube channels, with back-catalog policies.
 - **Wishlist**: Movies, TV and YouTube tabs, the same design as the music one. It retries with backoff and groups what's stuck by cause: found but refused by your rules, nothing found, couldn't search, or not posted yet. Open a title to see every release the last search judged and why each was refused.
-- **Requests**: Overseerr-style. Non-admins request, admins approve.
+- **Requests**: Overseerr-style. Non-admins request, admins approve. Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
 - **Import lists**: TMDB, IMDb and Plex Watchlist.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.
