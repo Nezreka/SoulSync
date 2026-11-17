@@ -7,8 +7,10 @@
  * This only draws them and skips what the profile isn't allowed to open
  * anyway, so nobody gets a switch for a page they can't reach.
  *
- * An admin can lock a profile's choice (#2157). Locked, this shows what the
- * admin set and changes nothing; the server refuses the save anyway.
+ * An admin can lock a profile's choice (#2157). Locked, there's no way in
+ * (#2164): the sidebar and Settings drop Customize and a stray call opens
+ * nothing. A lock that lands while it's open turns it read only; the server
+ * refuses the save anyway.
  */
 
 import { Dialog } from '@base-ui/react/dialog';
@@ -18,6 +20,7 @@ import type { FeatureDef, FeaturesPayload, FeaturesSave } from '@/shell/features
 
 import { DialogFrame } from '@/components/dialog';
 import { Switch } from '@/components/form/form';
+import { isFeaturesLocked } from '@/platform/features';
 
 import styles from './feature-picker.module.css';
 import { FeatureIcon } from './icons';
@@ -66,6 +69,7 @@ export function FeaturePicker() {
 
   useEffect(() => {
     window.openFeaturePicker = () => {
+      if (isFeaturesLocked()) return;
       setOpen(true);
       void load();
     };

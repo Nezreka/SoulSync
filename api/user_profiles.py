@@ -18,7 +18,7 @@ from flask import Blueprint, jsonify, request, session
 
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
-from core.permissions import may_manage_profile, profile_view_for
+from core.permissions import may_manage_profile, profiles_listed_for
 from core.profile_context import admin_only, is_admin_request
 
 from utils.logging_config import get_logger
@@ -472,13 +472,15 @@ def _qs_server_available(server):
 
 @bp.route('/api/profiles', methods=['GET'])
 def list_profiles():
-    """List all profiles"""
+    """the profiles this viewer may see: everyone for an admin and for the
+    household picker, only their own for a member in login mode (#2162)"""
     try:
         database = get_database()
         viewer_id = get_current_profile_id()
         viewer_is_admin = is_admin_request()
-        profiles = [profile_view_for(p, viewer_id=viewer_id, viewer_is_admin=viewer_is_admin)
-                    for p in database.get_all_profiles()]
+        profiles = profiles_listed_for(database.get_all_profiles(), viewer_id=viewer_id,
+                                       viewer_is_admin=viewer_is_admin,
+                                       login_mode=bool(_require_login_enabled()))
         return jsonify({'success': True, 'profiles': profiles,
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
@@ -759,6 +761,9 @@ def delete_profile(profile_id):
                 ui_features.clear(database, profile_id)
             except Exception as e:  # noqa: BLE001 - a leftover pref is harmless
                 logger.debug("features clear for %s failed: %s", profile_id, e)
+            # and their own sidebar weather (#2163)
+            from api.sidebar_weather import forget_profile as _forget_weather
+            _forget_weather(database, profile_id)
             _audit('profile_deleted', profile_id, target.get('name'))
             # its folder is no library any more (#1199)
             from core.library_scope import library_config_changed
@@ -1539,7 +1544,8 @@ def save_profile_features():
         if ui_features.is_locked(db, profile_id):
             return jsonify({'success': False, 'error': FEATURES_LOCKED_MESSAGE, 'locked': True}), 403
         if data.get('reset') is True:
-            ui_features.reset(db, profile_id)
+            # only their own pick goes; what an admin set for them stays
+            ui_features.reset_own(db, profile_id)
         else:
             off, error = _features_off_from(data)
             if error or off is None:
@@ -1578,8 +1584,7 @@ def get_other_profile_features(profile_id):
     if refused:
         return refused
     try:
-        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
-                        'default': ui_features.load_default(db)})
+        return jsonify({'success': True, **ui_features.admin_payload(db, profile_id)})
     except Exception as e:
         logger.error("features read for %s failed: %s", profile_id, e)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1589,7 +1594,9 @@ def get_other_profile_features(profile_id):
 def set_other_profile_features(profile_id):
     """an admin sets what a profile shows and whether it's locked (#2157).
     takes {off} or {preset}, {locked}, or {reset: true} (back to the default
-    for new profiles). works on a locked profile, that's the point."""
+    for new profiles). works on a locked profile, that's the point. the set
+    and the lock both drop the member's old pick (#2164), so what the admin
+    set is what they see."""
     from core import ui_features
     db, target, refused = _features_target(profile_id)
     if refused:
@@ -1607,12 +1614,11 @@ def set_other_profile_features(profile_id):
         if data.get('reset') is True:
             ui_features.reset(db, profile_id)
         if off is not None:
-            ui_features.save_off(db, profile_id, off)
+            ui_features.save_admin_off(db, profile_id, off)
         if has_lock:
-            ui_features.set_locked(db, profile_id, bool(data.get('locked')))
+            ui_features.admin_lock(db, profile_id, bool(data.get('locked')))
         _audit('features_changed', profile_id, target.get('name'))
-        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
-                        'default': ui_features.load_default(db)})
+        return jsonify({'success': True, **ui_features.admin_payload(db, profile_id)})
     except Exception as e:
         logger.error("features save for %s failed: %s", profile_id, e)
         return jsonify({'success': False, 'error': str(e)}), 500

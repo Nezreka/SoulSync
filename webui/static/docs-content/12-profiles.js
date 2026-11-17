@@ -70,7 +70,7 @@ Admins choose whether each profile sees **Music only**, **Movies & TV only**, or
 
 ## Page access
 
-Admins choose exactly which pages each profile can visit (**allowed pages**). A kid's profile might only see Discover and the media player; a guest might only see the request page. Unset means all pages.
+Admins choose exactly which pages each profile can visit (**allowed pages**). A kid's profile might only see Discover and the media player; a guest might only see the request page. Unset means all pages. Set it in the profile's **Access** step, under **What they can open** → **Pages**. A page left out is gone from their sidebar, and pages with their own data (Import, Playlist Explorer, Listening stats, Audiobooks, Sample Studio) are refused by the server too.
 
 A few pages follow their own rules regardless of the list: **Help** and **Issues** are always visible, **Settings** is admin-only (it's stripped from non-admin grants even if picked), and the **Requests** page shows for admins and for profiles without download rights. **Automations** is a grantable page — non-admin profiles can get full access to it.
 
@@ -124,6 +124,10 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Your sidebar weather
+
+The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.
+
 ## Scrobbling your plays
 
 Your own plays can scrobble to your own accounts, from the moment you turn it on (nothing older is sent):
@@ -148,6 +152,12 @@ A short (4–20 digits) code asked **when anyone opens the profile**, for privac
 ## Login password
 
 Used for **signing in when login mode is on** — separate from the PIN. Set it in your own profile editor or let an admin set it for you. Setting a password signs out every other browser on that profile; the one that changed it stays in.
+
+## Who you can see
+
+In login mode everyone signs in as themselves, so a member's profile menu has no **Switch to** list and SoulSync never tells them who else has a profile. Edit my profile, Profile & account and Sign out stay. Admins still see everyone and can switch with that profile's password.
+
+Without login mode (the household picker), the picker shows every profile before anyone opens one, so the **Switch to** list stays for everyone. Turned-off profiles are left out.
 
 ## Recovery question
 
@@ -230,7 +240,12 @@ Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, o
 
 This is a preference, not access. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
 
-**Admins set it for others.** In **Profiles**, open someone's profile and look under **What shows**: the same presets and switches, plus **Lock it**. A locked profile sees its setup in **Customize** read only, with a note that an admin set it, and can't change it (the server refuses too). An admin can always change it. **Reset to default** puts a profile back on what new profiles see. On the **People** tab, **What new profiles see** sets the starting point and whether it comes locked. Every profile that never picked its own follows it, so changing it reaches them too. Admins always pick their own. None of this opens a page: what someone can reach is still their page access.
+**Admins set it for others.** In **Profiles**, open someone's profile and go to **Access**. It reads top to bottom:
+
+- **What they can open**: the music and video sides, and **Pages** under them. Anything off here is gone for them: it leaves their sidebar and SoulSync refuses it.
+- **What shows in their sidebar**: of what they can open, which parts show. The same presets and switches as Customize, plus **Lock it**. A hidden part still opens from a link.
+
+Unlocked, the person can change what shows in **Customize**, and their own pick is what they see. The editor says when they picked their own, and saving a change there replaces it. **Lock it** shows them exactly what you set: their old pick is dropped, **Customize** goes away for them (the sidebar button and the one in Settings), and the server refuses their changes. Unlocking later keeps what you set, and they can change it from there. **Reset to default** puts a profile back on what new profiles see. On the **People** tab, **What new profiles see** sets the starting point and whether it comes locked. Every profile you never set follows it, so changing it reaches them too. When that default is locked, it wins over anything people picked themselves. Admins always pick their own.
 
 A profile that can only use the video side can't hide it, since it would have nothing left.
 

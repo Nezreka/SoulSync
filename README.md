@@ -570,7 +570,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - A link to a hidden part still opens, with a note that brings it back in one click.
 - First-run setup starts you off with what you said SoulSync is for, and profiles from before ask once, right above the Customize button.
 - Search, library, watchlist, wishlist, downloads and settings never hide.
-- Admins set it per profile in **Profiles** (under **What shows**) and can lock it, so Customize turns read only for them. **What new profiles see** on the People tab is the starting point for every profile that never picked its own. **Reset to default** goes back to it.
+- Admins set it per profile in **Profiles**, in the Access step: **What they can open** (sides and pages, refused by the server too), then **What shows in their sidebar**. **Lock it** shows them exactly what you set, drops anything they picked before and takes Customize away from them. **What new profiles see** on the People tab is the starting point for every profile you never set. **Reset to default** goes back to it.
 
 </details>
 

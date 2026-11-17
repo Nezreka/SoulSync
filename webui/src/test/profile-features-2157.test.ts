@@ -25,14 +25,26 @@ const NAMES = [
   'pfFeaturesLine',
   'pfFeatureChooser',
   '_pfLoadProfileFeatures',
+  'pfFeaturesBody',
+  '_pfSidesAllow',
+  'pfPagesSummary',
 ];
 
-type Fst = { off: string[]; locked: boolean; dirty: boolean; reset: boolean };
+type Fst = {
+  off: string[];
+  locked: boolean;
+  dirty: boolean;
+  reset: boolean;
+  offDirty?: boolean;
+  lockDirty?: boolean;
+};
 type Chooser = { box: HTMLElement; render: () => void };
 type Api = {
   pfFeaturesOffered: (f: unknown[], sides: string, pages: string[] | null) => string[];
   pfFeaturesLine: (p: unknown, off: string[], locked: boolean) => string;
   pfFeatureChooser: (p: unknown, fst: Fst, o?: object) => Chooser;
+  pfFeaturesBody: (fst: Fst) => Record<string, unknown>;
+  pfPagesSummary: (st: { sides: string; allowed_pages: string[] | null }) => string;
   _pfLoadProfileFeatures: (
     id: number,
     box: HTMLElement,
@@ -42,7 +54,7 @@ type Api = {
 };
 
 const api = new Function(
-  `let _pfUid = 0;\n${NAMES.map((n) => extractFunction(n, INIT)).join('\n')}\nreturn { ${NAMES.join(', ')} };`,
+  `let _pfUid = 0;\nconst PROFILE_PAGE_GROUPS = [{ side: 'music', pages: ['dashboard', 'import', 'stats'] }, { side: 'video', pages: ['video-dashboard', 'video-tools'] }];\n${NAMES.map((n) => extractFunction(n, INIT)).join('\n')}\nreturn { ${NAMES.join(', ')} };`,
 )() as Api;
 
 const FEATURES = [
@@ -125,12 +137,14 @@ describe('the chooser', () => {
     const { box } = api.pfFeatureChooser(PAYLOAD, fst, { lockTitle: 'Lock it' });
     document.body.append(box);
     switchFor(box, 'Discover').click();
-    expect(fst).toMatchObject({ off: ['discover'], dirty: true, reset: false });
+    // a switch is the set half; a reset from before stays in the save (#2164)
+    expect(fst).toMatchObject({ off: ['discover'], dirty: true, offDirty: true, reset: true });
     box.querySelectorAll<HTMLButtonElement>('.pf-preset')[1].click();
     expect(fst.off).toEqual(PAYLOAD.presets[1].off);
     expect(box.querySelectorAll('.pf-preset')[1].getAttribute('aria-checked')).toBe('true');
     switchFor(box, 'Lock it').click();
     expect(fst.locked).toBe(true);
+    expect(fst.lockDirty).toBe(true);
   });
 
   it("drops the video side's own switches while it's off", () => {
@@ -169,10 +183,13 @@ describe('the editor section', () => {
     expect(fst).toMatchObject({ off: ['music_videos'], locked: true, dirty: true, reset: true });
     expect(box.textContent).toContain('Follows what new profiles see.');
     expect(reset.disabled).toBe(true);
-    // changing anything after a reset is a choice of its own again
+    expect(api.pfFeaturesBody(fst)).toEqual({ reset: true });
+    // changing a switch after a reset is a set of its own again, on top of
+    // the reset (the lock goes back to the default's too)
     switchFor(box, 'Discover').click();
-    expect(fst.reset).toBe(false);
+    expect(box.textContent).not.toContain('Follows what new profiles see.');
     expect(reset.disabled).toBe(false);
+    expect(api.pfFeaturesBody(fst)).toEqual({ reset: true, off: ['music_videos', 'discover'] });
   });
 
   it('a video-only profile in the form gets no Movies & TV switch', async () => {
@@ -196,5 +213,79 @@ describe('the editor section', () => {
     });
     expect(called).toBe(false);
     expect(box.textContent).toContain('Admin only');
+  });
+});
+
+describe('#2164: the editor never passes their own pick off as the admin set', () => {
+  const MEMBER = {
+    ...PAYLOAD,
+    // what they see now: their own pick
+    off: ['discover', 'chat'],
+    // what the admin controls: nothing set for them, so the default
+    set_off: ['music_videos'],
+    admin_set: false,
+    own_off: ['discover', 'chat'],
+    lock_set: false,
+    follows_default: false,
+  };
+
+  async function load(body: object) {
+    server.use(http.get('*/api/profiles/7/features', () => HttpResponse.json(body)));
+    const box = document.createElement('div');
+    document.body.append(box);
+    let fst: Fst | null = null;
+    await api._pfLoadProfileFeatures(7, box, { sides: 'both', allowed_pages: null }, (f) => {
+      fst = f;
+    });
+    return { box, fst: fst! };
+  }
+
+  it('the switches start from the admin set, their pick is named apart', async () => {
+    const { box, fst } = await load(MEMBER);
+    expect(fst.off).toEqual(['music_videos']);
+    expect(switchFor(box, 'Discover').checked).toBe(true);
+    expect(switchFor(box, 'Chat & Arcade').checked).toBe(true);
+    expect(box.textContent).toContain('They picked their own (2 parts hidden)');
+    expect(box.textContent).toContain('Follows what new profiles see.');
+    // their pick is something to reset
+    const reset = [...box.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Reset to default',
+    )!;
+    expect(reset.disabled).toBe(false);
+  });
+
+  it('locking alone sends just the lock and says it replaces their pick', async () => {
+    const { box, fst } = await load(MEMBER);
+    switchFor(box, 'Lock it').click();
+    expect(api.pfFeaturesBody(fst)).toEqual({ locked: true });
+    expect(box.textContent).toContain('Saving replaces it with this.');
+  });
+
+  it('a switch sends the set, not the lock', async () => {
+    const { box, fst } = await load(MEMBER);
+    switchFor(box, 'Discover').click();
+    expect(api.pfFeaturesBody(fst)).toEqual({ off: ['music_videos', 'discover'] });
+  });
+
+  it('locked, it says their old pick is ignored', async () => {
+    const { box } = await load({ ...MEMBER, locked: true, off: ['music_videos'] });
+    expect(box.textContent).toContain("It's ignored while this is locked.");
+  });
+
+  it('no pick of their own, no note', async () => {
+    const { box } = await load({ ...MEMBER, own_off: null, off: ['music_videos'] });
+    expect(box.textContent).not.toContain('They picked their own');
+  });
+});
+
+describe('#2164: the page list says what they can open at a glance', () => {
+  it('counts the pages on the sides they have', () => {
+    expect(api.pfPagesSummary({ sides: 'both', allowed_pages: null })).toBe('Pages: all of them');
+    expect(api.pfPagesSummary({ sides: 'both', allowed_pages: ['dashboard', 'video-tools'] })).toBe(
+      'Pages: 2 of 5',
+    );
+    expect(
+      api.pfPagesSummary({ sides: 'music', allowed_pages: ['dashboard', 'video-tools'] }),
+    ).toBe('Pages: 1 of 3');
   });
 });
