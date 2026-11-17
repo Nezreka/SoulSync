@@ -687,6 +687,11 @@ class TidalWorker:
         finally:
             if conn:
                 conn.close()
+        if entity_type == 'track' and provider_id:
+            # every artist Tidal credits on it: the evidence the credit
+            # decisions read (Split Artists' confirmation among them)
+            from core.library2.provider_credits import keep_match_credits
+            keep_match_credits(self.db, 'track', entity_id, 'tidal', str(provider_id))
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
         """Record the outcome of an attempt in the provider ledger.

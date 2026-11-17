@@ -280,3 +280,103 @@ def test_tidal_answers_through_the_signed_in_worker_client(monkeypatch):
     monkeypatch.setattr(service_search, "tidal_enrichment_worker",
                         type("W", (), {"client": client})())
     assert pc._credit_client("tidal") is client
+
+
+# ── what brings lists in: the download, the workers ─────────────────────────
+
+def test_a_download_keeps_its_sources_list_of_two_or_more(tmp_path):
+    from core.library2.autolink import _store_download_credits
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn, credits=("ODESZA",), deezer="dz-1")
+        ti = {"artists": [{"id": "d-od", "name": "ODESZA"}, {"id": "d-ry", "name": "RY X"}]}
+        _store_download_credits(conn, track, ti, "deezer", "dz-1")
+        lists = stored_track_credits(conn, track)
+    assert ("deezer credits", ["ODESZA", "RY X"]) in lists
+
+
+def test_a_download_never_keeps_a_one_artist_or_foreign_list(tmp_path):
+    # a search result carries only the main artist (Deezer's artist, not its
+    # contributors): kept, it would read as "Deezer credits one artist"
+    from core.library2.autolink import _store_download_credits
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn, credits=("ODESZA",), deezer="dz-1")
+        _store_download_credits(conn, track, {"artists": [{"id": "d-od", "name": "ODESZA"}]},
+                                "deezer", "dz-1")
+        both = {"artists": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]}
+        _store_download_credits(conn, track, both, "deezer", "dz-other")   # not its id
+        _store_download_credits(conn, track, both, "itunes", "it-1")       # no list source
+        names = [{"name": "A"}, {"name": "B"}]                              # no ids
+        _store_download_credits(conn, track, {"artists": names}, "deezer", "dz-1")
+        rows = conn.execute("SELECT COUNT(*) FROM lib2_provider_credits").fetchone()[0]
+    assert rows == 0
+
+
+def test_a_worker_match_keeps_the_list_it_carries(tmp_path, monkeypatch):
+    monkeypatch.setattr(pc, "ONLINE_REFRESH", False)
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn, credits=("ODESZA",), musicbrainz="mb-1")
+        conn.commit()
+    credits = [{"id": "mb-od", "name": "ODESZA"}, {"id": "mb-ry", "name": "RY X"}]
+    pc.keep_match_credits(db, "track", track, "musicbrainz", "mb-1", artists=credits)
+    # another id than the track holds, or nothing carried while offline: nothing
+    pc.keep_match_credits(db, "track", track, "musicbrainz", "mb-2", artists=credits[:1])
+    assert pc.keep_match_credits(db, "track", track, "tidal", "t-1") == 0
+    with db._get_connection() as conn:
+        lists = stored_track_credits(conn, track)
+    assert lists[0] == ("musicbrainz credits", ["ODESZA", "RY X"])
+
+
+def test_a_worker_match_without_a_list_fetches_it_by_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(pc, "ONLINE_REFRESH", True)
+    asked = []
+    monkeypatch.setattr(pc, "refresh_match_credits",
+                        lambda db, et, eid, service, pid: asked.append((service, pid)) or 2)
+    assert pc.keep_match_credits("db", "track", 7, "tidal", "t-1") == 2
+    assert pc.keep_match_credits("db", "track", 7, "itunes", "it-1") == 0
+    assert asked == [("tidal", "t-1")]
+
+
+def _searcher(monkeypatch, candidates):
+    import core.library2.native_enrich as ne
+    tried = []
+    monkeypatch.setattr(ne, "enrich_native_entity_for_service",
+                        lambda conn, et, eid, service, artist_name=None, **kw:
+                        tried.append(artist_name) or {"success": False, "reason": "not_found",
+                                                      "candidates": candidates})
+    return tried
+
+
+def test_a_search_the_provider_answered_without_a_fit_is_not_repeated(tmp_path, online,
+                                                                       monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn)
+        conn.commit()
+    tried = _searcher(monkeypatch, candidates=5)
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
+    assert tried == [None, "ODESZA"]          # once, not twice
+    # another proposed name is another search
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["RY X"])
+    assert tried == [None, "ODESZA", None, "RY X"]
+    # so is a corrected title
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_tracks SET title='Corners Of The Earth (Live)' WHERE id=?",
+                     (track,))
+        conn.commit()
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["RY X"])
+    assert len(tried) == 6
+
+
+def test_an_empty_answer_may_be_an_outage_and_is_asked_again(tmp_path, online, monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn)
+        conn.commit()
+    tried = _searcher(monkeypatch, candidates=0)
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
+    assert tried == [None, "ODESZA", None, "ODESZA"]

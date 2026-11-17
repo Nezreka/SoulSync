@@ -554,6 +554,12 @@ class MusicBrainzWorker:
                     self.mb_service.update_track_mbid(
                         item_id, result['mbid'], 'matched',
                         recording_disambiguation=result.get('recording_disambiguation'))
+                    # every artist MusicBrainz credits on the recording: the
+                    # credit evidence (the search hit carries it; a cached
+                    # match is fetched by id)
+                    from core.library2.provider_credits import keep_match_credits
+                    keep_match_credits(self.db, 'track', item_id, 'musicbrainz', result['mbid'],
+                                       artists=result.get('artist_credit'))
                     self.stats['matched'] += 1
                     logger.info(f"Matched track '{item_name}' → MBID: {result['mbid']}")
                 else:

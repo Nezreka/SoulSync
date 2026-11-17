@@ -1556,11 +1556,15 @@ class MusicBrainzService:
 
                 logger.info(f"Matched recording '{track_name}' → '{mb_title}' (MBID: {mbid}, confidence: {best_confidence})")
 
+                from core.musicbrainz_client import artist_credit_list
                 return {
                     'mbid': mbid,
                     'title': mb_title,
                     'confidence': best_confidence,
                     'recording_disambiguation': best_match.get('disambiguation'),
+                    # the search hit's artist credit: the credit evidence,
+                    # kept without another request
+                    'artist_credit': artist_credit_list(best_match),
                     'cached': False
                 }
             else:

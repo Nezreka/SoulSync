@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS lib2_credit_checks (
 """
 # a provider can re-credit a track; an answer this old is asked again
 CREDIT_CHECK_TTL_DAYS = 180
+# a track no search found at a source is not searched there again for this long
+UNMATCHED_RETRY_DAYS = 30
 
 
 def ensure_provider_credits_schema(cursor: Any) -> None:
@@ -458,6 +460,37 @@ def refresh_match_credits(database: Any, entity_type: str, entity_id: int,
             conn.close()
 
 
+def keep_match_credits(database: Any, entity_type: str, entity_id: int, service: str,
+                       provider_id: Optional[str], artists: Optional[list] = None) -> int:
+    """An enrichment worker matched a track at a credit source: keep that
+    source's artist list for it, as the evidence every credit decision reads.
+    ``artists``: the list the match already carries (no request); otherwise
+    it is fetched by id. Only while the entity still holds that id. Returns
+    how many credits were added. Never raises."""
+    service = str(service or "").lower()
+    if service not in _SOURCES or entity_type not in ("track", "album") or not provider_id:
+        return 0
+    if artists is None:
+        if not ONLINE_REFRESH:
+            return 0
+        return refresh_match_credits(database, entity_type, entity_id, service, str(provider_id))
+    conn = None
+    try:
+        from core.library2.worker_support import stored_provider_id
+        conn = database._get_connection()
+        if str(stored_provider_id(conn, entity_type, entity_id, service) or "") != str(provider_id):
+            return 0
+        added = link_credited_artists(conn, entity_type, int(entity_id), service, artists)
+        conn.commit()
+        return added
+    except Exception as exc:  # noqa: BLE001 - a credit list is evidence, never a blocker
+        logger.debug("%s credits for %s %s not kept: %s", service, entity_type, entity_id, exc)
+        return 0
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def schedule_match_credits(database: Any, entity_type: str, entity_id: int,
                            service: str, provider_id: Optional[str]):
     """:func:`refresh_match_credits` off the request thread, after the caller
@@ -513,6 +546,41 @@ def _record_check(conn: Any, service: str, provider_id: str, artists: list) -> N
         "INSERT OR REPLACE INTO lib2_credit_checks(source, provider_id, names_json, checked_at)"
         " VALUES(?, ?, ?, CURRENT_TIMESTAMP)",
         (service, str(provider_id), json.dumps([n for n in names if n], ensure_ascii=False)))
+
+
+def _unmatched_key(conn: Any, track_id: Any, hints: Iterable[str]) -> str:
+    """The identity of one search for a track: its title, album and album
+    artist and the names it is looked up under. lib2_credit_checks is keyed
+    by a source's own id; a search that found nothing has none, so this
+    stands in, marked as such. A corrected title or another proposed name is
+    another search, asked again."""
+    import hashlib
+    row = conn.execute(
+        "SELECT t.title, al.title, ar.name FROM lib2_tracks t "
+        "LEFT JOIN lib2_albums al ON al.id=t.album_id "
+        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id WHERE t.id=?",
+        (int(track_id),)).fetchone()
+    parts = [str(v or "").strip().casefold() for v in (row or ())]
+    parts += [h.casefold() for h in _hint_names(hints)]
+    digest = hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"unmatched:track:{int(track_id)}:{digest}"
+
+
+def _searched_lately(conn: Any, service: str, key: str) -> bool:
+    try:
+        return conn.execute(
+            "SELECT 1 FROM lib2_credit_checks WHERE source=? AND provider_id=? "
+            "AND checked_at >= datetime('now', ?)",
+            (service, key, f"-{UNMATCHED_RETRY_DAYS} days")).fetchone() is not None
+    except Exception:  # noqa: BLE001 - no ledger yet: search
+        return False
+
+
+def _record_unmatched(conn: Any, service: str, key: str) -> None:
+    conn.execute(LIB2_CREDIT_CHECKS_DDL)
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_credit_checks(source, provider_id, names_json, checked_at)"
+        " VALUES(?, ?, '[]', CURRENT_TIMESTAMP)", (service, key))
 
 
 # a combined artist's parts a track is looked up under, at most
@@ -576,17 +644,28 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
                                      (int(track_id),)).fetchone() or [None])[0]
                 client = _credit_client("musicbrainz") if str(isrc or "").strip() else None
                 exact = client.track_artist_credits_by_isrc(str(isrc)) if client else None
-            if not provider_id and not exact and match:
+            search_key = (_unmatched_key(conn, track_id, artist_hints)
+                          if not provider_id and not exact and match else "")
+            if search_key and _searched_lately(conn, service, search_key):
+                continue    # this very search found nothing there lately
+            if search_key:
                 from core.library2.native_enrich import enrich_native_entity_for_service
+                answered = False
                 for artist in (None, *_hint_names(artist_hints)):
                     result = enrich_native_entity_for_service(conn, "track", int(track_id),
                                                               service, artist_name=artist)
                     conn.commit()
+                    answered = answered or bool((result or {}).get("candidates"))
                     if (result or {}).get("success") and \
                             (result or {}).get("source", service) == service:
                         provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
                     if provider_id or (result or {}).get("locked"):
                         break
+                # remembered only when the provider answered and nothing fit:
+                # an empty answer can be an outage the search helpers folded
+                if not provider_id and answered and not (result or {}).get("locked"):
+                    _record_unmatched(conn, service, search_key)
+                    conn.commit()
             if not provider_id and not exact:
                 continue
         except Exception as exc:  # noqa: BLE001 - see docstring
@@ -630,7 +709,7 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
 CREDIT_SOURCES = _SOURCES
 
 __all__ = ["CREDIT_SOURCES", "checked_track_credits", "credit_services", "drop_source_credits",
-           "ensure_provider_credits_schema",
+           "ensure_provider_credits_schema", "keep_match_credits",
            "ensure_track_credits",
            "link_credited_artists", "materialize_artist_credits",
            "refresh_match_credits", "schedule_match_credits"]

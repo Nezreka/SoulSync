@@ -848,6 +848,10 @@ def enrich_native_entity_for_service(
                 "success": False, "attempted": True,
                 "entity_type": canonical, "entity_id": int(entity_id),
                 "reason": "not_found", "source": service,
+                # how many results the provider answered with: none can be
+                # an outage (the search helpers fold errors into []), some
+                # and none fitting is a real "not there"
+                "candidates": len(candidates),
             }
         ranked.sort(key=lambda item: item[0], reverse=True)
         if (
