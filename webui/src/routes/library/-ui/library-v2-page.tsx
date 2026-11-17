@@ -14650,7 +14650,9 @@ export function TrackInfoPanel({
   });
 
   const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
-  const canBlacklist = Boolean(dl?.source_username && dl?.source_filename);
+  // the download blacklist is install-wide, so it's the admin's to change
+  const canWrite = useLibraryV2CanWrite();
+  const canBlacklist = canWrite && Boolean(dl?.source_username && dl?.source_filename);
   const actionRow =
     canBlacklist || actions ? (
       <div className={styles.modalActions}>

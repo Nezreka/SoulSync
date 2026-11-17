@@ -240,7 +240,7 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
               ) : null}
             </>
           ) : (
-            <MusicToolSections />
+            <MusicToolSections isAdmin={isAdmin} />
           )}
         </div>
       </div>
@@ -248,7 +248,21 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
   );
 }
 
-function MusicToolSections() {
+/* the scans, the cleaner, the updater, backups, the cache and the download
+   blacklist change the whole install, so the server keeps them for an admin.
+   everyone else gets the tools they may use. */
+function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
+  if (!isAdmin) {
+    return (
+      <ToolsSection
+        title="Metadata &amp; Cache"
+        blurb="Enriching what SoulSync knows, and fixing what it got wrong."
+      >
+        <DiscoveryPoolCard />
+        <ManualLibraryMatchCard />
+      </ToolsSection>
+    );
+  }
   return (
     <>
       <ToolsSection

@@ -120,15 +120,16 @@ def download_permission_error():
     then ``if err: return err``. It lives here rather than in web_server so the
     isolated blueprints can use it without importing the app.
     """
-    from core.permissions import download_denied_reason
+    from core.permissions import PROFILE_UNREADABLE, download_denied_reason, strict_profile_getter
     from core.profile_context import get_current_profile_id
 
-    def _get_profile(pid):
+    def _db():
         from database.music_database import get_database
 
-        return get_database().get_profile(pid)
+        return get_database()
 
-    reason = download_denied_reason(get_current_profile_id(), _get_profile)
+    # raises on a read error: unreadable is not "allowed"
+    reason = download_denied_reason(get_current_profile_id(), strict_profile_getter(_db))
     if reason:
-        return jsonify({"success": False, "error": reason}), 403
+        return jsonify({"success": False, "error": reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None

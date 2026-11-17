@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createShellBridge } from '@/test/shell-bridge';
+
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography } from '../-artist-detail.types';
 
@@ -617,3 +619,19 @@ describe('ArtistHero watchlist button opens the settings modal', () => {
 vi.mock('@/features/audiobook-routes/audiobook-route-toggle', () => ({
   AudiobookRouteToggle: () => null,
 }));
+
+describe('the artist photo (S13)', () => {
+  it("is the admin's to change: a member gets no picker", () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      getCurrentProfileContext: vi.fn(() => ({ profileId: 5, isAdmin: false })),
+    });
+    try {
+      renderHero({ id: 9, name: 'A' }, { albums: [{ id: 1 }] });
+      expect(document.querySelector('.artist-image-edit-overlay')).toBeNull();
+      fireEvent.click(document.querySelector('.artist-image-container')!);
+      expect(screen.queryByText('Choose artist photo')).toBeNull();
+    } finally {
+      delete window.SoulSyncWebShellBridge;
+    }
+  });
+});

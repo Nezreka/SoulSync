@@ -1717,6 +1717,14 @@ def save_profile_server_library():
                 return jsonify({'success': False, 'error': 'Your Navidrome login has no such library'}), 400
             if library_id == _navidrome_shared_folder_id():
                 return jsonify({'success': False, 'error': 'That is the shared library; pick your own'}), 400
+        if server_type == 'jellyfin' and user_id:
+            # who you are on jellyfin decides whose history and requests are
+            # yours, so it has to be a real user there and nobody else's yet
+            # (the navidrome login proves itself with the password)
+            user_id = str(user_id).strip()
+            problem = _jellyfin_user_problem(user_id, profile_id, db)
+            if problem:
+                return jsonify({'success': False, 'error': problem[0]}), problem[1]
         success = db.set_profile_server_library(profile_id, server_type, library_id, user_id)
 
         if success:
@@ -1724,6 +1732,43 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': 'Failed to save library selection'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _norm_server_user_id(value) -> str:
+    """jellyfin ids arrive with and without dashes, in either case"""
+    return str(value or '').replace('-', '').strip().lower()
+
+
+def _jellyfin_user_problem(user_id, profile_id, db):
+    """None when this profile may be this jellyfin user, else (message, status).
+    the user has to be one the server lists, and not one another profile
+    already is."""
+    wanted = _norm_server_user_id(user_id)
+    if not wanted:
+        return ('Pick a Jellyfin user', 400)
+    try:
+        engine = _media_server_engine()
+        client = engine.client('jellyfin') if engine is not None else None
+        users = client.get_available_users() if client is not None else None
+    except Exception as e:  # noqa: BLE001 - unreadable is not a yes
+        logger.debug("jellyfin users for profile link: %s", e)
+        users = None
+    if users is None:
+        return ("Couldn't check that user with Jellyfin. Try again in a moment.", 503)
+    if wanted not in {_norm_server_user_id(u.get('id')) for u in users if isinstance(u, dict)}:
+        return ('Jellyfin has no such user', 400)
+    try:
+        with db._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, jellyfin_user_id FROM profiles WHERE id != ? "
+                "AND jellyfin_user_id IS NOT NULL AND jellyfin_user_id != ''",
+                (int(profile_id),)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("jellyfin user claim check: %s", e)
+        return ("Couldn't check that user. Try again in a moment.", 503)
+    if any(_norm_server_user_id(r[1]) == wanted for r in rows):
+        return ('Another profile is already that Jellyfin user', 409)
+    return None
 
 
 def _is_docker() -> bool:
@@ -1922,6 +1967,13 @@ def link_plex_home_user():
         pin = str(data.get('pin') or '').strip() or None
         if not user_id:
             return jsonify({'success': False, 'error': 'Pick a Plex user'}), 400
+        # one plex user is one profile: their history and requests follow it
+        with get_database()._get_connection() as conn:
+            taken = conn.execute(
+                "SELECT 1 FROM profiles WHERE id != ? AND plex_home_user_id = ? LIMIT 1",
+                (int(get_current_profile_id() or 0), user_id)).fetchone()
+        if taken:
+            return jsonify({'success': False, 'error': 'Another profile is already that Plex user'}), 409
         engine = _media_server_engine()
         client = engine.client('plex') if engine is not None else None
         if client is None or not hasattr(client, 'mint_home_user_server_token'):

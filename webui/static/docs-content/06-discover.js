@@ -280,7 +280,7 @@ The open-PM head shows the username (plus a ⭐ Friend badge when applicable), t
 PMs are **plain-text only** — the formatting toolbar, GIF, poll, now-playing, and wanted buttons are room-only. Emoji and file attach still work in PMs.
 
 > [!NOTE]
-> PMs use the same Soulseek connection as rooms, so the slskd prerequisite and the admin / "Let other profiles send" rules apply identically.
+> PMs use the same Soulseek connection as rooms, so the slskd prerequisite and the admin / "Let other profiles send" rules apply identically. The same rule decides who reads them: without "Let other profiles send", other profiles see no Direct Messages and no private notes on users.
 `
         },
         {

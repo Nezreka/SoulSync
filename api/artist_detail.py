@@ -517,6 +517,7 @@ def get_similar_artists(artist_name):
         }), 500
 
 @bp.route('/api/artist/<artist_id>/write-image-to-disk', methods=['POST'])
+@admin_only
 def write_artist_image_to_disk(artist_id):
     """Write `artist.jpg` to the artist's folder on disk.
 
@@ -546,7 +547,6 @@ def write_artist_image_to_disk(artist_id):
     """
     try:
         from core.library.artist_image import (
-            download_image_bytes,
             find_artist_folder,
             write_artist_jpg,
         )
@@ -604,7 +604,9 @@ def write_artist_image_to_disk(artist_id):
             return jsonify({"success": False,
                             "error": "No artist image URL found from metadata sources."}), 404
 
-        image_bytes = download_image_bytes(image_url)
+        # the guarded fetch: a pasted image_url is fetched by the server, so
+        # never a lan, loopback or metadata address
+        image_bytes = _download_art(image_url)
         if not image_bytes:
             return jsonify({"success": False,
                             "error": f"Failed to download image from {image_url}"}), 502
@@ -1309,15 +1311,32 @@ def _derive_album_folder(db, album_id):
 
 def _download_art(url):
     """the chosen image's bytes, or None when the download fails. best-effort on
-    purpose: hotlink-protected art still renders in the browser."""
-    import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
-        with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
-            return resp.read() or None
-    except Exception as exc:
-        logger.warning("[set-art] image download failed: %s", exc)
-        return None
+    purpose: hotlink-protected art still renders in the browser.
+
+    the server fetches this url, so it goes through the library's guarded
+    artwork fetch: http/https to public addresses only (every redirect hop and
+    the connected peer re-checked), a size cap and timeouts. a lan, loopback or
+    cloud-metadata address is never fetched."""
+    from core.library2.artwork import _download_remote_artwork
+    return _download_remote_artwork(url)
+
+
+# the guarded fetch's reasons that mean "this url is not usable", as opposed to
+# a site that refused a hotlink (that pick still stands, the browser loads it)
+_ART_URL_REFUSALS = (
+    "That link is not a public",
+    "That link opens a web page",
+    "That link is not an image",
+    "That image is too large",
+    "That link redirects",
+)
+
+
+def _art_url_refusal(url):
+    """why the last _download_art of this url can't be used, or None."""
+    from core.library2.artwork import remote_artwork_failure
+    reason = remote_artwork_failure(url)
+    return reason if reason and reason.startswith(_ART_URL_REFUSALS) else None
 
 
 def _write_cover_jpg(data, folder):
@@ -1402,6 +1421,7 @@ def _push_album_poster(album_id, image_bytes):
 
 
 @bp.route('/api/album/<album_id>/art', methods=['POST'])
+@admin_only
 def set_album_art(album_id):
     """Apply a cover chosen in the picker, the same three places the artist twin writes to:
 
@@ -1421,6 +1441,9 @@ def set_album_art(album_id):
             return jsonify({"error": "url is required"}), 400
 
         image_bytes = _download_art(url)
+        refusal = _art_url_refusal(url) if image_bytes is None else None
+        if refusal:
+            return jsonify({"error": refusal}), 400
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 
@@ -1469,6 +1492,7 @@ def get_album_metadata_lock(album_id):
 
 
 @bp.route('/api/album/<album_id>/metadata-lock', methods=['DELETE'])
+@admin_only
 def clear_album_metadata_lock(album_id):
     """Unlock a hand-tagged album. it was tagged by hand from basic search
     ("tag it yourself") and locked so nothing rematched it to a studio release.
@@ -1485,6 +1509,7 @@ def clear_album_metadata_lock(album_id):
 
 
 @bp.route('/api/album/<album_id>/art', methods=['DELETE'])
+@admin_only
 def clear_album_art_lock(album_id):
     """Hand this album's cover back to the media server.
 
@@ -1503,6 +1528,7 @@ def clear_album_art_lock(album_id):
 
 
 @bp.route('/api/artist/<artist_id>/art', methods=['DELETE'])
+@admin_only
 def clear_artist_art_lock(artist_id):
     """Hand this artist's photo back to the media server. See the album twin."""
     try:
@@ -1698,6 +1724,7 @@ def push_artist_art_outbound(artist_id, image_bytes) -> dict:
 
 
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
+@admin_only
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
 
@@ -1730,15 +1757,10 @@ def set_artist_art(artist_id):
         # validate: a custom URL that resolves to an HTML page must abort
         # before anything is pinned. A failed download stays best-effort —
         # hotlink-protected art can still render in the browser.
-        image_bytes = None
-        try:
-            import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0",
-                                                       "Accept": "image/*"})
-            with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
-                image_bytes = resp.read() or None
-        except Exception as exc:
-            logger.warning("[set-artist-art] image download failed: %s", exc)
+        image_bytes = _download_art(url)
+        refusal = _art_url_refusal(url) if image_bytes is None else None
+        if refusal:
+            return jsonify({"error": refusal}), 400
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 

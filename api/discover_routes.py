@@ -3445,6 +3445,7 @@ def image_cache_status():
 
 
 @bp.route('/api/image-cache/clear', methods=['POST'])
+@admin_only
 def image_cache_clear():
     """Empty the artwork cache. Everything in it is re-fetchable, so this is
     only ever a temporary cost — nothing user-created lives here."""
@@ -3458,6 +3459,7 @@ def image_cache_clear():
 
 
 @bp.route('/api/image-cache/prune', methods=['POST'])
+@admin_only
 def image_cache_prune():
     """Apply the TTL and size cap now, rather than waiting for the next store."""
     try:
