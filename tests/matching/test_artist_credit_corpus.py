@@ -455,3 +455,50 @@ def test_a_keep_whole_name_is_an_act_everywhere():
 ])
 def test_a_capital_x_ending_a_name_is_no_marker(credit, expected):
     assert decide_credit(credit).names == expected
+
+
+
+# ── the built-in band names list that was removed (KNOWN_ACTS) ──────────────
+# every name it held, through the data-driven decision
+
+OLD_KNOWN_ACTS = (
+    'Tyler, The Creator', 'Earth, Wind & Fire', 'Earth, Wind and Fire',
+    'Crosby, Stills & Nash', 'Crosby, Stills and Nash', 'Crosby, Stills, Nash & Young',
+    'Crosby, Stills, Nash and Young', 'Emerson, Lake & Palmer', 'Emerson, Lake and Palmer',
+    'Blood, Sweat & Tears', 'Blood, Sweat and Tears', 'Peter, Paul & Mary',
+    'Peter, Paul and Mary', 'Me, Mom & Morgentaler', 'Now, Now',
+    'Sammy Davis, Jr.', 'Simon & Garfunkel', 'Hall & Oates',
+    'Above & Beyond', 'Chase & Status', 'Mumford & Sons',
+    'Florence + the Machine', 'Florence and the Machine', 'Marina and the Diamonds',
+    'Belle & Sebastian', 'Iron & Wine', 'Years & Years',
+    'Kyau & Albert', 'Super8 & Tab', 'Sonny & Cher',
+    'Ike & Tina Turner', 'Macklemore & Ryan Lewis', 'Tom Petty and the Heartbreakers',
+    'Tom Petty & The Heartbreakers', 'Bob Marley & The Wailers', 'Nick Cave & The Bad Seeds',
+    'AC/DC', 'K/DA', 'Axwell Λ Ingrosso',
+    'Of Monsters and Men', 'Hootie & the Blowfish', 'Sly & the Family Stone',
+    'Echo & the Bunnymen', 'Katrina and the Waves', 'Sam & Dave',
+    'Brooks & Dunn', 'Big & Rich', 'Dan + Shay',
+    'Matt and Kim',
+)
+
+
+@pytest.mark.parametrize("band", OLD_KNOWN_ACTS)
+def test_every_name_the_old_list_held_stays_whole_on_the_data(band):
+    from core.matching.artist_credit import credits_confirm
+    words = tokens(band)[0]
+    known = {w.casefold() for w in words}
+
+    def every_word_an_artist(name):
+        return name.casefold() in known
+    # nothing knows it: as written
+    assert decide_credit(band).names == (band,)
+    # a provider credits it as one artist: whole, even with every word an artist
+    whole = [("spotify credits", [band])]
+    assert decide_credit(band, evidence=whole, is_artist=every_word_an_artist).names == (band,)
+    # the band identified in the library: whole
+    assert decide_credit(band, is_act=lambda n: n == band,
+                         is_artist=every_word_an_artist).names == (band,)
+    # the worst case (every word an artist, nothing else known) only proposes;
+    # a provider list crediting the band never confirms cutting it
+    proposed = decide_credit(band, is_artist=every_word_an_artist).names
+    assert not credits_confirm(proposed, whole)

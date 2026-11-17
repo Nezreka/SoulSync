@@ -214,6 +214,9 @@ class CommaArtistSplitterJob(RepairJob):
         '- Keep Whole Names: Names that are one artist and never split, separated by ";" '
         '(e.g. "K/DA; Above & Beyond"). A finding\'s "One artist" and "Edit split" add to it\n'
         '- Dry Run: When enabled, only reports splits without changing your library\n'
+        '- Heal Ghosts: a combined artist that only stands in credits (owns no album, nobody '
+        'watches it) is split on its own as soon as the providers confirm it, dry run or not. '
+        'One they do not confirm stays a finding to check\n'
         '- Request Re-tag / Request Reorganize: after every split (a finding applied here, or '
         'a new download\'s artist split after the import), run those jobs for exactly the '
         'affected files, also when their own schedule is off'
@@ -230,6 +233,9 @@ class CommaArtistSplitterJob(RepairJob):
         'dry_run': True,
         'request_retag': True,
         'request_reorganize': True,
+        # a confirmed split of a ghost (a credit no album belongs to and
+        # nobody watches) is applied on its own, dry run or not
+        'heal_ghosts': True,
     }
     auto_fix = True
     writes_library_files = False
@@ -357,14 +363,19 @@ class CommaArtistSplitterJob(RepairJob):
         else:
             _gap_cursor(context, _CURSOR_KEY, 0)
 
+        heal_ghosts = settings.get('heal_ghosts', True) is not False
         fixer = None
-        if not dry_run:
-            from core.repair_worker import active_repair_worker, RepairWorker
-            fixer = active_repair_worker()
-            # the app's worker, when it works on this library's database
-            if fixer is None or getattr(fixer, 'db', None) is not context.db:
-                fixer = RepairWorker(context.db, transfer_folder=context.transfer_folder)
-                fixer._config_manager = context.config_manager
+
+        def get_fixer():
+            nonlocal fixer
+            if fixer is None:
+                from core.repair_worker import active_repair_worker, RepairWorker
+                fixer = active_repair_worker()
+                # the app's worker, when it works on this library's database
+                if fixer is None or getattr(fixer, 'db', None) is not context.db:
+                    fixer = RepairWorker(context.db, transfer_folder=context.transfer_folder)
+                    fixer._config_manager = context.config_manager
+            return fixer
 
         for info in sorted(found, key=lambda x: len(x['details']['all_files']), reverse=True):
             if context.check_stop():
@@ -378,47 +389,26 @@ class CommaArtistSplitterJob(RepairJob):
                     log_type='warning')
             entity_id = f'lib2:{info["artist_id"]}'
             unconfirmed = bool(details.get('needs_confirmation'))
-            if dry_run or unconfirmed:
-                # live mode applies only what the providers confirmed; a split
-                # names alone propose waits for the user either way
-                if not context.create_finding:
-                    continue
-                count = len(details["split_artists"])
-                try:
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='comma_artist_split',
-                        severity='info' if unconfirmed else 'warning',
-                        entity_type='artist',
-                        entity_id=entity_id,
-                        file_path=None,
-                        title=f'Combined artist: {details["combined_name"]}',
-                        description=(
-                            f'"{details["combined_name"]}" may be {count} artists. No '
-                            f'provider confirms it: check it before you split it'
-                            if unconfirmed else
-                            f'"{details["combined_name"]}" is {count} '
-                            f'artists — the fix splits it in your library for '
-                            f'{details["track_count"]} track(s)'),
-                        details=details,
-                    )
-                    if inserted:
-                        result.findings_created += 1
-                    else:
-                        result.findings_skipped_dedup += 1
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("Error creating finding for %s: %s", details['combined_name'], e)
-                    result.errors += 1
+            # applied on its own: what the providers confirmed, in live mode,
+            # or for a ghost whenever ghosts heal. A split names alone
+            # propose waits for the user either way
+            auto = not unconfirmed and (not dry_run or (heal_ghosts and details.get('ghost')))
+            if not auto:
+                self._file_finding(context, result, details, entity_id, unconfirmed)
             else:
-                applied = fixer._fix_comma_artist_split('artist', entity_id, None, details)
+                applied = get_fixer()._fix_comma_artist_split('artist', entity_id, None, details)
                 if applied.get('success') and applied.get('action') == 'artists_split':
                     result.auto_fixed += applied.get('fixed', 0)
                     self._record_resolved_finding(context, details, int(applied.get('fixed', 0)),
                                                   entity_id)
                 elif not applied.get('success'):
-                    result.errors += 1
-                    logger.warning("Could not apply artist split for %s: %s",
-                                   details['combined_name'], applied.get('error'))
+                    if dry_run:
+                        # a ghost the heal refused (a lock, a name set by hand)
+                        self._file_finding(context, result, details, entity_id, unconfirmed)
+                    else:
+                        result.errors += 1
+                        logger.warning("Could not apply artist split for %s: %s",
+                                       details['combined_name'], applied.get('error'))
             if context.sleep_or_stop(0.05):
                 return result
 
@@ -433,6 +423,37 @@ class CommaArtistSplitterJob(RepairJob):
                          f'{result.skipped} skipped, {result.scanned} checked',
                 log_type='success')
         return result
+
+    def _file_finding(self, context: JobContext, result: JobResult, details: dict,
+                      entity_id: str, unconfirmed: bool) -> None:
+        if not context.create_finding:
+            return
+        count = len(details["split_artists"])
+        try:
+            inserted = context.create_finding(
+                job_id=self.job_id,
+                finding_type='comma_artist_split',
+                severity='info' if unconfirmed else 'warning',
+                entity_type='artist',
+                entity_id=entity_id,
+                file_path=None,
+                title=f'Combined artist: {details["combined_name"]}',
+                description=(
+                    f'"{details["combined_name"]}" may be {count} artists. No '
+                    f'provider confirms it: check it before you split it'
+                    if unconfirmed else
+                    f'"{details["combined_name"]}" is {count} '
+                    f'artists — the fix splits it in your library for '
+                    f'{details["track_count"]} track(s)'),
+                details=details,
+            )
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Error creating finding for %s: %s", details['combined_name'], e)
+            result.errors += 1
 
     def _asked_artists(self, context: JobContext, artist_ids, symbols: list, walk: dict):
         """Yield (id, name) of the requested artists whose name holds an
@@ -533,6 +554,12 @@ class CommaArtistSplitterJob(RepairJob):
                 "JOIN lib2_artists pa ON pa.id = al.primary_artist_id "
                 "WHERE ta.artist_id = ? AND pa.id <> ?", (artist_id, artist_id)) if r[0]]
             identified = _identified_name_keys(conn, exclude_id=artist_id)
+            # a ghost: a credit no album belongs to and nobody watches
+            watched = conn.execute(
+                "SELECT 1 FROM lib2_artists WHERE id=? AND COALESCE(monitored,0)=1 UNION ALL "
+                "SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=? "
+                "AND COALESCE(monitored,0)=1 LIMIT 1", (artist_id, artist_id)).fetchone()
+            ghost = not scope['primary_album_ids'] and watched is None
             # the artist's own provider identity says the whole name is one
             # act: "Lo & Leduc" stays whole next to identified "Lo" / "Leduc"
             from core.library2.native_enrich import _IDENTIFIED_SQL
@@ -609,6 +636,7 @@ class CommaArtistSplitterJob(RepairJob):
             # names alone proposed it: never applied without the user
             'confirmed': is_confirmed,
             'needs_confirmation': not is_confirmed,
+            'ghost': ghost,
             'parts_resolution': resolution,
             'file_count': len(files),
             'track_count': len(scope['track_ids']),

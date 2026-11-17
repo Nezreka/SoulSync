@@ -4315,8 +4315,15 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
 
+            whole = _key(combined)
+
             def _known(name):
-                return _key(name) in keys or library_has_identified_artist(name, conn=conn)
+                if _key(name) in keys:
+                    return True
+                # the combined artist's own row vouches for nothing: its id may
+                # be one it picked up by name ("Øneheart, Malek"), and the scan
+                # already weighed it (the album's artist inside the name wins)
+                return _key(name) != whole and library_has_identified_artist(name, conn=conn)
 
             have = {_key(p) for p in parts}
             for name in split_names(combined, known=_known):

@@ -575,10 +575,10 @@ def test_an_anchored_ghost_with_an_id_it_picked_up_by_name_is_still_a_list(db, n
                      "VALUES(?, ?, 'featured', 1)", (tracks[0], ghost))
         conn.commit()
     _credits(db, tracks[0], ['Øneheart', 'Malek'])
-    _result, findings = _scan(db)
-    finding = [f for f in findings if f['details']['combined_name'] == 'Øneheart, Malek'][0]
-    assert finding['details']['split_artists'] == ['Øneheart', 'Malek']
-    assert finding['details']['confirmed'] is True
+    result, findings = _scan(db)
+    # a ghost, confirmed: healed on its own, its own picked-up id no obstacle
+    assert findings == [] and result.auto_fixed == 1
+    assert _artist_id(db, 'Øneheart, Malek') is None and _artist_id(db, 'Malek')
 
 
 
@@ -610,9 +610,15 @@ def test_a_feat_credit_the_import_kept_whole_is_split_when_confirmed(db, no_fetc
                      "VALUES(?, ?, 'featured', 1)", (tracks[0], ghost))
         conn.commit()
     _credits(db, tracks[0], ['Drake', 'Wizkid'])
-    _result, findings = _scan(db, scope={'artist_ids': [ghost]})
-    assert [f['details']['split_artists'] for f in findings] == [['Drake', 'Wizkid']]
-    assert findings[0]['details']['confirmed'] is True
+    result, findings = _scan(db, scope={'artist_ids': [ghost]})
+    # a confirmed ghost (a credit only) heals on its own, dry run or not
+    assert findings == [] and result.auto_fixed == 1
+    assert _artist_id(db, 'Drake feat. Wizkid') is None
+    with db._get_connection() as conn:
+        credited = {r[0] for r in conn.execute(
+            "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
+            "WHERE ta.track_id=?", (tracks[0],))}
+    assert credited == {'Drake', 'Wizkid'}
 
 
 def test_a_run_with_files_and_artists_asked_for_checks_both(db, no_fetch):
@@ -629,3 +635,79 @@ def test_a_run_with_files_and_artists_asked_for_checks_both(db, no_fetch):
     names = {f['details']['combined_name'] for f in findings}
     assert 'Camellia, Toby Fox' in names            # the file scope
     assert 'Nova, Mat Zo' not in names               # neither asked nor in scope
+
+
+
+# ── ghosts heal on their own, everything else is a finding in dry run ───────
+
+def _ghost_on(db, album_artist, ghost, title='Song'):
+    tracks = _album_by(db, album_artist, title, album=f'{album_artist} LP')
+    with db._get_connection() as conn:
+        gid = conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)",
+                           (ghost, ghost)).lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, 'featured', 1)", (tracks[0], gid))
+        conn.commit()
+    return tracks[0], gid
+
+
+def test_a_confirmed_ghost_heals_in_dry_run_and_leaves_a_record(db, no_fetch):
+    track, ghost = _ghost_on(db, 'Camellia', 'Camellia, Toby Fox')
+    _credits(db, track, ['Camellia', 'Toby Fox'])
+    result, findings = _scan(db)
+    assert findings == [] and result.auto_fixed == 1
+    assert _artist_id(db, 'Camellia, Toby Fox') is None
+    with db._get_connection() as conn:
+        row = conn.execute("SELECT status FROM repair_findings "
+                           "WHERE job_id='comma_artist_splitter'").fetchone()
+    assert row[0] == 'resolved'         # Fixed on the Tools page says what happened
+
+
+def test_an_unconfirmed_ghost_is_a_finding_to_check(db, no_fetch):
+    _ghost_on(db, 'Camellia', 'Camellia, Toby Fox')
+    result, findings = _scan(db)
+    assert result.auto_fixed == 0
+    assert [f['details']['needs_confirmation'] for f in findings] == [True]
+
+
+def test_what_is_not_a_ghost_stays_a_finding_in_dry_run(db, no_fetch):
+    # an album of its own
+    tracks = _album_by(db, 'Camellia, Toby Fox', 'One')
+    _credits(db, tracks[0], ['Camellia', 'Toby Fox'])
+    # a watched credit
+    track, watched = _ghost_on(db, 'Nova', 'Nova, Mat Zo', title='Two')
+    _credits(db, track, ['Nova', 'Mat Zo'])
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (watched,))
+        conn.commit()
+    result, findings = _scan(db)
+    assert result.auto_fixed == 0
+    assert sorted(f['details']['combined_name'] for f in findings) == [
+        'Camellia, Toby Fox', 'Nova, Mat Zo']
+
+
+def test_heal_ghosts_off_files_ghosts_as_findings(db, no_fetch):
+    track, _ghost = _ghost_on(db, 'Camellia', 'Camellia, Toby Fox')
+    _credits(db, track, ['Camellia', 'Toby Fox'])
+    result, findings = _scan(db, _settings(heal_ghosts=False))
+    assert result.auto_fixed == 0 and len(findings) == 1
+
+
+
+# ── every name of the removed built-in list, through the job ────────────────
+
+from tests.matching.test_artist_credit_corpus import OLD_KNOWN_ACTS  # noqa: E402
+
+
+@pytest.mark.parametrize("band", OLD_KNOWN_ACTS)
+def test_split_artists_never_splits_a_name_the_old_list_held(db, no_fetch, band):
+    from core.matching.artist_credit import tokens
+    # its words are artists in the library (old phantom splits), the worst case
+    words = [w for w in tokens(band)[0] if w.casefold() != band.casefold()]
+    _identified(db, *words)
+    # the band as a credit on someone's track, a provider listing it whole
+    track, _ghost = _ghost_on(db, 'Various Artists', band)
+    _credits(db, track, [band])
+    result, findings = _scan(db)
+    assert result.auto_fixed == 0 and findings == []
+    assert _artist_id(db, band) is not None

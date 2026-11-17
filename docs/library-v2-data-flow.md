@@ -102,7 +102,10 @@ owner of another one.
 by a stored provider list, so the track exists under each of them there.
 Names (a ";", the album's artist inside the name, parts the library knows)
 only propose a split. A split it cannot confirm is a finding the user
-confirms on the finding itself; Fix All and live mode leave it alone.
+confirms on the finding itself; Fix All and live mode leave it alone. A
+confirmed split of a ghost (a credit no album belongs to and nobody watches)
+is applied on its own, dry run or not (Heal Ghosts, on by default); anything
+else follows dry run.
 
 **Credit sources** are the providers whose track lookup gives a real artist
 list with ids: Spotify, Deezer, MusicBrainz, Tidal, Discogs, JioSaavn
