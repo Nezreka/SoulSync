@@ -197,6 +197,39 @@ All under `/lidarr/api/v1`: `system/status`, `qualityprofile`, `metadataprofile`
 
 ---
 
+## Seerr compatible API
+
+Apps built for Seerr (Jellyseerr, Overseerr) can use SoulSync's video side instead. They browse and search through SoulSync's TMDB data, see what's already in your library, and their movie and show requests land on SoulSync's video wishlist. Built for **Litefin** and its Jellyfin plugin.
+
+### Turn it on
+
+Go to **Settings > System > SoulSync API > Seerr Compatible API**:
+
+1. Tick **Answer as Seerr at /seerr**. While it's off, every `/seerr` route answers `404`.
+2. Pick **Jellyfin users with no profile request as**.
+
+### Connect the app
+
+In the app, set the Seerr URL to `http://<host>:8008/seerr` and paste a SoulSync **admin** API key as the Seerr API key. For Litefin that's the **Seerr Integration** on the Litefin plugin's page in your Jellyfin dashboard. A read key gets `403`. The app talks to `/seerr/api/v1` like it would to a real Seerr.
+
+### Who asks
+
+Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin user under **Settings > Connections**, else the profile with the same name, else the profile picked above. A profile without the video side can't request, and a kids profile can't request a title over its rating cap.
+
+### What happens
+
+- A profile that can download gets it straight away: a movie goes on its video wishlist, and for a show every aired episode of the seasons asked for that isn't in the library yet. Asking for the newest season also follows the show, so its next episodes come too.
+- A profile that can't download files a video request that waits on the **Requests** page. SoulSync requests pick a whole-show policy, so when the seasons asked for aren't all, the first or the newest, the request asks for every season and the note says which ones were picked. The admin can change it when approving.
+- Request limits apply like they do in SoulSync.
+- Cards show **Available** when it's in your library, **Partially available** for a show with episodes missing, **Processing** when it's on a wishlist or followed, and **Pending** while a request waits.
+- Downloads use your normal quality profiles. There are no Radarr or Sonarr servers to pick and no separate 4K request.
+
+### Supported routes
+
+All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `discover/movies` (plus `upcoming`, `studio`, `genre`), `discover/tv` (plus `upcoming`, `network`, `genre`), `discover/genreslider`, `search`, `movie` and `tv` (details, `similar`, `recommendations`), `person` (with `combined_credits`), `collection`, `request` (list, create, cancel) and `media`. Seerr's watch-later list, outside ratings and Radarr/Sonarr service lists answer empty, since SoulSync doesn't keep them.
+
+---
+
 ## Endpoints
 
 ### System

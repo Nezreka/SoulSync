@@ -251,7 +251,7 @@ def test_tmdb_search_parses_multi(monkeypatch):
     kinds = [r["kind"] for r in res]
     assert kinds == ["movie", "show", "person"]              # company dropped
     assert res[0] == {"kind": "movie", "tmdb_id": 1, "title": "Dune", "year": "2021",
-                      "overview": None, "rating": 8.0,
+                      "date": "2021-10-22", "backdrop": None, "overview": None, "rating": 8.0,
                       "poster": "https://image.tmdb.org/t/p/w300/d.jpg"}
     assert res[2]["known_for"] == "Dune, Euphoria"
 
@@ -1155,7 +1155,7 @@ def test_tmdb_discover_builds_filtered_params(monkeypatch):
     assert p["with_genres"] == 28 and p["sort_by"] == "vote_average.desc"
     assert p["primary_release_date.gte"] == "2010-01-01" and p["primary_release_date.lte"] == "2019-12-31"
     assert res[0] == {"kind": "movie", "tmdb_id": 1, "title": "A", "year": "2015",
-                      "rating": 7.5, "overview": "O",
+                      "date": "2015-01-01", "rating": 7.5, "overview": "O",
                       "original_language": None, "popularity": None,
                       "poster": "https://image.tmdb.org/t/p/w300/a.jpg",
                       "backdrop": "https://image.tmdb.org/t/p/w780/b.jpg"}
@@ -1170,6 +1170,31 @@ def test_tmdb_discover_tv_uses_first_air_date_year(monkeypatch):
     assert "/discover/tv" in captured["url"]
     assert captured["params"]["first_air_date_year"] == 2020
     assert "primary_release_year" not in captured["params"]
+
+
+def test_tmdb_discover_next_90_looks_ahead(monkeypatch):
+    """#2151: the seerr compat api's upcoming tv row asks for what airs in
+    the next three months, not the last."""
+    import datetime as _dt
+    captured = {}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(
+        get=lambda u, **k: (captured.update(params=k.get("params")), _Resp({"results": []}))[1]))
+    TMDBClient("KEY").discover("show", release_window="next_90", vote_count_min=0)
+    today = _dt.date.today()
+    p = captured["params"]
+    assert p["first_air_date.gte"] == (today + _dt.timedelta(days=1)).isoformat()
+    assert p["first_air_date.lte"] == (today + _dt.timedelta(days=90)).isoformat()
+    assert p["vote_count.gte"] == 0
+
+
+def test_tmdb_search_keeps_the_full_date(monkeypatch):
+    """#2151: seerr clients show a release date, not just the year."""
+    body = {"results": [{"media_type": "tv", "id": 3, "name": "S", "first_air_date": "2019-09-09",
+                         "backdrop_path": "/b.jpg"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    res = TMDBClient("KEY").search("s")
+    assert res[0]["date"] == "2019-09-09" and res[0]["year"] == "2019"
+    assert res[0]["backdrop"] == "https://image.tmdb.org/t/p/w780/b.jpg"
 
 
 def test_tmdb_genres_parses(monkeypatch):

@@ -129,7 +129,7 @@ def _run_mirrored_playlist_pipeline(
             log_type='info',
         )
 
-        refreshed, refresh_errors = _run_refresh_phase(
+        refreshed, refresh_errors, refresh_messages = _run_refresh_phase(
             config,
             deps,
             automation_id,
@@ -204,10 +204,13 @@ def _run_mirrored_playlist_pipeline(
             final_log_line += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             final_log_type = 'warning'
         # imported here: core.automation.handlers imports this module
-        from core.automation.handlers._pipeline_shared import apply_sync_errors
+        from core.automation.handlers._pipeline_shared import (
+            apply_refresh_errors, apply_sync_errors)
         result_errors: Dict[str, Any] = {}
         final_log_line, final_log_type = apply_sync_errors(
             sync_summary, result_errors, final_log_line, final_log_type)
+        final_log_line, final_log_type = apply_refresh_errors(
+            refresh_errors, refresh_messages, result_errors, final_log_line, final_log_type)
         deps.update_progress(
             automation_id,
             status='finished',
@@ -384,7 +387,7 @@ def _run_refresh_phase(
     automation_id: Any,
     *,
     refresh_fn: RefreshFn,
-) -> tuple[int, int]:
+) -> tuple[int, int, List[str]]:
     deps.update_progress(
         automation_id,
         progress=3,
@@ -404,6 +407,7 @@ def _run_refresh_phase(
     refresh_result = refresh_fn(refresh_config, deps)
     refreshed = int(refresh_result.get('refreshed', 0))
     refresh_errors = int(refresh_result.get('errors', 0))
+    refresh_messages = list(refresh_result.get('_error_messages') or [])
 
     deps.update_progress(
         automation_id,
@@ -412,7 +416,7 @@ def _run_refresh_phase(
         log_line=f'Phase 1 done: {refreshed} refreshed, {refresh_errors} errors',
         log_type='success' if refresh_errors == 0 else 'warning',
     )
-    return refreshed, refresh_errors
+    return refreshed, refresh_errors, refresh_messages
 
 
 def _run_discovery_phase(

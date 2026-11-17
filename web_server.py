@@ -1807,12 +1807,10 @@ def _register_automation_handlers():
             return None
 
     def _itunes_link_parser_for_registry(url):
-        # ``parse_itunes_link_endpoint`` is a Flask route handler; the
-        # actual parsing work needs the underlying helpers. For now
-        # we punt — Phase 2 will lift the parsing into a pure helper
-        # the adapter can call directly. Refresh of itunes_link
-        # mirrors is not yet wired (current handler skips them).
-        return None
+        # the same parse the paste route runs. this was a stub returning
+        # None, so an Apple Music mirror never refreshed (#2147)
+        from core.playlists.itunes_link import fetch_itunes_link
+        return fetch_itunes_link(url, _get_itunes_client)
 
     # Discovery callable for the LB / Last.fm adapters' ``discover_tracks``.
     # Wraps the pure ``match_mb_tracks`` helper with the live matching
@@ -4527,7 +4525,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -24042,6 +24040,12 @@ app.register_blueprint(_bp_mr())
 from api.lidarr_compat import configure as _cfg_lc, create_blueprint as _bp_lc
 _cfg_lc(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_lc())
+
+# seerr compatible api: seerr request apps (litefin's jellyfin plugin) can use
+# soulsync's video side as their seerr (#2151)
+from api.seerr_compat import configure as _cfg_sc, create_blueprint as _bp_sc
+_cfg_sc(get_database=get_database, config_manager=config_manager)
+app.register_blueprint(_bp_sc())
 
 # mcp: an ai client drives soulsync through /mcp with an api key
 from api.mcp import configure as _cfg_mcp, create_blueprint as _bp_mcp

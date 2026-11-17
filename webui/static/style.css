@@ -73936,6 +73936,8 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-detail-inner .repair-btn:hover:not(:disabled) { background: var(--white-a16); }
 #tools-page .repair-finding-detail-inner .repair-btn.repair-btn-fix { background: var(--text-1); color: var(--bg-primary); }
 #tools-page .repair-finding-detail-inner .repair-btn.repair-btn-fix:hover:not(:disabled) { background: var(--white-a85); }
+/* a disabled merge/keep button read as live (#2146): no pointer on it */
+#tools-page .repair-finding-detail-inner .repair-btn:disabled { cursor: default; }
 #tools-page .repair-finding-play-btn svg,
 #tools-page .repair-subitem-play svg { width: 12px; height: 12px; fill: currentColor; }
 
@@ -74001,6 +74003,7 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-finding-error-title { flex: none; font-weight: 600; color: var(--danger-light); }
 #tools-page .repair-finding-error-text { min-width: 0; }
+#tools-page .repair-finding-error-banner.repair-merge-blocked { margin: 0 0 12px; }
 
 #tools-page .repair-findings-pagination { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 8px; }
 #tools-page .repair-page-btn {

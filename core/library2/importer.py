@@ -761,6 +761,8 @@ class _ArtistResolver:
         # Stufe 5) keeps numerically-colliding ids of different providers
         # (a Deezer id equal to some iTunes id) from merging two artists.
         self._by_provider: Dict[tuple, int] = {}
+        # names the user said are one artist each (#2150), read once
+        self._kept_whole: Optional[set] = None
 
     @staticmethod
     def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -844,8 +846,15 @@ class _ArtistResolver:
         return self._by_legacy.get(_legacy_key(legacy_id))
 
     def known_name(self, name: str) -> bool:
-        """Whether an artist with exactly this (normalized) name already exists."""
-        return normalize_name(name) in self._by_name
+        """Whether an artist with exactly this (normalized) name already
+        exists, or the user said this name is one artist (#2150)."""
+        key = normalize_name(name)
+        if key in self._by_name:
+            return True
+        if self._kept_whole is None:
+            from core.imports.collab_artist import kept_whole_keys
+            self._kept_whole = kept_whole_keys()
+        return key in self._kept_whole
 
     def get_or_create_by_name(self, name: str, *,
                               provider_ids: Optional[Dict[str, Any]] = None,

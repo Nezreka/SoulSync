@@ -125,6 +125,22 @@ from core.media_server.base import MediaServerBase
 from core.media_server.contract import Capability
 
 
+def playlist_create_body(name: str, user_id, *, is_public: bool = False) -> Dict[str, Any]:
+    """the body for POST /Playlists.
+
+    jellyfin 10.9+ makes a playlist public unless the body says otherwise
+    (CreatePlaylistDto.IsPublic defaults to true), so every playlist SoulSync
+    made for one person showed up for every user (#2148). older jellyfin and
+    emby don't know the field and ignore it. no 'Ids': emby can't take an
+    empty array, the tracks go in after."""
+    return {
+        'Name': name,
+        'UserId': user_id,
+        'MediaType': 'Audio',
+        'IsPublic': bool(is_public),
+    }
+
+
 class JellyfinClient(MediaServerBase):
     CAPABILITIES = frozenset({
         Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER, Capability.LIBRARY_STATS,
@@ -1620,8 +1636,8 @@ class JellyfinClient(MediaServerBase):
             logger.error(f"Error deleting Jellyfin playlist {playlist_id}: {e}")
             return False
 
-    def create_playlist(self, name: str, tracks) -> bool:
-        """Create a new playlist with given tracks"""
+    def create_playlist(self, name: str, tracks, *, is_public: bool = False) -> bool:
+        """Create a new playlist with given tracks. private unless asked (#2148)."""
         if not self.ensure_connection():
             return False
         
@@ -1654,41 +1670,9 @@ class JellyfinClient(MediaServerBase):
 
             logger.info(f"Creating Jellyfin/Emby playlist '{name}' with {len(track_ids)} valid track IDs (filtered {len(invalid_tracks)} invalid)")
             
-            # For large playlists, create empty playlist first then add tracks in batches
-            if True:
-                return self._create_large_playlist(name, track_ids)
-            
-            # Create playlist using POST request for smaller playlists
-            import requests
-            url = f"{self.base_url}/Playlists"
-            headers = {
-                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
-                'Content-Type': 'application/json'
-            }
-            data = {
-                'Name': name,
-                'UserId': self.user_id,
-                'MediaType': 'Audio',
-                'Ids': track_ids
-            }
-            
-            response = requests.post(url, json=data, headers=headers, timeout=30)
-            
-            # Log response details for debugging
-            logger.debug(f"Jellyfin playlist creation response: Status {response.status_code}")
-            if response.status_code >= 400:
-                logger.error(f"Jellyfin API error: {response.status_code} - {response.text}")
-                
-            response.raise_for_status()
-            
-            result = response.json()
-            if result and 'Id' in result:
-                logger.info(f"Created Jellyfin playlist '{name}' with {len(track_ids)} tracks")
-                return True
-            else:
-                logger.error(f"Failed to create Jellyfin playlist '{name}': No playlist ID returned")
-                return False
-                
+            # create it empty, then add the tracks in batches
+            return self._create_large_playlist(name, track_ids, is_public=is_public)
+
         except Exception as e:
             logger.error(f"Error creating Jellyfin playlist '{name}': {e}")
             return False
@@ -1718,7 +1702,7 @@ class JellyfinClient(MediaServerBase):
         except ValueError:
             return False
 
-    def _create_large_playlist(self, name: str, track_ids: List[str]) -> bool:
+    def _create_large_playlist(self, name: str, track_ids: List[str], *, is_public: bool = False) -> bool:
         """Create a large playlist by first creating empty playlist, then adding tracks in batches"""
         try:
             import requests
@@ -1729,12 +1713,7 @@ class JellyfinClient(MediaServerBase):
                 'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'application/json'
             }
-            # Don't include 'Ids' field for empty playlist - Emby doesn't handle empty arrays
-            data = {
-                'Name': name,
-                'UserId': self.user_id,
-                'MediaType': 'Audio'
-            }
+            data = playlist_create_body(name, self.user_id, is_public=is_public)
 
             logger.debug(f"Creating empty playlist with data: {data}")
             response = requests.post(url, json=data, headers=headers, timeout=10)
@@ -2174,6 +2153,18 @@ class JellyfinClient(MediaServerBase):
             logger.error(f"Error reordering Jellyfin playlist '{playlist_name}': {e}")
             return False
 
+    def _playlist_is_public(self, playlist_id) -> Optional[bool]:
+        """the playlist's own public flag (jellyfin 10.9+ ``OpenAccess``), or
+        None when the server doesn't say (emby, older jellyfin)."""
+        try:
+            data = self._make_request(f'/Playlists/{playlist_id}')
+        except Exception as e:  # noqa: BLE001 - unknown means private
+            logger.debug(f"Could not read visibility of playlist {playlist_id}: {e}")
+            return None
+        if isinstance(data, dict) and isinstance(data.get('OpenAccess'), bool):
+            return data['OpenAccess']
+        return None
+
     def update_playlist(self, playlist_name: str, tracks, *, playlist_id=None) -> bool:
         """Update an existing playlist or create it if it doesn't exist.
 
@@ -2205,8 +2196,11 @@ class JellyfinClient(MediaServerBase):
             if existing_playlist and self._replace_in_place(existing_playlist.id, playlist_name, tracks):
                 return True
 
+            is_public = False
             if existing_playlist:
-                # in place did not work: delete it and make it again
+                # in place did not work: delete it and make it again, shared
+                # or private the way it was (#2148)
+                is_public = bool(self._playlist_is_public(existing_playlist.id))
                 import requests
                 url = f"{self.base_url}/Items/{existing_playlist.id}"
                 headers = {
@@ -2223,7 +2217,7 @@ class JellyfinClient(MediaServerBase):
                     return False
             
             # Create new playlist with tracks
-            return self.create_playlist(playlist_name, tracks)
+            return self.create_playlist(playlist_name, tracks, is_public=is_public)
             
         except Exception as e:
             logger.error(f"Error updating Jellyfin playlist '{playlist_name}': {e}")

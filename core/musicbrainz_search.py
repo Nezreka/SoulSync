@@ -543,6 +543,15 @@ class MusicBrainzSearchClient:
         albums.sort(key=self._release_variant_key)
         return albums[:limit]
 
+    def release_group_editions(self, release_group_mbid: str, artist_name: str = '',
+                               limit: int = 100) -> List[Album]:
+        """Every release (edition) in one release group, from one browse call.
+        what picard calls "other versions" (#2145)."""
+        if not release_group_mbid:
+            return []
+        return self._release_group_releases_to_albums({'id': release_group_mbid},
+                                                      artist_name, limit)
+
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search MusicBrainz for releases (albums).
 

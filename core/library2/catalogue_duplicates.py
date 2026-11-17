@@ -753,6 +753,9 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
         return {"success": True, "action": "catalogue_merge", "kept_album_id": keep_album_id,
                 "merged_album_id": duplicate["id"], "message": "Release groups merged; editions and files preserved."}
     except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
+        # a refused merge was only a toast, nothing in the log (#2146)
+        logger.warning("release merge into %s refused (%s): %s",
+                       keep_album_id, candidate.get("pair_key") if isinstance(candidate, dict) else None, exc)
         return {"success": False, "error": str(exc)}
 
 
