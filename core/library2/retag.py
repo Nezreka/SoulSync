@@ -68,7 +68,7 @@ _POLICY_DATA_KEYS = {
     'track_number': 'track_number', 'disc_number': 'disc_number',
     'total_tracks': 'track_count', 'total_discs': 'total_discs',
     'bpm': 'bpm', 'style': 'style', 'mood': 'mood', 'copyright': 'copyright',
-    'isrc': 'isrc', 'lyrics': 'lyrics',
+    'isrc': 'isrc', 'lyrics': 'lyrics', 'artists': 'artists_list',
 }
 
 
@@ -140,7 +140,9 @@ def _policy_diff(file_tags, db_data, options):
     diff = build_tag_diff(file_tags, db_data)
     for item in diff:
         key = item['file_key']
-        if selected is not None and key not in selected and _POLICY_DATA_KEYS.get(key) not in selected:
+        # the ARTISTS list belongs to the artist field
+        chosen = 'artist' if key == 'artists' else key
+        if selected is not None and chosen not in selected and _POLICY_DATA_KEYS.get(chosen) not in selected:
             item['changed'] = False
         elif key == 'cover_art':
             item['changed'] = (options['cover_art'] != 'skip' and bool(db_data.get('thumb_url'))
@@ -400,7 +402,8 @@ def _apply_overrides(conn, row: Any, data: Dict[str, Any]) -> Dict[str, str]:
     return manual
 
 
-def _performers(artists: List[str], album_artist: Any, own_artist: Any) -> List[str]:
+def _performers(artists: List[str], album_artist: Any, own_artist: Any,
+                source_album_artist: Any = None) -> List[str]:
     """the credits that belong in the ARTIST tag.
 
     the upgrade import credits every track to its album artist as well as to
@@ -414,6 +417,11 @@ def _performers(artists: List[str], album_artist: Any, own_artist: Any) -> List[
         return artists
     try:
         from core.tag_writer import _artist_name_set
+        # Membership comes from the catalogue's source credit; a manual
+        # display-name override must not turn the album performer into an
+        # unrelated curator and remove them from ARTIST/ARTISTS.
+        if source_album_artist and _artist_name_set(source_album_artist) & _artist_name_set(own_artist):
+            return artists
         album_names = _artist_name_set(album_artist)
         if not album_names or album_names & _artist_name_set(own_artist):
             return artists
@@ -451,7 +459,7 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     album_artist_name = effective_artist_name(
         conn, row["album_artist_id"], row["album_artist_name"])
     own_artist = row["own_artist"] if "own_artist" in row.keys() else None
-    artists = _performers(artists, album_artist_name, own_artist)
+    artists = _performers(artists, album_artist_name, own_artist, row['album_artist_name'])
     track_artist = _artist_joiner().join(artists) if artists else (album_artist_name or "")
     data: Dict[str, Any] = {
         "title": row["title"],
@@ -1012,8 +1020,6 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                             value = value or data.get('artist_name')
                         if value is not None:
                             fields[key] = value
-                    if 'artist' in fields and data.get('artists_list') and _multi_artist_write_enabled():
-                        fields['artists'] = data['artists_list']
                     if not fields and not cover:
                         _persist_file_tags(database, file['id'], tags)
                         stats['skipped'] += 1
