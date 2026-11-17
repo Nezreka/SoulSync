@@ -1,0 +1,99 @@
+[
+  {
+    "PlayState": {"PositionTicks": 32710000000, "CanSeek": true, "IsPaused": false, "IsMuted": false,
+                  "AudioStreamIndex": 1, "SubtitleStreamIndex": -1, "MediaSourceId": "aa01", "PlayMethod": "DirectPlay",
+                  "RepeatMode": "RepeatNone"},
+    "RemoteEndPoint": "192.168.1.44",
+    "PlayableMediaTypes": ["Audio", "Video"],
+    "Id": "8f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
+    "UserId": "0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+    "UserName": "dan",
+    "Client": "Jellyfin Android TV",
+    "LastActivityDate": "2026-11-16T20:02:11.0000000Z",
+    "DeviceName": "Shield TV",
+    "DeviceType": "Tv",
+    "DeviceId": "shield-1",
+    "ApplicationVersion": "0.18.1",
+    "IsActive": true,
+    "SupportsMediaControl": true,
+    "SupportsRemoteControl": true,
+    "SupportedCommands": ["DisplayMessage", "SetVolume"],
+    "UserPrimaryImageTag": "abc123",
+    "NowPlayingItem": {
+      "Name": "Cold Harbor", "Id": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1", "Type": "Episode",
+      "SeriesName": "Severance", "SeriesId": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e", "SeriesPrimaryImageTag": "s1",
+      "SeasonId": "5a5a", "SeasonName": "Season 2", "ParentIndexNumber": 2, "IndexNumber": 10,
+      "RunTimeTicks": 45400000000, "Container": "mkv", "ProductionYear": 2025,
+      "ProviderIds": {"Tmdb": "95396"},
+      "MediaStreams": [
+        {"Codec": "hevc", "Type": "Video", "Index": 0, "Width": 1920, "Height": 1080, "BitRate": 9000000,
+         "BitDepth": 10, "Profile": "Main 10", "VideoRange": "SDR", "VideoRangeType": "SDR",
+         "RealFrameRate": 23.976, "DisplayTitle": "1080p HEVC SDR"},
+        {"Codec": "eac3", "Type": "Audio", "Index": 1, "Channels": 6, "ChannelLayout": "5.1", "Language": "eng",
+         "BitRate": 640000, "IsDefault": true, "DisplayTitle": "English - Dolby Digital+ - 5.1"},
+        {"Codec": "subrip", "Type": "Subtitle", "Index": 2, "Language": "eng", "IsTextSubtitleStream": true}
+      ]
+    }
+  },
+  {
+    "PlayState": {"PositionTicks": 28200000000, "IsPaused": false, "AudioStreamIndex": 1, "SubtitleStreamIndex": -1,
+                  "PlayMethod": "Transcode"},
+    "RemoteEndPoint": "73.41.208.17",
+    "Id": "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+    "UserId": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+    "UserName": "maya",
+    "Client": "Jellyfin iOS",
+    "DeviceName": "iPad",
+    "ApplicationVersion": "1.6.4",
+    "SupportsMediaControl": true,
+    "SupportsRemoteControl": true,
+    "SupportedCommands": ["DisplayMessage"],
+    "TranscodingInfo": {"AudioCodec": "aac", "VideoCodec": "h264", "Container": "ts", "IsVideoDirect": false,
+                        "IsAudioDirect": false, "Bitrate": 3200000, "Framerate": 57.6, "CompletionPercentage": 52.3,
+                        "Width": 1280, "Height": 720, "AudioChannels": 2, "HardwareAccelerationType": "nvenc",
+                        "TranscodeReasons": ["ContainerBitrateExceedsLimit", "AudioCodecNotSupported"]},
+    "NowPlayingItem": {
+      "Name": "The Wild Robot", "Id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", "Type": "Movie", "ProductionYear": 2024,
+      "RunTimeTicks": 61200000000, "Container": "mkv", "ProviderIds": {"Tmdb": "1184918"},
+      "MediaStreams": [
+        {"Codec": "h264", "Type": "Video", "Index": 0, "Width": 1920, "Height": 1080, "BitRate": 14000000,
+         "RealFrameRate": 24, "Profile": "High", "VideoRangeType": "SDR"},
+        {"Codec": "dts", "Type": "Audio", "Index": 1, "Channels": 6, "ChannelLayout": "5.1", "Profile": "DTS-HD MA",
+         "Language": "eng", "BitRate": 3000000}
+      ]
+    }
+  },
+  {
+    "PlayState": {"PositionTicks": 59000000000, "IsPaused": true, "PlayMethod": "DirectPlay"},
+    "RemoteEndPoint": "192.168.1.70",
+    "Id": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+    "UserId": "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e",
+    "UserName": "jo",
+    "Client": "Jellyfin Web",
+    "DeviceName": "Firefox",
+    "ApplicationVersion": "10.11.2",
+    "SupportsMediaControl": true,
+    "SupportedCommands": [],
+    "NowPlayingItem": {
+      "Name": "The Selfish Gene", "Id": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4", "Type": "AudioBook",
+      "Album": "The Selfish Gene", "AlbumArtist": "Richard Dawkins", "ParentId": "d5d5",
+      "RunTimeTicks": 600000000000, "Container": "m4b",
+      "Chapters": [
+        {"StartPositionTicks": 0, "Name": "Preface"},
+        {"StartPositionTicks": 30000000000, "Name": "Why are people?"},
+        {"StartPositionTicks": 54000000000, "Name": "The replicators"},
+        {"StartPositionTicks": 90000000000, "Name": "Immortal coils"}
+      ],
+      "MediaStreams": [
+        {"Codec": "aac", "Type": "Audio", "Index": 0, "Channels": 2, "BitRate": 64000, "SampleRate": 44100}
+      ]
+    }
+  },
+  {
+    "PlayState": {"PositionTicks": 0, "IsPaused": false, "PlayMethod": "DirectPlay"},
+    "RemoteEndPoint": "192.168.1.70",
+    "Id": "4d4d",
+    "UserName": "idle-device",
+    "Client": "Jellyfin Web"
+  }
+]

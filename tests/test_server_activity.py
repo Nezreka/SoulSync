@@ -1,578 +1,164 @@
-"""Live server activity — Plex session normalization (Tautulli-style).
+"""live server activity: what a card shows, the click-through to soulsync's own
+pages, the drawer wiring and the plex connection cache.
 
-The raw plexapi session objects → clean activity payload is pure + defensive:
-tested here with fakes shaped like plexapi's Video/Track/Player/Session/
-TranscodeSession, so the transcode-decision logic, per-type titles, progress,
-and summary roll-up are all covered without a live Plex.
+the rich shape (source vs stream, reasons, transcoder, kinds) is pinned in
+test_server_activity_normalize.py; the recorder, history and stats in their
+own files.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace as NS
+from xml.etree import ElementTree as ET
 
-import pytest
+from core.server_activity import jellyfin as jf
+from core.server_activity import links
+from core.server_activity import plex as px
+from tests.sa_helpers import sa_env  # noqa: F401 - fixture
 
-from core.server_activity import get_activity, normalize_session
 
+def _track(**a):
+    base = {"type": "track", "title": "t", "sessionKey": "1"}
+    base.update({k: v for k, v in a.items() if v is not None})
+    return px.normalize(ET.Element("Track", **base))
 
-class _EmptyVDB:
-    def items_by_server_ids(self, ids, server_source=None):
-        return []
 
-    def find_library_ref_by_title(self, kind, title, year=None):
-        return None
-
-
-@pytest.fixture(autouse=True)
-def _isolate(monkeypatch):
-    """Isolate get_activity tests from any real Jellyfin config + video library in
-    the env. Jellyfin/link-specific tests override these."""
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_jellyfin_activity", lambda db=None: ([], None))
-    monkeypatch.setattr("api.video.get_video_db", lambda: _EmptyVDB())
-
-
-def _media(res="1080", vcodec="hevc", acodec="eac3", bitrate=12000, container="mkv"):
-    return NS(videoResolution=res, videoCodec=vcodec, audioCodec=acodec,
-              bitrate=bitrate, container=container)
-
-
-def _player(state="playing", product="Plex Web", device="Chrome", platform="Chrome", title="Living Room"):
-    return NS(state=state, product=product, device=device, platform=platform, title=title)
-
-
-
-
-def _sess(bandwidth=12000, location="lan", sid="s1"):
-    return NS(bandwidth=bandwidth, location=location, id=sid)
-
-
-def _movie(**kw):
-    # usernames (+ _username) is the LOCAL list; never set `.user`/`.users` — those
-    # would trigger a plex.tv network call in real plexapi, which the code avoids.
-    base = dict(type="movie", sessionKey="10", title="Heat", year=1995, duration=600000,
-                viewOffset=150000, thumb="/t/heat", art="/a/heat",
-                media=[_media()], players=[_player()], usernames=["boulder"], _username="boulder",
-                session=_sess(), transcodeSessions=[])
-    base.update(kw)
-    return NS(**base)
-
-
-def _transcode(vdec="transcode", adec="copy", vcodec="h264", progress=44.0, hw=True):
-    return NS(videoDecision=vdec, audioDecision=adec, videoCodec=vcodec, audioCodec="aac",
-              progress=progress, throttled=False, transcodeHwEncoding=hw,
-              transcodeHwRequested=hw, container="mp4")
-
-
-# ── per-type titles + progress ───────────────────────────────────────────────
-def test_movie_direct_play():
-    s = normalize_session(_movie())
-    assert s["media_type"] == "movie" and s["title"] == "Heat" and s["subtitle"] == "1995"
-    assert s["progress_pct"] == 25              # 150000 / 600000
-    assert s["stream"]["method"] == "Direct Play"
-    assert s["stream"]["video"] == "HEVC" and s["stream"]["resolution"] == "1080P"
-    assert s["user"] == "boulder" and s["player"]["device"] == "Chrome"
-    assert s["bandwidth_kbps"] == 12000 and s["location"] == "lan"
-
-
-def test_episode_transcode_line():
-    ep = _movie(type="episode", title="Ozymandias", grandparentTitle="Breaking Bad",
-                parentIndex=5, index=14, transcodeSessions=[_transcode()])
-    s = normalize_session(ep)
-    assert s["media_type"] == "episode"
-    assert s["subtitle"] == "Breaking Bad · S05E14"
-    assert s["grandparent"] == "Breaking Bad"
-    assert s["stream"]["method"] == "Transcode"
-    assert s["stream"]["video"] == "HEVC → H264"   # source → target on video transcode
-    assert s["stream"]["audio"] == "EAC3"          # audio is 'copy' → no arrow
-    assert s["stream"]["hw"] is True and s["stream"]["transcode_progress"] == 44
-
-
-def test_track_titles_artist_and_album():
-    tr = _movie(type="track", title="Teardrop", grandparentTitle="Massive Attack",
-                parentTitle="Mezzanine", year=None)
-    s = normalize_session(tr)
-    assert s["media_type"] == "track"
-    assert s["subtitle"] == "Massive Attack · Mezzanine"
-
-
-def test_direct_stream_when_only_audio_copies_but_no_video_transcode():
-    # both decisions 'copy' → Direct Stream (remux, not transcode)
-    ep = _movie(transcodeSessions=[_transcode(vdec="copy", adec="copy")])
-    s = normalize_session(ep)
-    assert s["stream"]["method"] == "Direct Stream"
-    assert "→" not in s["stream"]["video"]         # nothing transcoded
-
-
-def test_paused_and_buffering_states_survive():
-    assert normalize_session(_movie(players=[_player(state="paused")]))["state"] == "paused"
-    assert normalize_session(_movie(players=[_player(state="buffering")]))["state"] == "buffering"
-    assert normalize_session(_movie(players=[_player(state="weird")]))["state"] == "playing"
-
-
-def test_missing_attributes_never_raise():
-    # a bare object with almost nothing set
-    s = normalize_session(NS(type="clip"))
-    assert s["title"] == "" and s["user"] == "Someone" and s["progress_pct"] == 0
-    assert s["stream"]["method"] == "Direct Play"
-
-
-# ── the full payload + summary ───────────────────────────────────────────────
-class _FakePlex:
-    friendlyName = "Broque's Plex"
-    version = "1.40.0"
-
-    def __init__(self, sessions):
-        self._s = sessions
-
-    def sessions(self):
-        return self._s
-
-
-def test_get_activity_summarizes(monkeypatch):
-    import core.server_activity as sa
-    plex = _FakePlex([_movie(), _movie(type="episode", transcodeSessions=[_transcode()]),
-                      _movie(session=_sess(location="wan", bandwidth=3000))])
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: plex)
-    out = get_activity()
-    assert out["ok"] is True
-    assert out["server"]["name"] == "Broque's Plex"
-    sm = out["summary"]
-    assert sm["streams"] == 3 and sm["transcodes"] == 1 and sm["direct_play"] == 2
-    assert sm["total_bandwidth_kbps"] == 12000 + 12000 + 3000
-    assert sm["lan"] == 2 and sm["wan"] == 1
-
-
-def test_get_activity_no_server_is_a_state_not_an_error(monkeypatch):
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
-    out = get_activity()
-    assert out["ok"] is False and out["reason"] == "no_server"
-    assert out["sessions"] == [] and out["summary"]["streams"] == 0
-
-
-def test_get_activity_survives_a_bad_session(monkeypatch):
-    import core.server_activity as sa
-
-    class _Boom:
-        friendlyName = "P"
-        version = "1"
-        def sessions(self):
-            good = _movie()
-            bad = property(lambda self: (_ for _ in ()).throw(RuntimeError()))  # noqa
-            return [good, NS(type="movie", media=_BadMedia())]
-
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _Boom())
-    out = sa.get_activity()
-    assert out["ok"] is True and out["summary"]["streams"] >= 1   # good one survives
-
-
-class _BadMedia:
-    def __getitem__(self, i):
-        raise RuntimeError("boom")
-
-
-# ── history (Phase 2) ────────────────────────────────────────────────────────
-from datetime import datetime  # noqa: E402
-
-from core.server_activity import get_history, normalize_history  # noqa: E402
-
-
-def _hist(**kw):
-    base = dict(type="episode", title="Ozymandias", grandparentTitle="Breaking Bad",
-                parentIndex=5, index=14, thumb="/t", grandparentThumb="/gt",
-                accountID=2, deviceID=7, viewedAt=datetime(2026, 7, 12, 3, 0, 0))
-    base.update(kw)
-    return NS(**base)
-
-
-def test_history_row_resolves_user_and_device():
-    accounts, devices = {2: "boulder"}, {7: "Apple TV"}
-    r = normalize_history(_hist(), accounts, devices)
-    assert r["title"] == "Ozymandias" and r["subtitle"] == "Breaking Bad · S05E14"
-    assert r["user"] == "boulder" and r["device"] == "Apple TV"
-    assert r["viewed_epoch"] > 0
-
-
-def test_history_unknown_account_falls_back():
-    r = normalize_history(_hist(accountID=999), {2: "boulder"}, {})
-    assert r["user"] == "Someone" and r["device"] == ""
-
-
-class _HistPlex:
-    machineIdentifier = "abc"
-
-    def history(self, maxresults=None):
-        return [_hist(viewedAt=datetime(2026, 7, 12, 1, 0, 0)),
-                _hist(title="Newer", viewedAt=datetime(2026, 7, 12, 9, 0, 0))]
-
-    def systemAccounts(self):
-        return [NS(id=2, name="boulder")]
-
-    def systemDevices(self):
-        return [NS(id=7, name="Apple TV")]
-
-
-def test_get_history_sorts_newest_first(monkeypatch):
-    import core.server_activity as sa
-    sa._lookup_cache.update(accounts={}, devices={}, at=0.0, key="")   # clear cache
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _HistPlex())
-    out = get_history()
-    assert out["ok"] is True and len(out["history"]) == 2
-    assert out["history"][0]["title"] == "Newer"          # newest first
-    assert out["history"][0]["user"] == "boulder"
-
-
-def test_get_history_no_server(monkeypatch):
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
-    assert get_history()["ok"] is False
-
-
-def test_plex_server_negative_cache_prevents_repeated_connect_attempts(monkeypatch):
-    import core.server_activity as sa
-    sa.invalidate_plex_server_cache()
-
-    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
-    connect_attempts = 0
-
-    def fake_plex_init(*args, **kwargs):
-        nonlocal connect_attempts
-        connect_attempts += 1
-        raise ConnectionError("Host unreachable")
-
-    import plexapi.server
-    monkeypatch.setattr(plexapi.server, "PlexServer", fake_plex_init)
-
-    # First attempt: connection fails, recorded in cache
-    res1 = sa._plex_server()
-    assert res1 is None
-    assert connect_attempts == 1
-
-    # Second attempt within 60s: hits negative cache immediately without calling PlexServer
-    res2 = sa._plex_server()
-    assert res2 is None
-    assert connect_attempts == 1
-
-    # Third attempt after 60s TTL expires: reconnects
-    original_at = sa._server_cache["at"]
-    sa._server_cache["at"] = original_at - 61.0
-    res3 = sa._plex_server()
-    assert res3 is None
-    assert connect_attempts == 2
-
-    # Credential change bypasses negative cache immediately
-    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.2:32400", "token": "abcdef123456"})
-    res4 = sa._plex_server()
-    assert res4 is None
-    assert connect_attempts == 3
-
-    # Cleanup
-    sa.invalidate_plex_server_cache()
-
-
-def test_get_activity_sessions_failure_marks_server_unreachable(monkeypatch):
-    import core.server_activity as sa
-    sa.invalidate_plex_server_cache()
-
-    class _FailingPlex:
-        def sessions(self):
-            raise ConnectionError("Plex crashed")
-
-    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
-
-    import plexapi.server
-    monkeypatch.setattr(plexapi.server, "PlexServer", lambda *a, **kw: _FailingPlex())
-
-    # Initial connect succeeds
-    srv = sa._plex_server()
-    assert srv is not None
-
-    # Calling get_activity encounters sessions() failure
-    act = sa.get_activity()
-    assert act["ok"] is False
-    assert act["reason"] == "unreachable"
-
-    # Subsequent _plex_server call should now return None immediately from cache
-    assert sa._plex_server() is None
-
-    # Cleanup
-    sa.invalidate_plex_server_cache()
-
-
-# ── stream termination ───────────────────────────────────────────────────────
-def test_stop_session_calls_stop_with_message(monkeypatch):
-    import core.server_activity as sa
-    stopped = {}
-
-    class _Item:
-        sessionKey = 42
-        def stop(self, reason=None):
-            stopped["reason"] = reason
-
-    class _P:
-        def sessions(self):
-            return [_Item()]
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _P())
-    res = sa.stop_session("42", "Go to bed")
-    assert res["ok"] is True and stopped["reason"] == "Go to bed"
-
-
-def test_stop_session_uses_default_message_when_blank(monkeypatch):
-    import core.server_activity as sa
-    seen = {}
-
-    class _Item:
-        sessionKey = 1
-        def stop(self, reason=None):
-            seen["r"] = reason
-
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: type("P", (), {"sessions": lambda s: [_Item()]})())
-    sa.stop_session("1", "   ")
-    assert "administrator" in seen["r"]
-
-
-def test_stop_session_unknown_key(monkeypatch):
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: type("P", (), {"sessions": lambda s: []})())
-    assert sa.stop_session("99")["ok"] is False
-
-
-def test_stop_session_no_server(monkeypatch):
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: None)
-    assert sa.stop_session("1")["ok"] is False
-
-
-# ── stats (Phase 3) ──────────────────────────────────────────────────────────
-from core.server_activity import compute_stats  # noqa: E402
-
-
-def _hitem(mtype, title, gp, acct, dev, when):
-    return NS(type=mtype, title=title, grandparentTitle=gp, thumb="/t", grandparentThumb="/gt",
-              accountID=acct, deviceID=dev, viewedAt=when)
-
-
-def test_compute_stats_rolls_up_content_users_devices():
-    accts, devs = {1: "boulder", 2: "guest"}, {9: "Apple TV", 8: "Chrome"}
-    now = datetime(2026, 7, 12, 12, 0, 0)
-    items = [
-        _hitem("episode", "Ep1", "Breaking Bad", 1, 9, now),
-        _hitem("episode", "Ep2", "Breaking Bad", 1, 9, now),     # same show → grouped
-        _hitem("movie", "Heat", "", 2, 8, now),
-        _hitem("track", "Teardrop", "Massive Attack", 1, 9, now),
-    ]
-    d = compute_stats(items, accts, devs, 30)
-    assert d["total_plays"] == 4 and d["unique_users"] == 2
-    top = {c["title"]: c["plays"] for c in d["top_content"]}
-    assert top["Breaking Bad"] == 2 and top["Heat"] == 1 and top["Massive Attack"] == 1
-    assert d["top_users"][0] == {"user": "boulder", "plays": 3}   # most active first
-    assert d["top_devices"][0]["device"] == "Apple TV" and d["top_devices"][0]["plays"] == 3
-    # series is always 14 ordered day-buckets
-    assert len(d["series"]) == 14 and all("date" in p and "plays" in p for p in d["series"])
-
-
-def test_compute_stats_empty():
-    d = compute_stats([], {}, {}, 30)
-    assert d["total_plays"] == 0 and d["top_content"] == [] and len(d["series"]) == 14
-
-
-def test_get_stats_caches(monkeypatch):
-    import core.server_activity as sa
-    calls = {"n": 0}
-
-    class _P:
-        machineIdentifier = "m1"
-        def history(self, maxresults=None, mindate=None):
-            calls["n"] += 1
-            return [_hitem("movie", "Heat", "", 1, 9, datetime.now())]
-        def systemAccounts(self): return [NS(id=1, name="boulder")]
-        def systemDevices(self): return [NS(id=9, name="TV")]
-    sa._stats_cache.update(data=None, at=0.0, key="")
-    sa._lookup_cache.update(accounts={}, devices={}, at=0.0, key="")
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _P())
-    a = sa.get_stats(days=30)
-    b = sa.get_stats(days=30)
-    assert a["ok"] and a["total_plays"] == 1 and calls["n"] == 1   # second call served from cache
-
-
-# ── Jellyfin (merged activity) ───────────────────────────────────────────────
 # ── what a card shows: the thing playing, before whoever made it (#2089) ─────
 
 def test_a_track_shows_its_albums_cover_not_the_artists_picture():
-    tr = _movie(type="track", title="I Don't Get Lonely (Extended Mix)", grandparentTitle="Orjan Nilsen",
-                parentTitle="Anomalous", thumb="/library/metadata/9/thumb/1",
-                parentThumb="/library/metadata/8/thumb/1", grandparentThumb="/library/metadata/7/thumb/1",
-                art="/library/metadata/7/art/1", grandparentArt="/library/metadata/7/art/1")
-    s = normalize_session(tr)
+    s = _track(title="I Don't Get Lonely (Extended Mix)", grandparentTitle="Orjan Nilsen", parentTitle="Anomalous",
+               thumb="/library/metadata/9/thumb/1", parentThumb="/library/metadata/8/thumb/1",
+               grandparentThumb="/library/metadata/7/thumb/1", art="/library/metadata/7/art/1",
+               grandparentArt="/library/metadata/7/art/1")
     assert s["thumb"] == "/library/metadata/8/thumb/1"
-    # the backdrop is the cover too, not the artist's art
-    assert s["art"] == "/library/metadata/8/thumb/1"
+    assert s["art"] == "/library/metadata/8/thumb/1"      # the backdrop is the cover too
 
 
 def test_an_audiobook_chapter_shows_the_books_cover_not_the_authors_picture():
-    # plex files a book as an album under its author
-    ch = _movie(type="track", title="Chapter 12", grandparentTitle="Caroline Peckham",
-                parentTitle="Zodiac Academy 8", thumb=None,
-                parentThumb="/library/metadata/21/thumb/1", grandparentThumb="/library/metadata/20/thumb/1",
-                art="/library/metadata/20/art/1")
-    s = normalize_session(ch)
+    s = _track(title="Chapter 12", grandparentTitle="Caroline Peckham", parentTitle="Zodiac Academy 8",
+               parentThumb="/library/metadata/21/thumb/1", grandparentThumb="/library/metadata/20/thumb/1",
+               art="/library/metadata/20/art/1")
     assert s["thumb"] == s["art"] == "/library/metadata/21/thumb/1"
 
 
 def test_the_artists_picture_is_only_what_is_left_without_a_cover():
-    tr = _movie(type="track", title="Loose Single", grandparentTitle="Someone", parentTitle="",
-                thumb=None, parentThumb=None, grandparentThumb="/library/metadata/7/thumb/1",
-                art="/library/metadata/7/art/1")
-    s = normalize_session(tr)
+    s = _track(title="Loose Single", grandparentTitle="Someone", grandparentThumb="/library/metadata/7/thumb/1",
+               art="/library/metadata/7/art/1")
     assert s["thumb"] == "/library/metadata/7/thumb/1" and s["art"] == "/library/metadata/7/art/1"
 
 
 def test_an_episode_keeps_its_shows_poster_and_a_movie_its_own():
-    ep = _movie(type="episode", title="Pilot", grandparentTitle="Severance",
-                thumb="/library/metadata/3/thumb/1", parentThumb="/library/metadata/2/thumb/1",
-                grandparentThumb="/library/metadata/1/thumb/1", art="/library/metadata/1/art/1")
-    assert normalize_session(ep)["thumb"] == "/library/metadata/1/thumb/1"
-    mv = _movie(thumb="/library/metadata/5/thumb/1", art="/library/metadata/5/art/1")
-    s = normalize_session(mv)
-    assert (s["thumb"], s["art"]) == ("/library/metadata/5/thumb/1", "/library/metadata/5/art/1")
+    ep = px.normalize(ET.Element("Video", type="episode", title="Pilot", grandparentTitle="Severance",
+                                 thumb="/library/metadata/3/thumb/1", parentThumb="/library/metadata/2/thumb/1",
+                                 grandparentThumb="/library/metadata/1/thumb/1", art="/library/metadata/1/art/1"))
+    assert ep["thumb"] == "/library/metadata/1/thumb/1"
+    mv = px.normalize(ET.Element("Video", type="movie", title="Heat", thumb="/library/metadata/5/thumb/1",
+                                 art="/library/metadata/5/art/1"))
+    assert (mv["thumb"], mv["art"]) == ("/library/metadata/5/thumb/1", "/library/metadata/5/art/1")
 
 
-def test_history_rows_show_the_cover_too():
-    from core.server_activity import normalize_history
-    row = NS(type="track", title="Teardrop", grandparentTitle="Massive Attack", parentTitle="Mezzanine",
-             thumb="/t", parentThumb="/album", grandparentThumb="/artist", accountID=1, deviceID=1,
-             viewedAt=None)
-    assert normalize_history(row, {}, {})["thumb"] == "/album"
-
-
-from core.server_activity import normalize_jellyfin  # noqa: E402
+def _jf(npi, **s):
+    return jf.normalize(dict({"NowPlayingItem": npi, "PlayState": {}, "Id": "s1"}, **s))
 
 
 def test_a_jellyfin_track_with_no_picture_of_its_own_shows_its_albums_cover():
     npi = {"Type": "Audio", "Name": "Teardrop", "AlbumArtist": "Massive Attack", "Album": "Mezzanine",
            "Id": "track1", "AlbumId": "album1", "AlbumPrimaryImageTag": "abc", "ImageTags": {}}
-    n = normalize_jellyfin({"NowPlayingItem": npi, "PlayState": {}}, npi)
+    n = _jf(npi)
     assert n["thumb"] == n["art"] == "jf:album1"
-    # one with its own picture keeps it, and one with nothing to borrow keeps its id
-    own = dict(npi, ImageTags={"Primary": "t"})
-    assert normalize_jellyfin({"NowPlayingItem": own, "PlayState": {}}, own)["thumb"] == "jf:track1"
-    bare = {"Type": "Audio", "Name": "X", "Id": "track2", "AlbumId": "album2"}
-    assert normalize_jellyfin({"NowPlayingItem": bare, "PlayState": {}}, bare)["thumb"] == "jf:track2"
-
-
-def test_jellyfin_episode_normalizes_to_shared_shape():
-    s = {"UserName": "guest", "Client": "Jellyfin Web", "DeviceName": "Firefox",
-         "PlayState": {"PositionTicks": 3000000000, "IsPaused": False, "PlayMethod": "Transcode"},
-         "TranscodingInfo": {"VideoCodec": "h264", "AudioCodec": "aac", "Bitrate": 4000000,
-                             "CompletionPercentage": 30.0, "Container": "ts"},
-         "NowPlayingItem": {"Type": "Episode", "Name": "Pilot", "SeriesName": "Severance",
-                            "ParentIndexNumber": 1, "IndexNumber": 1, "RunTimeTicks": 30000000000, "Id": "abc"}}
-    n = normalize_jellyfin(s, s["NowPlayingItem"])
-    assert n["media_type"] == "episode" and n["title"] == "Pilot"
-    assert n["subtitle"] == "Severance · S01E01"
-    assert n["progress_pct"] == 10           # 3e9 / 30e9 ticks
-    assert n["stream"]["method"] == "Transcode" and n["stream"]["video"] == "H264"
-    assert n["user"] == "guest" and n["player"]["device"] == "Firefox"
-    assert n["thumb"] == "jf:abc"            # image marker for the proxy
-    assert n["session_key"] == ""            # no stop button (Plex-only terminate)
+    assert _jf(dict(npi, ImageTags={"Primary": "t"}))["thumb"] == "jf:track1"
+    assert _jf({"Type": "Audio", "Name": "X", "Id": "track2", "AlbumId": "album2"})["thumb"] == "jf:track2"
 
 
 def test_jellyfin_track_uses_artist_album():
-    npi = {"Type": "Audio", "Name": "Teardrop", "AlbumArtist": "Massive Attack", "Album": "Mezzanine", "Id": "x"}
-    n = normalize_jellyfin({"NowPlayingItem": npi, "PlayState": {}}, npi)
-    assert n["media_type"] == "track" and n["subtitle"] == "Massive Attack · Mezzanine"
+    n = _jf({"Type": "Audio", "Name": "Teardrop", "AlbumArtist": "Massive Attack", "Album": "Mezzanine", "Id": "x"})
+    assert n["kind"] == "track" and n["subtitle"] == "Massive Attack · Mezzanine"
 
 
-def test_activity_merges_plex_and_jellyfin(monkeypatch):
-    import core.server_activity as sa
-    monkeypatch.setattr(sa, "_plex_server", lambda db=None: _FakePlex([_movie()]))
-    npi = {"Type": "Movie", "Name": "Dune", "RunTimeTicks": 60000000000, "Id": "d1"}
-    monkeypatch.setattr(sa, "_jellyfin_activity",
-                        lambda db=None: ([normalize_jellyfin({"NowPlayingItem": npi, "UserName": "jf-user",
-                                                              "PlayState": {}}, npi)], "Jellyfin"))
-    out = get_activity()
-    assert out["ok"] and out["summary"]["streams"] == 2      # 1 plex + 1 jellyfin
-    assert out["server"]["platform"] == "plex+jellyfin"
-    titles = {s["title"] for s in out["sessions"]}
-    assert "Heat" in titles and "Dune" in titles
+# ── click-through: the soulsync page for what's playing ──────────────────────
+
+def _hinted(kind, **hint):
+    return {"kind": kind, "show": {"season": 2, "episode": 4} if kind == "episode" else None,
+            "_link": dict({"server": "plex", "kind": kind, "rating_key": "", "parent_key": "",
+                           "grandparent_key": "", "title": "", "year": None, "tmdb": ""}, **hint)}
 
 
-# ── click-through: resolve a stream to its SoulSync library page ─────────────
-def test_normalize_captures_link_ids():
-    m = normalize_session(_movie(ratingKey=100))
-    assert m["_link_sid"] == "100"                    # movie links to itself
-    ep = normalize_session(_movie(type="episode", grandparentRatingKey=200))
-    assert ep["_link_sid"] == "200"                   # episode links to its SHOW
-    tr = normalize_session(_movie(type="track"))
-    assert tr["_link_sid"] == ""                       # music: no video detail to link
+class _VDB:
+    def __init__(self, rows=(), by_title=None):
+        self.rows, self.by_title, self.calls = list(rows), by_title or {}, 0
+
+    def items_by_server_ids(self, ids, server_source=None):
+        self.calls += 1
+        return [r for r in self.rows if r["server_id"] in ids]
+
+    def find_library_ref_by_title(self, kind, title, year=None):
+        return self.by_title.get((kind, title, year))
 
 
-def test_resolve_library_links(monkeypatch):
-    import core.server_activity as sa
-
-    class _VDB:
-        def items_by_server_ids(self, ids, server_source=None):
-            return [{"kind": "movie", "id": 7, "tmdb_id": 603, "server_id": "100", "title": "Heat"},
-                    {"kind": "show", "id": 9, "tmdb_id": 1396, "server_id": "200", "title": "BB"}]
-    monkeypatch.setattr("api.video.get_video_db", lambda: _VDB())
-    sessions = [
-        {"media_type": "movie", "_link_sid": "100", "link": None},
-        {"media_type": "episode", "_link_sid": "200", "link": None},
-        {"media_type": "movie", "_link_sid": "999", "link": None},   # not owned
-    ]
-    sa._resolve_library_links(sessions)
-    assert sessions[0]["link"] == {"kind": "movie", "id": 7, "source": "library"}
-    assert sessions[1]["link"] == {"kind": "show", "id": 9, "source": "library"}
-    assert sessions[2]["link"] is None                # not in library → not clickable
-    assert all("_link_sid" not in s for s in sessions)   # internal fields cleaned up
-    assert all("_link_title" not in s for s in sessions)
+def test_resolve_library_links(sa_env, monkeypatch):
+    vdb = _VDB([{"kind": "movie", "id": 7, "tmdb_id": 603, "server_id": "100", "title": "Heat"},
+                {"kind": "show", "id": 9, "tmdb_id": 1396, "server_id": "200", "title": "BB"}])
+    monkeypatch.setattr("api.video.get_video_db", lambda: vdb)
+    ss = [_hinted("movie", rating_key="100"), _hinted("episode", rating_key="201", grandparent_key="200"),
+          _hinted("movie", rating_key="999")]
+    links.resolve(ss, now=0)
+    assert ss[0]["link"] == {"kind": "movie", "id": 7, "source": "library"}
+    assert ss[1]["link"] == {"kind": "show", "id": 9, "source": "library", "season": 2, "episode": 4}
+    assert ss[2]["link"] is None
+    assert all("_link" not in s and "_key" not in s for s in ss)
+    # cached: the next poll asks the db nothing
+    again = [_hinted("movie", rating_key="100")]
+    links.resolve(again, now=10)
+    assert again[0]["link"]["id"] == 7 and vdb.calls == 1
 
 
-def test_resolve_falls_back_to_title_year_when_id_misses(monkeypatch):
-    import core.server_activity as sa
-
-    class _VDB:
-        def items_by_server_ids(self, ids, server_source=None):
-            return []   # id doesn't line up (re-scan / different server_source)
-
-        def find_library_ref_by_title(self, kind, title, year=None):
-            if kind == "movie" and title == "Heat" and year == 1995:
-                return 42
-            return None
-    monkeypatch.setattr("api.video.get_video_db", lambda: _VDB())
-    sessions = [{"media_type": "movie", "_link_sid": "nope", "_link_title": "Heat",
-                 "_link_year": 1995, "link": None}]
-    sa._resolve_library_links(sessions)
-    assert sessions[0]["link"] == {"kind": "movie", "id": 42, "source": "library"}
+def test_resolve_falls_back_to_title_year_then_tmdb(sa_env, monkeypatch):
+    monkeypatch.setattr("api.video.get_video_db", lambda: _VDB(by_title={("movie", "Heat", 1995): 42}))
+    ss = [_hinted("movie", rating_key="x", title="Heat", year=1995),
+          _hinted("movie", rating_key="y", title="Dune", year=2024, tmdb="693134")]
+    links.resolve(ss, now=0)
+    assert ss[0]["link"] == {"kind": "movie", "id": 42, "source": "library"}
+    assert ss[1]["link"] == {"kind": "movie", "id": "693134", "source": "tmdb"}
 
 
-def test_normalize_captures_tmdb_from_guids():
-    guids = [NS(id="imdb://tt123"), NS(id="tmdb://949?lang=en"), NS(id="tvdb://5")]
-    m = normalize_session(_movie(guids=guids))
-    assert m["_link_tmdb"] == "949"
+def test_resolve_links_kind_mismatch_is_ignored(sa_env, monkeypatch):
+    monkeypatch.setattr("api.video.get_video_db",
+                        lambda: _VDB([{"kind": "show", "id": 3, "tmdb_id": 1, "server_id": "5", "title": "X"}]))
+    ss = [_hinted("movie", rating_key="5")]
+    links.resolve(ss, now=0)
+    assert ss[0]["link"] is None
 
 
-def test_resolve_falls_back_to_tmdb_when_not_owned(monkeypatch):
-    """Not in the SoulSync library → link to the TMDB preview page so anything on
-    the server is still clickable (works even with no video library at all)."""
-    import core.server_activity as sa
-    monkeypatch.setattr("api.video.get_video_db", lambda: _EmptyVDB())    # nothing owned
-    sessions = [{"media_type": "movie", "_link_sid": "x", "_link_title": "Heat",
-                 "_link_year": 1995, "_link_tmdb": "949", "link": None}]
-    sa._resolve_library_links(sessions)
-    assert sessions[0]["link"] == {"kind": "movie", "id": "949", "source": "tmdb"}
+def test_a_track_links_to_its_library_artist_album_and_track(sa_env):
+    from core.server_activity import store
+    with store.connect() as c:
+        c.executescript("""
+            CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, primary_artist_id INTEGER);
+            CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, server_source TEXT, server_id TEXT);
+            CREATE TABLE lib2_media_server_mappings (entity_type TEXT, entity_id INTEGER, server_source TEXT,
+                                                     server_library_id TEXT DEFAULT '', server_id TEXT);
+            INSERT INTO lib2_albums VALUES (11, 5);
+            INSERT INTO lib2_tracks VALUES (101, 11, NULL, NULL), (102, 11, 'plex', '703');
+            INSERT INTO lib2_media_server_mappings VALUES ('track', 101, 'plex', '', '702');
+        """)
+    ss = [_hinted("track", rating_key="702"), _hinted("track", rating_key="703"), _hinted("track", rating_key="9")]
+    links.resolve(ss, now=0)
+    assert ss[0]["link"] == {"kind": "music", "id": 5, "artist_id": 5, "album_id": 11, "track_id": 101,
+                             "source": "library"}
+    assert ss[1]["link"]["track_id"] == 102            # the compatibility columns
+    assert ss[2]["link"] is None
 
 
-def test_resolve_links_kind_mismatch_is_ignored(monkeypatch):
-    import core.server_activity as sa
-    # a movie ratingKey that (bizarrely) matches a show row must NOT link
-    monkeypatch.setattr("api.video.get_video_db", lambda: type("D", (), {
-        "items_by_server_ids": lambda s, ids, server_source=None:
-            [{"kind": "show", "id": 3, "tmdb_id": 1, "server_id": "5", "title": "X"}]})())
-    sessions = [{"media_type": "movie", "_link_sid": "5", "link": None}]
-    sa._resolve_library_links(sessions)
-    assert sessions[0]["link"] is None
+def test_audiobooks_and_podcasts_are_told_apart_from_music(monkeypatch):
+    monkeypatch.setattr(links, "_root_names", lambda: {"audiobook": "audiobooks", "podcast": "podcasts"})
+    monkeypatch.setattr(links, "_book_index", lambda: {"andy weir/project hail mary": {"asin": "B08", "narrator": "Ray Porter"}})
+    assert links.audio_kind("Audiobooks", "") == "audiobook"
+    assert links.audio_kind("Hörbücher", "") == "audiobook"
+    assert links.audio_kind("My Podcasts", "") == "podcast"
+    assert links.audio_kind("Music", "/data/podcasts/Hard Fork/ep1.mp3") == "podcast"
+    assert links.audio_kind("Music", "/data/music/Radiohead/Kid A/01.flac") is None
+    # a book folder soulsync knows, on a server that mounts it elsewhere
+    assert links.audio_kind("Books", "/srv/library/Andy Weir/Project Hail Mary/14.m4b") == "audiobook"
+    assert links.book_meta("D:\\stuff\\Andy Weir\\Project Hail Mary\\CD1\\01.mp3")["asin"] == "B08"
 
 
 # ── frontend wiring ──────────────────────────────────────────────────────────
@@ -621,16 +207,23 @@ def test_ui_is_wired():
 
 
 def test_web_server_registers_the_routes():
-    # the routes moved to api/server_activity.py (aug 25 lift) - same paths,
-    # blueprint decorator
     from pathlib import Path
     ws = (Path(__file__).resolve().parent.parent / "api" / "server_activity.py").read_text(encoding="utf-8")
-    assert "@bp.route('/api/server-activity')" in ws
-    assert "@bp.route('/api/server-activity/image')" in ws
-    assert "@bp.route('/api/server-activity/history')" in ws
-    assert "@bp.route('/api/server-activity/stop', methods=['POST'])" in ws
-    assert "@bp.route('/api/server-activity/stats')" in ws
+    for route in ("'/api/server-activity'", "'/api/server-activity/image'", "'/api/server-activity/history'",
+                  "'/api/server-activity/history/<group_key>'", "'/api/server-activity/stats'",
+                  "'/api/server-activity/stop', methods=['POST']", "'/api/server-activity/message', methods=['POST']",
+                  "'/api/server-activity/settings', methods=['GET', 'POST']",
+                  "'/api/server-activity/plays/clear', methods=['POST']", "'/api/server-activity/avatar'"):
+        assert f"@bp.route({route})" in ws, route
     assert "admin_or_api_key_refusal" in ws   # admin-gated, every route but the image (#2155)
+    assert "_OPEN_PATHS = ('/api/server-activity/image',)" in ws
+
+
+def test_the_sampler_runs_from_the_live_push_loop():
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parent.parent / "web_server.py").read_text(encoding="utf-8")
+    body = ws[ws.index("def _emit_server_activity_loop"):ws.index("# --- Socket.IO event handlers ---")]
+    assert "run_sampler_forever(" in body and "room='activity:live'" in body
 
 
 def test_a_working_connection_is_kept_past_a_minute(monkeypatch):

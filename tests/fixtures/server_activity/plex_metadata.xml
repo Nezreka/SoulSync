@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- /library/metadata/<key>?includeChapters=1 for the items above: the files as stored -->
+<Library>
+<MediaContainer size="1" librarySectionTitle="Movies">
+  <Video ratingKey="5101" type="movie" title="Dune: Part Two" year="2024" duration="9960000" librarySectionTitle="Movies">
+    <Media id="9001" audioChannels="8" audioCodec="truehd" bitrate="62400" container="mkv" height="2160" videoCodec="hevc" videoResolution="4k" width="3840">
+      <Part id="9101" container="mkv" file="/data/movies/Dune Part Two (2024)/Dune.Part.Two.2024.2160p.mkv">
+        <Stream id="30001" streamType="1" codec="hevc" bitDepth="10" bitrate="58000" colorTrc="smpte2084" colorPrimaries="bt2020" height="2160" width="3840" profile="main 10" displayTitle="4K HDR10 (HEVC Main 10)" frameRate="23.976"/>
+        <Stream id="30002" streamType="2" codec="truehd" channels="8" audioChannelLayout="7.1" language="English" displayTitle="English (TRUEHD 7.1)" extendedDisplayTitle="English (TrueHD Atmos 7.1)" selected="1"/>
+        <Stream id="30003" streamType="3" codec="srt" language="English" displayTitle="English (SRT)"/>
+      </Part>
+    </Media>
+    <Guid id="tmdb://693134"/>
+  </Video>
+</MediaContainer>
+<MediaContainer size="1">
+  <Video ratingKey="909" type="episode" title="Crimson Sky" duration="3600000" librarySectionTitle="TV Shows">
+    <Media id="9501" audioChannels="6" audioCodec="eac3" bitrate="9800" container="mkv" height="1080" videoCodec="h264" videoResolution="1080" width="1920">
+      <Part id="9511" container="mkv" file="/data/tv/Shogun/S01E09.mkv">
+        <Stream id="50001" streamType="1" codec="h264" bitrate="9000" height="1080" width="1920" profile="high"/>
+        <Stream id="50002" streamType="2" codec="eac3" channels="6" language="English" selected="1"/>
+        <Stream id="50003" streamType="3" codec="pgs" language="English"/>
+      </Part>
+    </Media>
+  </Video>
+</MediaContainer>
+<MediaContainer size="1">
+  <Track ratingKey="814" type="track" title="Chapter 14" duration="1890000" librarySectionTitle="Audiobooks">
+    <Media id="9401" audioCodec="aac" bitrate="64" container="m4b">
+      <Part id="9411" container="m4b" file="/data/audiobooks/Andy Weir/Project Hail Mary/14.m4b">
+        <Stream id="41001" streamType="2" codec="aac" channels="2" bitrate="64"/>
+      </Part>
+    </Media>
+  </Track>
+</MediaContainer>
+</Library>
