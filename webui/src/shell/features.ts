@@ -166,8 +166,20 @@ export function isFeatureOn(id: string): boolean {
   return !state.off.includes(id);
 }
 
-export function getFeatures(): { loaded: boolean; off: string[]; payload: FeaturesPayload | null } {
-  return { loaded: state.loaded, off: state.off.slice(), payload: state.payload };
+export function getFeatures(): {
+  loaded: boolean;
+  off: string[];
+  /** the pages hidden right now (the cache until the server answers). the
+   *  landing page skips them (profile-nav.js, #2154) */
+  hiddenPages: string[];
+  payload: FeaturesPayload | null;
+} {
+  return {
+    loaded: state.loaded,
+    off: state.off.slice(),
+    hiddenPages: state.hiddenPages.slice(),
+    payload: state.payload,
+  };
 }
 
 /** before the server answers, trust the cache so React's first render

@@ -539,16 +539,21 @@ function normalizeProfilePageList(pageIds) {
 // always a music page the profile can open: the react router and the denied
 // page bounce both land here, so a home they can't see would loop or render
 // the page they were refused. video homes are handled at boot
-// (profileVideoHomePage).
+// (profileVideoHomePage), the video side's landing in video-side.js.
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
     const home = currentProfile.home_page ? normalizeProfilePageId(currentProfile.home_page) : '';
-    if (home && !home.startsWith('video-') && isPageAllowed(home)) return home;
-    if (currentProfile.is_admin) return 'dashboard';
-    if (isPageAllowed('discover')) return 'discover';
-    // discover is switched off for them: the first page they do have
-    const firstAllowed = PROFILE_PAGE_GROUPS[0].pages.find(pageId => isPageAllowed(pageId));
-    return firstAllowed || 'help';
+    const nav = window.SoulSyncProfileNav;
+    return nav.landingPage({
+        home: home && !home.startsWith('video-') ? home : '',
+        isAdmin: !!currentProfile.is_admin,
+        adminPage: 'dashboard',
+        // discover first, then the first page they have and haven't hidden
+        order: nav.MUSIC_LANDING,
+        allowed: isPageAllowed,
+        hidden: nav.featureHiddenPages(),
+        fallback: 'help',
+    });
 }
 
 // a video page picked as home, when the profile can still reach it
@@ -1837,42 +1842,12 @@ function updateProfileIndicator() {
         indicatorButton.setAttribute('aria-label', `${currentProfile.name}, switch profile`);
     }
 
-    // Filter sidebar pages based on profile permissions
-    document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
-        const page = btn.getAttribute('data-page');
-        if (page === 'hydrabase') return; // Managed by dev mode toggle
-        if (page === 'settings') {
-            // Settings always gated by is_admin
-            btn.style.display = currentProfile.is_admin ? '' : 'none';
-        } else if (page === 'requests') {
-            btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none';
-        } else if (page === 'help' || page === 'issues') {
-            btn.style.display = ''; // Always visible
-        } else if (currentProfile.id === 1) {
-            btn.style.display = ''; // Root admin sees all
-        } else {
-            // old rows still carry retired page ids (downloads, artists)
-            const ap = normalizeProfilePageList(currentProfile.allowed_pages);
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
-        }
-    });
-
-    // Video side — same model. Control surfaces (Import, Settings, Automations) are
-    // admin-only; the Overlay Studio launcher is admin-only via a body class (robust
-    // to the dashboard re-rendering it); everything else is a per-profile page toggle
-    // sharing the same allowed_pages list. Help/Issues always visible.
-    const VIDEO_ADMIN_ONLY = ['video-import', 'video-settings', 'video-automations'];
-    document.querySelectorAll('.video-nav .nav-button[data-video-page]').forEach(btn => {
-        const page = btn.getAttribute('data-video-page');
-        if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
-        if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
-        // requests: admins answer them, profiles without download rights make
-        // them. same rule as the music side's requests, not a page toggle
-        if (page === 'video-requests') { btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none'; return; }
-        if (currentProfile.id === 1) { btn.style.display = ''; return; }
-        const ap = currentProfile.allowed_pages;
-        btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
-    });
+    // the sidebar, cut down to what this profile may open (profile-nav.js
+    // holds the rules; the server-rendered profile already ran them before
+    // first paint, this is the authoritative pass and every profile switch)
+    window.SoulSyncProfileNav.apply(currentProfile);
+    // the Overlay Studio launcher is admin-only via a body class (robust to
+    // the dashboard re-rendering it)
     document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
 
     // what this profile chose to see (#1909). goes on top of the permission
@@ -3964,6 +3939,12 @@ function initApp() {
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
     // component init below measures real layout, not a display:none container.
     document.body.classList.remove('app-locked');
+    // no profile came back (the profile check failed): show the nav the old
+    // way rather than leave it hidden
+    document.documentElement.classList.remove('nav-pending');
+    // the video side waits for this before it picks a page it can't yet check
+    window._soulsyncAppStarted = true;
+    window.dispatchEvent(new CustomEvent('ss:app-started'));
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();

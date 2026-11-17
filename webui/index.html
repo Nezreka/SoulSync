@@ -142,6 +142,11 @@
         window._maxPerfActive = {{ initial_max_performance | tojson }};
         // what profile-api-gate.js holds before a profile is picked (#1763)
         window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
+        // the signed-in profile, so the sidebar shows only their pages from
+        // the first frame (#2156). null when the server knows nobody yet
+        // (picker, sign-in): the nav items wait hidden until init.js has one.
+        window.SOULSYNC_BOOT_PROFILE = {{ boot_profile | tojson }};
+        if (!window.SOULSYNC_BOOT_PROFILE) document.documentElement.classList.add('nav-pending');
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
@@ -778,6 +783,11 @@
                         <span class="nav-text">Help & Docs</span>
                     </a>
                 </nav>
+
+                <!-- what this profile may open (#2156): cuts the nav down to the
+                     server-rendered profile before first paint. before the #1909
+                     replay below, which counts what this left showing. -->
+                <script src="{{ url_for('static', filename='profile-nav.js', v=static_v) }}"></script>
 
                 <!-- what this profile chose to see (#1909). the full rule and the
                      server's answer live in shell/features.ts; this only replays the

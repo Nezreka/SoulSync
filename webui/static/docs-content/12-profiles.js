@@ -209,6 +209,8 @@ Every profile can choose its own home page:
 - **Discover** — the non-admin default: new releases, recommendations, trending
 
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be in the profile's allowed pages — picking a new allowed-pages list resets a home page that was locked out.
+
+With no home page (or one they can't open), a profile lands on Discover, or the first page it has if Discover is off or hidden. The same goes for the video side, and for any page a profile opens that it isn't allowed on.
 `
         },
         {

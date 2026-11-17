@@ -7,9 +7,44 @@ import type { MirroredPipelineState } from '@/routes/sync/-sync.pipeline';
 
 import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './bridge';
 
+/** the profile fields the sidebar rule reads (profile-nav.js) */
+interface SoulSyncNavProfile {
+  id: number;
+  is_admin: boolean;
+  can_download?: boolean;
+  allowed_pages?: string[] | null;
+  allowed_sides?: string | null;
+  home_page?: string | null;
+}
+
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
+    SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;
+    /** static/profile-nav.js: the sidebar's permission rule and the landing page (#2154, #2156) */
+    SoulSyncProfileNav?: {
+      MUSIC_LANDING: string[];
+      VIDEO_LANDING: string[];
+      normalizePageId: (pageId: string) => string;
+      allowedSides: (profile: SoulSyncNavProfile | null) => 'music' | 'video' | 'both';
+      navButtonVisible: (
+        profile: SoulSyncNavProfile | null,
+        pageId: string,
+        video: boolean,
+      ) => boolean;
+      apply: (profile: SoulSyncNavProfile | null, root?: Document) => void;
+      featureHiddenPages: () => string[];
+      landingPage: (opts: {
+        home?: string;
+        isAdmin?: boolean;
+        adminPage?: string;
+        order?: string[];
+        allowed?: (pageId: string) => boolean;
+        hidden?: string[];
+        fallback: string;
+      }) => string;
+    };
     /** core.js: the latest server-side active music download count from the status push. */
     __soulsyncMusicActiveDownloads?: number;
     /** src/shell/oidc-signin.ts: sign-in is OIDC only right now (#1839), from /api/auth/oidc/available. */
