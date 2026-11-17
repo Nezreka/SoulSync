@@ -749,6 +749,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'total_discs': explicit_album.get('total_discs', 1),
                     'album_type': explicit_album.get('album_type', 'album'),
                     'album_type_locked': bool(explicit_album.get('album_type_locked')),
+                    # the release's runtime: $albumtype's store rule (5 tracks, 44 min is an album)
+                    'duration_ms': explicit_album.get('duration_ms') or 0,
                     'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}]),
                     # #2068: the album's explicit flag, for $explicit in a folder.
                     # the batch works it out over every track (_album_explicit)
@@ -787,6 +789,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     # that sent no type gets its album's real one (#1605)
                     'album_type': fallback_album.get('album_type') or None,
                     'album_type_locked': bool(fallback_album.get('album_type_locked')),
+                    'duration_ms': fallback_album.get('duration_ms') or 0,
                     'total_tracks': fallback_album.get('total_tracks', 0),
                     'total_discs': fallback_album.get('total_discs', 1),
                     'artists': _fallback_album_artists

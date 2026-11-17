@@ -421,7 +421,8 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                  direction: str = "",
                  completeness: Dict[str, Any] | None = None,
                  credit: str = "",
-                 ids_only: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+                 ids_only: bool = False,
+                 collection: bool = False) -> Tuple[List[Dict[str, Any]], int]:
     """Paginated artist overview with per-artist roll-up stats.
 
     ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
@@ -432,6 +433,12 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     read each artist's kept completeness (#2106, #2107). ``credit`` picks the
     release artists (default), the ones only credited on others' tracks
     ("featured"), or both ("all").
+
+    ``collection`` reads ``track_count`` / ``track_files_present`` /
+    ``unverified_albums`` by the completeness rule the cards, sorts and
+    filters share (``artist_completeness.rule_ctes``), so an artist nobody
+    watches is measured against the albums you have. Without it the counts
+    are the wanted-or-held ones the older callers have always read.
 
     ``include_size`` (perf25-03) controls the disk-space roll-up, which needs a
     window function over every file of the page's artists plus a SUM on top of
@@ -689,6 +696,22 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     size_join = "LEFT JOIN artist_size asz ON asz.artist_id=a.id" if include_size else ""
     order_count_col = f"COALESCE(ar.{rollup_column}, 0)" if rollup_column else "0"
 
+    if collection:
+        # #2106: the cards' numbers, by the one rule the kept pass also reads
+        from .artist_completeness import _scope_parts, rule_ctes
+        collection_cte = "," + rule_ctes("canonical_members", _scope_parts())
+        counts_select = ("COALESCE(cc.unverified_albums, 0) AS unverified_albums,"
+                         " COALESCE(cc.total, 0) AS track_count,"
+                         " COALESCE(cc.present, 0) AS track_files_present,"
+                         " COALESCE(cc.watched, 0) AS completeness_watched")
+        counts_join = "LEFT JOIN cc_completeness cc ON cc.artist_id=a.id"
+    else:
+        collection_cte = ""
+        counts_select = ("COALESCE(als.unverified_albums, 0) AS unverified_albums,"
+                         " COALESCE(ts.track_count, 0) AS track_count,"
+                         " COALESCE(ts.track_files_present, 0) AS track_files_present")
+        counts_join = "LEFT JOIN track_stats ts ON ts.artist_id=a.id"
+
     if ordered_ids is not None:
         # the page is already chosen: keep its order through the projection
         params = {**params, "page_ids": json.dumps(ordered_ids[offset:offset + limit])}
@@ -751,8 +774,6 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                        WHEN al.album_type = 'single'
                         AND (al.origin='library' OR {album_monitored}=1)
                        THEN al.id END) AS single_count,
-                   -- #2106: a release whose size nobody has looked up can
-                   -- hide missing tracks, so the artist is not "complete"
                    COUNT(DISTINCT CASE
                        WHEN al.expected_track_count IS NULL
                         AND (al.origin='library' OR {album_monitored}=1)
@@ -786,7 +807,7 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                      ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
               LEFT JOIN lib2_track_files tf ON tf.track_id=t.id{tf_owner}
              GROUP BY cm.canonical_id
-        ){size_cte}
+        ){collection_cte}{size_cte}
         SELECT a.id, a.legacy_artist_id, a.name, a.sort_name, a.image_url, a.genres,
                a.spotify_id, a.musicbrainz_id, a.external_ids, a.soul_id, a.server_source,
                {watchlist_predicate} AS is_watched,
@@ -794,13 +815,11 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                a.quality_profile_explicit, a.added_at,
                COALESCE(als.album_count, 0) AS album_count,
                COALESCE(als.single_count, 0) AS single_count,
-               COALESCE(als.unverified_albums, 0) AS unverified_albums,
-               COALESCE(ts.track_count, 0) AS track_count,
-               COALESCE(ts.track_files_present, 0) AS track_files_present,
+               {counts_select},
                {size_select} AS total_size_bytes
         FROM page_artists a
         LEFT JOIN album_stats als ON als.artist_id=a.id
-        LEFT JOIN track_stats ts ON ts.artist_id=a.id
+        {counts_join}
         {size_join}
         ORDER BY {outer_order}
         """,

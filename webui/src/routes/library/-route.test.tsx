@@ -230,6 +230,7 @@ describe('library route (live)', () => {
         tracks_present: 341,
         tracks_missing: 4,
         completion: 'incomplete',
+        completeness_basis: 'watchlist',
         genres: [],
       },
       {
@@ -267,6 +268,32 @@ describe('library route (live)', () => {
         true,
       ),
     );
+  }, 30_000);
+
+  // #2106 follow-up: an artist nobody watches is counted against the albums
+  // you have, and those missing tracks aren't wanted, so the count opens the
+  // artist's page (have / total per release) instead of an empty Wanted list
+  it('opens the artist page for an unwatched artist’s missing tracks (#2106)', async () => {
+    artistRows = [
+      {
+        id: 49,
+        name: 'Maniacs',
+        track_count: 14,
+        tracks_present: 1,
+        tracks_missing: 13,
+        completion: 'incomplete',
+        completeness_basis: 'albums',
+        genres: [],
+      },
+    ];
+    const { router } = renderRoute(['/library']);
+    expect(await screen.findByText('1 / 14 tracks', {}, { timeout: 10_000 })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '13 missing' }));
+    // the same place a click on the card opens: the artist's own releases
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 49, releases: 'library' }),
+    );
+    expect(router.state.location.search).not.toHaveProperty('section', 'wanted');
   }, 30_000);
 
   it('sorts by completion either way round (#2107)', async () => {

@@ -59,15 +59,33 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _infer_type_from_count(track_count: int) -> str:
-    """1-3 → single, 4-6 → ep, else album — for sources whose album-type
-    signal is missing or a bare 'album' filler (SpotipyFree hardcodes
-    'album' on every release, #1064). Unknown count → album."""
-    if 0 < track_count <= 3:
-        return 'single'
-    if 3 < track_count <= 6:
-        return 'ep'
-    return 'album'
+def _infer_type_from_shape(track_count: int, raw: Optional[Dict[str, Any]] = None) -> str:
+    """single / ep / album by the store rule (count and runtime) for sources
+    whose type is missing or a bare 'album' filler (SpotipyFree hardcodes
+    'album' on every release, #1064). the runtime comes from the raw's own
+    total ('duration' seconds on deezer, 'duration_ms') or its full
+    tracklist; count alone when neither is there. unknown count: album."""
+    from core.metadata.release_type import release_type_from_shape
+    return release_type_from_shape(track_count, _raw_runtime_ms(raw, track_count))
+
+
+def _raw_runtime_ms(raw: Optional[Dict[str, Any]], track_count: int = 0) -> Optional[int]:
+    from core.metadata.release_type import tracklist_runtime_ms
+    if not isinstance(raw, dict):
+        return None
+    ms = _int(raw.get('duration_ms'))
+    if ms > 0:
+        return ms
+    secs = _int(raw.get('duration'))
+    if secs > 0:
+        return secs * 1000
+    tracks = raw.get('tracks')
+    if isinstance(tracks, dict):
+        if tracks.get('items'):
+            return tracklist_runtime_ms(tracks['items'], track_count)
+        # deezer: tracks.data, durations in seconds
+        return tracklist_runtime_ms(tracks.get('data'), track_count, seconds=True)
+    return tracklist_runtime_ms(tracks, track_count)
 
 
 def _strip_discogs_disambiguation(name: str) -> str:
@@ -166,7 +184,7 @@ class Album:
         _album_type = (
             _raw_album_type
             if _raw_album_type in ('single', 'ep', 'compilation')
-            else _infer_type_from_count(_int(raw.get('total_tracks')))
+            else _infer_type_from_shape(_int(raw.get('total_tracks')), raw)
         )
 
         return cls(
@@ -191,16 +209,19 @@ class Album:
         """iTunes Search API album response shape (`collectionType=Album`)."""
         track_count = _int(raw.get('trackCount'))
 
-        # iTunes doesn't tag album type; infer from track count + collectionType.
-        collection_type = _str(raw.get('collectionType'), default='Album')
-        if 'compilation' in collection_type.lower():
-            album_type = 'compilation'
-        elif track_count <= 3:
-            album_type = 'single'
-        elif track_count <= 6:
-            album_type = 'ep'
+        # apple names its singles and eps ('X - Single'), read that. the
+        # itunes client hands over its normalized dict too: its raw rides
+        # along in _raw_data, else its own album_type already read the name.
+        from core.metadata.release_type import itunes_release_type
+        _apple = raw.get('_raw_data') if isinstance(raw.get('_raw_data'), dict) else raw
+        _normalized = _str(raw.get('album_type')).lower()
+        if not _apple.get('collectionName') and _normalized in ('album', 'single', 'ep', 'compilation'):
+            album_type = _normalized
         else:
-            album_type = 'album'
+            album_type = itunes_release_type(
+                _apple.get('collectionName'),
+                _str(_apple.get('collectionType'), default='Album'),
+                track_count or _int(_apple.get('trackCount')))
 
         artist_id = _str(raw.get('artistId')) or None
         external_ids = {}
@@ -261,21 +282,26 @@ class Album:
         record_type = _str(raw.get('record_type'), default='').lower()
         # 'compile' is Deezer's raw value for compilations (the enrichment
         # worker persists it unmapped — web_server's display helper already
-        # expects it). A bare 'album'/missing type is verified against the
-        # track count like the Spotify converter; the filler problem isn't
-        # Spotify-specific.
+        # expects it). deezer's own record_type is a real signal, 'album'
+        # included: re-guessing a raw 'album' by count made wish you were
+        # here (5 tracks, 44 min) an ep.
         # Also accept the normalized shape (album_type/total_tracks): the
         # metadata layer sometimes passes already-normalized dicts through
         # _build_album_info, and re-applying the raw-key extraction to them
         # loses the type and count (verified: ep/6 → album/0, which then
         # files EPs under Album/ and starves the count-based derivation).
-        if not record_type:
-            record_type = _str(raw.get('album_type'), default='').lower()
-        _type_map = {'single': 'single', 'ep': 'ep',
+        # there a bare 'album' may be someone's filler, so it goes by shape.
+        _type_map = {'single': 'single', 'ep': 'ep', 'album': 'album',
                      'compile': 'compilation', 'compilation': 'compilation'}
-        album_type = _type_map.get(
-            record_type, _infer_type_from_count(
-                _int(raw.get('nb_tracks') or raw.get('total_tracks'))))
+        if record_type in _type_map:
+            album_type = _type_map[record_type]
+        else:
+            _normalized = _str(raw.get('album_type'), default='').lower()
+            album_type = (
+                _type_map[_normalized]
+                if _normalized in _type_map and _normalized != 'album'
+                else _infer_type_from_shape(
+                    _int(raw.get('nb_tracks') or raw.get('total_tracks')), raw))
 
         external_ids = {}
         if raw.get('id'):

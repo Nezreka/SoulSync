@@ -35,7 +35,8 @@ list.
 
 from __future__ import annotations
 
-from typing import List, Optional
+import re
+from typing import Any, List, Optional
 
 
 # MB primary-type vocabulary as of 2026 — `Album | Single | EP |
@@ -91,3 +92,119 @@ def map_release_group_type(primary_type: Optional[str],
         return 'single'
 
     return 'album'
+
+
+# ---------------------------------------------------------------------------
+# release kind from the release's shape (count + runtime)
+# ---------------------------------------------------------------------------
+# the store rule (apple, spotify, distrokid): 1 to 3 tracks under 30 minutes is
+# a single, 4 to 6 tracks under 30 minutes is an ep, anything else is an album.
+# count alone made wish you were here (5 tracks, 44 min) an ep and close to the
+# edge (3 tracks, 38 min) a single. only for sources that didn't say: a
+# provider's own explicit type always wins over this.
+SHORT_RELEASE_MS = 30 * 60 * 1000
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def release_type_from_shape(track_count: Any, total_ms: Any = None) -> str:
+    """single / ep / album from track count and total runtime in ms.
+
+    runtime unknown (None or 0): count alone, which is right for most short
+    releases and the best there is. unknown count: album, never guess."""
+    count = _as_int(track_count)
+    if count <= 0:
+        return 'album'
+    runtime = _as_int(total_ms)
+    if runtime >= SHORT_RELEASE_MS:
+        return 'album'
+    if count <= 3:
+        return 'single'
+    if count <= 6:
+        return 'ep'
+    return 'album'
+
+
+def _track_ms(track: Any, seconds: bool = False) -> int:
+    if isinstance(track, dict):
+        get = track.get
+    else:
+        def get(key):
+            return getattr(track, key, None)
+    for key in ('duration_ms', 'trackTimeMillis'):
+        ms = _as_int(get(key))
+        if ms > 0:
+            return ms
+    if not seconds:
+        return 0
+    # deezer carries seconds under 'duration', discogs a clock string ('4:35')
+    secs = get('duration')
+    if isinstance(secs, str) and ':' in secs:
+        return parse_clock_ms(secs)
+    secs = _as_int(secs)
+    return secs * 1000 if secs > 0 else 0
+
+
+def parse_clock_ms(text: Any) -> int:
+    """'4:35' or '1:02:03' to ms, 0 when it isn't a clock."""
+    parts = str(text or '').strip().split(':')
+    if len(parts) < 2 or not all(p.strip().isdigit() for p in parts):
+        return 0
+    total = 0
+    for p in parts:
+        total = total * 60 + int(p)
+    return total * 1000
+
+
+def tracklist_runtime_ms(tracks: Any, expected_count: Any = None, *,
+                         seconds: bool = False) -> Optional[int]:
+    """sum of the track durations, or None unless the whole tracklist is at
+    hand with a duration on every track (a partial sum would read short and
+    call an album an ep). ``seconds``: the tracks keep a 'duration' in
+    seconds or as '4:35' (deezer, discogs) rather than duration_ms."""
+    if not tracks or not isinstance(tracks, (list, tuple)):
+        return None
+    if _as_int(expected_count) > len(tracks):
+        return None
+    total = 0
+    for track in tracks:
+        ms = _track_ms(track, seconds)
+        if ms <= 0:
+            return None
+        total += ms
+    return total
+
+
+_ITUNES_SUFFIX = re.compile(r'\s-\s(Single|EP)\b')
+_TITLE_SAYS_EP = re.compile(r'(?:^|[\s(\[-])(?:EP|E\.P\.?)(?=$|[\s)\]:,.-])')
+
+
+def title_says_ep(title: Any) -> bool:
+    """'The Heat EP', 'Hope For Something EP (Remixes)', 'The Def Leppard E.P.'.
+    case sensitive on purpose: a lowercase 'ep' is a word, not a label."""
+    return bool(_TITLE_SAYS_EP.search(str(title or '')))
+
+
+def itunes_release_type(collection_name: Any, collection_type: Any = None,
+                        track_count: Any = None, total_ms: Any = None) -> str:
+    """apple names its own singles and eps: 'Song - Single', 'Thing - EP'
+    (checked on 26k cached albums: 23.4k of 23.8k 1-3 track releases carry
+    ' - Single'). apple applies the store rule itself, so no suffix means
+    apple calls it an album, unless the title says EP outright. track count
+    and runtime are only a fallback when there is no name to read."""
+    name = str(collection_name or '')
+    if 'compilation' in str(collection_type or '').lower():
+        return 'compilation'
+    m = _ITUNES_SUFFIX.search(name)
+    if m:
+        return 'single' if m.group(1) == 'Single' else 'ep'
+    if title_says_ep(name):
+        return 'ep'
+    if name:
+        return 'album'
+    return release_type_from_shape(track_count, total_ms)

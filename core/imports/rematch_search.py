@@ -35,7 +35,7 @@ def _year(release_date: Any) -> Optional[str]:
     return s[:4] if len(s) >= 4 and s[:4].isdigit() else None
 
 
-def infer_release_type(album_type: Any, total_tracks: Any) -> str:
+def infer_release_type(album_type: Any, total_tracks: Any, total_ms: Any = None) -> str:
     """Normalize a source's release type to one of album / ep / single / compilation.
 
     Sources disagree: Spotify has no 'EP' — EPs come back as ``album_type='single'``
@@ -56,13 +56,10 @@ def infer_release_type(album_type: Any, total_tracks: Any) -> str:
     if t == "single":
         # 1–3 tracks → single; 4+ → almost always an EP in practice.
         return "ep" if n >= 4 else "single"
-    # Unknown type: infer purely from track count.
-    if n >= 7:
-        return "album"
-    if n >= 4:
-        return "ep"
+    # Unknown type: the store rule (count, and runtime when known).
     if n >= 1:
-        return "single"
+        from core.metadata.release_type import release_type_from_shape
+        return release_type_from_shape(n, total_ms)
     return t or "album"
 
 

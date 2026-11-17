@@ -139,13 +139,15 @@ def test_album_from_itunes_dict_full_response():
     assert album.external_ids['itunes_artist'] == '368183298'
 
 
-def test_album_from_itunes_dict_infers_album_type_from_track_count():
-    """iTunes doesn't tag album type — convert per the existing
-    heuristic (1-3 single, 4-6 EP, 7+ album)."""
+def test_album_from_itunes_dict_reads_apples_name_suffix():
+    """apple names its own singles and eps ('X - Single', 'X - EP'); no
+    suffix is apple calling it an album, whatever the track count (wish you
+    were here, 5 tracks, read as an ep by count, nov 16)."""
     base = {'collectionId': 1, 'collectionName': 'X', 'artistName': 'A',
             'collectionType': 'Album'}
-    assert Album.from_itunes_dict({**base, 'trackCount': 1}).album_type == 'single'
-    assert Album.from_itunes_dict({**base, 'trackCount': 5}).album_type == 'ep'
+    assert Album.from_itunes_dict({**base, 'collectionName': 'X - Single', 'trackCount': 1}).album_type == 'single'
+    assert Album.from_itunes_dict({**base, 'collectionName': 'X - EP', 'trackCount': 5}).album_type == 'ep'
+    assert Album.from_itunes_dict({**base, 'trackCount': 5}).album_type == 'album'
     assert Album.from_itunes_dict({**base, 'trackCount': 12}).album_type == 'album'
 
 

@@ -103,7 +103,8 @@ function AskedVsGot({
   asked: { title?: string; artist?: string; length?: number | null };
   got: { title?: string; artist?: string; length?: number | null };
 }) {
-  if (!asked.title) return null;
+  // nothing to put beside the ask (an old row, or a source that sent no title)
+  if (!asked.title || !(got.title || got.artist)) return null;
   const diff = (a?: string, b?: string) =>
     Boolean(a && b && a.trim().toLowerCase() !== b.trim().toLowerCase());
   const lengths = Boolean(asked.length && got.length);
@@ -277,8 +278,11 @@ export function AdlUnverifiedRow({
           facts={facts}
           aside={
             <AskedVsGot
-              asked={{ title: dl.expected_title, artist: dl.expected_artist }}
-              got={{ title: dl.title, artist: dl.artist }}
+              asked={{
+                title: dl.expected_title || dl.title,
+                artist: dl.expected_artist || dl.artist,
+              }}
+              got={{ title: dl.got_title, artist: dl.got_artist }}
             />
           }
           actions={

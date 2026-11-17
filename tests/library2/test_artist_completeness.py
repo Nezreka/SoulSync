@@ -11,6 +11,7 @@ from core.library2 import artist_completeness as AC
 from core.library2 import queries
 from core.library2.schema import ensure_library_v2_schema
 from core.library2.wanted_views import list_missing
+from tests.lib2_seed import album as seed_album
 from tests.lib2_seed import artist, row_conn, track
 
 
@@ -192,11 +193,9 @@ def test_kept_answer_moves_with_the_library(lib, monkeypatch):
 def test_the_library_pass_stays_on_indexes(lib):
     """one pass over the tracks is the point; every join from it is a seek."""
     conn, _ids = lib
-    parts = AC._scope_parts()
-    for sql in (AC._TRACKS_SQL.format(**parts), AC._OWN_RELEASES_SQL.format(**parts)):
-        plan = " | ".join(str(r[3]) for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
-        for table in ("tf", "w", "m"):
-            assert f"SCAN {table} " not in plan + " ", plan
+    plan = " | ".join(str(r[3]) for r in conn.execute("EXPLAIN QUERY PLAN " + AC.library_sql()))
+    for table in ("tf", "w", "ta", "aa"):
+        assert f"SCAN {table} " not in plan + " ", plan
     from core.library2.wanted_views import _ARTIST_TRACKS
     plan = " | ".join(str(r[3]) for r in conn.execute(
         "EXPLAIN QUERY PLAN " + _ARTIST_TRACKS, {"artist_id": 1}))
@@ -212,3 +211,137 @@ def test_select_all_ids_follow_the_filters(lib):
     assert [r["id"] for r in rows] == [ids["Empty"], ids["Gaps"]] and total == 2
     everyone, total = read_artist_page(conn, ids_only=True, sort="name", direction="desc")
     assert total == 5 and everyone[0]["id"] == ids["watched"]
+
+
+# -- the albums you have (#2106 follow-up) ------------------------------------
+#
+# an artist nobody watches wants nothing, so the first rule counted only what
+# is owned and every card read "N / N, complete". the shapes below are the
+# live ones that said so.
+
+@pytest.fixture
+def shapes(tmp_path):
+    conn = row_conn(str(tmp_path / "shapes.db"))
+    ensure_library_v2_schema(conn)
+    conn.execute("CREATE TABLE watchlist_artists(spotify_artist_id TEXT, itunes_artist_id TEXT,"
+                 " artist_name TEXT, profile_id INTEGER)")
+    AC.forget()
+
+    def release(name, title, rows, owned, size=None, origin="library", wanted=()):
+        """``rows`` track rows, the first ``owned`` of them on disk; nothing
+        else wanted or monitored unless its index is in ``wanted``."""
+        ids = []
+        for n in range(rows):
+            tid = track(conn, name, title, f"{title} {n}", owned=n < owned, credit=name,
+                        monitored=0, album_cols={"expected_track_count": size,
+                                                 "origin": origin, "monitored": 0})
+            if n in wanted:
+                conn.execute("INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason,"
+                             " projection_version) VALUES (1, ?, 1, 'track', 1)", (tid,))
+            ids.append(tid)
+        if not rows:
+            seed_album(conn, name, title, expected_track_count=size, origin=origin, monitored=0)
+        return ids
+
+    # 10,000 Maniacs: a 14 track live album, one track here
+    release("Maniacs", "Unplugged", 14, 1, size=14)
+    # 112: the same, plus five albums of the discography with no rows at all
+    release("112", "Greatest Hits", 14, 1, size=14)
+    for n in range(5):
+        release("112", f"Disco {n}", 0, 0, origin="discography")
+    # 10LEC6: eleven tracks says the provider, one row, and it's here
+    release("10LEC6", "AKO AKAS", 1, 1, size=11)
+    # 070 Shake: two singles, all here; the albums not at all
+    release("Shake", "Black Dress", 2, 2, size=2)
+    release("Shake", "BODY", 1, 1, size=1)
+    release("Shake", "Petrichor", 0, 0, origin="discography")
+    release("Shake", "Modus Vivendi", 0, 0, origin="discography")
+    # nobody looked up the size, one of three rows here
+    release("Unsized Part", "Unknown", 3, 1)
+    # a wanted track on a release you hold nothing of still counts
+    release("Wishful", "Owned", 2, 2, size=2)
+    release("Wishful", "Not Yet", 3, 0, size=3, wanted=(0,))
+    # on the Watchlist: the collection settings decide, unchanged
+    release("Watched One", "Partly", 14, 1, size=14, wanted=(1, 2))
+    # an alias member on the Watchlist makes the whole group watched
+    release("Group", "Group Album", 4, 1, size=4)
+    group = artist(conn, "Group")
+    artist(conn, "Group Alias", canonical_artist_id=group, monitored=1)
+    conn.execute("UPDATE lib2_artists SET monitored=1 WHERE name='Watched One'")
+    conn.commit()
+    yield conn
+    AC.forget()
+    conn.close()
+
+
+def _rows(conn, **kw):
+    return {r["name"]: r for r in queries.list_artists(conn, **kw)[0]}
+
+
+def _card(row):
+    return (row["tracks_present"], row["track_count"], row["completion"])
+
+
+def test_an_unwatched_artist_counts_the_albums_you_have(shapes):
+    """#2106 follow-up: one track of a 14 track album is 1 / 14, not 1 / 1
+    complete. releases you hold nothing of don't count."""
+    rows = _rows(shapes)
+    assert _card(rows["Maniacs"]) == (1, 14, "incomplete")
+    assert _card(rows["112"]) == (1, 14, "incomplete")
+    assert _card(rows["Shake"]) == (3, 3, "complete")
+    assert rows["Maniacs"]["completeness_basis"] == "albums"
+
+
+def test_a_release_is_the_larger_of_its_size_and_its_rows(shapes):
+    """#2106 follow-up: eleven tracks with one row held is 1 / 11; no known
+    size and only some rows here is never complete."""
+    rows = _rows(shapes)
+    assert _card(rows["10LEC6"]) == (1, 11, "incomplete")
+    assert _card(rows["Unsized Part"]) == (1, 3, "incomplete")
+    assert rows["Unsized Part"]["unverified_albums"] == 1
+
+
+def test_a_wanted_track_still_counts_for_an_unwatched_artist(shapes):
+    assert _card(_rows(shapes)["Wishful"]) == (2, 3, "incomplete")
+
+
+def test_a_watched_artist_keeps_the_collection_settings_rule(shapes):
+    """the one owned and the two wanted, not the album's other eleven."""
+    rows = _rows(shapes)
+    assert _card(rows["Watched One"]) == (1, 3, "incomplete")
+    assert rows["Watched One"]["completeness_basis"] == "watchlist"
+    # watched through an alias: only the owned track is expected
+    assert _card(rows["Group"]) == (1, 1, "complete")
+
+
+def test_the_sorts_and_filters_read_the_cards_numbers(shapes):
+    """#2106 follow-up: the kept pass and the live page are one rule."""
+    rows = _rows(shapes)
+    facts = AC.artist_completeness(shapes)
+    for row in rows.values():
+        fact = facts.get(int(row["id"]), AC.Completeness())
+        assert (fact.present, fact.total, fact.state if fact.total else "unknown") == (
+            row["tracks_present"], row["track_count"], row["completion"]), row["name"]
+    names = lambda **kw: sorted(_rows(shapes, completeness=AC.completeness_filters(**kw)))
+    assert names(completion="complete") == ["Group", "Shake"]
+    assert names(completion="incomplete") == [
+        "10LEC6", "112", "Maniacs", "Unsized Part", "Watched One", "Wishful"]
+    assert facts[int(rows["Maniacs"]["id"])].incomplete_albums == 1
+    assert facts[int(rows["Shake"]["id"])].incomplete_albums == 0
+
+
+def test_the_library_rule_stays_on_indexes(shapes):
+    """one pass over the tracks for the kept answer; every other join is a
+    seek, and the page's own pass never walks the tracks at all."""
+    plan = " | ".join(str(r[3]) for r in shapes.execute("EXPLAIN QUERY PLAN " + AC.library_sql()))
+    for alias in ("wa", "aa", "al", "w", "tf", "ta", "st"):
+        assert f"SCAN {alias} " not in plan + " ", (alias, plan)
+    stmts = []
+    shapes.set_trace_callback(stmts.append)
+    queries.list_artists(shapes)
+    shapes.set_trace_callback(None)
+    page = next(s for s in stmts if "cc_completeness" in s)
+    plan = " | ".join(str(r[3]) for r in shapes.execute("EXPLAIN QUERY PLAN " + page))
+    # (aa is the page's own artist_albums CTE there)
+    for alias in ("wa", "al", "w", "tf", "ta", "st", "t"):
+        assert f"SCAN {alias} " not in plan + " ", (alias, plan)

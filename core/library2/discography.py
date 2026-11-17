@@ -301,20 +301,22 @@ _CONTENT_FILTER_DEFAULTS = {
 }
 
 
-def _release_type_included(track_count: Any, filters: Dict[str, bool]) -> bool:
-    """3.6.1's rule by track count: 1-3 a single, 4-6 an EP, 7+ an album. A
-    release whose count isn't known yet is let through, as 3.6.1 did on error."""
+def _release_type_included(track_count: Any, filters: Dict[str, bool],
+                           total_ms: Any = None) -> bool:
+    """3.6.1's release types by the store rule: 1-3 tracks under 30 min a
+    single, 4-6 an EP, else an album (count alone when the runtime isn't
+    known). A release whose count isn't known yet is let through, as 3.6.1
+    did on error."""
+    from core.metadata.release_type import release_type_from_shape
     try:
         count = int(track_count or 0)
     except (TypeError, ValueError):
         return True
     if count <= 0:
         return True
-    if count >= 7:
-        return filters.get("include_albums", True)
-    if count >= 4:
-        return filters.get("include_eps", True)
-    return filters.get("include_singles", True)
+    kind = release_type_from_shape(count, total_ms)
+    return filters.get({"album": "include_albums", "ep": "include_eps"}.get(
+        kind, "include_singles"), True)
 
 
 def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[str, bool]:
@@ -1161,6 +1163,21 @@ def repair_track_number_collisions(database, config_manager, artist_id: int) -> 
                 ORDER BY al.id""",
             (artist_id,),
         ).fetchall()]
+        if album_ids:
+            # a row a moved file left behind shares its position with the row
+            # that has the file now. that is not a numbering fault, it folds
+            # (#2094), and only what still collides gets the tracklist pass
+            from core.library2.dedup_repair import fold_leftover_rows
+            if fold_leftover_rows(conn, album_ids)["leftover_tracks_folded"]:
+                conn.commit()
+                marks = ",".join("?" for _ in album_ids)
+                album_ids = [row["id"] for row in conn.execute(
+                    f"""SELECT al.id FROM lib2_albums al
+                         WHERE al.id IN ({marks}) AND EXISTS (
+                             SELECT 1 FROM lib2_tracks t WHERE t.album_id = al.id
+                              GROUP BY COALESCE(t.disc_number, 1), t.track_number
+                             HAVING COUNT(*) > 1)
+                         ORDER BY al.id""", album_ids).fetchall()]
         for album_id in album_ids:
             try:
                 if resolve_tracklist(config_manager, conn, album_id):

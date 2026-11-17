@@ -83,9 +83,12 @@ export interface AdlDownload {
   event_type?: string;
   /** History rows only: what acoustid said about the file. */
   acoustid_result?: string;
-  /** History rows only: what we asked for, to show beside what we got. */
+  /** History rows only: what we asked for (the row's own title/artist). */
   expected_title?: string;
   expected_artist?: string;
+  /** History rows only: what the source handed over, to show beside the ask. */
+  got_title?: string;
+  got_artist?: string;
 }
 
 /**

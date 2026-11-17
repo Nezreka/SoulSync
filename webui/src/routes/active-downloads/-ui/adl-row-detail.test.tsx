@@ -311,21 +311,27 @@ describe('AdlRow expansion (#1156)', () => {
     expect(facts(container).match(/Tidal/g)).toHaveLength(1);
   });
 
-  it('shows what we asked for only when it differs from what we got', () => {
+  it('shows what we got only when it differs from what we asked for', () => {
+    // in-app chat (makiel): asked for and got were reversed. the row's
+    // title is the ask, so the fact line names the file the source sent.
     const { container } = render(
       <AdlRow
         dl={row({
           task_id: 'history-4',
           status: 'completed',
           is_persistent_history: true,
-          title: 'XO (Live)',
+          title: 'XO',
           expected_title: 'XO',
           expected_artist: 'John Mayer',
+          got_title: 'XO (Live)',
+          got_artist: 'John Mayer',
         })}
       />,
     );
     fireEvent.click(rowEl(container));
-    expect(facts(container)).toContain('John Mayer · XO');
+    expect(facts(container)).toContain('Got');
+    expect(facts(container)).toContain('John Mayer · XO (Live)');
+    expect(facts(container)).not.toContain('Asked for');
     cleanup();
     const same = render(
       <AdlRow
@@ -333,14 +339,14 @@ describe('AdlRow expansion (#1156)', () => {
           task_id: 'history-5',
           status: 'completed',
           is_persistent_history: true,
-          expected_title: 'xtal',
+          title: 'Xtal',
+          expected_title: 'Xtal',
+          got_title: 'xtal',
         })}
       />,
     );
     fireEvent.click(rowEl(same.container));
-    expect(same.container.querySelector('.dlc-facts')?.textContent ?? '').not.toContain(
-      'Asked for',
-    );
+    expect(same.container.querySelector('.dlc-facts')?.textContent ?? '').not.toContain('Got');
   });
 
   it('the cancel button still cancels without toggling the row open', async () => {

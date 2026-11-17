@@ -906,6 +906,12 @@ def _post_scan_hook_with_own_libraries(server_type, deep):
         _run_own_library_scans(server_type, deep)
         if _reconcile_after_scan:
             _reconcile_after_scan(worker)
+        # a file that moved to another row of its album leaves its old row
+        # behind with no file, and only a scan sees that happen (#2094)
+        if getattr(worker, 'database', None) is not None:
+            _db_update_phase_callback("Finishing up: folding leftover track rows...")
+            from core.library2.dedup_repair import fold_leftovers_after_scan
+            fold_leftovers_after_scan(worker.database)
     return hook
 
 
