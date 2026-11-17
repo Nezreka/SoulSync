@@ -43,7 +43,8 @@ function remove(doc: Document): void {
 
 export function refreshHiddenPageNote(
   payload: FeaturesPayload | null,
-  showIt: (featureId: string) => Promise<unknown>,
+  /** null when an admin locked this profile's choice (#2157) */
+  showIt: ((featureId: string) => Promise<unknown>) | null,
   doc: Document = document,
 ): void {
   const page = currentNavPage(doc);
@@ -53,7 +54,7 @@ export function refreshHiddenPageNote(
     return;
   }
   let note = doc.getElementById(NOTE_ID);
-  if (note?.dataset.page === page) return;
+  if (note?.dataset.page === page && note.dataset.locked === String(!showIt)) return;
   remove(doc);
 
   note = doc.createElement('div');
@@ -61,15 +62,19 @@ export function refreshHiddenPageNote(
   note.className = 'hidden-page-note';
   note.setAttribute('role', 'status');
   note.dataset.page = page;
+  note.dataset.locked = String(!showIt);
 
   const text = doc.createElement('span');
-  text.textContent = `${owner.label} is hidden from your sidebar.`;
+  text.textContent = showIt
+    ? `${owner.label} is hidden from your sidebar.`
+    : `${owner.label} is hidden from your sidebar by an admin.`;
 
   const show = doc.createElement('button');
   show.type = 'button';
   show.className = 'hidden-page-note-show';
   show.textContent = 'Show it';
   show.addEventListener('click', () => {
+    if (!showIt) return;
     show.disabled = true;
     showIt(owner.id).catch(() => {
       show.disabled = false;
@@ -87,7 +92,8 @@ export function refreshHiddenPageNote(
     remove(doc);
   });
 
-  note.append(text, show, close);
+  if (showIt) note.append(text, show, close);
+  else note.append(text, close);
   doc.body.appendChild(note);
 }
 
