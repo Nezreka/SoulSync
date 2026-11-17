@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
  * OIDC sign-up): they could file a request from a card but never open the
  * page to see or withdraw it.
  *
- * These run the real sidebar loop (init.js) and route guard (video-side.js)
+ * These run the real sidebar rule (profile-nav.js) and route guard (video-side.js)
  * against stub profiles.
  */
 
@@ -25,7 +25,7 @@ function between(src: string, start: string, end: string): string {
   return src.slice(a, b);
 }
 
-const INIT = read('static/init.js');
+const NAV = read('static/profile-nav.js');
 const SIDE = read('static/video/video-side.js');
 
 type Profile = {
@@ -49,27 +49,16 @@ const ADMIN: Profile = { id: 1, is_admin: true, can_download: true, allowed_page
 
 const canDownloadFor = (p: Profile) => () => p.id === 1 || p.can_download;
 
-/** the sidebar loop's display value for one video nav button */
+/** the sidebar rule's answer for one video nav button (profile-nav.js) */
 function navDisplay(profile: Profile, page: string): string {
-  const loop = between(
-    INIT,
-    'const VIDEO_ADMIN_ONLY',
-    "document.body.classList.toggle('video-admin'",
-  );
-  const btn = { style: { display: 'unset' }, getAttribute: () => page };
-  const document = { querySelectorAll: () => [btn] };
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  new Function('document', 'currentProfile', 'canDownload', loop)(
-    document,
-    profile,
-    canDownloadFor(profile),
-  );
-  return btn.style.display;
+  new Function(NAV)();
+  return window.SoulSyncProfileNav!.navButtonVisible(profile, page, true) ? '' : 'none';
 }
 
 /** the route guard's answer for one video page */
 function routeAllowed(profile: Profile, page: string): boolean {
-  const sideAllowed = between(SIDE, 'function sideAllowed(', 'function videoPageAllowed(');
+  const sideAllowed = between(SIDE, 'function knownProfile(', 'function videoPageAllowed(');
   const guard = between(
     SIDE,
     'function videoPageAllowed(',
