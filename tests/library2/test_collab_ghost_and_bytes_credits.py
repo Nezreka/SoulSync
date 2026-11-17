@@ -32,10 +32,8 @@ def test_a_bytes_text_credit_is_the_name_inside_it():
     assert unwrap_bytes_repr("bonobo") == "bonobo"
     assert all(not name.startswith("b'") and not name.endswith("'")
                for name in split_artist_credits("b'Above & Beyond'"))
-    # the known band stays whole once the bytes text is unwrapped
-    known = {"above & beyond"}
-    assert _credit_names_for_import("b'Above & Beyond'", lambda n: n.lower() in known) == [
-        "Above & Beyond"]
+    # the import keeps the credit as written, the bytes text unwrapped
+    assert _credit_names_for_import("b'Above & Beyond'") == ["Above & Beyond"]
 
 
 def _library(tmp_path):

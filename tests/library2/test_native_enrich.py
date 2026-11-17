@@ -554,15 +554,21 @@ def _component_resolver(name):
             "name": name, "image_url": "http://img/" + name, "genres": []}
 
 
+def _split(conn, combined, names):
+    """what Split Artists' fix does once the providers confirm the parts:
+    the one combined-artist heal, with each part's provider identity"""
+    return NE.heal_combined_artist(conn, combined, list(names),
+                                   identities={n: _component_resolver(n) for n in names},
+                                   reason="Split Artists")
+
+
 def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
     imported_conn.execute("UPDATE lib2_artists SET monitored=0 WHERE id=?", (combined,))
     album_id, track_id = _make_collab_release(imported_conn, combined,
                                               credits=("Ian Asher", "Galantis"))
 
-    result = NE.smart_split_combined_artist(
-        imported_conn, combined, resolver=_component_resolver
-    )
+    result = _split(imported_conn, combined, ("Ian Asher", "Galantis"))
 
     assert result is not None
     # Ghost is gone; both real components now exist and are matched.
@@ -600,48 +606,6 @@ def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     ).fetchone() is not None
 
 
-def test_a_split_no_provider_list_confirms_waits_for_the_user(imported_conn):
-    """strict: every part resolving somewhere and the "&" proposing it is not
-    enough. No provider credits the parts on its tracks: nothing changes, and
-    Split Artists files it for the user to confirm"""
-    combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
-    album_id, track_id = _make_collab_release(imported_conn, combined)
-    assert NE.smart_split_combined_artist(
-        imported_conn, combined, resolver=_component_resolver) is None
-    _provider_credits(imported_conn, track_id, ("Ian Asher",))     # one part only
-    assert NE.smart_split_combined_artist(
-        imported_conn, combined, resolver=_component_resolver) is None
-    assert _artist_id_by_name(imported_conn, "Ian Asher & Galantis") == combined
-    assert _artist_id_by_name(imported_conn, "Ian Asher") is None
-
-
-def test_smart_split_aborts_when_a_component_does_not_resolve(imported_conn):
-    combined = _insert_native_artist(imported_conn, "Foo & Bar")
-    album_id, _track = _make_collab_release(imported_conn, combined)
-
-    def resolver(name):
-        return _component_resolver(name) if name == "Foo" else None
-
-    result = NE.smart_split_combined_artist(imported_conn, combined, resolver=resolver)
-
-    assert result is None
-    # Nothing changed: ghost intact, no phantom component created.
-    assert _artist_id_by_name(imported_conn, "Foo & Bar") == combined
-    assert _artist_id_by_name(imported_conn, "Foo") is None
-    assert imported_conn.execute(
-        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)
-    ).fetchone()["primary_artist_id"] == combined
-
-
-def test_smart_split_skips_a_non_combined_name(imported_conn):
-    solo = _insert_native_artist(imported_conn, "Solo Artist")
-    result = NE.smart_split_combined_artist(
-        imported_conn, solo, resolver=_component_resolver
-    )
-    assert result is None
-    assert _artist_id_by_name(imported_conn, "Solo Artist") == solo
-
-
 def test_smart_split_reuses_existing_component_artist(imported_conn):
     # "Galantis" already exists (e.g. imported separately); split must reuse it,
     # not create a duplicate.
@@ -649,8 +613,7 @@ def test_smart_split_reuses_existing_component_artist(imported_conn):
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
     _make_collab_release(imported_conn, combined, credits=("Ian Asher", "Galantis"))
 
-    assert NE.smart_split_combined_artist(imported_conn, combined,
-                                          resolver=_component_resolver) is not None
+    assert _split(imported_conn, combined, ("Ian Asher", "Galantis")) is not None
 
     gal_rows = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Galantis'"
@@ -659,9 +622,16 @@ def test_smart_split_reuses_existing_component_artist(imported_conn):
     assert gal_rows[0]["id"] == existing_gal
 
 
-def test_reconcile_splits_unmatched_combined_and_counts_it(imported_conn):
+def test_reconcile_hands_an_unmatched_combined_name_to_split_artists(imported_conn,
+                                                                     monkeypatch):
+    """No provider knows "Ian Asher & Galantis" as one artist: the reconcile
+    does not split it, it asks Split Artists, the one job that splits"""
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
     _make_collab_release(imported_conn, combined, credits=("Ian Asher", "Galantis"))
+    import core.repair_worker as rw
+    asked = []
+    monkeypatch.setattr(rw, "request_artist_split",
+                        lambda ids, reason="": asked.extend(ids) or True)
 
     def resolver(name):
         # The combined name matches nothing; each component resolves.
@@ -671,8 +641,8 @@ def test_reconcile_splits_unmatched_combined_and_counts_it(imported_conn):
 
     stats = NE.reconcile_unmapped_native_artists(imported_conn, resolver=resolver)
 
-    assert stats["split"] >= 1
-    assert _artist_id_by_name(imported_conn, "Ian Asher & Galantis") is None
+    assert combined in asked and stats["split_requested"] >= 1
+    assert _artist_id_by_name(imported_conn, "Ian Asher & Galantis") == combined
 
 
 def test_reconcile_matches_pending_native_skips_matched_and_legacy(imported_conn):
@@ -713,9 +683,7 @@ def test_smart_split_legacy_backed_artist_becomes_alias(imported_conn):
     )
     album_id, track_id = _make_collab_release(imported_conn, combined, credits=("A", "B"))
 
-    result = NE.smart_split_combined_artist(
-        imported_conn, combined, resolver=_component_resolver
-    )
+    result = _split(imported_conn, combined, ("A", "B"))
 
     assert result is not None
     # Ghost is not deleted (legacy ID preserved) but becomes an alias
@@ -1657,7 +1625,7 @@ def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
     album_id, _track = _make_collab_release(imported_conn, combined,
                                             credits=("Ian Asher", "Beyonce"))
 
-    NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
+    _split(imported_conn, combined, ("Ian Asher", "Beyonce"))
 
     holders = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE spotify_id='SP_Beyonce'").fetchall()
@@ -1734,7 +1702,7 @@ def test_a_split_creates_the_guest_component_unwatched(imported_conn):
     imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
     _make_collab_release(imported_conn, ghost, credits=("Ian Asher", "Galantis"))
 
-    result = NE.smart_split_combined_artist(imported_conn, ghost, resolver=_component_resolver)
+    result = _split(imported_conn, ghost, ("Ian Asher", "Galantis"))
 
     primary, guest = result["component_ids"][:2]
     flags = dict(imported_conn.execute(
@@ -1755,12 +1723,11 @@ def test_a_local_split_creates_the_guest_unwatched(imported_conn):
     imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
                           "VALUES(?,?, 'primary', 0)", (track, ghost))
     imported_conn.commit()
-    # the album's artist inside the name proposes it; no provider confirms yet
-    assert NE.split_combined_credits_locally(imported_conn)["split"] == 0
+    # the pass hands it to Split Artists; its heal leaves the new guest unwatched
     _provider_credits(imported_conn, track, ("Oneheart", "Malek"))
     imported_conn.commit()
-
-    assert NE.split_combined_credits_locally(imported_conn)["split"] == 1
+    NE.heal_combined_artist(imported_conn, ghost, ["Oneheart", "Malek"], lead="Oneheart",
+                            reason="Split Artists")
 
     flags = {r[0]: r[1] for r in imported_conn.execute(
         "SELECT name, monitored FROM lib2_artists WHERE name IN ('Oneheart', 'Malek')")}

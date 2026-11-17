@@ -289,6 +289,20 @@ def _names_of(items: Iterable[Any]) -> List[str]:
     return out
 
 
+def credits_confirm(parts: Iterable[Any], evidence: Iterable[Evidence]) -> bool:
+    """Whether stored provider lists confirm splitting into ``parts``: every
+    part is credited by one of them (a catalogue list is not a provider's).
+    The one rule every split that changes the catalogue asks: names (a ";",
+    the album's artist inside the name, parts the library knows) only
+    propose a split, a provider crediting each part on the track confirms it."""
+    wanted = {name_key(p) for p in parts or ()} - {""}
+    if len(wanted) < 2:
+        return False
+    credited = {name_key(n) for via, names in evidence or ()
+                if not str(via).startswith("catalogue") for n in _names_of(names)}
+    return wanted <= credited
+
+
 def credits_cover(name: Any, credits: Iterable[Any]) -> Optional[List[str]]:
     """``credits`` in the order ``name`` lists them, when together they are
     all of ``name`` with only separators between; None otherwise. A single
@@ -614,6 +628,6 @@ __all__ = [
     "STORED_SOURCES", "clean_credit", "kept_whole_artist_names",
     "kept_whole_keys", "known_act_keys", "parse_kept_whole_names",
     "remember_kept_whole_names",
-    "credit_verdict", "credits_cover", "decide_credit", "leads_a_band", "lookup_name", "name_key",
+    "credit_verdict", "credits_confirm", "credits_cover", "decide_credit", "leads_a_band", "lookup_name", "name_key",
     "split_names", "stored_track_credits", "tokens", "unwrap_bytes_repr",
 ]

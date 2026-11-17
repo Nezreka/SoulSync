@@ -143,7 +143,8 @@ def test_normalize_artist_name():
 def test_splits_only_at_enabled_separators():
     assert _splits_only_at('Camellia, Toby Fox', ['Camellia', 'Toby Fox'], [','])
     assert not _splits_only_at('Camellia & Toby Fox', ['Camellia', 'Toby Fox'], [','])
-    assert not _splits_only_at('A feat. B', ['A', 'B'], [',', ';', '/', '&'])
+    # a guest marker always separates artists: the import hands "A feat. B" over
+    assert _splits_only_at('A feat. B', ['A', 'B'], [',', ';', '/', '&'])
     assert not _splits_only_at('NovaVale', ['Nova', 'Vale'], [','])
 
 
@@ -520,3 +521,111 @@ def test_fix_all_leaves_an_unconfirmed_split_its_own_button_applies_it(db, no_fe
                                          {**finding['details'], '_explicit_single_fix': True})
     assert out['success'] is True and out['action'] == 'artists_split'
     assert _artist_id(db, 'ODESZA; RY X') is None
+
+
+# ── a request for named artists (another job handing its candidates over) ──
+
+def test_a_request_checks_exactly_the_artists_asked_for_files_or_not(db, no_fetch):
+    tracks = _album_by(db, 'Camellia, Toby Fox', 'One')
+    _credits(db, tracks[0], ['Camellia', 'Toby Fox'])
+    _album_by(db, 'Nova, Mat Zo', 'Two', album='Other')
+    with db._get_connection() as conn:
+        # a fileless collaboration ghost, credited nowhere
+        ghost = conn.execute("INSERT INTO lib2_artists(name, sort_name) "
+                             "VALUES('Nelly & Florida Georgia Line', 'x')").lastrowid
+        conn.commit()
+    camellia = _artist_id(db, 'Camellia, Toby Fox')
+    _result, findings = _scan(db, scope={'artist_ids': [camellia, ghost]})
+    names = sorted(f['details']['combined_name'] for f in findings)
+    assert 'Nova, Mat Zo' not in names                  # not asked for
+    assert 'Camellia, Toby Fox' in names
+
+
+def test_2136_the_job_never_cuts_a_band_into_its_words(db, no_fetch):
+    """#2131 / #2136: ghost "Above" and "Beyond" rows from an old split, the
+    identified band, and a credit naming the band and a guest"""
+    _album_by(db, 'Above & Beyond', 'Sun & Moon', **{'spotify_id': 'sp-ab'})
+    _identified(db, 'Above', 'Beyond', 'Mat Zo')
+    tracks = _album_by(db, 'Above & Beyond & Mat Zo', 'Thing Called Love', album='Collab')
+    _credits(db, tracks[0], ['Above & Beyond', 'Mat Zo'])
+    _result, findings = _scan(db)
+    assert [f['details']['combined_name'] for f in findings] == ['Above & Beyond & Mat Zo']
+    finding = findings[0]
+    assert finding['details']['split_artists'] == ['Above & Beyond', 'Mat Zo']
+    assert finding['details']['confirmed'] is True
+    out = _worker(db)._fix_comma_artist_split('artist', finding['entity_id'], None,
+                                              finding['details'])
+    assert out['success'] is True
+    with db._get_connection() as conn:
+        credited = {r[0] for r in conn.execute(
+            "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
+            "WHERE ta.track_id=?", (tracks[0],))}
+    assert credited == {'Above & Beyond', 'Mat Zo'}
+
+
+def test_an_anchored_ghost_with_an_id_it_picked_up_by_name_is_still_a_list(db, no_fetch):
+    """e7923c21e: "Øneheart, Malek" on Øneheart's album got a provider id from
+    a name match; the album's own artist inside the name proposes the split
+    whatever id the ghost carries, the provider list confirms it"""
+    tracks = _album_by(db, 'Øneheart', 'Snow', **{'spotify_id': 'sp-one'})
+    with db._get_connection() as conn:
+        ghost = conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id) "
+                             "VALUES('Øneheart, Malek', 'x', 'sp-wrong')").lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, 'featured', 1)", (tracks[0], ghost))
+        conn.commit()
+    _credits(db, tracks[0], ['Øneheart', 'Malek'])
+    _result, findings = _scan(db)
+    finding = [f for f in findings if f['details']['combined_name'] == 'Øneheart, Malek'][0]
+    assert finding['details']['split_artists'] == ['Øneheart', 'Malek']
+    assert finding['details']['confirmed'] is True
+
+
+
+# ── every separator the kernel reads ────────────────────────────────────────
+
+def test_split_artists_splits_at_every_separator_the_kernel_reads():
+    symbols = [',', ';', '/', '&']
+    assert _splits_only_at('Drake feat. Wizkid', ['Drake', 'Wizkid'], symbols)
+    assert _splits_only_at('A x B', ['A', 'B'], symbols)
+    assert _splits_only_at('A vs. B', ['A', 'B'], symbols)
+    assert _splits_only_at('A | B', ['A', 'B'], symbols)
+    assert _splits_only_at('Camellia and Toby Fox', ['Camellia', 'Toby Fox'], symbols)
+    # the switches still decide the separators that can be part of a name
+    assert not _splits_only_at('Camellia, Toby Fox', ['Camellia', 'Toby Fox'], [';'])
+    assert not _splits_only_at('Camellia and Toby Fox', ['Camellia', 'Toby Fox'], [','])
+    assert _splits_only_at('Drake feat. Wizkid', ['Drake', 'Wizkid'], [])
+    # "Lil Nas X" has no separator in it
+    assert not _splits_only_at('Lil Nas X', ['Lil Nas', ''], symbols)
+
+
+def test_a_feat_credit_the_import_kept_whole_is_split_when_confirmed(db, no_fetch):
+    """the import keeps "Drake feat. Wizkid" as written and hands it over;
+    Split Artists reads the feat. and the provider list confirms it"""
+    tracks = _album_by(db, 'Drake', 'One Dance', **{'spotify_id': 'sp-drake'})
+    with db._get_connection() as conn:
+        ghost = conn.execute("INSERT INTO lib2_artists(name, sort_name) "
+                             "VALUES('Drake feat. Wizkid', 'x')").lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, 'featured', 1)", (tracks[0], ghost))
+        conn.commit()
+    _credits(db, tracks[0], ['Drake', 'Wizkid'])
+    _result, findings = _scan(db, scope={'artist_ids': [ghost]})
+    assert [f['details']['split_artists'] for f in findings] == [['Drake', 'Wizkid']]
+    assert findings[0]['details']['confirmed'] is True
+
+
+def test_a_run_with_files_and_artists_asked_for_checks_both(db, no_fetch):
+    tracks = _album_by(db, 'Camellia, Toby Fox', 'One')
+    _credits(db, tracks[0], ['Camellia', 'Toby Fox'])
+    _album_by(db, 'Nova, Mat Zo', 'Two', album='Other')
+    with db._get_connection() as conn:
+        path = conn.execute("SELECT path FROM lib2_track_files WHERE track_id=?",
+                            (tracks[0],)).fetchone()[0]
+        ghost = conn.execute("INSERT INTO lib2_artists(name, sort_name) "
+                             "VALUES('Drake feat. Wizkid', 'x')").lastrowid
+        conn.commit()
+    _result, findings = _scan(db, scope={'file_paths': [path], 'artist_ids': [ghost]})
+    names = {f['details']['combined_name'] for f in findings}
+    assert 'Camellia, Toby Fox' in names            # the file scope
+    assert 'Nova, Mat Zo' not in names               # neither asked nor in scope

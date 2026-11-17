@@ -227,11 +227,17 @@ def test_leads_a_band():
     ("Drake feat. Rihanna", (), None, ["Drake", "Rihanna"]),
     ("Earth, Wind & Fire", ("Earth",), "Various Artists", ["Earth, Wind & Fire"]),
 ])
-def test_the_importer_reads_credits_through_the_kernel(credit, library, album_artist, expected):
+def test_an_imported_credit_is_kept_as_written_and_split_artists_proposes(
+        credit, library, album_artist, expected):
+    """The import keeps a credit as written; Split Artists, the one job that
+    splits, proposes the parts from the same context (and splits once a
+    provider credits each part on the track)."""
     from core.library2.importer import _credit_names_for_import
+    assert _credit_names_for_import(credit) == [credit]
     known = {n.casefold() for n in library}
-    assert _credit_names_for_import(credit, lambda n: n.casefold() in known,
-                                    album_artist=album_artist) == expected
+    assert list(decide_credit(credit, known=[album_artist] if album_artist else [],
+                              is_act=lambda n: n.casefold() in known,
+                              is_artist=lambda n: n.casefold() in known).names) == expected
 
 
 @pytest.mark.parametrize("credit,known,library,expected", [
@@ -375,8 +381,9 @@ def test_context_anchor_beats_a_combined_catalogue_row_before_marker_cut():
     from core.imports.collab_artist import split_credit_primary
 
     library = _lib('Drake', 'Drake feat. Rihanna')
-    assert _credit_names_for_import('Drake feat. Rihanna', library,
-                                    album_artist='Drake') == ['Drake', 'Rihanna']
+    assert _credit_names_for_import('Drake feat. Rihanna') == ['Drake feat. Rihanna']
+    assert decide_credit('Drake feat. Rihanna', known=['Drake'], is_act=library,
+                         is_artist=library).names == ('Drake', 'Rihanna')
     assert split_credit_primary('Drake feat. Rihanna', ['Drake'], library) == 'Drake'
 
 
@@ -437,3 +444,14 @@ def test_a_keep_whole_name_is_an_act_everywhere():
     assert decide_credit("Above & Beyond", known=["Above"], config=cfg).names == ("Above & Beyond",)
     assert decide_credit("K/DA; Mimi Webb", is_artist=_lib("K", "DA", "Mimi Webb"),
                          config=cfg).names == ("K/DA", "Mimi Webb")
+
+
+# ── found against the real test library (dev cut names after a sure cut) ────
+
+@pytest.mark.parametrize("credit, expected", [
+    ("ODESZA; RY X", ("ODESZA", "RY X")),                      # dev: "RY"
+    ("Gabry Ponte; LUM!X; Prezioso", ("Gabry Ponte", "LUM!X", "Prezioso")),   # dev: "LUM!"
+    ("LUM!X; Gabry Ponte; Robin Schulz", ("LUM!X", "Gabry Ponte", "Robin Schulz")),  # dev: whole
+])
+def test_a_capital_x_ending_a_name_is_no_marker(credit, expected):
+    assert decide_credit(credit).names == expected

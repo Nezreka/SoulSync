@@ -87,21 +87,34 @@ identified artists, keep-whole names), heals through `heal_combined_artist`,
 and requests Re-tag and Reorganize for the affected files. It has no tag
 codec, no file mover and no provider search of its own.
 
-**A combined artist splits on its own only when the providers confirm it.**
-`native_enrich.split_confirmed(conn, artist_id, parts)`: every part is
-credited on one of its tracks by a stored provider list, so the track exists
-under each of them there. Names (a ";", the album's artist inside the name,
-parts the library knows) only propose a split. Every automatic split asks
-this (the local credit split, the provider split, the split after an import,
-Split Artists' live mode); a split it does not confirm is a Split Artists
-finding the user confirms on the finding itself, and Fix All leaves it alone.
+**One job splits an artist: Split Artists.** No importer, enrichment pass
+or other healer splits a combined artist. One that meets a name reading as a
+list hands it over, `RepairWorker.request_split(artist_ids)` (or
+`repair_worker.request_artist_split` outside a job), the way healers hand
+files to Re-tag and Reorganize: the reconcile, the local credit pass, the
+collaboration ghost clean-up and the step after a download all do. The import
+keeps a credit as written. Every job keeps its own competence and asks the
+owner of another one.
+
+**Split Artists splits only what the providers confirm.**
+`native_enrich.split_confirmed(conn, artist_id, parts)` (kernel:
+`artist_credit.credits_confirm`): every part is credited on one of its tracks
+by a stored provider list, so the track exists under each of them there.
+Names (a ";", the album's artist inside the name, parts the library knows)
+only propose a split. A split it cannot confirm is a finding the user
+confirms on the finding itself; Fix All and live mode leave it alone.
 
 **Credit sources** are the providers whose track lookup gives a real artist
 list with ids: Spotify, Deezer, MusicBrainz, Tidal, Discogs, JioSaavn
 (`provider_credits.CREDIT_SOURCES`). Each client reads its own format in
 `track_artist_credits(track_id)` into `[{"id", "name"}]`. A source that only
 has a string ("A & B") or one name is not evidence of who is on a track. A
-one-artist answer is stored too: it is what keeps a band whole.
+one-artist answer is stored too: it is what keeps a band whole. The lists
+come in with the data: a download keeps the list its source gave (two or more
+artists with ids; a search result often names only the main artist), every
+enrichment worker keeps the list of a track it matched
+(`provider_credits.keep_match_credits`), and the credit fetcher asks for the
+rest on request.
 
 When a needed scoped operation is absent, extend its existing owner rather
 than create another tag writer, rename planner, provider search or identity

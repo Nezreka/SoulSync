@@ -52,9 +52,13 @@ def test_real_features_still_split():
 
 
 def test_the_importer_keeps_the_band_even_with_phantoms_known():
+    # the import keeps the credit as written; Split Artists proposes the band
+    # and the guest, never the band's words
+    from core.matching.artist_credit import decide_credit
     known = _known("Above & Beyond", "Above", "Beyond", "Mat Zo")
-    assert _credit_names_for_import("Above & Beyond, Mat Zo", known,
-                                    album_artist="Above & Beyond") == [
+    assert _credit_names_for_import("Above & Beyond, Mat Zo") == ["Above & Beyond, Mat Zo"]
+    assert list(decide_credit("Above & Beyond, Mat Zo", known=["Above & Beyond"],
+                              is_act=known, is_artist=known).names) == [
         "Above & Beyond", "Mat Zo"]
 
 
@@ -112,48 +116,69 @@ def _resolver(name):
             "name": name, "image_url": "", "genres": []}
 
 
-def test_the_local_split_keeps_the_band(conn):
+def _split_artists(conn, ghost):
+    """what Split Artists does with a ghost: decide with the stored lists and
+    the identified artists, heal only what the providers confirm"""
+    from core.matching.artist_credit import credits_confirm, decide_credit, stored_track_credits
+    tracks = [r[0] for r in conn.execute(
+        "SELECT track_id FROM lib2_track_artists WHERE artist_id=?", (ghost,))]
+    evidence = [e for t in tracks for e in stored_track_credits(conn, t)]
+    identified = {normalize_name(r[0]) for r in conn.execute(
+        "SELECT name FROM lib2_artists WHERE COALESCE(spotify_id,'')<>'' AND id<>?", (ghost,))}
+    name = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (ghost,)).fetchone()[0]
+    decision = decide_credit(name, evidence=evidence,
+                             is_act=lambda n: normalize_name(n) in identified,
+                             is_artist=lambda n: normalize_name(n) in identified)
+    if not decision.split or not credits_confirm(decision.names, evidence):
+        return None
+    return NE.heal_combined_artist(conn, ghost, list(decision.names), reason="Split Artists")
+
+
+def test_the_local_pass_hands_the_ghost_over_and_never_cuts_the_band(conn, monkeypatch):
+    import core.repair_worker as rw
+    asked = []
+    monkeypatch.setattr(rw, "request_artist_split",
+                        lambda ids, reason="": asked.extend(ids) or True)
     band = _artist(conn, "Above & Beyond", spotify="10gzBoINW3cLJfZUka8Zoe")
     _artist(conn, "Mat Zo", spotify="2n7USVO8fO8FF8zq4kG2N1")
     ghost = _artist(conn, "Above & Beyond & Mat Zo")
     track = _track(conn, _album(conn, band), [band, ghost])
-    _provider(conn, track, "Above & Beyond", "Mat Zo")
 
     NE.split_combined_credits_locally(conn)
 
-    assert _credits(conn, track) == ["Above & Beyond", "Mat Zo"]
+    assert ghost in asked
+    assert _credits(conn, track) == ["Above & Beyond", "Above & Beyond & Mat Zo"]
     assert not {"Above", "Beyond"} & _names(conn)
 
 
-def test_the_online_split_keeps_the_band(conn):
+def test_split_artists_keeps_the_band(conn):
     _artist(conn, "Above & Beyond", spotify="10gzBoINW3cLJfZUka8Zoe")
     ghost = _artist(conn, "Above & Beyond & Mat Zo")
     track = _track(conn, _album(conn, ghost), [ghost])
     _provider(conn, track, "Above & Beyond", "Mat Zo")
 
-    assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is not None
+    assert _split_artists(conn, ghost) is not None
 
     assert _credits(conn, track) == ["Above & Beyond", "Mat Zo"]
     assert not {"Above", "Beyond"} & _names(conn)
 
 
-def test_the_online_split_leaves_a_name_the_library_already_knows(conn):
+def test_split_artists_leaves_a_name_the_library_already_knows(conn):
     _artist(conn, "Kyau & Albert", spotify="SP_KA")
     copy = _artist(conn, "Kyau & Albert")
     _track(conn, _album(conn, copy), [copy])
 
-    assert NE.smart_split_combined_artist(conn, copy, resolver=_resolver) is None
+    assert _split_artists(conn, copy) is None
     assert not {"Kyau", "Albert"} & _names(conn)
 
 
-def test_a_real_collab_still_splits_online(conn):
+def test_a_real_collab_splits_once_a_provider_confirms_it(conn):
     ghost = _artist(conn, "Ian Asher & Galantis")
     track = _track(conn, _album(conn, ghost), [ghost])
-    # names alone propose it; the provider's list confirms it
-    assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is None
+    assert _split_artists(conn, ghost) is None            # names alone: no
     _provider(conn, track, "Ian Asher", "Galantis")
 
-    assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is not None
+    assert _split_artists(conn, ghost) is not None
     assert _credits(conn, track) == ["Ian Asher", "Galantis"]
 
 

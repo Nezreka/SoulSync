@@ -34,7 +34,9 @@ from core.matching.artist_credit import (
     decide_credit, name_key, parse_kept_whole_names, tokens,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, get_scope_file_paths
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, get_scope_artist_ids, get_scope_file_paths,
+)
 from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
 
@@ -121,19 +123,62 @@ def custom_split_parts(combined: str, edited: str) -> tuple:
     return parts, joined
 
 
+# every name the kernel's tokenizer can read as a list, for the SQL prefilter;
+# the tokenizer itself decides (core/matching/artist_credit.py)
+_CANDIDATE_LIKES = ('%,%', '%;%', '%/%', '%&%', '%|%', '%+%', '%×%', '% and %', '% feat%',
+                    '% ft.%', '% ft %', '% featuring %', '% x %', '% vs%', '% with %',
+                    '% w/ %', '% pres%', '% meets %')
+
+
+def _separator_switch(kind: str, raw: str) -> str:
+    """the setting a kernel separator falls under ('' = always a list): the
+    four switches cover the separators that can be part of a name; a guest
+    marker (feat., x, vs., with, pres.) and "|" always separate artists"""
+    text = raw.strip()
+    if kind == 'comma':
+        return ','
+    if kind == 'amp':
+        return '&'
+    if kind == 'slash':
+        return '/'
+    if kind == 'hard':
+        return ';' if text == ';' else '/' if text == '/' else ''
+    return ''
+
+
+def _distinct(*streams):
+    """(id, name) pairs from several walks, each artist once"""
+    seen = set()
+    for stream in streams:
+        for artist_id, name in stream:
+            if artist_id not in seen:
+                seen.add(artist_id)
+                yield artist_id, name
+
+
+def _reads_as_list(name: str) -> bool:
+    return len(tokens(name or '')[0]) >= 2
+
+
 def _splits_only_at(name: str, parts: list, symbols: list) -> bool:
-    """every gap between ``parts`` in ``name`` is made of separators this
-    job splits at (its settings switch each one on or off)"""
-    text = ' '.join(str(name or '').split()).casefold()
+    """every gap between ``parts`` in ``name`` is one separator the kernel
+    reads, and one this job splits at (its settings switch the ones that can
+    be part of a name on or off)"""
+    text = ' '.join(str(name or '').split())
+    lower = text.lower()
     pos = 0
     for index, part in enumerate(parts):
-        piece = ' '.join(part.split()).casefold()
-        at = text.find(piece, pos)
+        piece = ' '.join(part.split()).lower()
+        at = lower.find(piece, pos)
         if at < 0:
             return False
-        gap = text[pos:at]
-        if index and not (gap.strip() and all(ch.isspace() or ch in symbols for ch in gap)):
-            return False
+        if index:
+            names, seps = tokens(f"Alpha{text[pos:at]}Omega")
+            if names != ['Alpha', 'Omega'] or len(seps) != 1:
+                return False
+            switch = _separator_switch(*seps[0])
+            if switch and switch not in symbols:
+                return False
         pos = at + len(piece)
     return not text[pos:].strip()
 
@@ -189,15 +234,18 @@ class CommaArtistSplitterJob(RepairJob):
     auto_fix = True
     writes_library_files = False
     supports_file_scope = True
+    # the one job that splits an artist: others hand it their candidates by id
+    # (RepairWorker.request_split), a fileless ghost included
+    supports_artist_id_scope = True
 
     def estimate_scope(self, context: JobContext) -> int:
         conn = None
         try:
             conn = context.db._get_connection()
+            likes = ' OR '.join("a.name LIKE ?" for _ in _CANDIDATE_LIKES)
             return int(conn.execute(
                 "SELECT COUNT(*) FROM lib2_artists a WHERE a.canonical_artist_id IS NULL "
-                "AND (a.name LIKE '%,%' OR a.name LIKE '%;%' OR a.name LIKE '%&%' "
-                "OR a.name LIKE '%/%')").fetchone()[0])
+                f"AND ({likes})", _CANDIDATE_LIKES).fetchone()[0])
         except Exception:  # noqa: BLE001 - an estimate only
             return 0
         finally:
@@ -239,6 +287,7 @@ class CommaArtistSplitterJob(RepairJob):
             return result
         kept = {name_key(n) for n in parse_kept_whole_names(settings.get('keep_whole_names'))}
         allowed = get_scope_file_paths(context)
+        asked_for = get_scope_artist_ids(context)
         from core.library2.provider_credits import credit_services
         services = credit_services() - ({'spotify'} if context.is_spotify_rate_limited() else set())
 
@@ -252,7 +301,17 @@ class CommaArtistSplitterJob(RepairJob):
         walk = {'last': None, 'error': None}
         found = []
         capped = False
-        for artist_id, name in self._walk_artists(context, cursor_start, symbols, walk):
+        if asked_for is not None and allowed is not None:
+            # two requests in one run: artists asked for by id, and the files
+            # a scoped run was asked for (the walk keeps only theirs)
+            artists = _distinct(self._asked_artists(context, asked_for, symbols, walk),
+                                self._walk_artists(context, 0, symbols, walk))
+        elif asked_for is not None:
+            artists = self._asked_artists(context, asked_for, symbols, walk)
+        else:
+            artists = self._walk_artists(context, cursor_start, symbols, walk)
+        seen_ids: set = set()
+        for artist_id, name in artists:
             if context.check_stop():
                 return result
             if context.wait_if_paused():
@@ -260,6 +319,7 @@ class CommaArtistSplitterJob(RepairJob):
             if len(found) >= SCAN_ARTIST_LIMIT:
                 capped = True
                 break
+            seen_ids.add(int(artist_id))
             walk['last'] = int(artist_id)
             result.scanned += 1
             if context.update_progress:
@@ -269,7 +329,9 @@ class CommaArtistSplitterJob(RepairJob):
                 result.skipped += 1
                 continue
             try:
-                info = self._decide(context, int(artist_id), name, symbols, services, allowed)
+                by_id = asked_for is not None and int(artist_id) in asked_for
+                info = self._decide(context, int(artist_id), name, symbols, services,
+                                    None if by_id else allowed, asked=by_id)
             except Exception as e:  # noqa: BLE001 - one artist never ends the scan
                 logger.debug("Split check failed for %r: %s", name, e)
                 result.errors += 1
@@ -283,6 +345,13 @@ class CommaArtistSplitterJob(RepairJob):
             result.errors += 1
             if not result.scanned:
                 return result
+        elif asked_for is not None:
+            # a request for named artists leaves the library walk where it
+            # was; what one run could not take is asked for again
+            rest = sorted(set(asked_for) - seen_ids)
+            if capped and rest:
+                from core.repair_worker import request_artist_split
+                request_artist_split(rest, reason='Split Artists, the rest of a request')
         elif capped and walk['last'] is not None:
             _gap_cursor(context, _CURSOR_KEY, walk['last'])
         else:
@@ -365,12 +434,36 @@ class CommaArtistSplitterJob(RepairJob):
                 log_type='success')
         return result
 
+    def _asked_artists(self, context: JobContext, artist_ids, symbols: list, walk: dict):
+        """Yield (id, name) of the requested artists whose name holds an
+        enabled separator, files or not."""
+        if not artist_ids:
+            return
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            ids = sorted(artist_ids)
+            marks = ','.join('?' for _ in ids)
+            rows = conn.execute(
+                f"SELECT id, name FROM lib2_artists WHERE canonical_artist_id IS NULL "
+                f"AND id IN ({marks}) ORDER BY id", ids).fetchall()
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error reading requested artists: %s", e, exc_info=True)
+            walk['error'] = e
+            return
+        finally:
+            if conn is not None:
+                conn.close()
+        for artist_id, name in rows:
+            if _reads_as_list(name):
+                yield int(artist_id), name
+
     def _walk_artists(self, context: JobContext, after: int, symbols: list, walk: dict):
         """Yield (id, name) of every canonical artist whose name holds an
         enabled separator and that has files in the library, in id order from
         ``after``, wrapping round. One page per connection."""
-        likes = ' OR '.join("a.name LIKE ?" for _ in symbols)
-        patterns = [f'%{s}%' for s in symbols]
+        likes = ' OR '.join("a.name LIKE ?" for _ in _CANDIDATE_LIKES)
+        patterns = list(_CANDIDATE_LIKES)
         ranges = [(after, None)] + ([(0, after)] if after else [])
         for low, high in ranges:
             while True:
@@ -401,13 +494,14 @@ class CommaArtistSplitterJob(RepairJob):
                     if conn:
                         conn.close()
                 for row in rows:
-                    yield int(row[0]), str(row[1] or '')
+                    if _reads_as_list(row[1]):
+                        yield int(row[0]), str(row[1] or '')
                 if len(rows) < _ARTIST_PAGE:
                     break
                 low = int(rows[-1][0])
 
     def _decide(self, context: JobContext, artist_id: int, name: str, symbols: list,
-                services: set, allowed) -> Optional[dict]:
+                services: set, allowed, *, asked: bool = False) -> Optional[dict]:
         """the finding for one combined artist, None to leave it alone.
 
         Reads the catalogue only. A split is confirmed when Spotify / Deezer
@@ -430,7 +524,7 @@ class CommaArtistSplitterJob(RepairJob):
         try:
             scope = combined_artist_scope(conn, artist_id)
             files = self._files(conn, scope['track_ids'], allowed)
-            if not files:
+            if not files and not asked:
                 return None  # nothing of it in this run's scope
             anchors = [r[0] for r in conn.execute(
                 "SELECT DISTINCT pa.name FROM lib2_track_artists ta "
@@ -475,8 +569,11 @@ class CommaArtistSplitterJob(RepairJob):
                 conn.close()
 
         decision = decide()
-        settled = confirmed(decision) or (
-            not decision.split and decision.via.endswith(' credits'))
+        # settled: a split the providers confirm, or a whole name a provider
+        # list, the artist's own identity, the album's artist or the band its
+        # lead fronts already accounts for. Only the rest is worth a request
+        settled = confirmed(decision) or (not decision.split and (
+            decision.via.endswith(' credits') or decision.via in ('act', 'known', 'band')))
         if not settled:
             # the providers asked about the proposed artists: a track the
             # combined name finds nowhere is looked up under each of them

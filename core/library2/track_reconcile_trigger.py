@@ -73,12 +73,12 @@ def run_album_track_reconcile(
             conn.close()
         # the album's artist reads as a list and no provider knows it yet
         # ("Camellia & Toby Fox" from a source that credits one string):
-        # its tracks' credits are fetched, then the one credit decision
-        # settles it, splitting through the providers if it is a list
+        # an album artist reading as a list goes to Split Artists, the one
+        # job that splits (it fetches the evidence and asks the user)
         try:
             from core.library2.native_enrich import settle_new_album_artist
             if settle_new_album_artist(database, album_id):
-                totals["artists_split"] = totals.get("artists_split", 0) + 1
+                totals["artists_handed_to_split"] = totals.get("artists_handed_to_split", 0) + 1
         except Exception as exc:  # noqa: BLE001 - background healing is fail-open
             logger.debug("album %s artist not settled: %s", album_id, exc)
     return totals

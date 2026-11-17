@@ -14,6 +14,9 @@ Before changing anything under `core/library2/`, `core/repair_jobs/`,
   projection jobs (`RepairWorker.request_projection`), which act by their own
   settings. It never runs a tag write or a move itself.
 - Fix the cause in its owning layer, not with another caller-specific rule.
+- One competence, one owner: a job that needs another's work asks for it,
+  scoped (`request_projection` for Re-tag / Reorganize, `request_split` for
+  Split Artists, the only job that splits an artist).
 - One question, one kernel: search for the existing function before writing a
   helper (artist credits: `core/matching/artist_credit.py`; paths:
   `core/imports/paths.build_final_path_for_track`; user-visible values:

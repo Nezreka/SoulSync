@@ -1411,104 +1411,21 @@ def split_confirmed(conn, artist_id: int, parts: Iterable[str]) -> bool:
     library knows) only propose a split. Nothing splits a combined artist on
     its own without this; Split Artists files a finding the user confirms.
     """
-    from core.matching.artist_credit import name_key
+    from core.matching.artist_credit import credits_confirm
 
-    wanted = {name_key(p) for p in parts or ()} - {""}
-    if len(wanted) < 2:
-        return False
-    credited = {name_key(n) for _via, names in _ghost_credit_evidence(conn, artist_id)
-                for n in names}
-    return wanted <= credited
+    return credits_confirm(parts, _ghost_credit_evidence(conn, artist_id))
 
 
-def smart_split_combined_artist(
-    conn,
-    artist_id: int,
-    *,
-    resolver: Optional[ArtistResolver] = None,
-) -> Optional[Dict[str, Any]]:
-    """Split a combined-name artist ("A & B") into its real components.
-
-    Runs only as a fallback for an artist that no provider recognizes as a
-    single entity (the caller tries a single-entity resolve first). It splits the
-    display name and requires **every** component to resolve to a real provider
-    artist — a strong guard: a genuine band name like "Hall & Oates" is
-    recognized as one entity upstream and never reaches here, so this only ever
-    fires on true concatenations. When all components resolve, each becomes a
-    real (enriched) artist, the release re-homes to the first component with the
-    rest credited, and the ghost combined row is deleted/aliased (see
-    ``_rehome_and_delete_combined`` for the cascade-safe ordering).
-
-    Returns a summary dict on a split, or ``None`` when it declines (not a
-    combined name or a component didn't resolve).
-    """
-    if resolver is None:
-        resolver = default_artist_resolver
-
-    row = conn.execute(
-        "SELECT id, name, legacy_artist_id, monitored FROM lib2_artists WHERE id=?",
-        (int(artist_id),),
-    ).fetchone()
-    if row is None:
-        return None
-
-    from core.library2.importer import normalize_name
-    from core.matching.artist_credit import decide_credit
-
-    resolved: Dict[str, Any] = {}
-
-    def resolves(component: str) -> bool:
-        if component not in resolved:
-            resolved[component] = resolver(component)
-        identity = resolved[component]
-        return bool(identity and str(identity.get("artist_id") or "").strip())
-
-    # what the library knows: an identified artist or a name the user keeps
-    # whole is one artist, never a list ("Above" and "Beyond" both resolve
-    # on their own, #2136), and a run of the name that spells one stays whole
-    identified = _identified_name_keys(conn, exclude_id=int(artist_id))
-
-    def known(name: str) -> bool:
-        return normalize_name(name) in identified
-
-    # the one credit decision: the tracks' provider credits first, then what
-    # the library knows, then parts a provider resolves
-    decision = decide_credit(row["name"], evidence=_ghost_credit_evidence(conn, artist_id),
-                             is_act=known, is_artist=lambda n: known(n) or resolves(n))
-    if not decision.split or not split_confirmed(conn, artist_id, decision.names):
-        # every part existing somewhere is not enough ("K" and "DA" both
-        # do): the providers credit them on its tracks, or it waits for the user
-        return None
-    for component in decision.names:
-        if not resolves(component):
-            return None  # not confident — leave the combined row intact
-    healed = heal_combined_artist(
-        conn, int(artist_id), list(decision.names),
-        identities={c: resolved[c] for c in decision.names}, reason="Artist split")
-    if not healed or healed.get("refused"):
-        return None
-    return healed
-
-
-def settle_new_album_artist(database: Any, album_id: int, *,
-                            resolver: Optional[ArtistResolver] = None,
-                            max_tracks: int = 10) -> Optional[Dict[str, Any]]:
-    """After a download filed an album: settle an artist that reads as a
-    list ("Camellia & Toby Fox") while no provider knows it yet.
-
-    A reader of the catalogue, it only uses the writers that exist: the
-    credit writer fetches what Spotify / Deezer credit the album's tracks
-    with (``provider_credits.ensure_track_credits``, matching them there
-    first), and :func:`smart_split_combined_artist` then decides with that
-    evidence and resolves every part at a provider before it re-homes the
-    album. An artist with a provider id, a plain name, or a list nothing
-    proves stays as it is. Returns the split summary, or None. Never raises.
-    """
-    from core.library2 import provider_credits
+def settle_new_album_artist(database: Any, album_id: int, **_ignored: Any) -> bool:
+    """After a download filed an album whose artist reads as a list
+    ("Camellia & Toby Fox") and no provider knows as one artist: hand it to
+    Split Artists, the one job that splits an artist. It asks the credit
+    fetcher for the tracks' lists (looking them up under the proposed names
+    too), splits what the providers confirm, files the rest for the user and
+    requests Re-tag / Reorganize, by its own settings. Returns whether it was
+    handed over. Never raises."""
     from core.matching.artist_credit import tokens
 
-    if not provider_credits.ONLINE_REFRESH:
-        return None
     conn = None
     try:
         conn = database._get_connection()
@@ -1516,63 +1433,16 @@ def settle_new_album_artist(database: Any, album_id: int, *,
             f"SELECT a.id, a.name, {_IDENTIFIED_SQL} AS identified FROM lib2_albums al "
             "JOIN lib2_artists a ON a.id = al.primary_artist_id WHERE al.id=?",
             (int(album_id),)).fetchone()
-        if row is None or row[2] or len(tokens(row[1] or "")[0]) < 2:
-            return None
-        artist_id = int(row[0])
-        track_ids = [int(r[0]) for r in conn.execute(
-            "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY id LIMIT ?",
-            (int(album_id), int(max_tracks))).fetchall()]
     except Exception as exc:  # noqa: BLE001
         logger.debug("album %s artist not read: %s", album_id, exc)
-        return None
+        return False
     finally:
         if conn is not None:
             conn.close()
-    services = provider_credits.credit_services()
-    hints = tokens(row[1] or "")[0]
-    for track_id in track_ids:
-        provider_credits.ensure_track_credits(database, track_id, services, artist_hints=hints)
-    resolver = resolver or default_artist_resolver
-    # smart_split's contract: the whole name is asked first. A provider that
-    # models it as one artist ("Hall & Oates") settles it as it is
-    try:
-        whole = resolver(row[1])
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("artist %r not resolved: %s", row[1], exc)
-        return None
-    if whole and str(whole.get("artist_id") or "").strip():
-        return None
-    conn = None
-    try:
-        conn = database._get_connection()
-        # a new download's artist is split on evidence only: the tracks'
-        # provider credits, a sure separator. Never on parts merely existing
-        result = smart_split_combined_artist(conn, artist_id, resolver=resolver)
-        conn.commit()
-        if result:
-            logger.info("settled album %s artist %r into %d artists",
-                        album_id, row[1], len(result.get("component_ids") or ()))
-            # the files still sit under the combined name: Re-tag and
-            # Reorganize check them, as Split Artists' settings ask
-            try:
-                from core.repair_worker import active_repair_worker, split_projection
-                worker = active_repair_worker()
-                if worker is not None:
-                    worker.request_projection(
-                        result.get("track_ids") or (),
-                        **split_projection(getattr(worker, "_config_manager", None)),
-                        reason=f"New album artist {row[1]!r} split")
-            except Exception as exc:  # noqa: BLE001 - the catalogue change stands
-                logger.debug("projection for album %s not requested: %s", album_id, exc)
-        return result
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("album %s artist %s not settled: %s", album_id, artist_id, exc)
-        if conn is not None:
-            conn.rollback()
-        return None
-    finally:
-        if conn is not None:
-            conn.close()
+    if row is None or row[2] or len(tokens(row[1] or "")[0]) < 2:
+        return False
+    from core.repair_worker import request_artist_split
+    return request_artist_split([int(row[0])], reason=f"New album artist {row[1]!r}")
 
 
 def _has_attempt_column(conn) -> bool:
@@ -1972,6 +1842,7 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
                                  AND (r.monitored = 1 OR r.provenance IN ('user_explicit', 'wishlist_import')))"""
     ).fetchall()
     cleared = 0
+    split_requests: List[int] = []
     for gid, name in candidates:
         gid = int(gid)
         from core.matching.artist_credit import decide_credit, leads_a_band
@@ -2039,7 +1910,15 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
         conn.execute(f"DELETE FROM lib2_tracks WHERE album_id IN ({marks})", albums)
         conn.execute(f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", albums)
         conn.execute(f"DELETE FROM lib2_albums WHERE id IN ({marks})", albums)
-        _rehome_and_delete_combined(conn, gid, components[0], components)
+        # what is left is the name. Still credited somewhere: Split Artists
+        # splits it (the one job that does). Credited nowhere: an empty row,
+        # gone the way of any ghost
+        if conn.execute("SELECT 1 FROM lib2_track_artists WHERE artist_id=? UNION ALL "
+                        "SELECT 1 FROM lib2_album_artists WHERE artist_id=? LIMIT 1",
+                        (gid, gid)).fetchone():
+            split_requests.append(gid)
+        else:
+            _rehome_and_delete_combined(conn, gid, components[0], components)
         # one ghost, one transaction: this runs on every start (the short
         # credit pass) and committing once at the end held the write lock
         # across every candidate's checks
@@ -2047,6 +1926,9 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
         logger.info("cleared collaboration ghost %r: %d untouched catalogue album(s) dropped",
                     name, len(albums))
         cleared += 1
+    if split_requests:
+        from core.repair_worker import request_artist_split
+        request_artist_split(split_requests, reason="Collaboration ghosts")
     return cleared
 
 
@@ -2145,25 +2027,17 @@ _BAND_SEPARATOR_RE = re.compile(r"[,;/&×+]|\b(?:and|x|vs\.?)\b", re.IGNORECASE)
 
 def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, int], None]] = None,
                                    batch: int = 500) -> Dict[str, int]:
-    """Clear guest-credit ghosts from the library's own knowledge, no network.
+    """Settle guest-credit ghosts that own no album, from the library's own
+    knowledge, no network.
 
-    An imported credit like "1788-L, Deathpact" became one artist with no
-    provider id, and the healer below looked each of them up online, one by
-    one: on a 300k-track library ~26k of them at about a minute each. Most
-    need no lookup at all:
-
-    - the whole name is already an identified artist: the ghost merges in
-    - a part is the album artist of a track it's credited on, or every part
-      is an identified artist: it splits. a known part keeps its artist, an
-      unknown one becomes a plain single-name artist the enrichment workers
-      identify the normal way
-
-    A real band name ("Earth, Wind & Fire") never has the album artist as one
-    of its parts, so it is never split here. A ghost that owns an album, or
-    that no rule covers, is left for the online pass. Commits per batch.
+    An imported credit like "1788-L, Deathpact" is one artist with no
+    provider id. A ghost whose whole name is already an identified artist
+    merges into it. A ghost whose name reads as a list goes to Split Artists,
+    the one job that splits an artist: it reads the providers' lists for the
+    tracks, splits what they confirm and asks the user about the rest. A
+    ghost that owns an album is left for the online pass. Commits per batch.
     """
     from core.library2.importer import normalize_name, split_artist_credits
-    from core.matching.artist_credit import decide_credit
 
     identified: Dict[str, int] = {}
     anyone: Dict[str, int] = {}
@@ -2194,8 +2068,10 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
         "ORDER BY a.id").fetchall()
     ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
-    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
+    stats = {"considered": len(ghosts), "merged": 0, "left": 0, "handed_to_split_artists": 0,
              "collab_ghosts_cleared": unghosted, "band_fragments_dropped": fragments}
+    from core.matching.artist_credit import tokens
+    candidates: List[int] = []
     total = len(ghosts)
     for index, (gid, name, _monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
@@ -2204,43 +2080,12 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         if target and target != gid:
             _rehome_and_delete_combined(conn, gid, target, [target])
             stats["merged"] += 1
+        elif len(tokens(name or "")[0]) >= 2:
+            # a name reading as a list is Split Artists' to decide: the one
+            # job that splits, with the provider evidence and the user's say
+            candidates.append(gid)
         else:
-            anchor_names = [r[0] or "" for r in conn.execute(
-                "SELECT DISTINCT pa.name FROM lib2_track_artists ta "
-                "JOIN lib2_tracks t ON t.id=ta.track_id "
-                "JOIN lib2_albums al ON al.id=t.album_id "
-                "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
-                "WHERE ta.artist_id=?", (gid,))]
-            anchors = {normalize_name(n) for n in anchor_names}
-            # the one credit decision (core/matching/artist_credit.py): the
-            # provider credits of its tracks, the album's own artist as a part
-            # (not the band that artist leads: "Nick Cave & The Bad Seeds" on a
-            # Nick Cave album), and for a ghost with no id of its own, parts
-            # that are all identified artists. An identified artist inside the
-            # name stays whole (#2136); the ghost's own row never vouches for
-            # itself. It splits here only when the providers confirm the parts
-            # (split_confirmed); anything less is Split Artists' to propose
-            def other_identified(n, gid=gid):
-                return identified.get(normalize_name(n)) not in (None, gid)
-            decision = decide_credit(
-                name or "", evidence=_ghost_credit_evidence(conn, gid), known=anchor_names,
-                is_act=other_identified,
-                is_artist=None if settled else other_identified)
-            pieces = list(decision.names)
-            keys = [normalize_name(piece) for piece in pieces]
-            if not decision.split or not split_confirmed(conn, gid, pieces):
-                # a split names alone propose waits for the user (Split Artists)
-                stats["left"] += 1
-            else:
-                # the album's own artist leads, the guests follow
-                lead = next((p for p, k in zip(pieces, keys, strict=True) if k in anchors), None)
-                healed = heal_combined_artist(conn, gid, pieces, lead=lead,
-                                              reason="Local credit split")
-                if not healed or healed.get("refused"):
-                    stats["left"] += 1
-                else:
-                    stats["created"] += healed["created"]
-                    stats["split"] += 1
+            stats["left"] += 1
         if index % batch == 0:
             conn.commit()
             if progress is not None:
@@ -2248,6 +2093,12 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     conn.commit()
     if progress is not None:
         progress(total, total)
+    if candidates:
+        from core.repair_worker import request_artist_split
+        if request_artist_split(candidates, reason="Credit ghosts"):
+            stats["handed_to_split_artists"] = len(candidates)
+        else:
+            stats["left"] += len(candidates)
     logger.info("Local credit split: %s", stats)
     return stats
 
@@ -2298,15 +2149,17 @@ def reconcile_unmapped_native_artists(
         except Exception as progress_exc:  # noqa: BLE001
             logger.debug("reconcile progress callback failed: %s", progress_exc)
     stats = {
-        "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
+        "scanned": 0, "matched": 0, "unmatched": 0, "errors": 0,
         "identities_released": released["released"],
         "identities_ambiguous": released["ambiguous"],
         "released_artist_ids": released["artist_ids"] + placeholders["artist_ids"],
         "browse_only_pruned": pruned["pruned"],
         "placeholder_images_cleared": placeholders["cleared"],
         "local_merged": local["merged"],
-        "local_split": local["split"],
+        "split_requested": local.get("handed_to_split_artists", 0),
     }
+    from core.matching.artist_credit import tokens
+    split_candidates: List[int] = []
     for index, art in enumerate(artists):
         artist_id = art["id"]
         try:
@@ -2321,11 +2174,13 @@ def reconcile_unmapped_native_artists(
                     conn.commit()
                 continue
 
-            # Single-entity match failed: try a conservative collaboration split.
-            if smart_split_combined_artist(conn, artist_id, resolver=resolver):
-                stats["split"] += 1
-            else:
-                stats["unmatched"] += 1
+            # No provider resolves it as one artist: a name reading as a list
+            # is Split Artists' to decide (the one job that splits)
+            name_row = conn.execute("SELECT name FROM lib2_artists WHERE id=?",
+                                    (artist_id,)).fetchone()
+            if name_row and len(tokens(name_row[0] or "")[0]) >= 2:
+                split_candidates.append(int(artist_id))
+            stats["unmatched"] += 1
 
             _mark_reconcile_attempted(conn, artist_id)
             if progress is not None:
@@ -2352,6 +2207,10 @@ def reconcile_unmapped_native_artists(
                     progress(index + 1, total)
                 except Exception as progress_exc:
                     logger.debug("reconcile progress callback failed: %s", progress_exc)
+    if split_candidates:
+        from core.repair_worker import request_artist_split
+        if request_artist_split(split_candidates, reason="Artist reconcile"):
+            stats["split_requested"] += len(split_candidates)
     return stats
 
 
@@ -2497,7 +2356,6 @@ __all__ = [
     "prune_browse_only_artists",
     "clear_placeholder_artist_images",
     "identity_is_free",
-    "smart_split_combined_artist",
     "split_confirmed",
     "heal_combined_artist",
     "combined_artist_scope",

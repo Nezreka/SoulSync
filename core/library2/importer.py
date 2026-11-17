@@ -115,7 +115,6 @@ from core.matching.artist_credit import (  # noqa: E402 - re-exported for caller
     leads_a_band,
     unwrap_bytes_repr,
 )
-from core.matching.artist_credit import decide_credit as _decide_credit  # noqa: E402
 from core.matching.artist_credit import split_names as _split_names  # noqa: E402
 
 
@@ -186,50 +185,30 @@ def featured_from_title(title: str) -> List[str]:
     return names
 
 
-def _credit_names_for_import(
-    raw: str,
-    known_name: Callable[[str], bool],
-    *,
-    split_with_known_anchor: bool = False,
-    album_artist: Optional[str] = None,
-) -> List[str]:
-    """Resolve a flat legacy credit without inventing provider identities.
+def _credit_names_for_import(raw: str) -> List[str]:
+    """A flat legacy credit, as written: one artist.
 
     A legacy ``track_artist`` does not say whether it is a list: ``Earth,
-    Wind & Fire`` and ``Hall & Oates`` are complete names. The one credit
-    kernel decides (``core.matching.artist_credit.decide_credit``): a sure
-    separator (``feat.``, ``x``, ``vs``, ``;``) proves a list; the album's own
-    artist standing in the credit makes it one ("1788-L, Deathpact" on a
-    1788-L album), except the band that artist leads ("Nick Cave & The Bad
-    Seeds"); a credit the library knows whole stays whole; parts the library
-    all knows make a list, or one known part when ``split_with_known_anchor``
-    (a title's ``feat.`` list).
-
-    Unknown ambiguous text is preserved losslessly as one credit. A later
-    provider match or manual alias link can refine it; creating several phantom
-    artists cannot be reversed reliably from the source text alone (P2-24).
+    Wind & Fire`` and ``Hall & Oates`` are complete names, "1788-L, Deathpact"
+    is two. The import does not decide that. Split Artists is the one job
+    that splits an artist: the post-import pass hands it every credit that
+    reads as a list, and it splits what the providers confirm (the 3.6.1
+    credit lists are carried right after the import) and asks the user about
+    the rest. A credit kept whole can still be split; phantom artists made
+    from a guess cannot be merged back reliably (P2-24).
     """
-    anchors = [album_artist] if album_artist else []
-    return list(_decide_credit(
-        raw, known=anchors, is_act=known_name, is_artist=known_name,
-        min_runs=1 if split_with_known_anchor else None).names)
+    from core.matching.artist_credit import clean_credit
+
+    whole = clean_credit(raw)
+    return [whole] if whole else []
 
 
-def _featured_names_for_import(
-    title: str, known_name: Callable[[str], bool]
-) -> List[str]:
-    """Extract title credits through the same P2-24 identity guard."""
+def _featured_names_for_import(title: str) -> List[str]:
+    """The credits a title's ``(feat. …)`` names, each as written: the
+    wrapper says they are guests, not how many artists each one is."""
     names: List[str] = []
     for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
-        # A title's ``feat.`` wrapper establishes that this is a guest-credit
-        # list.  One already known component is enough to disambiguate its
-        # conjunctions; with no known anchor we still preserve an unknown band
-        # name as a unit.
-        names.extend(
-            _credit_names_for_import(
-                match.group(1), known_name, split_with_known_anchor=True
-            )
-        )
+        names.extend(_credit_names_for_import(match.group(1)))
     return names
 
 
@@ -666,7 +645,6 @@ class _ArtistResolver:
         # (a Deezer id equal to some iTunes id) from merging two artists.
         self._by_provider: Dict[tuple, int] = {}
         # names the user said are one artist each (#2150), read once
-        self._kept_whole: Optional[set] = None
 
     @staticmethod
     def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -748,17 +726,6 @@ class _ArtistResolver:
 
     def get_legacy(self, legacy_id: Any) -> Optional[int]:
         return self._by_legacy.get(_legacy_key(legacy_id))
-
-    def known_name(self, name: str) -> bool:
-        """Whether an artist with exactly this (normalized) name already
-        exists, or the user said this name is one artist (#2150)."""
-        key = normalize_name(name)
-        if key in self._by_name:
-            return True
-        if self._kept_whole is None:
-            from core.imports.collab_artist import kept_whole_keys
-            self._kept_whole = kept_whole_keys()
-        return key in self._kept_whole
 
     def get_or_create_by_name(self, name: str, *,
                               provider_ids: Optional[Dict[str, Any]] = None,
@@ -2204,18 +2171,6 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 *_provider_id_columns("track"),
             ),
         )
-        album_artist_names: Dict[int, Optional[str]] = {}
-
-        def _album_artist_name(artist_id: Optional[int]) -> Optional[str]:
-            """The album artist's name, for the guest-credit anchor. Cached:
-            a library has thousands of albums and 300k tracks."""
-            if artist_id is None:
-                return None
-            if artist_id not in album_artist_names:
-                found = cursor.execute("SELECT name FROM lib2_artists WHERE id=?",
-                                       (artist_id,)).fetchone()
-                album_artist_names[artist_id] = found[0] if found else None
-            return album_artist_names[artist_id]
 
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
         track_from = walk_from("tracks")
@@ -2430,20 +2385,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if primary_lib2 is not None:
                 credits.append((primary_lib2, "primary", 0))
             raw_credit = _pick(row, "track_artist") or ""
-            extra_names = _credit_names_for_import(
-                raw_credit, resolver.known_name,
-                album_artist=_album_artist_name(primary_lib2))
-            planned_names = {normalize_name(name) for name in extra_names}
-
-            def _known_or_planned(
-                name: str, planned: Set[str] = planned_names
-            ) -> bool:
-                return resolver.known_name(name) or normalize_name(name) in planned
-
-            extra_names += _featured_names_for_import(
-                title,
-                _known_or_planned,
-            )
+            # as written: Split Artists decides later which of them are lists
+            extra_names = _credit_names_for_import(raw_credit)
+            extra_names += _featured_names_for_import(title)
             pos = 1
             for nm in extra_names:
                 # `get_or_create_by_name` matches the folded-away row by name,

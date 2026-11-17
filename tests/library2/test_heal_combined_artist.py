@@ -182,3 +182,43 @@ def test_request_projection_with_nothing_to_project(db):
     worker = _bare_worker(db)
     assert worker.request_projection([]) == {'files': 0, 'queued': []}
     assert worker.request_projection([999]) == {'files': 0, 'queued': []}
+
+
+# ── only Split Artists splits: everything else asks it ───────────────────────
+
+def test_a_split_request_queues_split_artists_for_those_artists(db):
+    worker = _bare_worker(db, enabled=False)
+    worker._jobs['comma_artist_splitter'] = type('J', (), {
+        'supports_artist_id_scope': True, 'supports_file_scope': True,
+        'display_name': 'Split Artists'})()
+    assert worker.request_split([7, 3, 7], reason='test') is True
+    assert worker._force_run_queue == ['comma_artist_splitter']
+    assert worker._force_run_scopes['comma_artist_splitter'] == {'artist_ids': [3, 7]}
+    # a second request before it runs adds up
+    worker.request_split([9])
+    assert worker._force_run_scopes['comma_artist_splitter'] == {'artist_ids': [3, 7, 9]}
+    assert worker.request_split([]) is False
+
+
+def test_a_job_that_cannot_take_artist_ids_refuses_them(db):
+    worker = _bare_worker(db)
+    with pytest.raises(ValueError):
+        worker.run_job_now('library_retag', scope={'artist_ids': [1]})
+
+
+def test_without_a_worker_a_split_request_is_a_no_op(monkeypatch):
+    import core.repair_worker as rw
+    from core.repair_worker import request_artist_split
+    monkeypatch.setattr(rw, '_ACTIVE_WORKER', None)
+    assert request_artist_split([1, 2]) is False
+
+
+def test_a_file_scope_and_an_artist_request_add_up():
+    files = {'file_paths': ['/m/a.flac']}
+    artists = {'artist_ids': [3]}
+    assert _merge_scope(files, artists, queued=True) == {'file_paths': ['/m/a.flac'],
+                                                         'artist_ids': [3]}
+    assert _merge_scope(artists, files, queued=True) == {'artist_ids': [3],
+                                                         'file_paths': ['/m/a.flac']}
+    # another library's request is another run, as before
+    assert _merge_scope({**files, 'library': 2}, artists, queued=True) == artists

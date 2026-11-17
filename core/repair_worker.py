@@ -836,6 +836,15 @@ def active_repair_worker() -> Optional["RepairWorker"]:
 # by default, writing only when the user turned that on), manual tags and
 # locks included. A healer never writes tags or moves files itself.
 PROJECTION_JOBS = {"retag": "library_retag", "reorganize": "library_reorganize"}
+# the one job that splits a combined artist; everything else asks it
+SPLIT_JOB = "comma_artist_splitter"
+
+
+def request_artist_split(artist_ids, *, reason: str = "") -> bool:
+    """:meth:`RepairWorker.request_split` on the app's worker, for code that
+    is not a repair job (enrichment, the import). False without a worker."""
+    worker = active_repair_worker()
+    return worker.request_split(artist_ids, reason=reason) if worker is not None else False
 
 
 _PROJECTION_NAMES = {"retag": "Re-tag", "reorganize": "Reorganize"}
@@ -869,10 +878,19 @@ def _merge_scope(existing: Optional[dict], new: Optional[dict], queued: bool) ->
         return None
     if not new:
         return None
-    if (queued and existing and "file_paths" in existing and "file_paths" in new
+    lists = ("file_paths", "artist_ids")
+
+    def only_lists(scope: dict) -> bool:
+        return bool(scope) and set(scope) - {"library"} <= set(lists)
+
+    if (queued and existing and only_lists(existing) and only_lists(new)
             and existing.get("library") == new.get("library")):
+        # files and artists asked for before it starts: one run over all of
+        # them, a file scope and an artist request side by side included
         merged = dict(existing)
-        merged["file_paths"] = sorted({*existing["file_paths"], *new["file_paths"]})
+        for key in lists:
+            if key in existing or key in new:
+                merged[key] = sorted({*existing.get(key, ()), *new.get(key, ())})
         return merged
     return new
 
@@ -2051,6 +2069,11 @@ class RepairWorker:
             logger.warning("Unknown job: %s", job_id)
             return False
 
+        if scope and "artist_ids" in scope and not getattr(
+                self._jobs[job_id], "supports_artist_id_scope", False):
+            raise ValueError(
+                f"{getattr(self._jobs[job_id], 'display_name', job_id)} cannot be "
+                "scoped to artists by id")
         if scope and "file_paths" in scope:
             job = self._jobs[job_id]
             if not getattr(job, "supports_file_scope", False):
@@ -2131,6 +2154,27 @@ class RepairWorker:
             logger.info("%s: %s requested for %d file(s)", reason or "catalogue change",
                         " and ".join(out["queued"]), len(paths))
         return out
+
+    def request_split(self, artist_ids, *, reason: str = "") -> bool:
+        """Hand combined-artist candidates to Split Artists, the one job that
+        splits an artist: it decides with the credit kernel, asks the credit
+        fetcher for evidence, confirms, heals and requests Re-tag /
+        Reorganize, all by its own settings (dry run: findings). No other
+        job splits; one that meets a name reading as a list asks here. Like
+        a projection request, its switch is its schedule, not a veto.
+        Returns whether a run was queued. Never raises."""
+        ids = sorted({int(a) for a in artist_ids or () if str(a).strip().lstrip("-").isdigit()})
+        if not ids:
+            return False
+        try:
+            queued = self.run_job_now(SPLIT_JOB, scope={"artist_ids": ids})
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            logger.debug("split not requested: %s", exc)
+            return False
+        if queued:
+            logger.info("%s: Split Artists requested for %d artist(s)",
+                        reason or "combined artist", len(ids))
+        return bool(queued)
 
     def _update_progress(self, scanned: int, total: int, report=None):
         """Callback for jobs to report progress.
