@@ -9,6 +9,10 @@ provider's own explicit type always wins.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from core.metadata.release_type import (
     itunes_release_type,
     release_type_from_shape,
@@ -192,3 +196,75 @@ def test_wishlist_payload_without_a_type():
     assert _album_type_from_payload(album, 5) == "album"
     assert _album_type_from_payload({"name": "Short"}, 5) == "ep"
     assert _album_type_from_payload({"album_type": "single"}, 5) == "single"
+
+
+# -- the one time repair ------------------------------------------------------------
+
+@pytest.fixture()
+def lib2():
+    from core.library2.schema import ensure_library_v2_schema
+    from tests.lib2_seed import row_conn
+
+    conn = row_conn(":memory:")
+    ensure_library_v2_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS metadata_cache_entities (id INTEGER PRIMARY KEY,"
+                 " source TEXT, entity_type TEXT, entity_id TEXT, raw_json TEXT)")
+    yield conn
+    conn.close()
+
+
+def _album(conn, title, kind, durations, *, mb=None, ids=None):
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Pink Floyd')").lastrowid
+    enrichment = {"musicbrainz": {"album_type": mb}} if mb else {}
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, expected_track_count,"
+        " enrichment, external_ids) VALUES(?,?,?,?,?,?)",
+        (artist, title, kind, len(durations), json.dumps(enrichment), json.dumps(ids or {}))).lastrowid
+    for i, ms in enumerate(durations):
+        conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, duration) VALUES(?,?,?,?)",
+                     (album, f"{title} {i}", i + 1, ms))
+    return album
+
+
+def _kind(conn, album):
+    return conn.execute("SELECT album_type FROM lib2_albums WHERE id=?", (album,)).fetchone()[0]
+
+
+def test_repair_retypes_a_guessed_long_ep(lib2):
+    from core.library2.release_kind import retype_long_short_releases
+
+    wywh = _album(lib2, "Wish You Were Here", "ep", WYWH_MS, mb="album")
+    ctte = _album(lib2, "Close to the Edge", "single", CTTE_MS, ids={"deezer": "77"})
+    lib2.execute("INSERT INTO metadata_cache_entities(source, entity_type, entity_id, raw_json)"
+                 " VALUES('deezer','album','77',?)", (json.dumps({"record_type": "album"}),))
+    short = _album(lib2, "Real EP", "ep", SHORT_EP_MS, mb="album")
+    assert retype_long_short_releases(lib2) == 2
+    assert _kind(lib2, wywh) == "album"
+    assert _kind(lib2, ctte) == "album"
+    assert _kind(lib2, short) == "ep"
+
+
+def test_repair_leaves_explicit_locked_and_unbacked_rows(lib2):
+    from core.library2.locks import set_lock
+    from core.library2.metadata_overrides import set_field_override
+    from core.library2.release_kind import retype_long_short_releases
+
+    hi_scores = _album(lib2, "Hi Scores", "ep", [330000] * 6, mb="ep")
+    apple_ep = _album(lib2, "Long Mixes", "ep", [400000] * 5, mb="album", ids={"itunes": "5"})
+    lib2.execute("INSERT INTO metadata_cache_entities(source, entity_type, entity_id, raw_json)"
+                 " VALUES('itunes','album','5',?)",
+                 (json.dumps({"collectionName": "Long Mixes - EP"}),))
+    titled = _album(lib2, "Sailorman EP", "ep", WYWH_MS, mb="album")
+    remixes = _album(lib2, "Rain (Remixes)", "ep", WYWH_MS, mb="album")
+    unbacked = _album(lib2, "Lune", "ep", WYWH_MS)
+    locked = _album(lib2, "Locked", "ep", WYWH_MS, mb="album")
+    set_lock(lib2, "album", locked, ["metadata"])
+    typed = _album(lib2, "Hand typed", "ep", WYWH_MS, mb="album")
+    set_field_override(lib2, entity_type="release_group", entity_id=typed,
+                       field_name="album_type", value="ep", profile_id=1, reason="album_type_edit")
+    partial = _album(lib2, "Partial", "ep", WYWH_MS[:4], mb="album")
+    lib2.execute("UPDATE lib2_albums SET expected_track_count=5 WHERE id=?", (partial,))
+
+    assert retype_long_short_releases(lib2) == 0
+    for album in (hi_scores, apple_ep, titled, remixes, unbacked, locked, typed, partial):
+        assert _kind(lib2, album) == "ep"
