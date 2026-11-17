@@ -963,6 +963,23 @@ The **Requests** system gives every member a voice in what gets added. A member 
 > Members submit requests and see their own. Viewing everyone's requests and approving/denying are **admin** actions.
 
 This is the video equivalent of the music side's request flow — one shared pattern for household curation.
+
+## Where a title stands
+
+Every poster on the video side (Search, Discover, people, studios, More like this) wears one badge that says where the title stands, for everyone, not just you:
+
+| Badge | Means |
+|---|---|
+| **In Library** | It's on your server. |
+| **Partial** | A show with some aired episodes on your server. |
+| **Requested** | Someone asked and it's waiting for an admin. |
+| **Approved / Wishlisted / Watchlisted** | It's on its way. |
+| **Searching / Downloading** | A download is running. The badge follows it. |
+| **Failed** | It's still wanted but the last download didn't work. |
+
+The detail page shows the same thing above its buttons, with how far a download is, what each season has for a show, and who asked. Admins see names; members see their own ask and "someone" for everyone else's. **Your requests** there opens the Requests page, where you can follow every ask you made.
+
+Asking for something already on its way is refused, so the queue never gets a duplicate. If someone else already asked and it's still waiting, **Ask too** adds you to that request (it doesn't use up your request limit) so you hear when it's decided. The Seerr compatible API reports the same status.
 `
         },
     ]

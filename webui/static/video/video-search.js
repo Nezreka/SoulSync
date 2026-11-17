@@ -28,6 +28,10 @@
     var queryContext = null;
 
     function $(sel) { return document.querySelector(sel); }
+    // the poster's identity for its status badge (#2160, video-title-status.js)
+    function statusAttrs(kind, tmdbId, owned) {
+        return window.VideoTitleStatus ? VideoTitleStatus.cardAttrs(kind, tmdbId, owned) : '';
+    }
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1514,7 +1518,8 @@
         var cb = window.VideoGet ? VideoGet.cardButton({ kind: it.kind, tmdbId: it.tmdb_id,
             libraryId: it.library_id, title: it.title, poster: it.poster, status: it.status, source: source }) : '';
         return '<a class="vsr-card" href="' + href + '" ' +
-            'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' + cb +
+            'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '"' +
+            statusAttrs(it.kind, it.tmdb_id, owned) + '>' + cb +
             '<div class="vsr-poster">' + img + ribbon + rating +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +

@@ -277,6 +277,7 @@ def create_video_blueprint() -> Blueprint:
     from .subtitles import register_routes as reg_subtitles
     from .library_manage import register_routes as reg_library_manage
     from .manager import register_routes as reg_manager
+    from .title_status import register_routes as reg_title_status
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -306,5 +307,6 @@ def create_video_blueprint() -> Blueprint:
     reg_subtitles(bp)
     reg_library_manage(bp)
     reg_manager(bp)
+    reg_title_status(bp)
 
     return bp
