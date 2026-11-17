@@ -17,6 +17,7 @@ import { createRoot } from 'react-dom/client';
 
 import { getHealth, getStatus, getUpdateInfo, mergeStatus, statusFromHealth } from './api';
 import { currentPageId, viewerIsAdmin } from './page';
+import { closePalette, isPaletteOpen, openPalette } from './search/palette';
 import { BUTTON_ID, HelpSheet, PHONE_QUERY } from './sheet';
 import { needsAdmin, useHelpStore } from './store';
 import { isViewId } from './views';
@@ -153,7 +154,11 @@ export function onGlobalKey(event: KeyboardEvent): void {
     !event.altKey
   ) {
     event.preventDefault();
-    store.openSheet(undefined, { focusSearch: true });
+    // the palette, from anywhere; Ctrl K again closes it. with the sheet open
+    // the same search is its own field, and another modal keeps the keys
+    if (isPaletteOpen()) closePalette();
+    else if (store.open) store.openSheet(undefined, { focusSearch: true });
+    else if (!otherModalOpen()) openPalette();
     return;
   }
   // the sheet's own Esc handles focus inside it; this is Esc from the page beside it
