@@ -1,15 +1,15 @@
-**SoulSync 3.6.6 is out** :musical_note:
+**SoulSync 3.6.7 is out** :musical_note:
 
-The video library is now a full library manager. The Library page shows your movies and shows as posters, as a sortable table of titles, or as a table of the files themselves, with filters for what needs a look and for what the files are. You can act on a selection or on everything a filter matches: rename with a preview, move to another drive or library, set a quality profile, look for upgrades, fetch subtitles and more. Every rename, move and delete is recorded and can be undone, and a padlock keeps automation away from a title you have finished curating.
+The Settings page has been rebuilt in React. It looks and works the same, loads its tabs once, and saves only what you changed.
 
-Movie and show pages now manage their own seasons, episodes and files: rename, renumber and delete with a preview, stop hunting single episodes, and undo any change from the page. Pages also keep themselves current, checking your media server, the metadata provider and ratings in the background when they have gone stale.
+SoulSync can now answer as a Seerr server, so Litefin and other Seerr apps can discover and request movies and shows through the video side (thanks Thibs, #2151). Turn it on under Settings, System, SoulSync API.
 
-It is fast. On a large library the Files view went from several seconds a page to instant.
+Albums get an Other versions picker in their menu, listing the release's editions with track count, year and label, with a preview before it switches (thanks wolf39us, #2145). Popular tracks get a flame on the album page (#2144), the artist page shows which albums a rename would move (#2141), and locking an album keeps you on the artist page (#2143).
 
-Server Activity now shows album and book covers for music and audiobooks (thanks SeadogsBooty, #2089), and its drawer no longer sits under the floating buttons (#2090).
+Band names with an "&" like Above & Beyond now stay one artist in tags, credits and folders, and Group Therapy style numbered releases no longer cross (thanks SeadogsBooty, #2131, #2133 to #2136). Release types go by length too, so Wish You Were Here is an album again.
 
-Thanks to onnwee for two contributions: cam releases are caught however they are spelled (#2088), and a new setting starts SoulSync's torrents on a qBittorrent that adds them stopped (#2087).
+Thanks to nstrelow (#2140: one unfingerprintable file no longer stops AcoustID scans), PapaBearDoes (#2152: the video library table keeps its columns in view) and ginevra-70 (#2115: Music Assistant scans follow their own task) for their contributions.
 
-Also: live albums and live tracks are separate rules (#2082), original release and clean version filters (#2080, #2081), Albums You're Missing no longer lists albums you own (#2083), dead file rows can be removed (thanks wolf39us, #2086), Discogs artist images download again (thanks Ktzenjammer, #2079), anime numbered as one long season is handled (thanks Thibs), one shared page frame across the app, a security pass, MetaSync pairing now gives the node a read-only key (#2099), and a lighter sidebar and player on phones.
+Also: Jellyfin playlists are private (#2148), Apple Music mirrors refresh again (#2147), K/DA stays whole in Split Artists (#2150), artist.nfo lands in the artist folder with poster and background art (#2138), guest artists no longer fill the Library list (#2142), Asked for and Got are the right way round in review, a library upgrade no longer stops at an old track with no id, and a video import folder (#2129).
 
 Full notes on GitHub.

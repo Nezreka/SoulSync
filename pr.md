@@ -1,67 +1,61 @@
-# soulsync 3.6.6: `dev` → `main`
+# soulsync 3.6.7: `dev` → `main`
 
-the video library becomes a real library manager. the library page is a table of titles and a table of files as well as posters, with bulk operations, history with undo and a padlock, and a movie or show page now manages its own seasons, episodes and files and keeps itself current. plus the page frame on every page, a security pass, and a batch of fixes.
+the settings page is react now, soulsync can answer as seerr for litefin and other seerr apps, an album can switch to another version of itself, and popular tracks get a flame. plus band names with an "&" stay one artist, numbered releases like group therapy stop crossing, and a long list of reported fixes.
 
-## video library manager
+## settings
 
-- **the library page is a manager.** posters, a sortable table of titles with the columns you pick, and a table of the files themselves. filters for what needs a look (missing, below your target, extra copies, unmatched, no subtitles) and for what the files are (resolution, codec, hdr, languages, drive, library). save any set as a named view.
-- **bulk operations** on a selection or on everything a filter matches: rename with a preview, move to another drive or library, quality profile, look for upgrades, get missing, subtitles, identify again, genres, series type, and delete with a preview.
-- **history and undo.** every rename, move, delete and re-file made by hand is listed and one click puts it back, a whole bulk run at once.
-- **the padlock.** lock a title once it is the way you want it and maintenance, mass rename and automatic upgrades leave it and its files alone.
-- **a library can sit on many drives.** move lists each library with every drive it has and the free space on each. pick another drive of the same library, or another library.
-- **it is fast.** lists, filter counts and the files view are answered from memory. on a 120k file library the files view went from 3 to 7 seconds a page to about 10ms, filter counts from over half a second to nothing, and the tab you are not on is ready before you click it.
-- the cards rise and fade in like the music library's, and the page is as wide as the watchlist.
-- channel cards and the plain posters a profile without the manager browses fade in the same way.
+- **the settings page is react.** every tab, music and video, the shell and the page itself. it looks and works the same, it just loads its tabs once and saves only what you changed.
+- typing in the settings search no longer queues a save, an emptied folder or redirect field stays empty while you type the new one, and autosaves refresh the sidebar's server dots straight away again.
+- **playlist folders say where organize by playlist is turned on (#2112)**, and an empty rebuild links to it.
 
-## movie and show pages
+## library
 
-- **manage a title from its own page.** the padlock, file history with undo and move are on the page. a season has rename files, renumber episodes and delete files, each showing what it will do first. tick episodes, or the whole season, to rename, renumber, delete, look for upgrades or stop hunting them.
-- **stop hunting one episode** from its menu, and a delete can stop the hunt for what it empties so a file you threw out is not fetched again.
-- **every change leaves an undo** at the foot of the page.
-- **a page that keeps itself current.** opening a movie or show asks whichever source has gone stale, in the background: your media server for that one title, the metadata provider for what changed since it was matched, and the ratings. the page redraws in place only if something moved, and refresh asks all three now.
-- **the season and episode list is react now**, with the new tools built in, and a rename or an undo no longer throws you back to the first season.
-- a scan keeps a file's id and the date it was added, so an open menu or an undo still points at the right file afterwards.
+- **other versions (thanks wolf39us, #2145).** an album's ⋯ menu lists the release's other editions from musicbrainz and your primary source, with track count, year, country and label, plus a search for that artist. pick one and it shows what changes before it switches. fixing the manual match on the way: it kept the old release's cached tracklist.
+- **popular tracks get a flame (thanks wolf39us, #2144)**, up to three of an album's most played on last.fm that clearly stand out, like plexamp. nothing is fetched for it, it reads the play counts soulsync already has.
+- **the artist page shows what a rename would move (thanks wolf39us, #2141).** albums whose files don't match your naming template read "N to rename", and clicking opens preview rename.
+- **locking an album from the artist page stays on the artist page (thanks wolf39us, #2143)**, so you can lock one after another.
+- **collection completeness on the cards and table (thanks SeadogsBooty, #2106, #2107, #2108, #2109)**, with sorts, a featured filter, card size and multi-select. for an artist you don't watch it counts every track of the releases you own something of, so a single track off a 14 track album reads 1 of 14, not complete.
+- **guests stop filling the artists list (thanks Ericsson, #2142).** an album artist credit a guest picked up on someone else's album no longer makes them a library artist. the list and the artist page now go by the same rule.
+- **release type goes by length too (thanks wolf39us).** 4 to 6 tracks only made an ep when it runs under 30 minutes, so wish you were here is an album again. a provider's own word (deezer's type, apple's "- EP") wins, and a one time repair retypes the long releases a count guess got wrong when a provider agrees.
+- **leftover rows fold on every scan (thanks Ktzenjammer, #2094).** the fix in 3.6.6 only ran during the one time library upgrade. scans, refresh & scan and update discography fold them now, and a row with no file gets a remove this row option.
+- same-named albums of one artist no longer merge into one (#2110), a split album keeps each profile's watch choice, a locked album reads as finished (#2119), and a recycle bin button sits at the top of the music and video library (#2128).
+- **the library upgrade no longer stops at an old track with no id.** a few old installs had track rows with an empty id, and the first one failed the whole upgrade, pausing downloads. those files come across now and a restart finishes it.
+
+## artists and tags
+
+- **a band with "&" in its name stays one artist (thanks SeadogsBooty and wolf39us, #2136, #2131).** above & beyond became "above (feat. beyond)", kyau & albert became "kyau", and a rename folder dropped to "above". a name the library or the metadata source knows as one artist is never split now, and the stray split credits are taken back off your tracks on the next start.
+- **split artists keeps K/DA whole (thanks Vidariondr, #2150)**, and a finding can be corrected by hand: edit split, or one artist, which is remembered.
+- **a release stays under its album artist (thanks SeadogsBooty, #2133, #2135).** reorganize scattered a compilation into a folder per track artist while its preview showed the right one, and manual downloads tagged a track's own artist as the album artist.
+- **numbered releases never cross (thanks SeadogsBooty, #2134).** group therapy 699 was taken for 696, pt. 1 for pt. 4, and their metadata swapped. numbers in a title now have to agree for downloads, imports, library ownership and enrichment.
+- **artist.nfo lands in the artist folder (thanks Ericsson, #2138)**, also when the template nests the album deeper, and the same switch saves poster.jpg and background.jpg where the folder has no artist art yet.
+
+## downloads and review
+
+- **asked for and got are the right way round in review (thanks makiel).** files held for acoustid review showed them swapped, and wrong song put the wrong file's name back on the wishlist.
+- **an unfingerprintable file no longer reads as a bad acoustid key (thanks @nstrelow, #2140).** one file with no audio stopped every acoustid scan at the same spot.
+- a soulseek folder naming the artist by an alias counts (thanks Storm, #2105), live albums stay out with live albums off (#2117), and the releases tab searches every prowlarr torrent indexer (#2127).
+- **reorganize takes the cover along (thanks QT3496, #2010)** when you apply its findings from tools, and a cover already in the new folder no longer keeps the old one.
+- **a pair that can't be merged says why (thanks redbeardymcgee, #2146)** instead of buttons that look live and do nothing.
+- torrent rows name their tracker (#2123), and pausing a finished torrent shows paused with resume (#2125).
+- a free soundcloud account gets the uploader's original file when downloads are on (#2116).
+
+## playlists and servers
+
+- **jellyfin playlists are private (thanks Darkcere, #2148)** to the account they sync to. ones soulsync already made stay public until you change them in jellyfin.
+- **apple music mirrors refresh again (thanks NeskireDK, #2147)**, and a refresh that gets nothing back counts as a failure, not completed.
+- **copy mode playlists stay owned after a drive remounts (thanks NeskireDK, #2137).**
+- **music assistant scans follow their own task (thanks @ginevra-70, #2115)** before the database updates, and sync, scans and playlists reach music assistant (#2111).
 
 ## video
 
-- **anime the server numbers as one long season (thanks Thibs).** it keeps that season and is searched and subtitled by its split numbers, and tmdb lumps split when the anime map is stale or one out.
-- **cam releases are caught however they are spelled (thanks @onnwee, #2088).** camrip, hdcamrip, hdtsrip, tsrip, telecine, hd-tc and pre-dvd rips all read as cam now. a pre-dvd rip used to pass as a retail dvd.
-- rename and delete previews read each folder once, so a 400 file season previews in under a second.
+- **soulsync can answer as seerr (thanks Thibs, #2151).** turn it on under settings, system, soulsync api, and point litefin's seerr plugin (or another seerr app) at /seerr with an admin key. discover, search, details and requests go through the video side, requests land on the right profile's wishlist or approval queue. not tried against a real litefin yet.
+- **an import folder (#2129)**, like the music side's import page.
+- manual search opens with an editable query (#2121) and is on a movie's menu, owned or not (#2122), video download rows show the release's languages (#2120), and manual subtitle search says when the file already has the language (#2126).
+- **long titles and language lists give way in the library table (thanks @PapaBearDoes, #2152)** instead of pushing columns out of view.
+- the more menu on a detail page always fits on screen (#2124).
 
-## music
+## also
 
-- **live albums and live tracks are two rules (#2082)**, a release you pick yourself is never kept out by what it is, the original release is the standard edition (#2080), and clean copies can be left out (#2081).
-- **albums you're missing no longer lists albums you own (#2083)** under other punctuation, a pressing tag or an ep suffix.
-- **a dead file's row has a remove button (thanks wolf39us, #2086)**, and values taken from file tags can be released for an album, an artist or the whole library (#2084).
-- artist images from discogs download again (thanks Ktzenjammer, #2079), each track of a multi-track single keeps its own number (#2044), and album tag consistency finds a split album by a shared release id (#2072).
-- **an album no longer counts a retagged rip's old rows as missing tracks (thanks Ktzenjammer, #2094).** files tagged "labor days - daylight" left a row behind under that name once they were retagged, so the album read 14 of 24. a row like that folds into the song at its position, across the whole library after a scan, and a last.fm page stored as a spotify id no longer keeps two rows of one album apart.
-- a moved file is one file: the scan no longer adopts it twice, lists the song twice or downloads it again.
-- **playlists can find bootlegs, edits and unofficial remixes (thanks CptSamFalcon, #2097).** a track no catalog has waited in the wing it pool forever. a new "find uncatalogued tracks" switch in a playlist's settings searches for it by the playlist's own artist and title on every sync, takes a file only when its name says it is that exact version, and tags it from the playlist.
-- **one playlist on the server per mirror, on jellyfin and plex (#2098).** a sync found the server playlist by name, deleted it and made it again, so a refused delete or a second playlist with the name left a stale twin with a different track count. the playlist is rewritten in place now and the mirror follows it by id, renames included, as navidrome mirrors already did.
+- replaygain analyses files with non utf-8 tags (#2118), re-identify remembers the move-the-file choice (#2114), and the tools findings filter speaks the list's names (#2113).
 
-## downloads
-
-- **start the torrents soulsync adds (thanks @onnwee, #2087).** a new switch in the torrent client settings for a qbittorrent that adds torrents stopped, or stops them once the metadata is in. soulsync's torrents start anyway and what other apps add keeps your qbittorrent setting.
-- **music usenet grabs use your category (thanks Randomname653, #2096).** every music nzb was sent as "soulsync" whatever category was set, so it landed in the root of the completed folder. a grab that names no category uses the one in settings now, on sabnzbd and nzbget.
-- a profile can cancel a download it started.
-
-## server activity
-
-- **music and audiobooks show the album or book cover (thanks SeadogsBooty, #2089)**, on the card and behind it, not the artist or author picture.
-- **the drawer covers the floating buttons while it is open (thanks SeadogsBooty, #2090)**, so they no longer sit on the playback cards.
-
-## every page
-
-- **one page frame.** search, discover, playlists, watchlist, tools, requests, downloads, import, issues, wishlist, stats, audiobooks and podcasts share one width, header, pill row and section heading.
-- **lighter on a phone.** the sidebar sky stops drawing while the menu is closed and draws half the frames at fewer pixels on a phone, the sidebar visualizer no longer runs where the phone layout hides it, and the now playing screen drops a blur nobody could see and fits the real screen height.
-- **settings save quietly, or only when you say (thanks JonnyJonnster).** saving a setting no longer pops a toast naming every settings section, the save button is the one status. a new switch under system, saving turns autosave off, so changes wait until you click save.
-
-## security and upkeep
-
-- **a security pass.** api keys, tokens and passwords are blanked out of every log line, names and urls are escaped before they reach the page, and backups, diagnostics, auto-import settings, quality profiles, repair findings and automations are checked against the profile asking.
-- **metasync holds less (#2099).** pairing gives the node a read-only key, since the node only reads. the pool key is handed to the node you paired with and to no address a request names. the node's status, which shows the first characters of its keys, is for admins. a node paired before this keeps its older admin key until you pair it again.
-- status loops, discover shelves, the quarantine list and bulk repair fixes each stopped re-reading the whole library.
-- **bulk fixing orphan files is fast (thanks Randomname653, #2095).** each finding rebuilt the path of every file in the library to recheck one. it reads only the files that share the orphan's name now: about two seconds a finding where it took a minute on a 311k file library.
-- the visual baselines render again (#2102): the artist shot follows the route to the library's artist page, and the library shots show a library.
-
-tested: the frontend suite and the video, library, wishlist, activity and release suites pass locally. the full suite runs on dev's nightly build, which is the check on this pr.
+tested: the full suite passes on windows python with every failure rechecked on linux (only the known drive permission tests on a windows disk fail), the frontend suite passes, and each fix carries its own test.
