@@ -10,9 +10,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { getHealth, request, type HealthFinding, type HealthFix } from '../api';
+import { openSettings as openSettingsTab, runFix as runHealthFix } from '../fixes';
 import hs from '../help.module.css';
 import { Icon, type IconName } from '../icons';
-import { openArticleInSheet, openExternal } from '../links';
+import { openArticleInSheet } from '../links';
 import { useHelpStore } from '../store';
 import s from './answers.module.css';
 
@@ -300,69 +301,39 @@ export function goHref(href: string): void {
 /** a docs article, read inside the sheet */
 export const readArticle = openArticleInSheet;
 
-/** a Settings tab on this side or the video side ('downloads', media 'video') */
+/**
+ * A Settings tab on this side or the video side ('downloads', media 'video'):
+ * fixes.ts's opener, which switches sides and waits for the page, with the
+ * sheet out of the way on a phone first.
+ */
 export function openSettings(tab: string, media?: 'video'): void {
-  const safe = tab.replace(/[^\w-]/g, '');
-  const onSettings = /\/settings\/?$/.test(window.location.pathname);
-  const sameMedia =
-    (new URLSearchParams(window.location.search).get('media') === 'video') === (media === 'video');
-  const show = () => window.switchSettingsTab?.(safe);
   revealPage();
-  if (onSettings && sameMedia) {
-    show();
-    return;
-  }
-  const router = window.SoulSyncWebRouter;
-  if (router?.navigateToHref) {
-    void router.navigateToHref(`/settings${media === 'video' ? '?media=video' : ''}`);
-  } else {
-    void window.navigateToPage?.('settings');
-  }
-  let tries = 0;
-  const attempt = () => {
-    tries += 1;
-    if (document.querySelector(`#settings-page [data-tab="${safe}"]`)) show();
-    else if (tries < 20) setTimeout(attempt, 100);
-  };
-  setTimeout(attempt, 50);
+  openSettingsTab(tab, media);
 }
 
 // ── health findings as answers (admin) ──────────────────────────────────
 
-/** what a finding's fix button does; the server already wrote the label */
+/**
+ * A finding's fix button in an answer. The Health view's runner does the
+ * work (fixes.ts: side switching, docker-side hosts, /api/ routes only); here
+ * the outcome is a toast, and the answers re-read Health once it has run.
+ */
 export async function runFix(fix: HealthFix, onDone?: () => void): Promise<void> {
-  switch (fix.kind) {
-    case 'settings':
-      openSettings(fix.tab, fix.media);
-      return;
-    case 'page':
-      goHref(fix.media === 'video' ? `${fix.path}?media=video` : fix.path);
-      return;
-    case 'external':
-      openExternal(fix.href);
-      return;
-    case 'checklist':
-      if (fix.href) goHref(fix.href);
-      return;
-    case 'logs':
-      useHelpStore.getState().push({ view: 'logs' });
-      return;
-    case 'recheck':
+  const outcome = await runHealthFix(fix, {
+    recheck: async () => {
       await getHealth(true);
       onDone?.();
-      return;
-    case 'post': {
-      const res = await request<{ success?: boolean; error?: string; message?: string }>(fix.url, {
-        method: 'POST',
-        body: JSON.stringify(fix.body ?? {}),
-      });
-      const ok = res.ok && res.data?.success !== false;
-      if (ok) toast(res.ok && res.data?.message ? res.data.message : 'Done', 'success');
-      else toast((res.ok ? res.data?.error : res.error) || "That didn't work", 'error');
-      if (fix.recheck !== false) await getHealth(true);
-      onDone?.();
-      return;
-    }
+    },
+    openLogs: () => useHelpStore.getState().push({ view: 'logs' }),
+  });
+  if (!outcome.ok) {
+    toast(outcome.error || "That didn't work", 'error');
+    return;
+  }
+  if (fix.kind === 'post') {
+    toast(outcome.message || `${fix.label}: done`, 'success');
+    // a post that doesn't ask for a recheck can still change what's stuck
+    if (!fix.recheck) onDone?.();
   }
 }
 

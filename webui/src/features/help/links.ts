@@ -44,18 +44,3 @@ export function openExternal(url: string): void {
 export function openReleaseNotes(): void {
   document.querySelector<HTMLElement>('.version-button')?.click();
 }
-
-/** a Settings tab, e.g. 'logs'. the tab switch waits for the page to be there */
-export function openSettingsTab(tab: string): void {
-  goToPage('settings');
-  let tries = 0;
-  const attempt = () => {
-    tries += 1;
-    if (document.querySelector(`#settings-page [data-tab="${tab.replace(/[^\w-]/g, '')}"]`)) {
-      window.switchSettingsTab?.(tab);
-    } else if (tries < 20) {
-      setTimeout(attempt, 100);
-    }
-  };
-  setTimeout(attempt, 0);
-}

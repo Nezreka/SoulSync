@@ -17,7 +17,7 @@ import { ago, formatBytes } from './format';
 import { Glyph } from './glyphs';
 import h from './help.module.css';
 import { Icon } from './icons';
-import { openSettingsTab } from './links';
+import { openSettings } from './fixes';
 import { Switch } from './switch';
 import { Label } from './ui';
 
@@ -109,7 +109,7 @@ export function LogsView({ isAdmin }: ViewProps) {
               type="button"
               className={h.btn}
               data-kind="ghost"
-              onClick={() => openSettingsTab('logs')}
+              onClick={() => openSettings('logs')}
             >
               Open the live log
             </button>

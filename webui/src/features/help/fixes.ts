@@ -1,6 +1,7 @@
 /**
- * What a Health finding's buttons do (HELP_API.md, Fix). One runner for
- * every kind so the view only says which finding and which button:
+ * What a Health finding's buttons do (HELP_API.md, Fix). The one runner for
+ * every kind, wherever the button is: the Health view (health.tsx) shows the
+ * outcome on the card, a page's answers (pages/kit.tsx runFix) as a toast.
  *
  *   post       POST the app's own route, then check again when it asks
  *   settings   Settings on that tab, the video side's when media is video
@@ -19,7 +20,8 @@ import { goToPage, openExternal } from './links';
 import { isVideoSide } from './page';
 import { useHelpStore } from './store';
 
-export type FixOutcome = { ok: true } | { ok: false; error: string };
+/** ok with the server's own words when it sent some ("Connected to Jellyfin") */
+export type FixOutcome = { ok: true; message?: string } | { ok: false; error: string };
 
 export interface FixContext {
   /** Health again with the cache skipped */
@@ -33,7 +35,8 @@ export async function runFix(fix: HealthFix, ctx: FixContext): Promise<FixOutcom
       const res = await postFix(fix.url, fix.body);
       if (!res.ok) return { ok: false, error: res.error };
       if (fix.recheck) await ctx.recheck();
-      return { ok: true };
+      const said = (res.data as { message?: unknown } | null)?.message;
+      return typeof said === 'string' && said ? { ok: true, message: said } : { ok: true };
     }
     case 'settings':
       openSettings(fix.tab, fix.media);
