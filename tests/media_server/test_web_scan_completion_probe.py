@@ -235,7 +235,7 @@ def test_music_assistant_success_outcome_alone_runs_completion_callback(clock, m
 
 
 @pytest.mark.parametrize("outcome", [
-    "partial_success", "failed", "cancelled", "already_running", "unknown",
+    "failed", "cancelled", "unknown",
 ])
 def test_music_assistant_non_success_outcomes_never_run_callbacks(
         clock, monkeypatch, outcome):
@@ -280,3 +280,65 @@ def test_music_assistant_unreadable_state_times_out_without_database_update(
     assert fired == []
     assert mgr._scan_in_progress is False
     assert mgr.get_scan_status()["last_result"]["outcome"] == "timeout"
+
+
+def test_music_assistant_partial_success_still_runs_the_database_update(clock, monkeypatch):
+    """#2115: partial_success means the sync finished with a few bad files.
+    the library changed, so the update after the scan still runs."""
+    now, fired = clock
+    client = _TaskMonitorClient({
+        "task_monitor": True, "scanning": False, "outcome": "partial_success",
+    })
+    mgr = _task_monitor_manager(client, fired, monkeypatch)
+
+    _tick_to(mgr, now, wsm.WebScanManager.EXACT_POLL_SECONDS)
+
+    assert fired == ["completed"]
+    assert mgr.get_scan_status()["last_result"]["outcome"] == "partial_success"
+
+
+@pytest.mark.parametrize("outcome", ["failed", "unknown"])
+def test_downloads_during_a_failed_scan_still_get_a_follow_up(clock, monkeypatch, outcome):
+    """#2115: a download that landed mid scan is scanned next time, whatever
+    this scan's outcome was."""
+    now, fired = clock
+    client = _TaskMonitorClient({"task_monitor": True, "scanning": False, "outcome": outcome})
+    mgr = _task_monitor_manager(client, fired, monkeypatch)
+    mgr._downloads_during_scan = True
+    asked = []
+    monkeypatch.setattr(mgr, "request_scan", lambda reason, scope="full": asked.append(scope))
+
+    _tick_to(mgr, now, wsm.WebScanManager.EXACT_POLL_SECONDS)
+
+    assert fired == []
+    assert asked == ["downloads"]
+
+
+def test_a_sync_that_was_already_running_gets_one_follow_up_scan(clock, monkeypatch):
+    """#2115: music assistant drops a sync request while that sync runs, so
+    the scan asks again once the old run is done."""
+    now, fired = clock
+    client = _TaskMonitorClient({
+        "task_monitor": True, "scanning": False, "outcome": "already_running",
+    })
+    mgr = _task_monitor_manager(client, fired, monkeypatch)
+    asked = []
+    monkeypatch.setattr(mgr, "request_scan", lambda reason, scope="full": asked.append(scope))
+
+    _tick_to(mgr, now, wsm.WebScanManager.EXACT_POLL_SECONDS)
+
+    assert fired == []
+    assert asked == ["full"]
+    assert mgr._last_scan_result["outcome"] == "already_running"
+
+
+def test_plex_timeout_still_runs_the_database_update(clock, monkeypatch):
+    """#2115 is music assistant only: plex, jellyfin and navidrome have no
+    outcome to read, so a scan past the 30 minute cap still counts as done."""
+    now, fired = clock
+    mgr = _manager_with_client(_FakeClient(scanning=True), fired, monkeypatch)
+    mgr._max_scan_time = 1
+
+    _tick_to(mgr, now, 2)
+
+    assert fired == ["completed"]

@@ -424,7 +424,11 @@ def test_scan_state_distinguishes_music_assistant_task_outcomes(
 
 def test_scan_state_does_not_reuse_a_preexisting_running_task(client):
     started_at = '2026-11-14T09:00:00+00:00'
-    task_states = iter([[_scan_task('running', started_at)], [_scan_task('running', started_at)]])
+    task_states = iter([
+        [_scan_task('running', started_at)],
+        [_scan_task('running', started_at)],
+        [{**_scan_task('success', started_at), 'finished_at': '2026-11-14T09:05:00+00:00'}],
+    ])
 
     def transport(command, args):
         if command == 'tasks/list':
@@ -436,8 +440,12 @@ def test_scan_state_does_not_reuse_a_preexisting_running_task(client):
     client._transport = transport
     client.get_scan_state()
     assert client.trigger_library_scan() is True
+    # the old run is still going: wait for it, don't call the scan done yet
     state = client.get_scan_state()
+    assert state['scanning'] is True
+    assert state['outcome'] == 'running'
 
+    state = client.get_scan_state()
     assert state['scanning'] is False
     assert state['outcome'] == 'already_running'
 
@@ -464,7 +472,12 @@ def test_scan_state_reports_already_running_when_other_requested_tasks_succeed(c
         _scan_task('success', new_album_start, media_type='album'),
         _scan_task('success', new_playlist_start, media_type='playlist'),
     ]
-    task_states = iter([baseline_tasks, completed_tasks])
+    old_run_done = [
+        _scan_task('failed', old_track_start, media_type='track'),
+        _scan_task('success', new_album_start, media_type='album'),
+        _scan_task('success', new_playlist_start, media_type='playlist'),
+    ]
+    task_states = iter([baseline_tasks, completed_tasks, old_run_done])
 
     def transport(command, args):
         if command == 'tasks/list':
@@ -483,6 +496,11 @@ def test_scan_state_reports_already_running_when_other_requested_tasks_succeed(c
         f'music_sync_{SRC}_album': 'success',
         f'music_sync_{SRC}_playlist': 'success',
     }
+    assert state['scanning'] is True
+    assert state['outcome'] == 'running'
+
+    # how the old run ended doesn't count against the request it swallowed
+    state = client.get_scan_state()
     assert state['scanning'] is False
     assert state['outcome'] == 'already_running'
 

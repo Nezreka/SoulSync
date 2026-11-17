@@ -448,10 +448,17 @@ class WebScanManager:
                             }
                         self._handle_scan_completion(outcome="success")
                         return
-                    if outcome in {
-                        "partial_success", "failed", "cancelled",
-                        "already_running", "unknown",
-                    }:
+                    if outcome == "partial_success":
+                        # the sync ran to the end with a few bad files, so the
+                        # library did change: the database update still runs
+                        with self._lock:
+                            self._scan_progress = {
+                                "status": "completed",
+                                "message": "Music Assistant scan completed with some issues",
+                            }
+                        self._handle_scan_completion(outcome="partial_success")
+                        return
+                    if outcome in {"failed", "cancelled", "already_running", "unknown"}:
                         with self._lock:
                             self._scan_progress = {
                                 "status": outcome,
@@ -481,15 +488,16 @@ class WebScanManager:
                     self._schedule_completion_poll(check_completion)
                     return
 
-                # A timeout is not evidence of successful indexing.
+                # Check for timeout. plex, jellyfin and navidrome have no
+                # outcome to read, so the update after a long scan still runs
                 if self._scan_start_time and (time.time() - self._scan_start_time) > self._max_scan_time:
                     logger.warning(f"Web scan timed out after {self._max_scan_time} seconds")
                     with self._lock:
                         self._scan_progress = {
                             "status": "timeout",
-                            "message": "Scan timed out without a verified result"
+                            "message": "Scan timed out - assuming complete"
                         }
-                    self._handle_scan_completion(outcome="timeout")
+                    self._handle_scan_completion()
                     return
 
                 # Exact path (#1899): a server that reports its own scan state
@@ -547,13 +555,15 @@ class WebScanManager:
         timer.start()
 
     def _handle_scan_completion(self, outcome="success"):
-        """Finish a scan; only verified success invokes completion callbacks."""
+        """Finish a scan. completion callbacks (the database update) run only
+        when the library changed: success, or music assistant's partial success."""
         with self._lock:
             if self._shutting_down:
                 return
             server_type = self._current_server_type
             callbacks_to_call = (
-                self._scan_completion_callbacks.copy() if outcome == "success" else []
+                self._scan_completion_callbacks.copy()
+                if outcome in ("success", "partial_success") else []
             )
             downloads_during_scan = self._downloads_during_scan
 
@@ -567,13 +577,14 @@ class WebScanManager:
             "partial_success": f"Web {server_type.upper()} library scan partially completed",
             "failed": f"Web {server_type.upper()} library scan failed",
             "cancelled": f"Web {server_type.upper()} library scan was cancelled",
-            "already_running": f"Web {server_type.upper()} scan was already running before this request",
+            "already_running": (f"Web {server_type.upper()} scan was already running before this "
+                                "request, scanning again now that it finished"),
             "unknown": f"Web {server_type.upper()} library scan outcome is unknown",
             "timeout": f"Web {server_type.upper()} library scan timed out without a verified result",
         }
         logger.info(messages.get(outcome, f"Web {server_type.upper()} library scan ended: {outcome}"))
         self._last_scan_result = {
-            "status": "completed" if outcome == "success" else outcome,
+            "status": "completed" if outcome in ("success", "partial_success") else outcome,
             "outcome": outcome,
             "server_type": server_type,
         }
@@ -585,16 +596,19 @@ class WebScanManager:
             except Exception as e:
                 logger.error(f"Error in web scan completion callback {callback.__name__}: {e}")
 
-        # Reset scan state. A failed/unknown result never triggers completion
-        # callbacks or a follow-up scan that depends on successful indexing.
         self._reset_scan_state()
 
-        if outcome == "success" and downloads_during_scan:
+        # downloads that landed during the scan still need one, whatever this
+        # scan's outcome. a sync that was already running swallowed our
+        # request, so ask again now that it's done
+        if downloads_during_scan:
             logger.info("Web scan follow-up needed for downloads during scan")
             queued_downloads_only = self._queued_downloads_only
             self._queued_downloads_only = True
             self.request_scan("Follow-up scan for downloads during previous scan",
                               scope="downloads" if queued_downloads_only else "full")
+        elif outcome == "already_running":
+            self.request_scan("Follow-up scan, the server was already scanning", scope="full")
 
     def _reset_scan_state(self):
         """Reset internal scan state"""

@@ -876,6 +876,19 @@ class MusicAssistantClient(MediaServerBase):
             task_id for task_id, status in statuses.items()
             if task_id not in self._scan_task_preexisting and status in ('pending', 'running')
         }
+        # a sync that was already running swallowed our request. wait for that
+        # run to end so the follow-up scan isn't swallowed too
+        active_ids |= {
+            task_id for task_id in self._scan_task_preexisting
+            if statuses.get(task_id) == 'running'
+            and str(current[task_id].get('started_at') or '') == str(
+                self._scan_task_baseline.get(task_id, {}).get('started_at') or '')
+        }
+        # how an old run ended says nothing about the request it swallowed
+        own_statuses = {
+            task_id: status for task_id, status in statuses.items()
+            if task_id not in self._scan_task_preexisting
+        }
         if awaiting_start:
             outcome = 'running'
             scanning = True
@@ -887,13 +900,13 @@ class MusicAssistantClient(MediaServerBase):
         elif active_ids:
             outcome = 'running'
             scanning = True
-        elif any(status == 'failed' for status in statuses.values()):
+        elif any(status == 'failed' for status in own_statuses.values()):
             outcome = 'failed'
             scanning = False
-        elif any(status == 'cancelled' for status in statuses.values()):
+        elif any(status == 'cancelled' for status in own_statuses.values()):
             outcome = 'cancelled'
             scanning = False
-        elif any(status == 'partial_success' for status in statuses.values()):
+        elif any(status == 'partial_success' for status in own_statuses.values()):
             outcome = 'partial_success'
             scanning = False
         elif self._scan_task_preexisting:
@@ -902,7 +915,7 @@ class MusicAssistantClient(MediaServerBase):
         elif all(
                 task_id in self._scan_task_verified_started_at
                 and status == 'success'
-                for task_id, status in statuses.items()
+                for task_id, status in own_statuses.items()
         ):
             outcome = 'success'
             scanning = False
