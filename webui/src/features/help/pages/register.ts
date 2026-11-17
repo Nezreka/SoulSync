@@ -5,3 +5,11 @@
  */
 
 import './base';
+import './active-downloads';
+import './video-downloads';
+import './requests';
+import './wishlist';
+import './import';
+import './settings';
+import './library';
+import './search';
