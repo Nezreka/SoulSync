@@ -191,8 +191,9 @@ def test_deleting_a_profile_drops_its_choice(db):
 
 def test_finishing_setup_hides_what_wasnt_picked(db):
     """the purpose step promised the rest would be out of the way. finishing
-    setup as a music-only install now hides podcasts, audiobooks and video."""
-    pid = db.create_profile(name=f'e_{os.urandom(3).hex()}')
+    setup as a music-only install now hides podcasts, audiobooks and video.
+    (finishing setup is the admin's: an admin profile runs it)"""
+    pid = db.create_profile(name=f'e_{os.urandom(3).hex()}', is_admin=True)
     c = _client(pid)
     assert c.post('/api/setup/complete', json={'purposes': ['music', 'podcasts']}).get_json()['success']
     assert uf.load_off(db, pid) == ['audiobooks', 'video']

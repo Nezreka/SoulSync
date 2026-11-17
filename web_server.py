@@ -4697,7 +4697,11 @@ def get_art_sources():
 def handle_dev_mode():
     global dev_mode_enabled
     if request.method == 'POST':
-        data = request.get_json()
+        # dev mode is install-wide: reading it is anyone's, switching it on
+        # is the admin's
+        if not is_admin_request():
+            return jsonify({"success": False, "error": "Admin access required"}), 403
+        data = request.get_json(silent=True) or {}
         if data.get('password') == 'hydratest':
             dev_mode_enabled = True
             logger.info("Dev mode activated")
@@ -4945,6 +4949,7 @@ def setup_status_endpoint():
     })
 
 @app.route('/api/setup/complete', methods=['POST'])
+@admin_only
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
     data = request.get_json(silent=True) or {}
@@ -5245,6 +5250,7 @@ def test_dashboard_connection_endpoint():
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
 
 @app.route('/api/detect-media-server', methods=['POST'])
+@admin_only
 def detect_media_server_endpoint():
     data = request.get_json()
     server_type = data.get('server_type')
@@ -5283,6 +5289,7 @@ def verify_plex_token():
 
 
 @app.route('/api/plex/pin/start', methods=['POST'])
+@admin_only
 def start_plex_pin_auth():
     try:
         pinlogin = MyPlexPinLogin(oauth=False)
@@ -5320,6 +5327,7 @@ def start_plex_pin_auth():
 
 
 @app.route('/api/plex/pin/status', methods=['GET'])
+@admin_only
 def get_plex_pin_status():
     request_id = request.args.get('request_id')
     if not request_id:
@@ -5444,6 +5452,7 @@ def get_plex_music_libraries():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/plex/select-music-library', methods=['POST'])
+@admin_only
 def select_plex_music_library():
     """Set the active Plex music library"""
     try:
@@ -5496,6 +5505,7 @@ def get_jellyfin_users():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/select-user', methods=['POST'])
+@admin_only
 def select_jellyfin_user():
     """Set the active Jellyfin user"""
     try:
@@ -5560,6 +5570,7 @@ def get_jellyfin_music_libraries():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/select-music-library', methods=['POST'])
+@admin_only
 def select_jellyfin_music_library():
     """Set the active Jellyfin music library"""
     try:
@@ -5639,6 +5650,7 @@ def get_navidrome_music_folders():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/navidrome/select-music-folder', methods=['POST'])
+@admin_only
 def select_navidrome_music_folder():
     """Set the active Navidrome music folder"""
     try:
