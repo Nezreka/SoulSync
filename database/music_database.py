@@ -28623,6 +28623,25 @@ class MusicDatabase:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_profile ON music_requests (profile_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_status ON music_requests (status)")
+        self._ensure_music_ask_log(cursor)
+
+    @staticmethod
+    def _ensure_music_ask_log(cursor) -> None:
+        """every ask a limited profile made, kept when its wishlist rows or
+        request history are withdrawn or deleted: the request limit counts
+        from here too, so deleting your own rows doesn't hand the asks back.
+        ``kind`` is 'track' (an album or track group key) or 'video'."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_request_ask_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                ask_key TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_ask_log_profile "
+                       "ON music_request_ask_log (profile_id, kind, created_at)")
 
     def music_request_asks_since(self, cursor, profile_id: int, days: int) -> set:
         """the asks (album or single-track group keys) a profile made in the
@@ -28643,6 +28662,11 @@ class MusicDatabase:
                                 'source_type': row['source_type']}))
         cursor.execute("SELECT group_key FROM music_requests WHERE profile_id = ? "
                        "AND created_at >= datetime('now', ?)", (int(profile_id), window))
+        keys.update(r[0] for r in cursor.fetchall())
+        # asks whose rows were withdrawn or deleted since: still asked
+        cursor.execute("SELECT ask_key FROM music_request_ask_log WHERE profile_id = ? "
+                       "AND kind = 'track' AND created_at >= datetime('now', ?)",
+                       (int(profile_id), window))
         keys.update(r[0] for r in cursor.fetchall())
         return keys
 
@@ -28668,7 +28692,13 @@ class MusicDatabase:
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
         if key in asks:
             return False
-        return len(asks) >= quota['limit']
+        if len(asks) >= quota['limit']:
+            return True
+        # a new ask: logged in the add's own transaction, so it counts even
+        # after the rows it makes are withdrawn or deleted
+        cursor.execute("INSERT INTO music_request_ask_log (profile_id, kind, ask_key) "
+                       "VALUES (?, 'track', ?)", (int(profile_id), key))
+        return False
 
     def get_pending_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
         """the not-yet-approved wishlist rows of one profile."""
@@ -28882,6 +28912,7 @@ class MusicDatabase:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_profile ON music_video_requests(profile_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_status ON music_video_requests(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_video ON music_video_requests(video_id)")
+        self._ensure_music_ask_log(cursor)
 
     def add_music_video_request(self, *, profile_id: int, requester_name: str,
                                 video_id: str, url: str, title: str,
@@ -28897,8 +28928,13 @@ class MusicDatabase:
                     "title, channel, artist, thumbnail_url, status) VALUES (?,?,?,?,?,?,?,?,?)",
                     (int(profile_id), requester_name, video_id, url, title,
                      channel, artist, thumbnail_url, "pending"))
+                rid = cursor.lastrowid
+                # the request limit counts this ask from the log, which
+                # outlives a withdrawn or deleted request row
+                cursor.execute("INSERT INTO music_request_ask_log (profile_id, kind, ask_key) "
+                               "VALUES (?, 'video', ?)", (int(profile_id), "video:" + str(video_id)))
                 conn.commit()
-                return cursor.lastrowid
+                return rid
         except Exception as e:
             logger.error("Error recording music video request: %s", e)
             return None
@@ -29015,20 +29051,23 @@ class MusicDatabase:
             return 0
 
     def count_music_video_requests_since(self, profile_id: int, days: int) -> int:
-        """Count video requests filed by a profile in the last N days (for quota)."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                self._ensure_music_video_request_schema(cursor)
-                cursor.execute(
-                    "SELECT COUNT(*) FROM music_video_requests "
-                    "WHERE profile_id = ? AND created_at >= datetime('now', ?)",
-                    (int(profile_id), f"-{int(days)} days"))
-                row = cursor.fetchone()
-                return int(row[0]) if row else 0
-        except Exception as e:
-            logger.error("Error counting music video requests: %s", e)
-            return 0
+        """Count the videos a profile asked for in the last N days (for quota):
+        the request rows plus the ask log, so a withdrawn or deleted request
+        still counts. One video asked twice in the window is one ask. Raises
+        on a db error: the quota check fails closed on it."""
+        window = f"-{int(days)} days"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            self._ensure_music_video_request_schema(cursor)
+            cursor.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT 'video:' || video_id AS k FROM music_video_requests "
+                "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
+                "UNION SELECT ask_key FROM music_request_ask_log "
+                "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
+                (int(profile_id), window, int(profile_id), window))
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

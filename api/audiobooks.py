@@ -592,6 +592,13 @@ def create_audiobooks_blueprint() -> Blueprint:
         the reading this ASIN is, "any" accepts another narrator's edition. It
         is never a list — a book is always exactly one narrator.
         """
+        # a wanted book is grabbed by the wishlist pass, so wanting one is a
+        # download. audiobooks have no request flow yet, so a profile with
+        # downloads off can't add one (music turns these into requests)
+        denied = _download_denied()
+        if denied is not None:
+            return denied
+
         body = request.get_json(silent=True) or {}
         asin = str(body.get("asin") or "").strip()
         if not asin:
@@ -726,6 +733,11 @@ def create_audiobooks_blueprint() -> Blueprint:
         right away, so the missing volumes are on the wishlist when this returns
         rather than after the next daily pass.
         """
+        # following wishlists new releases, which the wishlist pass grabs
+        denied = _download_denied()
+        if denied is not None:
+            return denied
+
         body = request.get_json(silent=True) or {}
         name = str(body.get("name") or "").strip()
         if not name:

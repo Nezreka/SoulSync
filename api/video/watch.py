@@ -296,6 +296,12 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "id required"}), 400
         if tmdb_id <= 0 or kd not in ("m", "t"):
             return jsonify({"success": False, "error": "kd must be m|t with a tmdb id"}), 400
+        # a kids profile grabs only what its rating cap allows
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(
+                get_video_db(), "movie" if kd == "m" else "show", tmdb_id, cap):
+            return restricted_response()
         # Bus-carried fallbacks (already length-capped by the protocol layer).
         fb_title = str(body.get("ti") or "").strip()[:200]
         fb_poster = str(body.get("po") or "").strip()[:300] or None

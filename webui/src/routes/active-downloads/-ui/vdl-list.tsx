@@ -65,6 +65,11 @@ function vdlGotoVideoImport(): void {
   document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-import' }));
 }
 
+/** the server says who may stop a row; an older server sends nothing (yes). */
+function mayCancel(d: VdlDownload): boolean {
+  return d.can_cancel !== false;
+}
+
 function clampPct(v: number | null | undefined): number {
   return Math.max(0, Math.min(100, Number(v) || 0));
 }
@@ -196,7 +201,8 @@ function VdlCard({
   const ctx = vdlParseCtx(d);
   const vt = vdlRowType(d);
   const target = openTarget(d);
-  const canBlock = vdlCanBlock(d);
+  // blocking writes the household's blocklist: admin only, like the server
+  const canBlock = canImport && vdlCanBlock(d);
   const needsImport = d.status === 'import_failed' && canImport;
   const downloading = d.status === 'downloading';
   const sub = rowSub(d, importElapsed, Boolean(inGroup));
@@ -220,7 +226,7 @@ function VdlCard({
           },
         ]
       : []),
-    ...(vdlIsRemovable(d.status)
+    ...(vdlIsRemovable(d.status) && canImport
       ? [{ key: 'remove', label: 'Remove from list', onSelect: () => actions.onRemove(d.id) }]
       : []),
     ...(canBlock
@@ -320,7 +326,7 @@ function VdlCard({
           )}
         </div>
         <div className="dlc-acts">
-          {active ? (
+          {active && mayCancel(d) ? (
             <button
               type="button"
               className="dlc-icon-btn dlc-hover dlc-cancel"
@@ -588,7 +594,7 @@ function VdlSheet({
       ];
 
   const needsImport = d.status === 'import_failed' && canImport;
-  const canBlock = vdlCanBlock(d);
+  const canBlock = canImport && vdlCanBlock(d);
 
   return (
     <DlSheet
@@ -632,7 +638,7 @@ function VdlSheet({
               {d.status === 'failed' ? 'Block and retry' : 'Block release'}
             </DlButton>
           ) : null}
-          {active ? (
+          {active && mayCancel(d) ? (
             <DlButton onClick={() => actions.onCancel(d.id)}>Cancel download</DlButton>
           ) : null}
         </>
@@ -704,16 +710,19 @@ function VdlGroup({
   const headVisible = pack ? vdlMatchesFilter(pack.status, filter) : false;
 
   const onGroupCancel = () => {
-    const ids = episodes.filter((d) => vdlIsActive(d.status)).map((d) => d.id);
+    const ids = episodes.filter((d) => vdlIsActive(d.status) && mayCancel(d)).map((d) => d.id);
     // the pack is the head, not a card in the body. without this, cancelling
     // a batch whose episodes don't exist yet would cancel nothing at all.
-    if (pack && packActive && !ids.includes(pack.id)) ids.push(pack.id);
+    if (pack && packActive && mayCancel(pack) && !ids.includes(pack.id)) ids.push(pack.id);
     onCancel(ids);
   };
+  const cancellable =
+    episodes.some((d) => vdlIsActive(d.status) && mayCancel(d)) ||
+    Boolean(pack && packActive && mayCancel(pack));
   const target = openTarget(first);
   const menu = [
     ...(target ? [{ key: 'open', label: target.label, onSelect: target.run }] : []),
-    ...(act || packActive
+    ...((act || packActive) && cancellable
       ? [
           {
             key: 'cancel',

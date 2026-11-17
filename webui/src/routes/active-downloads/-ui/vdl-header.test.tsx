@@ -125,4 +125,30 @@ describe('video header actions', () => {
     expect(screen.queryByRole('menuitem', { name: /^Clear failed/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: /^Clear finished/ })).not.toBeNull();
   });
+
+  it("a member gets no clear, cancel all or Review: those are the admin's", () => {
+    const p = props({
+      counts: { ...counts, active: 1, completed: 2, failed: 1, removable: 1, total: 4 },
+      hasRunningWork: true,
+      retryableCount: 1,
+      canManage: false,
+    });
+    const { container } = render(<VdlHeader {...p} />);
+    expect(screen.queryByRole('tab', { name: /Review/ })).toBeNull();
+    openMenu(container);
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(items).toEqual(['Retry failed (1)']);
+  });
+
+  it('an admin keeps them', () => {
+    const p = props({
+      counts: { ...counts, active: 1, completed: 2, failed: 1, removable: 1, total: 4 },
+      hasRunningWork: true,
+    });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(items).toContain('Clear finished (2)');
+    expect(items).toContain('Cancel all (1)');
+  });
 });

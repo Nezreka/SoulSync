@@ -82,7 +82,7 @@ The **can download** toggle controls whether a profile can trigger downloads dir
 
 ## Request quotas
 
-Set a **request limit** per profile — e.g. 5 requests per 7 days. The request page shows how many are left; once the quota is used up, new asks are refused until the window resets. Admins are never limited. Quotas keep one enthusiastic family member from flooding the request queue.
+Set a **request limit** per profile — e.g. 5 requests per 7 days. The request page shows how many are left; once the quota is used up, new asks are refused until the window resets. Every ask counts from when it was made, so withdrawing a request or clearing it from the history doesn't hand it back. Admins are never limited. Quotas keep one enthusiastic family member from flooding the request queue.
 
 ## Kids limits
 

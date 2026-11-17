@@ -4896,6 +4896,8 @@ Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin us
 - A profile that can download gets it straight away: a movie goes on its video wishlist, and for a show every aired episode of the seasons asked for that isn't in the library yet. Asking for the newest season also follows the show, so its next episodes come too.
 - A profile that can't download files a video request that waits on the **Requests** page. SoulSync requests pick a whole-show policy, so when the seasons asked for aren't all, the first or the newest, the request asks for every season and the note says which ones were picked. The admin can change it when approving.
 - Request limits apply like they do in SoulSync.
+- A kids profile's rating cap applies everywhere: discover, search, similar, credits and recently added keep only what the library rates under it, and an over-cap title reads as not found.
+- The request list shows the acting user's own requests. An admin sees everyone's.
 - Cards show **Available** when it's in your library, **Partially available** for a show with episodes missing, **Processing** when it's on a wishlist or followed, and **Pending** while a request waits.
 - Downloads use your normal quality profiles. There are no Radarr or Sonarr servers to pick and no separate 4K request.
 

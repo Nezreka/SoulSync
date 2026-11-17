@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type {
   AudiobookItem,
   AudiobookNarratorMode,
@@ -99,6 +101,12 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       if (!asin || busy.has(asin)) return wishlisted.has(asin);
 
       const wanted = !wishlisted.has(asin);
+      // the add button is hidden for a profile with downloads off; a stray
+      // click (a stale page after a profile switch) says why instead of 403ing
+      if (wanted && profileAsksFirst()) {
+        window.showToast?.("Downloads are off for this profile, so books can't be added.", 'info');
+        return false;
+      }
       setBusy((current) => new Set(current).add(asin));
       // Optimistic: the button answers immediately and rolls back if the
       // server disagrees, because a wishlist toggle that waits on an indexer
