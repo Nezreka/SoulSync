@@ -25201,9 +25201,16 @@ def _emit_tool_progress_loop():
                     formatted.append(f"[{ts}] {icon} {title} - {sub}" if sub else f"[{ts}] {icon} {title}")
                 if not formatted:
                     formatted = ["No recent activity.", "Sync and download operations..."]
-                socketio.emit('tool:logs', {'logs': formatted})
+                # the whole install's activity: the admin's tools page only
+                socketio.emit('tool:logs', {'logs': formatted}, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting logs: {e}")
+
+def _push_live_log_lines(lines, source):
+    """send tailed log lines to the admins who subscribed (the logs:live
+    room), never to every socket: logs carry paths, usernames and urls."""
+    socketio.emit('logs:live', {'lines': lines, 'source': source}, to='logs:live')
+
 
 def _emit_live_log_loop():
     """Background thread that tails app.log and pushes new lines via WebSocket."""
@@ -25248,10 +25255,7 @@ def _emit_live_log_loop():
 
             if new_lines:
                 # Cap at 50 lines per push to avoid flooding
-                socketio.emit('logs:live', {
-                    'lines': new_lines[-50:],
-                    'source': source,
-                })
+                _push_live_log_lines(new_lines[-50:], source)
         except Exception as e:
             logger.debug(f"Error in live log emitter: {e}")
 
