@@ -1,6 +1,7 @@
 /**
  * Downloads (music): why things are stuck, from the rows the page already
- * polls (/api/downloads/all, -adl.api.ts fetchDownloads) and their
+ * polls (/api/downloads/all, -adl.api.ts fetchDownloads; read from the page's
+ * feed while it is mounted, polled here only when it isn't) and their
  * live_detail (core/downloads/live_detail.py): the raw slskd queue state,
  * how long it has waited, the uploader's slots and queue, held imports. A
  * not-found row reads its search breakdown (task_worker.py error_message)
@@ -29,6 +30,7 @@ import {
   fetchReviewQueueSummary,
   fetchTaskDetail,
 } from '@/routes/active-downloads/-adl.api';
+import { musicDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { downloadFailureSummary } from '@/routes/active-downloads/-adl.helpers';
 import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
 
@@ -51,6 +53,7 @@ import {
   sentence,
   spoken,
   toast,
+  useFeedOrPoll,
   useHealthFindings,
   useLive,
 } from './kit';
@@ -590,7 +593,8 @@ export function musicDownloadAnswers(
 }
 
 export function useMusicDownloadAnswers(ctx: AnswerContext): PageAnswer[] {
-  const rows = useLive(fetchDownloads, 3000);
+  // the page's own 2s poll when it is mounted, else ours
+  const rows = useFeedOrPoll(musicDownloadsFeed, fetchDownloads, 3000);
   const review = useLive(ctx.isAdmin ? fetchReviewQueueSummary : null, 15_000);
   const health = useHealthFindings(ctx.isAdmin);
 

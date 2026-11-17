@@ -1,6 +1,7 @@
 /**
  * Downloads (video): the rows the video view polls
- * (/api/video/downloads/active, -vdl.api.ts fetchVideoDownloads), read the
+ * (/api/video/downloads/active, -vdl.api.ts fetchVideoDownloads; read from
+ * the view's feed while it is mounted, polled here only when it isn't), read the
  * way the page's own journey reads them (-dl.format.ts videoJourney): a
  * free-slot wait with the peer's slots and queue (search_ctx.peer), a
  * transfer with no progress for 10 minutes, a re-search, a failure with its
@@ -21,6 +22,7 @@ import {
   fetchVideoDownloads,
   retryVideoDownload,
 } from '@/routes/active-downloads/-vdl.api';
+import { videoDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import {
   vdlCanBlock,
   vdlCardTitle,
@@ -47,8 +49,8 @@ import {
   sentence,
   stampMs,
   toast,
+  useFeedOrPoll,
   useHealthFindings,
-  useLive,
 } from './kit';
 
 /** the page's own stall rule (videoJourney): no progress for 10 minutes */
@@ -378,7 +380,8 @@ export function videoDownloadAnswers(
 }
 
 export function useVideoDownloadAnswers(ctx: AnswerContext): PageAnswer[] {
-  const rows = useLive(fetchVideoDownloads, 3000);
+  // the video view's own poll when it is mounted, else ours
+  const rows = useFeedOrPoll(videoDownloadsFeed, fetchVideoDownloads, 3000);
   const health = useHealthFindings(ctx.isAdmin);
   if (!rows.loaded) return [];
   return videoDownloadAnswers(

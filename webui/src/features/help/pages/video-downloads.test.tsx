@@ -7,11 +7,12 @@
  * the why without titles or buttons.
  */
 
-import { fireEvent, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { VdlDownload } from '@/routes/active-downloads/-vdl.types';
 
+import { videoDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { HttpResponse, http, server } from '@/test/msw';
 
 import { answer, asProfile, renderAnswers, titles } from './answers.test-utils';
@@ -77,11 +78,16 @@ const ALIEN: VdlDownload = {
 const DONE: VdlDownload = { id: 16, kind: 'movie', title: 'Up', status: 'completed' };
 
 let rows: VdlDownload[] = [];
+let polls = 0;
 beforeEach(() => {
+  polls = 0;
   rows = [];
   asProfile(1, true);
   server.use(
-    http.get('/api/video/downloads/active', () => HttpResponse.json({ downloads: rows })),
+    http.get('/api/video/downloads/active', () => {
+      polls += 1;
+      return HttpResponse.json({ downloads: rows });
+    }),
     http.get('/api/help/health', () => HttpResponse.json({ status: 'ok', findings: [] })),
   );
 });
@@ -242,5 +248,20 @@ describe('downloads answers (video)', () => {
     );
     expect(container.textContent).not.toMatch(/Dune|Arrival|Heat|reelbox/);
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+});
+
+describe('one poll, not two', () => {
+  it('with the video view mounted, the answers read its poll and send none; without it, their own', async () => {
+    const detach = videoDownloadsFeed.attach(vi.fn());
+    videoDownloadsFeed.publish({ downloads: [DUNE] });
+    rows = [DONE];
+    const { container } = renderAnswers(useVideoDownloadAnswers);
+    await waitFor(() => expect(titles(container)).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(polls).toBe(0);
+    act(() => detach());
+    await waitFor(() => expect(polls).toBeGreaterThan(0));
+    await waitFor(() => expect(titles(container)).toEqual([]));
   });
 });

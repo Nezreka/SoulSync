@@ -7,7 +7,9 @@
  * a poll here costs nothing when help is closed.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+
+import type { DownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 
 import { getHealth, request, type HealthFinding, type HealthFix } from '../api';
 import { openSettings as openSettingsTab, runFix as runHealthFix } from '../fixes';
@@ -68,6 +70,23 @@ export function useLive<T>(load: (() => Promise<T>) | null, everyMs: number): Li
   }, [enabled, everyMs, tick]);
 
   return { ...state, reload: () => setTick((n) => n + 1) };
+}
+
+/**
+ * The rows a page already polls, when that page is mounted: read its feed
+ * (routes/active-downloads/-dl.feed.ts) and send nothing. When it isn't,
+ * poll `load` every `everyMs` like useLive. reload asks the page for a poll
+ * then, or polls here.
+ */
+export function useFeedOrPoll<T>(
+  feed: DownloadsFeed<T>,
+  load: () => Promise<T>,
+  everyMs: number,
+): Live<T> {
+  const snap = useSyncExternalStore(feed.subscribe, feed.snapshot, feed.snapshot);
+  const own = useLive(snap.live ? null : load, everyMs);
+  if (!snap.live) return own;
+  return { data: snap.data, loaded: snap.data !== undefined, reload: feed.refresh };
 }
 
 /** a plain GET through the help client; undefined on any failure */

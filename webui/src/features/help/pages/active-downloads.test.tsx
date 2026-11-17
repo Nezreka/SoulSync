@@ -6,11 +6,13 @@
  * wrong; a member gets the why without names or actions.
  */
 
-import { fireEvent, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, renderHook, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AdlDownload } from '@/routes/active-downloads/-adl.types';
 
+import { useAdlDownloads } from '@/routes/active-downloads/-adl.use-downloads';
+import { musicDownloadsFeed } from '@/routes/active-downloads/-dl.feed';
 import { HttpResponse, http, server } from '@/test/msw';
 
 import { readSearchBreakdown, useMusicDownloadAnswers } from './active-downloads';
@@ -98,15 +100,19 @@ let review = { success: true, quarantine: 0, unverified: 0, total: 0 };
 let findings: unknown[] = [];
 const healthCalls = vi.fn();
 
+let polls = 0;
+
 beforeEach(() => {
+  polls = 0;
   rows = [];
   review = { success: true, quarantine: 0, unverified: 0, total: 0 };
   findings = [];
   healthCalls.mockReset();
   asProfile(1, true);
   server.use(
-    http.get('/api/downloads/all', () =>
-      HttpResponse.json({
+    http.get('/api/downloads/all', () => {
+      polls += 1;
+      return HttpResponse.json({
         success: true,
         downloads: rows,
         batches: [
@@ -135,8 +141,8 @@ beforeEach(() => {
             queued: 0,
           },
         ],
-      }),
-    ),
+      });
+    }),
     http.get('/api/review-queue/summary', () => HttpResponse.json(review)),
     http.get('/api/downloads/task/:id/detail', ({ params }) =>
       HttpResponse.json({
@@ -332,5 +338,52 @@ describe('readSearchBreakdown', () => {
   it('sums the results that came back and reads the query count', () => {
     expect(readSearchBreakdown(TEARDROP.error)).toEqual({ queries: 3, results: 22 });
     expect(readSearchBreakdown('')).toEqual({ queries: null, results: 0 });
+  });
+});
+
+describe('one poll, not two', () => {
+  const SNAPSHOT = { success: true, downloads: [] as AdlDownload[], batches: [] };
+
+  it('with the Downloads page mounted, the answers read its poll and send none', async () => {
+    const pageRefresh = vi.fn();
+    const detach = musicDownloadsFeed.attach(pageRefresh);
+    try {
+      musicDownloadsFeed.publish({ ...SNAPSHOT, downloads: [SCHISM, PARABOLA, LATERALUS] });
+      const { container } = renderAnswers(useMusicDownloadAnswers);
+      await waitFor(() =>
+        expect(titles(container)[0]).toBe('Why are 3 downloads stuck in Queued?'),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      expect(polls).toBe(0);
+      // the page's next poll is the answers' next read
+      act(() => musicDownloadsFeed.publish({ ...SNAPSHOT, downloads: [DONE] }));
+      await waitFor(() => expect(titles(container)).toEqual(['Where do finished downloads go?']));
+      expect(polls).toBe(0);
+    } finally {
+      detach();
+    }
+  });
+
+  it('once the page goes, the answers poll for themselves', async () => {
+    const detach = musicDownloadsFeed.attach(vi.fn());
+    musicDownloadsFeed.publish({ ...SNAPSHOT, downloads: [DONE] });
+    rows = [SCHISM, PARABOLA, LATERALUS];
+    const { container } = renderAnswers(useMusicDownloadAnswers);
+    await waitFor(() => expect(titles(container)).toEqual(['Where do finished downloads go?']));
+    expect(polls).toBe(0);
+    act(() => detach());
+    await waitFor(() => expect(polls).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(titles(container)[0]).toBe('Why are 3 downloads stuck in Queued?'),
+    );
+  });
+
+  it('the page publishes each poll while it is mounted, and stops when it unmounts', async () => {
+    rows = [DONE];
+    const page = renderHook(() => useAdlDownloads());
+    expect(musicDownloadsFeed.snapshot().live).toBe(true);
+    await waitFor(() => expect(musicDownloadsFeed.snapshot().data?.downloads).toEqual([DONE]));
+    page.unmount();
+    expect(musicDownloadsFeed.snapshot()).toEqual({ live: false, data: undefined });
   });
 });
