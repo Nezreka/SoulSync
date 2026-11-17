@@ -1,6 +1,7 @@
 import type { SearchVideo } from '../-search.types';
 
 import { formatVideoDuration, formatViewCount } from '../-search.helpers';
+import { videoWatchUrl } from '../../artist-detail/-artist-detail.videos';
 import { DownloadIcon } from './search-icons';
 import styles from './search.module.css';
 
@@ -32,7 +33,9 @@ export function VideoGrid({
 }: {
   videos: SearchVideo[];
   progress: Record<string, VideoProgress>;
-  onDownload: (video: SearchVideo) => void;
+  /** absent when getting music isn't part of the profile (#2166): the
+   *  card plays the video on YouTube instead of offering a dead download */
+  onDownload?: (video: SearchVideo) => void;
 }) {
   return (
     <section className={styles.section} id="enh-videos-section">
@@ -61,8 +64,17 @@ export function VideoGrid({
                 className={styles.video}
                 data-video-id={id}
                 data-state={state}
-                aria-label={`Download ${video.title}`}
-                onClick={() => onDownload(video)}
+                aria-label={
+                  onDownload ? `Download ${video.title}` : `Watch ${video.title} on YouTube`
+                }
+                onClick={() => {
+                  if (onDownload) {
+                    onDownload(video);
+                    return;
+                  }
+                  const url = videoWatchUrl(video);
+                  if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                }}
               >
                 <span className={styles.videoThumb}>
                   {video.thumbnail ? (
@@ -75,7 +87,7 @@ export function VideoGrid({
                       }}
                     />
                   ) : null}
-                  {state === 'idle' ? (
+                  {state === 'idle' && onDownload ? (
                     <span className={styles.videoAction} aria-hidden="true">
                       <DownloadIcon />
                     </span>

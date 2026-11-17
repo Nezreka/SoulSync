@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
 
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
-import { acquireVerb } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import { sourceLabel, splitTitleExtra } from '../-search.helpers';
 import { SOURCE_LABELS } from '../-search.types';
@@ -257,8 +257,10 @@ export function TrackRow({
 }) {
   const img = useImage(image);
   const title = splitTitleExtra(name);
-  // a profile that can't download asks: the same modal, a request instead
-  const verb = acquireVerb();
+  // a profile that can't download asks: the same modal, a request instead.
+  // one that can't get music at all (#2166) has no download button; the row
+  // still opens the album to see what's in it
+  const { verb, cantRequest } = useMusicGet();
   return (
     <div
       className={styles.trackRow}
@@ -316,18 +318,22 @@ export function TrackRow({
       ) : (
         <span aria-hidden="true" />
       )}
-      <button
-        type="button"
-        className={styles.rowDownload}
-        aria-label={`${verb} ${name}`}
-        title={verb}
-        onClick={(event) => {
-          event.stopPropagation();
-          onOpen();
-        }}
-      >
-        <DownloadIcon />
-      </button>
+      {cantRequest ? (
+        <span aria-hidden="true" />
+      ) : (
+        <button
+          type="button"
+          className={styles.rowDownload}
+          aria-label={`${verb} ${name}`}
+          title={verb}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen();
+          }}
+        >
+          <DownloadIcon />
+        </button>
+      )}
     </div>
   );
 }

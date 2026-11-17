@@ -3,7 +3,7 @@ import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Skeleton } from '@/components/primitives';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { profileAsksFirst, useMusicGet } from '@/platform/shell/download-rights';
 
 import type { BasicSource } from '../-basic.types';
 import type {
@@ -210,6 +210,10 @@ export function SearchPage() {
     },
     [downloadVideo, requestVideo],
   );
+  // getting music isn't part of the profile (#2166): video cards play on
+  // YouTube instead of offering a download the server would refuse
+  const { cantRequest } = useMusicGet();
+  const videoAcquire = cantRequest ? undefined : handleVideoAcquire;
 
   // Requested videos show the saved tick so the card stops looking clickable.
   // Display-only: the grid's states are download-shaped, and a requested video
@@ -628,7 +632,7 @@ export function SearchPage() {
                         if (row) playOwnedTrack(row);
                         else void streamSearchTrack(track);
                       }}
-                      onVideoDownload={handleVideoAcquire}
+                      onVideoDownload={videoAcquire}
                     />
                   </div>
                 ) : null}
@@ -739,7 +743,7 @@ export function SearchPage() {
                     if (row) playOwnedTrack(row);
                     else void streamSearchTrack(track);
                   }}
-                  onVideoDownload={handleVideoAcquire}
+                  onVideoDownload={videoAcquire}
                 />
               </div>
             </div>

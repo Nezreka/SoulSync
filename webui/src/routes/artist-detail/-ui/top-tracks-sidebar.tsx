@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { getShellBridge } from '@/platform/shell/bridge';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import type { ArtistDetailTrack } from '../-artist-detail.types';
 
@@ -46,9 +46,12 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
     return () => controller.abort();
   }, [artistId, artistName]);
 
+  // a profile that asks first: the same adds, sent as requests. one that
+  // can't get music at all (#2166) gets no download buttons here
+  const { asksFirst, cantRequest } = useMusicGet();
+  const offersGet = state.downloadable && !cantRequest;
+
   if (state.tracks.length === 0) return null;
-  // a profile that can't download: the same adds, sent as requests
-  const asksFirst = profileAsksFirst();
 
   const play = (track: ArtistDetailTrack) => {
     // Read at click time, not render time: the vanilla shell attaches the
@@ -140,7 +143,7 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
               className="hero-top-track-add"
               size={12}
             />
-            {state.downloadable ? (
+            {offersGet ? (
               <button
                 type="button"
                 className="hero-top-track-download"
@@ -153,14 +156,14 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
               >
                 ⬇
               </button>
-            ) : (
+            ) : state.downloadable ? null : (
               // Last.fm rows are display-only — a playcount, never a download.
               <span className="hero-top-track-plays">{formatPlaycount(track.playcount)}</span>
             )}
           </div>
         ))}
       </div>
-      {state.downloadable ? (
+      {offersGet ? (
         <button
           type="button"
           className="hero-top-tracks-download-all"

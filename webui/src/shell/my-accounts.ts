@@ -21,9 +21,16 @@
  * sidebar weather (#2163: the server answers each profile with its own).
  */
 
+import {
+  type CanDoRow,
+  describePermissions,
+  loadAdminName,
+  requestLimit,
+} from '@/platform/shell/my-permissions-core';
 import { appURL } from '@/platform/url-base';
 
 import { escapeHtml, toast } from './html';
+import { PERMS_CHANGED_EVENT, getMyPermissions, loadMyPermissions } from './my-permissions';
 
 type ServiceId = 'spotify' | 'tidal' | 'listenbrainz' | 'lastfm';
 
@@ -189,6 +196,9 @@ const _ma: {
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
   scrobbling: MaScrobbling | null;
   weather: MaWeather | null;
+  /** asks used in the current window, for "5 a week · 2 used" */
+  asksUsed: number | null;
+  adminName: string;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
 } = {
@@ -198,6 +208,8 @@ const _ma: {
   imports: {},
   scrobbling: null,
   weather: null,
+  asksUsed: null,
+  adminName: '',
   open: null,
   poll: null,
 };
@@ -276,7 +288,14 @@ export function openMyAccountsModal(): void {
   // beat the shell to knowing who is signed in, so the header redraws when it
   // finds out instead of staying on "?"
   window.addEventListener(PROFILE_CONTEXT_CHANGED_EVENT, _maRefreshHeader);
+  // an admin's change reaches the open card
+  window.addEventListener(PERMS_CHANGED_EVENT, _maRefreshCanDo);
   void _maLoad();
+}
+
+function _maRefreshCanDo(): void {
+  const box = document.getElementById('ma-cando');
+  if (box) box.outerHTML = _maCanDoSection();
 }
 
 function _maRefreshHeader(): void {
@@ -289,6 +308,7 @@ export function closeMyAccountsModal(): void {
   if (o) o.classList.add('hidden');
   document.removeEventListener('keydown', _maOnKeydown);
   window.removeEventListener(PROFILE_CONTEXT_CHANGED_EVENT, _maRefreshHeader);
+  window.removeEventListener(PERMS_CHANGED_EVENT, _maRefreshCanDo);
   _maStopPoll();
 }
 
@@ -320,6 +340,7 @@ async function _maLoad(): Promise<void> {
     _maJson<OidcStatus>('/api/profiles/me/oidc'),
     _maJson<MaScrobbling>('/api/profiles/me/scrobbling'),
     _maJson<MaWeather>('/api/weather'),
+    _maLoadCanDo(),
   ]);
   _ma.data = data || { connections: {}, is_admin: false };
   _ma.server = server;
@@ -338,6 +359,22 @@ async function _maLoad(): Promise<void> {
     else toast(last.error || 'Connecting failed. Try again.', 'error');
   }
   await _maLoadImports();
+}
+
+/** what you can do (#2166): the server's map, fresh, and how many asks the
+ * window has used when there's a limit */
+async function _maLoadCanDo(): Promise<void> {
+  const [perms, admin] = await Promise.all([
+    loadMyPermissions({ force: true }).catch(() => getMyPermissions()),
+    loadAdminName(),
+  ]);
+  _ma.adminName = admin;
+  _ma.asksUsed = null;
+  if (requestLimit(perms)) {
+    const q = await _maJson<{ quota?: { used?: number } | null }>('/api/requests/music/quota');
+    const used = q?.quota?.used;
+    _ma.asksUsed = typeof used === 'number' ? used : null;
+  }
 }
 
 /** who you are on the media server. the ACTIVE server decides the card, a
@@ -478,6 +515,7 @@ function _maRender(): void {
     return;
   }
   body.innerHTML = `
+    ${_maCanDoSection()}
     ${_maListeningCard()}
     <section class="ma-section" aria-labelledby="ma-server-h">
       <h4 class="ma-section-title" id="ma-server-h">Media server</h4>
@@ -493,6 +531,62 @@ function _maRender(): void {
   for (const s of ['listenbrainz', 'lastfm'] as const) _maPaintImport(s);
   const focus = body.querySelector<HTMLElement>('.ma-row.is-open input, .ma-row.is-open select');
   focus?.focus();
+}
+
+const _CAN_ICONS: Record<CanDoRow['id'], string> = {
+  music:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  movies:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M7 3v18M17 3v18M2 9h5M17 9h5M2 15h5M17 15h5"/></svg>',
+  tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M17 2l-5 5-5-5"/></svg>',
+  books:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>',
+  requests:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>',
+};
+
+/** what you can do (#2166): the same plain-words summary the admin's editor
+ * shows, read-only, with who to ask when something is off. built from the
+ * server's map, so it is the truth, not a copy of a form */
+export function _maCanDoSection(): string {
+  const perms = getMyPermissions();
+  if (perms.isAdmin) return '';
+  const can = describePermissions(perms, { used: _ma.asksUsed });
+  const rows = can.rows
+    .map((r) => {
+      const lead = r.strong
+        ? `<b>${escapeHtml(r.lead)}</b>`
+        : r.off
+          ? `<span class="ma-can-off">${escapeHtml(r.lead)}</span>`
+          : escapeHtml(r.lead);
+      const detail = r.detail.map((d) => ` · ${escapeHtml(d)}`).join('');
+      return `
+        <div class="ma-can-row" data-can="${r.id}">
+          <span class="ma-can-icon">${_CAN_ICONS[r.id]}</span>
+          <div class="ma-can-text">
+            <div class="ma-can-k">${escapeHtml(r.label)}</div>
+            <div class="ma-can-v">${lead}${detail}</div>
+          </div>
+        </div>`;
+    })
+    .join('');
+  const who = escapeHtml(_ma.adminName || 'your admin');
+  const ask = can.anyOff
+    ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}. Changes reach you right away.</p>`
+    : '';
+  const never = can.never.length
+    ? `<div class="ma-can-never"><b>Not part of your profile:</b> ${escapeHtml(can.never.join(', '))}.</div>`
+    : '';
+  return `
+    <section class="ma-section" id="ma-cando" aria-labelledby="ma-cando-h">
+      <h4 class="ma-section-title" id="ma-cando-h">What you can do</h4>
+      <div class="ma-can">
+        <p class="ma-can-lead">${escapeHtml(can.sentence)}</p>
+        ${rows}
+        ${never}
+        ${ask}
+      </div>
+    </section>`;
 }
 
 /** sign in with oidc: connect this profile to your account at the provider,

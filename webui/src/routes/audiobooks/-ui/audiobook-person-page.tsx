@@ -156,8 +156,8 @@ export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
                 type="button"
                 className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
                 // following wishlists their new books to download: hidden for a
-                // profile with downloads off (unfollowing stays)
-                data-download-action={watching ? undefined : ''}
+                // profile that can't get books (unfollowing stays)
+                data-books-action={watching ? undefined : ''}
                 disabled={followBusy}
                 onClick={() => void toggleFollow()}
                 title={

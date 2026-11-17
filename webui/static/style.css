@@ -42025,14 +42025,46 @@ body.downloads-disabled [onclick*="startWishlistMissingTracksProcess"],
 body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]),
 /* the react pages hash their class names, so podcast and audiobook
    download buttons carry this attribute instead of a class */
-body.downloads-disabled [data-download-action] {
+body.downloads-disabled [data-download-action],
+/* getting music isn't part of this profile (#2166): the Request that
+   stands in for a download goes too, no dead buttons */
+body[data-music-get="none"] [data-request-action],
+/* books and podcasts follow their own permission, not the music one */
+body[data-books-get="none"] [data-books-action],
+body[data-podcasts-get="none"] [data-podcasts-action] {
     display: none !important;
 }
 
-/* ...except where the download is really a wishlist add: for these
-   profiles that's a request, so the control stays and says Request */
-body.downloads-disabled .discog-download-btn[data-request-action] {
+/* ...except where the download is really a wishlist add: for a profile
+   that asks first that's a request, so the control stays and says Request */
+body.downloads-disabled[data-music-get="ask"] .discog-download-btn[data-request-action] {
     display: flex !important;
+}
+
+/* "3 of 5 asks left this week" beside the Request button (#2166) */
+.music-asks-left {
+    align-self: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.music-asks-left:empty {
+    display: none;
+}
+
+/* the download modal for a profile that can't get music: what's in it and
+   what they own still shows, with one calm line where the buttons were */
+.music-get-off-note {
+    display: none;
+}
+body[data-music-get="none"] .music-get-off-note {
+    display: block;
+    flex: 1 1 100%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), 0.08);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 /* Profile Indicator in Sidebar */
@@ -62266,6 +62298,36 @@ select.ma-input { appearance: auto; }
 .ma-switch input:focus-visible + span { outline: 2px solid rgba(var(--accent-light-rgb), 0.8); outline-offset: 2px; }
 
 .ma-foot { margin: 0; padding: 0 4px 26px; font-size: 12px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.45); }
+
+/* What you can do (#2166): the member's own summary, read-only. the same
+   plain words the admin's editor shows in its right column */
+.ma-can {
+    padding: 18px 20px 16px; border-radius: var(--radius-xl);
+    background: var(--white-a03); border: 1px solid var(--white-a06);
+}
+.ma-can-lead { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.82); }
+.ma-can-row {
+    display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start;
+    padding: 11px 0; border-top: 1px solid var(--white-a06);
+}
+.ma-can-icon {
+    width: 28px; height: 28px; border-radius: var(--radius-md); display: grid; place-items: center;
+    background: var(--white-a06); color: rgba(var(--text-bright-rgb), 0.8);
+}
+.ma-can-icon svg {
+    width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round;
+}
+.ma-can-k { font-size: 13.5px; font-weight: 600; }
+.ma-can-v { margin-top: 2px; font-size: 13px; line-height: 1.45; color: rgba(var(--text-bright-rgb), 0.62); }
+.ma-can-v b { color: rgb(var(--accent-light-rgb)); font-weight: 500; }
+.ma-can-off { color: rgba(var(--text-bright-rgb), 0.45); }
+.ma-can-never {
+    margin-top: 10px; padding: 11px 14px; border-radius: var(--radius-lg); background: var(--white-a04);
+    font-size: 12.5px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.62);
+}
+.ma-can-never b { color: rgba(var(--text-bright-rgb), 0.82); font-weight: 600; }
+.ma-can-ask { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.55); }
 
 @media (max-width: 520px) {
     .ma-head { padding: 22px 20px 18px; }

@@ -63,6 +63,7 @@ import {
   openPersonalSettings,
   saveMyAccountToken,
 } from './my-accounts';
+import { installMyPermissions } from './my-permissions';
 import { initOidcOnlyAdmin, refreshOidcOnlySettingsStatus } from './oidc-only';
 import { initOidcAdminStatus, initOidcSignIn } from './oidc-signin';
 import './download-modal-library';
@@ -193,6 +194,8 @@ export const SHELL_WINDOW_EXPORTS = {
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 // window.SoulSyncFeatures (#1909): what this profile chose to see
 installFeatures();
+// window.SoulSyncPerms (#2166): what this profile may do, from the server
+installMyPermissions();
 // the Settings page's keyboard, and password managers kept off its fields
 startSettingsShell();
 startDiscoverInboxBadge();
