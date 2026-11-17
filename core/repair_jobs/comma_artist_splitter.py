@@ -166,8 +166,9 @@ class CommaArtistSplitterJob(RepairJob):
         '- Keep Whole Names: Names that are one artist and never split, separated by ";" '
         '(e.g. "K/DA; Above & Beyond"). A finding\'s "One artist" and "Edit split" add to it\n'
         '- Dry Run: When enabled, only reports splits without changing your library\n'
-        '- Request Re-tag / Request Reorganize: after a split, ask those jobs to check the '
-        'affected files'
+        '- Request Re-tag / Request Reorganize: after every split (a finding applied here, or '
+        'a new download\'s artist split after the import), run those jobs for exactly the '
+        'affected files, also when their own schedule is off'
     )
     icon = 'repair-icon-artist'
     default_enabled = False

@@ -327,6 +327,8 @@ def test_the_fix_splits_the_artist_in_the_catalogue_only(db, no_fetch):
     assert lead == 'Camellia' and credited == {'Camellia', 'Toby Fox'} and gone is None
     assert worker.asked == [(sorted(tracks), {'retag': True, 'reorganize': True,
                                               'reason': 'Split Artists "Camellia, Toby Fox"'})]
+    assert out['message'] == ('"Camellia, Toby Fox" split into 2 artists; '
+                              'Re-tag and Reorganize will check 2 file(s)')
 
 
 def test_projection_follows_the_jobs_settings(db, no_fetch):

@@ -152,11 +152,30 @@ def test_request_projection_queues_both_writers_scoped_to_the_files(db):
     assert len(worker._force_run_scopes['library_reorganize']['file_paths']) == 2
 
 
-def test_request_projection_never_forces_a_job_the_user_switched_off(db):
+def test_a_heal_asks_the_writers_even_without_their_schedule(db):
+    # both jobs ship switched off: that switch is their library-wide
+    # schedule. Whether a heal asks is the healer's own setting
     tracks = _album(db, 'Camellia', 'One')
     worker = _bare_worker(db, enabled=False)
-    assert worker.request_projection(tracks)['queued'] == []
-    assert worker._force_run_queue == []
+    assert worker.request_projection(tracks)['queued'] == ['retag', 'reorganize']
+    assert worker._force_run_queue == ['library_retag', 'library_reorganize']
+    assert worker.request_projection(_album(db, 'Toby Fox', 'Two'),
+                                     retag=False, reorganize=False)['queued'] == []
+
+
+def test_split_artists_settings_decide_for_every_split_heal():
+    from core.repair_worker import split_projection
+
+    class Cfg:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def get(self, key, default=None):
+            return self.settings if key == 'repair.jobs.comma_artist_splitter.settings' else default
+    assert split_projection(None) == {'retag': True, 'reorganize': True}
+    assert split_projection(Cfg({})) == {'retag': True, 'reorganize': True}
+    assert split_projection(Cfg({'request_reorganize': False})) == \
+        {'retag': True, 'reorganize': False}
 
 
 def test_request_projection_with_nothing_to_project(db):

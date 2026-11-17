@@ -43,7 +43,9 @@ Re-tag and / or Reorganize scoped to the files of the tracks it changed
 Those jobs then act by their own settings: by default they file findings,
 they write only when the user switched their automatic mode on, and they
 apply their own rules (hand-set values, hand-tagged files, locks, history).
-A job the user switched off is not forced. Requests for one job that arrive
+Their on / off switch is their library-wide schedule, not a veto: whether a
+heal asks is the healer's own setting (Split Artists: Request Re-tag /
+Request Reorganize, both on by default). Requests for one job that arrive
 before it starts add up to one run over all their files. If a projection
 fails or waits, the corrected catalogue stays, and the next run of the job
 finds the same files again.
@@ -73,8 +75,8 @@ Scoped operations already available:
   owns the transaction
 - `RepairWorker.request_projection(track_ids, retag=..., reorganize=...)`:
   queue the projection jobs scoped to those tracks' files
-- `run_job_now(job_id, scope={'file_paths': [...]}, respect_enabled=True)`:
-  a scoped run of any job that declares `supports_file_scope`
+- `run_job_now(job_id, scope={'file_paths': [...]})`: a scoped run of any
+  job that declares `supports_file_scope`
 
 Split Artists is the reference: it scans library artists, decides with the
 credit kernel (stored credits, the credit fetcher on request, album anchors,

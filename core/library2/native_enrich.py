@@ -1534,13 +1534,15 @@ def settle_new_album_artist(database: Any, album_id: int, *,
             logger.info("settled album %s artist %r into %d artists",
                         album_id, row[1], len(result.get("component_ids") or ()))
             # the files still sit under the combined name: Re-tag and
-            # Reorganize check them by their own settings
+            # Reorganize check them, as Split Artists' settings ask
             try:
-                from core.repair_worker import active_repair_worker
+                from core.repair_worker import active_repair_worker, split_projection
                 worker = active_repair_worker()
                 if worker is not None:
-                    worker.request_projection(result.get("track_ids") or (),
-                                              reason=f"New album artist {row[1]!r} split")
+                    worker.request_projection(
+                        result.get("track_ids") or (),
+                        **split_projection(getattr(worker, "_config_manager", None)),
+                        reason=f"New album artist {row[1]!r} split")
             except Exception as exc:  # noqa: BLE001 - the catalogue change stands
                 logger.debug("projection for album %s not requested: %s", album_id, exc)
         return result

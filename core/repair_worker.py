@@ -833,6 +833,28 @@ def active_repair_worker() -> Optional["RepairWorker"]:
 PROJECTION_JOBS = {"retag": "library_retag", "reorganize": "library_reorganize"}
 
 
+_PROJECTION_NAMES = {"retag": "Re-tag", "reorganize": "Reorganize"}
+
+
+def split_projection(config_manager: Any) -> Dict[str, bool]:
+    """Split Artists' Request Re-tag / Request Reorganize (both on by
+    default). Every heal of a combined artist asks by them: the finding's
+    fix and the settle after an import."""
+    settings = {}
+    if config_manager is not None:
+        settings = config_manager.get('repair.jobs.comma_artist_splitter.settings', {}) or {}
+    return {"retag": settings.get("request_retag", True) is not False,
+            "reorganize": settings.get("request_reorganize", True) is not False}
+
+
+def _projection_note(projected: dict) -> str:
+    """what a heal's projection request did, for the fix's message"""
+    queued = " and ".join(_PROJECTION_NAMES[k] for k in projected.get("queued") or ())
+    if not queued or not projected.get("files"):
+        return ""
+    return f"; {queued} will check {projected['files']} file(s)"
+
+
 def _merge_scope(existing: Optional[dict], new: Optional[dict], queued: bool) -> Optional[dict]:
     """the scope a queued run takes when it is asked for again before it
     starts. a waiting library-wide run already covers everything; two file
@@ -2056,16 +2078,19 @@ class RepairWorker:
                             f" (scope: {scope})" if scope else "")
         return True
 
-    def request_projection(self, track_ids, *, retag: bool = True,
-                           reorganize: bool = True, reason: str = "") -> Dict[str, Any]:
+    def request_projection(self, track_ids, *, retag: bool = True, reorganize: bool = True,
+                           reason: str = "") -> Dict[str, Any]:
         """Hand a healer's catalogue changes to the projection writers.
 
         Queues Retag and / or Reorganize scoped to the active files of
         ``track_ids``. Each runs in its own mode: by default it files
         findings for the files that no longer match the catalogue, and
         writes only when the user switched its automatic mode on; manual
-        tags, locks and history are its business, not the healer's. A job
-        the user switched off is not forced. Returns what was queued.
+        tags, locks and history are its business, not the healer's. The
+        jobs' own switch is their library-wide schedule (both ship off);
+        whether a heal asks is the healer's setting (``retag`` /
+        ``reorganize``), so a request runs a job that has no schedule.
+        Returns what was queued.
         Never raises: the catalogue change stands either way, and the
         jobs' own schedules catch up later."""
         out: Dict[str, Any] = {"files": 0, "queued": []}
@@ -2093,8 +2118,7 @@ class RepairWorker:
             if not wanted:
                 continue
             try:
-                if self.run_job_now(PROJECTION_JOBS[kind], scope={"file_paths": paths},
-                                    respect_enabled=True):
+                if self.run_job_now(PROJECTION_JOBS[kind], scope={"file_paths": paths}):
                     out["queued"].append(kind)
             except Exception as exc:  # noqa: BLE001 - see docstring
                 logger.debug("%s not requested: %s", kind, exc)
@@ -4144,10 +4168,7 @@ class RepairWorker:
         from contextlib import closing
         from core.library2.native_enrich import heal_combined_artist
 
-        settings = {}
-        if self._config_manager:
-            settings = self._config_manager.get(
-                'repair.jobs.comma_artist_splitter.settings', {}) or {}
+        wanted = split_projection(self._config_manager)
         try:
             with closing(self.db._get_connection()) as conn:
                 artist_id = self._comma_split_artist(conn, entity_id, details, combined)
@@ -4157,12 +4178,12 @@ class RepairWorker:
                     # tags). what is left is the files, Re-tag's to compare
                     track_ids = self._comma_split_tracks(conn, entity_id, details)
                     projected = self.request_projection(
-                        track_ids, retag=settings.get('request_retag', True) is not False,
-                        reorganize=False, reason=f'Split Artists "{combined}"')
+                        track_ids, retag=wanted['retag'], reorganize=False,
+                        reason=f'Split Artists "{combined}"')
                     return {'success': True, 'action': 'catalogue_already_split', 'fixed': 0,
                             'projection': projected,
-                            'message': 'The library already credits these artists separately; '
-                                       'Re-tag checks the files'}
+                            'message': ('The library already credits these artists separately'
+                                        + _projection_note(projected))}
                 healed = heal_combined_artist(
                     conn, artist_id, parts, lead=details.get('primary_artist'),
                     reason='Split Artists')
@@ -4180,16 +4201,11 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
         # the catalogue change stands; the projection writers check the files
         projected = self.request_projection(
-            healed['track_ids'],
-            retag=settings.get('request_retag', True) is not False,
-            reorganize=settings.get('request_reorganize', True) is not False,
-            reason=f'Split Artists "{combined}"')
-        requested = ' and '.join(projected['queued'])
+            healed['track_ids'], **wanted, reason=f'Split Artists "{combined}"')
         return {'success': True, 'action': 'artists_split', 'catalogue_healed': True,
                 'fixed': len(healed['track_ids']), 'healing': healed, 'projection': projected,
                 'message': (f'"{combined}" split into {len(healed["component_ids"])} artists'
-                            + (f'; {requested} will check {projected["files"]} file(s)'
-                               if requested else ''))}
+                            + _projection_note(projected))}
 
     def _comma_split_artist(self, conn, entity_id, details, combined):
         """the catalogue artist a split finding is about: the finding's own
