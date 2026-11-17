@@ -46,8 +46,18 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **copy mode playlists stay owned after a drive remounts (thanks NeskireDK, #2137).**
 - **music assistant scans follow their own task (thanks @ginevra-70, #2115)** before the database updates, and sync, scans and playlists reach music assistant (#2111).
 
+## profiles
+
+- **a member lands on a page they can open (thanks SeadogsBooty, #2154).** a profile without the video dashboard was sent to it after signing in, turned away, and left on a black page. you land on your own home page, else discover, else your first page, and a refused page sends you there too.
+- **the admin menu never flashes (thanks SeadogsBooty, #2156).** the page arrives already knowing who you are, so the sidebar only ever shows your sections, from the first frame.
+- **an admin sets what each profile shows (thanks SeadogsBooty, #2157).** in profiles, a profile's parts can be set, locked so customize is read only for that person, or reset, and new profiles start from a default. switching a part back on brings it back right away, and a video only profile can't hide its only side.
+- **server activity is the admin's (thanks SeadogsBooty, #2155).** the live view, history, stats and the live feed refuse anyone else, direct urls included, its image proxy only fetches artwork, service status is hidden from members, and seven other diagnostic routes that answered anyone are admin only.
+
 ## video
 
+- **where a title stands, on every poster (thanks SeadogsBooty, #2160).** in library, partial, requested, approved, searching, downloading or failed, following a download as it moves, and the detail page shows progress, each season and who asked. a request for something already on its way is refused, and you can ask too when someone else already did. it is the same answer the seerr api gives.
+- **discover rows always finish (thanks SeadogsBooty, #2158).** a row that never answered kept its placeholder forever. each row fills, hides when it's honestly empty, or offers try again, and one slow row never holds the page.
+- **discover looks the part (thanks SeadogsBooty, #2159).** the top 10 numbers sit beside the posters, one poster size and heading style everywhere, even spacing, and a jump bar that follows you.
 - **soulsync can answer as seerr (thanks Thibs, #2151).** turn it on under settings, system, soulsync api, and point litefin's seerr plugin (or another seerr app) at /seerr with an admin key. discover, search, details and requests go through the video side, requests land on the right profile's wishlist or approval queue. not tried against a real litefin yet.
 - **an import folder (#2129)**, like the music side's import page.
 - manual search opens with an editable query (#2121) and is on a movie's menu, owned or not (#2122), video download rows show the release's languages (#2120), and manual subtitle search says when the file already has the language (#2126).

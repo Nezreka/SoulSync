@@ -1,12 +1,14 @@
 **SoulSync 3.6.7 is out** :musical_note:
 
-The Settings page has been rebuilt in React. It looks and works the same, loads its tabs once, and saves only what you changed.
+The Settings page has been rebuilt in React. It works the same and saves only what you changed.
 
 SoulSync can now answer as a Seerr server, so Litefin and other Seerr apps can discover and request movies and shows through the video side (thanks Thibs, #2151). Turn it on under Settings, System, SoulSync API.
 
 Albums get an Other versions picker in their menu, listing the release's editions with track count, year and label, with a preview before it switches (thanks wolf39us, #2145). Popular tracks get a flame on the album page (#2144), the artist page shows which albums a rename would move (#2141), and locking an album keeps you on the artist page (#2143).
 
 Band names with an "&" like Above & Beyond now stay one artist in tags, credits and folders, and Group Therapy style numbered releases no longer cross (thanks SeadogsBooty, #2131, #2133 to #2136). Release types go by length too, so Wish You Were Here is an album again.
+
+For request users, video posters show where a title stands, from Requested to In Library, Discover always loads with a cleaner layout, members land on a page they can open, and admins can set and lock what each profile shows (thanks SeadogsBooty, #2154 to #2160).
 
 Thanks to nstrelow (#2140: one unfingerprintable file no longer stops AcoustID scans), PapaBearDoes (#2152: the video library table keeps its columns in view) and ginevra-70 (#2115: Music Assistant scans follow their own task) for their contributions.
 
