@@ -26,14 +26,18 @@ const toast = (message: string, type: string) => window.showToast?.(message, typ
 
 export function VideoDownloadsView() {
   const dl = useVideoDownloads();
-  // blocking writes the household's blocklist: admin only, like one row's block
+  // blocking writes the household's blocklist, and clearing the list, the
+  // recycle bin and the history are the household's too: admin only, like
+  // the server. a member's list is the grabs they started
   const canBlockAll = useVdlCanImport();
+  const isAdmin = canBlockAll;
   // the Music | Video switch shows this side's live count
   useReportActive('video', dl.counts.active);
   const review = useVdlReview();
   const [historyOpen, setHistoryOpen] = useState(false);
   // #2128: the Library's recycle bin button: Review, on the bin
   useOpenRecycleBin(() => {
+    if (!isAdmin) return;
     showVideoRecycleBin();
     dl.setView('review');
   });
@@ -112,11 +116,12 @@ export function VideoDownloadsView() {
             onClearFailed={() => void dl.clearFailed()}
             onClearEverything={() => void dl.clearEverything()}
             retryAllPending={dl.retryAllPending}
+            canManage={isAdmin}
           />
 
           {dl.view === 'clients' ? (
             <AdlClientsTab />
-          ) : dl.view === 'review' ? (
+          ) : dl.view === 'review' && isAdmin ? (
             <VdlReviewPane review={review} onChanged={() => void review.loadReview()} />
           ) : (
             <>
@@ -156,6 +161,7 @@ export function VideoDownloadsView() {
             open={historyOpen}
             onClose={() => setHistoryOpen(false)}
             onCountChange={setHistoryCount}
+            canManage={isAdmin}
           />
         </div>
       </div>

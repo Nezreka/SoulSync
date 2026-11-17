@@ -1014,6 +1014,40 @@ export async function fetchLibraryV2ArtistSettings(
   };
 }
 
+/** #2165: what new downloads of an artist are filed and tagged as. */
+export interface LibraryV2ArtistNaming {
+  artist_id: number;
+  /** the name the library uses: a pinned name, else the scanned one */
+  library_name: string;
+  scanned_name: string;
+  pinned: boolean;
+  /** what the download source calls them, when it could say */
+  source: { provider: string; label: string; id: string; name: string } | null;
+  /** the source spells them differently and downloads take the library's name */
+  renamed: boolean;
+  /** the source spells them differently and downloads keep the source's name */
+  kept_source_name: boolean;
+  /** the folder a new album goes to, null when file organization is off */
+  folder: string | null;
+}
+
+export async function fetchLibraryV2ArtistNaming(artistId: number): Promise<LibraryV2ArtistNaming> {
+  const payload = await lib2Json<Ok & Partial<LibraryV2ArtistNaming>>(
+    apiClient.get(`library/v2/artists/${artistId}/naming`),
+    'The artist name could not be loaded',
+  );
+  return {
+    artist_id: payload.artist_id ?? artistId,
+    library_name: payload.library_name ?? '',
+    scanned_name: payload.scanned_name ?? '',
+    pinned: payload.pinned === true,
+    source: payload.source ?? null,
+    renamed: payload.renamed === true,
+    kept_source_name: payload.kept_source_name === true,
+    folder: payload.folder ?? null,
+  };
+}
+
 export async function updateLibraryV2ArtistSettings(
   artistId: number,
   settings: Pick<

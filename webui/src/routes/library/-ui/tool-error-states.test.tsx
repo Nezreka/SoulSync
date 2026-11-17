@@ -126,4 +126,34 @@ describe('Library v2 tool error states', () => {
     expect(await screen.findByText(/Failed to fetch|Network/i)).toBeInTheDocument();
     expect(screen.queryByText(/No download source data/)).not.toBeInTheDocument();
   });
+
+  it('keeps the install-wide download blacklist button for the admin (S14)', async () => {
+    const sourceInfo = () =>
+      HttpResponse.json({
+        success: true,
+        downloads: [
+          { source_service: 'soulseek', source_username: 'fairlight', source_filename: 'a.flac' },
+        ],
+        manual_skips: [],
+      });
+    server.use(
+      http.get('/api/library/v2/tracks/9/source-info', sourceInfo),
+      http.get('/api/library/v2/tracks/9/history', () =>
+        HttpResponse.json({ success: true, history: [] }),
+      ),
+    );
+    // a member reads the panel without the write context
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <TrackInfoPanel
+          trackId={9}
+          trackTitle="Teardrop"
+          trackArtist="Massive Attack"
+          file={null}
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/fairlight/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Blacklist This Source/ })).not.toBeInTheDocument();
+  });
 });

@@ -649,7 +649,19 @@ from core.url_base import configure_url_base
 configure_url_base(app, os.environ.get("SOULSYNC_URL_BASE", ""))
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
-set_activity_toast_emitter(socketio.emit)
+def _emit_activity_toast(event, item):
+    """an activity toast goes to the admins, and to the member whose request
+    made it. never to every socket: the feed names what everyone downloads."""
+    socketio.emit(event, item, to=ADMIN_SOCKET_ROOM)
+    owner = (item or {}).get('profile_id')
+    if owner is not None:
+        socketio.emit(event, item, to=f'member:{owner}')
+
+
+# sockets of admin profiles sit in this room, every other profile's in
+# member:<id>; a socket is in exactly one of them (see _ws_join_role_room)
+ADMIN_SOCKET_ROOM = 'role:admin'
+set_activity_toast_emitter(_emit_activity_toast)
 # Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
 from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
 _set_overlay_emit(socketio.emit)
@@ -997,10 +1009,27 @@ def _set_profile_context():
                         session.pop(_k, None)
                     g.profile_id = None
                     g.is_admin = False
+                    g.can_download = False
                     return
                 g.is_admin = bool((profile or {}).get('is_admin', False))
-            except Exception:
+                g.can_download = bool((profile or {}).get('can_download', True)) or g.is_admin
+                # a turned-off profile is signed out here too, the same as on
+                # every other path (this branch skips the full check below)
+                if profile.get('disabled') and not g.is_admin:
+                    for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                        session.pop(_k, None)
+                    g.profile_id = None
+                    g.can_download = False
+                    g.allowed_sides = 'none'
+                    if no_profile_request_is_blocked(path, request.method):
+                        return jsonify({"error": "profile_required", "profile_required": True,
+                                        "disabled": True}), 401
+                    return
+            except Exception as e:
+                # unreadable is not admin and not allowed to download
+                logger.warning("profile session validate (skip path): %s", e)
                 g.is_admin = False
+                g.can_download = False
         return
 
     if pid != 1 and 'profile_id' in session:
@@ -1049,7 +1078,18 @@ def _set_profile_context():
                 g.profile_id = pid
                 return jsonify({"success": False, "error": "page_not_allowed"}), 403
         except Exception as e:
-            logger.debug("profile session validate: %s", e)
+            # fail closed: a profile we couldn't read is no admin, downloads
+            # nothing, sees neither side's gated apis, and a page-only api is
+            # refused (its page list is unknown). it used to keep the
+            # defaults above: downloads on, both sides, no page gate
+            logger.warning("profile session validate failed for %s: %s", pid, e)
+            g.is_admin = False
+            g.can_download = False
+            g.allowed_sides = 'none'
+            g.profile_id = pid
+            from core.permissions import page_for_path
+            if page_for_path(path) is not None:
+                return jsonify({"success": False, "error": "page_not_allowed"}), 403
 
     g.profile_id = pid
 
@@ -1260,10 +1300,11 @@ VALID_PAGE_IDS = {
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
-    from core.permissions import download_denied_reason
-    reason = download_denied_reason(get_current_profile_id(), lambda pid: get_database().get_profile(pid))
+    from core.permissions import PROFILE_UNREADABLE, download_denied_reason, strict_profile_getter
+    reason = download_denied_reason(get_current_profile_id(), strict_profile_getter(get_database))
     if reason:
-        return jsonify({'success': False, 'error': reason}), 403
+        # an unreadable profile is a passing problem, not a switch that's off
+        return jsonify({'success': False, 'error': reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None
 
 # --- Docker Helper Functions ---
@@ -4306,8 +4347,11 @@ def get_activity_feed():
     """Get recent activity feed for dashboard"""
     try:
         with activity_feed_lock:
-            # Return last 10 activities in reverse chronological order
-            return jsonify({'activities': activity_feed[-10:][::-1]})
+            feed = list(activity_feed)
+        # Return last 10 activities in reverse chronological order. a member
+        # sees what their own requests did, the admin everything
+        mine = _rt_state.activity_visible_to(feed, get_current_profile_id(), is_admin_request())
+        return jsonify({'activities': mine[-10:][::-1]})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4325,7 +4369,9 @@ def get_recent_toasts():
                 if activity.get('show_toast', True) and
                    (current_time - activity.get('timestamp', 0)) <= 10
             ]
-            return jsonify({'toasts': recent_toasts})
+        recent_toasts = _rt_state.activity_visible_to(
+            recent_toasts, get_current_profile_id(), is_admin_request())
+        return jsonify({'toasts': recent_toasts})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4334,37 +4380,40 @@ def get_activity_logs():
     """Get formatted activity feed for display in sync page log area"""
     try:
         with activity_feed_lock:
-            # Get the last 50 activities (more than the dashboard shows)
-            recent_activities = activity_feed[-50:] if len(activity_feed) > 50 else activity_feed[:]
+            feed = list(activity_feed)
+        # Get the last 50 activities (more than the dashboard shows); a
+        # member's own only
+        feed = _rt_state.activity_visible_to(feed, get_current_profile_id(), is_admin_request())
+        recent_activities = feed[-50:]
 
-            # Reverse order so newest appears at top
-            recent_activities = recent_activities[::-1]
+        # Reverse order so newest appears at top
+        recent_activities = recent_activities[::-1]
 
-            # Format activities as readable log entries
-            formatted_logs = []
+        # Format activities as readable log entries
+        formatted_logs = []
 
-            if not recent_activities:
-                formatted_logs = [
-                    "No recent activity.",
-                    "Sync and download operations will appear here in real-time."
-                ]
-            else:
-                for activity in recent_activities:
-                    # Format: [TIME] ICON TITLE - SUBTITLE
-                    timestamp = activity.get('time', 'Unknown')
-                    icon = activity.get('icon', '•')
-                    title = activity.get('title', 'Activity')
-                    subtitle = activity.get('subtitle', '')
+        if not recent_activities:
+            formatted_logs = [
+                "No recent activity.",
+                "Sync and download operations will appear here in real-time."
+            ]
+        else:
+            for activity in recent_activities:
+                # Format: [TIME] ICON TITLE - SUBTITLE
+                timestamp = activity.get('time', 'Unknown')
+                icon = activity.get('icon', '•')
+                title = activity.get('title', 'Activity')
+                subtitle = activity.get('subtitle', '')
 
-                    # Create a clean, readable log entry
-                    if subtitle:
-                        log_entry = f"[{timestamp}] {icon} {title} - {subtitle}"
-                    else:
-                        log_entry = f"[{timestamp}] {icon} {title}"
+                # Create a clean, readable log entry
+                if subtitle:
+                    log_entry = f"[{timestamp}] {icon} {title} - {subtitle}"
+                else:
+                    log_entry = f"[{timestamp}] {icon} {title}"
 
-                    formatted_logs.append(log_entry)
+                formatted_logs.append(log_entry)
 
-            return jsonify({'logs': formatted_logs})
+        return jsonify({'logs': formatted_logs})
 
     except Exception as e:
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
@@ -4697,7 +4746,11 @@ def get_art_sources():
 def handle_dev_mode():
     global dev_mode_enabled
     if request.method == 'POST':
-        data = request.get_json()
+        # dev mode is install-wide: reading it is anyone's, switching it on
+        # is the admin's
+        if not is_admin_request():
+            return jsonify({"success": False, "error": "Admin access required"}), 403
+        data = request.get_json(silent=True) or {}
         if data.get('password') == 'hydratest':
             dev_mode_enabled = True
             logger.info("Dev mode activated")
@@ -4945,6 +4998,7 @@ def setup_status_endpoint():
     })
 
 @app.route('/api/setup/complete', methods=['POST'])
+@admin_only
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
     data = request.get_json(silent=True) or {}
@@ -5245,6 +5299,7 @@ def test_dashboard_connection_endpoint():
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
 
 @app.route('/api/detect-media-server', methods=['POST'])
+@admin_only
 def detect_media_server_endpoint():
     data = request.get_json()
     server_type = data.get('server_type')
@@ -5283,6 +5338,7 @@ def verify_plex_token():
 
 
 @app.route('/api/plex/pin/start', methods=['POST'])
+@admin_only
 def start_plex_pin_auth():
     try:
         pinlogin = MyPlexPinLogin(oauth=False)
@@ -5320,6 +5376,7 @@ def start_plex_pin_auth():
 
 
 @app.route('/api/plex/pin/status', methods=['GET'])
+@admin_only
 def get_plex_pin_status():
     request_id = request.args.get('request_id')
     if not request_id:
@@ -5444,6 +5501,7 @@ def get_plex_music_libraries():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/plex/select-music-library', methods=['POST'])
+@admin_only
 def select_plex_music_library():
     """Set the active Plex music library"""
     try:
@@ -5496,6 +5554,7 @@ def get_jellyfin_users():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/select-user', methods=['POST'])
+@admin_only
 def select_jellyfin_user():
     """Set the active Jellyfin user"""
     try:
@@ -5560,6 +5619,7 @@ def get_jellyfin_music_libraries():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/select-music-library', methods=['POST'])
+@admin_only
 def select_jellyfin_music_library():
     """Set the active Jellyfin music library"""
     try:
@@ -5639,6 +5699,7 @@ def get_navidrome_music_folders():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/navidrome/select-music-folder', methods=['POST'])
+@admin_only
 def select_navidrome_music_folder():
     """Set the active Navidrome music folder"""
     try:
@@ -5715,6 +5776,54 @@ def _profile_spotify_oauth(profile_id_int):
     )
 
 
+def _oauth_callback_allowed(key, profile_id=None) -> bool:
+    """may this oauth callback bind the account behind ``key``?
+
+    the profile itself, an admin, or a browser with no session at all (the
+    provider sent it to another host name) when somebody allowed to start
+    this flow did so in the last few minutes. a member's session never binds
+    another profile or the install-wide account."""
+    from core.security import oauth_pending
+    started = oauth_pending.consume(key)
+    me = getattr(g, 'profile_id', None)
+    if profile_id is not None and me is not None:
+        try:
+            if int(me) == int(profile_id):
+                return True
+        except (TypeError, ValueError):
+            pass
+    if is_admin_request():
+        return True
+    return started and me is None
+
+
+def _complete_profile_spotify_auth(profile_id, auth_code):
+    """exchange a code for one profile's own spotify token. the result page,
+    or None when the server has no spotify app to exchange with."""
+    auth_manager = _profile_spotify_oauth(profile_id)
+    if not auth_manager:
+        return None
+    token_info = auth_manager.get_access_token(auth_code)
+    if not token_info:
+        raise Exception("Failed to exchange authorization code for access token")
+    metadata_registry.clear_cached_profile_spotify_client(profile_id)
+    profile_client = metadata_registry.get_spotify_client_for_profile(profile_id)
+    profile_authenticated = bool(profile_client and profile_client.is_spotify_authenticated())
+    if profile_authenticated:
+        if profile_client:
+            profile_client._invalidate_auth_cache()
+        add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id} authenticated with Spotify", "Now")
+        return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
+    if profile_client:
+        profile_client._invalidate_auth_cache()
+    invalidate_metadata_status_caches()
+    add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id} completed OAuth but Spotify did not confirm an authenticated session", "Now")
+    return _spotify_auth_result_page(
+        "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
+        authenticated=False,
+    )
+
+
 @app.route('/auth/spotify')
 def auth_spotify():
     """
@@ -5722,25 +5831,41 @@ def auth_spotify():
     Supports per-profile auth via ?profile_id= query param.
     """
     try:
+        from core.security import oauth_pending
         profile_id = request.args.get('profile_id', '')
+        admin = is_admin_request()
 
         # Per-profile auth: the profile's own account via the shared (global) app.
+        # yours, or anyone's as an admin; never another member's
         if profile_id and profile_id != '1':
             try:
                 profile_id_int = int(profile_id)
+            except ValueError:
+                return "<h1>Spotify Authentication Failed</h1><p>Unknown profile.</p>", 400
+            if not admin and profile_id_int != get_current_profile_id():
+                return "<h1>Spotify Authentication Failed</h1><p>You can only connect your own account.</p>", 403
+            try:
                 auth_manager = _profile_spotify_oauth(profile_id_int)
                 if auth_manager:
                     auth_url = auth_manager.get_authorize_url()
+                    oauth_pending.mark(f"spotify:profile:{profile_id_int}")
                     logger.info(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
                     return redirect(auth_url)
-            except (ValueError, Exception) as e:
-                logger.error(f"Per-profile Spotify auth failed, falling back to global: {e}")
+            except Exception as e:
+                logger.error(f"Per-profile Spotify auth failed: {e}")
+            # the install-wide account is the admin's: a member's failed
+            # connect doesn't fall back to rebinding it
+            if not admin:
+                return "<h1>Spotify Authentication Failed</h1><p>Spotify isn't set up on this server yet. Ask your admin.</p>", 400
 
-        # Global auth (admin or fallback)
+        # Global auth: the install-wide account, the admin's to bind
+        if not admin:
+            return "<h1>Spotify Authentication Failed</h1><p>Admin access required.</p>", 403
         temp_spotify_client = get_spotify_client()
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
+            oauth_pending.mark("spotify:global")
             configured_uri = config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
             logger.info(f"Spotify auth initiated — redirect_uri: {configured_uri}")
             add_activity_item("", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
@@ -5847,6 +5972,7 @@ def auth_spotify():
 
 
 @app.route('/auth/spotify/export')
+@admin_only
 def auth_spotify_export():
     """On-demand authorization for Spotify playlist EXPORT (#945).
 
@@ -5871,6 +5997,8 @@ def auth_spotify_export():
             show_dialog=True,
         )
         add_activity_item("", "Spotify Export Auth", "Requesting permission to create playlists", "Now")
+        from core.security import oauth_pending
+        oauth_pending.mark("spotify:global")
         return redirect(auth_manager.get_authorize_url())
     except Exception as e:
         logger.error(f"Error starting Spotify export auth: {e}")
@@ -5883,6 +6011,16 @@ def auth_tidal():
     Initiates Tidal OAuth authentication flow
     """
     logger.info("TIDAL AUTH ROUTE CALLED ")
+    # your own profile's account, or (as an admin) any profile's and the
+    # install-wide one. the callback trusts what was started here
+    _tidal_pid = request.args.get('profile_id', '')
+    if not is_admin_request():
+        try:
+            _own = bool(_tidal_pid) and _tidal_pid != '1' and int(_tidal_pid) == get_current_profile_id()
+        except ValueError:
+            _own = False
+        if not _own:
+            return "<h1>Tidal Authentication Failed</h1><p>You can only connect your own account.</p>", 403
     try:
         # Create a fresh tidal client to get OAuth URL
         from core.tidal_client import TidalClient
@@ -6137,31 +6275,20 @@ def spotify_callback():
         from core.settings import config_manager
 
         # Per-profile callback: the profile's own account via the shared app.
+        # a member binds only their own profile; a state naming somebody else
+        # needs that profile's own start (or an admin)
         if profile_id_from_state and profile_id_from_state != 1:
-            auth_manager = _profile_spotify_oauth(profile_id_from_state)
-            if auth_manager:
-                token_info = auth_manager.get_access_token(auth_code)
-                if token_info:
-                    metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
-                    profile_client = metadata_registry.get_spotify_client_for_profile(profile_id_from_state)
-                    profile_authenticated = bool(profile_client and profile_client.is_spotify_authenticated())
-                    if profile_authenticated:
-                        if profile_client:
-                            profile_client._invalidate_auth_cache()
-                        add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
-                        return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
-                    if profile_client:
-                        profile_client._invalidate_auth_cache()
-                    invalidate_metadata_status_caches()
-                    add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id_from_state} completed OAuth but Spotify did not confirm an authenticated session", "Now")
-                    return _spotify_auth_result_page(
-                        "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
-                        authenticated=False,
-                    )
-                else:
-                    raise Exception("Failed to exchange authorization code for access token")
+            if not _oauth_callback_allowed(f"spotify:profile:{profile_id_from_state}",
+                                           profile_id=profile_id_from_state):
+                return "<h1>Spotify Authentication Failed</h1><p>This sign-in wasn't started for your profile.</p>", 403
+            page = _complete_profile_spotify_auth(profile_id_from_state, auth_code)
+            if page is None:
+                return "<h1>Spotify Authentication Failed</h1><p>Spotify isn't set up on this server.</p>", 400
+            return page
 
-        # Global callback (admin)
+        # Global callback (admin): the install-wide account
+        if not _oauth_callback_allowed("spotify:global"):
+            return "<h1>Spotify Authentication Failed</h1><p>Admin access required.</p>", 403
         config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
@@ -6215,6 +6342,7 @@ def spotify_callback():
 
 
 @app.route('/api/spotify/disconnect', methods=['POST'])
+@admin_only
 def spotify_disconnect():
     """Disconnect Spotify and keep using the active primary metadata source."""
     global spotify_client
@@ -6267,6 +6395,42 @@ def spotify_rate_limit_status():
         return jsonify({'error': str(e)}), 500
 
 
+def _finish_tidal_auth(auth_code):
+    """exchange a tidal code with what /auth/tidal stored. a profile's own
+    connect lands on that profile only: the client's token save writes the
+    install-wide tokens, so it's switched off for one. returns 'profile',
+    'global' or None."""
+    global tidal_client
+    temp_tidal_client = TidalClient()
+    with tidal_oauth_lock:
+        temp_tidal_client.code_verifier = tidal_oauth_state.get("code_verifier")
+        temp_tidal_client.code_challenge = tidal_oauth_state.get("code_challenge")
+        if "redirect_uri" in tidal_oauth_state:
+            temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
+        profile_id_for_tidal = tidal_oauth_state.get("profile_id")
+    profile_id_int = None
+    if profile_id_for_tidal:
+        try:
+            profile_id_int = int(profile_id_for_tidal)
+        except (TypeError, ValueError):
+            return None
+        temp_tidal_client._save_tokens = lambda: None
+    if not temp_tidal_client.fetch_token_from_code(auth_code):
+        return None
+    if profile_id_int is not None:
+        get_database().set_profile_tidal_tokens(
+            profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
+        clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
+        add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
+        return 'profile'
+    # Global: Re-initialize the main global tidal_client instance with the new token
+    tidal_client = TidalClient()
+    if tidal_enrichment_worker:
+        tidal_enrichment_worker.client = tidal_client
+    add_activity_item("", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
+    return 'global'
+
+
 @app.route('/tidal/callback')
 def tidal_callback():
     """
@@ -6283,40 +6447,12 @@ def tidal_callback():
         return f"<h1>Tidal Authentication Failed</h1><p>Error: {error}</p><p>{error_description}</p><p>Please close this window and try again.</p>", 400
 
     try:
-        # Create a temporary client for the token exchange
-        temp_tidal_client = TidalClient()
-
-        # Restore PKCE values, redirect_uri, and profile_id from the auth request
-        profile_id_for_tidal = None
-        with tidal_oauth_lock:
-            temp_tidal_client.code_verifier = tidal_oauth_state["code_verifier"]
-            temp_tidal_client.code_challenge = tidal_oauth_state["code_challenge"]
-            if "redirect_uri" in tidal_oauth_state:
-                temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
-            profile_id_for_tidal = tidal_oauth_state.get("profile_id")
-
-        success = temp_tidal_client.fetch_token_from_code(auth_code)
-
-        if success:
-            # Per-profile: store tokens on profile, don't touch global client
-            if profile_id_for_tidal:
-                try:
-                    profile_id_int = int(profile_id_for_tidal)
-                    get_database().set_profile_tidal_tokens(
-                        profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
-                    clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
-                    add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
-                    return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
-                except Exception as profile_err:
-                    logger.error(f"Per-profile Tidal auth failed, falling back to global: {profile_err}")
-
-            # Global: Re-initialize the main global tidal_client instance with the new token
-            tidal_client = TidalClient()
-            if tidal_enrichment_worker:
-                tidal_enrichment_worker.client = tidal_client
+        outcome = _finish_tidal_auth(auth_code)
+        if outcome == 'profile':
+            return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
+        if outcome == 'global':
             return "<h1>Tidal Authentication Successful!</h1><p>You can now close this window and return to the SoulSync application.</p>"
-        else:
-            return "<h1>Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
+        return "<h1>Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
     except Exception as e:
         logger.error(f"Error during Tidal token exchange: {e}")
         return f"<h1>An Error Occurred</h1><p>An unexpected error occurred during the authentication process: {e}</p>", 500
@@ -6325,6 +6461,7 @@ def tidal_callback():
 # --- Deezer OAuth ---
 
 @app.route('/auth/deezer')
+@admin_only
 def auth_deezer():
     """Initialize Deezer OAuth flow. Redirects user to Deezer authorization page."""
     try:
@@ -6335,6 +6472,8 @@ def auth_deezer():
             return "<h1>Deezer App ID not configured</h1><p>Go to Settings → Connections and enter your Deezer App ID first.</p>", 400
 
         perms = 'basic_access,email,offline_access,manage_library,listening_history'
+        from core.security import oauth_pending
+        oauth_pending.mark("deezer:global")
         import urllib.parse
         auth_url = f"https://connect.deezer.com/oauth/auth.php?app_id={app_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&perms={perms}"
 
@@ -6360,6 +6499,10 @@ def deezer_callback():
 
     if not auth_code:
         return f"<h1>Deezer Authentication Failed</h1><p>{error_reason or 'No authorization code received.'}</p>", 400
+
+    # the install-wide deezer account is the admin's to bind
+    if not _oauth_callback_allowed("deezer:global"):
+        return "<h1>Deezer Authentication Failed</h1><p>Admin access required.</p>", 403
 
     try:
         app_id = config_manager.get('deezer.app_id', '')
@@ -9014,6 +9157,7 @@ def manual_search_for_task(task_id):
 
 
 @app.route('/api/scan/request', methods=['POST'])
+@admin_only
 def request_media_scan():
     """
     Request a media library scan.
@@ -9072,6 +9216,7 @@ def clear_all_searches():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/maintain', methods=['POST'])
+@admin_only
 def maintain_search_history():
     """
     Maintain search history by keeping only recent searches.
@@ -9927,6 +10072,7 @@ def reidentify_apply():
 
 
 @app.route('/api/library/artist/<artist_id>', methods=['PUT'])
+@admin_only
 def update_library_artist(artist_id):
     """Update artist metadata fields."""
     try:
@@ -9942,6 +10088,7 @@ def update_library_artist(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/album/<album_id>', methods=['PUT'])
+@admin_only
 def update_library_album(album_id):
     """Update album metadata fields."""
     try:
@@ -9957,6 +10104,7 @@ def update_library_album(album_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/track/<track_id>', methods=['PUT'])
+@admin_only
 def update_library_track(track_id):
     """Update track metadata fields."""
     try:
@@ -9972,6 +10120,7 @@ def update_library_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/tracks/batch', methods=['PUT'])
+@admin_only
 def batch_update_library_tracks():
     """Batch update multiple tracks with the same field values."""
     try:
@@ -10135,6 +10284,7 @@ _reconcile_ids_lock = threading.Lock()
 
 
 @app.route('/api/library/reconcile-embedded-ids', methods=['POST'])
+@admin_only
 def reconcile_embedded_ids():
     """Scan every library file for embedded provider IDs and gap-fill them
     into the DB so enrichment workers skip the API lookup. Runs in the
@@ -10304,6 +10454,17 @@ def reorganize_all_artist_albums(artist_id):
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
+        # #1504, the single-album rule for every album: a non-admin profile
+        # moves only albums in its own library, never the shared one or
+        # another profile's
+        if not getattr(g, 'is_admin', False):
+            from core.library_reorganize import resolve_album_profile_id
+            _me = getattr(g, 'profile_id', None)
+            albums = [a for a in albums if _me is not None and resolve_album_profile_id(
+                get_database(), a['album_id'], resolve_file_path_fn=_resolve_library_file_path) == _me]
+            if not albums:
+                return jsonify({"success": False, "error": "Not your artist"}), 403
+
         # The queue's bulk-enqueue helper owns the loop+tally.
         result = get_queue().enqueue_many(albums)
 
@@ -10330,13 +10491,27 @@ def reorganize_queue_snapshot():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _reorganize_item_is_callers(item) -> bool:
+    """may the caller cancel this queued reorganize? the admin, any; anyone
+    else, only one queued in their own library (the single-album rule, #1504)"""
+    if getattr(g, 'is_admin', False):
+        return True
+    me = getattr(g, 'profile_id', None)
+    try:
+        return me is not None and item.library is not None and int(item.library) == int(me)
+    except (TypeError, ValueError):
+        return False
+
+
 @app.route('/api/library/reorganize/queue/<queue_id>/cancel', methods=['POST'])
 def reorganize_queue_cancel(queue_id):
     """Cancel a queued item (running items can't be cleanly cancelled —
     see the queue module's design rules)."""
     try:
         from core.reorganize_queue import get_queue
-        result = get_queue().cancel(queue_id)
+        result = get_queue().cancel(queue_id, may=_reorganize_item_is_callers)
+        if result.get('reason') == 'not_yours':
+            return jsonify({"success": False, **result, "error": "Not your reorganize"}), 403
         status_code = 200 if result.get('cancelled') else 409
         return jsonify({"success": result.get('cancelled', False), **result}), status_code
     except Exception as e:
@@ -10349,7 +10524,10 @@ def reorganize_queue_clear():
     """Cancel all queued items at once (the running item continues)."""
     try:
         from core.reorganize_queue import get_queue
-        cancelled = get_queue().clear_queued()
+        # the admin clears the whole queue; anyone else only what's queued
+        # in their own library
+        cancelled = get_queue().clear_queued(
+            only=None if getattr(g, 'is_admin', False) else _reorganize_item_is_callers)
         return jsonify({"success": True, "cancelled": cancelled})
     except Exception as e:
         logger.error(f"Reorganize clear error: {e}")
@@ -10781,6 +10959,7 @@ def library_log_play_eligible():
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
+@admin_only
 def library_enrich_entity():
     """Trigger enrichment of a specific entity from a single service.
     Body: { entity_type: 'artist'|'album'|'track', entity_id: str, service: str,
@@ -11170,6 +11349,7 @@ def library_clear_match():
 
 @app.route('/api/library/album/<album_id>/import-existing-track', methods=['POST'])
 @app.route('/api/library/album/<album_id>/missing-track/import-existing', methods=['POST'])
+@admin_only
 def library_import_existing_track_for_missing_slot(album_id):
     """Use an existing library file as source audio for a missing album slot.
 
@@ -11235,6 +11415,7 @@ def get_blacklist():
 
 
 @app.route('/api/library/blacklist', methods=['POST'])
+@admin_only
 def add_to_blacklist():
     """Add a download source to the blacklist."""
     try:
@@ -11253,6 +11434,7 @@ def add_to_blacklist():
 
 
 @app.route('/api/library/blacklist/<int:blacklist_id>', methods=['DELETE'])
+@admin_only
 def remove_from_blacklist(blacklist_id):
     """Remove an entry from the blacklist."""
     try:
@@ -15219,6 +15401,7 @@ _init_duplicate_cleaner(
 )
 
 @app.route('/api/duplicate-cleaner/start', methods=['POST'])
+@admin_only
 def start_duplicate_cleaner():
     """Start the duplicate cleaner"""
     with duplicate_cleaner_lock:
@@ -15255,6 +15438,7 @@ def get_duplicate_cleaner_status():
         return jsonify(state_copy)
 
 @app.route('/api/duplicate-cleaner/stop', methods=['POST'])
+@admin_only
 def stop_duplicate_cleaner():
     """Stop the duplicate cleaner (sets a stop flag)"""
     with duplicate_cleaner_lock:
@@ -16125,10 +16309,13 @@ def get_active_processes():
     - YouTube discovery/sync processes (non-fresh phases)
     """
     active_processes = []
+    _me, _admin = get_current_profile_id(), is_admin_request()
 
-    # Add active download batch processes
+    # Add active download batch processes (a member's own; the admin's all)
     with tasks_lock:
         for batch_id, batch_data in download_batches.items():
+            if not _batch_visible_to(batch_data, _me, _admin):
+                continue
             if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
                 process_info = {
                     "type": "batch",
@@ -16232,6 +16419,10 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
 def get_batch_download_status(batch_id):
     """Returns real-time status for a single batch."""
     try:
+        with tasks_lock:
+            _batch = download_batches.get(batch_id)
+        if _batch is not None and not _batch_visible_to(_batch, get_current_profile_id(), is_admin_request()):
+            return jsonify({"error": "Batch not found"}), 404
         body, status = _downloads_status.build_single_batch_status(batch_id, _build_status_deps())
         return jsonify(body), status
     except Exception as e:
@@ -16245,6 +16436,12 @@ def get_batched_download_statuses():
     """Returns status for multiple download batches in one request."""
     try:
         requested_batch_ids = request.args.getlist('batch_ids')
+        # another profile's batch isn't there for a member
+        _me, _admin = get_current_profile_id(), is_admin_request()
+        if not _admin:
+            with tasks_lock:
+                requested_batch_ids = [b for b in requested_batch_ids
+                                       if _batch_visible_to(download_batches.get(b), _me, _admin)]
         # batches whose modal is open on screen; keeps them past the auto-cleanup
         watching = request.args.getlist('watching')
         if watching:
@@ -16269,12 +16466,34 @@ def watch_download_batches():
     return jsonify({"success": True})
 
 
+def _downloads_for_member(body, pid):
+    """the downloads page as a member sees it: the live tasks of batches their
+    profile started. history rows carry no owner, so they're the admin's."""
+    with tasks_lock:
+        owners = {bid: b.get('profile_id') for bid, b in download_batches.items()}
+    def mine(row):
+        return _batch_visible_to({'profile_id': owners.get(row.get('batch_id'))}, pid, False)
+
+    out = dict(body or {})
+    rows = out.get('downloads')
+    if isinstance(rows, list):
+        out['downloads'] = [r for r in rows if isinstance(r, dict)
+                            and not r.get('is_persistent_history') and mine(r)]
+        out['total'] = len(out['downloads'])
+    if isinstance(out.get('batches'), list):
+        out['batches'] = [b for b in out['batches'] if isinstance(b, dict) and mine(b)]
+    return out
+
+
 @app.route('/api/downloads/all', methods=['GET'])
 def get_all_downloads_unified():
     """Unified downloads list for the centralized Downloads page."""
     try:
         limit = int(request.args.get('limit', 200))
-        return jsonify(_downloads_status.build_unified_downloads_response(limit, _build_status_deps()))
+        body = _downloads_status.build_unified_downloads_response(limit, _build_status_deps())
+        if not is_admin_request():
+            body = _downloads_for_member(body, get_current_profile_id())
+        return jsonify(body)
     except Exception as e:
         logger.error(f"Error getting unified downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -16286,6 +16505,9 @@ def get_batch_history():
     try:
         days = int(request.args.get('days', 7))
         limit = int(request.args.get('limit', 50))
+        # finished batches carry no owner: the admin's history
+        if not is_admin_request():
+            return jsonify({'success': True, 'history': []})
         database = get_database()
         history = database.get_recent_batch_history(days=days, limit=limit)
         return jsonify({'success': True, 'history': history})
@@ -18907,6 +19129,11 @@ def start_missing_tracks_process(playlist_id):
     A single, robust endpoint to kick off the entire missing tracks workflow.
     It creates a batch and starts the master worker in the background.
     """
+    # same check as download_missing: a profile with downloads off asks through
+    # the wishlist (a request the admin approves), it doesn't start a batch here
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json() or {}
     tracks = data.get('tracks', [])
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
@@ -20870,6 +21097,7 @@ def _get_lb_discover_playlists(playlist_type):
 # ── listenbrainz + lastfm radio endpoints live in api/listenbrainz_routes.py ─
 
 @app.route('/api/metadata/start', methods=['POST'])
+@admin_only
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
     global metadata_update_worker, metadata_update_runtime_worker, metadata_update_state
@@ -20974,6 +21202,7 @@ def start_metadata_update():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/stop', methods=['POST'])
+@admin_only
 def stop_metadata_update():
     """Stop the metadata update process"""
     global metadata_update_state
@@ -21305,6 +21534,41 @@ def start_oauth_callback_servers():
                     auth_code = query_params['code'][0]
                     _oauth_logger.info(f"Received Spotify authorization code: {auth_code[:10]}...")
 
+                    # this port has no session at all: a code binds an account
+                    # only when somebody allowed to started that flow (the
+                    # admin for the install-wide one, a profile for its own)
+                    from core.security import oauth_pending
+                    _state = (query_params.get('state') or [''])[0]
+                    _state_pid = None
+                    if _state.startswith('profile_'):
+                        try:
+                            _state_pid = int(_state[len('profile_'):])
+                        except ValueError:
+                            _state_pid = None
+                    if _state_pid and _state_pid != 1:
+                        if not oauth_pending.consume(f"spotify:profile:{_state_pid}"):
+                            self.send_response(403)
+                            self.send_header('Content-type', 'text/html')
+                            self.end_headers()
+                            self.wfile.write(b'<h1>Spotify Authentication Failed</h1><p>Start the connect again from SoulSync.</p>')
+                            return
+                        try:
+                            page = _complete_profile_spotify_auth(_state_pid, auth_code)
+                        except Exception as e:
+                            _oauth_logger.error(f"Spotify profile token processing error: {e}")
+                            page = None
+                        self.send_response(200 if page else 400)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write((page or '<h1>Spotify Authentication Failed</h1>').encode('utf-8'))
+                        return
+                    if not oauth_pending.consume("spotify:global"):
+                        self.send_response(403)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(b'<h1>Spotify Authentication Failed</h1><p>Start the connect again from SoulSync Settings.</p>')
+                        return
+
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
@@ -21451,29 +21715,11 @@ def start_oauth_callback_servers():
 
                 # Exchange the authorization code for tokens
                 try:
-                    from core.tidal_client import TidalClient
-
-                    # Create a temporary client and set the stored PKCE values
-                    temp_client = TidalClient()
-
-                    # Restore the PKCE values from the auth request
-                    global tidal_oauth_state
-                    with tidal_oauth_lock:
-                        temp_client.code_verifier = tidal_oauth_state["code_verifier"]
-                        temp_client.code_challenge = tidal_oauth_state["code_challenge"]
-
-                    logger.info(f"Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
-
-                    success = temp_client.fetch_token_from_code(auth_code)
+                    # a profile's own connect lands on that profile, not on
+                    # the install-wide tokens (the same as /tidal/callback)
+                    success = _finish_tidal_auth(auth_code)
 
                     if success:
-                        # Reinitialize the global tidal client with new tokens
-                        global tidal_client
-                        tidal_client = TidalClient()
-                        if tidal_enrichment_worker:
-                            tidal_enrichment_worker.client = tidal_client
-
-                        add_activity_item("", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
                         self.send_response(200)
                         self.send_header('Content-type', 'text/html')
                         self.end_headers()
@@ -21913,6 +22159,7 @@ def get_artist_lastfm_top_tracks(artist_id):
 
 # ================================================================================================
 @app.route('/api/lastfm/auth-url', methods=['GET'])
+@admin_only
 def lastfm_auth_url():
     """Get the Last.fm authorization URL for scrobbling."""
     try:
@@ -21928,6 +22175,7 @@ def lastfm_auth_url():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/lastfm/callback', methods=['GET'])
+@admin_only
 def lastfm_callback():
     """Last.fm auth callback — exchanges token for session key."""
     try:
@@ -23029,7 +23277,7 @@ def _chat_auto_prove_loop():
                     'icon': '🤖', 'title': 'Chat auto-reply',
                     'subtitle': "answered %s's download challenge with '%s'" % (
                         r['username'], r['token']),
-                })
+                }, to=ADMIN_SOCKET_ROOM)
         except Exception:
             logger.debug("chat auto-prove loop error", exc_info=True)
 
@@ -23316,6 +23564,7 @@ def handle_connect():
     # #1837: remember the session this socket connected under so the
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
+    _ws_join_role_room()
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
@@ -23353,10 +23602,15 @@ def handle_download_subscribe(data):
     """Client subscribes to download batch updates by joining rooms."""
     if _ws_drop_sid_if_revoked():
         return
-    batch_ids = data.get('batch_ids', [])
-    for bid in batch_ids:
+    batch_ids = data.get('batch_ids', []) or []
+    # a batch's live updates go to whoever started it, and to admins
+    pid, is_admin = _ws_session_profile()
+    with tasks_lock:
+        allowed = [bid for bid in batch_ids
+                   if _batch_visible_to(download_batches.get(bid), pid, is_admin)]
+    for bid in allowed:
         join_room(f'batch:{bid}')
-    logger.debug(f"Client subscribed to batches: {batch_ids}")
+    logger.debug(f"Client subscribed to batches: {allowed}")
 
 @socketio.on('downloads:unsubscribe')
 def handle_download_unsubscribe(data):
@@ -23390,8 +23644,40 @@ def handle_profile_join(data):
     old_id = data.get('old_profile_id')
     if old_id:
         leave_room(f'profile:{old_id}')
+        leave_room(f'member:{old_id}')
     join_room(f'profile:{target}')
+    _ws_join_role_room()
     logger.debug(f"Client joined profile room: profile:{target}")
+
+
+def _batch_visible_to(batch, pid, is_admin) -> bool:
+    """may this caller see a download batch (its live status, its room)? an
+    admin, any; anyone else, one their own profile started"""
+    if is_admin:
+        return True
+    owner = (batch or {}).get('profile_id')
+    try:
+        return pid is not None and owner is not None and int(owner) == int(pid)
+    except (TypeError, ValueError):
+        return False
+
+
+def _ws_join_role_room():
+    """put this socket in the admins' room or its member room (never both),
+    the rooms the activity feed and toasts are sent to"""
+    try:
+        pid, is_admin = _ws_session_profile()
+    except Exception as e:  # noqa: BLE001 - no room is the safe answer
+        logger.debug("role room: %s", e)
+        return
+    leave_room(ADMIN_SOCKET_ROOM)
+    if pid is None:
+        return
+    if is_admin:
+        leave_room(f'member:{pid}')
+        join_room(ADMIN_SOCKET_ROOM)
+    else:
+        join_room(f'member:{pid}')
 
 
 def _ws_session_profile():
@@ -23442,6 +23728,17 @@ def _emit_system_stats_loop():
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
+def _push_activity_feed():
+    """the dashboard feed: everything to the admins, and to each member the
+    items their own requests made"""
+    with activity_feed_lock:
+        feed = list(activity_feed)
+    socketio.emit('dashboard:activity', {'activities': feed[-10:][::-1]}, to=ADMIN_SOCKET_ROOM)
+    for owner in {a.get('profile_id') for a in feed if a.get('profile_id') is not None}:
+        mine = [a for a in feed if a.get('profile_id') == owner]
+        socketio.emit('dashboard:activity', {'activities': mine[-10:][::-1]}, to=f'member:{owner}')
+
+
 def _emit_activity_feed_loop():
     """Background thread that pushes activity feed every 2 seconds.
     Skipped entirely while no client is connected."""
@@ -23450,9 +23747,7 @@ def _emit_activity_feed_loop():
         if not _has_connected_clients():
             continue
         try:
-            with activity_feed_lock:
-                activities = activity_feed[-10:][::-1]
-            socketio.emit('dashboard:activity', {'activities': activities})
+            _push_activity_feed()
         except Exception as e:
             logger.debug(f"Error emitting activity feed: {e}")
 
@@ -24919,9 +25214,16 @@ def _emit_tool_progress_loop():
                     formatted.append(f"[{ts}] {icon} {title} - {sub}" if sub else f"[{ts}] {icon} {title}")
                 if not formatted:
                     formatted = ["No recent activity.", "Sync and download operations..."]
-                socketio.emit('tool:logs', {'logs': formatted})
+                # the whole install's activity: the admin's tools page only
+                socketio.emit('tool:logs', {'logs': formatted}, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting logs: {e}")
+
+def _push_live_log_lines(lines, source):
+    """send tailed log lines to the admins who subscribed (the logs:live
+    room), never to every socket: logs carry paths, usernames and urls."""
+    socketio.emit('logs:live', {'lines': lines, 'source': source}, to='logs:live')
+
 
 def _emit_live_log_loop():
     """Background thread that tails app.log and pushes new lines via WebSocket."""
@@ -24966,10 +25268,7 @@ def _emit_live_log_loop():
 
             if new_lines:
                 # Cap at 50 lines per push to avoid flooding
-                socketio.emit('logs:live', {
-                    'lines': new_lines[-50:],
-                    'source': source,
-                })
+                _push_live_log_lines(new_lines[-50:], source)
         except Exception as e:
             logger.debug(f"Error in live log emitter: {e}")
 

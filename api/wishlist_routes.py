@@ -15,7 +15,7 @@ import time
 from flask import Blueprint, jsonify, request
 
 from core import runtime_state as _rt_state
-from core.profile_context import get_current_profile_id
+from core.profile_context import admin_only, get_current_profile_id
 from core.runtime_state import (
     add_activity_item,
     download_batches,
@@ -163,6 +163,7 @@ def get_wishlist_cycle():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wishlist/cycle', methods=['POST'])
+@admin_only
 def set_wishlist_cycle():
     """
     Set the current wishlist processing cycle.
@@ -196,6 +197,7 @@ def get_wishlist_retry_profile():
     return jsonify(payload), status
 
 @bp.route('/api/wishlist/retry-profile', methods=['PUT'])
+@admin_only
 def set_wishlist_retry_profile():
     """
     Set the active wishlist retry profile.
@@ -244,6 +246,7 @@ def get_discovery_lookback_period():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery/lookback-period', methods=['POST'])
+@admin_only
 def set_discovery_lookback_period():
     """
     Set the discovery pool lookback period setting.
@@ -315,6 +318,7 @@ def get_hemisphere():
 
 
 @bp.route('/api/discovery/hemisphere', methods=['POST'])
+@admin_only
 def set_hemisphere():
     """Set the hemisphere for seasonal content (northern or southern)."""
     try:

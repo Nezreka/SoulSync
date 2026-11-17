@@ -128,3 +128,29 @@ describe('scroll targets still resolve', () => {
     expect(HERO).toContain('className="tools-maintenance-hero"');
   });
 });
+
+describe('what a member gets on the music side (S6, S14)', () => {
+  // the scans, the cleaner, the updater, backups, the cache and the download
+  // blacklist are admin-only on the server, so a member never sees their cards
+  const member = PAGE.slice(PAGE.indexOf('if (!isAdmin) {'), PAGE.indexOf('  return (\n    <>'));
+
+  it('leaves the admin-only cards out', () => {
+    expect(member).toContain('<DiscoveryPoolCard />');
+    for (const card of [
+      'DbUpdaterCard',
+      'ReconcileIdsCard',
+      'DuplicateCleanerCard',
+      'MediaScanCard',
+      'MetadataUpdaterCard',
+      'BackupManagerCard',
+      'MetadataCacheCard',
+      'BlacklistCard',
+    ]) {
+      expect(member).not.toContain(`<${card} />`);
+    }
+  });
+
+  it('hands the admin flag to the music cards', () => {
+    expect(PAGE).toContain('<MusicToolSections isAdmin={isAdmin} />');
+  });
+});

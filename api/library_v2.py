@@ -4359,6 +4359,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @_route("/api/library/v2/artists/<int:artist_id>/naming")
+    def lib2_artist_naming(artist_id):
+        """What new downloads of this artist are filed and tagged as (#2165).
+
+        A download is named after the library artist it belongs to, found by
+        provider id, so a source that still says "Machine Gun Kelly" files
+        under "mgk". The name is pinned with the artist's ``name`` metadata
+        override (``PATCH /api/library/v2/metadata-overrides/artist/<id>``)."""
+        from core.library2.artist_naming import artist_naming
+        try:
+            from core.metadata.registry import get_primary_source
+            primary = get_primary_source()
+        except Exception:  # noqa: BLE001 - the other sources still answer
+            primary = ""
+        with closing(_conn()) as conn:
+            naming = artist_naming(conn, artist_id, primary_source=primary or "")
+        if naming is None:
+            return _fail("Artist not found", 404)
+        return jsonify({"success": True, **naming})
+
     @_route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
     def lib2_edit_artist(artist_id):
         """Update artist-level settings. Currently: ``monitor_new_items``

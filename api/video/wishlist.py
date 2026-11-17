@@ -326,6 +326,19 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         srv = _server()
         db = get_video_db()
+        # a kids profile wishes only for what its rating cap allows
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None:
+            for kind, key in (("movie", "movie"), ("show", "show")):
+                item = body.get(key)
+                if isinstance(item, dict) and item.get("tmdb_id") is not None:
+                    try:
+                        allowed = tmdb_title_allowed(db, kind, int(item["tmdb_id"]), cap)
+                    except (TypeError, ValueError):
+                        allowed = False
+                    if not allowed:
+                        return restricted_response()
         try:
             movie = body.get("movie")
             if movie and movie.get("tmdb_id") and (movie.get("title") or "").strip():

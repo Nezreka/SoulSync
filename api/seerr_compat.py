@@ -125,6 +125,17 @@ def _title_allowed(kind, tmdb_id, profile) -> bool:
     return tmdb_title_allowed(_video_db(), kind, tmdb_id, cap)
 
 
+def _filter_titles(items, profile):
+    """kids profiles: discover, search and lists keep only the titles the
+    library rates under the cap, the same rule the video discover rails use."""
+    from core.content_filter import restrictions_for
+    cap = restrictions_for(profile).get("cap")
+    if cap is None:
+        return items
+    from api.video.kids import filter_tmdb_items
+    return filter_tmdb_items(_video_db(), items, cap)
+
+
 def _publish(event, payload):
     from core.video.download_events import publish
     publish(event, payload)
@@ -145,7 +156,8 @@ def service() -> SeerrCompat:
                 get_profile=lambda pid: get_database().get_profile(pid),
                 list_profiles=_list_profiles, jellyfin_users=_jellyfin_users,
                 fallback_profile_id=fallback_profile_id, server=_server,
-                title_allowed=_title_allowed, publish=_publish, show_wanted=_show_wanted)
+                title_allowed=_title_allowed, filter_titles=_filter_titles,
+                publish=_publish, show_wanted=_show_wanted)
         return _service
 
 
@@ -240,55 +252,55 @@ def user_one(uid):
 @bp.route("/discover/trending", methods=["GET"])
 @seerr_route()
 def discover_trending():
-    return jsonify(service().trending(_page()))
+    return jsonify(service().trending(_page(), pid=_api_user()))
 
 
 @bp.route("/discover/movies", methods=["GET"])
 @seerr_route()
 def discover_movies():
-    return jsonify(service().discover("movie", _page(), request.args.to_dict()))
+    return jsonify(service().discover("movie", _page(), request.args.to_dict(), pid=_api_user()))
 
 
 @bp.route("/discover/tv", methods=["GET"])
 @seerr_route()
 def discover_tv():
-    return jsonify(service().discover("show", _page(), request.args.to_dict()))
+    return jsonify(service().discover("show", _page(), request.args.to_dict(), pid=_api_user()))
 
 
 @bp.route("/discover/movies/upcoming", methods=["GET"])
 @seerr_route()
 def discover_movies_upcoming():
-    return jsonify(service().upcoming("movie", _page()))
+    return jsonify(service().upcoming("movie", _page(), pid=_api_user()))
 
 
 @bp.route("/discover/tv/upcoming", methods=["GET"])
 @seerr_route()
 def discover_tv_upcoming():
-    return jsonify(service().upcoming("show", _page()))
+    return jsonify(service().upcoming("show", _page(), pid=_api_user()))
 
 
 @bp.route("/discover/movies/studio/<int:studio_id>", methods=["GET"])
 @seerr_route()
 def discover_studio(studio_id):
-    return jsonify(service().discover("movie", _page(), {"studio": str(studio_id)}))
+    return jsonify(service().discover("movie", _page(), {"studio": str(studio_id)}, pid=_api_user()))
 
 
 @bp.route("/discover/tv/network/<int:network_id>", methods=["GET"])
 @seerr_route()
 def discover_network(network_id):
-    return jsonify(service().discover("show", _page(), {"network": str(network_id)}))
+    return jsonify(service().discover("show", _page(), {"network": str(network_id)}, pid=_api_user()))
 
 
 @bp.route("/discover/movies/genre/<int:genre_id>", methods=["GET"])
 @seerr_route()
 def discover_movie_genre(genre_id):
-    return jsonify(service().discover("movie", _page(), {"genre": str(genre_id)}))
+    return jsonify(service().discover("movie", _page(), {"genre": str(genre_id)}, pid=_api_user()))
 
 
 @bp.route("/discover/tv/genre/<int:genre_id>", methods=["GET"])
 @seerr_route()
 def discover_tv_genre(genre_id):
-    return jsonify(service().discover("show", _page(), {"genre": str(genre_id)}))
+    return jsonify(service().discover("show", _page(), {"genre": str(genre_id)}, pid=_api_user()))
 
 
 @bp.route("/discover/genreslider/movie", methods=["GET"])
@@ -306,7 +318,7 @@ def genreslider_tv():
 @bp.route("/search", methods=["GET"])
 @seerr_route()
 def search():
-    return jsonify(service().search(request.args.get("query") or "", _page()))
+    return jsonify(service().search(request.args.get("query") or "", _page(), pid=_api_user()))
 
 
 # ---- details ---------------------------------------------------------------------
@@ -314,19 +326,19 @@ def search():
 @bp.route("/<media_type>/<int:tmdb_id>", methods=["GET"])
 @seerr_route()
 def details(media_type, tmdb_id):
-    return jsonify(service().details(_kind(media_type), tmdb_id))
+    return jsonify(service().details(_kind(media_type), tmdb_id, pid=_api_user()))
 
 
 @bp.route("/<media_type>/<int:tmdb_id>/similar", methods=["GET"])
 @seerr_route()
 def similar(media_type, tmdb_id):
-    return jsonify(service().similar(_kind(media_type), tmdb_id, _page()))
+    return jsonify(service().similar(_kind(media_type), tmdb_id, _page(), pid=_api_user()))
 
 
 @bp.route("/<media_type>/<int:tmdb_id>/recommendations", methods=["GET"])
 @seerr_route()
 def recommendations(media_type, tmdb_id):
-    return jsonify(service().recommendations(_kind(media_type), tmdb_id, _page()))
+    return jsonify(service().recommendations(_kind(media_type), tmdb_id, _page(), pid=_api_user()))
 
 
 @bp.route("/<media_type>/<int:tmdb_id>/ratingscombined", methods=["GET"])
@@ -348,19 +360,19 @@ def person(person_id):
 @bp.route("/person/<int:person_id>/combined_credits", methods=["GET"])
 @seerr_route()
 def person_credits(person_id):
-    return jsonify(service().person_credits(person_id))
+    return jsonify(service().person_credits(person_id, pid=_api_user()))
 
 
 @bp.route("/collection/<int:collection_id>", methods=["GET"])
 @seerr_route()
 def collection(collection_id):
-    return jsonify(service().collection(collection_id))
+    return jsonify(service().collection(collection_id, pid=_api_user()))
 
 
 @bp.route("/media", methods=["GET"])
 @seerr_route()
 def media():
-    return jsonify(service().recently_added(_arg_int("take", 20), _arg_int("skip", 0)))
+    return jsonify(service().recently_added(_arg_int("take", 20), _arg_int("skip", 0), pid=_api_user()))
 
 
 # ---- requests --------------------------------------------------------------------
@@ -371,7 +383,7 @@ def request_list():
     return jsonify(service().requests(
         take=_arg_int("take", 10), skip=_arg_int("skip", 0),
         filt=request.args.get("filter") or "all",
-        requested_by=request.args.get("requestedBy")))
+        requested_by=request.args.get("requestedBy"), pid=_api_user()))
 
 
 @bp.route("/request", methods=["POST"])

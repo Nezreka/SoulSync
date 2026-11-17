@@ -170,6 +170,12 @@ def _profile() -> int:
 
 def _default_fetch_channels() -> List[Dict[str, Any]]:
     from api.video import get_video_db
+    from core.permissions import owner_may_download
+    # a follow wishes new uploads to download, so a profile with downloads
+    # off has nothing to scan for (asked each pass: the switch may change)
+    if not owner_may_download(_profile()):
+        logger.info("channel scan: profile %s has downloads off, skipped", _profile())
+        return []
     return get_video_db().list_watchlist_channels(profile_id=_profile())
 
 

@@ -163,7 +163,7 @@ TRIGGERS: list[dict] = [
      "variables": ["title", "author", "series", "asin"]},
     {"type": "audiobook_wishlist_processing_completed", "label": "Audiobook Wishlist Processed", "icon": "check-circle",
      "description": "After an audiobook wishlist pass that searched for at least one book", "available": True,
-     "variables": ["checked", "found", "grabbed", "errors", "freed", "unstuck", "already_owned"]},
+     "variables": ["checked", "found", "grabbed", "errors", "freed", "unstuck", "already_owned", "skipped"]},
     {"type": "audiobook_new_release", "label": "Audiobook New Release Found", "icon": "bell",
      "description": "When a followed author, narrator or series has new audiobooks", "available": True,
      "has_conditions": True, "condition_fields": ["artist", "role"],

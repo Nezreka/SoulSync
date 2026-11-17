@@ -2,6 +2,12 @@
 
 the settings page is react now, soulsync can answer as seerr for litefin and other seerr apps, an album can switch to another version of itself, and popular tracks get a flame. plus band names with an "&" stay one artist, numbered releases like group therapy stop crossing, and a long list of reported fixes.
 
+## security
+
+- **only the admin can make the first api key.** while an install had no api key yet, anyone who could reach the server could create an admin key, signed in or not, because `/api/v1` skips the login screen. that was in 3.6.6 too, so this release is worth taking soon.
+- **members can only do what their profile allows.** with login on or an admin pin, a member could still download with downloads off (playlist start missing, audiobooks, youtube follows), edit shared library metadata including the explicit flag, reorganize anyone's files, run the duplicate cleaner and other tools, cancel someone else's video download, rebind the install's spotify, tidal, deezer, last.fm or qobuz accounts, change the media server setup, read live server logs, claim another jellyfin user, and get around request limits and rating caps. all of those are refused now, and the buttons are gone for them. found while planning the people and permissions work (#2166, #2167, #2168).
+- members see their own downloads and toasts, not everyone's. past download history is admin only for now, since old rows don't say who started them.
+
 ## settings
 
 - **the settings page is react.** every tab, music and video, the shell and the page itself. it looks and works the same, it just loads its tabs once and saves only what you changed.
@@ -13,6 +19,7 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **other versions (thanks wolf39us, #2145).** an album's ⋯ menu lists the release's other editions from musicbrainz and your primary source, with track count, year, country and label, plus a search for that artist. pick one and it shows what changes before it switches. fixing the manual match on the way: it kept the old release's cached tracklist.
 - **popular tracks get a flame (thanks wolf39us, #2144)**, up to three of an album's most played on last.fm that clearly stand out, like plexamp. nothing is fetched for it, it reads the play counts soulsync already has.
 - **the artist page shows what a rename would move (thanks wolf39us, #2141).** albums whose files don't match your naming template read "N to rename", and clicking opens preview rename.
+- **an artist keeps their folder when the source renames them (thanks nstrelow, #2165).** deezer still says machine gun kelly while your library says mgk, so new downloads made a second folder. a download now takes the name your library has for that artist by id, and artist settings has a folder and tag name section to set your own spelling, with preview rename and retag for the files you already have.
 - **locking an album from the artist page stays on the artist page (thanks wolf39us, #2143)**, so you can lock one after another.
 - **collection completeness on the cards and table (thanks SeadogsBooty, #2106, #2107, #2108, #2109)**, with sorts, a featured filter, card size and multi-select. for an artist you don't watch it counts every track of the releases you own something of, so a single track off a 14 track album reads 1 of 14, not complete.
 - **guests stop filling the artists list (thanks Ericsson, #2142).** an album artist credit a guest picked up on someone else's album no longer makes them a library artist. the list and the artist page now go by the same rule.
@@ -75,6 +82,6 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 
 ## also
 
-- replaygain analyses files with non utf-8 tags (#2118), re-identify remembers the move-the-file choice (#2114), and the tools findings filter speaks the list's names (#2113).
+- the ? help button opens again on every page. it did nothing on the react pages. replaygain analyses files with non utf-8 tags (#2118), re-identify remembers the move-the-file choice (#2114), and the tools findings filter speaks the list's names (#2113).
 
 tested: the full suite passes on windows python with every failure rechecked on linux (only the known drive permission tests on a windows disk fail), the frontend suite passes, and each fix carries its own test.

@@ -18,6 +18,7 @@ from api.source_playlists import (
     _get_metadata_fallback_client,
     _get_metadata_fallback_source,
 )
+from core.profile_context import admin_only
 from core.settings import config_manager
 from utils.logging_config import get_logger
 
@@ -134,6 +135,7 @@ def _run_background_comparison(query, hydrabase_counts=None):
     threading.Thread(target=_worker, daemon=True).start()
 
 @bp.route('/api/hydrabase/connect', methods=['POST'])
+@admin_only
 def hydrabase_connect():
     """Connect to a Hydrabase instance via WebSocket."""
     global _hydrabase_ws
@@ -168,6 +170,7 @@ def hydrabase_connect():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/hydrabase/disconnect', methods=['POST'])
+@admin_only
 def hydrabase_disconnect():
     """Disconnect from Hydrabase and disable dev mode."""
     global _hydrabase_ws
@@ -220,6 +223,7 @@ def hydrabase_comparisons():
     return jsonify({"success": True, "comparisons": items})
 
 @bp.route('/api/hydrabase/send', methods=['POST'])
+@admin_only
 def hydrabase_send():
     """Send a raw JSON payload to Hydrabase and return the response."""
     global _hydrabase_ws

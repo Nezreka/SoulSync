@@ -510,7 +510,7 @@ def _record_pack_episode(db, ep_dl, patch):
             k: ep_dl.get(k) for k in
             ("kind", "title", "release_title", "source", "username", "filename",
              "size_bytes", "quality_label", "target_dir", "media_id", "media_source",
-             "year", "poster_url", "search_ctx", "quality_profile_id")
+             "year", "poster_url", "search_ctx", "quality_profile_id", "profile_id")
         } | {"status": "completed", "attempts": 0})
         db.update_video_download(child, dest_path=patch.get("dest_path"),
                                  progress=100.0, completed_at=_now(),

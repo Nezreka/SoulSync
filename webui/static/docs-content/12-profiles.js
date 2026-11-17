@@ -74,13 +74,15 @@ Admins choose exactly which pages each profile can visit (**allowed pages**). A 
 
 A few pages follow their own rules regardless of the list: **Help** and **Issues** are always visible, **Settings** is admin-only (it's stripped from non-admin grants even if picked), and the **Requests** page shows for admins and for profiles without download rights. **Automations** is a grantable page — non-admin profiles can get full access to it.
 
+What changes the whole install stays with the admin, whatever pages a profile has: editing library details (names, years, the explicit flag), cover and artist art, the Tools page's scans and cleaners, the download blacklist, media server and service logins (Spotify, Tidal, Deezer, Qobuz, Last.fm in Settings), finishing setup, and settings like the wishlist retry profile. A member reorganizes only albums in their own library, sees their own downloads and activity, and the admin's Soulseek private messages stay the admin's unless member sending is on.
+
 ## Download permission
 
 The **can download** toggle controls whether a profile can trigger downloads directly. Profiles without it can still add to their wishlist — those rows become requests for an admin to approve (see [Requests](#docs/prof-requests)).
 
 ## Request quotas
 
-Set a **request limit** per profile — e.g. 5 requests per 7 days. The request page shows how many are left; once the quota is used up, new asks are refused until the window resets. Admins are never limited. Quotas keep one enthusiastic family member from flooding the request queue.
+Set a **request limit** per profile — e.g. 5 requests per 7 days. The request page shows how many are left; once the quota is used up, new asks are refused until the window resets. Every ask counts from when it was made, so withdrawing a request or clearing it from the history doesn't hand it back. Admins are never limited. Quotas keep one enthusiastic family member from flooding the request queue.
 
 ## Kids limits
 

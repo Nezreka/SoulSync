@@ -134,6 +134,8 @@ def server(monkeypatch):
     monkeypatch.setattr(artist_detail, '_resolve_library_file_path', lambda p: p)
     monkeypatch.setattr(urllib.request, 'urlopen', lambda *a, **k: _Resp(_PNG))
     monkeypatch.setattr('core.library.artist_image.download_image_bytes', lambda *a, **k: _PNG)
+    # the art routes fetch through the guarded artwork download now
+    monkeypatch.setattr(artist_detail, '_download_art', lambda url: _PNG)
     db = web_server.get_database()
     seeded = []
 

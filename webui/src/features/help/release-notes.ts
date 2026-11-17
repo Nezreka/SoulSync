@@ -162,6 +162,15 @@ export const RELEASES: Release[] = [
         desc: 'Members land on a page they can open and never see the admin menu, admins can set, lock and reset what each profile shows, and a lock hides Customize and shows only what the admin set. Members see only their own profile with login on, and set their own sidebar weather under Profile & account (thanks SeadogsBooty, #2154 to #2157, #2162 to #2164).',
       },
       {
+        title: 'Security',
+        desc: 'Only the admin can make the first API key, and members can only do what their profile allows: no downloads with downloads off, no shared library edits, tools, other people’s downloads or install accounts. Worth updating soon.',
+      },
+      {
+        title: 'Artist folder names',
+        desc: 'A download takes the name your library has for an artist, so Machine Gun Kelly from Deezer lands in mgk. Artist Settings can set your own spelling (thanks nstrelow, #2165).',
+        page: 'library',
+      },
+      {
         title: 'Library fixes',
         desc: 'Leftover rows fold on every scan (#2094), reorganize takes the cover along (#2010), a pair that can’t be merged says why (#2146), and the library upgrade no longer stops at an old track with no id.',
         page: 'library',

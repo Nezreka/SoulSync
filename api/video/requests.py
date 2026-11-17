@@ -41,11 +41,24 @@ def _server():
 
 
 def _profile_row(pid):
-    """the quota fields web_server's before_request stashed on g (the video
-    side never imports the music db)."""
-    return {"id": pid, "is_admin": _is_admin(),
+    """the quota fields web_server's before_request stamps on g (the video
+    side never imports the music db). a member's request with no stamp came
+    through a path that skipped it: that is not "no limit", so it raises and
+    the caller refuses the ask rather than wave it through uncounted."""
+    if _is_admin():
+        return {"id": pid, "is_admin": True}
+    if not hasattr(g, "request_limit"):
+        raise LookupError("no request limit on record for profile %s" % pid)
+    return {"id": pid, "is_admin": False,
             "request_limit": getattr(g, "request_limit", 0),
             "request_limit_days": getattr(g, "request_limit_days", 7)}
+
+
+def _used(db, quota) -> int:
+    """asks spent in the quota's window. a count that can't be read is a
+    full quota: refuse the ask rather than let it through uncounted."""
+    used = db.count_video_requests_since(_me(), quota["days"])
+    return quota["limit"] if used is None else int(used)
 
 
 def _already_pending(db, kind, tmdb_id, season, episode, youtube_id) -> bool:
@@ -215,6 +228,14 @@ def register_routes(bp):
             monitor = monitor_for_new_request(kind, body.get("monitor"))
             title = meta["title"]
             year, poster_url = meta["year"], meta["poster_url"]
+        # a kids profile asks only for what its rating cap allows (the title
+        # pages already hide the rest; this is the deep link and the api)
+        if kind in ("movie", "show", "episode"):
+            from .kids import restricted_response, tmdb_title_allowed, video_cap
+            cap = video_cap()
+            if cap is not None and not tmdb_title_allowed(
+                    db, "movie" if kind == "movie" else "show", tmdb_id, cap):
+                return restricted_response()
         # already on its way (wishlisted, approved, downloading): a second ask
         # would only be a duplicate in the admin's queue (#2160). someone
         # else's ask still waiting is fine: this one joins it (the queue shows
@@ -227,9 +248,14 @@ def register_routes(bp):
                                 "error": "That's already on the way."}), 409
         # a limited profile's quota (asks per window, any outcome counts)
         from core.requests.quota import over_quota, quota_for, quota_message, quota_state
-        quota = quota_for(_profile_row(_me()))
+        try:
+            quota = quota_for(_profile_row(_me()))
+        except Exception:  # noqa: BLE001 - can't read the limit, so no ask goes through uncounted
+            logger.warning("request limit lookup failed for profile %s", _me(), exc_info=True)
+            return jsonify({"success": False,
+                            "error": "Couldn't check your request limit. Try again in a moment."}), 503
         if quota:
-            used = db.count_video_requests_since(_me(), quota["days"])
+            used = _used(db, quota)
             if over_quota(quota, used) and not joining and not _already_pending(
                     db, kind, tmdb_id, season, episode, youtube_id):
                 return jsonify({"success": False, "error": quota_message(quota),
@@ -274,11 +300,14 @@ def register_routes(bp):
         db.annotate_request_progress(rows)
         counts = db.video_requests_status_counts(scope)
         from core.requests.quota import quota_for, quota_state
-        quota = quota_for(_profile_row(_me())) if not _is_admin() else None
+        try:
+            quota = quota_for(_profile_row(_me())) if not _is_admin() else None
+        except Exception:  # noqa: BLE001 - the list still loads without the quota line
+            logger.warning("request limit lookup failed for profile %s", _me(), exc_info=True)
+            quota = None
         return jsonify({"success": True, "requests": rows,
                         "counts": counts, "pending": counts.get("pending", 0),
-                        "quota": quota_state(quota, db.count_video_requests_since(_me(), quota["days"]))
-                        if quota else None})
+                        "quota": quota_state(quota, _used(db, quota)) if quota else None})
 
     @bp.route("/requests/counts", methods=["GET"])
     def video_request_counts():

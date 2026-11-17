@@ -57,6 +57,13 @@ def _tmdb_resize(url, w, backdrop):
 def register_routes(bp):
     def _stream_art(kind, item_id, art):
         from . import get_video_db
+        if kind in ("movie", "show"):
+            # a kids profile's art for a title over its rating cap reads as
+            # missing, like the title itself
+            from .kids import library_title_allowed, video_cap
+            cap = video_cap()
+            if cap is not None and not library_title_allowed(get_video_db(), kind, item_id, cap):
+                abort(404)
         ref = get_video_db().get_art_ref(kind, item_id, art)
         if not ref or not ref.get("poster_url"):
             abort(404)

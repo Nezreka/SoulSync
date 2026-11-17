@@ -298,13 +298,16 @@ class ReorganizeQueue:
             tally['locked'] = locked
         return tally
 
-    def cancel(self, queue_id: str) -> dict:
+    def cancel(self, queue_id: str, may: Optional[Callable[[QueueItem], bool]] = None) -> dict:
         """Cancel a queued item. The currently-running item cannot be
-        cancelled (Python threads aren't cleanly killable)."""
+        cancelled (Python threads aren't cleanly killable). ``may`` answers
+        whether the caller may touch this item at all."""
         with self._cond:
             for item in self._items:
                 if item.queue_id != queue_id:
                     continue
+                if may is not None and not may(item):
+                    return {'cancelled': False, 'reason': 'not_yours'}
                 if item.status == 'queued':
                     item.status = 'cancelled'
                     item.finished_at = time.time()
@@ -316,19 +319,21 @@ class ReorganizeQueue:
                 return {'cancelled': False, 'reason': 'not_active'}
         return {'cancelled': False, 'reason': 'not_found'}
 
-    def clear_queued(self) -> int:
-        """Cancel ALL queued items (running item continues). Returns
-        the count of items cancelled."""
+    def clear_queued(self, only: Optional[Callable[[QueueItem], bool]] = None) -> int:
+        """Cancel ALL queued items (running item continues), or just the
+        ones ``only`` picks. Returns the count of items cancelled."""
         cancelled = 0
         with self._cond:
             now = time.time()
             for item in self._items:
-                if item.status == 'queued':
+                if item.status == 'queued' and (only is None or only(item)):
                     item.status = 'cancelled'
                     item.finished_at = now
                     cancelled += 1
+                    if only is not None:
+                        self._persist(item)
             # one statement instead of N deletes - this can be thousands of rows
-            if cancelled and self._store is not None:
+            if cancelled and only is None and self._store is not None:
                 try:
                     self._store.delete_queued()
                 except Exception as e:
