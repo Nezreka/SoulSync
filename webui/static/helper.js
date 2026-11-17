@@ -2152,20 +2152,30 @@ const HELPER_MENU_ITEMS = [
     { id: 'troubleshoot', icon: '🔧', label: 'Troubleshoot',    desc: 'Fix common issues' },
 ];
 
+// The ? button opens the React help sheet (features/help, window.SoulSyncHelp).
+// This is the shim the button's onclick still calls: it ends an old mode that
+// is still running (a tour), then hands over. The old menu and its modes stay
+// below until P7 deletes them; nothing on the button opens them any more.
+let _helpOpenPending = false;
+
 function toggleHelperMode() {
-    // If a mode is active, deactivate everything
-    if (HelperState.mode) {
-        exitHelperMode();
-        return;
+    if (HelperState.mode) exitHelperMode();
+    if (HelperState.menuOpen) closeHelperMenu();
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) {
+        floatBtn.classList.remove('undiscovered');
+        try { localStorage.setItem('soulsync_helper_discovered', '1'); } catch (e) { /* storage blocked */ }
     }
-    // If menu is open, close it
-    if (HelperState.menuOpen) {
-        closeHelperMenu();
-        return;
-    }
-    // Otherwise, open the menu
-    openHelperMenu();
+    const help = window.SoulSyncHelp;
+    if (help) { help.toggle(); return; }
+    // the React bundle hasn't run yet: open once it says it is ready
+    _helpOpenPending = !_helpOpenPending;
 }
+
+window.addEventListener('ss:help-ready', () => {
+    if (_helpOpenPending && window.SoulSyncHelp) window.SoulSyncHelp.open();
+    _helpOpenPending = false;
+});
 
 // Map page IDs → tour IDs (only where they differ)
 const PAGE_TOUR_MAP = {
@@ -2823,21 +2833,7 @@ document.addEventListener('keydown', function(e) {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nextTourStep(); }
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prevTourStep(); }
     }
-    // ? opens helper menu (when not typing in an input)
-    if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
-        const tag = document.activeElement?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        if (document.activeElement?.isContentEditable) return;
-        e.preventDefault();
-        toggleHelperMode();
-    }
-    // Ctrl+K / Cmd+K opens helper search
-    if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        if (HelperState.mode === 'search') { exitHelperMode(); return; }
-        if (HelperState.mode) exitHelperMode();
-        activateHelperMode('search');
-    }
+    // ?, F1 and Ctrl/Cmd+K belong to the help sheet now (features/help/host.tsx)
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3927,8 +3923,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 .catch(() => { /* no answer, no nag */ });
         }
 
-        // What's New badge
-        _updateHelperBadge();
+        // the What's new dot on the ? is gone: the sheet's What's new tile
+        // carries the version chip instead, and the dot on the ? is Health's
 
         // Idle glow for undiscovered help button
         if (!localStorage.getItem('soulsync_helper_discovered')) {

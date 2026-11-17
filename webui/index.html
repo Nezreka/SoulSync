@@ -4252,9 +4252,9 @@
         <span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
         <span class="notif-bell-dl" id="notif-bell-dl" style="display:none" title="Active downloads">0</span>
     </button>
-    <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()"
-        title="Interactive Help — click any element to learn about it">
-        <span>?</span>
+    <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()" title="Help (?)"
+        aria-label="Help" aria-haspopup="dialog" aria-expanded="false" aria-controls="soulsync-help-sheet">
+        <span aria-hidden="true">?</span>
     </button>
 
     <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>

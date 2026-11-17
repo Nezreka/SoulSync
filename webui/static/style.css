@@ -1820,6 +1820,34 @@ body.max-performance .nav-button.active:hover {
     transform: scale(1.05);
 }
 
+/* the help sheet is open (features/help/host.tsx sets aria-expanded) */
+.helper-float-btn[aria-expanded="true"] {
+    transform: none;
+    animation: none;
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--help-on-accent);
+    box-shadow: 0 6px 28px rgba(var(--accent-rgb), 0.35), 0 2px 8px var(--black-a30);
+}
+
+.helper-float-btn[aria-expanded="true"]:hover {
+    background: var(--accent-light);
+    color: var(--help-on-accent);
+}
+
+/* Health has an error: an amber dot, admins only (features/help/host.tsx) */
+.helper-float-btn[data-help-alert]::before {
+    content: '';
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--bg-primary);
+    border-radius: var(--radius-circle);
+    background: var(--warning);
+}
+
 @keyframes helperFloatPulse {
     0%, 100% { box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4), 0 2px 8px var(--black-a30); }
     50% { box-shadow: 0 4px 32px rgba(var(--accent-rgb), 0.6), 0 2px 8px var(--black-a30); }
