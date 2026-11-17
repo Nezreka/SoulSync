@@ -202,7 +202,10 @@ def scan_author(
 
     # Following without auto-wishlist is "tell me, do not fetch". The releases
     # are still counted and reported, so the card can say what turned up.
-    if not row.get("auto_wishlist", 1):
+    # an owner with downloads off gets the same: a wishlisted book is grabbed
+    # by the next pass, so nothing is wishlisted for them (asked each scan)
+    from core.permissions import owner_may_download
+    if not row.get("auto_wishlist", 1) or not owner_may_download(profile_id):
         outcome["wishlisted"] = 0
         database.mark_author_scanned(name, found=outcome["found"], profile_id=profile_id, role=role)
         if outcome["found"]:

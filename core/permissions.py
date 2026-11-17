@@ -26,6 +26,31 @@ def profile_can_download(profile: Optional[Dict[str, Any]]) -> bool:
     return bool(profile.get("can_download", True))
 
 
+def owner_may_download(pid, get_profile: Optional[Callable[[int], Optional[Dict[str, Any]]]] = None) -> bool:
+    """may a background job download for the profile that owns this row?
+
+    the wishlist and watchlist workers run as the system, not as the person
+    whose row it is, so they ask about the owner, at grab time (a switch
+    turned off after the add counts). fails closed: an owner that can't be
+    read is skipped this pass and looked at again on the next."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid == 1:
+        return True
+    try:
+        if get_profile is None:
+            from database.music_database import get_database
+            get_profile = get_database().get_profile
+        profile = get_profile(pid)
+    except Exception:  # noqa: BLE001 - see docstring, skip until it can be read
+        return False
+    if profile and profile.get("is_admin"):
+        return True
+    return profile_can_download(profile)
+
+
 def download_denied_reason(pid, get_profile: Callable[[int], Optional[Dict[str, Any]]]) -> Optional[str]:
     """why this profile may not start a download, or None when it may."""
     if pid is None:
