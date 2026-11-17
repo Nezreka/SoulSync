@@ -54,8 +54,10 @@ def _fetch_jellyfin_image(item_id: str, db=None) -> Optional[tuple]:
         return None
     try:
         import requests
+        from core.jellyfin_client import jellyfin_auth_headers
         url = cfg["base_url"].rstrip("/") + "/Items/" + item_id + "/Images/Primary"
-        r = requests.get(url, params={"api_key": cfg["api_key"], "maxHeight": 480}, timeout=sa._PLEX_TIMEOUT)
+        r = requests.get(url, params={"maxHeight": 480}, headers=jellyfin_auth_headers(cfg["api_key"]),
+                         timeout=sa._PLEX_TIMEOUT)
         return _image_reply(r)
     except Exception:   # noqa: BLE001
         logger.debug("jellyfin image proxy failed for %s", item_id, exc_info=True)

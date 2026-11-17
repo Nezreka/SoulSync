@@ -120,9 +120,27 @@ def test_server_activity_sends_the_modern_header(monkeypatch):
     monkeypatch.setattr(requests, "get", _get)
     monkeypatch.setattr(sa, "_jellyfin_config",
                         lambda db: {"base_url": "http://jelly.invalid", "api_key": "abc123"})
-    sa._jellyfin_activity(None)
+    from core.server_activity.live import _jellyfin_sessions
+    _jellyfin_sessions(None)   # live activity asks /Sessions through jellyfin.sessions
     assert seen.get("X-Emby-Token") == "abc123"
     assert seen.get("Authorization", "").startswith("MediaBrowser ")
+
+    # the poster proxy is the other door to jellyfin: same header, no ?api_key
+    from core.server_activity.images import _fetch_jellyfin_image
+    seen.clear()
+    params_seen = {}
+
+    def _get_img(url, headers=None, params=None, timeout=None, **kw):
+        seen.update(headers or {})
+        params_seen.update(params or {})
+        r = MagicMock()
+        r.status_code = 404
+        return r
+
+    monkeypatch.setattr(requests, "get", _get_img)
+    _fetch_jellyfin_image("0123456789abcdef0123456789abcdef", None)
+    assert seen.get("X-Emby-Token") == "abc123"
+    assert "api_key" not in params_seen
 
 
 def test_no_hand_rolled_jellyfin_header_dict_anywhere():
