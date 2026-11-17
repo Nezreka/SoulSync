@@ -101,6 +101,16 @@ def register_routes(bp):
         title = (body.get("title") or "").strip()
         if kind not in _KINDS or not tmdb_id or not title:
             return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
+        if kind == "show":
+            # a kids profile follows only a show its rating cap allows
+            from .kids import restricted_response, tmdb_title_allowed, video_cap
+            cap = video_cap()
+            try:
+                allowed = cap is None or tmdb_title_allowed(get_video_db(), "show", int(tmdb_id), cap)
+            except (TypeError, ValueError):
+                allowed = False
+            if not allowed:
+                return restricted_response()
         try:
             db = get_video_db()
             server = _server()

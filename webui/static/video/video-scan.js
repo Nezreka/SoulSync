@@ -57,7 +57,17 @@
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ mode: mode, media_type: mediaType })
         })
-            .then(function () { setTimeout(poll, 600); })
+            .then(function (r) {
+                // scanning the library is the admin's: a refusal ends here
+                // with its reason instead of polling a scan that never started
+                if (r && r.status === 403) {
+                    scanning = false;
+                    emit('soulsync:video-scan-done', { state: 'error', error: 'Only an admin can scan the library.' });
+                    if (typeof showToast === 'function') showToast('Only an admin can scan the library.', 'info');
+                    return;
+                }
+                setTimeout(poll, 600);
+            })
             .catch(function () {
                 scanning = false;
                 emit('soulsync:video-scan-done', { state: 'error' });

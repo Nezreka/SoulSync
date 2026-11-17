@@ -167,7 +167,24 @@ def create_video_blueprint() -> Blueprint:
             admin = admin or _p("/api/video/server", "/api/video/downloads/config",
                                  "/api/video/downloads/quality",
                                  "/api/video/downloads/youtube-quality",
-                                 "/api/video/enrichment")   # all enrichment mutations
+                                 "/api/video/enrichment",   # all enrichment mutations
+                                 # the household's recycle bin, download history
+                                 # and queue: restoring or purging files, forgetting
+                                 # grabs and clearing rows is the admin's, like the
+                                 # music downloads page. the GETs stay open (a
+                                 # member's list is scoped to their own grabs).
+                                 # cancel is per row: the route lets a member stop
+                                 # a grab they started
+                                 "/api/video/downloads/recycle",
+                                 "/api/video/downloads/history",
+                                 "/api/video/downloads/remove",
+                                 "/api/video/downloads/clear",
+                                 # start/stop a library scan or a server rescan
+                                 "/api/video/scan",
+                                 # the discover page's languages and streaming
+                                 # services are one setting for the household
+                                 "/api/video/discover/languages",
+                                 "/api/video/discover/providers-pref")
             # Library / metadata MANAGEMENT — parity with music's @admin_only library edits
             # (delete/sync/clear-match/delete-batch) + the download blocklist config. Content
             # views only READ metadata (the detail GET stays open); these MUTATE the library.
@@ -232,7 +249,15 @@ def create_video_blueprint() -> Blueprint:
                 "/api/video/wishlist/remove", "/api/video/wishlist/clear",
                 "/api/video/wishlist/search", "/api/video/wishlist/retry",
                 "/api/video/watchlist/remove", "/api/video/watchlist/person",
-                "/api/video/watchlist/studio", "/api/video/youtube/wishlist/remove"):
+                "/api/video/watchlist/studio", "/api/video/youtube/wishlist/remove",
+                # following a channel or a playlist wishes its uploads, and an
+                # import follows a whole file of them: the same spend as an add.
+                # channel settings decide what a follow downloads
+                "/api/video/youtube/follow", "/api/video/youtube/subscriptions/import",
+                "/api/video/youtube/playlist/follow") or (
+                writing and not getattr(g, "can_download", True)
+                and path.startswith("/api/video/youtube/channel/")
+                and path.endswith("/settings")):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
 
     # the library manager keeps each title summed up in memory. a write to

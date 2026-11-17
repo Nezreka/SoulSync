@@ -580,6 +580,57 @@ def test_request_list_and_cancel(client, h):
                       headers=KEY(3)).get_json()["pageInfo"]["results"] == 1
 
 
+def test_request_list_is_the_acting_users_own_unless_admin(client, h):
+    """S7: a member's requests list is their own, whatever requestedBy asks
+    for. an admin sees everyone's (and may still narrow to one user)."""
+    _post(client, 5, {"mediaType": "movie", "mediaId": NEW_MOVIE})
+    mine = client.get(BASE + "/request?filter=all", headers=KEY(5)).get_json()
+    assert {r["requestedBy"]["id"] for r in mine["results"]} == {5}
+    asked_for_kid = client.get(BASE + "/request?filter=all&requestedBy=3", headers=KEY(5)).get_json()
+    assert {r["requestedBy"]["id"] for r in asked_for_kid["results"]} == {5}
+    everyone = client.get(BASE + "/request?filter=all", headers=KEY(1)).get_json()
+    assert {r["requestedBy"]["id"] for r in everyone["results"]} == {3, 5}
+    narrowed = client.get(BASE + "/request?filter=all&requestedBy=3", headers=KEY(1)).get_json()
+    assert {r["requestedBy"]["id"] for r in narrowed["results"]} == {3}
+    # the title page's open requests: the same rule
+    asked = client.get(BASE + "/movie/%d" % ASKED_MOVIE, headers=KEY(5)).get_json()
+    assert asked["mediaInfo"]["requests"] == []
+    asked = client.get(BASE + "/movie/%d" % ASKED_MOVIE, headers=KEY(3)).get_json()
+    assert [r["requestedBy"]["id"] for r in asked["mediaInfo"]["requests"]] == [3]
+
+
+@pytest.fixture
+def capped(h, monkeypatch):
+    """S16: the real kids rules (api.seerr_compat's title checks over the
+    video db's ratings). profile 6 is a kid capped at PG."""
+    kid = {"id": 6, "name": "Little", "is_admin": False, "can_download": False,
+           "allowed_sides": "video", "max_rating": "PG"}
+    monkeypatch.setitem(PROFILES, 6, kid)
+    monkeypatch.setattr(sc, "_video_db", lambda: h.db)
+    h.sql("UPDATE movies SET content_rating='R' WHERE tmdb_id=?", (OWNED_MOVIE,))
+    h.sql("UPDATE shows SET content_rating='TV-Y' WHERE tmdb_id=?", (OWNED_SHOW,))
+    h.svc._title_allowed = sc._title_allowed
+    h.svc._filter_titles = sc._filter_titles
+    return 6
+
+
+def test_kids_cap_holds_on_seerr_discover_search_and_details(client, h, capped):
+    trending = client.get(BASE + "/discover/trending", headers=KEY(capped)).get_json()
+    # only what the library rates under the cap: the TV-Y show
+    assert [r["id"] for r in trending["results"]] == [OWNED_SHOW]
+    admin = client.get(BASE + "/discover/trending", headers=KEY(1)).get_json()
+    assert len(admin["results"]) == 5
+    found = client.get(BASE + "/search?query=x", headers=KEY(capped)).get_json()
+    assert [r["mediaType"] for r in found["results"]] == ["person"]
+    # an over-cap title reads as not found
+    assert client.get(BASE + "/movie/%d" % OWNED_MOVIE, headers=KEY(capped)).status_code == 404
+    assert client.get(BASE + "/movie/%d" % OWNED_MOVIE, headers=KEY(1)).status_code == 200
+    media = client.get(BASE + "/media?take=10&skip=0", headers=KEY(capped)).get_json()
+    assert [r["tmdbId"] for r in media["results"]] == [OWNED_SHOW]
+    credits = client.get(BASE + "/person/9/combined_credits", headers=KEY(capped)).get_json()
+    assert credits["cast"] == [] and credits["crew"] == []
+
+
 def test_recently_added_carries_tmdb_ids(client):
     body = client.get(BASE + "/media?filter=allavailable&sort=mediaAdded&take=10&skip=0",
                       headers=KEY()).get_json()

@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Optional
 
 DOWNLOADS_OFF = "Downloads are disabled for this profile."
 NO_PROFILE = "Pick a profile first."
+PROFILE_UNREADABLE = "Couldn't check this profile's download rights. Try again in a moment."
 
 
 def profile_can_download(profile: Optional[Dict[str, Any]]) -> bool:
@@ -24,6 +25,31 @@ def profile_can_download(profile: Optional[Dict[str, Any]]) -> bool:
     except (TypeError, ValueError):
         pass
     return bool(profile.get("can_download", True))
+
+
+def owner_may_download(pid, get_profile: Optional[Callable[[int], Optional[Dict[str, Any]]]] = None) -> bool:
+    """may a background job download for the profile that owns this row?
+
+    the wishlist and watchlist workers run as the system, not as the person
+    whose row it is, so they ask about the owner, at grab time (a switch
+    turned off after the add counts). fails closed: an owner that can't be
+    read is skipped this pass and looked at again on the next."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid == 1:
+        return True
+    try:
+        if get_profile is None:
+            from database.music_database import get_database
+            get_profile = get_database().get_profile
+        profile = get_profile(pid)
+    except Exception:  # noqa: BLE001 - see docstring, skip until it can be read
+        return False
+    if profile and profile.get("is_admin"):
+        return True
+    return profile_can_download(profile)
 
 
 def download_denied_reason(pid, get_profile: Callable[[int], Optional[Dict[str, Any]]]) -> Optional[str]:
@@ -39,14 +65,31 @@ def download_denied_reason(pid, get_profile: Callable[[int], Optional[Dict[str, 
     try:
         profile = get_profile(pid)
     except Exception:
-        # a check that can't read the profile row must not lock somebody out
-        # of their own downloads over a db hiccup
-        return None
-    # no row is not a row that says no: get_profile answers None on a read
-    # error too. a deleted profile never gets here, the session gate drops it.
+        # a check that can't read the profile row can't say yes: a profile
+        # with downloads off would download through every db hiccup. the
+        # reason tells the caller it's passing, not a switch that's off
+        return PROFILE_UNREADABLE
+    # no row is not a row that says no (a deleted profile never gets here, the
+    # session gate drops it). callers pass a getter that raises on a read
+    # error, so an unreadable row lands above instead of here.
     if profile and not profile.get("can_download", True):
         return DOWNLOADS_OFF
     return None
+
+
+def strict_profile_getter(get_database: Callable[[], Any]) -> Callable[[int], Optional[Dict[str, Any]]]:
+    """a get_profile for download_denied_reason that raises on a read error
+    instead of answering None (which reads as "no row, allowed"). a stand-in
+    database without the flag (tests, the lidarr shim) is asked plainly."""
+    def _get(pid):
+        db = get_database()
+        try:
+            return db.get_profile(pid, raise_errors=True)
+        except TypeError as exc:
+            if "raise_errors" not in str(exc):
+                raise
+            return db.get_profile(pid)
+    return _get
 
 
 def may_manage_profile(actor_id, actor_is_admin: bool, target_id) -> bool:
@@ -162,6 +205,7 @@ def page_denied(path: str, allowed_pages, is_admin: bool) -> bool:
 
 
 __all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
+           "PROFILE_UNREADABLE", "strict_profile_getter",
            "may_manage_profile", "may_cancel_download", "profile_view_for", "profiles_listed_for",
            "PUBLIC_PROFILE_FIELDS",
            "PAGE_EXCLUSIVE_APIS", "page_for_path", "page_denied"]

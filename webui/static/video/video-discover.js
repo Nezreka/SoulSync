@@ -1679,6 +1679,7 @@
                 }).catch(function () { /* default chip state stands */ });
             langWrap.addEventListener('click', function (e) {
                 var btn = e.target.closest('.vdsc-lang'); if (!btn) return;
+                if (!householdPrefsEditable()) return;
                 btn.classList.toggle('vdsc-lang--on');
                 var langs = Array.prototype.map.call(langWrap.querySelectorAll('.vdsc-lang--on'),
                     function (b) { return b.getAttribute('data-lang'); });
@@ -1704,6 +1705,7 @@
                 }).catch(function () { /* chips stay off */ });
             provWrap.addEventListener('click', function (e) {
                 var btn = e.target.closest('.vdsc-lang'); if (!btn) return;
+                if (!householdPrefsEditable()) return;
                 btn.classList.toggle('vdsc-lang--on');
                 var provs = Array.prototype.map.call(provWrap.querySelectorAll('.vdsc-lang--on'),
                     function (b) { return b.getAttribute('data-prov'); });
@@ -1747,6 +1749,19 @@
                 if (!heroEl.contains(e.relatedTarget)) startHeroTimer();
             });
         }
+    }
+
+    // the rail languages and streaming services are one setting for the
+    // whole household, so only an admin changes them (the server refuses
+    // anyone else). everyone else is told why the chip didn't move
+    function householdPrefsEditable() {
+        // currentProfile is a top-level let in init.js, read by bare name
+        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        if (!cp || cp.is_admin || cp.id === 1) return true;
+        if (typeof showToast === 'function') {
+            showToast('Only an admin can change these, they apply to everyone.', 'info');
+        }
+        return false;
     }
 
     function loadMeta() {

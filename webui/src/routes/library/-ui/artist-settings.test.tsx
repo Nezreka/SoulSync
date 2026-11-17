@@ -85,6 +85,19 @@ function handlers() {
     http.get('/api/library/v2/artists/7/match-status', () =>
       HttpResponse.json({ success: true, services: [] }),
     ),
+    http.get('/api/library/v2/artists/7/naming', () =>
+      HttpResponse.json({
+        success: true,
+        artist_id: 7,
+        library_name: 'Drake',
+        scanned_name: 'Drake',
+        pinned: false,
+        source: null,
+        renamed: false,
+        kept_source_name: false,
+        folder: 'Drake/Drake - Views',
+      }),
+    ),
   );
 }
 
@@ -117,6 +130,7 @@ describe('Library v2 Artist Settings', () => {
     await screen.findByText('Watchlist identity');
 
     for (const name of [
+      'Save name',
       'Save future-release settings',
       'Wishlist all',
       'Wishlist missing only',

@@ -17,7 +17,7 @@ from urllib.parse import quote, urlparse
 from flask import Blueprint, jsonify, request
 
 from core.metadata import is_internal_image_host
-from core.profile_context import get_current_profile_id
+from core.profile_context import get_current_profile_id, is_admin_request
 from utils.logging_config import get_logger
 
 logger = get_logger("api.stats")
@@ -495,6 +495,26 @@ def _import_target(service, shared_getter, workers_getter):
     return 'none', None
 
 
+_SERVICE_LABEL = {'lastfm': 'Last.fm', 'listenbrainz': 'ListenBrainz'}
+
+
+def _run_shared_as_member(worker, body, service):
+    """a member on the shared history runs the shared import as the admin set
+    it up. the account and the schedule switch are install-wide settings, so
+    a member doesn't write them: a different username is refused, ``enabled``
+    is left alone."""
+    configured = str(config_manager.get(f'{service}.username', '') or '').strip()
+    asked = str(body.get('username') or '').strip()
+    if asked and asked.casefold() != configured.casefold():
+        label = _SERVICE_LABEL.get(service, service)
+        return jsonify({'success': False,
+                        'error': f"The shared history's {label} account is the admin's to change. "
+                                 f"Connect your own {label} in My Accounts."}), 403
+    result = worker.start_import(username=configured or None, full=bool(body.get('full')))
+    ok = result.get('status') not in ('error',)
+    return jsonify({'success': ok, **result}), 200 if ok else 400
+
+
 def _own_status(worker, username, next_run):
     """the card for a profile running its own account, hourly while connected."""
     status = worker.status()
@@ -569,6 +589,8 @@ def lastfm_listening_import_run():
             return jsonify({'success': False, 'error': 'Connect your Last.fm in My Accounts first'}), 400
         if kind == 'own':
             return _run_own(worker, body)
+        if not is_admin_request():
+            return _run_shared_as_member(worker, body, 'lastfm')
         username = str(body.get('username') or config_manager.get('lastfm.username', '') or '').strip()
         if username:
             config_manager.set('lastfm.username', username)
@@ -638,6 +660,8 @@ def listenbrainz_listening_import_run():
             return jsonify({'success': False, 'error': 'Connect your ListenBrainz in My Accounts first'}), 400
         if kind == 'own':
             return _run_own(worker, body)
+        if not is_admin_request():
+            return _run_shared_as_member(worker, body, 'listenbrainz')
         username = str(body.get('username') or config_manager.get('listenbrainz.username', '') or '').strip()
         if username:
             config_manager.set('listenbrainz.username', username)

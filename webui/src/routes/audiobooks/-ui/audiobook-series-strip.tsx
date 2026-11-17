@@ -149,6 +149,9 @@ export function AudiobookSeriesStrip({
               <button
                 type="button"
                 className="library-artist-watchlist-btn"
+                // following wishlists books to download: hidden for a profile
+                // with downloads off, like the other download buttons
+                data-download-action
                 disabled={busy}
                 onClick={() => void follow(true)}
                 title="Wishlist every book you are missing, and pick up new ones automatically"
@@ -159,6 +162,7 @@ export function AudiobookSeriesStrip({
               <button
                 type="button"
                 className="library-artist-watchlist-btn"
+                data-download-action
                 disabled={busy}
                 onClick={() => void follow(false)}
                 title="Only books published from today on"

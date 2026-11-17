@@ -983,6 +983,17 @@ CREATE INDEX IF NOT EXISTS idx_vreq_profile ON video_requests(profile_id);
 CREATE INDEX IF NOT EXISTS idx_vreq_status  ON video_requests(status);
 CREATE INDEX IF NOT EXISTS idx_vreq_title   ON video_requests(kind, tmdb_id);
 
+-- every request a profile filed, kept when the request row is withdrawn or
+-- cleared from the history: the request limit counts asks from here, so
+-- deleting your own rows doesn't hand the asks back (v73)
+CREATE TABLE IF NOT EXISTS video_request_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id  INTEGER NOT NULL,
+    request_id  INTEGER UNIQUE,                  -- the video_requests row it was (gone or not)
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_vreq_log_profile ON video_request_log(profile_id, created_at);
+
 CREATE TABLE IF NOT EXISTS video_issues (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id     INTEGER NOT NULL DEFAULT 1,

@@ -714,19 +714,21 @@ Base path: \`/api/audiobooks\`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | \`/wishlist\` | Items + counts + worker status for the profile |
-| POST | \`/wishlist\` | Add by ASIN (metadata resolved server-side; \`narrator_mode\` exact/any; idempotent) |
+| POST | \`/wishlist\` | Add by ASIN (metadata resolved server-side; \`narrator_mode\` exact/any; idempotent). Needs download rights: audiobooks have no requests yet, so a profile with downloads off gets 403 |
 | PATCH | \`/wishlist/<asin>\` | \`{"status":"wanted"}\` retries a cancelled/failed row; or change \`narrator_mode\` (no backoff reset) |
 | DELETE | \`/wishlist\` | Clear the profile's wishlist |
 | DELETE | \`/wishlist/<asin>\` | Remove one entry |
 | POST | \`/wishlist/search\` | Run a wishlist pass now (force=true bypasses backoff) |
 | POST | \`/wishlist/<asin>/search\` | Search + grab one book now |
 
+The wishlist pass and the author scan run as the system, so they check each row's owner when they get to it: a book whose owner has downloads off isn't searched or grabbed (it stays wanted), and a follow of theirs wishlists nothing.
+
 ## Watchlist (authors)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | \`/watchlist\` | Followed authors |
-| POST | \`/watchlist\` | Follow an author (\`name\`, \`cover_url\`, \`since\` cutoff defaults to today) |
+| POST | \`/watchlist\` | Follow an author (\`name\`, \`cover_url\`, \`since\` cutoff defaults to today). Needs download rights, like the wishlist |
 | PATCH | \`/watchlist/<name>\` | Per-author settings (\`auto_wishlist\`, \`narrator_mode\`, \`since_date\`) |
 | DELETE | \`/watchlist/<name>\` | Unfollow |
 | POST | \`/watchlist/scan\` | Check followed authors now (same path as the daily automation) |

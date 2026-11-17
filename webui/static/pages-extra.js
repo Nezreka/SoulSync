@@ -1525,6 +1525,13 @@ function showRateLimitModal(rateLimitInfo) {
     const overlay = document.getElementById('rate-limit-modal-overlay');
     if (!overlay) return;
 
+    // disconnecting spotify is install-wide, so the button is the admin's
+    const disconnectBtn = overlay.querySelector('.rate-limit-disconnect-btn');
+    if (disconnectBtn) {
+        const admin = typeof currentProfile === 'undefined' || !currentProfile || !!currentProfile.is_admin;
+        disconnectBtn.style.display = admin ? '' : 'none';
+    }
+
     // Populate details
     const banDuration = document.getElementById('rate-limit-ban-duration');
     const endpoint = document.getElementById('rate-limit-endpoint');

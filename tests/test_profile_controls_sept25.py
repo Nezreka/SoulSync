@@ -224,6 +224,54 @@ def test_music_request_quota_counts_asks_not_tracks(member):
     db.clear_wishlist(profile_id=member)
 
 
+def test_deleting_your_own_asks_does_not_reset_the_music_limit(member):
+    """S19: the limit counts asks as they were made. clearing your own
+    wishlist rows (or withdrawing) used to hand the asks back."""
+    db = web_server.get_database()
+    db.update_profile(member, can_download=0, request_limit=1, request_limit_days=7)
+    tag = uuid4().hex[:6]
+    add = lambda t: db.add_to_wishlist_detailed(  # noqa: E731
+        spotify_track_data=t, source_type='manual', profile_id=member, user_initiated=True)
+    assert add(_track(f'{tag}s1', f'S{tag}', 'single'))['status'] != 'rejected'
+    db.clear_wishlist(profile_id=member)
+    out = add(_track(f'{tag}s2', f'T{tag}', 'single'))
+    assert out['status'] == 'rejected' and out.get('reason') == 'request_limit'
+    # asking again for the one already asked is not a new ask
+    assert add(_track(f'{tag}s1', f'S{tag}', 'single'))['status'] != 'rejected'
+    assert _as(member).get('/api/requests/music/quota').get_json()['quota']['used'] == 1
+    db.clear_wishlist(profile_id=member)
+
+
+def test_withdrawing_a_music_video_request_does_not_reset_the_limit(member):
+    db = web_server.get_database()
+    db.update_profile(member, can_download=0, request_limit=1, request_limit_days=7)
+    c = _as(member)
+    tag = uuid4().hex[:6]
+    vid = lambda t: {'video_id': f'v{t}', 'url': f'https://youtu.be/v{t}',  # noqa: E731
+                     'title': f'Song {t}', 'channel': 'Warp'}
+    first = c.post('/api/requests/music/videos', json=vid(tag + 'a'))
+    assert first.status_code == 200, first.get_json()
+    rid = first.get_json()['id']
+    assert c.post(f'/api/requests/music/videos/{rid}/withdraw').status_code == 200
+    again = c.post('/api/requests/music/videos', json=vid(tag + 'b'))
+    assert again.status_code == 429
+
+
+def test_withdrawing_a_video_request_does_not_reset_the_limit(member, tmp_path, monkeypatch):
+    import api.video as videoapi
+    import api.video.requests as vreq
+    from database.video_database import VideoDatabase
+    monkeypatch.setattr(videoapi, '_video_db', VideoDatabase(database_path=str(tmp_path / 'v.db')))
+    monkeypatch.setattr(vreq, '_tmdb_lookup', lambda kind, tid: None)
+    db = web_server.get_database()
+    db.update_profile(member, request_limit=1, request_limit_days=7, allowed_sides='both')
+    c = _as(member)
+    rid = c.post('/api/video/requests', json={'kind': 'movie', 'tmdb_id': 21, 'title': 'x'}).get_json()['id']
+    assert c.delete(f'/api/video/requests/{rid}').status_code == 200
+    r = c.post('/api/video/requests', json={'kind': 'movie', 'tmdb_id': 22, 'title': 'y'})
+    assert r.status_code == 429
+
+
 def test_approve_all_music_requests(member):
     db = web_server.get_database()
     db.update_profile(member, can_download=0)

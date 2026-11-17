@@ -1185,6 +1185,10 @@ def _fresh_fold_index():
     from core.imports import artist_facts as _artist_facts
     saved_online, _artist_facts.ONLINE_LOOKUP = _artist_facts.ONLINE_LOOKUP, False
     _artist_facts.clear_cache()
+    # the library's name for a download's artist (#2165) is cached for 30s;
+    # one test's library must not name the next test's download
+    from core.imports import library_names as _library_names
+    _library_names.clear_cache()
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl

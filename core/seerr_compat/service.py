@@ -85,6 +85,7 @@ class SeerrCompat:
                  fallback_profile_id: Callable[[], int],
                  server: Callable[[], Optional[str]],
                  title_allowed: Callable[[str, int, dict], bool],
+                 filter_titles: Callable[[List[dict], dict], List[dict]] = lambda items, p: items,
                  publish: Callable[[str, dict], Any] = lambda *a: None,
                  show_wanted: Callable[[int], Any] = lambda *a: None,
                  today: Callable[[], str] = lambda: date.today().isoformat()):
@@ -97,6 +98,7 @@ class SeerrCompat:
         self._fallback = fallback_profile_id
         self._server = server
         self._title_allowed = title_allowed
+        self._filter_titles = filter_titles
         self._publish = publish
         self._show_wanted = show_wanted
         self._today = today
@@ -189,8 +191,11 @@ class SeerrCompat:
                 out[(kind, tid)] = shapes.media_info(kind, tid, title_status.seerr_code(st))
         return out
 
-    def _results(self, items: Iterable[dict], *, people: bool = False) -> List[dict]:
+    def _results(self, items: Iterable[dict], *, people: bool = False, pid=None) -> List[dict]:
         items = [i for i in items or [] if people or i.get("kind") in ("movie", "show")]
+        # the acting profile's rating cap, the way create_request holds it:
+        # a kids profile's lists keep only what the library rates under it
+        items = self._filter_titles(items, self.profile(pid))
         infos = self._infos(items)
         out = []
         for it in items:
@@ -201,12 +206,12 @@ class SeerrCompat:
 
     # ---- discover and search -------------------------------------------------
 
-    def trending(self, page_no: int) -> dict:
+    def trending(self, page_no: int, pid=None) -> dict:
         # the engine keeps tmdb's first trending page, the chart a seerr home row shows
         items = self._engine().trending() if page_no <= 1 else []
-        return shapes.page(self._results(items), page_no, total_pages=1)
+        return shapes.page(self._results(items, pid=pid), page_no, total_pages=1)
 
-    def discover(self, kind: str, page_no: int, args: Dict[str, Any]) -> dict:
+    def discover(self, kind: str, page_no: int, args: Dict[str, Any], pid=None) -> dict:
         sort = str(args.get("sortBy") or "popularity.desc")
         if not _SORT.match(sort):
             sort = "popularity.desc"
@@ -219,27 +224,28 @@ class SeerrCompat:
             networks=args.get("network") or None if kind == "show" else None,
             certification=args.get("certification") or None if kind == "movie" else None,
             sort_by=sort, page=page_no)
-        return shapes.page(self._results(items), page_no)
+        return shapes.page(self._results(items, pid=pid), page_no)
 
-    def upcoming(self, kind: str, page_no: int) -> dict:
+    def upcoming(self, kind: str, page_no: int, pid=None) -> dict:
         if kind == "movie":
             items = self._engine().discover_curated("upcoming_movies", page=page_no)
         else:
             # no votes yet on anything that hasn't aired, so no vote floor
             items = self._engine().discover_filter("show", release_window="next_90",
                                                    vote_count_min=0, page=page_no)
-        return shapes.page(self._results(items), page_no)
+        return shapes.page(self._results(items, pid=pid), page_no)
 
     def genre_slider(self, kind: str) -> List[dict]:
         return [{"id": g["id"], "name": g.get("name") or "", "backdrops": []}
                 for g in self._engine().genre_list(kind) or [] if g.get("id")]
 
-    def search(self, query: str, page_no: int) -> dict:
+    def search(self, query: str, page_no: int, pid=None) -> dict:
         query = (query or "").strip()
         if not query or page_no > 1:
             # the engine's multi search is one page of tmdb results
             return shapes.page([], page_no, total_pages=1 if not query else page_no)
-        return shapes.page(self._results(self._engine().search(query), people=True), 1, total_pages=1)
+        return shapes.page(self._results(self._engine().search(query), people=True, pid=pid),
+                           1, total_pages=1)
 
     # ---- details -------------------------------------------------------------
 
@@ -263,7 +269,11 @@ class SeerrCompat:
                                 for s in d.pop("_seasons", []) or []]
         return d if isinstance(d, dict) and d.get("title") else None
 
-    def details(self, kind: str, tmdb_id: int) -> dict:
+    def details(self, kind: str, tmdb_id: int, pid=None) -> dict:
+        p = self.profile(pid)
+        # over the acting profile's rating cap reads as not there
+        if not self._title_allowed(kind, tmdb_id, p):
+            raise SeerrError(404, "Unable to retrieve %s." % ("movie" if kind == "movie" else "series"))
         d = self._detail(kind, tmdb_id)
         if not d:
             raise SeerrError(404, "Unable to retrieve %s." % ("movie" if kind == "movie" else "series"))
@@ -280,7 +290,8 @@ class SeerrCompat:
         if kind == "show":
             seasons = shapes.season_statuses(coverage or {}, self.store.wished_seasons(tmdb_id))
         requests = [shapes.request_row(r, self._requested_by(r))
-                    for r in self._title_requests(kind, tmdb_id)]
+                    for r in self._title_requests(kind, tmdb_id)
+                    if self._sees_request(p, r)]
         info = shapes.media_info(kind, tmdb_id, status, seasons=seasons,
                                  requests=[r for r in requests if r])
         return shapes.detail(kind, d, info)
@@ -291,13 +302,14 @@ class SeerrCompat:
                 if r.get("kind") in kinds and _int(r.get("tmdb_id")) == int(tmdb_id)]
         return rows
 
-    def similar(self, kind: str, tmdb_id: int, page_no: int) -> dict:
+    def similar(self, kind: str, tmdb_id: int, page_no: int, pid=None) -> dict:
         d = self._detail(kind, tmdb_id) if page_no <= 1 else None
-        return shapes.page(self._results((d or {}).get("similar") or []), page_no, total_pages=1)
+        return shapes.page(self._results((d or {}).get("similar") or [], pid=pid), page_no,
+                           total_pages=1)
 
-    def recommendations(self, kind: str, tmdb_id: int, page_no: int) -> dict:
-        return shapes.page(self._results(self._engine().recommendations(kind, tmdb_id, page=page_no)),
-                           page_no)
+    def recommendations(self, kind: str, tmdb_id: int, page_no: int, pid=None) -> dict:
+        return shapes.page(self._results(self._engine().recommendations(kind, tmdb_id, page=page_no),
+                                         pid=pid), page_no)
 
     def person(self, person_id: int) -> dict:
         p = self._engine().person_detail(person_id)
@@ -305,15 +317,16 @@ class SeerrCompat:
             raise SeerrError(404, "Unable to retrieve person.")
         return shapes.person(p)
 
-    def person_credits(self, person_id: int) -> dict:
+    def person_credits(self, person_id: int, pid=None) -> dict:
         p = self._engine().person_detail(person_id)
         if not p:
             raise SeerrError(404, "Unable to retrieve person.")
         credits = [c for c in p.get("credits") or [] if c.get("kind") in ("movie", "show")]
-        return shapes.combined_credits(p, self._infos(credits))
+        credits = self._filter_titles(credits, self.profile(pid))
+        return shapes.combined_credits(dict(p, credits=credits), self._infos(credits))
 
-    def collection(self, collection_id: int) -> dict:
-        parts = self._results(self._engine().collection(collection_id) or [])
+    def collection(self, collection_id: int, pid=None) -> dict:
+        parts = self._results(self._engine().collection(collection_id) or [], pid=pid)
         if not parts:
             raise SeerrError(404, "Unable to retrieve collection.")
         # the engine keeps a collection's films, not its name
@@ -322,14 +335,17 @@ class SeerrCompat:
 
     # ---- library -------------------------------------------------------------
 
-    def recently_added(self, take: int, skip: int) -> dict:
+    def recently_added(self, take: int, skip: int, pid=None) -> dict:
         db = self._db()
         take, skip = max(1, min(50, take)), max(0, skip)
         rows = db.recently_added(server_source=self._server(), limit=min(50, take + skip))
         out = []
+        p = self.profile(pid)
         for r in rows[skip:skip + take]:
             tid = db.item_tmdb_id(r.get("kind"), r.get("id"))
             if not tid:
+                continue
+            if not self._filter_titles([{"kind": r.get("kind"), "tmdb_id": int(tid)}], p):
                 continue
             out.append({"id": int(tid), "tmdbId": int(tid), "tvdbId": None,
                         "mediaType": shapes.seerr_type(r.get("kind")),
@@ -345,10 +361,21 @@ class SeerrCompat:
             "id": row.get("profile_id") or 1, "name": row.get("requester_name") or ""}
         return self.user(p)
 
-    def requests(self, *, take: int, skip: int, filt: str, requested_by=None) -> dict:
+    @staticmethod
+    def _is_admin(p: dict) -> bool:
+        return bool(p.get("is_admin") or int(p.get("id") or 0) == 1)
+
+    def _sees_request(self, p: dict, row: dict) -> bool:
+        """an admin sees every request, anyone else only their own."""
+        return self._is_admin(p) or _int(row.get("profile_id")) == _int(p.get("id"))
+
+    def requests(self, *, take: int, skip: int, filt: str, requested_by=None, pid=None) -> dict:
         db = self._db()
         status, in_library = _FILTERS.get(str(filt or "all").lower(), (None, None))
-        scope = _int(requested_by)
+        p = self.profile(pid)
+        # the acting user's own requests unless they're an admin, whatever
+        # requestedBy asks for (an admin may still narrow to one user)
+        scope = _int(requested_by) if self._is_admin(p) else int(p["id"])
         rows = db.list_video_requests(profile_id=scope, status=status, limit=500)
         rows = [r for r in rows if r.get("kind") in ("movie", "show", "episode")]
         db.annotate_requests_in_library(rows)
@@ -472,7 +499,9 @@ class SeerrCompat:
         if title_status.blocks_request(kind, got.get("status"), got.get("state")):
             raise SeerrError(409, "Request for this media already exists.")
         quota = quota_for(p)
-        if quota and over_quota(quota, db.count_video_requests_since(pid, quota["days"])):
+        used = db.count_video_requests_since(pid, quota["days"]) if quota else 0
+        # a count that can't be read is a full quota, never a free ask
+        if quota and over_quota(quota, quota["limit"] if used is None else used):
             raise SeerrError(403, quota_message(quota))
         monitor, note = ("future", None)
         if kind == "show":
