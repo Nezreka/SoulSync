@@ -433,3 +433,14 @@ def test_live_mode_applies_and_records_the_split(db, no_fetch, monkeypatch):
         row = conn.execute("SELECT status, user_action FROM repair_findings "
                            "WHERE job_id='comma_artist_splitter'").fetchone()
     assert tuple(row) == ('resolved', 'artists_split')
+
+
+def test_the_finding_says_which_albums_move_to_the_lead(db, no_fetch):
+    tracks = _album_by(db, 'Camellia, Toby Fox', 'One')                 # its own album
+    guest = _guest_on(db, 'Camellia', 'Camellia, Toby Fox', album='Other')  # a guest credit
+    _credits(db, tracks[0], ['Camellia', 'Toby Fox'])
+    finding = _finding(db, 'Camellia, Toby Fox')
+    with db._get_connection() as conn:
+        own = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (tracks[0],)).fetchone()[0]
+    assert finding['details']['primary_album_ids'] == [own]
+    assert guest in finding['details']['library_v2']['track_ids']

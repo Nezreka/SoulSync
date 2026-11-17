@@ -1239,7 +1239,11 @@ def _component_artist_id(conn, name: str) -> Optional[int]:
 
 def combined_artist_scope(conn, artist_id: int) -> Dict[str, List[int]]:
     """the tracks and albums a combined artist's split touches: the tracks
-    credited to it, the albums it is the artist of, and their tracks"""
+    credited to it, the albums it is credited on, and the tracks of the
+    albums it is the artist of (``primary_album_ids``: those albums move to
+    the lead)"""
+    primary_album_ids = sorted(int(r[0]) for r in conn.execute(
+        "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (int(artist_id),)))
     album_ids = sorted({int(r[0]) for r in conn.execute(
         "SELECT id FROM lib2_albums WHERE primary_artist_id=? "
         "UNION SELECT album_id FROM lib2_album_artists WHERE artist_id=?",
@@ -1251,7 +1255,8 @@ def combined_artist_scope(conn, artist_id: int) -> Dict[str, List[int]]:
         track_ids |= {int(r[0]) for r in conn.execute(
             f"SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
             f"WHERE al.id IN ({marks}) AND al.primary_artist_id=?", (*album_ids, int(artist_id)))}
-    return {"track_ids": sorted(track_ids), "album_ids": album_ids}
+    return {"track_ids": sorted(track_ids), "album_ids": album_ids,
+            "primary_album_ids": primary_album_ids}
 
 
 def heal_combined_artist(

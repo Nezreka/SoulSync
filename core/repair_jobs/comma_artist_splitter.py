@@ -490,6 +490,9 @@ class CommaArtistSplitterJob(RepairJob):
             'track_count': len(scope['track_ids']),
             'files': files[:TRACK_SAMPLE_LIMIT],
             'all_files': files,
+            # the albums whose own artist this is: they move to the lead
+            # (library_v2 below is rebuilt for every finding, so not in there)
+            'primary_album_ids': scope['primary_album_ids'],
             'library_v2_native': True,
             'library_v2': {
                 'artist_ids': [artist_id],

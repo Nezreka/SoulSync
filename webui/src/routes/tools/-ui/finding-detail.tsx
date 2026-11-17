@@ -841,22 +841,24 @@ function FindingDetailBody({
     case 'comma_artist_split': {
       // jadux — the contract: exactly what the artist tag becomes.
       const parts = list<string>(d.split_artists);
+      // the library's credit, not a tag string: "A; B" joined back looks
+      // just like the combined name, so the parts are counted and listed
       const artistChanges: TagChange[] = [
         {
           key: 'artist',
           label: 'Artist',
           before: text(d.combined_name),
-          after: text(d.new_display_artist) || parts.join('; '),
+          after: parts.length ? `${parts.length} artists: ${parts.join(', ')}` : '',
         },
       ];
-      if (d.primary_artist) {
+      if (d.primary_artist && list<number>(d.primary_album_ids).length) {
+        // the combined name is an album's own artist: the album goes to the lead
         artistChanges.push({
           key: 'albumartist',
           label: 'Album artist',
           before: text(d.combined_name),
           after: text(d.primary_artist),
         });
-        rows.push(['Album artist', 'Only changes where it was the combined name']);
       }
       const checked = list<string>(d.checked_sources);
       if (checked.length) rows.push(['Checked against', checked.join(', ')]);
@@ -926,7 +928,7 @@ function FindingDetailBody({
             </>
           ) : null}
           <div className="repair-finding-meta" style={{ marginTop: '8px' }}>
-            Your media server picks up the split on its next scan.
+            Your media server shows the split once Re-tag has written the files.
           </div>
           {onFixAction && finding.status === 'pending' ? (
             <CommaSplitEditor

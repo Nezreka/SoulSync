@@ -509,13 +509,13 @@ const WRITERS: Record<string, Writer> = {
 
   comma_artist_split: (finding, d, _s, verb) => {
     const parts = arr(d.split_artists).map(str).filter(Boolean);
-    const next = first(d.new_display_artist) || parts.join('; ');
     const count = Number(d.track_count);
     return {
       title: first(d.combined_name) || withoutPrefix(finding.title),
       sub: count > 0 ? `${count} track${count === 1 ? '' : 's'}` : '',
       problem: `This artist is really ${parts.length || 'several'} artists in one name.`,
-      fix: next ? `${verb} changes the artist tag to “${next}”.` : '',
+      // the split happens in the library; Re-tag and Reorganize bring the files along
+      fix: parts.length ? `${verb} splits it into ${listWords(parts)} in your library.` : '',
     };
   },
 

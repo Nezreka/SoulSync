@@ -2485,12 +2485,13 @@ describe('the detail renderer', () => {
     ]);
   });
 
-  it('comma_artist_split shows the resulting tag and clickable library chips', async () => {
+  it('comma_artist_split shows the artists it becomes and clickable library chips', async () => {
     const detail = await openDetail({
       finding_type: 'comma_artist_split',
       details: {
         combined_name: 'A, B',
         new_display_artist: 'A; B',
+        split_artists: ['A', 'B'],
         track_count: 3,
         tracks: [{ title: 'One', album: 'LP' }],
         parts_resolution: [
@@ -2500,7 +2501,8 @@ describe('the detail renderer', () => {
       },
     });
 
-    expect(changeRows(detail)).toContainEqual(['Artist', 'A, B', 'A; B']);
+    // the library's credit: "A; B" joined back would look like the old name
+    expect(changeRows(detail)).toContainEqual(['Artist', 'A, B', '2 artists: A, B']);
     const chip = within(detail).getByTitle("Open A's page");
     fireEvent.click(chip);
     await flush();
