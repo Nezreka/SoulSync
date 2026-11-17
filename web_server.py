@@ -14773,13 +14773,18 @@ def check_for_update():
     published release newer than the running base version reports its
     number + severity; the commit-SHA comparison stays as the fallback
     signal when no release info is available."""
+    return jsonify(_update_check_payload())
+
+
+def _update_check_payload():
+    """the update check as a dict, for the route and the help sheet's health"""
     _check_for_updates()
     current = _current_commit_sha
     latest = _update_cache.get('latest_sha')
     rel = _update_cache.get('release_info') or {}
     sha_update = bool(current and latest and current != latest)
     update_available = bool(rel.get('available')) or (not rel and sha_update)
-    return jsonify({
+    return {
         'update_available': update_available,
         'current_sha': current[:8] if current else None,
         'latest_sha': latest[:8] if latest else None,
@@ -14788,7 +14793,7 @@ def check_for_update():
         'severity': rel.get('severity'),
         'release_url': rel.get('release_url'),
         'is_docker': os.path.exists('/.dockerenv'),
-    })
+    }
 
 
 # ── Notification history (Kazimir) ───────────────────────────────
@@ -24071,6 +24076,14 @@ from api.mcp import configure as _cfg_mcp, create_blueprint as _bp_mcp
 _cfg_mcp(get_database=get_database, config_manager=config_manager,
          version=SOULSYNC_VERSION.split('+')[0])
 app.register_blueprint(_bp_mcp())
+
+# help sheet: health, report a problem, the log files (api/help.py)
+from api.help import configure as _cfg_help, create_blueprint as _bp_help
+_cfg_help(config_manager_=config_manager, get_database_=get_database,
+          media_server_engine_getter=lambda: media_server_engine,
+          download_orchestrator_getter=lambda: download_orchestrator,
+          update_info=_update_check_payload, log_path=_log_path, version=SOULSYNC_VERSION)
+app.register_blueprint(_bp_help())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard
