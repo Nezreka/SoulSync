@@ -12,9 +12,10 @@ shape differs and is added in :func:`_jellyfin_sessions`).
 
 from __future__ import annotations
 
-import time
-import threading
 import hashlib
+import re
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -666,16 +667,41 @@ def get_stats(db=None, days: int = 30) -> Dict[str, Any]:
     return data
 
 
+# the image proxy carries the server's own token, so it only fetches what is
+# shaped like artwork and only hands back an image (#2155). anything else
+# ("/status/sessions", "x/../../Sessions?") would read the server's api with
+# the admin's token for whoever asked.
+_PLEX_IMAGE_PATH = re.compile(
+    r"^/library/(?:metadata|collections)/\d+/(?:thumb|art|banner|poster|clearLogo|composite)(?:/\d+)?$")
+_JELLYFIN_ITEM_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
+
+def is_image_path(path: str) -> bool:
+    """True for a path the image proxy may fetch: a plex artwork path or a
+    jellyfin item id (``jf:<id>``)."""
+    path = str(path or "")
+    if path.startswith("jf:"):
+        return bool(_JELLYFIN_ITEM_ID.match(path[3:]))
+    return bool(_PLEX_IMAGE_PATH.match(path))
+
+
+def _image_reply(r) -> Optional[tuple]:
+    """(bytes, content type) when the upstream answered with an image."""
+    ctype = (r.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip().lower()
+    if r.status_code == 200 and r.content and ctype.startswith("image/"):
+        return r.content, ctype
+    return None
+
+
 def _fetch_jellyfin_image(item_id: str, db=None) -> Optional[tuple]:
     cfg = _jellyfin_config(db)
-    if not item_id or not cfg["base_url"] or not cfg["api_key"]:
+    if not item_id or not _JELLYFIN_ITEM_ID.match(item_id) or not cfg["base_url"] or not cfg["api_key"]:
         return None
     try:
         import requests
         url = cfg["base_url"].rstrip("/") + "/Items/" + item_id + "/Images/Primary"
         r = requests.get(url, params={"api_key": cfg["api_key"], "maxHeight": 480}, timeout=_PLEX_TIMEOUT)
-        if r.status_code == 200 and r.content:
-            return r.content, r.headers.get("Content-Type", "image/jpeg")
+        return _image_reply(r)
     except Exception:   # noqa: BLE001
         logger.debug("jellyfin image proxy failed for %s", item_id, exc_info=True)
     return None
@@ -686,7 +712,7 @@ def fetch_image(path: str, db=None) -> Optional[tuple]:
     so the token never reaches the browser. None on any failure."""
     if path and str(path).startswith("jf:"):
         return _fetch_jellyfin_image(str(path)[3:], db)
-    if not path or not str(path).startswith("/"):
+    if not is_image_path(path):
         return None
     cfg = _plex_config(db)
     if not cfg["base_url"] or not cfg["token"]:
@@ -695,8 +721,7 @@ def fetch_image(path: str, db=None) -> Optional[tuple]:
         import requests
         url = cfg["base_url"].rstrip("/") + path
         r = requests.get(url, params={"X-Plex-Token": cfg["token"]}, timeout=_PLEX_TIMEOUT)
-        if r.status_code == 200 and r.content:
-            return r.content, r.headers.get("Content-Type", "image/jpeg")
+        return _image_reply(r)
     except Exception:   # noqa: BLE001
         logger.debug("plex image proxy failed for %s", path, exc_info=True)
     return None

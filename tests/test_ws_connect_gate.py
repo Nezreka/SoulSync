@@ -430,3 +430,53 @@ def test_anonymous_socket_survives_sweep():
     web_server._disconnect_revoked_sockets()
     assert sio.is_connected() is True
     sio.disconnect()
+
+
+# ── #2155: server activity is the admin's, on the socket and over http ─────
+def _profile_client(name, is_admin):
+    db = web_server.get_database()
+    pid = db.create_profile(name, is_admin=is_admin)
+    assert pid
+    device_id = f'dev-{name}'
+    assert db.add_profile_device(device_id, pid, 'Browser', '127.0.0.1')
+    epoch = (db.get_profile(pid) or {}).get('session_epoch', 0)
+    return pid, _session_client(pid, epoch, device_id)
+
+
+def test_a_non_admin_socket_never_joins_the_activity_room():
+    """#2155: the live push carried every stream on the server to any
+    profile that asked for it."""
+    _pid, client = _profile_client('Act2155Member', is_admin=False)
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=client)
+    assert sio.is_connected() is True
+    sio.emit('activity:subscribe')
+    with web_server._activity_sids_lock:
+        member_sids = set(web_server._activity_sids)
+    sio.disconnect()
+    assert not member_sids
+
+
+def test_an_admin_socket_still_joins_the_activity_room():
+    _pid, client = _profile_client('Act2155Admin', is_admin=True)
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=client)
+    assert sio.is_connected() is True
+    sio.emit('activity:subscribe')
+    with web_server._activity_sids_lock:
+        joined = bool(web_server._activity_sids)
+    sio.disconnect()
+    assert joined
+
+
+def test_server_activity_http_is_admin_only_through_the_real_gate(monkeypatch):
+    """#2155: the real before_request + blueprint, not a stub."""
+    import core.server_activity as sa
+    monkeypatch.setattr(sa, 'get_activity', lambda: {'ok': True, 'sessions': [{'user': 'someone'}],
+                                                     'summary': {'streams': 1}})
+    _pid, member = _profile_client('Http2155Member', is_admin=False)
+    r = member.get('/api/server-activity')
+    assert r.status_code == 403
+    assert b'someone' not in r.data
+    _pid, admin = _profile_client('Http2155Admin', is_admin=True)
+    r = admin.get('/api/server-activity')
+    assert r.status_code == 200
+    assert b'someone' in r.data

@@ -5456,6 +5456,7 @@ def select_plex_music_library():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/users', methods=['GET'])
+@admin_only
 def get_jellyfin_users():
     """Get list of Jellyfin users that have music libraries"""
     try:
@@ -22370,6 +22371,7 @@ def hydrabase_worker_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/hydrabase-worker/pause', methods=['POST'])
+@admin_only
 def hydrabase_worker_pause():
     """Pause Hydrabase P2P mirror worker"""
     try:
@@ -22384,6 +22386,7 @@ def hydrabase_worker_pause():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/hydrabase-worker/resume', methods=['POST'])
+@admin_only
 def hydrabase_worker_resume():
     """Resume Hydrabase P2P mirror worker"""
     try:
@@ -23309,8 +23312,11 @@ def handle_disconnect():
 
 @socketio.on('activity:subscribe')
 def handle_activity_subscribe():
-    """A drawer opened → join the live room so the push loop starts feeding it."""
-    if _ws_drop_sid_if_revoked():
+    """A drawer opened → join the live room so the push loop starts feeding it.
+    admin only, same as the http routes (#2155): the room carries every
+    stream on the server, whose it is and where it plays from."""
+    _pid, _is_admin = _ws_session_profile()
+    if not _is_admin:
         return
     join_room('activity:live')
     with _activity_sids_lock:
