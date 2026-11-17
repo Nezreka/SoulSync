@@ -1539,7 +1539,8 @@ def save_profile_features():
         if ui_features.is_locked(db, profile_id):
             return jsonify({'success': False, 'error': FEATURES_LOCKED_MESSAGE, 'locked': True}), 403
         if data.get('reset') is True:
-            ui_features.reset(db, profile_id)
+            # only their own pick goes; what an admin set for them stays
+            ui_features.reset_own(db, profile_id)
         else:
             off, error = _features_off_from(data)
             if error or off is None:
@@ -1578,8 +1579,7 @@ def get_other_profile_features(profile_id):
     if refused:
         return refused
     try:
-        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
-                        'default': ui_features.load_default(db)})
+        return jsonify({'success': True, **ui_features.admin_payload(db, profile_id)})
     except Exception as e:
         logger.error("features read for %s failed: %s", profile_id, e)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1589,7 +1589,9 @@ def get_other_profile_features(profile_id):
 def set_other_profile_features(profile_id):
     """an admin sets what a profile shows and whether it's locked (#2157).
     takes {off} or {preset}, {locked}, or {reset: true} (back to the default
-    for new profiles). works on a locked profile, that's the point."""
+    for new profiles). works on a locked profile, that's the point. the set
+    and the lock both drop the member's old pick (#2164), so what the admin
+    set is what they see."""
     from core import ui_features
     db, target, refused = _features_target(profile_id)
     if refused:
@@ -1607,12 +1609,11 @@ def set_other_profile_features(profile_id):
         if data.get('reset') is True:
             ui_features.reset(db, profile_id)
         if off is not None:
-            ui_features.save_off(db, profile_id, off)
+            ui_features.save_admin_off(db, profile_id, off)
         if has_lock:
-            ui_features.set_locked(db, profile_id, bool(data.get('locked')))
+            ui_features.admin_lock(db, profile_id, bool(data.get('locked')))
         _audit('features_changed', profile_id, target.get('name'))
-        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
-                        'default': ui_features.load_default(db)})
+        return jsonify({'success': True, **ui_features.admin_payload(db, profile_id)})
     except Exception as e:
         logger.error("features save for %s failed: %s", profile_id, e)
         return jsonify({'success': False, 'error': str(e)}), 500

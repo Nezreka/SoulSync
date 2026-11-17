@@ -70,7 +70,7 @@ Admins choose whether each profile sees **Music only**, **Movies & TV only**, or
 
 ## Page access
 
-Admins choose exactly which pages each profile can visit (**allowed pages**). A kid's profile might only see Discover and the media player; a guest might only see the request page. Unset means all pages.
+Admins choose exactly which pages each profile can visit (**allowed pages**). A kid's profile might only see Discover and the media player; a guest might only see the request page. Unset means all pages. Set it in the profile's **Access** step, under **What they can open** → **Pages**. A page left out is gone from their sidebar, and pages with their own data (Import, Playlist Explorer, Listening stats, Audiobooks, Sample Studio) are refused by the server too.
 
 A few pages follow their own rules regardless of the list: **Help** and **Issues** are always visible, **Settings** is admin-only (it's stripped from non-admin grants even if picked), and the **Requests** page shows for admins and for profiles without download rights. **Automations** is a grantable page — non-admin profiles can get full access to it.
 
@@ -230,7 +230,12 @@ Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, o
 
 This is a preference, not access. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
 
-**Admins set it for others.** In **Profiles**, open someone's profile and look under **What shows**: the same presets and switches, plus **Lock it**. A locked profile sees its setup in **Customize** read only, with a note that an admin set it, and can't change it (the server refuses too). An admin can always change it. **Reset to default** puts a profile back on what new profiles see. On the **People** tab, **What new profiles see** sets the starting point and whether it comes locked. Every profile that never picked its own follows it, so changing it reaches them too. Admins always pick their own. None of this opens a page: what someone can reach is still their page access.
+**Admins set it for others.** In **Profiles**, open someone's profile and go to **Access**. It reads top to bottom:
+
+- **What they can open**: the music and video sides, and **Pages** under them. Anything off here is gone for them: it leaves their sidebar and SoulSync refuses it.
+- **What shows in their sidebar**: of what they can open, which parts show. The same presets and switches as Customize, plus **Lock it**. A hidden part still opens from a link.
+
+Unlocked, the person can change what shows in **Customize**, and their own pick is what they see. The editor says when they picked their own, and saving a change there replaces it. **Lock it** shows them exactly what you set: their old pick is dropped, **Customize** goes away for them (the sidebar button and the one in Settings), and the server refuses their changes. Unlocking later keeps what you set, and they can change it from there. **Reset to default** puts a profile back on what new profiles see. On the **People** tab, **What new profiles see** sets the starting point and whether it comes locked. Every profile you never set follows it, so changing it reaches them too. When that default is locked, it wins over anything people picked themselves. Admins always pick their own.
 
 A profile that can only use the video side can't hide it, since it would have nothing left.
 

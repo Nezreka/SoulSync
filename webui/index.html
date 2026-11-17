@@ -799,6 +799,8 @@
                         try { c = JSON.parse(localStorage.getItem('ss_features') || 'null'); } catch (e) { }
                         if (!c || !Array.isArray(c.pages)) return;
                         document.documentElement.setAttribute('data-features-off', (c.off || []).join(' '));
+                        // an admin locked it (#2164): no Customize, nothing to change
+                        if (c.locked === true) document.documentElement.setAttribute('data-features-locked', '');
                         var pages = {};
                         c.pages.forEach(function (p) { pages[p] = true; });
                         document.querySelectorAll('.sidebar-nav .nav-button').forEach(function (b) {

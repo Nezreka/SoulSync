@@ -68,6 +68,8 @@ beforeEach(() => {
     }),
   );
   installFeatures();
+  // a locked case below leaves the shell locked; every case starts unlocked
+  return window.SoulSyncFeatures?.load().then(() => undefined);
 });
 
 afterEach(() => {
@@ -151,6 +153,19 @@ describe('the feature picker', () => {
 });
 
 describe('#2157: locked by an admin', () => {
+  it('#2164: a stray open does nothing once the shell knows it is locked', async () => {
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json({ ...payload([]), locked: true, chosen: true }),
+      ),
+    );
+    await window.SoulSyncFeatures?.load();
+    render(<FeaturePicker />);
+    await act(async () => window.openFeaturePicker?.());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText('Make SoulSync yours')).toBeNull();
+  });
+
   it('shows the choice read only and saves nothing', async () => {
     stored = ['podcasts'];
     server.use(

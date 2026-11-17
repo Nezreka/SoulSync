@@ -111,6 +111,8 @@ PAGE_EXCLUSIVE_APIS = (
     ("/api/playlist-explorer", "playlist-explorer"),
     ("/api/listening-stats", "stats"),
     ("/api/audiobooks", "audiobooks"),
+    # stems and chops, only sample studio calls these (#2164)
+    ("/api/sample", "sample-studio"),
 )
 
 

@@ -217,6 +217,23 @@ describe('changing the appearance', () => {
     expect(box('particles-enabled').disabled).toBe(false);
   });
 
+  it('#2164: no Customize door while an admin has the profile locked', () => {
+    const features = window.SoulSyncFeatures;
+    window.SoulSyncFeatures = {
+      get: () => ({ loaded: true, off: [], hiddenPages: [], payload: { locked: true } }),
+    } as unknown as typeof window.SoulSyncFeatures;
+    try {
+      store.hydrate({});
+      ui();
+      expect(screen.queryByText('Customize SoulSync')).toBeNull();
+      expect(screen.queryByText('Show only what you use')).toBeNull();
+      // the rest of the tab is still there
+      expect(screen.getByText('UI Appearance')).toBeInTheDocument();
+    } finally {
+      window.SoulSyncFeatures = features;
+    }
+  });
+
   it('Customize SoulSync opens the feature picker', () => {
     const open = vi.fn();
     shell.openFeaturePicker = open;
