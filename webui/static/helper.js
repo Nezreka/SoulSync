@@ -2182,6 +2182,14 @@ const PAGE_TOUR_MAP = {
     'issues':      'issues-tour',
 };
 
+// the page the user is on. the three callers each declared a const named
+// currentPage whose own initializer read currentPage: on a React page that
+// throws, so the help menu, tour navigation and troubleshoot never ran.
+function _helperPageId() {
+    return document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '')
+        || (typeof window.currentPage === 'string' ? window.currentPage : '');
+}
+
 function openHelperMenu() {
     closeHelperMenu();
     HelperState.menuOpen = true;
@@ -2195,8 +2203,8 @@ function openHelperMenu() {
     floatBtn.classList.add('menu-open');
 
     // Detect current page for contextual tour suggestion
-    const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
-    const suggestedTourId = PAGE_TOUR_MAP[currentPage];
+    const pageId = _helperPageId();
+    const suggestedTourId = PAGE_TOUR_MAP[pageId];
     const suggestedTour = suggestedTourId ? HELPER_TOURS[suggestedTourId] : null;
 
     const menu = document.createElement('div');
@@ -2572,8 +2580,8 @@ function showTourStep() {
 
     // Navigate to the correct page if needed
     if (step.page) {
-        const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
-        if (currentPage !== step.page) {
+        const pageId = _helperPageId();
+        if (pageId !== step.page) {
             navigateToPage(step.page);
         }
     }
@@ -3767,8 +3775,8 @@ function activateTroubleshootMode() {
     _troubleshootActive = true;
 
     // We need to be on the dashboard to scan service cards
-    const currentPage = (document.querySelector('.page.active:not(#webui-react-root)')?.id?.replace('-page', '') || (typeof window.currentPage === 'string' ? window.currentPage : '') || (typeof currentPage === 'string' ? currentPage : ''));
-    if (currentPage !== 'dashboard') {
+    const pageId = _helperPageId();
+    if (pageId !== 'dashboard') {
         navigateToPage('dashboard');
         setTimeout(() => _runTroubleshootScan(), 400);
     } else {
