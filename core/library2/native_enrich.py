@@ -707,6 +707,7 @@ def enrich_native_entity_for_service(
     service: str,
     *,
     searcher: Optional[Callable[[str, str, str], List[Dict[str, Any]]]] = None,
+    artist_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Refresh one entity from one requested provider, without a legacy row.
 
@@ -714,10 +715,16 @@ def enrich_native_entity_for_service(
     fell back. That provider namespace is persisted and returned; a Deezer or
     iTunes ID can therefore never enter the Spotify slot merely because the
     Spotify facade initiated the request.
+
+    ``artist_name``: an album or track searched under this artist instead of
+    its album's artist. A combined artist ("A; B") matches no provider's
+    artist, so its tracks are looked up under each of its parts; the same
+    title, album and artist checks decide the hit.
     """
 
     from difflib import SequenceMatcher
 
+    search_artist = artist_name
     canonical = {
         "artist": "artist", "artists": "artist",
         "album": "album", "albums": "album",
@@ -764,6 +771,8 @@ def enrich_native_entity_for_service(
         album_title = str(row["album_title"] or "") if row else ""
     if row is None:
         raise LookupError(f"Library {canonical} {entity_id} not found")
+    if canonical != "artist" and str(search_artist or "").strip():
+        artist_name = str(search_artist).strip()
 
     source_ids = _stored_source_ids(row)
     provider_id = source_ids.get(service)

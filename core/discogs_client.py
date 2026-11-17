@@ -661,6 +661,37 @@ class DiscogsClient:
         logger.info(f"Discogs collection: fetched {len(results)} releases for {username}")
         return results
 
+    def track_artist_credits(self, track_id: str) -> Optional[List[Dict[str, str]]]:
+        """The artists Discogs credits on a track (``<release>_t<n>``, n
+        counting the release's real tracks the way the tracklist is read
+        here): the track's own list, else the release's. ``[{"id", "name"}]``
+        in order, the name as credited (ANV) without the ``(2)`` suffix. None
+        when Discogs can't say."""
+        match = re.fullmatch(r'r?(\d+)_t(\d+)', str(track_id or '').strip())
+        if not match:
+            return None
+        release = self.get_release(int(match.group(1)))
+        if not isinstance(release, dict):
+            return None
+        wanted, number, entry = int(match.group(2)), 0, None
+        for item in release.get('tracklist') or []:
+            if not isinstance(item, dict) or item.get('type_', '') not in ('track', ''):
+                continue
+            number += 1
+            if number == wanted:
+                entry = item
+                break
+        if entry is None:
+            return None
+        out = []
+        for artist in entry.get('artists') or release.get('artists') or []:
+            if not isinstance(artist, dict):
+                continue
+            name = _clean_discogs_artist_name(artist.get('anv') or artist.get('name'))
+            if name and artist.get('id'):
+                out.append({'id': str(artist['id']), 'name': name})
+        return out or None
+
     def get_release(self, release_id: int) -> Optional[Dict[str, Any]]:
         """Fetch full Discogs release detail including tracklist.
 

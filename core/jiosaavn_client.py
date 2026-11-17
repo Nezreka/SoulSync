@@ -367,6 +367,35 @@ class JioSaavnClient:
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
         return self._search("album", "/api/search/albums", query, limit, dataclass_from_api=Album.from_api)
 
+    def track_artist_credits(self, track_id: str) -> Optional[List[Dict[str, str]]]:
+        """The primary and featured artists JioSaavn credits on a song, in
+        order, as ``[{"id", "name"}]``. None when JioSaavn can't say."""
+        import html
+
+        track_id = str(track_id or "").strip()
+        if not track_id:
+            return None
+        try:
+            items = self._unwrap_results(self._get_json(f"/api/songs/{track_id}"))
+        except Exception as exc:  # noqa: BLE001 - None means unknown
+            logger.debug("JioSaavn song %s artists unavailable: %s", track_id, exc)
+            return None
+        block = items[0].get("artists") if items and isinstance(items[0], dict) else None
+        if not isinstance(block, dict):
+            return None
+        out: List[Dict[str, str]] = []
+        seen: set = set()
+        for bucket in ("primary", "featured"):
+            for artist in block.get(bucket) or []:
+                if not isinstance(artist, dict):
+                    continue
+                artist_id = str(artist.get("id") or "").strip()
+                name = html.unescape(str(artist.get("name") or "")).strip()
+                if artist_id and name and artist_id not in seen:
+                    seen.add(artist_id)
+                    out.append({"id": artist_id, "name": name})
+        return out or None
+
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         track_id = str(track_id or "").strip()
         if not track_id:

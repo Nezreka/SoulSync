@@ -508,7 +508,8 @@ def set_library_v2_match(
     # cleared match takes that list's featured artists away with it (3.6.1
     # did the same). The new match's credits are fetched after the commit
     # (provider_credits.schedule_match_credits). Same transaction as the id.
-    if (canonical in ("track", "album") and service in ("spotify", "deezer")
+    from core.library2.provider_credits import CREDIT_SOURCES
+    if (canonical in ("track", "album") and service in CREDIT_SOURCES
             and (value or "") != previous):
         from core.library2.provider_credits import drop_source_credits
         drop_source_credits(conn, canonical, int(entity_id), service)
@@ -516,7 +517,7 @@ def set_library_v2_match(
     # The default edition names the release the album row stands for, or the
     # chip says one release while completeness and track-number repair read
     # another (feature-parity A01). Same transaction as the id.
-    if canonical == "artist" and value and service in ("spotify", "deezer"):
+    if canonical == "artist" and value and service in CREDIT_SOURCES:
         # credits stored before this artist had the id (A04)
         from core.library2.provider_credits import materialize_artist_credits
         materialize_artist_credits(conn, int(entity_id))

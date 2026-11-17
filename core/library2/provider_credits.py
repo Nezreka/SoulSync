@@ -19,7 +19,7 @@ before them.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -38,7 +38,27 @@ CREATE TABLE IF NOT EXISTS lib2_provider_credits (
 ) WITHOUT ROWID
 """
 
-_SOURCES = ("spotify", "deezer")
+# every source whose track lookup gives a real artist list (ids, in credit
+# order). A source that only has a string ("A & B": iTunes, Last.fm, AudioDB)
+# or one name (Amazon's first artist, Qobuz's performer) is no evidence of
+# who is on a track, so it is not one of them.
+_SOURCES = ("spotify", "deezer", "musicbrainz", "tidal", "discogs", "jiosaavn")
+
+
+def credit_services(configured: Optional[Iterable[str]] = None) -> set:
+    """The credit sources this instance can ask: every one of ``_SOURCES``
+    it configured (MusicBrainz always is). ``configured`` None reads the
+    app's configured services; when nothing registered an answer, all."""
+    if configured is None:
+        try:
+            from core.library2.match_status import configured_services
+            configured = configured_services()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("configured credit services unavailable: %s", exc)
+            configured = None
+    if configured is None:
+        return set(_SOURCES)
+    return set(_SOURCES) & {str(s).lower() for s in configured}
 
 # a manual match fetches the new release's credits from the source. tests turn
 # it off (conftest) so none asks a provider; the tests of it turn it back on.
@@ -117,10 +137,12 @@ def _artist_id_sql(service: str) -> Optional[str]:
     artists is a corrupt mapping, and a credit must not guess."""
     if service == "spotify":
         return "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 2"
-    if service == "deezer":
+    if service == "musicbrainz":
+        return "SELECT id FROM lib2_artists WHERE musicbrainz_id = ? LIMIT 2"
+    if service in _SOURCES:
         from core.library2.provider_ids import external_id_sql
         return (f"SELECT id FROM lib2_artists"
-                f" WHERE {external_id_sql('external_ids', 'deezer')} = ? LIMIT 2")
+                f" WHERE {external_id_sql('external_ids', service)} = ? LIMIT 2")
     return None
 
 
@@ -166,18 +188,21 @@ def _insert_credit(conn: Any, entity_type: str, entity_id: int, artist_id: int,
 
 def materialize_artist_credits(conn: Any, artist_id: int) -> int:
     """Credit ``artist_id`` on every track and album whose stored provider
-    credits name one of its provider ids. Called when an artist gains a Spotify
-    or Deezer id; one indexed lookup per id. Returns how many junction rows were
-    added. Never raises."""
+    credits name one of its provider ids. Called when an artist gains an id at
+    a credit source; one lookup per id. A one-artist list adds nothing (its
+    artist is the one the entity is filed under). Returns how many junction
+    rows were added. Never raises."""
     added = 0
     try:
-        row = conn.execute("SELECT spotify_id, external_ids FROM lib2_artists WHERE id=?",
-                           (int(artist_id),)).fetchone()
+        row = conn.execute(
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id=?",
+            (int(artist_id),)).fetchone()
         if row is None:
             return 0
-        from core.library2.provider_ids import parse_external_ids
-        ids = {"spotify": str(row[0] or "").strip(),
-               "deezer": str(parse_external_ids(row[1]).get("deezer") or "").strip()}
+        from core.library2.provider_ids import external_id_sql, parse_external_ids
+        external = parse_external_ids(row[2])
+        ids = {source: str((row[0] if source == "spotify" else row[1] if source == "musicbrainz"
+                            else external.get(source)) or "").strip() for source in _SOURCES}
         canon = conn.execute("SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
                              (int(artist_id),)).fetchone()[0]
         for source, provider_id in ids.items():
@@ -185,9 +210,8 @@ def materialize_artist_credits(conn: Any, artist_id: int) -> int:
                 continue
             # an id two different artists hold names neither for sure (the
             # linker's own rule): no credits from it
-            from core.library2.provider_ids import external_id_sql
-            column = ("a.spotify_id" if source == "spotify"
-                      else external_id_sql("a.external_ids", "deezer"))
+            column = ("a.spotify_id" if source == "spotify" else "a.musicbrainz_id"
+                      if source == "musicbrainz" else external_id_sql("a.external_ids", source))
             shared = conn.execute(
                 f"SELECT 1 FROM lib2_artists a WHERE {column} = ? "
                 "AND COALESCE(a.canonical_artist_id, a.id) <> ? LIMIT 1",
@@ -195,8 +219,11 @@ def materialize_artist_credits(conn: Any, artist_id: int) -> int:
             if shared:
                 continue
             for entity_type, entity_id, position in conn.execute(
-                    "SELECT entity_type, entity_id, position FROM lib2_provider_credits"
-                    " WHERE source=? AND source_artist_id=?", (source, provider_id)).fetchall():
+                    "SELECT p.entity_type, p.entity_id, p.position FROM lib2_provider_credits p"
+                    " WHERE p.source=? AND p.source_artist_id=?"
+                    " AND (SELECT COUNT(*) FROM lib2_provider_credits q"
+                    "      WHERE q.entity_type=p.entity_type AND q.entity_id=p.entity_id"
+                    "        AND q.source=p.source) > 1", (source, provider_id)).fetchall():
                 added += _insert_credit(conn, entity_type, entity_id, artist_id, position)
     except Exception as exc:  # noqa: BLE001 - see docstring
         logger.debug("credits for artist %s not materialized: %s", artist_id, exc)
@@ -318,14 +345,18 @@ def link_credited_artists(conn: Any, entity_type: str, entity_id: int,
     credited = _credited(artists)
     drop_source_credits(conn, entity_type, entity_id, service,
                         keep_provider_ids=[pid for pid, _name in credited])
+    if not credited:
+        return 0
+    # the list is kept whole, a one-artist list too: "Above & Beyond" credited
+    # alone is the evidence that keeps a band whole
+    try:
+        _store_snapshot(conn, entity_type, entity_id, service, credited)
+    except Exception as exc:  # noqa: BLE001 - a schema without the table
+        logger.debug("credit snapshot for %s %s skipped: %s", entity_type, entity_id, exc)
     if len(credited) < 2:
         return 0  # a sole artist is the one it is filed under
     added = 0
     try:
-        try:
-            _store_snapshot(conn, entity_type, entity_id, service, credited)
-        except Exception as exc:  # noqa: BLE001 - a schema without the table
-            logger.debug("credit snapshot for %s %s skipped: %s", entity_type, entity_id, exc)
         for position, (provider_id, _name) in enumerate(credited):
             rows = conn.execute(sql, (provider_id,)).fetchall()
             if len(rows) != 1:
@@ -360,6 +391,35 @@ def _fetch_credits(service: str, entity_type: str, provider_id: str) -> Optional
         fetch = client.get_album_raw if entity_type == "album" else client.get_track_raw
         data = fetch(int(provider_id))
         return (data or {}).get("contributors") if data else None
+    if service == "musicbrainz" and entity_type == "album":
+        from core.musicbrainz_client import artist_credit_list
+        client = _credit_client("musicbrainz")
+        return artist_credit_list(client.get_release(provider_id, includes=["artist-credits"])) \
+            if client is not None else None
+    if service in ("musicbrainz", "tidal", "discogs", "jiosaavn") and entity_type == "track":
+        # each client reads its own format: [{"id", "name"}] in credit order
+        client = _credit_client(service)
+        return client.track_artist_credits(provider_id) if client is not None else None
+    return None
+
+
+def _credit_client(service: str) -> Any:
+    """The client a credit source answers through, or None."""
+    from core.metadata import registry
+    if service == "musicbrainz":
+        # the registry hands out the search facade; the lookups by id are on
+        # the MusicBrainz client it wraps (one rate limit for both)
+        facade = registry.get_musicbrainz_client()
+        return getattr(facade, "_client", facade)
+    if service == "discogs":
+        return registry.get_discogs_client()
+    if service == "jiosaavn":
+        return registry.get_jiosaavn_client()
+    if service == "tidal":
+        # Tidal needs the signed-in client the enrichment worker holds
+        from core.library import service_search
+        worker = getattr(service_search, "tidal_enrichment_worker", None)
+        return getattr(worker, "client", None)
     return None
 
 
@@ -455,14 +515,31 @@ def _record_check(conn: Any, service: str, provider_id: str, artists: list) -> N
         (service, str(provider_id), json.dumps([n for n in names if n], ensure_ascii=False)))
 
 
+# a combined artist's parts a track is looked up under, at most
+_MAX_HINTS = 4
+
+
+def _hint_names(hints: Iterable[str]) -> List[str]:
+    """distinct, non-empty, in order, capped"""
+    out: List[str] = []
+    for hint in hints or ():
+        name = str(hint or "").strip()
+        if name and name.casefold() not in {o.casefold() for o in out}:
+            out.append(name)
+    return out[:_MAX_HINTS]
+
+
 def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterable[str]] = None,
-                         *, match: bool = True) -> bool:
+                         *, match: bool = True, artist_hints: Iterable[str] = ()) -> bool:
     """Make sure the library holds a track's credit list from each of
     ``services`` (Spotify, Deezer; default both), for readers that need it
     (the Split Artists job, the credit healers). Uses the writers that exist:
 
     - a track with no id at a service is matched there first by the native
-      enrichment (``enrich_native_entity_for_service``), when ``match``
+      enrichment (``enrich_native_entity_for_service``), when ``match``:
+      under its album's artist, then under each of ``artist_hints`` (the
+      parts of a combined artist: "ODESZA; RY X" matches no artist there,
+      "ODESZA" does)
     - a track with an id gets its credits fetched by id and stored as its
       snapshot (``link_credited_artists``, which also credits every guest
       the library has); the answer, a one-artist one too, is recorded in
@@ -480,6 +557,7 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
     stored_any = False
     for service in wanted:
         conn = None
+        exact = None   # (recording id, credits) MusicBrainz gave for the ISRC
         try:
             from core.library2.worker_support import stored_provider_id
             conn = database._get_connection()
@@ -492,13 +570,24 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
             if has_snapshot or (provider_id and any(
                     s == service for s, _n in checked_track_credits(conn, track_id))):
                 continue
-            if not provider_id and match:
+            if not provider_id and service == "musicbrainz":
+                # an ISRC names the recording exactly, no text search
+                isrc = (conn.execute("SELECT isrc FROM lib2_tracks WHERE id=?",
+                                     (int(track_id),)).fetchone() or [None])[0]
+                client = _credit_client("musicbrainz") if str(isrc or "").strip() else None
+                exact = client.track_artist_credits_by_isrc(str(isrc)) if client else None
+            if not provider_id and not exact and match:
                 from core.library2.native_enrich import enrich_native_entity_for_service
-                result = enrich_native_entity_for_service(conn, "track", int(track_id), service)
-                conn.commit()
-                if (result or {}).get("success") and (result or {}).get("source", service) == service:
-                    provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
-            if not provider_id:
+                for artist in (None, *_hint_names(artist_hints)):
+                    result = enrich_native_entity_for_service(conn, "track", int(track_id),
+                                                              service, artist_name=artist)
+                    conn.commit()
+                    if (result or {}).get("success") and \
+                            (result or {}).get("source", service) == service:
+                        provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
+                    if provider_id or (result or {}).get("locked"):
+                        break
+            if not provider_id and not exact:
                 continue
         except Exception as exc:  # noqa: BLE001 - see docstring
             logger.debug("credit refresh for track %s via %s skipped: %s", track_id, service, exc)
@@ -507,11 +596,15 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
             if conn is not None:
                 conn.close()
         # the provider call runs with no connection open
-        try:
-            artists = _fetch_credits(service, "track", provider_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("credit fetch for track %s via %s failed: %s", track_id, service, exc)
-            artists = None
+        if exact:
+            checked_id, artists = exact
+        else:
+            checked_id = provider_id
+            try:
+                artists = _fetch_credits(service, "track", provider_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("credit fetch for track %s via %s failed: %s", track_id, service, exc)
+                artists = None
         if artists is None:
             continue  # unreachable: nothing recorded, asked again next time
         conn = None
@@ -523,7 +616,7 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
             if str(stored_provider_id(conn, "track", track_id, service) or "") != provider_id:
                 continue  # matched again while the fetch ran
             link_credited_artists(conn, "track", int(track_id), service, artists)
-            _record_check(conn, service, provider_id, artists)
+            _record_check(conn, service, checked_id, artists)
             conn.commit()
             stored_any = True
         except Exception as exc:  # noqa: BLE001
@@ -534,7 +627,10 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
     return stored_any
 
 
-__all__ = ["checked_track_credits", "drop_source_credits", "ensure_provider_credits_schema",
+CREDIT_SOURCES = _SOURCES
+
+__all__ = ["CREDIT_SOURCES", "checked_track_credits", "credit_services", "drop_source_credits",
+           "ensure_provider_credits_schema",
            "ensure_track_credits",
            "link_credited_artists", "materialize_artist_credits",
            "refresh_match_credits", "schedule_match_credits"]

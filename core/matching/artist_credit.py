@@ -335,7 +335,7 @@ def credit_verdict(name: Any, evidence: Iterable[Evidence]) -> Optional[Tuple[st
     return None
 
 
-STORED_SOURCES = ("spotify", "deezer")
+STORED_SOURCES = ("spotify", "deezer", "musicbrainz", "tidal", "discogs", "jiosaavn")
 
 
 def stored_track_credits(conn: Any, track_id: Any) -> List[Evidence]:
