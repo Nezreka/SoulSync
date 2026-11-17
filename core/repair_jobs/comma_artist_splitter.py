@@ -31,7 +31,7 @@ import re
 from typing import Optional
 
 from core.matching.artist_credit import (
-    KNOWN_ACTS, decide_credit, name_key, parse_kept_whole_names, tokens,
+    decide_credit, name_key, parse_kept_whole_names, tokens,
 )
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, get_scope_file_paths
@@ -39,10 +39,6 @@ from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.comma_artist_splitter")
-
-# Famous acts whose name reads as a list — never flagged.
-# One list for every place that reads credits (core/matching/artist_credit.py).
-KNOWN_COMMA_ARTISTS = KNOWN_ACTS
 
 # Cap on combined artists examined per run (each may ask the credit fetcher).
 SCAN_ARTIST_LIMIT = 300
@@ -264,7 +260,7 @@ class CommaArtistSplitterJob(RepairJob):
             if context.update_progress:
                 context.update_progress(result.scanned, total)
             key = name_key(name)
-            if key in KNOWN_COMMA_ARTISTS or key in kept:
+            if key in kept:
                 result.skipped += 1
                 continue
             try:
@@ -427,11 +423,21 @@ class CommaArtistSplitterJob(RepairJob):
                 "JOIN lib2_artists pa ON pa.id = al.primary_artist_id "
                 "WHERE ta.artist_id = ? AND pa.id <> ?", (artist_id, artist_id)) if r[0]]
             identified = _identified_name_keys(conn, exclude_id=artist_id)
+            # the artist's own provider identity says the whole name is one
+            # act: "Lo & Leduc" stays whole next to identified "Lo" / "Leduc"
+            from core.library2.native_enrich import _IDENTIFIED_SQL
+            own = conn.execute(f"SELECT {_IDENTIFIED_SQL} FROM lib2_artists a WHERE a.id=?",
+                               (artist_id,)).fetchone()
+            self_identified = bool(own and own[0])
         finally:
             conn.close()
+        whole = normalize_name(name)
 
         def known(n):
             return normalize_name(n) in identified
+
+        def act(n):
+            return known(n) or (self_identified and normalize_name(n) == whole)
 
         def evidence():
             # what the library holds; only when that decides nothing is the
@@ -453,7 +459,7 @@ class CommaArtistSplitterJob(RepairJob):
                 yield from fresh
 
         decision = decide_credit(name, evidence=evidence(), known=anchors,
-                                 is_act=known, is_artist=known, config=context.config_manager)
+                                 is_act=act, is_artist=known, config=context.config_manager)
         if not decision.split or not _splits_only_at(name, list(decision.names), symbols):
             return None
         parts = list(decision.names)

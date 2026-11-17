@@ -190,8 +190,9 @@ def test_a_provider_listing_the_name_as_one_artist_keeps_it(db, no_fetch):
 
 def test_a_slash_band_inside_a_semicolon_list_stays_whole(db, no_fetch):
     """#2150: "K/DA; League Of Legends; ..." was "K; DA; ..." with album artist "K"."""
-    _album_by(db, KDA, 'Pop/Stars')
+    tracks = _album_by(db, KDA, 'Pop/Stars')
     _identified(db, 'K', 'DA')             # even identified fragments
+    _credits(db, tracks[0], ['K/DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers'])
     _result, findings = _scan(db)
     assert findings[0]['details']['split_artists'] == [
         'K/DA', 'League Of Legends', 'Mimi Webb', 'Sophie Powers']
@@ -237,12 +238,20 @@ def test_what_the_fetcher_stores_decides(db, monkeypatch):
     assert findings[0]['details']['library_v2']['track_ids'] == tracks
 
 
-def test_known_acts_and_keep_whole_names_are_never_flagged(db, no_fetch):
-    _album_by(db, 'Earth, Wind & Fire', 'September')
+def test_a_band_nothing_knows_and_keep_whole_names_are_never_flagged(db, no_fetch):
+    _album_by(db, 'Earth, Wind & Fire', 'September')      # no data: lossless
     _album_by(db, 'Nova & Vale, Mat Zo', 'One')
     _identified(db, 'Nova', 'Vale', 'Mat Zo')
     _result, findings = _scan(db, _settings(keep_whole_names='Nova & Vale, Mat Zo'))
-    assert findings == [] and no_fetch == []
+    assert findings == []
+    assert len(no_fetch) == 1          # only the unknown band was worth asking about
+
+
+def test_a_band_the_library_identified_is_never_flagged(db, no_fetch):
+    _album_by(db, 'Lo & Leduc', 'Update 4.0', **{'spotify_id': 'sp-lo-leduc'})
+    _identified(db, 'Lo', 'Leduc')         # even identified namesakes of its words
+    _result, findings = _scan(db)
+    assert findings == []
 
 
 def test_a_kept_name_inside_a_credit_stays_one_part(db, no_fetch):

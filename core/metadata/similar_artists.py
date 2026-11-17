@@ -49,9 +49,11 @@ def clean_musicmap_artist_name(artist_name: str) -> Optional[str]:
         return None
 
     # the lead artist (#1178): MusicMap has no page for a joined string
+    from core.imports.collab_artist import library_has_identified_artist
     from core.matching.artist_credit import lookup_name
     pipe = [part.strip() for part in name.split('|') if part.strip()]
-    name = lookup_name(pipe[0] if pipe else name) or name
+    # a band the library knows stays whole in the query
+    name = lookup_name(pipe[0] if pipe else name, is_act=library_has_identified_artist) or name
     normalized = _normalize_artist_name(name)
     if not normalized or normalized in _PLACEHOLDER_ARTIST_NAMES:
         return None

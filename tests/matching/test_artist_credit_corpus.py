@@ -31,8 +31,13 @@ def _lib(*names):
 CORPUS = [
     # ── one act whose name reads as a list ──────────────────────────────────
     ("Above & Beyond", {}, ["Above & Beyond"], "#2131 #2133 #2135 #2136"),
-    ("Above & Beyond", {"library": _lib("Above", "Beyond")}, ["Above & Beyond"],
+    # the library holds the band itself next to the ghost parts
+    ("Above & Beyond", {"library": _lib("Above", "Beyond", "Above & Beyond")}, ["Above & Beyond"],
      "#2131: ghost 'Above' / 'Beyond' rows from an old split"),
+    # a stored provider list beats ghost parts the library holds
+    ("Above & Beyond", {"library": _lib("Above", "Beyond"),
+                        "evidence": [("spotify credits", ["Above & Beyond"])]}, ["Above & Beyond"],
+     "#2131: the track's provider credit"),
     ("Kyau & Albert", {}, ["Kyau & Albert"], "#2136"),
     ("Super8 & Tab", {}, ["Super8 & Tab"], "#2136"),
     ("Tom Petty & The Heartbreakers", {}, ["Tom Petty & The Heartbreakers"], "#2131"),
@@ -165,7 +170,8 @@ def test_an_act_the_library_knows_whole_is_not_split_by_its_parts():
 def test_every_decision_says_which_step_made_it():
     assert decide_credit("A feat. B").via == "structure"
     assert decide_credit("Nova & Vale").via == "whole"
-    assert decide_credit("AC/DC").via == "act"
+    assert decide_credit("AC/DC", is_act=_lib("AC/DC")).via == "act"
+    assert decide_credit("AC/DC").via == "whole"     # nothing knows it: lossless
     assert decide_credit("grandson & K.Flay", known=["grandson"]).via == "known"
     assert decide_credit("Solo").via == "single"
     assert decide_credit("").names == ()
@@ -215,7 +221,7 @@ def test_leads_a_band():
 @pytest.mark.parametrize("credit,library,album_artist,expected", [
     ("Lil Nas X", (), None, ["Lil Nas X"]),                       # was "Lil Nas"
     ("K/DA; League Of Legends", (), None, ["K/DA", "League Of Legends"]),
-    ("Above & Beyond", ("Above", "Beyond"), None, ["Above & Beyond"]),
+    ("Above & Beyond", ("Above", "Beyond", "Above & Beyond"), None, ["Above & Beyond"]),
     ("Nova & Vale", ("Nova", "Vale", "Nova & Vale"), None, ["Nova & Vale"]),
     ("1788-L, Deathpact", ("1788-L",), "1788-L", ["1788-L", "Deathpact"]),
     ("Drake feat. Rihanna", (), None, ["Drake", "Rihanna"]),
@@ -250,7 +256,6 @@ def test_first_listed_reads_credits_through_the_kernel(credit, known, library, e
     ("K/DA", "K/DA"),
     ("Armin van Buuren, Funk Tribu", "Armin van Buuren"),  # beatport search
     ("The Sickest Squad, Frazzbass", "The Sickest Squad"),  # #1178 MusicMap 404
-    ("Earth, Wind & Fire", "Earth, Wind & Fire"),         # was "Earth"
     ("Kendrick Lamar feat. Rihanna", "Kendrick Lamar"),
     ("Nova & Vale", "Nova & Vale"),
     ("Solo", "Solo"),
@@ -258,6 +263,16 @@ def test_first_listed_reads_credits_through_the_kernel(credit, known, library, e
 def test_lookup_name(credit, expected):
     from core.matching.artist_credit import lookup_name
     assert lookup_name(credit) == expected
+
+
+def test_a_band_the_library_knows_is_searched_whole():
+    """discogs / musicmap cut "Earth, Wind & Fire" to "Earth"; the library
+    holding the band as an identified artist keeps the query whole"""
+    from core.matching.artist_credit import lookup_name
+    assert lookup_name("Earth, Wind & Fire", is_act=_lib("Earth, Wind & Fire")) == \
+        "Earth, Wind & Fire"
+    # nothing knows it: an unreadable list is searched by its first name (#1178)
+    assert lookup_name("Earth, Wind & Fire") == "Earth"
 
 
 @pytest.mark.parametrize("release_artist,asked,lead", [
@@ -315,12 +330,14 @@ def test_lazy_evidence_is_read_once_for_the_whole_and_the_pieces():
     ("A & B", {"evidence": [("musicbrainz credits", ["A", "B"])]}, ["A", "B"],
      "#840: MusicBrainz joins artists with &"),
     ("alt‐J", {}, ["alt‐J"], "#1797: a unicode hyphen is no separator"),
-    ("Earth, Wind & Fire", {"known": ["Earth"]}, ["Earth, Wind & Fire"],
-     "a famous act on an album by a namesake"),
+    ("Earth, Wind & Fire", {"known": ["Earth"],
+                            "evidence": [("spotify credits", ["Earth, Wind & Fire"])]},
+     ["Earth, Wind & Fire"], "a band on an album by a namesake: the provider credit"),
     ("Chase & Status & Becky Hill", {"known": ["Chase & Status"]},
      ["Chase & Status", "Becky Hill"], "#1945: the tag spelling"),
-    ("Above & Beyond", {"known": ["Above"]}, ["Above & Beyond"],
-     "#2131: a ghost 'Above' as the album's artist"),
+    ("Above & Beyond", {"known": ["Above"],
+                        "evidence": [("deezer credits", ["Above & Beyond"])]}, ["Above & Beyond"],
+     "#2131: a ghost 'Above' as the album's artist, the provider credit"),
 ])
 def test_more_reported_cases(credit, knowledge, expected, source):
     decision = decide_credit(credit, evidence=knowledge.get("evidence", ()),
@@ -393,3 +410,30 @@ def test_library_part_checks_apply_equally_to_whole_and_nested_credits():
     nested = decide_credit('Lead feat. Nova & Vale', is_artist=library)
     assert whole.names == ('Nova', 'Vale')
     assert nested.names == ('Lead', *whole.names)
+
+
+
+# ── no built-in list of band names ──────────────────────────────────────────
+
+def test_with_no_data_at_all_names_alone_decide():
+    """No provider credit, no identified act, no keep-whole name: only the
+    name rules are left, and they are exactly as strong as the data behind
+    them. The album's own artist inside a name splits it, so does a full set
+    of known parts. In the running system the credit fetcher, the library's
+    identified artists and Keep Whole Names stand in front of this; the
+    fragment healer takes back what an old blind split left."""
+    assert decide_credit("Above & Beyond", known=["Above"]).names == ("Above", "Beyond")
+    assert decide_credit("Nova & Vale", is_artist=_lib("Nova", "Vale")).names == ("Nova", "Vale")
+    # and an unknown name stays as it is
+    assert decide_credit("Earth, Wind & Fire").names == ("Earth, Wind & Fire",)
+
+
+def test_a_keep_whole_name_is_an_act_everywhere():
+    class Cfg:
+        def get(self, key, default=None):
+            return ({"keep_whole_names": "Above & Beyond; K/DA"}
+                    if key == "repair.jobs.comma_artist_splitter.settings" else default)
+    cfg = Cfg()
+    assert decide_credit("Above & Beyond", known=["Above"], config=cfg).names == ("Above & Beyond",)
+    assert decide_credit("K/DA; Mimi Webb", is_artist=_lib("K", "DA", "Mimi Webb"),
+                         config=cfg).names == ("K/DA", "Mimi Webb")

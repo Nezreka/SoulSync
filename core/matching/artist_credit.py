@@ -42,8 +42,8 @@ that knows:
 1. a credit list holds the string as one artist (whole) or its names make up
    the string (split)
 2. before a cut, the whole string is checked: a name a list credited, a
-   name the caller vouches for, a known act (a famous name, or ``is_act``)
-   stays whole
+   name the caller vouches for, a known act (a keep-whole name, or
+   ``is_act``) stays whole
 3. the cutting separators cut it into pieces, and each piece is checked
    again, from the top:
    a. a name a credit list holds, or names it holds that make up the piece
@@ -193,25 +193,9 @@ def _join(names: Sequence[str], seps: Sequence[Tuple[str, str]], i: int, j: int)
 
 # ── known acts ───────────────────────────────────────────────────────────────
 
-# famous acts whose name reads as a list. Only asked when no credit list and
-# no library says anything, so this is the offline safety net, not the rule.
-KNOWN_ACTS = frozenset(name_key(n) for n in (
-    "Tyler, The Creator", "Earth, Wind & Fire", "Earth, Wind and Fire",
-    "Crosby, Stills & Nash", "Crosby, Stills and Nash", "Crosby, Stills, Nash & Young",
-    "Crosby, Stills, Nash and Young", "Emerson, Lake & Palmer", "Emerson, Lake and Palmer",
-    "Blood, Sweat & Tears", "Blood, Sweat and Tears", "Peter, Paul & Mary",
-    "Peter, Paul and Mary", "Me, Mom & Morgentaler", "Now, Now", "Sammy Davis, Jr.",
-    "Simon & Garfunkel", "Hall & Oates", "Above & Beyond", "Chase & Status",
-    "Mumford & Sons", "Florence + the Machine", "Florence and the Machine",
-    "Marina and the Diamonds", "Belle & Sebastian", "Iron & Wine", "Years & Years",
-    "Kyau & Albert", "Super8 & Tab", "Sonny & Cher", "Ike & Tina Turner",
-    "Macklemore & Ryan Lewis", "Tom Petty and the Heartbreakers",
-    "Tom Petty & The Heartbreakers", "Bob Marley & The Wailers",
-    "Nick Cave & The Bad Seeds", "AC/DC", "K/DA", "Axwell Λ Ingrosso",
-    "Of Monsters and Men", "Hootie & the Blowfish", "Sly & the Family Stone",
-    "Echo & the Bunnymen", "Katrina and the Waves", "Sam & Dave",
-    "Brooks & Dunn", "Big & Rich", "Dan + Shay", "Matt and Kim",
-))
+# There is no built-in list of band names. A name is one act because data says
+# so: a provider credited it whole on the track, the library holds it as an
+# identified artist (``is_act``), or the user said so (Keep Whole Names).
 
 # the names the user said are one artist each (#2150). They live in the
 # Split Artists job's settings, so the list can be read and edited on the
@@ -270,9 +254,9 @@ def kept_whole_keys(config: Any = None) -> set:
 
 
 def known_act_keys(config: Any = None) -> frozenset:
-    """every name that is one act without asking anyone: the famous names
-    that read as a list, and the user's keep-whole names"""
-    return KNOWN_ACTS | frozenset(kept_whole_keys(config))
+    """every name that is one act without asking a provider or the library:
+    the user's keep-whole names"""
+    return frozenset(kept_whole_keys(config))
 
 
 # "<frontman> & The <band>": the band an artist leads, filed on that
@@ -455,8 +439,8 @@ def _pieces(names, seps, runs) -> List[Tuple[str, bool]]:
 
 
 class _Segment:
-    def __init__(self, known_keys, is_act, is_artist, min_runs, credited=None, acts=KNOWN_ACTS):
-        # the famous names and the user's keep-whole names, read once
+    def __init__(self, known_keys, is_act, is_artist, min_runs, credited=None, acts=frozenset()):
+        # the user's keep-whole names, read once
         self.acts = acts
         # every name a provider credited on this track, by key -> the list
         # that credited it: each is an artist as written, so a segment cut
@@ -484,8 +468,7 @@ class _Segment:
         if runs and sum(j - i + 1 for i, j in runs) == len(names):
             return [_join(names, seps, i, j) for i, j in runs], self.credited[
                 name_key(_join(names, seps, *runs[0]))]
-        # 3. a name the caller vouches for (a famous act's name first: "Earth,
-        # Wind & Fire" on an album by an artist called "Earth" is the band)
+        # 3. a name the caller vouches for, or the user keeps whole
         if key in self.known_keys or key in self.acts:
             return [clean_credit(text)], "known" if key in self.known_keys else "act"
         runs = _runs(names, seps, lambda t: name_key(t) in self.known_keys)
@@ -525,8 +508,8 @@ class _Segment:
         # 4. a known act
         if self.act(text):
             return [clean_credit(text)], "act"
-        # 5. names the library or the caller knows make it up; a known act
-        # (a famous name, a keep-whole name) is an artist for this too
+        # 5. names the library or the caller knows make it up; a keep-whole
+        # name is an artist for this too
         if self.is_artist is not None or self.acts:
             runs = _runs(names, seps, lambda t: name_key(t) in self.acts
                          or _ask(self.is_artist, t))
@@ -628,7 +611,7 @@ def _dedupe(names: Iterable[str]) -> Tuple[str, ...]:
 
 __all__ = [
     "CreditDecision", "Evidence", "KEPT_WHOLE_SETTING", "KEPT_WHOLE_SETTINGS_KEY",
-    "KNOWN_ACTS", "STORED_SOURCES", "clean_credit", "kept_whole_artist_names",
+    "STORED_SOURCES", "clean_credit", "kept_whole_artist_names",
     "kept_whole_keys", "known_act_keys", "parse_kept_whole_names",
     "remember_kept_whole_names",
     "credit_verdict", "credits_cover", "decide_credit", "leads_a_band", "lookup_name", "name_key",
