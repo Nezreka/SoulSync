@@ -2927,6 +2927,9 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 
 /* ── Page canvas ────────────────────────────────────────────────────────── */
 .vdsc-page {
+    /* one poster width for every rail (ranked ones too); the breakpoints below step it down */
+    --vdsc-card-w: 168px;
+    --vdsc-gap: 18px;
     position: relative;
     max-width: 1480px;
     margin: 0 auto;
@@ -3183,43 +3186,42 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 /* ── Sticky jump-nav ────────────────────────────────────────────────────── */
 .vdsc-jumpnav {
     position: sticky; top: 0; z-index: 20;
-    display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap;
-    margin: 0 0 30px; padding: 12px 2px;
+    display: flex; gap: 6px; overflow-x: auto; flex-wrap: nowrap;
+    margin: 0; padding: 12px 2px;
     scrollbar-width: none;
-    background: linear-gradient(180deg, rgba(10, 13, 20, 0.94) 0%, rgba(10, 13, 20, 0.86) 70%, transparent 100%);
+    background: linear-gradient(180deg, var(--black-a75) 0%, var(--black-a60) 70%, transparent 100%);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 .vdsc-jumpnav::-webkit-scrollbar { display: none; }
 .vdsc-jump {
-    flex: 0 0 auto; height: 34px; padding: 0 16px; border-radius: var(--radius-pill);
+    flex: 0 0 auto; height: 32px; padding: 0 14px; border-radius: var(--radius-pill);
     border: 1px solid var(--white-a08);
-    background: var(--white-a06);
-    color: rgba(255, 255, 255, 0.78);
-    font-size: 0.86rem; font-weight: 600; white-space: nowrap; cursor: pointer;
+    background: var(--white-a05);
+    color: var(--white-a70);
+    font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
     transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
-.vdsc-jump:hover { background: rgba(255, 255, 255, 0.13); color: #fff; border-color: var(--white-a16); }
+.vdsc-jump:hover { background: var(--white-a12); color: var(--text-bright); border-color: var(--white-a16); }
+/* the group you're reading */
+.vdsc-jump--on, .vdsc-jump--on:hover { background: var(--white-a90); border-color: transparent; color: var(--bg-primary); }
 
 /* ── Groups, shelves, rails ─────────────────────────────────────────────── */
-.vdsc-group { margin: 0 0 54px; content-visibility: auto; contain-intrinsic-size: auto 760px; }
+.vdsc-group { margin: 0; padding: 36px 0 8px; border-top: 1px solid var(--white-a06); scroll-margin-top: 56px; }
+.vdsc-jumpnav + .vdsc-group { border-top: 0; padding-top: 20px; }
 .vdsc-group--empty { display: none; }
-.vdsc-group-head { margin: 0 0 18px; }
+.vdsc-group-head { margin: 0 0 20px; }
 .vdsc-group-head h2 {
     margin: 0; font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em;
     line-height: 1.1; color: #fff;
 }
 .vdsc-group-head p { margin: 6px 0 0; font-size: 0.9rem; color: var(--white-a50); }
-.vdsc-shelf { margin: 0 0 34px; }
-.vdsc-shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 18px; }
+.vdsc-shelf { margin: 0 0 24px; }
+.vdsc-shelf:last-child { margin-bottom: 16px; }
+.vdsc-shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; min-height: 32px; }
 .vdsc-shelf-title {
     margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em;
     line-height: 1.2; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* ML-personalized shelves keep their gradient-title accent */
-.vdsc-shelf--ml .vdsc-shelf-title {
-    background: linear-gradient(135deg, #fff 30%, rgb(var(--accent-rgb)) 130%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .vdsc-shelf--in .vdsc-rail .vsr-card { animation: vdscCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
 .vdsc-shelf--in .vdsc-rail .vsr-card:nth-child(2) { animation-delay: 0.04s; }
@@ -3232,15 +3234,15 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @keyframes vdscCardIn { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes vdscKenBurns { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.12) translate(-1.5%, 1%); } }
 .vdsc-rail {
-    display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
-    padding: 6px 2px 20px;
+    display: flex; gap: var(--vdsc-gap); overflow-x: auto; overscroll-behavior-x: contain;
+    padding: 8px 2px 14px;
     scroll-snap-type: x mandatory;
     scrollbar-width: thin; scrollbar-color: var(--white-a18) transparent;
 }
 .vdsc-rail::-webkit-scrollbar { height: 6px; }
 .vdsc-rail::-webkit-scrollbar-thumb { background: var(--white-a16); border-radius: 3px; }
 .vdsc-rail::-webkit-scrollbar-track { background: transparent; }
-.vdsc-rail .vsr-card { flex: 0 0 180px; width: 180px; scroll-snap-align: start; }
+.vdsc-rail .vsr-card { flex: 0 0 var(--vdsc-card-w); width: var(--vdsc-card-w); scroll-snap-align: start; }
 
 /* ── Cards: the music side's tactile treatment ──────────────────────────── */
 .vdsc-rail .vsr-card,
@@ -3299,15 +3301,17 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @media (hover: none) { .vdsc-page .vsr-notint { opacity: 0.95; } }
 
 /* ── Ranked (Top 10) rails ──────────────────────────────────────────────── */
-.vdsc-shelf--ranked .vdsc-rail { gap: 6px; align-items: center; }
+.vdsc-shelf--ranked .vdsc-rail { gap: calc(var(--vdsc-gap) + 6px); align-items: flex-start; }
+.vsr-ranked { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; scroll-snap-align: start; }
 .vsr-rank {
     display: flex; align-items: flex-end; flex: 0 0 auto;
-    font-size: 120px; font-weight: 900; line-height: 0.8; letter-spacing: -0.05em;
-    color: transparent;
-    -webkit-text-stroke: 2px var(--white-a35);
-    margin-right: -6px; user-select: none;
+    height: calc(var(--vdsc-card-w) * 1.5);
+    font-size: calc(var(--vdsc-card-w) * 1.1); font-weight: 900; line-height: 0.74; letter-spacing: -0.07em;
+    color: var(--white-a04);
+    -webkit-text-stroke: 2px var(--white-a40);
+    user-select: none;
 }
-.vdsc-shelf--ranked .vsr-card { flex: 0 0 150px; width: 150px; }
+.vdsc-shelf--ranked .vsr-card { flex: 0 0 var(--vdsc-card-w); width: var(--vdsc-card-w); }
 .vdsc-shelf--ranked .vsr-card:hover {
     box-shadow: 0 10px 28px var(--black-a50), 0 0 18px var(--white-a18);
 }
@@ -3315,20 +3319,31 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdsc-shelf--ranked .vsr-ranked:first-child .vsr-rank { -webkit-text-stroke-color: var(--white-a90); }
 
 /* ── Skeletons ──────────────────────────────────────────────────────────── */
-.vdsc-skel { display: flex; gap: 18px; overflow: hidden; padding: 6px 2px 20px; }
-.vdsc-skel-card {
-    flex: 0 0 180px; height: 302px; border-radius: var(--radius-xl);
-    background: linear-gradient(100deg, var(--white-a04) 40%, var(--white-a10) 50%, var(--white-a04) 60%);
+/* the skeleton fills the rail; as a shrinkable flex item firefox squeezed it to one card */
+.vdsc-skel { display: flex; flex: 0 0 100%; gap: var(--vdsc-gap); overflow: hidden; }
+.vdsc-skel-card { flex: 0 0 var(--vdsc-card-w); }
+.vdsc-skel-poster, .vdsc-skel-line {
+    background: linear-gradient(100deg, var(--white-a04) 40%, var(--white-a08) 50%, var(--white-a04) 60%);
     background-size: 200% 100%;
     animation: vdscShimmer 1.6s linear infinite;
-    border: 1px solid var(--white-a05);
 }
+.vdsc-skel-poster { aspect-ratio: 2 / 3; border-radius: var(--radius-lg); }
+.vdsc-skel-line { height: 11px; width: 78%; margin-top: 12px; border-radius: var(--radius-xs); }
+.vdsc-skel-line--short { width: 46%; margin-top: 7px; }
+/* a row that couldn't load: one quiet line and a retry, not a poster-tall hole */
+.vdsc-rail-msg {
+    display: flex; align-items: center; gap: 14px; flex: 1 1 auto;
+    min-height: 56px; padding: 0 18px;
+    border: 1px dashed var(--white-a10); border-radius: var(--radius-lg);
+    color: var(--white-a55); font-size: 13.5px;
+}
+.vdsc-shelf--failed .vdsc-arrow { display: none; }
 @keyframes vdscShimmer { to { background-position: -200% 0; } }
 
 /* ── Rail controls ──────────────────────────────────────────────────────── */
 .vdsc-shelf-nav { display: flex; align-items: center; gap: 8px; }
 .vdsc-arrow {
-    flex: 0 0 auto; width: 34px; height: 34px; border-radius: var(--radius-circle);
+    flex: 0 0 auto; width: 32px; height: 32px; border-radius: var(--radius-circle);
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--white-a08);
     border: 1px solid var(--white-a12);
@@ -3336,20 +3351,22 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     transition: background 160ms ease, transform 160ms ease;
 }
 .vdsc-arrow:hover { background: var(--white-a18); transform: scale(1.06); }
-.vdsc-seeall {
+.vdsc-seeall, .vdsc-rail-retry {
     flex: 0 0 auto; align-self: center;
     background: none; border: none; cursor: pointer;
     font-size: 13px; font-weight: 600; color: var(--white-a55);
     padding: 8px 10px; border-radius: var(--radius-md); white-space: nowrap;
     transition: color 160ms ease, background 160ms ease;
 }
-.vdsc-seeall:hover { color: #fff; background: var(--white-a08); }
+.vdsc-seeall:hover, .vdsc-rail-retry:hover { color: var(--text-bright); background: var(--white-a08); }
+.vdsc-rail-retry { color: var(--text-bright); border: 1px solid var(--white-a14); }
 
 /* ── Browse strip ───────────────────────────────────────────────────────── */
 .vdsc-browse-strip { margin: 0 0 8px; }
-.vdsc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+/* the genres in even rows, Browse all as one slim bar under them (no ragged last row) */
+.vdsc-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 .vdsc-tile {
-    position: relative; height: 148px; border-radius: var(--radius-sheet); overflow: hidden;
+    position: relative; height: 104px; border-radius: var(--radius-sheet); overflow: hidden; scroll-snap-align: start;
     border: 1px solid var(--white-a10);
     background: rgba(28, 34, 48, 0.7);
     cursor: pointer; text-align: left; padding: 0;
@@ -3392,11 +3409,14 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     box-shadow: 0 12px 28px var(--black-a45), 0 0 22px rgba(var(--c, 88, 101, 242), 0.22);
 }
 .vdsc-tile-name {
-    position: absolute; left: 16px; bottom: 14px; z-index: 2;
-    font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
+    position: absolute; left: 16px; right: 14px; bottom: 14px; z-index: 2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 17px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
     text-shadow: 0 2px 14px var(--black-a75);
 }
-.vdsc-tile--all { border-style: dashed; }
+.vdsc-tile--all { border-style: dashed; grid-column: 1 / -1; height: 52px; }
+.vdsc-tile--all .vdsc-tile-name { bottom: 50%; transform: translateY(50%); font-size: 15px; }
+.vdsc-tile--all .vdsc-tile-name::before { display: none; }
 
 /* ── Filter bar: monochrome pills (music standard) ──────────────────────── */
 .vdsc-filterbar {
@@ -3632,14 +3652,8 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     .vdsc-hero-body { max-width: 100%; padding: 24px 24px 78px; }
     .vdsc-dots { padding: 0 24px 22px; }
     .vdsc-hero-nav { display: none; }
-    .vdsc-rail .vsr-card { flex-basis: 140px; width: 140px; }
-    .vdsc-shelf--ranked .vsr-card { flex-basis: 128px; width: 128px; }
-    .vdsc-skel-card { flex-basis: 140px; }
-    .vsr-rank { font-size: 88px; }
     .vdsc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
-    .vdsc-group-head h2 { font-size: 1.4rem; }
-    .vdsc-shelf-title { font-size: 1.15rem; }
-    .vdsc-tiles { grid-template-columns: repeat(2, 1fr); }
+
     .vdsc-bar-title { font-size: 1.4rem; }
 }
 
@@ -7074,7 +7088,7 @@ body[data-side="video"] #gsearch-aura {
    eyebrow, big title, subtitle, actions, drifting backdrop art, scrim. */
 .vdsc-stories { margin: 26px 0 8px; }
 .vdsc-stories-row {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px;
 }
 .vdsc-story {
     position: relative; overflow: hidden; border-radius: 20px;
@@ -7150,7 +7164,7 @@ body[data-side="video"] #gsearch-aura {
     position: relative; overflow: hidden; border-radius: 26px;
     min-height: 430px; display: flex; align-items: flex-end;
     border: 1px solid var(--white-a10);
-    isolation: isolate; margin: 46px 0;
+    isolation: isolate; margin: 12px 0 28px;
     opacity: 0; transform: translateY(30px);
     transition: opacity 0.9s ease, transform 0.9s var(--ease-emphasized);
     box-shadow: 0 30px 80px var(--black-a50);
@@ -7294,7 +7308,7 @@ body[data-side="video"] #gsearch-aura {
 
 /* ── Story blocks: phone + reduced motion ──────────────────────────────────── */
 @media (max-width: 900px) {
-    .vdsc-stories-row { grid-template-columns: 1fr; }
+    .vdsc-stories-row { grid-auto-flow: row; grid-template-columns: 1fr; }
     .vdsc-story { min-height: 300px; }
     .vdsc-story-title { font-size: 1.6rem; }
     .vdsc-hero-picks { right: 20px; bottom: 18px; padding: 8px 14px; }
@@ -8822,9 +8836,9 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vdsc-page.vdsc2 .vdsc-bar-title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .vdsc-page.vdsc2 .vdsc-bar-sub { font-size: 14px; font-weight: 500; color: var(--white-a55); }
 .vdsc-page.vdsc2 .vdsc-btn { border-radius: var(--radius-pill); font-weight: 600; }
-.vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; }
-.vdsc-page.vdsc2 .vdsc-group-head p { font-weight: 500; color: var(--white-a45); }
-.vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 16px; font-weight: 600; letter-spacing: 0; }
+.vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.vdsc-page.vdsc2 .vdsc-group-head p { margin-top: 4px; font-size: 13.5px; font-weight: 500; color: var(--white-a45); }
+.vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--white-a90); }
 .vdsc-page.vdsc2 .vdsc-tile-name { font-weight: 700; }
 .vdsc-page.vdsc2 .vdsc-grid-title,
 .vdsc-page.vdsc2 .vdsc-ig-title,
@@ -8851,3 +8865,37 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     background: var(--black-a65); }
 .vdsc-page.vdsc2 .vsr-new { font-weight: 700; }
 .vdsc-page.vdsc2 .vdsc-stories:not(.hidden) { margin-bottom: 26px; }
+
+/* discover rhythm on smaller screens: one poster width per size, tighter groups */
+@media (max-width: 1100px) {
+    .vdsc-page.vdsc2 .vdsc-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+    /* touch sizes: the genres become one swipeable row */
+    .vdsc-page.vdsc2 .vdsc-tiles {
+        grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 150px;
+        overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; padding-bottom: 8px;
+    }
+    .vdsc-page.vdsc2 .vdsc-tile { height: 88px; }
+    .vdsc-page.vdsc2 .vdsc-tile--all { grid-column: auto; height: 88px; }
+    .vdsc-page.vdsc2 { --vdsc-card-w: 146px; --vdsc-gap: 14px; }
+    .vdsc-page.vdsc2 .vdsc-group { padding-top: 28px; }
+    .vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 21px; }
+    .vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 16px; }
+}
+@media (max-width: 560px) {
+    .vdsc-page.vdsc2 { --vdsc-card-w: 118px; --vdsc-gap: 12px; }
+    .vdsc-page.vdsc2 .vdsc-group { padding-top: 24px; }
+    .vdsc-page.vdsc2 .vdsc-group-head { margin-bottom: 14px; }
+    .vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 19px; }
+    .vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 15px; }
+    .vdsc-page.vdsc2 .vdsc-arrow { display: none; }
+    .vdsc-page.vdsc2 .vsr-name { font-size: 12.5px; }
+    .vdsc-page.vdsc2 .vsr-rank { -webkit-text-stroke-width: 1.5px; }
+}
+/* with a mouse the rail arrows wait until you're on the rail, calmer at rest */
+@media (hover: hover) and (pointer: fine) {
+    .vdsc-page.vdsc2 .vdsc-arrow { opacity: 0; transition: opacity 160ms ease, background 160ms ease, transform 160ms ease; }
+    .vdsc-page.vdsc2 .vdsc-shelf:hover .vdsc-arrow,
+    .vdsc-page.vdsc2 .vdsc-arrow:focus-visible { opacity: 1; }
+}
