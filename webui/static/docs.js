@@ -1212,7 +1212,7 @@
                 ['label', 'string', 0, 'Descriptive label for the key'],
             ], bx: '{\n  "label": "My Integration"\n}' }),
             _ddE('DELETE', '/api-keys/{key_id}', 'Revoke a key', { note: 'Takes effect immediately — rotate first, then revoke.' }),
-            _ddE('POST', '/api-keys/bootstrap', 'Mint the first key when none exist (NO AUTH REQUIRED)', { na: true, b: [
+            _ddE('POST', '/api-keys/bootstrap', 'Mint the first key when none exist (admin only, no key needed)', { na: true, b: [
                 ['label', 'string', 0, 'Label for the key'],
             ], bx: '{\n  "label": "My First Key"\n}', note: 'Works without an API key only while zero keys exist — afterwards it answers 403.' }),
         ] },

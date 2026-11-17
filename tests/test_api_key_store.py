@@ -163,7 +163,14 @@ def test_v1_bootstrap_refuses_once_a_key_exists(v1_app):
     assert resp.status_code == 403
 
 
-def test_v1_bootstrap_on_empty_install():
+@pytest.fixture
+def one_profile(monkeypatch):
+    # a fresh single-user install: the admin is the only profile
+    import api.settings as settings_api
+    monkeypatch.setattr(settings_api, "_profile_count", lambda: 1)
+
+
+def test_v1_bootstrap_on_empty_install(one_profile):
     from api.settings import register_routes
 
     app = Flask(__name__)
@@ -187,7 +194,7 @@ def _v1_app_with(cfg):
     return app
 
 
-def test_v1_concurrent_bootstraps_through_the_route_mint_one_key():
+def test_v1_concurrent_bootstraps_through_the_route_mint_one_key(one_profile):
     cfg = _Cfg(slow=0.02)
     app = _v1_app_with(cfg)
     codes = []

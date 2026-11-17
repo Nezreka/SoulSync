@@ -174,7 +174,7 @@ curl -X DELETE http://localhost:8008/api/v1/api-keys/123e4567-e89b-12d3-a456-426
 
 ### \`POST /api/v1/api-keys/bootstrap\`
 
-Mint the **first** API key on a fresh install. This is the only public endpoint that works without authentication — and it only works while **zero** keys exist.
+Mint the **first** API key on a fresh install. It needs no key, only while **zero** keys exist, and only for the admin: a signed-in admin session, or any request on a single-profile install with no login or launch PIN. Everyone else gets \`403\`.
 
 **Request body** (\`application/json\`):
 

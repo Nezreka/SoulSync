@@ -8,7 +8,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
 
-Alternatively, if no keys exist yet, use the bootstrap endpoint:
+Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
 ```bash
 curl -X POST http://localhost:8008/api/v1/api-keys/bootstrap \
@@ -2585,7 +2585,7 @@ Revoke an API key by its UUID.
 
 #### `POST /api/v1/api-keys/bootstrap`
 
-Generate the first API key when none exist. **No authentication required.** Returns `403` if keys already exist.
+Generate the first API key when none exist. No API key needed, but the caller must be the admin: a signed-in admin session, or any request on a single-profile install with no login or launch PIN. Returns `403` if keys already exist or the caller isn't the admin.
 
 ```json
 {
@@ -2877,4 +2877,4 @@ curl -H "Authorization: Bearer sk_..." \
 | GET | `/api-keys` | List API keys |
 | POST | `/api-keys` | Generate new key |
 | DELETE | `/api-keys/<id>` | Revoke key |
-| POST | `/api-keys/bootstrap` | Bootstrap first key (no auth) |
+| POST | `/api-keys/bootstrap` | Bootstrap first key (no key, admin only) |
