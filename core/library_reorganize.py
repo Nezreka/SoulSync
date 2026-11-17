@@ -15,6 +15,7 @@ preview with the move.
 """
 
 import errno
+import filecmp
 import hashlib
 import json
 import os
@@ -1262,6 +1263,17 @@ def _move_entry(src: str, dst: str) -> None:
         shutil.move(src, dst)
 
 
+def _same_content(src: str, dst: str) -> bool:
+    """Two separate regular files with the same bytes."""
+    try:
+        if (not os.path.isfile(src) or os.path.islink(src) or not os.path.isfile(dst)
+                or os.path.islink(dst) or _same_physical_file(src, dst)):
+            return False
+        return filecmp.cmp(src, dst, shallow=False)
+    except OSError:
+        return False
+
+
 def _carry_album_files(src_dir: str, dst_dir: str) -> List[str]:
     """Move the album's own files after its tracks, once every track has left
     ``src_dir`` for the one folder ``dst_dir``. A rename moved the tracks and
@@ -1286,6 +1298,13 @@ def _carry_album_files(src_dir: str, dst_dir: str) -> List[str]:
             continue
         dst = os.path.join(dst_dir, name)
         if os.path.lexists(dst):
+            # the same cover is already there (an earlier run, a download into
+            # the new folder): this copy only kept the old folder alive (#2010).
+            # a different file stays put
+            if _same_content(src, dst):
+                os.remove(src)
+                logger.info("[Reorganize/rename] %s is already at %s, dropped the old copy",
+                            name, dst_dir)
             continue
         _move_entry(src, dst)
         moved.append(dst)
