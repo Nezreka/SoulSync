@@ -1109,7 +1109,25 @@ def reorganize_album_rename_only(
         _emit(moved=summary['moved'],
               processed=summary['moved'] + summary['skipped'] + summary['failed'])
 
-    for src_dir in src_dirs_touched:
+    tidy_moved_from(src_dirs_touched, dest_dirs, cleanup_empty_dir_fn)
+
+    if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
+        _persist_compilation_record_type(db, album_id)
+
+    if (_run_placed_everything(summary, stop_check)
+            and tracks and all(t.get('matched') and t.get('file_exists')
+                               and not t.get('collision') for t in tracks)):
+        mark_album_placed(db, album_id)
+    return summary
+
+
+def tidy_moved_from(src_dirs, dest_dirs, cleanup_empty_dir_fn=None) -> None:
+    """After tracks moved out of ``src_dirs`` (``dest_dirs`` says where each
+    folder's tracks went): the album's own files follow the last track, the
+    emptied folders go, and so do the empty album folders beside the new ones.
+    Every mover calls this, so none leaves cover.jpg and its folder behind (#2010).
+    """
+    for src_dir in src_dirs:
         album_dst = _album_destination(dest_dirs.get(src_dir))
         if album_dst:
             try:
@@ -1126,7 +1144,7 @@ def reorganize_album_rename_only(
         except Exception as e:
             logger.debug("[Reorganize/rename] source prune of %s failed: %s", src_dir, e)
     try:
-        _tidy_album_and_artist_dirs(src_dirs_touched, dest_dirs)
+        _tidy_album_and_artist_dirs(src_dirs, dest_dirs)
     except Exception as e:  # noqa: BLE001 - the tracks moved; the extras stay put
         logger.warning("[Reorganize/rename] album / artist folder tidy failed: %s", e)
 
@@ -1138,15 +1156,6 @@ def reorganize_album_rename_only(
             _prune_empty_album_dirs(artist_dir)
         except Exception as e:  # noqa: BLE001 - cosmetic
             logger.debug("[Reorganize/rename] album-dir prune of %s failed: %s", artist_dir, e)
-
-    if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
-        _persist_compilation_record_type(db, album_id)
-
-    if (_run_placed_everything(summary, stop_check)
-            and tracks and all(t.get('matched') and t.get('file_exists')
-                               and not t.get('collision') for t in tracks)):
-        mark_album_placed(db, album_id)
-    return summary
 
 
 def naming_fingerprint() -> str:

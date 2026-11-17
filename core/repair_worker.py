@@ -7638,6 +7638,15 @@ class RepairWorker:
                     ),
                 }
 
+            # #2010: the last track out takes cover.jpg, the cue and the rest of
+            # the album's own files, the same tidy a queued reorganize does.
+            # one finding at a time left every old folder holding its cover.
+            try:
+                from core.library_reorganize import tidy_moved_from
+                tidy_moved_from({src_dir}, {src_dir: {dst_dir}})
+            except Exception as e:  # noqa: BLE001 - the track moved; the extras stay put
+                logger.warning("Path mismatch fix: album files in %s stayed: %s", src_dir, e)
+
             # Clean up empty source directories (never a configured root, even
             # when nested under the transfer folder — #976 / Specialmed)
             protected = self._protected_root_dirs()
