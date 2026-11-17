@@ -4,9 +4,10 @@
  * remembering how you left it.
  *
  * The numbers are the table's own (owned / expected), worked out by the
- * server with the artist's collection settings: a release they leave out is
- * not expected, so it is never "missing". Complete is only ever said when
- * something is expected and every release's size is known.
+ * server. A Watchlist artist is measured by their collection settings, so a
+ * release they leave out is never "missing"; anyone else by the albums you
+ * have (every track of each release you hold something of). Complete is only
+ * ever said when something is expected and every release's size is known.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -52,14 +53,17 @@ const STATE_COPY: Record<LibraryV2Completion, string> = {
 };
 
 const STATE_TITLE: Record<LibraryV2Completion, string> = {
-  complete: 'Every track this artist’s collection settings want is here',
-  incomplete: 'Some wanted tracks are not here yet',
+  complete: 'Every track of the albums you have is here (a Watchlist artist: every wanted track)',
+  incomplete:
+    'Some tracks of the albums you have (a Watchlist artist: wanted tracks) are not here yet',
   unchecked:
     'Everything known is here, but a release’s size has not been looked up yet, so this may not be all of it',
   unknown: 'Nothing is expected for this artist yet',
 };
 
-type ShowMissing = (artist: Pick<LibraryV2ArtistSummary, 'id' | 'name'>) => void;
+type ShowMissing = (
+  artist: Pick<LibraryV2ArtistSummary, 'id' | 'name' | 'completeness_basis'>,
+) => void;
 
 /**
  * how the meter opens the missing tracks. the list provides it, so a card on
@@ -72,22 +76,37 @@ export function ShowMissingProvider({ children }: { children: ReactNode }) {
   return <ShowMissingContext.Provider value={showMissing}>{children}</ShowMissingContext.Provider>;
 }
 
-/** open the Wanted list on this artist's missing tracks */
+/**
+ * open this artist's missing tracks: the Wanted list for a Watchlist artist,
+ * whose missing tracks are the wanted ones. anyone else is counted against
+ * the albums you have, and those missing tracks aren't wanted (some have no
+ * row at all, only the release's size), so their page's own releases, which
+ * read have / total per album, are where they are
+ */
 export function useShowMissing(): ShowMissing {
   const navigate = Route.useNavigate();
-  return (artist: Pick<LibraryV2ArtistSummary, 'id' | 'name'>) =>
+  return (artist) =>
     void navigate({
-      search: (prev: LibraryV2Search) => ({
-        ...prev,
-        section: 'wanted' as const,
-        wantedKind: 'missing' as const,
-        wantedArtist: artist.id,
-        wantedArtistName: artist.name,
-        q: '',
-        page: 1,
-        artist: undefined,
-        album: undefined,
-      }),
+      search: (prev: LibraryV2Search) =>
+        artist.completeness_basis === 'albums'
+          ? {
+              ...prev,
+              artist: artist.id,
+              album: undefined,
+              releases: 'library' as const,
+              releaseView: undefined,
+            }
+          : {
+              ...prev,
+              section: 'wanted' as const,
+              wantedKind: 'missing' as const,
+              wantedArtist: artist.id,
+              wantedArtistName: artist.name,
+              q: '',
+              page: 1,
+              artist: undefined,
+              album: undefined,
+            },
     });
 }
 

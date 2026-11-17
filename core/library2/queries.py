@@ -301,7 +301,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         watchlist_filter=watchlist_filter, source_filter=source_filter,
         quality_filter=quality_filter, profile_id=profile_id,
         review_filter=review_filter, direction=direction,
-        completeness=completeness, credit=credit)
+        completeness=completeness, credit=credit, collection=True)
     projected = project_metadata_many(
         conn,
         entity_type="artist",
@@ -344,6 +344,10 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             # #2106: releases of unknown size, and what that makes the artist
             "unverified_albums": r["unverified_albums"] or 0,
             "completion": completion_state(track_count, present, r["unverified_albums"] or 0),
+            # what the count is against: the Watchlist artist's collection
+            # settings (missing ones are in Wanted), or the albums you have
+            # (missing ones are on the artist's page)
+            "completeness_basis": "watchlist" if r["completeness_watched"] else "albums",
             "total_size_bytes": r["total_size_bytes"] or 0,
             "media_server_sources": media_sources.get(int(r["id"]), []),
             "user_overrides": overrides,
