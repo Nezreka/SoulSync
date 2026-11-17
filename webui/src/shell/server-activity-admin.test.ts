@@ -45,6 +45,26 @@ beforeAll(async () => {
   await import('./server-activity');
 });
 
+// the react drawer arrives later, from the main bundle
+const opened: (string | undefined)[] = [];
+let drawerOpen = false;
+function installDrawer() {
+  window.SoulSyncActivityDrawer = {
+    open: (tab?: string) => {
+      opened.push(tab);
+      drawerOpen = true;
+    },
+    close: () => {
+      drawerOpen = false;
+    },
+    toggle: () => {},
+    isOpen: () => drawerOpen,
+    wantsLive: () => drawerOpen,
+    push: () => {},
+  };
+  window.dispatchEvent(new CustomEvent('ss:server-activity-ready'));
+}
+
 afterAll(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -69,10 +89,14 @@ describe('server activity only runs for an admin (#2155)', () => {
   });
 
   it('will not open the drawer for a non-admin', async () => {
+    installDrawer();
     window.ServerActivity!.toggle();
+    window.ServerActivity!.open('history');
     await flush();
-    expect(document.querySelector('.sact-drawer')).toBeNull();
+    expect(opened).toEqual([]);
     expect(calls).toEqual([]);
+    // the next test starts before the drawer has loaded
+    delete window.SoulSyncActivityDrawer;
   });
 
   it('starts for an admin', async () => {
@@ -86,10 +110,31 @@ describe('server activity only runs for an admin (#2155)', () => {
     expect(calls.length).toBeGreaterThan(before);
   });
 
+  it('an open asked for before the drawer loaded happens once it is there', async () => {
+    window.ServerActivity!.open('stats');
+    expect(opened).toEqual([]);
+    installDrawer();
+    expect(opened).toEqual(['stats']);
+    window.ServerActivity!.toggle();
+    expect(drawerOpen).toBe(false);
+    window.ServerActivity!.toggle();
+    expect(opened).toEqual(['stats', undefined]);
+  });
+
+  it('the open drawer feeds the badge itself, so the ambient tick rests', async () => {
+    const before = calls.length;
+    vi.advanceTimersByTime(40000);
+    await flush();
+    expect(calls.length).toBe(before);
+    window.ServerActivity!._sawActivity!({ ok: true, summary: { streams: 5 } });
+    expect(document.getElementById('activity-float-badge')!.textContent).toBe('5');
+  });
+
   it('stops and hides again when a non-admin takes over', async () => {
     changed({ profileId: 4, isAdmin: false });
     await flush();
     expect(btn().style.display).toBe('none');
+    expect(drawerOpen).toBe(false);
     const before = calls.length;
     vi.advanceTimersByTime(60000);
     await flush();

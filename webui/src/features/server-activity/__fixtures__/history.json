@@ -1,0 +1,677 @@
+{
+  "ok": true,
+  "filters": {
+    "kind": null,
+    "user": null,
+    "method": null,
+    "server": null,
+    "start": null,
+    "end": null,
+    "q": null
+  },
+  "summary": {
+    "plays": 7,
+    "played_ms": 200000,
+    "people": 5,
+    "converted_pct": 43,
+    "away_places": 2,
+    "first_at": 1794898345.9604685
+  },
+  "days": [
+    {
+      "date": "2026-11-17",
+      "plays": 7,
+      "played_ms": 200000
+    }
+  ],
+  "groups": [
+    {
+      "group_key": "254019ac9f2a4876ab195b79987facc8",
+      "kind": "track",
+      "title": "Everything In Its Right Place",
+      "subtitle": "Radiohead · Kid A",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 50000,
+      "paused_ms": 0,
+      "buffering_ms": 0,
+      "pause_count": 0,
+      "percent": 38,
+      "finished": 0,
+      "book_percent": null,
+      "method": "direct_play",
+      "method_label": "Direct Play",
+      "quality": "FLAC 24-bit · 96 kHz",
+      "change": null,
+      "reasons": [],
+      "user": "sam",
+      "user_avatar": "/api/server-activity/avatar?user=plex:1",
+      "player": {
+        "product": "Plexamp",
+        "name": "sam's iPhone",
+        "device": "iPhone",
+        "platform": "iOS",
+        "version": "4.11.2"
+      },
+      "connection": {
+        "remote": false,
+        "ip": "192.168.1.61",
+        "location": null
+      },
+      "server": "plex",
+      "server_name": "Basement",
+      "thumb": "/library/metadata/701/thumb/1700000002",
+      "link": null,
+      "source": "live",
+      "plays": [
+        {
+          "id": 2,
+          "play_key": "254019ac9f2a4876ab195b79987facc8",
+          "kind": "track",
+          "title": "Everything In Its Right Place",
+          "parent_title": "Kid A",
+          "grandparent_title": "Radiohead",
+          "season": null,
+          "episode": null,
+          "track": 1,
+          "chapter": null,
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 50000,
+          "paused_ms": 0,
+          "buffering_ms": 0,
+          "pause_count": 0,
+          "duration_ms": 251000,
+          "percent": 38,
+          "book_percent": null,
+          "method": "direct_play",
+          "method_label": "Direct Play",
+          "quality": "FLAC 24-bit · 96 kHz",
+          "change": null,
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "3a496b04f87c49a6ace2be6f94be869c",
+      "kind": "movie",
+      "title": "The Wild Robot",
+      "subtitle": "2024 · Movie",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 50000,
+      "paused_ms": 0,
+      "buffering_ms": 0,
+      "pause_count": 0,
+      "percent": 46,
+      "finished": 0,
+      "book_percent": null,
+      "method": "transcode",
+      "method_label": "Transcode",
+      "quality": "1080p H.264",
+      "change": "1080p → 720p",
+      "reasons": [
+        {
+          "code": "over_remote_limit",
+          "label": "Over the player's remote quality"
+        },
+        {
+          "code": "audio_codec",
+          "label": "Audio format the player can't play"
+        }
+      ],
+      "user": "maya",
+      "user_avatar": null,
+      "player": {
+        "product": "Jellyfin iOS",
+        "name": "iPad",
+        "device": null,
+        "platform": null,
+        "version": "1.6.4"
+      },
+      "connection": {
+        "remote": true,
+        "ip": "73.41.208.17",
+        "location": null
+      },
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "thumb": "jf:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "link": {
+        "kind": "movie",
+        "id": "1184918",
+        "source": "tmdb"
+      },
+      "source": "live",
+      "plays": [
+        {
+          "id": 6,
+          "play_key": "3a496b04f87c49a6ace2be6f94be869c",
+          "kind": "movie",
+          "title": "The Wild Robot",
+          "parent_title": null,
+          "grandparent_title": null,
+          "season": null,
+          "episode": null,
+          "track": null,
+          "chapter": null,
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 50000,
+          "paused_ms": 0,
+          "buffering_ms": 0,
+          "pause_count": 0,
+          "duration_ms": 6120000,
+          "percent": 46,
+          "book_percent": null,
+          "method": "transcode",
+          "method_label": "Transcode",
+          "quality": "1080p H.264",
+          "change": "1080p → 720p",
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "832ca18f5a5b45628c5d6adddfbcf586",
+      "kind": "audiobook",
+      "title": "The Selfish Gene",
+      "subtitle": "Chapter 3 · Richard Dawkins",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 0,
+      "paused_ms": 50000,
+      "buffering_ms": 0,
+      "pause_count": 1,
+      "percent": 10,
+      "finished": 0,
+      "book_percent": 10,
+      "method": "direct_play",
+      "method_label": "Direct Play",
+      "quality": "AAC 64 kbps",
+      "change": null,
+      "reasons": [],
+      "user": "jo",
+      "user_avatar": null,
+      "player": {
+        "product": "Jellyfin Web",
+        "name": "Firefox",
+        "device": null,
+        "platform": null,
+        "version": "10.11.2"
+      },
+      "connection": {
+        "remote": false,
+        "ip": "192.168.1.70",
+        "location": null
+      },
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "thumb": "jf:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "link": null,
+      "source": "live",
+      "plays": [
+        {
+          "id": 7,
+          "play_key": "832ca18f5a5b45628c5d6adddfbcf586",
+          "kind": "audiobook",
+          "title": "The Selfish Gene",
+          "parent_title": null,
+          "grandparent_title": "Richard Dawkins",
+          "season": null,
+          "episode": null,
+          "track": null,
+          "chapter": {
+            "index": 3,
+            "count": 4,
+            "title": "The replicators"
+          },
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 0,
+          "paused_ms": 50000,
+          "buffering_ms": 0,
+          "pause_count": 1,
+          "duration_ms": 60000000,
+          "percent": 10,
+          "book_percent": 10,
+          "method": "direct_play",
+          "method_label": "Direct Play",
+          "quality": "AAC 64 kbps",
+          "change": null,
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "90d7fd1e74d34a10968f4316c5608aa2",
+      "kind": "episode",
+      "title": "Shōgun",
+      "subtitle": "S1 E9 · Crimson Sky",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 0,
+      "paused_ms": 0,
+      "buffering_ms": 50000,
+      "pause_count": 0,
+      "percent": 17,
+      "finished": 0,
+      "book_percent": null,
+      "method": "transcode",
+      "method_label": "Transcode",
+      "quality": "1080p H.264",
+      "change": "Subtitles burned in",
+      "reasons": [
+        {
+          "code": "subtitle_burn_image",
+          "label": "Image subtitles burned in"
+        },
+        {
+          "code": "audio_codec",
+          "label": "Audio format the player can't play"
+        }
+      ],
+      "user": "maya",
+      "user_avatar": "/api/server-activity/avatar?user=plex:7341",
+      "player": {
+        "product": "Plex for iOS",
+        "name": "iPad",
+        "device": "iPad",
+        "platform": "iOS",
+        "version": "2024.1"
+      },
+      "connection": {
+        "remote": false,
+        "ip": "192.168.1.20",
+        "location": null
+      },
+      "server": "plex",
+      "server_name": "Basement",
+      "thumb": "/library/metadata/900/thumb/1",
+      "link": null,
+      "source": "live",
+      "plays": [
+        {
+          "id": 4,
+          "play_key": "90d7fd1e74d34a10968f4316c5608aa2",
+          "kind": "episode",
+          "title": "Crimson Sky",
+          "parent_title": "Season 1",
+          "grandparent_title": "Shōgun",
+          "season": 1,
+          "episode": 9,
+          "track": null,
+          "chapter": null,
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 0,
+          "paused_ms": 0,
+          "buffering_ms": 50000,
+          "pause_count": 0,
+          "duration_ms": 3600000,
+          "percent": 17,
+          "book_percent": null,
+          "method": "transcode",
+          "method_label": "Transcode",
+          "quality": "1080p H.264",
+          "change": "Subtitles burned in",
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "92e3ec89907b4918bfd70df4c74b43cc",
+      "kind": "episode",
+      "title": "Severance",
+      "subtitle": "S2 E10 · Cold Harbor",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 50000,
+      "paused_ms": 0,
+      "buffering_ms": 0,
+      "pause_count": 0,
+      "percent": 72,
+      "finished": 0,
+      "book_percent": null,
+      "method": "direct_play",
+      "method_label": "Direct Play",
+      "quality": "1080p HEVC",
+      "change": null,
+      "reasons": [],
+      "user": "dan",
+      "user_avatar": "/api/server-activity/avatar?user=jellyfin:0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+      "player": {
+        "product": "Jellyfin Android TV",
+        "name": "Shield TV",
+        "device": "Tv",
+        "platform": null,
+        "version": "0.18.1"
+      },
+      "connection": {
+        "remote": false,
+        "ip": "192.168.1.44",
+        "location": null
+      },
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "thumb": "jf:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "link": null,
+      "source": "live",
+      "plays": [
+        {
+          "id": 5,
+          "play_key": "92e3ec89907b4918bfd70df4c74b43cc",
+          "kind": "episode",
+          "title": "Cold Harbor",
+          "parent_title": "Season 2",
+          "grandparent_title": "Severance",
+          "season": 2,
+          "episode": 10,
+          "track": null,
+          "chapter": null,
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 50000,
+          "paused_ms": 0,
+          "buffering_ms": 0,
+          "pause_count": 0,
+          "duration_ms": 4540000,
+          "percent": 72,
+          "book_percent": null,
+          "method": "direct_play",
+          "method_label": "Direct Play",
+          "quality": "1080p HEVC",
+          "change": null,
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "b348193aa18f4d52b39f0f2b49493481",
+      "kind": "movie",
+      "title": "Dune: Part Two",
+      "subtitle": "2024 · Movie",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 50000,
+      "paused_ms": 0,
+      "buffering_ms": 0,
+      "pause_count": 0,
+      "percent": 41,
+      "finished": 0,
+      "book_percent": null,
+      "method": "transcode",
+      "method_label": "Transcode",
+      "quality": "4K HEVC",
+      "change": "4K → 1080p",
+      "reasons": [
+        {
+          "code": "over_remote_limit",
+          "label": "Over the player's remote quality"
+        },
+        {
+          "code": "hdr",
+          "label": "HDR on a screen without HDR"
+        },
+        {
+          "code": "audio_codec",
+          "label": "Audio format the player can't play"
+        }
+      ],
+      "user": "maya",
+      "user_avatar": "/api/server-activity/avatar?user=plex:7341",
+      "player": {
+        "product": "Plex for Apple TV",
+        "name": "Living room",
+        "device": "Apple TV",
+        "platform": "tvOS",
+        "version": "8.41"
+      },
+      "connection": {
+        "remote": true,
+        "ip": "73.41.208.17",
+        "location": null
+      },
+      "server": "plex",
+      "server_name": "Basement",
+      "thumb": "/library/metadata/5101/thumb/1710000001",
+      "link": {
+        "kind": "movie",
+        "id": "693134",
+        "source": "tmdb"
+      },
+      "source": "live",
+      "plays": [
+        {
+          "id": 1,
+          "play_key": "b348193aa18f4d52b39f0f2b49493481",
+          "kind": "movie",
+          "title": "Dune: Part Two",
+          "parent_title": null,
+          "grandparent_title": null,
+          "season": null,
+          "episode": null,
+          "track": null,
+          "chapter": null,
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 50000,
+          "paused_ms": 0,
+          "buffering_ms": 0,
+          "pause_count": 0,
+          "duration_ms": 9960000,
+          "percent": 41,
+          "book_percent": null,
+          "method": "transcode",
+          "method_label": "Transcode",
+          "quality": "4K HEVC",
+          "change": "4K → 1080p",
+          "source": "live"
+        }
+      ]
+    },
+    {
+      "group_key": "d1898c118831467c8fe94b11849961b3",
+      "kind": "audiobook",
+      "title": "Project Hail Mary",
+      "subtitle": "Chapter 14 · Andy Weir",
+      "count": 1,
+      "count_label": null,
+      "started_at": 1794898345.9604685,
+      "stopped_at": null,
+      "live": true,
+      "played_ms": 0,
+      "paused_ms": 50000,
+      "buffering_ms": 0,
+      "pause_count": 1,
+      "percent": 58,
+      "finished": 0,
+      "book_percent": 42,
+      "method": "direct_stream",
+      "method_label": "Direct Stream",
+      "quality": "AAC 64 kbps",
+      "change": "M4B → MP4",
+      "reasons": [
+        {
+          "code": "container",
+          "label": "File type the player can't open"
+        }
+      ],
+      "user": "ruth",
+      "user_avatar": "/api/server-activity/avatar?user=plex:9182",
+      "player": {
+        "product": "Plex for Android (Mobile)",
+        "name": "Pixel 8",
+        "device": "Pixel 8",
+        "platform": "Android",
+        "version": "10.20.0"
+      },
+      "connection": {
+        "remote": true,
+        "ip": "81.2.69.160",
+        "location": null
+      },
+      "server": "plex",
+      "server_name": "Basement",
+      "thumb": "/library/metadata/801/thumb/1700000003",
+      "link": null,
+      "source": "live",
+      "plays": [
+        {
+          "id": 3,
+          "play_key": "d1898c118831467c8fe94b11849961b3",
+          "kind": "audiobook",
+          "title": "Project Hail Mary",
+          "parent_title": null,
+          "grandparent_title": "Andy Weir",
+          "season": null,
+          "episode": null,
+          "track": null,
+          "chapter": {
+            "index": 14,
+            "count": 32,
+            "title": "Chapter 14"
+          },
+          "started_at": 1794898345.9604685,
+          "stopped_at": null,
+          "live": true,
+          "played_ms": 0,
+          "paused_ms": 50000,
+          "buffering_ms": 0,
+          "pause_count": 1,
+          "duration_ms": 1890000,
+          "percent": 58,
+          "book_percent": 42,
+          "method": "direct_stream",
+          "method_label": "Direct Stream",
+          "quality": "AAC 64 kbps",
+          "change": "M4B → MP4",
+          "source": "live"
+        }
+      ]
+    }
+  ],
+  "page": 0,
+  "per_page": 50,
+  "has_more": false,
+  "facets": {
+    "users": [
+      {
+        "user": "maya",
+        "avatar": "/api/server-activity/avatar?user=plex:7341",
+        "plays": 3
+      },
+      {
+        "user": "dan",
+        "avatar": "/api/server-activity/avatar?user=jellyfin:0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+        "plays": 1
+      },
+      {
+        "user": "jo",
+        "avatar": null,
+        "plays": 1
+      },
+      {
+        "user": "ruth",
+        "avatar": "/api/server-activity/avatar?user=plex:9182",
+        "plays": 1
+      },
+      {
+        "user": "sam",
+        "avatar": "/api/server-activity/avatar?user=plex:1",
+        "plays": 1
+      }
+    ],
+    "servers": ["plex", "jellyfin"]
+  },
+  "log_started_at": 1794898345.9604685,
+  "history": [
+    {
+      "title": "Everything In Its Right Place",
+      "subtitle": "Radiohead · Kid A",
+      "media_type": "track",
+      "user": "sam",
+      "device": "sam's iPhone",
+      "thumb": "/library/metadata/701/thumb/1700000002",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "The Wild Robot",
+      "subtitle": "2024 · Movie",
+      "media_type": "movie",
+      "user": "maya",
+      "device": "iPad",
+      "thumb": "jf:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "The Selfish Gene",
+      "subtitle": "Chapter 3 · Richard Dawkins",
+      "media_type": "audiobook",
+      "user": "jo",
+      "device": "Firefox",
+      "thumb": "jf:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "Shōgun",
+      "subtitle": "S1 E9 · Crimson Sky",
+      "media_type": "episode",
+      "user": "maya",
+      "device": "iPad",
+      "thumb": "/library/metadata/900/thumb/1",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "Severance",
+      "subtitle": "S2 E10 · Cold Harbor",
+      "media_type": "episode",
+      "user": "dan",
+      "device": "Shield TV",
+      "thumb": "jf:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "Dune: Part Two",
+      "subtitle": "2024 · Movie",
+      "media_type": "movie",
+      "user": "maya",
+      "device": "Living room",
+      "thumb": "/library/metadata/5101/thumb/1710000001",
+      "viewed_epoch": 1794898345
+    },
+    {
+      "title": "Project Hail Mary",
+      "subtitle": "Chapter 14 · Andy Weir",
+      "media_type": "audiobook",
+      "user": "ruth",
+      "device": "Pixel 8",
+      "thumb": "/library/metadata/801/thumb/1700000003",
+      "viewed_epoch": 1794898345
+    }
+  ]
+}

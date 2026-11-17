@@ -1381,7 +1381,7 @@ button.statusWarn:disabled {
 }
 
 .metadataTagsTooltipPositioner {
-  z-index: 999999;
+  z-index: var(--z-float);
   isolation: isolate;
   pointer-events: none;
 }

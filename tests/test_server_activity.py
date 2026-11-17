@@ -163,47 +163,38 @@ def test_audiobooks_and_podcasts_are_told_apart_from_music(monkeypatch):
 
 # ── frontend wiring ──────────────────────────────────────────────────────────
 def test_ui_is_wired():
+    """the drawer is react now (features/server-activity); the shell keeps the
+    button, its badge and the admin gate (#2155)."""
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    idx = (root / "webui" / "index.html").read_text(encoding="utf-8")
-    # ported to typescript (src/shell, aug 26); same pins against the TS source
-    js = (root / "webui" / "src" / "shell" / "server-activity.ts").read_text(encoding="utf-8")
-    css = (root / "webui" / "static" / "style.css").read_text(encoding="utf-8")
-    # app-wide floating button next to the notif bell + the script include
+    web = root / "webui"
+    idx = (web / "index.html").read_text(encoding="utf-8")
+    shell = (web / "src" / "shell" / "server-activity.ts").read_text(encoding="utf-8")
+    feat = web / "src" / "features" / "server-activity"
+    src = {p.name: p.read_text(encoding="utf-8") for p in feat.glob("*.ts*") if ".test." not in p.name}
+    main = (web / "src" / "app" / "main.tsx").read_text(encoding="utf-8")
+    css = (web / "static" / "style.css").read_text(encoding="utf-8")
+    # app-wide floating button, the shell bundle, the react host mounted from main
     assert 'id="activity-float-btn"' in idx and "ServerActivity.toggle()" in idx
-    assert "dist/shell.js" in idx  # the shell bundle carries the port
-    # the drawer + poll + endpoints
-    assert "/api/server-activity" in js and "/api/server-activity/image" in js
-    assert "function card" in js and "function refresh" in js
-    assert "setInterval(() => void refresh(), 3000)" in js  # live cadence while open
-    assert "startBadgePoll" in js                     # ambient badge from any page
-    # never touches the network-triggering user thumb — initials avatar instead
-    assert "function initials" in js
-    # tabbed: Activity + History (Phase 2)
-    assert 'data-sact-tab="activity"' in js and 'data-sact-tab="history"' in js
-    assert "function historyRow" in js and "function ago" in js
-    assert "/api/server-activity/history" in js
-    # the elegant bits exist in CSS
-    assert ".sact-drawer" in css and ".sact-badge--tc" in css and ".activity-live" in css
-    assert ".sact-tab--on" in css and ".sact-hrow" in css
-    # stream termination (Tautulli's kill move)
-    assert "data-sact-stop" in js and "function openStop" in js
-    assert "/api/server-activity/stop" in js and ".sact-stop-modal" in css
-    # stats tab: graph + rankings (Phase 3)
-    assert 'data-sact-tab="stats"' in js and "function renderStats" in js
-    assert "function graph" in js and "/api/server-activity/stats" in js
-    assert ".sact-graph" in css and ".sact-rank-bar" in css
-    # visual elevation: smooth-ticking progress, no-flicker key-diff, equalizer, playhead
-    assert "function liveTick" in js and "data-sact-fill" in js
-    assert "setInterval(liveTick, 500)" in js
-    assert "function actKey" in js and "_actKeys" in js       # key-diffed render (no flicker)
-    assert "sact-eq" in js and ".sact-eq" in css              # music equalizer
-    assert ".sact-head-dot" in css and "@keyframes sactCardIn" in css
-    # click-through to the SoulSync detail page
-    assert "sact-card--link" in js and "SoulSyncVideo.openDetail" in js
-    assert "data-link-kind" in js and ".sact-card--link" in css
-    vs = (root / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+    assert "dist/shell.js" in idx
+    assert "mountServerActivityHost()" in main
+    assert "window.SoulSyncActivityDrawer" in src["host.tsx"]
+    # the shell: admin gate, ambient badge, hands the socket push to the drawer
+    assert "function viewerIsAdmin" in shell and "startBadgePoll" in shell
+    assert "drawer()?.push(raw)" in shell and ".activity-live" in css
+    # every route the drawer reads, through the api module
+    api = src["api.ts"]
+    for route in ("/history", "/stats", "/stop", "/message", "/settings", "/plays/clear", "/image?path="):
+        assert route in api, route
+    # live: socket first, a 3 s poll when not, a glide between polls
+    live = src["live.ts"]
+    assert "LIVE_MS = 3000" in live and "WATCHDOG_MS" in live and "function useGlide" in live
+    # click-through to the SoulSync page
+    assert "SoulSyncVideo?.openDetail" in src["links.ts"]
+    vs = (web / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
     assert "window.SoulSyncVideo.openDetail" in vs and "persistSide('video')" in vs
+    # the old string-built drawer is gone
+    assert ".sact-" not in css and "innerHTML" not in shell
 
 
 def test_web_server_registers_the_routes():

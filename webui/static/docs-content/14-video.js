@@ -1350,9 +1350,16 @@ From the Enrichment view you can:
         {
             id: 'vtool-activity',
             title: 'Server Activity',
-            lede: 'Tautulli-style live streams and watch history without leaving SoulSync.',
+            lede: 'What is playing on Plex and Jellyfin, how it plays and why, with your own play history and stats.',
             body: `
-A **Server Activity** drawer shows live Plex streams and recent watch history app-wide — who's watching what, on which device, with transcoding details. It's the Tautulli glanceable view, built in, so you can see what's playing without leaving SoulSync. Only admins see it: the button, the drawer and its endpoints are hidden from other profiles.
+The **activity button** at the bottom right opens Server Activity from any page. It is one drawer with three tabs. Only admins see it: the button, the drawer and its endpoints are hidden from other profiles.
+
+**Now playing** shows the server at a glance (streams, bandwidth against your upload, transcoders and CPU, and a 10 minute bandwidth line), then one card per stream. A card says who is playing what, on which device and from where, and how it plays: **Direct Play**, **Direct Stream** or **Transcode**. Open a card to see the file next to what is being sent, the reason it is converted in plain words (marked when SoulSync worked it out because Plex gives none), and the transcoder, connection, player and session. Music shows the audio quality, and audiobooks show the chapter and the whole book. From an open card you can **stop the stream with a message** on Plex (needs Plex Pass) and Jellyfin, **send a message** on Jellyfin, and open the title in SoulSync.
+
+**History** and **Stats** widen the drawer. History is SoulSync's own play log: how long, how well and from where, with back to back episodes and album tracks folded into one row that opens to a timeline. Filter by kind, person, playback, server, dates or search. Plex's own history fills in the time before SoulSync started recording. **Stats** sums up 7 days, 30 days, 90 days or a year: hours per day, how plays played and why they were converted, when people play, players, places, people and the most played films, shows, artists and books.
+
+> [!TIP]
+> **Settings > Connections > Server Activity** has your upload speed (for the bandwidth bar), the location lookup for remote viewers (asks plex.tv, like Tautulli), how long to keep the play log (forever by default) with a button to clear it, and the ready-made stop messages.
 `
         },
         {

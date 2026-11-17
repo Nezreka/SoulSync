@@ -1,0 +1,49 @@
+/* settings > connections > server activity: the stop message list */
+
+.presets {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.presets li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-control);
+  background: var(--white-a03);
+  color: var(--white-a80);
+  font-size: 13px;
+}
+
+.presets span {
+  flex: 1;
+  min-width: 0;
+}
+
+.presets button {
+  all: unset;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--white-a45);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.presets button:hover {
+  background: var(--white-a06);
+  color: var(--danger-light);
+}
+
+.presets button:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.85);
+}
