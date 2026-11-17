@@ -630,7 +630,7 @@ def test_web_server_registers_the_routes():
     assert "@bp.route('/api/server-activity/history')" in ws
     assert "@bp.route('/api/server-activity/stop', methods=['POST'])" in ws
     assert "@bp.route('/api/server-activity/stats')" in ws
-    assert "is_admin" in ws.split("stop_server_activity_stream")[1][:400]   # admin-gated
+    assert "admin_or_api_key_refusal" in ws   # admin-gated, every route but the image (#2155)
 
 
 def test_a_working_connection_is_kept_past_a_minute(monkeypatch):

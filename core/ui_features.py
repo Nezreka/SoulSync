@@ -4,7 +4,12 @@ soulsync does a lot. most people use a slice of it, and the rest is noise in
 the sidebar, the dashboard and the tabs. this is the one list of the parts a
 profile can switch off, and the two presets. it's a preference, not access:
 a hidden page still opens from a link, and what a profile may open is still
-allowed_pages (core.permissions). admins set that, everyone sets this.
+allowed_pages (core.permissions). this layer never grants anything.
+
+an admin can set it for someone else and lock it (#2157), and set what a new
+profile starts with. a profile that never chose follows that default, so
+changing it reaches everyone who didn't pick their own. admins themselves are
+never locked and never follow the default.
 
 the core never hides: dashboard, search, library, watchlist, wishlist,
 downloads, settings, help, on both sides. without those soulsync isn't
@@ -17,7 +22,10 @@ are OFF, so a feature added later shows up for everyone by default.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, Iterable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # id, label, one line, which side it's on, the pages it owns.
 # pages are shell page ids (route-manifest.ts / data-page / data-video-page).
@@ -156,17 +164,159 @@ def _key(profile_id: int) -> str:
     return f"ui_features_off:{int(profile_id)}"
 
 
-def load_off(db, profile_id: Optional[int]) -> List[str]:
+def _lock_key(profile_id: int) -> str:
+    return f"ui_features_locked:{int(profile_id)}"
+
+
+_DEFAULT_KEY = "ui_features_default"
+
+
+def _profile(db, profile_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    if profile_id is None:
+        return None
+    getter = getattr(db, "get_profile", None)
+    if getter is None:
+        return None
+    try:
+        return getter(int(profile_id))
+    except Exception as e:  # noqa: BLE001 - no profile means no admin rules
+        logger.debug("features: profile %s unreadable: %s", profile_id, e)
+        return None
+
+
+def admin_sets(profile: Optional[Dict[str, Any]]) -> bool:
+    """does the admin's default and lock reach this profile? everyone but
+    admins (and the owner)."""
+    if not profile or profile.get("is_admin"):
+        return False
+    try:
+        return int(profile.get("id") or 0) != 1
+    except (TypeError, ValueError):
+        return False
+
+
+def _sides(profile: Optional[Dict[str, Any]]) -> str:
+    if not admin_sets(profile):
+        return "both"
+    s = profile.get("allowed_sides")
+    return s if s in ("music", "video", "both") else "music"
+
+
+def fixed_on(profile: Optional[Dict[str, Any]]) -> List[str]:
+    """parts this profile can't hide. a video-only profile hiding the video
+    side was left on a music side it can't open, with no way back (#2157)."""
+    return ["video"] if _sides(profile) == "video" else []
+
+
+def offered(profile: Optional[Dict[str, Any]]) -> List[str]:
+    """the switches worth showing this profile: parts it can open, minus the
+    ones it can't hide. no profile (the new-profile default) gets them all."""
+    if profile is None:
+        return list(FEATURE_IDS)
+    sides = _sides(profile)
+    allowed = profile.get("allowed_pages") if admin_sets(profile) else None
+    fixed = set(fixed_on(profile))
+    out = []
+    for f in FEATURES:
+        if f["id"] in fixed:
+            continue
+        # only the pages on a side this profile has
+        pages = [p for p in f["pages"]
+                 if sides == "both" or ("video" if p.startswith("video-") else "music") == sides]
+        if f["pages"] and not pages:
+            continue
+        # no pages = lives inside music pages (music videos)
+        if not f["pages"] and sides == "video":
+            continue
+        if isinstance(allowed, list) and pages and not any(p in allowed for p in pages):
+            continue
+        out.append(f["id"])
+    return out
+
+
+def load_default(db) -> Dict[str, Any]:
+    """what a new profile starts with: {off, locked, set}. nothing saved is
+    everything on and unlocked, the way soulsync ships."""
+    try:
+        raw = db.get_metadata(_DEFAULT_KEY)
+        data = json.loads(raw) if raw else None
+    except Exception as e:  # noqa: BLE001 - unreadable default is the shipped app
+        logger.debug("features: default unreadable: %s", e)
+        data = None
+    if not isinstance(data, dict):
+        return {"off": [], "locked": False, "set": False}
+    return {"off": normalize_off(data.get("off")), "locked": bool(data.get("locked")), "set": True}
+
+
+def save_default(db, off: Iterable[str], locked: bool) -> Dict[str, Any]:
+    clean = {"off": normalize_off(list(off)), "locked": bool(locked)}
+    db.set_metadata(_DEFAULT_KEY, json.dumps(clean))
+    back = load_default(db)
+    if not back["set"] or back["off"] != clean["off"] or back["locked"] != clean["locked"]:
+        raise RuntimeError("couldn't save what new profiles see")
+    return back
+
+
+def _stored_off(db, profile_id: int) -> Optional[List[str]]:
+    try:
+        raw = db.get_metadata(_key(profile_id))
+    except Exception as e:  # noqa: BLE001 - unreadable pref means show everything
+        logger.debug("features: off list for %s unreadable: %s", profile_id, e)
+        return []
+    return None if raw is None else normalize_off(raw)
+
+
+def load_off(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> List[str]:
+    """what's off for this profile: its own choice, or the admin's default
+    when it never made one. never a part it can't hide."""
     if profile_id is None:
         return []
+    stored = _stored_off(db, profile_id)
+    if stored is None:
+        profile = profile if profile is not None else _profile(db, profile_id)
+        stored = load_default(db)["off"] if admin_sets(profile) else []
+    else:
+        profile = profile if profile is not None else _profile(db, profile_id)
+    fixed = set(fixed_on(profile))
+    return [f for f in stored if f not in fixed]
+
+
+def follows_default(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> bool:
+    if profile_id is None:
+        return False
+    profile = profile if profile is not None else _profile(db, profile_id)
+    return admin_sets(profile) and _stored_off(db, profile_id) is None
+
+
+def is_locked(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> bool:
+    """can this profile change its own choice? admins always can. a profile
+    the admin never locked or unlocked by hand follows the default's lock."""
+    if profile_id is None:
+        return False
+    profile = profile if profile is not None else _profile(db, profile_id)
+    if not admin_sets(profile):
+        return False
     try:
-        return normalize_off(db.get_metadata(_key(profile_id)))
-    except Exception:  # noqa: BLE001 - unreadable pref means show everything
-        return []
+        raw = db.get_metadata(_lock_key(profile_id))
+    except Exception as e:  # noqa: BLE001 - can't tell, keep the admin's word
+        logger.debug("features: lock for %s unreadable: %s", profile_id, e)
+        raw = None
+    if raw is None:
+        return load_default(db)["locked"]
+    return raw == "1"
+
+
+def set_locked(db, profile_id: int, locked: bool) -> bool:
+    want = "1" if locked else "0"
+    db.set_metadata(_lock_key(profile_id), want)
+    if db.get_metadata(_lock_key(profile_id)) != want:
+        raise RuntimeError("couldn't save the lock")
+    return bool(locked)
 
 
 def save_off(db, profile_id: int, off: Iterable[str]) -> List[str]:
-    clean = normalize_off(list(off))
+    fixed = set(fixed_on(_profile(db, profile_id)))
+    clean = [f for f in normalize_off(list(off)) if f not in fixed]
     db.set_metadata(_key(profile_id), json.dumps(clean))
     # set_metadata logs and swallows a failed write. read it back so the
     # page never says saved when it wasn't.
@@ -175,30 +325,66 @@ def save_off(db, profile_id: int, off: Iterable[str]) -> List[str]:
     return clean
 
 
+def reset(db, profile_id: int) -> None:
+    """back to the default: the profile's own choice and lock go, so it
+    follows what new profiles get (and any later change to that)."""
+    for key in (_key(profile_id), _lock_key(profile_id)):
+        db.delete_metadata(key)
+        if db.get_metadata(key) is not None:
+            raise RuntimeError("couldn't reset what this profile sees")
+
+
 def seed_from_purposes(db, profile_id: Optional[int], purposes: Iterable[str]) -> Optional[List[str]]:
     """first-run setup's answer, saved only when this profile never chose.
     running setup again (the dev preview, a reset) must not undo a choice
-    someone made by hand afterwards."""
+    someone made by hand afterwards, or one an admin locked."""
     if profile_id is None or db.get_metadata(_key(profile_id)) is not None:
+        return None
+    if is_locked(db, profile_id):
         return None
     return save_off(db, profile_id, off_from_purposes(purposes))
 
 
 def clear(db, profile_id: int) -> None:
     """a deleted profile takes its choice with it, so a new profile that gets
-    the same id starts with everything on."""
-    db.set_metadata(_key(profile_id), "[]")
+    the same id starts like any new profile."""
+    reset(db, profile_id)
 
 
-def has_chosen(db, profile_id: Optional[int]) -> bool:
-    """did this profile ever save a choice (or get one from setup)? the
-    dashboard offers the picker once to everyone who hasn't."""
+def has_chosen(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> bool:
+    """did this profile (or an admin, for it) ever choose? the dashboard
+    offers the picker once to everyone who hasn't."""
     if profile_id is None:
         return True
     try:
-        return db.get_metadata(_key(profile_id)) is not None
+        if db.get_metadata(_key(profile_id)) is not None:
+            return True
+        profile = profile if profile is not None else _profile(db, profile_id)
+        if not admin_sets(profile):
+            return False
+        return is_locked(db, profile_id, profile) or load_default(db)["set"]
     except Exception:  # noqa: BLE001 - can't tell, don't nag
         return True
+
+
+def profile_payload(db, profile_id: Optional[int]) -> Dict[str, Any]:
+    """everything the picker needs for one profile."""
+    profile = _profile(db, profile_id)
+    off = load_off(db, profile_id, profile)
+    return payload(
+        off,
+        has_chosen(db, profile_id, profile),
+        locked=is_locked(db, profile_id, profile),
+        follows=follows_default(db, profile_id, profile),
+        offer=offered(profile) if profile_id is not None else None,
+    )
+
+
+def default_payload(db) -> Dict[str, Any]:
+    d = load_default(db)
+    body = payload(d["off"], True, locked=d["locked"], follows=False, offer=list(FEATURE_IDS))
+    body["set"] = d["set"]
+    return body
 
 
 # --- pausing what nobody uses (#1909) ---------------------------------------
@@ -231,7 +417,7 @@ def _profile_hides(db, profile: Dict[str, Any], feature: str) -> bool:
     if not profile.get("is_admin") and isinstance(allowed, list) and pages:
         if not any(p in allowed for p in pages):
             return True
-    return feature in load_off(db, profile.get("id"))
+    return feature in load_off(db, profile.get("id"), profile)
 
 
 def everyone_hid(db, feature: str) -> bool:
@@ -286,10 +472,16 @@ def background_state(db) -> Dict[str, Dict[str, bool]]:
             for f in BACKGROUND_FEATURES}
 
 
-def payload(off: Iterable[str], chosen: bool = True) -> Dict[str, Any]:
+def payload(off: Iterable[str], chosen: bool = True, *, locked: bool = False,
+            follows: bool = False, offer: Optional[List[str]] = None) -> Dict[str, Any]:
     clean = normalize_off(list(off))
     return {
         "chosen": bool(chosen),
+        # an admin set it and locked it: show it, don't offer to change it
+        "locked": bool(locked),
+        # never chose, so it follows what an admin set for new profiles
+        "follows_default": bool(follows),
+        "offered": list(FEATURE_IDS) if offer is None else list(offer),
         "features": FEATURES,
         "groups": GROUPS,
         "presets": [{"id": k, **PRESET_LABELS[k], "off": v} for k, v in PRESETS.items()],
@@ -301,6 +493,8 @@ def payload(off: Iterable[str], chosen: bool = True) -> Dict[str, Any]:
 
 __all__ = ["FEATURES", "FEATURE_IDS", "GROUPS", "PRESETS", "normalize_off", "preset_for",
            "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear", "has_chosen",
+           "admin_sets", "fixed_on", "offered", "load_default", "save_default", "follows_default",
+           "is_locked", "set_locked", "reset", "profile_payload", "default_payload",
            "BACKGROUND_FEATURES", "feature_for_automation", "everyone_hid", "load_paused",
            "set_paused", "background_paused", "background_state",
            "payload"]

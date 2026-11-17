@@ -5283,6 +5283,7 @@ def cancel_playlist_sync():
     return jsonify({"success": True, "message": "Sync cancellation requested."})
 
 @bp.route('/api/sync/test-database', methods=['GET'])
+@admin_only
 def test_database_access():
     """Test endpoint to verify database connectivity for sync operations"""
     try:

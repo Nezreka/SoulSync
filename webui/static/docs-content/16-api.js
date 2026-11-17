@@ -4990,7 +4990,7 @@ Every emit below is server → client, pushed from a background thread — none 
 | \`wishlist:stats\` | S→C | \`{is_auto_processing, active_batches, next_run_in_seconds}\` | Wishlist statistics changed. |
 | \`watchlist:count\` | S→C | \`{success, count, next_run_in_seconds}\` | Watchlist count changed (per profile). |
 | \`status:update\` | S→C | service connectivity flags | System status changed (every 5s): metadata source, Spotify, media server, Soulseek, enrichment, active downloads. |
-| \`activity:update\` | S→C | activity snapshot | Server activity updated — join the \`activity:live\` room with \`activity:subscribe\`. |
+| \`activity:update\` | S→C | activity snapshot | Server activity updated — join the \`activity:live\` room with \`activity:subscribe\` (admins only). |
 | \`enrichment:{worker}\` | S→C | worker stats | Enrichment worker progress — one event per worker (e.g. \`enrichment:youtube\`). |
 | \`tool:logs\` | S→C | \`{logs}\` | Tool output streamed (last 50 activity entries, formatted). |
 | \`tool:metadata\` | S→C | \`{success, status}\` | Metadata tool progress. |

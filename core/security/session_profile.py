@@ -19,7 +19,10 @@ pure so the matrix is unit-testable without the app.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_session_profile(*, session_pid, login_mode: bool,
@@ -121,3 +124,34 @@ def client_gate_rules() -> dict:
 
 __all__ = ['resolve_session_profile', 'no_profile_request_is_blocked', 'is_open_profile_path',
            'client_gate_rules']
+
+
+# what the page shell needs to draw the sidebar before the profile fetch
+# lands (#2156). nothing secret: the same fields /api/profiles/current hands
+# this session anyway.
+_BOOT_PROFILE_FIELDS = ('id', 'is_admin', 'allowed_pages', 'allowed_sides', 'can_download', 'home_page')
+
+
+def boot_profile(profile_id, get_profile) -> Optional[dict]:
+    """the slice of the request's profile the page renders in, or None.
+
+    profile_id is what the request acts as (g.profile_id: None when signed
+    out, locked or nobody picked). None means the page hides the nav until
+    init.js knows who it is, so a member never sees the admin's sidebar.
+    """
+    if not profile_id:
+        return None
+    try:
+        profile = get_profile(int(profile_id))
+    except Exception as e:
+        logger.debug("boot profile lookup failed: %s", e)
+        return None
+    if not profile:
+        return None
+    # a turned off member is about to be signed out, not shown a sidebar
+    if profile.get('disabled') and not profile.get('is_admin'):
+        return None
+    out = {k: profile.get(k) for k in _BOOT_PROFILE_FIELDS}
+    out['is_admin'] = bool(out['is_admin'])
+    out['can_download'] = out['can_download'] is not False and out['can_download'] != 0
+    return out

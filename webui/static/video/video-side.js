@@ -311,23 +311,47 @@
     // pages + per-profile allowed_pages. Guards direct-URL access, not just the nav.
     // Per-profile side access — mirrors init.js's profileAllowedSides(), local
     // so this module keeps working if load order ever changes.
-    function sideAllowed(side) {
+    // the profile init.js loaded, else the one the server rendered into the
+    // page (#2156), else null: nobody known yet
+    function knownProfile() {
         var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        return cp || window.SOULSYNC_BOOT_PROFILE || null;
+    }
+    function sideAllowed(side) {
+        var cp = knownProfile();
         if (!cp || cp.is_admin || cp.id === 1) return true;
         var s = (cp.allowed_sides === 'video' || cp.allowed_sides === 'both') ? cp.allowed_sides : 'music';
         return s === 'both' || s === side;
     }
     function videoPageAllowed(pageId) {
         if (!sideAllowed('video')) return false;   // whole side is off for this profile
-        var cp = (typeof currentProfile !== 'undefined') ? currentProfile : null;
+        var cp = knownProfile();
         if (!cp || cp.is_admin || cp.id === 1) return true;
         if (pageId === 'video-help' || pageId === 'video-issues' || DETAIL_PAGES[pageId]) return true;
         if (['video-import', 'video-settings', 'video-automations'].indexOf(pageId) > -1) return false;
         // requests: profiles without download rights make them (admins passed
         // above). same rule as the sidebar, not a page toggle
-        if (pageId === 'video-requests') return typeof canDownload === 'function' && !canDownload();
+        if (pageId === 'video-requests') return cp.can_download === false || cp.can_download === 0;
         var ap = cp.allowed_pages;
         return !ap || ap.indexOf(pageId) > -1;
+    }
+    // where a refused or unpicked video page goes (#2154): their video home,
+    // else the first video page they can open. the dashboard used to be the
+    // answer for everyone, and a member without it got a blank page.
+    function landingPage() {
+        var cp = knownProfile();
+        var nav = window.SoulSyncProfileNav;
+        if (!cp || !nav) return DEFAULT_VIDEO_PAGE;
+        var home = String(cp.home_page || '');
+        return nav.landingPage({
+            home: home.indexOf('video-') === 0 ? home : '',
+            isAdmin: !!cp.is_admin || cp.id === 1,
+            adminPage: DEFAULT_VIDEO_PAGE,
+            order: nav.VIDEO_LANDING,
+            allowed: videoPageAllowed,
+            hidden: nav.featureHiddenPages(),
+            fallback: 'video-help',
+        });
     }
     // Hand off to the unified React downloads page with its video view
     // preselected. Downloads is a shared page: the shell stays on the
@@ -556,7 +580,7 @@
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
         if (!sideAllowed('video')) { switchSide('music', { force: true }); return; }
-        if (!videoPageAllowed(pageId)) { pageId = DEFAULT_VIDEO_PAGE; mode = 'replace'; }
+        if (!videoPageAllowed(pageId)) { pageId = landingPage(); mode = 'replace'; }
         // The music + video downloads pages are unified into the React
         // /active-downloads page — the old video shell subpage is gone, so
         // every in-shell navigation (sidebar, goto links) and every
@@ -626,6 +650,14 @@
     }
     // init.js's profile-apply uses this to land single-side profiles on their side.
     window._switchAppSide = switchSide;
+
+    // run fn once the profile is known: the server rendered it into the page,
+    // or init.js has loaded it and started the app. a macrotask either way, so
+    // every page module's listeners are registered first.
+    function whenProfileKnown(fn) {
+        if (knownProfile() || window._soulsyncAppStarted) { setTimeout(fn, 0); return; }
+        window.addEventListener('ss:app-started', function () { setTimeout(fn, 0); }, { once: true });
+    }
 
     function init() {
         // Deep-linked detail OR page path captured at eval time (music may already
@@ -770,18 +802,24 @@
             // A page handed off to a React route (the wishlist) lives at the
             // React url once it lands; re-asserting /video-wishlist over it sent
             // the router to an unknown path and the shell bounced the profile home.
+            // a refused deep link goes to the landing page instead (#2154), so
+            // only a page the profile can open gets its url re-asserted
             var reassertPage = function () {
                 if (bootPage && !HANDED_OFF[initialPage] && document.body.getAttribute('data-side') === 'video' &&
                     !DETAIL_PAGES[document.body.getAttribute('data-video-page')] &&
+                    videoPageAllowed(initialPage) &&
                     (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== pagePath) {
                     try { history.replaceState({ videoPage: initialPage }, '', pagePath); } catch (e) { /* ignore */ }
                 }
             };
-            setTimeout(function () {
+            // which page a member may open isn't known until their profile is
+            // (#2154): navigating first sent them to the dashboard they don't
+            // have, and the bounce left the screen blank
+            whenProfileKnown(function () {
                 reassertPage();
                 navigate(initialPage, 'restore');
                 if (bootPage) [120, 350, 700].forEach(function (ms) { setTimeout(reassertPage, ms); });
-            }, 0);
+            });
         }
 
         // Deep link / reload straight to a detail URL → restore it. Deferred to a

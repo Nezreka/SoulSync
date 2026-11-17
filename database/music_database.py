@@ -15087,6 +15087,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error setting metadata {key}: {e}")
     
+    def delete_metadata(self, key: str) -> bool:
+        """drop a metadata value, so get_metadata reads None again."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error deleting metadata {key}: {e}")
+            return False
+
     def get_metadata(self, key: str) -> Optional[str]:
         """Get a metadata value"""
         try:

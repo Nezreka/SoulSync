@@ -1376,6 +1376,7 @@ def download_backup_endpoint(filename):
 # ===============================
 
 @bp.route('/api/database/maintenance/info', methods=['GET'])
+@admin_only
 def database_maintenance_info():
     """Get database size, free pages, and auto_vacuum mode."""
     try:

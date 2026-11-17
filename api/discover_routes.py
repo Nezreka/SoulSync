@@ -1709,6 +1709,7 @@ def refresh_discover_data():
 
 
 @bp.route('/api/discover/diagnose', methods=['GET'])
+@admin_only
 def diagnose_discover_data():
     """
     Diagnostic endpoint to check the state of discover data.
