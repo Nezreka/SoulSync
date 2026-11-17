@@ -423,18 +423,15 @@ def register_routes(bp):
                         break
                 has_more, next_page = not ran_out, last + 1
             else:
-                MAX_PAGES, WAVE = 20, 5
-                offset, ran_out = 0, False
-                with concurrent.futures.ThreadPoolExecutor(max_workers=WAVE) as ex:
-                    while offset < MAX_PAGES and len(items) < target and not ran_out:
-                        batches = list(ex.map(fetch, [page + offset + i for i in range(WAVE)]))
-                        for batch in batches:
-                            if not consume(batch):
-                                ran_out = True       # an empty page = TMDB has no more
-                        offset += WAVE
-                has_more, next_page = not ran_out, page + offset
+                # one time budget for every wave, so a stuck tmdb page can't hold the rail (#2158)
+                from core.video import discover_paging
+                has_more, next_page = discover_paging.fill_pages(
+                    fetch, consume, page, lambda: len(items) < target,
+                    budget_s=discover_paging.DEFAULT_BUDGET_S)
             return jsonify({"items": _kids_items(items), "page": page,
                             "has_more": has_more, "next_page": next_page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)
-            return jsonify({"items": [], "page": page, "has_more": False, "next_page": page})
+            # a failure is not an empty rail: the page shows a retry instead of hiding the row
+            return jsonify({"items": [], "error": "discover list failed", "page": page,
+                            "has_more": False, "next_page": page}), 502

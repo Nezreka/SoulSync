@@ -536,6 +536,14 @@ def test_request_only_profile_files_a_request_with_the_nearest_policy(client, h)
     assert _post(client, 3, {"mediaType": "tv", "mediaId": NEW_SHOW, "seasons": [1]}).status_code == 409
 
 
+def test_request_only_profile_cannot_ask_for_what_is_already_coming(client, h):
+    """#2160: a movie already on a wishlist is on its way. a seerr client
+    asking for it gets seerr's own conflict, not a duplicate in the queue."""
+    r = _post(client, 3, {"mediaType": "movie", "mediaId": WISHED_MOVIE})
+    assert r.status_code == 409, r.data
+    assert not [x for x in h.db.list_video_requests(profile_id=3) if x["tmdb_id"] == WISHED_MOVIE]
+
+
 def test_seasons_no_policy_can_say_go_in_the_note(client, h):
     r = _post(client, 3, {"mediaType": "tv", "mediaId": NEW_SHOW, "seasons": [1, 2]})
     assert r.status_code == 201

@@ -47,6 +47,8 @@ _ALLOWED_WINDOW = {
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
     "window.VideoRequestSheet", "window.VideoRequests",
+    # where a title stands (#2160): video-title-status.js, a sibling video module
+    "window.VideoTitleStatus",
     "window.VideoOverlayEditor", "window.VideoCollectionEditor",
     # video-side.js: the hand-off to the React calendar (the dashboard's upcoming row)
     "window.videoOpenCalendar",
