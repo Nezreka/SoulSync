@@ -174,11 +174,11 @@ def featured_credit_names(title: str) -> list:
         if inner not in names:
             names.append(inner)
         if ',' in inner:
-            for part in inner.split(','):
-                for sub in re.split(r'\s*(?:&|\band\b)\s*', part):
-                    sub = sub.strip(')] ').strip()
-                    if sub and sub not in names:
-                        names.append(sub)
+            from core.matching.artist_credit import split_names
+            for sub in split_names(inner):
+                sub = sub.strip(')] ').strip()
+                if sub and sub not in names:
+                    names.append(sub)
     return names
 
 

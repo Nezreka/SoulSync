@@ -69,7 +69,8 @@ def _artist_similar(expected: Any, actual: Any) -> float:
     """a credit list ("Kanye West, Travis Scott") counts when any name fits"""
     if not expected or not actual:
         return 0.0
-    names = [part for part in re.split(r",|&| feat\.? | x ", str(actual)) if part.strip()]
+    from core.matching.artist_credit import split_names
+    names = split_names(actual)
     return max([_similar(expected, actual)] + [_similar(expected, name) for name in names])
 
 

@@ -199,9 +199,10 @@ def test_the_band_a_frontman_leads_stays_whole_at_import(band, lead):
 def test_a_list_with_the_album_artist_still_splits_at_import():
     assert _credit_names_for_import("Drake & Future", _known("Drake"),
                                     album_artist="Drake") == ["Drake", "Future"]
+    # the feat. makes Lauryn Hill a guest; it does not make the band a list
     assert _credit_names_for_import("Bob Marley & The Wailers feat. Lauryn Hill",
                                     _known("Bob Marley"), album_artist="Bob Marley") == [
-        "Bob Marley", "The Wailers", "Lauryn Hill"]
+        "Bob Marley & The Wailers", "Lauryn Hill"]
 
 
 def test_an_identified_band_a_frontman_leads_is_not_split(conn):

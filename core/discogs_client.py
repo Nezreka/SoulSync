@@ -897,12 +897,11 @@ class DiscogsClient:
             # "Kendrick Lamar Feat. Rihanna" → primary is Kendrick, keep
             release_artist = item.get('artist', '')
             if artist_name and release_artist:
-                # Get the primary artist (before any Feat./Ft./&)
-                primary = re.split(r'\s+(?:feat\.?|ft\.?|featuring)\s+', release_artist, flags=re.IGNORECASE)[0]
-                # the artist's own name first: "Above & Beyond" cut at the "&"
-                # is "Above", and every one of their releases was skipped (#2136)
-                if self._normalize_name(primary.strip()) != self._normalize_name(artist_name):
-                    primary = re.split(r'\s*[&,]\s*', primary)[0].strip()
+                # the release's lead artist, read by the one credit kernel:
+                # "Above & Beyond" stays whole, "Kendrick Lamar & SZA" leads
+                # with Kendrick when he is the artist asked for
+                from core.matching.artist_credit import decide_credit
+                primary = decide_credit(release_artist, known=[artist_name]).primary
                 # Check if our artist is the primary
                 if self._normalize_name(primary) != self._normalize_name(artist_name):
                     continue

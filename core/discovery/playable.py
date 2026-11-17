@@ -11,6 +11,7 @@ import re
 from typing import Any, Dict, List
 
 from utils.logging_config import get_logger
+from core.matching.artist_credit import split_names
 
 logger = get_logger("discovery.playable")
 
@@ -21,8 +22,6 @@ def _norm(text: str) -> str:
     return (text or "").strip().lower()
 
 
-# a credit string names several artists: "Cardi B, Grand Theft Auto VI"
-_CREDIT_SPLIT = re.compile(r"\s*(?:,|;|&|\bfeat\.?|\bft\.?|\bfeaturing\b)\s*", re.I)
 # the media servers a playlist's stored link can name (indexed by source first)
 _SERVERS = ("plex", "jellyfin", "navidrome", "emby", "subsonic", "soulsync")
 
@@ -37,7 +36,7 @@ def _artist_keys(*names: Any) -> List[str]:
         whole = _norm(str(name or ""))
         if not whole:
             continue
-        for key in [whole, *(_norm(part) for part in _CREDIT_SPLIT.split(whole))]:
+        for key in [whole, *(_norm(part) for part in split_names(whole))]:
             if key and key not in keys:
                 keys.append(key)
     return keys
