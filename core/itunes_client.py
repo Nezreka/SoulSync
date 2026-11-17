@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from utils.logging_config import get_logger
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
+from core.metadata.release_type import itunes_release_type
 
 logger = get_logger("itunes_client")
 
@@ -99,14 +100,10 @@ class Track:
         if 'trackViewUrl' in track_data:
             external_urls['itunes'] = track_data['trackViewUrl']
 
-        # Infer album type from track count
+        # apple names its singles and eps ('X - Single'), read that
         track_count = track_data.get('trackCount', 0)
-        if track_count <= 3:
-            album_type = 'single'
-        elif track_count <= 6:
-            album_type = 'ep'
-        else:
-            album_type = 'album'
+        album_type = itunes_release_type(
+            track_data.get('collectionName'), None, track_count)
 
         return cls(
             id=str(track_data.get('trackId', '')),
@@ -185,22 +182,11 @@ class Album:
         if 'collectionViewUrl' in album_data:
             external_urls['itunes'] = album_data['collectionViewUrl']
         
-        # Determine album type from collection type
+        # apple names its singles and eps ('X - Single'), read that
         track_count = album_data.get('trackCount', 0)
-
-        # iTunes doesn't clearly distinguish EPs, but we can infer:
-        # Singles typically have 1-3 tracks, EPs have 4-6, Albums have 7+
-        if track_count <= 3:
-            album_type = 'single'
-        elif track_count <= 6:
-            album_type = 'ep'  # 4-6 tracks = EP
-        else:
-            album_type = 'album'
-        
-        # Check if it's explicitly marked as compilation
-        collection_type = album_data.get('collectionType', 'Album')
-        if 'compilation' in collection_type.lower():
-            album_type = 'compilation'
+        album_type = itunes_release_type(
+            album_data.get('collectionName'),
+            album_data.get('collectionType') or 'Album', track_count)
         
         # Store artistId for primary artist resolution (collab album support)
         if album_data.get('artistId'):
@@ -686,12 +672,8 @@ class iTunesClient:
                 ]
 
             track_count = cached.get('trackCount', 0)
-            if track_count <= 3:
-                album_type = 'single'
-            elif track_count <= 6:
-                album_type = 'ep'
-            else:
-                album_type = 'album'
+            album_type = itunes_release_type(
+                cached.get('collectionName'), cached.get('collectionType'), track_count)
 
             album_result = {
                 'id': str(cached.get('collectionId', '')),
@@ -736,12 +718,9 @@ class iTunesClient:
 
                 # Determine album type
                 track_count = album_data.get('trackCount', 0)
-                if track_count <= 3:
-                    album_type = 'single'
-                elif track_count <= 6:
-                    album_type = 'ep'  # 4-6 tracks = EP
-                else:
-                    album_type = 'album'
+                album_type = itunes_release_type(
+                    album_data.get('collectionName'), album_data.get('collectionType'),
+                    track_count)
 
                 album_result = {
                     'id': str(album_data.get('collectionId', '')),

@@ -3032,14 +3032,18 @@ def _row_provider_ids(row, key: str = "external_ids") -> Dict[str, str]:
 
 
 def _album_type_from_payload(album: Dict[str, Any], total_tracks: int) -> str:
+    """the payload's own type, else the store rule (1-3 tracks under 30 min a
+    single, 4-6 an ep, else an album) with the runtime when the payload
+    carries its tracks."""
+    from core.metadata.release_type import release_type_from_shape, tracklist_runtime_ms
     typ = str(album.get("album_type") or album.get("type") or "").lower()
     if typ in {"album", "single", "ep", "compilation", "live"}:
         return typ
-    if total_tracks and total_tracks <= 1:
-        return "single"
-    if total_tracks and total_tracks <= 6:
-        return "ep"
-    return "album"
+    tracks = album.get("tracks")
+    if isinstance(tracks, dict):
+        tracks = tracks.get("items")
+    return release_type_from_shape(
+        total_tracks, album.get("duration_ms") or tracklist_runtime_ms(tracks, total_tracks))
 
 
 def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,

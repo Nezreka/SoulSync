@@ -241,16 +241,18 @@ class Track:
         if track_data.get('link'):
             external_urls['deezer'] = track_data['link']
 
-        # Deezer search doesn't return album_type directly; infer if nb_tracks available
+        # the album's own record_type when deezer sent it, else the store
+        # rule on its track count and runtime when those are there
         nb_tracks = album_data.get('nb_tracks') if isinstance(album_data, dict) else None
+        record_type = album_data.get('record_type') if isinstance(album_data, dict) else None
         album_type = track_data.get('type')  # Deezer sometimes returns 'album'/'single'
-        if not album_type and nb_tracks:
-            if nb_tracks <= 3:
-                album_type = 'single'
-            elif nb_tracks <= 6:
-                album_type = 'ep'
-            else:
-                album_type = 'album'
+        if record_type:
+            album_type = {'compile': 'compilation'}.get(record_type, record_type)
+        elif not album_type and nb_tracks:
+            from core.metadata.release_type import release_type_from_shape
+            _secs = album_data.get('duration') or 0
+            album_type = release_type_from_shape(
+                nb_tracks, _secs * 1000 if isinstance(_secs, (int, float)) else None)
 
         return cls(
             id=str(track_data.get('id', '')),

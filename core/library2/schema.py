@@ -1783,6 +1783,21 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             logger.error("download provenance link failed (will retry next start): %s", e)
 
     if not _stopped():
+        # a count guess typed 5 tracks over 44 minutes an ep (wish you were
+        # here). once: the guess is gone from every writer now
+        try:
+            if not _done_once(cursor, "release_kind_by_runtime_v1"):
+                from core.library2.release_kind import retype_long_short_releases
+                stats["release_kind_by_runtime"] = retype_long_short_releases(cursor)
+                if stats["release_kind_by_runtime"]:
+                    logger.info("Retyped %d long singles/EPs as albums",
+                                stats["release_kind_by_runtime"])
+                _mark_done(cursor, "release_kind_by_runtime_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("release kind by runtime repair failed (will retry next start): %s", e)
+
+    if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the
         # retag wrote BPM 0 into files, and a length of 0 switched off the
         # import's duration check while COALESCE kept it over real lengths.

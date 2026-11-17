@@ -499,6 +499,8 @@ def _build_post_process_context(
             'name': api_album_name,
             'release_date': api_album_release,
             'total_tracks': api_album_total_tracks,
+            # the release's runtime when known: $albumtype's store rule
+            'duration_ms': int(api_album.get('duration_ms') or 0),
             'total_discs': total_discs,
             # Reorganize is the caller that really knows: it counted the discs
             # off the source tracklist it just resolved, so the path builder must

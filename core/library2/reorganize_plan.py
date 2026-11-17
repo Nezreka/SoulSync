@@ -105,6 +105,7 @@ def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
             "source": str(filed.get("source") or ""),
             "locked": bool(filed.get("locked")),
             "total_tracks": int(filed.get("total_tracks") or 0),
+            "duration_ms": int(filed.get("duration_ms") or 0),
             "disambiguation": recorded,
         }
     return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0,
@@ -336,6 +337,8 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
         # #1299: the context builder hands this to the path builder, which
         # suffixes the folder exactly as the download did
         "disambiguation": str(album.get("disambiguation") or "").strip(),
+        # the runtime the download filed it with ($albumtype's store rule)
+        "duration_ms": int(album.get("duration_ms") or 0),
     }
 
 
@@ -531,7 +534,8 @@ def plan_album_reorganize(
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(
-            _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"]},
+            _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"],
+                                "duration_ms": filing.get("duration_ms") or 0},
                                filing["total_tracks"] or release_tracks, total_discs),
             {
                 "id": "",

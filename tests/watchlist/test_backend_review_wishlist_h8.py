@@ -33,7 +33,7 @@ def _make_scanner(stamp_log):
     )
     scanner._extract_track_items = lambda album_data: []
     scanner._has_placeholder_tracks = lambda tracks: False
-    scanner._should_include_release = lambda n, artist: True
+    scanner._should_include_release = lambda n, artist, *_: True
     scanner._should_include_track = lambda track, album_data, artist: True
     scanner.is_track_missing_from_library = lambda *a, **k: False
     scanner.update_artist_scan_timestamp = lambda artist: stamp_log.append(artist.artist_name)

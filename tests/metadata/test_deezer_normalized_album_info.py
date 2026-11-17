@@ -64,18 +64,25 @@ def test_deezer_converter_still_handles_raw_api_shape():
     assert album.total_tracks == 6
 
 
-def test_deezer_converter_raw_shape_bare_album_verified_by_count():
-    # Raw shape with no usable type still infers from the count.
+def test_deezer_converter_raw_shape_record_type_album_is_trusted():
+    # deezer's own record_type is its word, 'album' included: re-guessing it
+    # by count made wish you were here (5 tracks, 44 min) an ep (nov 16)
     raw = {
         'id': 999,
-        'title': 'Some EP',
+        'title': 'Wish You Were Here',
         'record_type': 'album',
         'nb_tracks': 5,
         'artist': {'id': 1, 'name': 'Someone'},
     }
     album = Album.from_deezer_dict(raw)
-    assert album.album_type == 'ep'
+    assert album.album_type == 'album'
     assert album.total_tracks == 5
+
+
+def test_deezer_converter_raw_shape_without_type_infers_from_count():
+    raw = {'id': 999, 'title': 'Some EP', 'nb_tracks': 5,
+           'artist': {'id': 1, 'name': 'Someone'}}
+    assert Album.from_deezer_dict(raw).album_type == 'ep'
 
 
 def test_deezer_converter_normalized_shape_direct():
