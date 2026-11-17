@@ -46,6 +46,12 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **copy mode playlists stay owned after a drive remounts (thanks NeskireDK, #2137).**
 - **music assistant scans follow their own task (thanks @ginevra-70, #2115)** before the database updates, and sync, scans and playlists reach music assistant (#2111).
 
+## server activity
+
+- **server activity is rebuilt, for plex and jellyfin.** the activity button opens one drawer. now playing shows streams, bandwidth against your upload, transcoders and cpu, then a card per stream: who, what, which device, from where, and direct play, direct stream or transcode. open a card for the file next to what is sent, the reason it converts in plain words, stop with a message (plex pass on plex) and send a message on jellyfin. music shows audio quality and audiobooks the chapter.
+- **history and stats of its own.** soulsync keeps its own play log (forever by default, with a setting and a clear button), folds back to back episodes and album tracks into one row with a timeline, and fills the time before it from plex's history. stats covers 7 days to a year: hours, how things played and why they converted, when, players, places, people and the most played.
+- settings, connections, server activity holds your upload speed, the location lookup for remote viewers and the stop messages. it is admin only (#2155). checked against recorded plex and jellyfin answers, not tried on a live server yet.
+
 ## profiles
 
 - **a member lands on a page they can open (thanks SeadogsBooty, #2154).** a profile without the video dashboard was sent to it after signing in, turned away, and left on a black page. you land on your own home page, else discover, else your first page, and a refused page sends you there too.

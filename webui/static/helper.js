@@ -3461,6 +3461,7 @@ const WHATS_NEW = {
         { date: 'November 2026 · 3.6.7' },
         { title: 'Settings, rebuilt', desc: 'The Settings page is React now, every tab on the music and video side. It looks and works the same, loads its tabs once and saves only what you changed.', page: 'settings' },
         { title: 'SoulSync as a Seerr server', desc: 'Turn on the Seerr Compatible API under Settings, System, SoulSync API and point Litefin’s Seerr plugin, or another Seerr app, at /seerr with an admin key. Discover, search and requests go through the video side (thanks Thibs, #2151).', page: 'settings' },
+        { title: 'Server Activity, rebuilt', desc: 'The activity button opens one drawer for Plex and Jellyfin: what is playing and how, the reason a stream converts in plain words, stop with a message, and SoulSync’s own play history and stats. Admin only, set up under Settings, Connections, Server Activity.' },
         { title: 'Other versions', desc: 'An album’s ⋯ menu lists the release’s other editions with track count, year, country and label, plus a search for that artist. It shows what changes before it switches (thanks wolf39us, #2145).', page: 'library' },
         { title: 'Popular tracks', desc: 'A flame marks up to three of an album’s most played tracks on Last.fm that clearly stand out, like Plexamp, from the play counts SoulSync already has (thanks wolf39us, #2144).', page: 'library' },
         { title: 'What a rename would move', desc: 'The artist page shows “N to rename” on albums whose files don’t match your naming template, and a click opens Preview rename (thanks wolf39us, #2141). Locking an album there keeps you on the artist page (#2143).', page: 'library' },
@@ -3507,10 +3508,11 @@ const WHATS_NEW = {
 const VERSION_MODAL_SECTIONS = [
     {
         title: '3.6.7: settings in React, Seerr and other versions',
-        description: 'The Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
+        description: 'The Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, Server Activity is rebuilt with its own history and stats, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
         features: [
             'Settings rebuilt in React: it looks and works the same, loads its tabs once and saves only what you changed.',
             'A Seerr compatible API at /seerr, so Litefin and other Seerr apps can discover and request through the video side (thanks Thibs, #2151).',
+            'Server Activity rebuilt for Plex and Jellyfin: now playing and why it converts, stop with a message, and SoulSync’s own play history and stats.',
             'Other versions on the album menu: pick another edition with a preview first (thanks wolf39us, #2145).',
             'A flame on an album’s most played tracks, and “N to rename” on the artist page (thanks wolf39us, #2144, #2141).',
             'Collection completeness on the Library cards and table, with sorts and filters (thanks SeadogsBooty, #2106 to #2109).',
