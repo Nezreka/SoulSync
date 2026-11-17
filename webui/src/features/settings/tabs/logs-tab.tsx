@@ -8,6 +8,8 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { appURL } from '@/platform/url-base';
+
 import type { SettingsTabProps } from '../host';
 
 import {
@@ -141,6 +143,21 @@ export function LogsTab({ active }: SettingsTabProps) {
     window.showToast?.('Logs copied', 'success');
   };
 
+  // the help sheet's Logs view: each log, its backups, secrets removed. a
+  // shell without the sheet gets the whole zip straight away, still redacted
+  const downloadLogs = () => {
+    if (window.SoulSyncHelp) {
+      window.SoulSyncHelp.open('logs');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = appURL('/api/help/logs/download-all');
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
   const clear = () => {
     setRows([]);
     setCount(0);
@@ -208,6 +225,13 @@ export function LogsTab({ active }: SettingsTabProps) {
           </button>
           <button className="log-action-btn" onClick={clear} title="Clear display">
             Clear
+          </button>
+          <button
+            className="log-action-btn"
+            onClick={downloadLogs}
+            title="Download every log and its backups, secrets removed"
+          >
+            Download
           </button>
           <label className="log-autoscroll-label">
             <input type="checkbox" id="log-viewer-autoscroll" defaultChecked ref={autoscroll} />
