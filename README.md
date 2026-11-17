@@ -548,7 +548,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
 - **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.
 - **My Account** for non-admins: their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
-- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off.
+- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Admins can set it for a profile, lock it, and choose what new profiles start with.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps** (video): per-profile G / PG / PG-13 / R limits, enforced across the video side.
 
@@ -570,6 +570,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - A link to a hidden part still opens, with a note that brings it back in one click.
 - First-run setup starts you off with what you said SoulSync is for, and profiles from before ask once, right above the Customize button.
 - Search, library, watchlist, wishlist, downloads and settings never hide.
+- Admins set it per profile in **Profiles** (under **What shows**) and can lock it, so Customize turns read only for them. **What new profiles see** on the People tab is the starting point for every profile that never picked its own. **Reset to default** goes back to it.
 
 </details>
 

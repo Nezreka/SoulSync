@@ -209,6 +209,8 @@ Every profile can choose its own home page:
 - **Discover** — the non-admin default: new releases, recommendations, trending
 
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be in the profile's allowed pages — picking a new allowed-pages list resets a home page that was locked out.
+
+With no home page (or one they can't open), a profile lands on Discover, or the first page it has if Discover is off or hidden. The same goes for the video side, and for any page a profile opens that it isn't allowed on.
 `
         },
         {
@@ -226,7 +228,11 @@ Each switch saves right away. What's off leaves the sidebar, its dashboard card 
 
 Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, on the music side and the video side.
 
-This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
+This is a preference, not access. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
+
+**Admins set it for others.** In **Profiles**, open someone's profile and look under **What shows**: the same presets and switches, plus **Lock it**. A locked profile sees its setup in **Customize** read only, with a note that an admin set it, and can't change it (the server refuses too). An admin can always change it. **Reset to default** puts a profile back on what new profiles see. On the **People** tab, **What new profiles see** sets the starting point and whether it comes locked. Every profile that never picked its own follows it, so changing it reaches them too. Admins always pick their own. None of this opens a page: what someone can reach is still their page access.
+
+A profile that can only use the video side can't hide it, since it would have nothing left.
 
 Once **every** profile has Podcasts or Audiobooks hidden, an admin sees **Also pause its background jobs** under it. Paused, its scheduled checks and downloads stop. If anyone turns the part back on, they start again by themselves. **Run now** on the Automations page always works. The video side's jobs have their own switch on the video Automations page. To stop someone from opening a page at all, use **page access** in their profile instead.
 

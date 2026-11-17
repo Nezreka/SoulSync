@@ -589,6 +589,16 @@ def _inject_profile_gate_rules():
     from core.security.session_profile import client_gate_rules
     return {'profile_gate_rules': client_gate_rules()}
 
+
+@app.context_processor
+def _inject_boot_profile():
+    """the signed-in profile, so the sidebar shows only their pages from the
+    first frame (#2156). g.profile_id is None when signed out, locked or
+    nobody's picked yet, and the page then waits for init.js."""
+    from core.security.session_profile import boot_profile
+    return {'boot_profile': boot_profile(getattr(g, 'profile_id', None),
+                                         lambda pid: get_database().get_profile(pid))}
+
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
 def _init_flask_secret_key():
