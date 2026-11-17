@@ -68,7 +68,12 @@ export function SearchBar({
   }, [query]);
 
   return (
-    <div className={styles.searchBox} id="enhanced-search-bar" role="search">
+    <div
+      className={styles.searchBox}
+      id="enhanced-search-bar"
+      role="search"
+      data-tour="search.field"
+    >
       <input
         ref={inputRef}
         id="enhanced-search-input"

@@ -7429,31 +7429,28 @@ async function showVersionInfo() {
         } catch (e) { /* ignore */ }
     }
 
-    // Build version data straight from helper.js — single source of truth.
-    // No backend round-trip; the changelog content is shipped in the same
-    // bundle the browser already loaded.
-    const version = (typeof _getCurrentVersion === 'function')
-        ? _getCurrentVersion()
-        : (btn ? btn.textContent.trim().replace('v', '') : '');
-    const sections = (typeof VERSION_MODAL_SECTIONS !== 'undefined')
-        ? VERSION_MODAL_SECTIONS
-        : [];
+    // The notes come from the one release notes file
+    // (webui/src/features/help/release-notes.ts), which the React bundle
+    // publishes as window.SoulSyncReleaseNotes. The help sheet's What's new
+    // reads the same file, so a release is written once.
+    const version = btn ? btn.textContent.trim().replace(/^v/, '') : '';
+    const notes = window.SoulSyncReleaseNotes;
+    let sections = [];
+    try {
+        sections = notes ? notes.modalSections(version || undefined) : [];
+    } catch (e) { /* no notes: the modal still opens with its header */ }
     const versionData = {
         version,
         title: "What's New in SoulSync",
-        subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
+        subtitle: version ? `Version ${version}: latest changes` : 'Latest changes',
         sections,
     };
 
-    // The version modal shows the same What's New content the helper's badge
-    // points at — mark it seen here too, or the helper button's red dot never
-    // clears for users who read release notes this way (Kazimir's stuck dot).
+    // Reading the notes here counts as having seen them: What's new's chip in
+    // the help sheet keys off the same version (Kazimir's stuck dot).
     try {
-        if (typeof _getLatestWhatsNewVersion === 'function') {
-            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
-            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
-        }
-    } catch (e) { /* badge sync is cosmetic */ }
+        if (version) localStorage.setItem('soulsync_helper_version_seen', version);
+    } catch (e) { /* storage blocked */ }
 
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);

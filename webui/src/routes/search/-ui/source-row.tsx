@@ -84,7 +84,13 @@ export function ModeTabs({
     },
   ];
   return (
-    <div className={styles.modes} id="enh-source-row" role="tablist" aria-label="What to search">
+    <div
+      className={styles.modes}
+      id="enh-source-row"
+      role="tablist"
+      aria-label="What to search"
+      data-tour="search.modes"
+    >
       {tabs.map((tab) => (
         <button
           key={tab.mode}
@@ -209,7 +215,7 @@ export function SourcePicker({
 
   if (mode === 'videos') {
     return (
-      <span className={styles.source} data-static>
+      <span className={styles.source} data-static data-tour="search.source">
         <SourceLogo source="youtube_videos" />
         <span className={styles.sourceLabel}>YouTube</span>
       </span>
@@ -222,6 +228,7 @@ export function SourcePicker({
       <button
         type="button"
         className={styles.source}
+        data-tour="search.source"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Search with ${sourceLabel(current)}`}

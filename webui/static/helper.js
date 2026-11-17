@@ -3455,83 +3455,27 @@ function closeHelperSearch() {
 // WHAT'S NEW (Phase 6)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Entries tagged with `unreleased: true` are accumulating under a version label
-// but won't display until the build version catches up — used for in-progress
-// projects that span multiple commits before shipping. Strip the flag at
-// release time and add a real `date:` line at the top of the version block.
-const WHATS_NEW = {
-    // Keep the current release and one brief Earlier versions summary.
-    '3.6.7': [
-        { date: 'November 2026 · 3.6.7' },
-        { title: 'Settings, rebuilt', desc: 'The Settings page is React now, every tab on the music and video side. It looks and works the same, loads its tabs once and saves only what you changed.', page: 'settings' },
-        { title: 'SoulSync as a Seerr server', desc: 'Turn on the Seerr Compatible API under Settings, System, SoulSync API and point Litefin’s Seerr plugin, or another Seerr app, at /seerr with an admin key. Discover, search and requests go through the video side (thanks Thibs, #2151).', page: 'settings' },
-        { title: 'Server Activity, rebuilt', desc: 'The activity button opens one drawer for Plex and Jellyfin: what is playing and how, the reason a stream converts in plain words, stop with a message, and SoulSync’s own play history and stats. Admin only, set up under Settings, Connections, Server Activity.' },
-        { title: 'Other versions', desc: 'An album’s ⋯ menu lists the release’s other editions with track count, year, country and label, plus a search for that artist. It shows what changes before it switches (thanks wolf39us, #2145).', page: 'library' },
-        { title: 'Popular tracks', desc: 'A flame marks up to three of an album’s most played tracks on Last.fm that clearly stand out, like Plexamp, from the play counts SoulSync already has (thanks wolf39us, #2144).', page: 'library' },
-        { title: 'What a rename would move', desc: 'The artist page shows “N to rename” on albums whose files don’t match your naming template, and a click opens Preview rename (thanks wolf39us, #2141). Locking an album there keeps you on the artist page (#2143).', page: 'library' },
-        { title: 'Collection completeness', desc: 'Cards and table rows show owned over expected tracks with sorts, a featured filter, card size and multi-select (thanks SeadogsBooty, #2106 to #2109). For an artist you don’t watch it counts every track of the releases you own something of.', page: 'library' },
-        { title: 'Band names stay whole', desc: 'Above & Beyond, Kyau & Albert and K/DA stay one artist in tags, credits, folders and Split Artists, and a Split Artists finding can be corrected by hand (thanks SeadogsBooty, wolf39us and Vidariondr, #2131, #2136, #2150).' },
-        { title: 'Releases stay together', desc: 'A compilation stays under its album artist on reorganize and download (#2133, #2135), and numbered releases like Group Therapy 696 and 699 never cross (thanks SeadogsBooty, #2134).' },
-        { title: 'Release types by length', desc: 'An EP or single now has to run under 30 minutes, so Wish You Were Here is an album again, and a provider’s own type wins (thanks wolf39us).' },
-        { title: 'Artist art for your server', desc: 'artist.nfo lands in the artist folder, and the same switch saves poster.jpg and background.jpg where the folder has none yet (thanks Ericsson, #2138). Guest artists no longer fill the Library list (#2142).', page: 'settings' },
-        { title: 'Review and AcoustID', desc: 'Asked for and Got are the right way round in review, and one file with no usable audio no longer stops every AcoustID scan (thanks nstrelow, #2140).' },
-        { title: 'Playlists and servers', desc: 'Jellyfin playlists are private to their account (#2148), Apple Music mirrors refresh again and copy mode playlists stay owned after a remount (thanks NeskireDK, #2147, #2137), and Music Assistant scans follow their own task (thanks ginevra-70, #2115).' },
-        { title: 'Video', desc: 'An import folder like the music side’s (#2129), manual search with an editable query on a movie’s menu (#2121, #2122), release languages on download rows (#2120), and long titles that no longer push the library table’s columns out of view (thanks PapaBearDoes, #2152).' },
-        { title: 'Where a title stands', desc: 'Every video poster shows In Library, Partial, Requested, Approved, Searching, Downloading or Failed, and the detail page shows progress, each season and who asked. A request for something already on its way is refused (thanks SeadogsBooty, #2160).' },
-        { title: 'Discover', desc: 'Every row fills, hides when empty or offers Try again, the Top 10 numbers sit beside the posters, and the page has one even layout (thanks SeadogsBooty, #2158, #2159).' },
-        { title: 'Profiles', desc: 'Members land on a page they can open and never see the admin menu, admins can set, lock and reset what each profile shows, and a lock hides Customize and shows only what the admin set. Members see only their own profile with login on, and set their own sidebar weather under Profile & account (thanks SeadogsBooty, #2154 to #2157, #2162 to #2164).' },
-        { title: 'Library fixes', desc: 'Leftover rows fold on every scan (#2094), reorganize takes the cover along (#2010), a pair that can’t be merged says why (#2146), and the library upgrade no longer stops at an old track with no id.', page: 'library' },
-        { title: 'Earlier versions', desc: '3.6.6 turned the video Library into a manager with bulk operations, history with undo and a padlock. 3.6.5 rebuilt both dashboards, Tools, Automations and Stats. 3.6.2 brought the new Library, built by @nick2000713.' },
-    ],
-};
+// The release notes live in one file now: webui/src/features/help/release-notes.ts.
+// The React bundle publishes them as window.SoulSyncReleaseNotes (and fires
+// ss:release-notes-ready); the help sheet's What's new and the version modal
+// (downloads.js showVersionInfo) both read that. These two keep their old
+// names and shapes, filled from it, for the helper modes below until P7
+// deletes them. Never write release notes here.
+const WHATS_NEW = {};
+const VERSION_MODAL_SECTIONS = [];
 
-// ═══════════════════════════════════════════════════════════════════════════
-// VERSION MODAL — curated highlight reel
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// `WHATS_NEW` above is the per-version detailed log used by the "What's New"
-// helper-popover panel — short one-liners, internal page links, every entry
-// shown on every browse-back through versions.
-//
-// `VERSION_MODAL_SECTIONS` (this block) is the curated highlight reel shown
-// when the user clicks the version button in the sidebar. It's NOT a
-// mechanical view of WHATS_NEW — it's editorial curation: bigger-picture
-// sections, bullet-list expansions, optional "usage" hints at the bottom.
-// Some sections aggregate across multiple WHATS_NEW entries ("Recent Fixes",
-// "Earlier in v2.3"); some don't have a 1:1 WHATS_NEW counterpart at all.
-//
-// Both consts live here so a release editor only opens one file. At release
-// time:
-//   1. Add the per-version block to `WHATS_NEW` (one entry per shipped item).
-//   2. Derive the current release highlights in `VERSION_MODAL_SECTIONS`
-//      from pr_description.md, using the same shipped changes.
-//   3. Keep one brief "Earlier in X.Y.Z" summary instead of a growing backlog.
-//
-// Section shape: { title, description, features: [bullet strings],
-//                  usage_note?: 'optional hint shown at the bottom' }
-const VERSION_MODAL_SECTIONS = [
-    {
-        title: '3.6.7: settings in React, Seerr and other versions',
-        description: 'The Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, Server Activity is rebuilt with its own history and stats, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
-        features: [
-            'Settings rebuilt in React: it looks and works the same, loads its tabs once and saves only what you changed.',
-            'A Seerr compatible API at /seerr, so Litefin and other Seerr apps can discover and request through the video side (thanks Thibs, #2151).',
-            'Server Activity rebuilt for Plex and Jellyfin: now playing and why it converts, stop with a message, and SoulSync’s own play history and stats.',
-            'Other versions on the album menu: pick another edition with a preview first (thanks wolf39us, #2145).',
-            'A flame on an album’s most played tracks, and “N to rename” on the artist page (thanks wolf39us, #2144, #2141).',
-            'Collection completeness on the Library cards and table, with sorts and filters (thanks SeadogsBooty, #2106 to #2109).',
-            'Band names like Above & Beyond and K/DA stay one artist, compilations stay under their album artist, and numbered releases never cross (#2131, #2133 to #2136, #2150).',
-            'Release types go by length, so Wish You Were Here is an album again.',
-            'artist.nfo in the artist folder with poster.jpg and background.jpg (#2138), private Jellyfin playlists (#2148), and Apple Music mirrors that refresh (#2147).',
-            'Contributions from nstrelow (#2140), PapaBearDoes (#2152) and ginevra-70 (#2115): AcoustID scans past an unreadable file, a video table that keeps its columns in view, and Music Assistant scans that follow their task.',
-        ],
-    },
-    {
-        title: 'Earlier in 3.6.6',
-        description: 'The video Library became a manager with tables, bulk operations, history with undo and a padlock, and movie and show pages manage their own seasons, episodes and files.',
-        features: [],
-    },
-];
+function _fillReleaseNotes() {
+    const notes = window.SoulSyncReleaseNotes;
+    if (!notes) return;
+    try {
+        const whatsNew = notes.whatsNew();
+        Object.keys(WHATS_NEW).forEach((k) => { delete WHATS_NEW[k]; });
+        Object.assign(WHATS_NEW, whatsNew);
+        VERSION_MODAL_SECTIONS.splice(0, VERSION_MODAL_SECTIONS.length, ...notes.modalSections());
+    } catch (e) { /* the old modes just show nothing */ }
+}
+_fillReleaseNotes();
+window.addEventListener('ss:release-notes-ready', _fillReleaseNotes);
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');

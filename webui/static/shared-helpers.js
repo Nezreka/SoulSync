@@ -1876,7 +1876,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
 
     // Use the exact same modal HTML structure as the existing modals
     modal.innerHTML = `
-        <div class="download-missing-modal-content" data-context="${contextType}">
+        <div class="download-missing-modal-content" data-context="${contextType}" data-tour="download.window">
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
@@ -1902,7 +1902,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                         ` : ''}
                         ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
-                    <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
+                    <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" data-tour="download.start" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
                     ${_isBeatportPlaylistId(virtualPlaylistId) ? `
