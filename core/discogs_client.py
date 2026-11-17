@@ -344,12 +344,14 @@ class Album:
             album_type = 'compilation'
         elif 'lp' in descriptions or 'lp' in format_str or 'album' in descriptions or 'album' in format_str:
             album_type = 'album'
-        elif total_tracks <= 3 and total_tracks > 0:
-            album_type = 'single'
-        elif total_tracks <= 6 and total_tracks > 0:
-            album_type = 'ep'
         else:
-            album_type = 'album'
+            # no format word: the store rule on the tracklist's own durations
+            # ('4:35'), count alone when discogs left them blank
+            from core.metadata.release_type import release_type_from_shape, tracklist_runtime_ms
+            album_type = release_type_from_shape(
+                total_tracks, tracklist_runtime_ms(
+                    [t for t in tracklist if isinstance(t, dict) and t.get('type_', 'track') == 'track'],
+                    seconds=True))
 
         release_date = discogs_release_date(release_data)
 

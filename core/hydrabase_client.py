@@ -379,10 +379,14 @@ class HydrabaseClient:
 
         album_type = item.get('album_type', 'album')
         if not album_type or album_type == 'album':
-            if total_tracks and total_tracks <= 3:
-                album_type = 'single'
-            elif total_tracks and total_tracks <= 6:
-                album_type = 'ep'
+            # a bare 'album' is filler here: the store rule, with the runtime
+            # when the item carries its tracks
+            from core.metadata.release_type import release_type_from_shape, tracklist_runtime_ms
+            _tracks = item.get('tracks')
+            if isinstance(_tracks, dict):
+                _tracks = _tracks.get('items')
+            album_type = release_type_from_shape(
+                total_tracks, item.get('duration_ms') or tracklist_runtime_ms(_tracks, total_tracks))
 
         album_result = {
             'id': str(item.get('soul_id', item.get('id', ''))),

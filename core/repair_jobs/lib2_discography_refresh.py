@@ -67,6 +67,7 @@ def _release_kind(album_type: Any, track_count: Any) -> str:
     """3.6.1's backfill rule: an explicit album / ep / compilation is trusted,
     anything else goes by track count (1-3 a single, 4-6 an EP, 7+ an album).
     Spotify files EPs and true singles both under 'single'."""
+    from core.metadata.release_type import release_type_from_shape
     kind = str(album_type or "").strip().lower()
     if kind in ("album", "ep", "compilation"):
         return kind
@@ -74,13 +75,9 @@ def _release_kind(album_type: Any, track_count: Any) -> str:
         count = int(track_count or 0)
     except (TypeError, ValueError):
         count = 0
-    if count >= 7:
-        return "album"
-    if count >= 4:
-        return "ep"
-    if count >= 1 or kind == "single":
-        return "single"
-    return "album"
+    if count >= 1:
+        return release_type_from_shape(count)
+    return "single" if kind == "single" else "album"
 
 
 def _release_included(album: Dict[str, Any], filters: Dict[str, bool]) -> bool:

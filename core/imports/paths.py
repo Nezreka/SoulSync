@@ -611,12 +611,15 @@ _LOCKED_TYPE_DISPLAY = {
 }
 
 
-def get_album_type_display(raw_type, track_count, source: str = "", locked: bool = False) -> str:
+def get_album_type_display(raw_type, track_count, source: str = "", locked: bool = False,
+                           total_ms=None) -> str:
     """Return the display form of an album's type for the $albumtype template variable.
 
     ``locked``: the type is the section the release sat in on the artist
     page, which the user already saw. it's used as-is, no track-count
-    guessing, so the folder always matches the section."""
+    guessing, so the folder always matches the section.
+    ``total_ms``: the release's runtime when known. a type the source didn't
+    give goes by the store rule, so 5 tracks over 44 minutes is an album."""
     raw = (raw_type or "").strip().lower()
     if locked and raw in _LOCKED_TYPE_DISPLAY:
         return _LOCKED_TYPE_DISPLAY[raw]
@@ -650,15 +653,11 @@ def get_album_type_display(raw_type, track_count, source: str = "", locked: bool
     # default fallback at every upstream layer (wishlist payloads,
     # album_grouping, import context) — not a signal. Deezer's track-level
     # responses hardcode album_type='album', so trusting it files every
-    # Deezer single/EP under Album/. Verify against the track count when we
-    # have one; with no count, keep the "Album" default rather than guessing.
-    if tc <= 0:
-        return "Album"
-    if tc <= 3:
-        return "Single"
-    if tc <= 6:
-        return "EP"
-    return "Album"
+    # Deezer single/EP under Album/. Verify against the track count (and the
+    # runtime when known) when we have one; with no count, keep the "Album"
+    # default rather than guessing.
+    from core.metadata.release_type import release_type_from_shape
+    return _LOCKED_TYPE_DISPLAY[release_type_from_shape(tc, total_ms)]
 
 
 def _named_artist(*values) -> str:
@@ -1580,7 +1579,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         (album_context and album_context.get("album_type_locked"))
         or (isinstance(album_info, dict) and album_info.get("album_type_locked"))
     )
-    album_type_display = get_album_type_display(raw_album_type, total_tracks, _type_source, _type_locked)
+    # the release's runtime, when the album context carried it
+    album_runtime_ms = _coerce_int(
+        album_context.get("duration_ms") if album_context else None, 0)
+    album_type_display = get_album_type_display(
+        raw_album_type, total_tracks, _type_source, _type_locked, album_runtime_ms or None)
     if isinstance(context, dict):
         # the inputs that decided the release type, kept on the Library v2
         # album at registration so a reorganize files the release where this
@@ -1588,6 +1591,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         context["_filed_release"] = {
             "type": raw_album_type or "album",
             "total_tracks": _coerce_int(total_tracks, 0),
+            "duration_ms": album_runtime_ms,
             "source": str(_type_source or ""),
             "locked": _type_locked,
             "secondary_types": [

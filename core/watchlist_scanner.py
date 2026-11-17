@@ -1991,13 +1991,16 @@ class WatchlistScanner:
                         if self._has_placeholder_tracks(tracks):
                             logger.info("Skipping album with placeholder tracks: %s", album_name)
                             continue
-                        if not self._should_include_release(len(tracks), artist):
+                        from core.metadata.release_type import release_type_from_shape, tracklist_runtime_ms
+                        _runtime = tracklist_runtime_ms(list(tracks or []))
+                        if not self._should_include_release(len(tracks), artist, _runtime):
                             # Make the type-filter skip visible — otherwise a user
                             # with "Albums" toggled off just sees missing tracks
                             # with no explanation (Sokhi #815-adjacent: 14 singles,
                             # 0 albums because include_albums was off).
                             _n = len(tracks)
-                            _kind = 'album' if _n >= 7 else ('EP' if _n >= 4 else 'single')
+                            _kind = release_type_from_shape(_n, _runtime)
+                            _kind = 'EP' if _kind == 'ep' else _kind
                             logger.info(
                                 "Skipping %s '%s' (%d tracks) — release type filter "
                                 "(albums=%s, eps=%s, singles=%s) excludes it",
@@ -2756,14 +2759,15 @@ class WatchlistScanner:
         # (some albums legitimately have a track called "Track X" but not most of them)
         return placeholder_count > len(tracks) / 2
 
-    def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist) -> bool:
+    def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist,
+                                total_ms: Optional[int] = None) -> bool:
         """
         Check if a release should be included based on user's preferences.
 
-        Categorization:
-        - Singles: 1-3 tracks
-        - EPs: 4-6 tracks
-        - Albums: 7+ tracks
+        Categorization (the store rule):
+        - Singles: 1-3 tracks under 30 minutes
+        - EPs: 4-6 tracks under 30 minutes
+        - Albums: 7+ tracks, or 30 minutes and up (runtime unknown: count alone)
 
         Args:
             track_count: Number of tracks in the release
@@ -2778,16 +2782,14 @@ class WatchlistScanner:
             include_eps = getattr(watchlist_artist, 'include_eps', True)
             include_singles = getattr(watchlist_artist, 'include_singles', True)
 
-            # Determine release type based on track count
-            if track_count >= 7:
-                # This is an album
+            from core.metadata.release_type import release_type_from_shape
+            kind = (release_type_from_shape(track_count, total_ms)
+                    if (track_count or 0) > 0 else 'single')
+            if kind == 'album':
                 return include_albums
-            elif track_count >= 4:
-                # This is an EP (4-6 tracks)
+            if kind == 'ep':
                 return include_eps
-            else:
-                # This is a single (1-3 tracks)
-                return include_singles
+            return include_singles
 
         except Exception as e:
             logger.warning(f"Error checking release inclusion: {e}")

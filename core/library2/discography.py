@@ -301,20 +301,22 @@ _CONTENT_FILTER_DEFAULTS = {
 }
 
 
-def _release_type_included(track_count: Any, filters: Dict[str, bool]) -> bool:
-    """3.6.1's rule by track count: 1-3 a single, 4-6 an EP, 7+ an album. A
-    release whose count isn't known yet is let through, as 3.6.1 did on error."""
+def _release_type_included(track_count: Any, filters: Dict[str, bool],
+                           total_ms: Any = None) -> bool:
+    """3.6.1's release types by the store rule: 1-3 tracks under 30 min a
+    single, 4-6 an EP, else an album (count alone when the runtime isn't
+    known). A release whose count isn't known yet is let through, as 3.6.1
+    did on error."""
+    from core.metadata.release_type import release_type_from_shape
     try:
         count = int(track_count or 0)
     except (TypeError, ValueError):
         return True
     if count <= 0:
         return True
-    if count >= 7:
-        return filters.get("include_albums", True)
-    if count >= 4:
-        return filters.get("include_eps", True)
-    return filters.get("include_singles", True)
+    kind = release_type_from_shape(count, total_ms)
+    return filters.get({"album": "include_albums", "ep": "include_eps"}.get(
+        kind, "include_singles"), True)
 
 
 def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[str, bool]:

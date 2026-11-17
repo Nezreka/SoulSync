@@ -361,11 +361,11 @@ def resolve_watchlist_content_settings(
     return settings
 
 
-def release_kind_for_scan(expected_tracks: Any) -> Optional[str]:
+def release_kind_for_scan(expected_tracks: Any, total_ms: Any = None) -> Optional[str]:
     """#1550: which release-type bucket the SCANNER would put a release in.
 
-    Mirrors ``WatchlistScanner._should_include_release``: 7+ tracks ->
-    'albums', 4-6 -> 'eps', 1-3 -> 'singles'. Returns None when the count is
+    Mirrors ``WatchlistScanner._should_include_release`` (the store rule):
+    7+ tracks or 30+ minutes -> 'albums', else 4-6 -> 'eps', 1-3 -> 'singles'. Returns None when the count is
     unknown (0/unparseable): the scan ``continue``s on empty track lists
     before classifying, so an unknown count means the scan never reaches
     the release-type gate — the caller must skip that gate rather than
@@ -375,13 +375,10 @@ def release_kind_for_scan(expected_tracks: Any) -> Optional[str]:
         n = int(expected_tracks or 0)
     except (TypeError, ValueError):
         n = 0
-    if n >= 7:
-        return 'albums'
-    if n >= 4:
-        return 'eps'
-    if n >= 1:
-        return 'singles'
-    return None
+    if n < 1:
+        return None
+    from core.metadata.release_type import release_type_from_shape
+    return release_type_from_shape(n, total_ms) + 's'
 
 
 def content_exclusion_reason(

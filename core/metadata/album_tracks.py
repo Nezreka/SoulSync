@@ -502,24 +502,21 @@ def _has_explicit_type_signal(album_data: Any) -> bool:
         v = album_data.get(key)
         if v is not None and str(v).strip().lower() in _EXPLICIT_TYPE_VALUES:
             return True
+    # apple classifies its own releases and says so in the name ('X - EP',
+    # no suffix for an album), so an itunes raw always carries the signal
+    raw = album_data.get('_raw_data')
+    for d in (album_data, raw if isinstance(raw, dict) else {}):
+        if d.get('collectionName') and d.get('wrapperType', 'collection') == 'collection':
+            return True
     return False
 
 
-def derive_album_type_from_count(track_count: Any) -> str:
-    """1-3 tracks → single, 4-6 → ep, more → album — the same inference the
-    iTunes converter has always used (iTunes doesn't tag types either).
-    Unknown count → album (never guess without a signal)."""
-    try:
-        tc = int(track_count or 0)
-    except (TypeError, ValueError):
-        tc = 0
-    if tc <= 0:
-        return 'album'
-    if tc <= 3:
-        return 'single'
-    if tc <= 6:
-        return 'ep'
-    return 'album'
+def derive_album_type_from_count(track_count: Any, total_ms: Any = None) -> str:
+    """single / ep / album by the store rule: 1-3 tracks under 30 minutes a
+    single, 4-6 under 30 an ep, anything else an album. runtime unknown:
+    count alone. unknown count: album (never guess without a signal)."""
+    from core.metadata.release_type import release_type_from_shape
+    return release_type_from_shape(track_count, total_ms)
 
 
 def _build_album_tracks_payload(
@@ -543,11 +540,16 @@ def _build_album_tracks_payload(
     # #1064: when the source carried no type signal, the builders defaulted the
     # type to a CONFIDENT 'album' — and by now we know the real track count, so
     # derive instead. Only fires on signal-less raws; explicit types are kept.
+    from core.metadata.release_type import tracklist_runtime_ms
+    _runtime = tracklist_runtime_ms(tracks, album_info.get('total_tracks') or len(tracks))
+    if _runtime and not album_info.get('duration_ms'):
+        # carried into the download's album context: $albumtype's store rule
+        album_info['duration_ms'] = _runtime
     if tracks and not _has_explicit_type_signal(album_data):
         if not album_info.get('total_tracks'):
             album_info['total_tracks'] = len(tracks)
         album_info['album_type'] = derive_album_type_from_count(
-            album_info.get('total_tracks') or len(tracks))
+            album_info.get('total_tracks') or len(tracks), _runtime)
 
     return {
         'success': bool(tracks),
