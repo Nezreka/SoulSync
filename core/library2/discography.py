@@ -1161,6 +1161,21 @@ def repair_track_number_collisions(database, config_manager, artist_id: int) -> 
                 ORDER BY al.id""",
             (artist_id,),
         ).fetchall()]
+        if album_ids:
+            # a row a moved file left behind shares its position with the row
+            # that has the file now. that is not a numbering fault, it folds
+            # (#2094), and only what still collides gets the tracklist pass
+            from core.library2.dedup_repair import fold_leftover_rows
+            if fold_leftover_rows(conn, album_ids)["leftover_tracks_folded"]:
+                conn.commit()
+                marks = ",".join("?" for _ in album_ids)
+                album_ids = [row["id"] for row in conn.execute(
+                    f"""SELECT al.id FROM lib2_albums al
+                         WHERE al.id IN ({marks}) AND EXISTS (
+                             SELECT 1 FROM lib2_tracks t WHERE t.album_id = al.id
+                              GROUP BY COALESCE(t.disc_number, 1), t.track_number
+                             HAVING COUNT(*) > 1)
+                         ORDER BY al.id""", album_ids).fetchall()]
         for album_id in album_ids:
             try:
                 if resolve_tracklist(config_manager, conn, album_id):
