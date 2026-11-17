@@ -285,6 +285,36 @@
   filter: brightness(1.08);
 }
 
+.actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.reset {
+  padding: 9px 14px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.reset:hover {
+  border-color: var(--white-a20);
+  color: var(--text-1);
+}
+.reset:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
+}
+
+.preset:disabled {
+  cursor: default;
+}
+
 @media (max-width: 600px) {
   .head {
     padding: 20px 18px 14px;

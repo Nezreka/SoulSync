@@ -1489,14 +1489,32 @@ def delete_profile_spotify_creds():
 
 # --- what this profile chose to see (#1909) ---
 
+FEATURES_LOCKED_MESSAGE = "An admin set what this profile shows. Ask them if you want something changed."
+
+
+def _features_off_from(data):
+    """the off list a features save asks for: {off}, {preset} or {purposes}.
+    (off, None), (None, None) when it names none, or (None, error)."""
+    from core import ui_features
+    if 'preset' in data:
+        preset = data.get('preset')
+        if preset not in ui_features.PRESETS:
+            return None, 'Unknown preset'
+        return ui_features.PRESETS[preset], None
+    if 'purposes' in data:
+        return ui_features.off_from_purposes(data.get('purposes') or []), None
+    if isinstance(data.get('off'), list):
+        return data['off'], None
+    return None, None
+
+
 @bp.route('/api/profiles/me/features', methods=['GET'])
 def get_profile_features():
     """the hideable parts of soulsync, the presets, and what's off for me"""
     from core import ui_features
     try:
         db, pid = get_database(), get_current_profile_id()
-        off = ui_features.load_off(db, pid)
-        body = {'success': True, **ui_features.payload(off, ui_features.has_chosen(db, pid))}
+        body = {'success': True, **ui_features.profile_payload(db, pid)}
         # install-wide, so only an admin sees or changes it
         if is_admin_request():
             body['background'] = ui_features.background_state(db)
@@ -1508,28 +1526,26 @@ def get_profile_features():
 
 @bp.route('/api/profiles/me/features', methods=['POST'])
 def save_profile_features():
-    """save what's off. takes {off: [...]}, {preset: 'simple'|'full'} or
-    {purposes: [...]} (the setup answer)."""
+    """save what's off. takes {off: [...]}, {preset: 'simple'|'full'},
+    {purposes: [...]} (the setup answer) or {reset: true}. a profile an
+    admin locked can't change its own (#2157)."""
     from core import ui_features
     try:
         data = request.json or {}
         profile_id = get_current_profile_id()
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Pick a profile first.'}), 400
-        if 'preset' in data:
-            preset = data.get('preset')
-            if preset not in ui_features.PRESETS:
-                return jsonify({'success': False, 'error': 'Unknown preset'}), 400
-            off = ui_features.PRESETS[preset]
-        elif 'purposes' in data:
-            off = ui_features.off_from_purposes(data.get('purposes') or [])
-        elif isinstance(data.get('off'), list):
-            off = data['off']
-        else:
-            return jsonify({'success': False, 'error': 'Send off, preset or purposes'}), 400
         db = get_database()
-        saved = ui_features.save_off(db, profile_id, off)
-        body = {'success': True, **ui_features.payload(saved)}
+        if ui_features.is_locked(db, profile_id):
+            return jsonify({'success': False, 'error': FEATURES_LOCKED_MESSAGE, 'locked': True}), 403
+        if data.get('reset') is True:
+            ui_features.reset(db, profile_id)
+        else:
+            off, error = _features_off_from(data)
+            if error or off is None:
+                return jsonify({'success': False, 'error': error or 'Send off, preset, purposes or reset'}), 400
+            ui_features.save_off(db, profile_id, off)
+        body = {'success': True, **ui_features.profile_payload(db, profile_id)}
         if is_admin_request():
             # hiding a part can make it hidden for everyone, the pause line
             # in the picker follows straight away
@@ -1537,6 +1553,104 @@ def save_profile_features():
         return jsonify(body)
     except Exception as e:
         logger.error("features save failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _features_target(profile_id):
+    """(db, profile, None) when the caller may set this profile's features,
+    or (None, None, response)."""
+    if not is_admin_request():
+        return None, None, (jsonify({'success': False, 'error': 'Admin only'}), 403)
+    db = get_database()
+    if not may_manage_profile(get_current_profile_id(), True, profile_id):
+        return None, None, (jsonify({'success': False, 'error': 'Unauthorized'}), 403)
+    target = db.get_profile(profile_id)
+    if not target:
+        return None, None, (jsonify({'success': False, 'error': 'Profile not found'}), 404)
+    return db, target, None
+
+
+@bp.route('/api/profiles/<int:profile_id>/features', methods=['GET'])
+def get_other_profile_features(profile_id):
+    """what an admin sees when setting someone's features (#2157)"""
+    from core import ui_features
+    db, _target, refused = _features_target(profile_id)
+    if refused:
+        return refused
+    try:
+        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
+                        'default': ui_features.load_default(db)})
+    except Exception as e:
+        logger.error("features read for %s failed: %s", profile_id, e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/<int:profile_id>/features', methods=['POST'])
+def set_other_profile_features(profile_id):
+    """an admin sets what a profile shows and whether it's locked (#2157).
+    takes {off} or {preset}, {locked}, or {reset: true} (back to the default
+    for new profiles). works on a locked profile, that's the point."""
+    from core import ui_features
+    db, target, refused = _features_target(profile_id)
+    if refused:
+        return refused
+    try:
+        data = request.json or {}
+        off, error = _features_off_from(data)
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
+        has_lock = 'locked' in data
+        if has_lock and not ui_features.admin_sets(target):
+            return jsonify({'success': False, 'error': "Admins can always change their own, there's nothing to lock."}), 400
+        if data.get('reset') is not True and off is None and not has_lock:
+            return jsonify({'success': False, 'error': 'Send off, preset, locked or reset'}), 400
+        if data.get('reset') is True:
+            ui_features.reset(db, profile_id)
+        if off is not None:
+            ui_features.save_off(db, profile_id, off)
+        if has_lock:
+            ui_features.set_locked(db, profile_id, bool(data.get('locked')))
+        _audit('features_changed', profile_id, target.get('name'))
+        return jsonify({'success': True, **ui_features.profile_payload(db, profile_id),
+                        'default': ui_features.load_default(db)})
+    except Exception as e:
+        logger.error("features save for %s failed: %s", profile_id, e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/feature-defaults', methods=['GET'])
+def get_feature_defaults():
+    """what a new profile starts with (#2157). admin only."""
+    from core import ui_features
+    if not is_admin_request():
+        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    try:
+        return jsonify({'success': True, **ui_features.default_payload(get_database())})
+    except Exception as e:
+        logger.error("feature defaults read failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/feature-defaults', methods=['POST'])
+def set_feature_defaults():
+    """{off} or {preset}, plus {locked}. every profile that never chose its
+    own follows this, new ones included."""
+    from core import ui_features
+    if not is_admin_request():
+        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    try:
+        data = request.json or {}
+        db = get_database()
+        off, error = _features_off_from(data)
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
+        now = ui_features.load_default(db)
+        ui_features.save_default(db, now['off'] if off is None else off,
+                                 bool(data['locked']) if 'locked' in data else now['locked'])
+        _audit('feature_defaults_changed')
+        return jsonify({'success': True, **ui_features.default_payload(db)})
+    except Exception as e:
+        logger.error("feature defaults save failed: %s", e)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
