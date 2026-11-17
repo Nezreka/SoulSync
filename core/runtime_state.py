@@ -70,6 +70,34 @@ def set_activity_toast_emitter(emitter) -> None:
     _activity_toast_emitter = emitter
 
 
+def _acting_profile_id():
+    """the profile a web request acts as, or None for background work. the
+    feed shows a member only what their own requests did; the rest is the
+    install's, the admin's to see."""
+    try:
+        from flask import g, has_request_context
+        if not has_request_context():
+            return None
+        pid = getattr(g, "profile_id", None)
+        return int(pid) if pid is not None else None
+    except Exception:  # noqa: BLE001 - no profile is the safe answer
+        return None
+
+
+def activity_visible_to(items, profile_id, is_admin):
+    """the activity items this viewer may see: an admin, all of them; anyone
+    else, the ones their own requests made."""
+    if is_admin:
+        return list(items)
+    if profile_id is None:
+        return []
+    try:
+        me = int(profile_id)
+    except (TypeError, ValueError):
+        return []
+    return [a for a in items if a.get("profile_id") == me]
+
+
 def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
     """Append an activity item and emit a toast if an emitter is configured."""
     activity_item = {
@@ -79,6 +107,7 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
         "time": time_ago,
         "timestamp": time.time(),
         "show_toast": show_toast,
+        "profile_id": _acting_profile_id(),
     }
     with activity_feed_lock:
         activity_feed.append(activity_item)

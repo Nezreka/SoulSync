@@ -649,7 +649,19 @@ from core.url_base import configure_url_base
 configure_url_base(app, os.environ.get("SOULSYNC_URL_BASE", ""))
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
-set_activity_toast_emitter(socketio.emit)
+def _emit_activity_toast(event, item):
+    """an activity toast goes to the admins, and to the member whose request
+    made it. never to every socket: the feed names what everyone downloads."""
+    socketio.emit(event, item, to=ADMIN_SOCKET_ROOM)
+    owner = (item or {}).get('profile_id')
+    if owner is not None:
+        socketio.emit(event, item, to=f'member:{owner}')
+
+
+# sockets of admin profiles sit in this room, every other profile's in
+# member:<id>; a socket is in exactly one of them (see _ws_join_role_room)
+ADMIN_SOCKET_ROOM = 'role:admin'
+set_activity_toast_emitter(_emit_activity_toast)
 # Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
 from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
 _set_overlay_emit(socketio.emit)
@@ -4335,8 +4347,11 @@ def get_activity_feed():
     """Get recent activity feed for dashboard"""
     try:
         with activity_feed_lock:
-            # Return last 10 activities in reverse chronological order
-            return jsonify({'activities': activity_feed[-10:][::-1]})
+            feed = list(activity_feed)
+        # Return last 10 activities in reverse chronological order. a member
+        # sees what their own requests did, the admin everything
+        mine = _rt_state.activity_visible_to(feed, get_current_profile_id(), is_admin_request())
+        return jsonify({'activities': mine[-10:][::-1]})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4354,7 +4369,9 @@ def get_recent_toasts():
                 if activity.get('show_toast', True) and
                    (current_time - activity.get('timestamp', 0)) <= 10
             ]
-            return jsonify({'toasts': recent_toasts})
+        recent_toasts = _rt_state.activity_visible_to(
+            recent_toasts, get_current_profile_id(), is_admin_request())
+        return jsonify({'toasts': recent_toasts})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4363,37 +4380,40 @@ def get_activity_logs():
     """Get formatted activity feed for display in sync page log area"""
     try:
         with activity_feed_lock:
-            # Get the last 50 activities (more than the dashboard shows)
-            recent_activities = activity_feed[-50:] if len(activity_feed) > 50 else activity_feed[:]
+            feed = list(activity_feed)
+        # Get the last 50 activities (more than the dashboard shows); a
+        # member's own only
+        feed = _rt_state.activity_visible_to(feed, get_current_profile_id(), is_admin_request())
+        recent_activities = feed[-50:]
 
-            # Reverse order so newest appears at top
-            recent_activities = recent_activities[::-1]
+        # Reverse order so newest appears at top
+        recent_activities = recent_activities[::-1]
 
-            # Format activities as readable log entries
-            formatted_logs = []
+        # Format activities as readable log entries
+        formatted_logs = []
 
-            if not recent_activities:
-                formatted_logs = [
-                    "No recent activity.",
-                    "Sync and download operations will appear here in real-time."
-                ]
-            else:
-                for activity in recent_activities:
-                    # Format: [TIME] ICON TITLE - SUBTITLE
-                    timestamp = activity.get('time', 'Unknown')
-                    icon = activity.get('icon', '•')
-                    title = activity.get('title', 'Activity')
-                    subtitle = activity.get('subtitle', '')
+        if not recent_activities:
+            formatted_logs = [
+                "No recent activity.",
+                "Sync and download operations will appear here in real-time."
+            ]
+        else:
+            for activity in recent_activities:
+                # Format: [TIME] ICON TITLE - SUBTITLE
+                timestamp = activity.get('time', 'Unknown')
+                icon = activity.get('icon', '•')
+                title = activity.get('title', 'Activity')
+                subtitle = activity.get('subtitle', '')
 
-                    # Create a clean, readable log entry
-                    if subtitle:
-                        log_entry = f"[{timestamp}] {icon} {title} - {subtitle}"
-                    else:
-                        log_entry = f"[{timestamp}] {icon} {title}"
+                # Create a clean, readable log entry
+                if subtitle:
+                    log_entry = f"[{timestamp}] {icon} {title} - {subtitle}"
+                else:
+                    log_entry = f"[{timestamp}] {icon} {title}"
 
-                    formatted_logs.append(log_entry)
+                formatted_logs.append(log_entry)
 
-            return jsonify({'logs': formatted_logs})
+        return jsonify({'logs': formatted_logs})
 
     except Exception as e:
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
@@ -16284,10 +16304,13 @@ def get_active_processes():
     - YouTube discovery/sync processes (non-fresh phases)
     """
     active_processes = []
+    _me, _admin = get_current_profile_id(), is_admin_request()
 
-    # Add active download batch processes
+    # Add active download batch processes (a member's own; the admin's all)
     with tasks_lock:
         for batch_id, batch_data in download_batches.items():
+            if not _batch_visible_to(batch_data, _me, _admin):
+                continue
             if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
                 process_info = {
                     "type": "batch",
@@ -16391,6 +16414,10 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
 def get_batch_download_status(batch_id):
     """Returns real-time status for a single batch."""
     try:
+        with tasks_lock:
+            _batch = download_batches.get(batch_id)
+        if _batch is not None and not _batch_visible_to(_batch, get_current_profile_id(), is_admin_request()):
+            return jsonify({"error": "Batch not found"}), 404
         body, status = _downloads_status.build_single_batch_status(batch_id, _build_status_deps())
         return jsonify(body), status
     except Exception as e:
@@ -16404,6 +16431,12 @@ def get_batched_download_statuses():
     """Returns status for multiple download batches in one request."""
     try:
         requested_batch_ids = request.args.getlist('batch_ids')
+        # another profile's batch isn't there for a member
+        _me, _admin = get_current_profile_id(), is_admin_request()
+        if not _admin:
+            with tasks_lock:
+                requested_batch_ids = [b for b in requested_batch_ids
+                                       if _batch_visible_to(download_batches.get(b), _me, _admin)]
         # batches whose modal is open on screen; keeps them past the auto-cleanup
         watching = request.args.getlist('watching')
         if watching:
@@ -16428,12 +16461,34 @@ def watch_download_batches():
     return jsonify({"success": True})
 
 
+def _downloads_for_member(body, pid):
+    """the downloads page as a member sees it: the live tasks of batches their
+    profile started. history rows carry no owner, so they're the admin's."""
+    with tasks_lock:
+        owners = {bid: b.get('profile_id') for bid, b in download_batches.items()}
+    def mine(row):
+        return _batch_visible_to({'profile_id': owners.get(row.get('batch_id'))}, pid, False)
+
+    out = dict(body or {})
+    rows = out.get('downloads')
+    if isinstance(rows, list):
+        out['downloads'] = [r for r in rows if isinstance(r, dict)
+                            and not r.get('is_persistent_history') and mine(r)]
+        out['total'] = len(out['downloads'])
+    if isinstance(out.get('batches'), list):
+        out['batches'] = [b for b in out['batches'] if isinstance(b, dict) and mine(b)]
+    return out
+
+
 @app.route('/api/downloads/all', methods=['GET'])
 def get_all_downloads_unified():
     """Unified downloads list for the centralized Downloads page."""
     try:
         limit = int(request.args.get('limit', 200))
-        return jsonify(_downloads_status.build_unified_downloads_response(limit, _build_status_deps()))
+        body = _downloads_status.build_unified_downloads_response(limit, _build_status_deps())
+        if not is_admin_request():
+            body = _downloads_for_member(body, get_current_profile_id())
+        return jsonify(body)
     except Exception as e:
         logger.error(f"Error getting unified downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -16445,6 +16500,9 @@ def get_batch_history():
     try:
         days = int(request.args.get('days', 7))
         limit = int(request.args.get('limit', 50))
+        # finished batches carry no owner: the admin's history
+        if not is_admin_request():
+            return jsonify({'success': True, 'history': []})
         database = get_database()
         history = database.get_recent_batch_history(days=days, limit=limit)
         return jsonify({'success': True, 'history': history})
@@ -23214,7 +23272,7 @@ def _chat_auto_prove_loop():
                     'icon': '🤖', 'title': 'Chat auto-reply',
                     'subtitle': "answered %s's download challenge with '%s'" % (
                         r['username'], r['token']),
-                })
+                }, to=ADMIN_SOCKET_ROOM)
         except Exception:
             logger.debug("chat auto-prove loop error", exc_info=True)
 
@@ -23501,6 +23559,7 @@ def handle_connect():
     # #1837: remember the session this socket connected under so the
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
+    _ws_join_role_room()
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
@@ -23538,10 +23597,15 @@ def handle_download_subscribe(data):
     """Client subscribes to download batch updates by joining rooms."""
     if _ws_drop_sid_if_revoked():
         return
-    batch_ids = data.get('batch_ids', [])
-    for bid in batch_ids:
+    batch_ids = data.get('batch_ids', []) or []
+    # a batch's live updates go to whoever started it, and to admins
+    pid, is_admin = _ws_session_profile()
+    with tasks_lock:
+        allowed = [bid for bid in batch_ids
+                   if _batch_visible_to(download_batches.get(bid), pid, is_admin)]
+    for bid in allowed:
         join_room(f'batch:{bid}')
-    logger.debug(f"Client subscribed to batches: {batch_ids}")
+    logger.debug(f"Client subscribed to batches: {allowed}")
 
 @socketio.on('downloads:unsubscribe')
 def handle_download_unsubscribe(data):
@@ -23575,8 +23639,40 @@ def handle_profile_join(data):
     old_id = data.get('old_profile_id')
     if old_id:
         leave_room(f'profile:{old_id}')
+        leave_room(f'member:{old_id}')
     join_room(f'profile:{target}')
+    _ws_join_role_room()
     logger.debug(f"Client joined profile room: profile:{target}")
+
+
+def _batch_visible_to(batch, pid, is_admin) -> bool:
+    """may this caller see a download batch (its live status, its room)? an
+    admin, any; anyone else, one their own profile started"""
+    if is_admin:
+        return True
+    owner = (batch or {}).get('profile_id')
+    try:
+        return pid is not None and owner is not None and int(owner) == int(pid)
+    except (TypeError, ValueError):
+        return False
+
+
+def _ws_join_role_room():
+    """put this socket in the admins' room or its member room (never both),
+    the rooms the activity feed and toasts are sent to"""
+    try:
+        pid, is_admin = _ws_session_profile()
+    except Exception as e:  # noqa: BLE001 - no room is the safe answer
+        logger.debug("role room: %s", e)
+        return
+    leave_room(ADMIN_SOCKET_ROOM)
+    if pid is None:
+        return
+    if is_admin:
+        leave_room(f'member:{pid}')
+        join_room(ADMIN_SOCKET_ROOM)
+    else:
+        join_room(f'member:{pid}')
 
 
 def _ws_session_profile():
@@ -23627,6 +23723,17 @@ def _emit_system_stats_loop():
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
+def _push_activity_feed():
+    """the dashboard feed: everything to the admins, and to each member the
+    items their own requests made"""
+    with activity_feed_lock:
+        feed = list(activity_feed)
+    socketio.emit('dashboard:activity', {'activities': feed[-10:][::-1]}, to=ADMIN_SOCKET_ROOM)
+    for owner in {a.get('profile_id') for a in feed if a.get('profile_id') is not None}:
+        mine = [a for a in feed if a.get('profile_id') == owner]
+        socketio.emit('dashboard:activity', {'activities': mine[-10:][::-1]}, to=f'member:{owner}')
+
+
 def _emit_activity_feed_loop():
     """Background thread that pushes activity feed every 2 seconds.
     Skipped entirely while no client is connected."""
@@ -23635,9 +23742,7 @@ def _emit_activity_feed_loop():
         if not _has_connected_clients():
             continue
         try:
-            with activity_feed_lock:
-                activities = activity_feed[-10:][::-1]
-            socketio.emit('dashboard:activity', {'activities': activities})
+            _push_activity_feed()
         except Exception as e:
             logger.debug(f"Error emitting activity feed: {e}")
 
