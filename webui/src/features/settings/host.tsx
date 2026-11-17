@@ -26,6 +26,7 @@ import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';
 import { LogsTab } from './tabs/logs-tab';
 import { playlistItemError, templateErrors } from './tabs/organization';
+import { PeopleTab, openPeopleSettings } from './tabs/people/people-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
 import { SourcesTab } from './tabs/sources-tab';
@@ -38,6 +39,7 @@ export type SettingsTabKey =
   | 'quality'
   | 'library'
   | 'discovery'
+  | 'people'
   | 'appearance'
   | 'advanced'
   | 'logs';
@@ -87,6 +89,7 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   downloads: DownloadsTab,
   library: LibraryTab,
   logs: LogsTab,
+  people: PeopleTab,
   quality: QualityTab,
   sources: SourcesTab,
 };
@@ -179,6 +182,9 @@ export function mountSettingsHost(): void {
   shell.closeServiceModal = () => servicesModel.close();
   // every card's Test button, React's and the video side's vanilla ones
   shell.testConnection = (service: string) => testConnection(service);
+  // Settings > People, from Manage profiles and anywhere else that sends
+  // someone to people and access
+  shell.openPeopleSettings = openPeopleSettings;
   // this bundle is a deferred module: the shell (shell.ts, in the shell
   // bundle) may have loaded the settings before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;
