@@ -26,6 +26,10 @@
     var loadingMore = false;
     var observer = null;
 
+    // the poster's identity for its status badge (#2160, video-title-status.js)
+    function statusAttrs(kind, tmdbId, owned) {
+        return window.VideoTitleStatus ? VideoTitleStatus.cardAttrs(kind, tmdbId, owned) : '';
+    }
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -54,7 +58,8 @@
         var cb = window.VideoGet ? VideoGet.cardButton({ kind: 'movie', tmdbId: m.tmdb_id,
             libraryId: m.library_id, title: m.title, poster: m.poster, status: m.status, source: source }) : '';
         return '<a class="vsr-card" href="' + href + '" ' +
-            'data-vst-open="movie" data-vst-source="' + source + '" data-vst-cid="' + id + '">' + cb +
+            'data-vst-open="movie" data-vst-source="' + source + '" data-vst-cid="' + id + '"' +
+            statusAttrs('movie', m.tmdb_id, owned) + '>' + cb +
             '<div class="vsr-poster">' + img + ribbon + rating +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(m.title) + '">' + esc(m.title) +

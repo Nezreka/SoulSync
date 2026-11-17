@@ -164,7 +164,10 @@ class SeerrCompat:
     # ---- media status --------------------------------------------------------
 
     def _infos(self, items: Iterable[dict]) -> Dict[tuple, Optional[dict]]:
-        """{(kind, tmdb_id): mediaInfo} for a batch of engine items."""
+        """{(kind, tmdb_id): mediaInfo} for a batch of engine items. the status
+        comes from the same batch the video pages read (#2160)."""
+        from core.video import title_status
+
         db = self._db()
         srv = self._server()
         by_kind: Dict[str, List[dict]] = {"movie": [], "show": []}
@@ -176,17 +179,14 @@ class SeerrCompat:
             if not rows:
                 continue
             ids = [int(r["tmdb_id"]) for r in rows]
-            owned = {int(r["tmdb_id"]) for r in rows if r.get("library_id") is not None}
-            unknown = [int(r["tmdb_id"]) for r in rows if "library_id" not in r]
-            if unknown:
-                owned |= set(db.library_ids_for_tmdb(kind, unknown, srv) or {})
-            states = self.store.title_states(kind, ids)
-            coverage = (self.store.show_coverage(owned, self._today(), srv)
-                        if kind == "show" and owned else {})
+            # the engine stamps library_id on what it knows; the rest is looked up
+            hint = {int(r["tmdb_id"]): r.get("library_id") is not None
+                    for r in rows if "library_id" in r}
+            got = title_status.batch(db, self.store, kind, ids, server=srv, today=self._today(),
+                                     owned_hint=hint)
             for tid in ids:
-                status = shapes.media_status(kind, owned=tid in owned, coverage=coverage.get(tid),
-                                             state=states.get(tid))
-                out[(kind, tid)] = shapes.media_info(kind, tid, status)
+                st = (got.get(tid) or {}).get("status")
+                out[(kind, tid)] = shapes.media_info(kind, tid, title_status.seerr_code(st))
         return out
 
     def _results(self, items: Iterable[dict], *, people: bool = False) -> List[dict]:
@@ -267,13 +267,15 @@ class SeerrCompat:
         d = self._detail(kind, tmdb_id)
         if not d:
             raise SeerrError(404, "Unable to retrieve %s." % ("movie" if kind == "movie" else "series"))
+        from core.video import title_status
+
         db = self._db()
         srv = self._server()
         owned = db.library_id_for_tmdb(kind, tmdb_id, srv) is not None
-        state = self.store.title_states(kind, [tmdb_id]).get(int(tmdb_id))
-        coverage = (self.store.show_coverage([tmdb_id], self._today(), srv).get(int(tmdb_id))
-                    if kind == "show" and owned else None)
-        status = shapes.media_status(kind, owned=owned, coverage=coverage, state=state)
+        got = title_status.batch(db, self.store, kind, [tmdb_id], server=srv, today=self._today(),
+                                 owned_hint={int(tmdb_id): owned}).get(int(tmdb_id)) or {}
+        coverage = got.get("coverage")
+        status = title_status.seerr_code(got.get("status"))
         seasons = []
         if kind == "show":
             seasons = shapes.season_statuses(coverage or {}, self.store.wished_seasons(tmdb_id))
@@ -461,6 +463,13 @@ class SeerrCompat:
         pending = any(_int(r.get("tmdb_id")) == tmdb_id and r.get("kind") == kind
                       for r in db.list_video_requests(profile_id=pid, status="pending"))
         if pending:
+            raise SeerrError(409, "Request for this media already exists.")
+        # already on its way (wishlisted, approved, downloading): asking again
+        # would only put a duplicate in the admin's queue (#2160)
+        from core.video import title_status
+        got = title_status.batch(db, self.store, kind, [tmdb_id], server=self._server(),
+                                 today=self._today()).get(int(tmdb_id)) or {}
+        if title_status.blocks_request(kind, got.get("status"), got.get("state")):
             raise SeerrError(409, "Request for this media already exists.")
         quota = quota_for(p)
         if quota and over_quota(quota, db.count_video_requests_since(pid, quota["days"])):

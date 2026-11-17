@@ -68,6 +68,27 @@ def _already_pending(db, kind, tmdb_id, season, episode, youtube_id) -> bool:
     return False
 
 
+def _title_taken(db, kind, tmdb_id) -> tuple:
+    """(on the way, someone else already asked) for a movie or show, from the
+    same status the posters show (core/video/title_status.py)."""
+    from datetime import date
+
+    from core.video import title_status as ts
+    try:
+        store = ts.TitleStatusStore(lambda: db._get_connection())
+        got = ts.batch(db, store, kind, [tmdb_id], server=_server(),
+                       today=date.today().isoformat()).get(int(tmdb_id)) or {}
+        rows = store.title_requests(kind, [tmdb_id]).get(int(tmdb_id)) or []
+    except Exception:  # noqa: BLE001 - a status hiccup never blocks an ask
+        logger.debug("title status check failed for %s %s", kind, tmdb_id, exc_info=True)
+        return False, False
+    if ts.blocks_request(kind, got.get("status"), got.get("state")):
+        return True, False
+    others = any(r.get("status") == "pending" and r.get("kind") == kind
+                 and int(r.get("profile_id") or 0) != _me() for r in rows)
+    return False, others
+
+
 def _claim_key(req) -> tuple:
     """The title identity a claim scopes to (approve-all dedups on it)."""
     if req.get("kind") == "episode":
@@ -194,12 +215,22 @@ def register_routes(bp):
             monitor = monitor_for_new_request(kind, body.get("monitor"))
             title = meta["title"]
             year, poster_url = meta["year"], meta["poster_url"]
+        # already on its way (wishlisted, approved, downloading): a second ask
+        # would only be a duplicate in the admin's queue (#2160). someone
+        # else's ask still waiting is fine: this one joins it (the queue shows
+        # one row, everyone who asked hears the answer) and costs no quota.
+        joining = False
+        if kind in ("movie", "show"):
+            on_way, joining = _title_taken(db, kind, tmdb_id)
+            if on_way:
+                return jsonify({"success": False, "on_the_way": True,
+                                "error": "That's already on the way."}), 409
         # a limited profile's quota (asks per window, any outcome counts)
         from core.requests.quota import over_quota, quota_for, quota_message, quota_state
         quota = quota_for(_profile_row(_me()))
         if quota:
             used = db.count_video_requests_since(_me(), quota["days"])
-            if over_quota(quota, used) and not _already_pending(
+            if over_quota(quota, used) and not joining and not _already_pending(
                     db, kind, tmdb_id, season, episode, youtube_id):
                 return jsonify({"success": False, "error": quota_message(quota),
                                 "quota": quota_state(quota, used)}), 429
@@ -224,7 +255,8 @@ def register_routes(bp):
                     "requester": getattr(g, "profile_name", None) or ""})
             except Exception:   # noqa: BLE001 - events never disturb the request
                 logger.exception("request-created event publish failed")
-        return jsonify({"success": True, "id": rid, "already": not created})
+        return jsonify({"success": True, "id": rid, "already": not created,
+                        "joined": bool(created and joining)})
 
     @bp.route("/requests", methods=["GET"])
     def video_request_list():

@@ -2428,6 +2428,62 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @media (hover: none) { .vreq-card-btn { opacity: 1; transform: none; } }
 .vsr-ribbon--req { background: rgba(59, 130, 246, 0.9); border: none; }
 .vsr-ribbon--req-here { background: rgba(var(--success-strong-rgb), 0.95); }
+
+/* where a title stands (#2160, video-title-status.js). the same few looks on
+   every poster: In Library (owned), Partial, Requested (req), on the way
+   (wish), Searching / Downloading (active), Failed. */
+.vsr-ribbon--partial { background: var(--black-a65); color: rgb(var(--success-rgb));
+    border: 1px solid rgba(var(--success-rgb), 0.5); }
+.vsr-ribbon--active { background: rgba(var(--accent-rgb), 0.92); border: none; }
+.vsr-ribbon--failed { background: var(--black-a65); color: rgb(var(--warning-rgb));
+    border: 1px solid rgba(var(--warning-rgb), 0.5); }
+.vsr-ribbon--active::before, .vd-sim-wishchip--active::before, .vts-block--active .vts-dot {
+    animation: vsrBasicPulse 1.6s ease-in-out infinite; }
+.vsr-ribbon--active::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px;
+    border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.vdsc-page .vsr-ribbon--req, .vdsc-page .vsr-ribbon--active {
+    background: var(--black-a60); color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.5); }
+.vdsc-page .vsr-ribbon--req { color: rgb(var(--info-rgb)); border-color: rgba(var(--info-rgb), 0.5); }
+.vdsc-page .vsr-ribbon--partial, .vdsc-page .vsr-ribbon--failed { background: var(--black-a60); }
+.vd-sim-wishchip--req { background: rgba(var(--info-rgb), 0.92); }
+.vd-sim-wishchip--partial { background: var(--black-a65); color: rgb(var(--success-rgb)); }
+.vd-sim-wishchip--failed { background: var(--black-a65); color: rgb(var(--warning-rgb)); }
+
+/* the detail page's block above the actions */
+.vts-host { margin: 0 0 14px; }
+.vts-host[hidden] { display: none; }
+.vts-block { --vts-c: var(--accent-rgb); display: flex; align-items: flex-start; gap: 11px;
+    max-width: 560px; padding: 10px 14px; border-radius: var(--radius-md);
+    background: var(--black-a35); border: 1px solid var(--white-a10);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.vts-block--owned, .vts-block--partial { --vts-c: var(--success-rgb); }
+.vts-block--req { --vts-c: var(--info-rgb); }
+.vts-block--wish { --vts-c: var(--accent-light-rgb); }
+.vts-block--failed { --vts-c: var(--warning-rgb); }
+.vts-dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%;
+    background: rgb(var(--vts-c)); box-shadow: 0 0 0 4px rgba(var(--vts-c), 0.16); }
+.vts-main { min-width: 0; flex: 1; }
+.vts-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
+.vts-sub { margin-top: 2px; font-size: 12.5px; color: var(--white-a60); }
+.vts-link { margin-left: 4px; padding: 0; border: 0; background: none; font: inherit;
+    color: rgb(var(--vts-c)); cursor: pointer; text-decoration: underline;
+    text-underline-offset: 2px; text-decoration-color: rgba(var(--vts-c), 0.45); }
+.vts-link:hover, .vts-link:focus-visible { text-decoration-color: currentColor; outline: none; }
+.vts-bar { margin-top: 8px; height: 3px; border-radius: var(--radius-pill); background: var(--white-a10);
+    overflow: hidden; }
+.vts-bar-fill { display: block; height: 100%; border-radius: inherit; background: rgb(var(--vts-c));
+    transition: width var(--dur-slow) ease; }
+.vts-seasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.vts-season { padding: 2px 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600;
+    background: var(--white-a06); border: 1px solid var(--white-a12); color: var(--white-a75); }
+.vts-season-tail { font-weight: 500; color: var(--white-a50); }
+.vts-season--available { border-color: rgba(var(--success-rgb), 0.4); }
+.vts-season--available .vts-season-tail { color: rgb(var(--success-rgb)); }
+.vts-season--processing .vts-season-tail { color: rgb(var(--accent-light-rgb)); }
+@media (prefers-reduced-motion: reduce) {
+    .vsr-ribbon--active::before, .vd-sim-wishchip--active::before, .vts-block--active .vts-dot { animation: none; }
+}
 @media (max-width: 640px) {
     .vreq-page { padding: 22px 16px 48px; }
     .vreq-row { flex-wrap: wrap; }
@@ -8042,6 +8098,17 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     border-radius: 50%;
     background: var(--success-strong);
 }
+/* the other title states (#2160): the same quiet glass, the dot says which */
+.vd-page .vd-sim-wishchip--req, .vd-page .vd-sim-wishchip--wish, .vd-page .vd-sim-wishchip--active,
+.vd-page .vd-sim-wishchip--partial, .vd-page .vd-sim-wishchip--failed { padding-left: 18px; }
+.vd-page .vd-sim-wishchip--req::before, .vd-page .vd-sim-wishchip--wish::before,
+.vd-page .vd-sim-wishchip--active::before, .vd-page .vd-sim-wishchip--partial::before,
+.vd-page .vd-sim-wishchip--failed::before {
+    content: ''; position: absolute; left: 8px; top: 50%; width: 6px; height: 6px; margin-top: -3px;
+    border-radius: 50%; background: rgb(var(--accent-light-rgb)); }
+.vd-page .vd-sim-wishchip--req::before { background: rgb(var(--info-rgb)); }
+.vd-page .vd-sim-wishchip--partial::before { background: rgb(var(--success-rgb)); }
+.vd-page .vd-sim-wishchip--failed::before { background: rgb(var(--warning-rgb)); }
 
 /* videos + photos */
 .vd-page .vd-videos { gap: 18px; margin-top: 20px; }

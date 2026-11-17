@@ -32,6 +32,10 @@
     var listCache = {};   // session cache of /discover/list responses, keyed by URL
 
     function $(s, r) { return (r || document).querySelector(s); }
+    // the poster's identity for its status badge (#2160, video-title-status.js)
+    function statusAttrs(kind, tmdbId, owned) {
+        return window.VideoTitleStatus ? VideoTitleStatus.cardAttrs(kind, tmdbId, owned) : '';
+    }
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -216,7 +220,7 @@
             'data-ig-poster="' + esc(it.poster || '') + '">✕</button>' : '';
         return '<a class="vsr-card' + (owned ? ' vsr-card--owned' : '') + '" href="' + href + '" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id +
-            '" style="--vgm-h:' + hueOf(it.title) + '">' + cb + notInt +
+            '"' + statusAttrs(it.kind, it.tmdb_id, owned) + ' style="--vgm-h:' + hueOf(it.title) + '">' + cb + notInt +
             '<div class="vsr-poster">' + img + ribbon + rating + fresh +
             '<span class="vsr-peek" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18">' +
             '<path d="M7 17L17 7M9 7h8v8" stroke="currentColor" stroke-width="2" fill="none" ' +
@@ -565,7 +569,7 @@
             '</div>';
         // The CTA needs to know if this title is ALREADY wishlisted ("✓ In
         // Wishlist" instead of offering an add that would no-op).
-        if (window.VideoWishState) VideoWishState.hydrate(body);
+        if (window.VideoTitleStatus) VideoTitleStatus.hydrate(body);
         preloadNextHero();
     }
     // Decode the NEXT slide's backdrop while the current one shows, so the
@@ -821,7 +825,7 @@
         var row = $('[data-vdsc-stories-row]'); if (!row) return;
         row.innerHTML = cards.join('');
         var sec = $('[data-vdsc-stories]'); if (sec) sec.classList.remove('hidden');
-        if (window.VideoWishState) VideoWishState.hydrate(row);
+        if (window.VideoTitleStatus) VideoTitleStatus.hydrate(row);
     }
     // ── full-width poster banners (music-Discover parity) ──────────────────
     // Same data trio as the stories; each banner is a cinematic moment between

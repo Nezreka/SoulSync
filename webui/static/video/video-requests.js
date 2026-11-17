@@ -871,9 +871,17 @@
                             toast('That’s already in your library', 'info');
                             return { ok: false, in_library: true };
                         }
+                        if (j.on_the_way) {
+                            // someone already has it coming (#2160): say so, and
+                            // repaint so the button stops offering it
+                            toast('That’s already on the way', 'info');
+                            changed();
+                            return { ok: false, on_the_way: true };
+                        }
                         if (!j.success) throw new Error(j.error || '');
                         toast(j.already ? 'Already requested. You’ll hear when it’s decided'
-                                        : 'Requested. You’ll hear when it’s decided', 'success');
+                            : j.joined ? 'Someone already asked, you’re on it too. You’ll hear when it’s decided'
+                                : 'Requested. You’ll hear when it’s decided', 'success');
                         mine(true).then(changed);
                         return { ok: true, already: !!j.already };
                     });
@@ -913,12 +921,17 @@
     // Requested / Available on un-owned cards, over the Preview ribbon. keyed
     // off the card's request button: every surface (search, discover, person,
     // studio, more like this) gets one for these profiles, whatever its own
-    // data attributes are called.
+    // data attributes are called. movies and shows belong to the shared title
+    // status (video-title-status.js, #2160) when it's loaded: it knows about
+    // everyone's requests and downloads, not just this profile's.
     var RIBBON_SEL = '.vsr-ribbon--preview, .vsr-ribbon--wish, .vsr-ribbon--req';
     function paintCards(root, states) {
         var btns = root.querySelectorAll('[data-vreq-card]');
+        var shared = !!window.VideoTitleStatus;
         for (var i = 0; i < btns.length; i++) {
             var b = btns[i];
+            var bk = b.getAttribute('data-kind');
+            if (shared && (bk === 'movie' || bk === 'show')) continue;
             var st = states[reqKey(b.getAttribute('data-kind'), b.getAttribute('data-tmdb'),
                 b.getAttribute('data-season'), b.getAttribute('data-episode'),
                 b.getAttribute('data-youtube'))] || '';
