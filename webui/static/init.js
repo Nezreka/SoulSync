@@ -2929,12 +2929,13 @@ function pfFeaturesLine(payload, off, locked) {
 }
 
 // presets, one switch per part, and the lock. fst holds {off, locked} and
-// gets dirty on any change; offered() says which switches show right now
+// gets dirty on any change, offDirty / lockDirty say which half (#2164);
+// offered() says which switches show right now
 function pfFeatureChooser(payload, fst, { offered = null, lockTitle = 'Lock it', lockDesc = '', onChange = null } = {}) {
     const box = pfEl('div');
-    const changed = (redraw) => {
+    const changed = (redraw, half = 'off') => {
         fst.dirty = true;
-        fst.reset = false;
+        if (half === 'lock') fst.lockDirty = true; else fst.offDirty = true;
         if (redraw) render();
         if (onChange) onChange();
     };
@@ -2967,7 +2968,7 @@ function pfFeatureChooser(payload, fst, { offered = null, lockTitle = 'Lock it',
                 },
             }).row)));
         });
-        const lock = pfSwitch({ title: lockTitle, desc: lockDesc, checked: fst.locked, onChange: (on) => { fst.locked = on; changed(false); } });
+        const lock = pfSwitch({ title: lockTitle, desc: lockDesc, checked: fst.locked, onChange: (on) => { fst.locked = on; changed(false, 'lock'); } });
         box.append(pfEl('div', { class: 'pf-group', style: 'margin-top:12px' }, lock.row));
     }
     render();
@@ -2998,7 +2999,7 @@ async function openFeatureDefaults(onSaved = null) {
     const fst = { off: (payload.off || []).slice(), locked: !!payload.locked, dirty: false, reset: false };
     const chooser = pfFeatureChooser(payload, fst, {
         lockTitle: 'Lock it',
-        lockDesc: "They see this and can't change it. You still can, from their profile.",
+        lockDesc: "They see this, can't change it and don't get Customize. Anything they picked before is set aside. You still can, from their profile.",
     });
     modal.body.append(chooser.box, error);
     save.disabled = false;
@@ -3436,13 +3437,18 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             syncAccess();
         }
 
-        // advanced: the page list, the home page, own library
+        // the page list, the home page, own library
         const pagePicker = pfPagePicker(st, () => renderHomeOptions());
         const pagesBox = pagePicker.box;
         const renderPages = pagePicker.render;
 
-        const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: 'Choose pages' })]);
-        details.append(pagesBox, homeField);
+        // the page list sits with the sides: both are what they can open (#2164)
+        const pagesSummary = pfEl('summary');
+        const pagesDetails = pfEl('details', { class: 'pf-details', style: 'margin-top:10px' }, [pagesSummary, pagesBox]);
+        const syncPagesSummary = () => { pagesSummary.textContent = pfPagesSummary(st); };
+        pagesBox.addEventListener('change', syncPagesSummary);
+        const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: isCreate ? 'Home page' : 'Home page and library' })]);
+        details.append(homeField);
         if (!isCreate) {
             const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
             folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
@@ -3477,15 +3483,18 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         } else if (isCreate) {
             featuresBox.append(pfEl('p', { class: 'pf-help', text: 'They start with what new profiles see. Change it from their profile once they exist.' }));
         }
+        // access first, then what shows of it: two layers, one place (#2164)
         const accessParts = [
             pfEl('div', { class: 'pf-section-title', text: 'Start from' }), presets,
-            pfEl('div', { class: 'pf-section-title', text: 'What they can use' }),
+            pfEl('div', { class: 'pf-section-title', text: 'What they can open' }),
+            pfEl('p', { class: 'pf-help', text: "Anything off here is gone for them: not in their sidebar, and SoulSync refuses it." }),
             pfEl('div', { class: 'pf-group' }, [musicSwitch.row, videoSwitch.row, sideError]),
+            pagesDetails,
+            pfEl('div', { class: 'pf-section-title', text: 'What shows in their sidebar' }), featuresBox,
             pfEl('div', { class: 'pf-section-title', text: 'Downloads' }),
             pfEl('div', { class: 'pf-group' }, dlSwitch.row),
             pfEl('div', { class: 'pf-section-title', text: 'Kids & limits' }),
             pfEl('div', { class: 'pf-group' }, [explicitSwitch.row, ratingRow, limitRow]),
-            pfEl('div', { class: 'pf-section-title', text: 'What shows' }), featuresBox,
         ];
         accessBox.append(...accessParts);
         pane2.append(adminNote, accessBox);
@@ -3523,6 +3532,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             explicitSwitch.row.style.display = st.sides === 'video' ? 'none' : '';
             ratingRow.style.display = st.sides === 'music' ? 'none' : '';
             renderPages();
+            syncPagesSummary();
             renderHomeOptions();
             // the switches follow the sides and pages picked above
             if (featureChooser) featureChooser.render();
@@ -3787,9 +3797,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         }
         if (adminEditsOther && !st.is_admin && featureState && featureState.dirty) {
             try {
-                await send(`/api/profiles/${targetId}/features`, 'POST', featureState.reset
-                    ? { reset: true }
-                    : { off: featureState.off, locked: featureState.locked });
+                await send(`/api/profiles/${targetId}/features`, 'POST', pfFeaturesBody(featureState));
                 saved.push('what shows');
             } catch (e) {
                 failed.push(['what shows', e.message]);
@@ -3821,7 +3829,27 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     modal.open(nameInput);
 }
 
-// the editor's "what shows" section for one profile (#2157)
+// "Pages: all of them" / "Pages: 12 of 23", the page list's summary line
+function pfPagesSummary(st) {
+    const pages = PROFILE_PAGE_GROUPS.filter(g => _pfSidesAllow(st.sides, g.side)).flatMap(g => g.pages);
+    if (!Array.isArray(st.allowed_pages)) return 'Pages: all of them';
+    const on = pages.filter(pg => st.allowed_pages.includes(pg)).length;
+    return `Pages: ${on} of ${pages.length}`;
+}
+
+// what the editor sends for "what shows" (#2164): only the halves the admin
+// touched, so flipping the lock alone doesn't pin a copy of the default
+function pfFeaturesBody(fst) {
+    const body = {};
+    if (fst.reset) body.reset = true;
+    if (fst.offDirty) body.off = fst.off;
+    if (fst.lockDirty) body.locked = fst.locked;
+    return body;
+}
+
+// the editor's "what shows" section for one profile (#2157). the switches
+// are the admin's set for them (what a lock shows), never their own pick:
+// that one is named on its own line so it can't pass for the admin's (#2164)
 async function _pfLoadProfileFeatures(profileId, box, st, ready) {
     let payload;
     try {
@@ -3833,20 +3861,38 @@ async function _pfLoadProfileFeatures(profileId, box, st, ready) {
         box.append(pfEl('p', { class: 'pf-form-error', text: `Couldn't load what shows for them: ${e.message || 'connection error'}` }));
         return;
     }
-    const fst = { off: (payload.off || []).slice(), locked: !!payload.locked, dirty: false, reset: false, follows: !!payload.follows_default };
+    const setOff = Array.isArray(payload.set_off) ? payload.set_off : (payload.off || []);
+    const fst = {
+        off: setOff.slice(), locked: !!payload.locked,
+        dirty: false, offDirty: false, lockDirty: false, reset: false,
+        // the switches follow the default until an admin sets this profile
+        follows: payload.admin_set === undefined ? !!payload.follows_default : !payload.admin_set,
+    };
+    const own = Array.isArray(payload.own_off) ? payload.own_off : null;
     const status = pfEl('span', { class: 'pf-switch-desc' });
+    const ownNote = pfEl('p', { class: 'pf-note', style: 'margin:0 0 10px' });
     const resetBtn = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Reset to default' });
     const syncStatus = () => {
-        const following = fst.reset || (fst.follows && !fst.dirty);
+        const following = (fst.reset || fst.follows) && !fst.offDirty;
         status.textContent = following
-            ? 'Follows what new profiles see.'
+            ? `Follows what new profiles see.${fst.locked ? ' Locked.' : ''}`
             : `${pfFeaturesLine(payload, fst.off, fst.locked)}. Saved with the profile.`;
-        resetBtn.disabled = following;
+        // nothing of their own to drop: no set, no lock by hand, no own pick
+        resetBtn.disabled = (fst.reset && !fst.offDirty && !fst.lockDirty)
+            || (fst.follows && !fst.dirty && !payload.lock_set && !own);
+        ownNote.style.display = own && !fst.reset ? '' : 'none';
+        if (!own) return;
+        const theirs = pfFeaturesLine(payload, own, false);
+        ownNote.textContent = fst.dirty
+            ? `They picked their own (${theirs}). Saving replaces it with this.`
+            : fst.locked
+                ? `They picked their own before (${theirs}). It's ignored while this is locked.`
+                : `They picked their own (${theirs}), so that's what shows for them. Changing anything here replaces it.`;
     };
     const chooser = pfFeatureChooser(payload, fst, {
         offered: () => pfFeaturesOffered(payload.features, st.sides, st.allowed_pages),
         lockTitle: 'Lock it',
-        lockDesc: "They see this and can't change it. Customize shows it read only.",
+        lockDesc: "They can't change it and Customize goes away for them.",
         onChange: syncStatus,
     });
     resetBtn.addEventListener('click', () => {
@@ -3854,13 +3900,16 @@ async function _pfLoadProfileFeatures(profileId, box, st, ready) {
         fst.off = (d.off || []).slice();
         fst.locked = !!d.locked;
         fst.dirty = true;
+        fst.offDirty = false;
+        fst.lockDirty = false;
         fst.reset = true;
         chooser.render();
         syncStatus();
     });
     box.innerHTML = '';
     box.append(
-        pfEl('p', { class: 'pf-help', text: 'Hides parts of SoulSync for them. It never opens a page the list above keeps closed.' }),
+        pfEl('p', { class: 'pf-help', text: "Of what they can open, which parts are in their sidebar. A hidden part still opens from a link. Unlocked, they can change it in Customize." }),
+        ownNote,
         chooser.box,
         pfEl('div', { class: 'pf-action-row', style: 'margin-top:8px' }, [pfEl('span', { class: 'pf-switch-text' }, status), resetBtn]),
     );

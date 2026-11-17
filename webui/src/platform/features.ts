@@ -46,6 +46,16 @@ export function useFeatureOn(id: FeatureId): boolean {
   );
 }
 
+/** an admin locked what this profile shows (#2164): every way into the
+ *  picker goes, there's nothing for them to change */
+export function isFeaturesLocked(): boolean {
+  return window.SoulSyncFeatures?.get().payload?.locked === true;
+}
+
+export function useFeaturesLocked(): boolean {
+  return useSyncExternalStore(subscribe, isFeaturesLocked, () => false);
+}
+
 export function openFeaturePicker(): void {
   window.openFeaturePicker?.();
 }

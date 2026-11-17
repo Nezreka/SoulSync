@@ -63422,6 +63422,9 @@ html.nav-pending .sidebar-nav .nav-section-label { visibility: hidden; }
 .sidebar-customize {
     padding: 6px 12px 0;
 }
+/* an admin locked what this profile shows (#2164): nothing to customize.
+   shell/features.ts sets the attribute, index.html replays it before paint */
+html[data-features-locked] .sidebar-customize { display: none; }
 .sidebar-customize-btn {
     display: flex;
     align-items: center;

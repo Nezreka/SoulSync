@@ -18,6 +18,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import { useFeaturesLocked } from '@/platform/features';
+
 import type { SettingsTabProps } from '../host';
 
 import {
@@ -78,28 +80,32 @@ function UiAppearance({ store }: SettingsTabProps) {
     reread();
   };
   const locked = flags.maxPerformance ? 'form-group setting-overridden' : 'form-group';
+  // an admin set what this profile shows and locked it: no door to the picker (#2164)
+  const featuresLocked = useFeaturesLocked();
 
   return (
     <>
       {/* what shows in the app (#1909). per profile, so it lives in the
           picker, this is just a door to it */}
-      <div className="settings-group" data-stg={TAB}>
-        <h3>Show only what you use</h3>
-        <div className="form-group">
-          <small className="settings-hint">
-            Hide the parts of SoulSync you don't use, like podcasts, audiobooks or the video side.
-            They keep working and come back with one switch. Each profile picks its own.
-          </small>
-          <button
-            type="button"
-            className="test-button"
-            id="settings-open-feature-picker"
-            onClick={() => window.openFeaturePicker?.()}
-          >
-            Customize SoulSync
-          </button>
+      {featuresLocked ? null : (
+        <div className="settings-group" data-stg={TAB}>
+          <h3>Show only what you use</h3>
+          <div className="form-group">
+            <small className="settings-hint">
+              Hide the parts of SoulSync you don't use, like podcasts, audiobooks or the video side.
+              They keep working and come back with one switch. Each profile picks its own.
+            </small>
+            <button
+              type="button"
+              className="test-button"
+              id="settings-open-feature-picker"
+              onClick={() => window.openFeaturePicker?.()}
+            >
+              Customize SoulSync
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="settings-group" data-stg={TAB}>
         <h3>UI Appearance</h3>
