@@ -2455,6 +2455,15 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 #### `GET /api/v1/video/downloads/history`
 
+#### Who may do what on the video downloads (web UI session API)
+
+- `GET /api/video/downloads/active`, `/downloads/history` and `/downloads/status?id=`: a member gets the grabs they started, an admin everyone's. Queue rows carry `can_cancel`.
+- `POST /api/video/downloads/cancel`: an admin any download, a member only one they started (`403` otherwise). An automatic grab has no owner, so it's the admin's.
+- `POST /downloads/clear`, `/downloads/remove`, `/downloads/recycle/restore`, `/downloads/recycle/purge`, `/downloads/history/clear`, `DELETE /downloads/history/{id}`, `POST /scan/request`, `/scan/stop`, `/scan/server`, and writes to `/discover/languages` and `/discover/providers-pref`: admin only.
+- `POST /youtube/follow`, `/youtube/playlist/follow`, `/youtube/subscriptions/import` and `/youtube/channel/{id}/settings`: need download rights.
+- A kids profile's rating cap holds on requests, wishlist and watchlist adds, manual search and grab, and the title reads (acquisition, history, title status, posters).
+- The video request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back.
+
 #### Release ranking (web UI session API)
 
 The video search the web UI runs (`POST /api/video/downloads/search`, `/downloads/search/start` and `GET /downloads/search/poll`) returns each result with:

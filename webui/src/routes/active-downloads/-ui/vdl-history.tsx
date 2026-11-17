@@ -40,11 +40,14 @@ function HistoryRow({
   open,
   onToggle,
   onRemoved,
+  canManage = true,
 }: {
   item: VdlHistoryItem;
   open: boolean;
   onToggle: () => void;
   onRemoved: () => void;
+  /** re-download (forget) and the blocks are the admin's */
+  canManage?: boolean;
 }) {
   const [blocked, setBlocked] = useState<'release' | 'uploader' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -167,39 +170,41 @@ function HistoryRow({
               <span className="vdh-d-v">{item.error}</span>
             </div>
           ) : null}
-          <div className="vdh-detail-act">
-            <button
-              type="button"
-              className="vdh-redl"
-              title="Forget this grab so it re-downloads on the next scan"
-              disabled={busy}
-              onClick={onRedownload}
-            >
-              &#8635; Re-download
-            </button>
-            {canBlockRelease ? (
+          {canManage ? (
+            <div className="vdh-detail-act">
               <button
                 type="button"
-                className="vdh-redl vdh-block"
-                title="Never pick this exact release again"
-                disabled={busy || blocked !== null}
-                onClick={onBlockRelease}
+                className="vdh-redl"
+                title="Forget this grab so it re-downloads on the next scan"
+                disabled={busy}
+                onClick={onRedownload}
               >
-                {blocked === 'release' ? 'Blocked' : <>&#8856; Block release</>}
+                &#8635; Re-download
               </button>
-            ) : null}
-            {canBlockUploader ? (
-              <button
-                type="button"
-                className="vdh-redl vdh-block"
-                title={`Never grab from this uploader (${item.username}) again`}
-                disabled={busy || blocked === 'uploader'}
-                onClick={onBlockUploader}
-              >
-                {blocked === 'uploader' ? 'Uploader blocked' : <>&#8856; Block uploader</>}
-              </button>
-            ) : null}
-          </div>
+              {canBlockRelease ? (
+                <button
+                  type="button"
+                  className="vdh-redl vdh-block"
+                  title="Never pick this exact release again"
+                  disabled={busy || blocked !== null}
+                  onClick={onBlockRelease}
+                >
+                  {blocked === 'release' ? 'Blocked' : <>&#8856; Block release</>}
+                </button>
+              ) : null}
+              {canBlockUploader ? (
+                <button
+                  type="button"
+                  className="vdh-redl vdh-block"
+                  title={`Never grab from this uploader (${item.username}) again`}
+                  disabled={busy || blocked === 'uploader'}
+                  onClick={onBlockUploader}
+                >
+                  {blocked === 'uploader' ? 'Uploader blocked' : <>&#8856; Block uploader</>}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -210,11 +215,14 @@ export function VdlHistoryModal({
   open,
   onClose,
   onCountChange,
+  canManage = true,
 }: {
   open: boolean;
   onClose: () => void;
   /** Fired when the total changes (clear / re-download) so the header badge stays honest. */
   onCountChange: (n: number | null) => void;
+  /** an admin: clearing and forgetting history. a member reads their own grabs. */
+  canManage?: boolean;
 }) {
   const [tab, setTab] = useState<VdlHistoryTab>('all');
   const [searchInput, setSearchInput] = useState('');
@@ -353,6 +361,7 @@ export function VdlHistoryModal({
         open={expanded.has(key)}
         onToggle={() => toggleRow(key)}
         onRemoved={() => setItems((prev) => prev.filter((it) => String(it.id) !== key))}
+        canManage={canManage}
       />,
     );
   }
@@ -424,14 +433,16 @@ export function VdlHistoryModal({
               onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
-          <button
-            type="button"
-            className="vdh-clear"
-            title="Clear the whole download history"
-            onClick={() => void onClear()}
-          >
-            Clear
-          </button>
+          {canManage ? (
+            <button
+              type="button"
+              className="vdh-clear"
+              title="Clear the whole download history"
+              onClick={() => void onClear()}
+            >
+              Clear
+            </button>
+          ) : null}
         </div>
         <div className={`vdh-body${loading && !items.length ? ' vdh-body--loading' : ''}`}>
           {items.length === 0 && !loading ? (

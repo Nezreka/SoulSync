@@ -90,7 +90,7 @@ export function VideoLibraryStrip({
               <button className="library-status-btn" onClick={() => goVideo('video-settings')}>
                 <span>Connect</span>
               </button>
-            ) : (
+            ) : !isAdmin ? null : (
               <button
                 className={scanning ? 'library-status-btn scanning' : 'library-status-btn'}
                 disabled={scanning}
@@ -122,7 +122,8 @@ export function VideoLibraryStrip({
               {MORE_ICON}
             </button>
             <div className="library-status-menu" role="menu" hidden={!menuOpen}>
-              {view.state !== 'no-server' ? (
+              {/* scanning the library is the admin's (the server refuses anyone else) */}
+              {view.state !== 'no-server' && isAdmin ? (
                 <button
                   role="menuitem"
                   className="library-status-menu-item"

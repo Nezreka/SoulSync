@@ -113,6 +113,10 @@ def register_routes(bp):
         if kind not in ("movie", "show"):
             return jsonify({"error": "bad kind"}), 400
         db = get_video_db()
+        from .kids import library_title_allowed, restricted_response, video_cap
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(db, kind, item_id, cap):
+            return restricted_response()
         detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
         if not detail:
             return jsonify({"error": "not found"}), 404
@@ -240,6 +244,10 @@ def register_routes(bp):
         if kind not in ("movie", "show"):
             return jsonify({"error": "bad kind"}), 400
         db = get_video_db()
+        from .kids import library_title_allowed, restricted_response, video_cap
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(db, kind, item_id, cap):
+            return restricted_response()
         detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
         if not detail:
             return jsonify({"error": "not found"}), 404

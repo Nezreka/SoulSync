@@ -49,6 +49,20 @@ def _ids(raw) -> list:
     return out
 
 
+def _kids_ids(db, want: dict) -> dict:
+    """a kids profile's poster badges: only titles the library rates under
+    its cap, the same rule its discover rails go by."""
+    from .kids import filter_tmdb_items, video_cap
+    cap = video_cap()
+    if cap is None:
+        return want
+    out = {}
+    for kind, ids in want.items():
+        kept = filter_tmdb_items(db, [{"kind": kind, "tmdb_id": i} for i in ids], cap)
+        out[kind] = [it["tmdb_id"] for it in kept]
+    return out
+
+
 def _store():
     from core.video.title_status import TitleStatusStore
 
@@ -67,6 +81,7 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         want = {"movie": _ids(body.get("movies")), "show": _ids(body.get("shows"))}
         db, store = _store()
+        want = _kids_ids(db, want)
         srv, today, me = _server(), date.today().isoformat(), _me()
         out = {}
         try:
@@ -109,6 +124,10 @@ def register_routes(bp):
         if kind not in ("movie", "show") or tmdb_id <= 0:
             return jsonify({"success": False, "error": "kind must be movie or show"}), 400
         db, store = _store()
+        from .kids import restricted_response, tmdb_title_allowed, video_cap
+        cap = video_cap()
+        if cap is not None and not tmdb_title_allowed(db, kind, tmdb_id, cap):
+            return restricted_response()
         srv, today, me = _server(), date.today().isoformat(), _me()
         try:
             row = ts.batch(db, store, kind, [tmdb_id], server=srv, today=today).get(tmdb_id) or {}

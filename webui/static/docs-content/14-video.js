@@ -1545,7 +1545,8 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
 | GET | \`/search\`, \`/search/studios\`, \`/trending\` | Search movies/shows/people/studios; trending feed |
 | GET | \`/studio/{id}\`, \`/studio/{id}/movies\`, \`/studio/presets\` | Studio detail, paged filmography, preset studios |
 | GET | \`/discover/hero\`, \`/discover/foryou\`, \`/discover/taste\`, \`/discover/morelike\`, \`/discover/gaps\`, \`/discover/genres\`, \`/discover/list\`, \`/discover/trailer\` | Discover feed surfaces |
-| GET/POST | \`/discover/ignore\`, \`/discover/languages\`, \`/discover/providers-pref\` | Global discover preferences |
+| GET/POST | \`/discover/ignore\` | The Not interested list |
+| GET/POST | \`/discover/languages\`, \`/discover/providers-pref\` | Global discover preferences (writes are admin only, they apply to everyone) |
 | GET | \`/calendar\`, \`/calendar/followed\` | The window with each episode's state; followed shows not in the library |
 | POST | \`/calendar/wishlist-missing\` | Wishlist every missing episode in a window |
 | GET/POST | \`/calendar/feed-url\` | This profile's iCal link (POST makes a new one) |
@@ -1562,11 +1563,13 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
-| GET | \`/downloads/active\`, \`/downloads/status\`, \`/downloads/history\` | Live queue & history | video |
-| POST | \`/downloads/search\`, \`/downloads/evaluate\` | Find & rank releases | video |
+| GET | \`/downloads/active\`, \`/downloads/status\`, \`/downloads/history\` | Live queue & history. A member gets the grabs they started; an admin everyone's. Each queue row carries \`can_cancel\` | video |
+| POST | \`/downloads/search\`, \`/downloads/evaluate\` | Find & rank releases (a kids profile only for a title under its rating cap) | video |
 | POST | \`/downloads/grab\`, \`/downloads/grab-pack\`, \`/downloads/retry\` | Queue a grab / retry | can_download |
-| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items (\`{scope: "failed"}\` clears only failed + cancelled; \`{scope: "everything"}\` clears completed + failed + cancelled; import failures always stay for Manual import) | video |
-| POST | \`/downloads/remove\` | Take one failed or cancelled row off the list, no retry | video |
+| POST | \`/downloads/cancel\` | Cancel a download. A member only one they started (403 otherwise); an automatic grab is the admin's | video |
+| POST | \`/downloads/clear\` | Clear queue items (\`{scope: "failed"}\` clears only failed + cancelled; \`{scope: "everything"}\` clears completed + failed + cancelled; import failures always stay for Manual import) | admin |
+| POST | \`/downloads/remove\` | Take one failed or cancelled row off the list, no retry | admin |
+| DELETE/POST | \`/downloads/history/{id}\`, \`/downloads/history/clear\` | Forget one grab / clear the history | admin |
 | GET/POST | \`/downloads/quality\`, \`/downloads/quality/profiles\`, \`/downloads/quality/formats\` | Quality profiles & custom formats | admin (write) |
 | GET/POST | \`/downloads/config\`, \`/downloads/config/import-lists\` | Download & import-list config | admin (write) |
 | GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | video (GET open); admin (writes) |
@@ -1580,10 +1583,10 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | POST | \`/watchlist/add\` | Follow a person/studio | can_download |
 | POST | \`/watchlist/remove\` | Unfollow a person/studio | can_download |
 | POST | \`/watchlist/person/{id}/settings\`, \`/watchlist/studio/{id}/settings\` | Per-follow settings | can_download |
-| POST | \`/requests\` | Submit a member request | video |
+| POST | \`/requests\` | Submit a member request. The request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back | video |
 | POST | \`/requests/{id}/approve\`, \`/requests/{id}/deny\` | Approve / deny a request | admin |
 | DELETE | \`/requests/{id}\` | Withdraw your own request (admins: any) | video |
-| POST | \`/scan/request\`, \`/scan/server\`, \`/scan/stop\` | Trigger / stop a library scan | video |
+| POST | \`/scan/request\`, \`/scan/server\`, \`/scan/stop\` | Trigger / stop a library scan | admin |
 | POST | \`/monitor\`, \`/bulk/start\` | Monitor toggle & bulk jobs | admin |
 | PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open; it marks the caller's own watch state, 409 when the profile has no linked account) | admin (watched: video) |
 `
@@ -1645,10 +1648,12 @@ Channel/playlist following and downloads under \`/api/video/youtube\`.
 |--------|------|---------|------|
 | GET | \`/youtube/channels\`, \`/youtube/channel/{id}\`, \`/youtube/wishlist\` | Followed channels & their videos | video |
 | GET | \`/youtube/search\`, \`/youtube/resolve\`, \`/youtube/video/{id}\`, \`/youtube/playlist/{id}\` | Search & resolve YouTube content | video |
-| POST | \`/youtube/follow\`, \`/youtube/unfollow\`, \`/youtube/playlist/follow\`, \`/youtube/playlist/unfollow\` | Follow/unfollow a channel or playlist | video |
-| POST | \`/youtube/subscriptions/preview\`, \`/youtube/subscriptions/import\` | Bulk-import subscriptions | video |
+| POST | \`/youtube/follow\`, \`/youtube/playlist/follow\` | Follow a channel or playlist (its new uploads are wishlisted) | can_download |
+| POST | \`/youtube/unfollow\`, \`/youtube/playlist/unfollow\` | Unfollow a channel or playlist | video |
+| POST | \`/youtube/subscriptions/preview\` | Read a subscriptions file | video |
+| POST | \`/youtube/subscriptions/import\` | Bulk-import subscriptions | can_download |
 | POST | \`/youtube/download\`, \`/youtube/wishlist/add\` | Download a video / add to wishlist | can_download |
-| GET/POST | \`/youtube/channel/{id}/settings\` | Per-channel pull settings | video |
+| GET/POST | \`/youtube/channel/{id}/settings\` | Per-channel pull settings | video (GET); can_download (POST) |
 `
         },
         {
@@ -1683,7 +1688,7 @@ Preview and apply the current organization templates to existing files (the API 
 
 ## Recycle bin
 
-Every video delete lands here first (upgrade replaces, YouTube retention, watched cleanup). Browse, restore, or purge.
+Every video delete lands here first (upgrade replaces, YouTube retention, watched cleanup). Browse, restore, or purge. Restore and purge are admin only.
 
 | Method | Path | Purpose |
 |--------|------|---------|

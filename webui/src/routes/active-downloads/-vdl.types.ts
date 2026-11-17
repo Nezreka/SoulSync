@@ -25,6 +25,8 @@ export interface VdlDownload {
   /** #2029: the video library it files into (by its target folder). */
   video_library_name?: string | null;
   id: number;
+  /** may this viewer cancel it: an admin any, a member only a grab they started. */
+  can_cancel?: boolean;
   kind?: string | null;
   title?: string | null;
   year?: number | string | null;

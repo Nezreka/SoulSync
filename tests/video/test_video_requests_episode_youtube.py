@@ -34,7 +34,9 @@ def app_db(tmp_path, monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
 
-    persona = {"profile_id": 1, "is_admin": True, "can_download": True, "profile_name": "Admin"}
+    # request_limit: web_server stamps it for every member (0 = no limit)
+    persona = {"profile_id": 1, "is_admin": True, "can_download": True, "profile_name": "Admin",
+               "request_limit": 0, "request_limit_days": 7}
 
     @app.before_request
     def _persona():
