@@ -9288,8 +9288,10 @@ class MusicDatabase:
             logger.error(f"Error getting profiles: {e}")
             return [{'id': 1, 'name': 'Admin', 'avatar_color': '#6366f1', 'avatar_url': None, 'is_admin': True, 'has_pin': False}]
 
-    def get_profile(self, profile_id: int) -> Optional[Dict[str, Any]]:
-        """Get a single profile by ID"""
+    def get_profile(self, profile_id: int, raise_errors: bool = False) -> Optional[Dict[str, Any]]:
+        """Get a single profile by ID. None for no such profile, and (unless
+        ``raise_errors``) for a read that failed too; a permission check that
+        must not read "unreadable" as "no row" passes raise_errors=True."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -9323,6 +9325,8 @@ class MusicDatabase:
                 return None
         except Exception as e:
             logger.error(f"Error getting profile {profile_id}: {e}")
+            if raise_errors:
+                raise
             return None
 
     def create_profile(self, name: str, avatar_color: str = '#6366f1',
@@ -16323,8 +16327,13 @@ class MusicDatabase:
                             cursor, profile_id, spotify_track_data, source_type, track_id):
                         logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
                         return self._wishlist_outcome("rejected", track_id, reason="request_limit")
-                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
-                    logger.debug("request quota check skipped: %s", _quota_exc)
+                except Exception as _quota_exc:  # noqa: BLE001
+                    # a quota that can't be read is not an unlimited one: the
+                    # ask is refused with a reason that says to try again
+                    logger.warning("request quota check failed for profile %s: %s", profile_id, _quota_exc)
+                    return self._wishlist_outcome(
+                        "rejected", track_id,
+                        reason="Couldn't check your request limit. Try again in a moment.")
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])

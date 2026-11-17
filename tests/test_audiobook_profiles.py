@@ -247,9 +247,11 @@ def test_the_admin_is_never_refused(monkeypatch):
     assert _permission(monkeypatch, {1: {"can_download": False}}, 1) is None
 
 
-def test_a_broken_lookup_fails_open(monkeypatch):
-    """A permission check that cannot read the profile must not take away
-    downloads from somebody who has them — the music side fails open too."""
+def test_a_broken_lookup_fails_closed(monkeypatch):
+    """A permission check that cannot read the profile can't say yes: a
+    profile with downloads off would download through every db hiccup. The
+    caller gets a 503 that says to try again, not the downloads-off 403
+    (S21, nov 17 review; the music side fails closed the same way)."""
     import database.music_database as music_db
     from api.helpers import download_permission_error
 
@@ -260,8 +262,11 @@ def test_a_broken_lookup_fails_open(monkeypatch):
 
     monkeypatch.setattr(music_db, "get_database", _explode)
     monkeypatch.setattr(profile_context, "get_current_profile_id", lambda: 2)
+    from core.permissions import PROFILE_UNREADABLE
     with Flask(__name__).app_context():
-        assert download_permission_error() is None
+        body, status = download_permission_error()
+        assert status == 503
+        assert body.get_json()["error"] == PROFILE_UNREADABLE
 
 
 def test_a_missing_profile_is_allowed(monkeypatch):

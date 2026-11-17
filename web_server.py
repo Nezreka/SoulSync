@@ -997,10 +997,27 @@ def _set_profile_context():
                         session.pop(_k, None)
                     g.profile_id = None
                     g.is_admin = False
+                    g.can_download = False
                     return
                 g.is_admin = bool((profile or {}).get('is_admin', False))
-            except Exception:
+                g.can_download = bool((profile or {}).get('can_download', True)) or g.is_admin
+                # a turned-off profile is signed out here too, the same as on
+                # every other path (this branch skips the full check below)
+                if profile.get('disabled') and not g.is_admin:
+                    for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                        session.pop(_k, None)
+                    g.profile_id = None
+                    g.can_download = False
+                    g.allowed_sides = 'none'
+                    if no_profile_request_is_blocked(path, request.method):
+                        return jsonify({"error": "profile_required", "profile_required": True,
+                                        "disabled": True}), 401
+                    return
+            except Exception as e:
+                # unreadable is not admin and not allowed to download
+                logger.warning("profile session validate (skip path): %s", e)
                 g.is_admin = False
+                g.can_download = False
         return
 
     if pid != 1 and 'profile_id' in session:
@@ -1049,7 +1066,18 @@ def _set_profile_context():
                 g.profile_id = pid
                 return jsonify({"success": False, "error": "page_not_allowed"}), 403
         except Exception as e:
-            logger.debug("profile session validate: %s", e)
+            # fail closed: a profile we couldn't read is no admin, downloads
+            # nothing, sees neither side's gated apis, and a page-only api is
+            # refused (its page list is unknown). it used to keep the
+            # defaults above: downloads on, both sides, no page gate
+            logger.warning("profile session validate failed for %s: %s", pid, e)
+            g.is_admin = False
+            g.can_download = False
+            g.allowed_sides = 'none'
+            g.profile_id = pid
+            from core.permissions import page_for_path
+            if page_for_path(path) is not None:
+                return jsonify({"success": False, "error": "page_not_allowed"}), 403
 
     g.profile_id = pid
 
@@ -1260,10 +1288,11 @@ VALID_PAGE_IDS = {
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
-    from core.permissions import download_denied_reason
-    reason = download_denied_reason(get_current_profile_id(), lambda pid: get_database().get_profile(pid))
+    from core.permissions import PROFILE_UNREADABLE, download_denied_reason, strict_profile_getter
+    reason = download_denied_reason(get_current_profile_id(), strict_profile_getter(get_database))
     if reason:
-        return jsonify({'success': False, 'error': reason}), 403
+        # an unreadable profile is a passing problem, not a switch that's off
+        return jsonify({'success': False, 'error': reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None
 
 # --- Docker Helper Functions ---
