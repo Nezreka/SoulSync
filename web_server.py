@@ -5715,6 +5715,54 @@ def _profile_spotify_oauth(profile_id_int):
     )
 
 
+def _oauth_callback_allowed(key, profile_id=None) -> bool:
+    """may this oauth callback bind the account behind ``key``?
+
+    the profile itself, an admin, or a browser with no session at all (the
+    provider sent it to another host name) when somebody allowed to start
+    this flow did so in the last few minutes. a member's session never binds
+    another profile or the install-wide account."""
+    from core.security import oauth_pending
+    started = oauth_pending.consume(key)
+    me = getattr(g, 'profile_id', None)
+    if profile_id is not None and me is not None:
+        try:
+            if int(me) == int(profile_id):
+                return True
+        except (TypeError, ValueError):
+            pass
+    if is_admin_request():
+        return True
+    return started and me is None
+
+
+def _complete_profile_spotify_auth(profile_id, auth_code):
+    """exchange a code for one profile's own spotify token. the result page,
+    or None when the server has no spotify app to exchange with."""
+    auth_manager = _profile_spotify_oauth(profile_id)
+    if not auth_manager:
+        return None
+    token_info = auth_manager.get_access_token(auth_code)
+    if not token_info:
+        raise Exception("Failed to exchange authorization code for access token")
+    metadata_registry.clear_cached_profile_spotify_client(profile_id)
+    profile_client = metadata_registry.get_spotify_client_for_profile(profile_id)
+    profile_authenticated = bool(profile_client and profile_client.is_spotify_authenticated())
+    if profile_authenticated:
+        if profile_client:
+            profile_client._invalidate_auth_cache()
+        add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id} authenticated with Spotify", "Now")
+        return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
+    if profile_client:
+        profile_client._invalidate_auth_cache()
+    invalidate_metadata_status_caches()
+    add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id} completed OAuth but Spotify did not confirm an authenticated session", "Now")
+    return _spotify_auth_result_page(
+        "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
+        authenticated=False,
+    )
+
+
 @app.route('/auth/spotify')
 def auth_spotify():
     """
@@ -5722,25 +5770,41 @@ def auth_spotify():
     Supports per-profile auth via ?profile_id= query param.
     """
     try:
+        from core.security import oauth_pending
         profile_id = request.args.get('profile_id', '')
+        admin = is_admin_request()
 
         # Per-profile auth: the profile's own account via the shared (global) app.
+        # yours, or anyone's as an admin; never another member's
         if profile_id and profile_id != '1':
             try:
                 profile_id_int = int(profile_id)
+            except ValueError:
+                return "<h1>Spotify Authentication Failed</h1><p>Unknown profile.</p>", 400
+            if not admin and profile_id_int != get_current_profile_id():
+                return "<h1>Spotify Authentication Failed</h1><p>You can only connect your own account.</p>", 403
+            try:
                 auth_manager = _profile_spotify_oauth(profile_id_int)
                 if auth_manager:
                     auth_url = auth_manager.get_authorize_url()
+                    oauth_pending.mark(f"spotify:profile:{profile_id_int}")
                     logger.info(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
                     return redirect(auth_url)
-            except (ValueError, Exception) as e:
-                logger.error(f"Per-profile Spotify auth failed, falling back to global: {e}")
+            except Exception as e:
+                logger.error(f"Per-profile Spotify auth failed: {e}")
+            # the install-wide account is the admin's: a member's failed
+            # connect doesn't fall back to rebinding it
+            if not admin:
+                return "<h1>Spotify Authentication Failed</h1><p>Spotify isn't set up on this server yet. Ask your admin.</p>", 400
 
-        # Global auth (admin or fallback)
+        # Global auth: the install-wide account, the admin's to bind
+        if not admin:
+            return "<h1>Spotify Authentication Failed</h1><p>Admin access required.</p>", 403
         temp_spotify_client = get_spotify_client()
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
+            oauth_pending.mark("spotify:global")
             configured_uri = config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
             logger.info(f"Spotify auth initiated — redirect_uri: {configured_uri}")
             add_activity_item("", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
@@ -5847,6 +5911,7 @@ def auth_spotify():
 
 
 @app.route('/auth/spotify/export')
+@admin_only
 def auth_spotify_export():
     """On-demand authorization for Spotify playlist EXPORT (#945).
 
@@ -5871,6 +5936,8 @@ def auth_spotify_export():
             show_dialog=True,
         )
         add_activity_item("", "Spotify Export Auth", "Requesting permission to create playlists", "Now")
+        from core.security import oauth_pending
+        oauth_pending.mark("spotify:global")
         return redirect(auth_manager.get_authorize_url())
     except Exception as e:
         logger.error(f"Error starting Spotify export auth: {e}")
@@ -5883,6 +5950,16 @@ def auth_tidal():
     Initiates Tidal OAuth authentication flow
     """
     logger.info("TIDAL AUTH ROUTE CALLED ")
+    # your own profile's account, or (as an admin) any profile's and the
+    # install-wide one. the callback trusts what was started here
+    _tidal_pid = request.args.get('profile_id', '')
+    if not is_admin_request():
+        try:
+            _own = bool(_tidal_pid) and _tidal_pid != '1' and int(_tidal_pid) == get_current_profile_id()
+        except ValueError:
+            _own = False
+        if not _own:
+            return "<h1>Tidal Authentication Failed</h1><p>You can only connect your own account.</p>", 403
     try:
         # Create a fresh tidal client to get OAuth URL
         from core.tidal_client import TidalClient
@@ -6137,31 +6214,20 @@ def spotify_callback():
         from core.settings import config_manager
 
         # Per-profile callback: the profile's own account via the shared app.
+        # a member binds only their own profile; a state naming somebody else
+        # needs that profile's own start (or an admin)
         if profile_id_from_state and profile_id_from_state != 1:
-            auth_manager = _profile_spotify_oauth(profile_id_from_state)
-            if auth_manager:
-                token_info = auth_manager.get_access_token(auth_code)
-                if token_info:
-                    metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
-                    profile_client = metadata_registry.get_spotify_client_for_profile(profile_id_from_state)
-                    profile_authenticated = bool(profile_client and profile_client.is_spotify_authenticated())
-                    if profile_authenticated:
-                        if profile_client:
-                            profile_client._invalidate_auth_cache()
-                        add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
-                        return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
-                    if profile_client:
-                        profile_client._invalidate_auth_cache()
-                    invalidate_metadata_status_caches()
-                    add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id_from_state} completed OAuth but Spotify did not confirm an authenticated session", "Now")
-                    return _spotify_auth_result_page(
-                        "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
-                        authenticated=False,
-                    )
-                else:
-                    raise Exception("Failed to exchange authorization code for access token")
+            if not _oauth_callback_allowed(f"spotify:profile:{profile_id_from_state}",
+                                           profile_id=profile_id_from_state):
+                return "<h1>Spotify Authentication Failed</h1><p>This sign-in wasn't started for your profile.</p>", 403
+            page = _complete_profile_spotify_auth(profile_id_from_state, auth_code)
+            if page is None:
+                return "<h1>Spotify Authentication Failed</h1><p>Spotify isn't set up on this server.</p>", 400
+            return page
 
-        # Global callback (admin)
+        # Global callback (admin): the install-wide account
+        if not _oauth_callback_allowed("spotify:global"):
+            return "<h1>Spotify Authentication Failed</h1><p>Admin access required.</p>", 403
         config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
@@ -6215,6 +6281,7 @@ def spotify_callback():
 
 
 @app.route('/api/spotify/disconnect', methods=['POST'])
+@admin_only
 def spotify_disconnect():
     """Disconnect Spotify and keep using the active primary metadata source."""
     global spotify_client
@@ -6267,6 +6334,42 @@ def spotify_rate_limit_status():
         return jsonify({'error': str(e)}), 500
 
 
+def _finish_tidal_auth(auth_code):
+    """exchange a tidal code with what /auth/tidal stored. a profile's own
+    connect lands on that profile only: the client's token save writes the
+    install-wide tokens, so it's switched off for one. returns 'profile',
+    'global' or None."""
+    global tidal_client
+    temp_tidal_client = TidalClient()
+    with tidal_oauth_lock:
+        temp_tidal_client.code_verifier = tidal_oauth_state.get("code_verifier")
+        temp_tidal_client.code_challenge = tidal_oauth_state.get("code_challenge")
+        if "redirect_uri" in tidal_oauth_state:
+            temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
+        profile_id_for_tidal = tidal_oauth_state.get("profile_id")
+    profile_id_int = None
+    if profile_id_for_tidal:
+        try:
+            profile_id_int = int(profile_id_for_tidal)
+        except (TypeError, ValueError):
+            return None
+        temp_tidal_client._save_tokens = lambda: None
+    if not temp_tidal_client.fetch_token_from_code(auth_code):
+        return None
+    if profile_id_int is not None:
+        get_database().set_profile_tidal_tokens(
+            profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
+        clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
+        add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
+        return 'profile'
+    # Global: Re-initialize the main global tidal_client instance with the new token
+    tidal_client = TidalClient()
+    if tidal_enrichment_worker:
+        tidal_enrichment_worker.client = tidal_client
+    add_activity_item("", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
+    return 'global'
+
+
 @app.route('/tidal/callback')
 def tidal_callback():
     """
@@ -6283,40 +6386,12 @@ def tidal_callback():
         return f"<h1>Tidal Authentication Failed</h1><p>Error: {error}</p><p>{error_description}</p><p>Please close this window and try again.</p>", 400
 
     try:
-        # Create a temporary client for the token exchange
-        temp_tidal_client = TidalClient()
-
-        # Restore PKCE values, redirect_uri, and profile_id from the auth request
-        profile_id_for_tidal = None
-        with tidal_oauth_lock:
-            temp_tidal_client.code_verifier = tidal_oauth_state["code_verifier"]
-            temp_tidal_client.code_challenge = tidal_oauth_state["code_challenge"]
-            if "redirect_uri" in tidal_oauth_state:
-                temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
-            profile_id_for_tidal = tidal_oauth_state.get("profile_id")
-
-        success = temp_tidal_client.fetch_token_from_code(auth_code)
-
-        if success:
-            # Per-profile: store tokens on profile, don't touch global client
-            if profile_id_for_tidal:
-                try:
-                    profile_id_int = int(profile_id_for_tidal)
-                    get_database().set_profile_tidal_tokens(
-                        profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
-                    clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
-                    add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
-                    return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
-                except Exception as profile_err:
-                    logger.error(f"Per-profile Tidal auth failed, falling back to global: {profile_err}")
-
-            # Global: Re-initialize the main global tidal_client instance with the new token
-            tidal_client = TidalClient()
-            if tidal_enrichment_worker:
-                tidal_enrichment_worker.client = tidal_client
+        outcome = _finish_tidal_auth(auth_code)
+        if outcome == 'profile':
+            return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
+        if outcome == 'global':
             return "<h1>Tidal Authentication Successful!</h1><p>You can now close this window and return to the SoulSync application.</p>"
-        else:
-            return "<h1>Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
+        return "<h1>Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
     except Exception as e:
         logger.error(f"Error during Tidal token exchange: {e}")
         return f"<h1>An Error Occurred</h1><p>An unexpected error occurred during the authentication process: {e}</p>", 500
@@ -6325,6 +6400,7 @@ def tidal_callback():
 # --- Deezer OAuth ---
 
 @app.route('/auth/deezer')
+@admin_only
 def auth_deezer():
     """Initialize Deezer OAuth flow. Redirects user to Deezer authorization page."""
     try:
@@ -6335,6 +6411,8 @@ def auth_deezer():
             return "<h1>Deezer App ID not configured</h1><p>Go to Settings → Connections and enter your Deezer App ID first.</p>", 400
 
         perms = 'basic_access,email,offline_access,manage_library,listening_history'
+        from core.security import oauth_pending
+        oauth_pending.mark("deezer:global")
         import urllib.parse
         auth_url = f"https://connect.deezer.com/oauth/auth.php?app_id={app_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&perms={perms}"
 
@@ -6360,6 +6438,10 @@ def deezer_callback():
 
     if not auth_code:
         return f"<h1>Deezer Authentication Failed</h1><p>{error_reason or 'No authorization code received.'}</p>", 400
+
+    # the install-wide deezer account is the admin's to bind
+    if not _oauth_callback_allowed("deezer:global"):
+        return "<h1>Deezer Authentication Failed</h1><p>Admin access required.</p>", 403
 
     try:
         app_id = config_manager.get('deezer.app_id', '')
@@ -21348,6 +21430,41 @@ def start_oauth_callback_servers():
                     auth_code = query_params['code'][0]
                     _oauth_logger.info(f"Received Spotify authorization code: {auth_code[:10]}...")
 
+                    # this port has no session at all: a code binds an account
+                    # only when somebody allowed to started that flow (the
+                    # admin for the install-wide one, a profile for its own)
+                    from core.security import oauth_pending
+                    _state = (query_params.get('state') or [''])[0]
+                    _state_pid = None
+                    if _state.startswith('profile_'):
+                        try:
+                            _state_pid = int(_state[len('profile_'):])
+                        except ValueError:
+                            _state_pid = None
+                    if _state_pid and _state_pid != 1:
+                        if not oauth_pending.consume(f"spotify:profile:{_state_pid}"):
+                            self.send_response(403)
+                            self.send_header('Content-type', 'text/html')
+                            self.end_headers()
+                            self.wfile.write(b'<h1>Spotify Authentication Failed</h1><p>Start the connect again from SoulSync.</p>')
+                            return
+                        try:
+                            page = _complete_profile_spotify_auth(_state_pid, auth_code)
+                        except Exception as e:
+                            _oauth_logger.error(f"Spotify profile token processing error: {e}")
+                            page = None
+                        self.send_response(200 if page else 400)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write((page or '<h1>Spotify Authentication Failed</h1>').encode('utf-8'))
+                        return
+                    if not oauth_pending.consume("spotify:global"):
+                        self.send_response(403)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(b'<h1>Spotify Authentication Failed</h1><p>Start the connect again from SoulSync Settings.</p>')
+                        return
+
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
@@ -21494,29 +21611,11 @@ def start_oauth_callback_servers():
 
                 # Exchange the authorization code for tokens
                 try:
-                    from core.tidal_client import TidalClient
-
-                    # Create a temporary client and set the stored PKCE values
-                    temp_client = TidalClient()
-
-                    # Restore the PKCE values from the auth request
-                    global tidal_oauth_state
-                    with tidal_oauth_lock:
-                        temp_client.code_verifier = tidal_oauth_state["code_verifier"]
-                        temp_client.code_challenge = tidal_oauth_state["code_challenge"]
-
-                    logger.info(f"Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
-
-                    success = temp_client.fetch_token_from_code(auth_code)
+                    # a profile's own connect lands on that profile, not on
+                    # the install-wide tokens (the same as /tidal/callback)
+                    success = _finish_tidal_auth(auth_code)
 
                     if success:
-                        # Reinitialize the global tidal client with new tokens
-                        global tidal_client
-                        tidal_client = TidalClient()
-                        if tidal_enrichment_worker:
-                            tidal_enrichment_worker.client = tidal_client
-
-                        add_activity_item("", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
                         self.send_response(200)
                         self.send_header('Content-type', 'text/html')
                         self.end_headers()
@@ -21956,6 +22055,7 @@ def get_artist_lastfm_top_tracks(artist_id):
 
 # ================================================================================================
 @app.route('/api/lastfm/auth-url', methods=['GET'])
+@admin_only
 def lastfm_auth_url():
     """Get the Last.fm authorization URL for scrobbling."""
     try:
@@ -21971,6 +22071,7 @@ def lastfm_auth_url():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/lastfm/callback', methods=['GET'])
+@admin_only
 def lastfm_callback():
     """Last.fm auth callback — exchanges token for session key."""
     try:

@@ -1197,6 +1197,7 @@ def _get_tidal_download_client():
     return tidal
 
 @bp.route('/api/tidal/download/auth/start', methods=['POST'])
+@admin_only
 def tidal_download_auth_start():
     """Start Tidal device-code OAuth flow for download client."""
     try:
@@ -1211,6 +1212,7 @@ def tidal_download_auth_start():
 
 
 @bp.route('/api/tidal/download/auth/check', methods=['GET'])
+@admin_only
 def tidal_download_auth_check():
     """Check status of Tidal device-code OAuth flow."""
     try:
@@ -1253,6 +1255,7 @@ def _sync_qobuz_credentials_to_worker():
 
 
 @bp.route('/api/qobuz/auth/login', methods=['POST'])
+@admin_only
 def qobuz_auth_login():
     """Login to Qobuz with email/password."""
     try:
@@ -1277,6 +1280,7 @@ def qobuz_auth_login():
 
 
 @bp.route('/api/qobuz/auth/token', methods=['POST'])
+@admin_only
 def qobuz_auth_token():
     """Login to Qobuz with a pasted user_auth_token (bypasses CAPTCHA)."""
     try:
@@ -1317,6 +1321,7 @@ def qobuz_auth_status():
 
 
 @bp.route('/api/qobuz/auth/logout', methods=['POST'])
+@admin_only
 def qobuz_auth_logout():
     """Logout from Qobuz."""
     try:
@@ -1332,6 +1337,7 @@ def qobuz_auth_logout():
 # ===================================================================
 
 @bp.route('/api/tidal/disconnect', methods=['POST'])
+@admin_only
 def tidal_disconnect():
     """Clear saved Tidal auth state. Use when re-authentication doesn't
     pick up newly-added scopes (e.g. existing token predates a scope
