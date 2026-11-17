@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
+import { getShellProfileContext } from '@/platform/shell/bridge';
 import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { StreamCounts } from '../-artist-detail.completion';
@@ -224,6 +225,9 @@ export function ArtistHero({
   const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
   const asksFirst = profileAsksFirst();
+  /** setting the photo writes the shared library, the server and artist.jpg,
+      so it's the admin's. no shell (a test) leaves it to the server's 403. */
+  const canChangePhoto = getShellProfileContext()?.isAdmin !== false;
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
@@ -369,8 +373,8 @@ export function ArtistHero({
       <div className="artist-hero-content">
         <div
           className="artist-image-container"
-          title="Change artist photo"
-          onClick={() => setPickingPhoto(true)}
+          title={canChangePhoto ? 'Change artist photo' : undefined}
+          onClick={canChangePhoto ? () => setPickingPhoto(true) : undefined}
         >
           <ArtistPhoto
             artist={
@@ -380,23 +384,25 @@ export function ArtistHero({
             }
             discography={discography}
           />
-          <div className="artist-image-edit-overlay">
-            <svg
-              viewBox="0 0 24 24"
-              width="26"
-              height="26"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-5-5L5 21" />
-            </svg>
-            <span>Change photo</span>
-          </div>
+          {canChangePhoto ? (
+            <div className="artist-image-edit-overlay">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="m21 15-5-5L5 21" />
+              </svg>
+              <span>Change photo</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="artist-info">
