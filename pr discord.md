@@ -10,7 +10,7 @@ Albums get an Other versions picker in their menu, listing the release's edition
 
 Band names with an "&" like Above & Beyond now stay one artist in tags, credits and folders, and Group Therapy style numbered releases no longer cross (thanks SeadogsBooty, #2131, #2133 to #2136). Release types go by length too, so Wish You Were Here is an album again.
 
-For request users, video posters show where a title stands, Discover always loads with a cleaner layout, members land on a page they can open, and admins can set and lock what each profile shows (thanks SeadogsBooty, #2154 to #2160).
+For request users, video posters show where a title stands, Discover always loads with a cleaner layout, members land on a page they can open, and admins can set and lock what each profile shows (thanks SeadogsBooty, #2154 to #2164).
 
 Thanks to nstrelow (#2140: one unfingerprintable file no longer stops AcoustID scans), PapaBearDoes (#2152: the video library table keeps its columns in view) and ginevra-70 (#2115: Music Assistant scans follow their own task) for their contributions.
 
