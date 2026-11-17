@@ -112,11 +112,29 @@ function StatusCard() {
   );
 }
 
-/** "Jellyfin isn't answering, and /downloads isn't writable." */
-function sentence(titles: string[]): string {
+/**
+ * Plain words a finding title may start with; mid sentence they read in
+ * lower case. Anything else is a name (Jellyfin, Soulseek, Last.fm) and
+ * keeps its capital.
+ */
+const PLAIN_START = new Set(
+  'a an the your no one some download downloads transfer import music movies movie tv shows video library folder folders disk drive path paths recycle setup update automation automations enrichment metadata media server source sources indexer indexers worker workers'.split(
+    ' ',
+  ),
+);
+
+function lowerStart(title: string): string {
+  const word = title.split(/\s+/)[0] ?? '';
+  return PLAIN_START.has(word.toLowerCase())
+    ? title.charAt(0).toLowerCase() + title.slice(1)
+    : title;
+}
+
+/** "Download folder isn't writable, and Jellyfin isn't answering." */
+export function sentence(titles: string[]): string {
   const shown = titles.filter(Boolean).slice(0, 2);
   if (!shown.length) return 'Open Health to see what and how to fix it.';
-  const lower = (t: string, i: number) => (i === 0 ? t : t.charAt(0).toLowerCase() + t.slice(1));
+  const lower = (t: string, i: number) => (i === 0 ? t : lowerStart(t));
   const more = titles.length > 2 ? `, and ${titles.length - 2} more` : '';
   const body =
     shown.length === 2 && !more

@@ -8,10 +8,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { pageTabs } from '@/features/settings/page-tabs';
 import { HttpResponse, http, server } from '@/test/msw';
 
-import { pageTabs } from '@/features/settings/page-tabs';
-
+import { sentence } from './home';
 import { HelpHost, installHelpApi, installHelpKeys, uninstallHelpKeys } from './host';
 import { pageIdFrom } from './page';
 import { registerPageHelp } from './pages';
@@ -428,7 +428,9 @@ describe('on this page', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Help' });
     const here = within(dialog).getByRole('region', { name: 'On this page: Settings, Downloads' });
     expect(within(here).getByRole('heading', { name: 'Settings, Downloads' })).toBeInTheDocument();
-    expect(here).toHaveTextContent('Queue behavior, retries, publishing, and what gets filtered out.');
+    expect(here).toHaveTextContent(
+      'Queue behavior, retries, publishing, and what gets filtered out.',
+    );
     act(() => pageTabs.show('advanced'));
     expect(
       within(dialog).getByRole('region', { name: 'On this page: Settings, System' }),
@@ -444,9 +446,9 @@ describe('on this page', () => {
     mount(MEMBER);
     act(() => window.SoulSyncHelp!.open());
     const dialog = await screen.findByRole('dialog', { name: 'Help' });
-    expect(within(dialog).getByRole('region', { name: 'On this page: Settings' })).toHaveTextContent(
-      'Your own accounts, sign-in and what you see.',
-    );
+    expect(
+      within(dialog).getByRole('region', { name: 'On this page: Settings' }),
+    ).toHaveTextContent('Your own accounts, sign-in and what you see.');
     pageTabs.reset();
   });
 
@@ -476,5 +478,19 @@ describe('the first Health run', () => {
     await waitFor(() => expect(useHelpStore.getState().status?.refreshing).toBe(true));
     expect(within(dialog).getByRole('button', { name: /Checking SoulSync/ })).toBeInTheDocument();
     expect(within(dialog).queryByText('Everything is running')).toBeNull();
+  });
+});
+
+describe("the status card's sentence", () => {
+  it('keeps a name capitalised mid sentence, and lowers a plain word', () => {
+    expect(sentence(["Download folder isn't writable", "Jellyfin isn't answering"])).toBe(
+      "Download folder isn't writable, and Jellyfin isn't answering.",
+    );
+    expect(sentence(["Jellyfin isn't answering", "Download folder isn't writable"])).toBe(
+      "Jellyfin isn't answering, and download folder isn't writable.",
+    );
+    expect(
+      sentence(['Spotify is rate limited', 'Last.fm enrichment is paused', 'Disk is full']),
+    ).toBe('Spotify is rate limited, Last.fm enrichment is paused, and 1 more.');
   });
 });
