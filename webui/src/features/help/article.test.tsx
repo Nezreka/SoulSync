@@ -1,23 +1,18 @@
 /** a docs article read in the sheet: the real content, links, the way out to Help & Docs */
 
 import { fireEvent, render, screen } from '@testing-library/react';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ArticleView } from './article';
 import { loadDocs } from './search/docs';
+import { installRealDocs } from './search/docs.test-utils';
 import { Markdown } from './search/markdown';
 import { useHelpStore } from './store';
 
-const DIR = join(process.cwd(), 'static', 'docs-content');
-const FILES = readdirSync(DIR).filter((f) => f.endsWith('.js'));
 
 beforeAll(async () => {
-  await loadDocs(
-    async (u) => readFileSync(join(DIR, u.split('/').pop()!), 'utf8'),
-    FILES.map((f) => `/static/docs-content/${f}`),
-  );
+  installRealDocs();
+  await loadDocs();
 });
 
 beforeEach(() => useHelpStore.setState(useHelpStore.getInitialState(), true));

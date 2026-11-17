@@ -3,12 +3,12 @@
  * sidebar's own answer for pages, ranking across kinds, the hand-off.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ACTIONS, actionsFor } from './actions';
 import { loadDocs } from './docs';
+import { installRealDocs } from './docs.test-utils';
 import {
   buildItems,
   canOpenPage,
@@ -22,8 +22,6 @@ import {
 } from './index';
 import { RECENT_KEY, noteRecent } from './rank';
 
-const DIR = join(process.cwd(), 'static', 'docs-content');
-const FILES = readdirSync(DIR).filter((f) => f.endsWith('.js'));
 
 type G = Window & {
   isPageAllowed?: (id: string) => boolean;
@@ -73,10 +71,8 @@ function sidebar(hidden: string[] = []) {
 }
 
 beforeAll(async () => {
-  await loadDocs(
-    async (u) => readFileSync(join(DIR, u.split('/').pop()!), 'utf8'),
-    FILES.map((f) => `/static/docs-content/${f}`),
-  );
+  installRealDocs();
+  await loadDocs();
 });
 
 beforeEach(() => {

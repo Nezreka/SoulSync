@@ -9,8 +9,9 @@
 // Integration contract (do not break):
 //   - initializeDocsPage()   — called by init.js when #help-page shows
 //   - navigateToDocsSection(id) — global; used by downloads.js "Learn more →"
+//   - window.SoulSyncDocs.sections() — the registry, for the help sheet
 //   - DOM: #docs-nav, #docs-content, .docs-nav-section[-title|-child|-children]
-//     with data-target / data-parent attrs — used by helper.js tours
+//     with data-target / data-parent attrs
 // ═══════════════════════════════════════════════════════════════════
 
 (function () {
@@ -33,6 +34,16 @@
     }
     // Expose globally for docs-content/*.js
     window.registerDocsSection = registerDocsSection;
+
+    // The help sheet reads the same registry (features/help/search/docs.ts):
+    // every section in page order, as copies so a reader can't reorder ours.
+    window.SoulSyncDocs = {
+        sections: function () {
+            return _sections.map(function (s) {
+                return { id: s.id, title: s.title, pages: s.pages.slice() };
+            });
+        },
+    };
 
     function findEntry(id) {
         if (_pageIndex.has(id)) return _pageIndex.get(id);

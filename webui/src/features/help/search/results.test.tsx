@@ -5,23 +5,18 @@
  */
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HelpSheet } from '../sheet';
 import { useHelpStore } from '../store';
 import { loadDocs } from './docs';
+import { installRealDocs } from './docs.test-utils';
 import { RECENT_KEY } from './rank';
 
-const DIR = join(process.cwd(), 'static', 'docs-content');
-const FILES = readdirSync(DIR).filter((f) => f.endsWith('.js'));
 
 beforeAll(async () => {
-  await loadDocs(
-    async (u) => readFileSync(join(DIR, u.split('/').pop()!), 'utf8'),
-    FILES.map((f) => `/static/docs-content/${f}`),
-  );
+  installRealDocs();
+  await loadDocs();
 });
 
 beforeEach(() => {

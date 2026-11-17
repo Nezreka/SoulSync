@@ -1,12 +1,12 @@
 /**
- * The docs articles, read from the same files the Help & Docs page runs
- * (webui/static/docs-content/*.js). Nothing is copied: each file calls
- * registerDocsSection({ id, title, pages: [{ id, title, lede, body }] }),
- * and docs.js keeps that registry private, so this reads the files again
- * (the page loaded them a moment ago, the browser has them cached) and runs
- * each with a stand-in registerDocsSection that just collects the sections.
+ * The docs articles, read from the registry the Help & Docs page already
+ * built: each webui/static/docs-content/*.js file calls
+ * registerDocsSection({ id, title, pages: [{ id, title, lede, body }] }) as
+ * it loads, and docs.js publishes what it collected as
+ * window.SoulSyncDocs.sections(). Nothing is copied or fetched again.
  *
- * Loaded once, on the first search or article, never at boot.
+ * Read on the first search or article, never at boot, and kept until the
+ * registry grows.
  */
 
 import { plainText } from './rank';
@@ -38,34 +38,25 @@ export interface DocsArticle {
   headings: string[];
 }
 
-const SCRIPT_SELECTOR = 'script[src*="docs-content/"]';
-
-/** the docs files this page loaded, in page order, with their cache-busting query */
-export function docsScriptUrls(doc: Document = document): string[] {
-  return Array.from(doc.querySelectorAll<HTMLScriptElement>(SCRIPT_SELECTOR))
-    .map((s) => s.getAttribute('src') || '')
-    .filter(Boolean);
-}
-
-/**
- * Run one docs file and return what it registered. The files are the app's
- * own static content (already executed by the page as plain scripts); the
- * only name they reach for is registerDocsSection.
- */
-export function readDocsScript(source: string): DocsSection[] {
-  const found: DocsSection[] = [];
-  const collect = (section: unknown) => {
-    const s = section as DocsSection | null;
-    if (s && typeof s.id === 'string' && Array.isArray(s.pages)) found.push(s);
-  };
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- first-party docs, see the file comment
-    new Function('registerDocsSection', `${source}\n//# sourceURL=help-docs.js`)(collect);
-  } catch {
-    /* a broken file costs its own articles, never the rest */
+declare global {
+  interface Window {
+    /** docs.js's registry (static/docs.js) */
+    SoulSyncDocs?: { sections: () => DocsSection[] };
   }
-  return found;
 }
+
+export type DocsSource = () => DocsSection[];
+
+/** what docs.js registered; [] before it ran or when it is missing */
+export const registrySections: DocsSource = () => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const sections = window.SoulSyncDocs?.sections();
+    return Array.isArray(sections) ? sections : [];
+  } catch {
+    return [];
+  }
+};
 
 const HEADING = /^#{2,3}\s+(.+)$/gm;
 
@@ -92,39 +83,34 @@ export function toArticles(sections: DocsSection[]): DocsArticle[] {
   return out;
 }
 
-export type FetchText = (url: string) => Promise<string>;
-
-const browserFetch: FetchText = async (url) => {
-  const res = await fetch(url, { credentials: 'same-origin' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
-};
-
-let loading: Promise<DocsArticle[]> | null = null;
 let loaded: DocsArticle[] | null = null;
+/** the registry's size when `loaded` was built: a section registered later rebuilds */
+let builtFrom = 0;
 const byId = new Map<string, DocsArticle>();
 
-/** every article, read once; later calls get the same answer */
-export function loadDocs(
-  fetchText: FetchText = browserFetch,
-  urls: string[] = docsScriptUrls(),
-): Promise<DocsArticle[]> {
-  if (loading) return loading;
-  loading = (async () => {
-    const texts = await Promise.all(urls.map((u) => fetchText(u).catch(() => '')));
-    const articles = toArticles(texts.flatMap((t) => (t ? readDocsScript(t) : [])));
-    byId.clear();
-    for (const a of articles) {
-      byId.set(a.id, a);
-      // a section id opens its first page, as docs.js resolves it
-      if (!byId.has(a.sectionId)) byId.set(a.sectionId, a);
-    }
-    loaded = articles;
-    // nothing came back (offline, a blip): the next search asks again
-    if (!articles.length) loading = null;
-    return articles;
-  })();
-  return loading;
+/**
+ * Every article. Built once from the registry, and again only when it has
+ * grown. Async for its callers' sake: the sheet and the palette await it.
+ */
+export function loadDocs(source: DocsSource = registrySections): Promise<DocsArticle[]> {
+  const sections = source();
+  if (loaded && loaded.length && sections.length === builtFrom) return Promise.resolve(loaded);
+  const articles = toArticles(sections.filter(isSection));
+  byId.clear();
+  for (const a of articles) {
+    byId.set(a.id, a);
+    // a section id opens its first page, as docs.js resolves it
+    if (!byId.has(a.sectionId)) byId.set(a.sectionId, a);
+  }
+  loaded = articles;
+  // nothing there yet (docs.js not run): the next search asks again
+  builtFrom = articles.length ? sections.length : 0;
+  return Promise.resolve(articles);
+}
+
+function isSection(s: unknown): s is DocsSection {
+  const sec = s as DocsSection | null;
+  return !!sec && typeof sec.id === 'string' && Array.isArray(sec.pages);
 }
 
 /** what loadDocs found, without waiting (null until it has run) */
@@ -138,7 +124,7 @@ export function findArticle(id: string): DocsArticle | undefined {
 
 /** for tests */
 export function resetDocs(): void {
-  loading = null;
   loaded = null;
+  builtFrom = 0;
   byId.clear();
 }
