@@ -15,6 +15,7 @@ import {
   installHelpKeys,
   uninstallHelpKeys,
 } from '@/features/help/host';
+import { closePalette, isPaletteOpen } from '@/features/help/search/palette';
 import { useHelpStore } from '@/features/help/store';
 
 const HELPER = readFileSync(resolve(process.cwd(), 'static/helper.js'), 'utf8');
@@ -98,7 +99,7 @@ describe('the help button', () => {
     expect(document.querySelector('.helper-menu')).toBeNull();
   });
 
-  it('Ctrl K no longer opens the old helper search', () => {
+  it('Ctrl K no longer opens the old helper search, it opens the palette', () => {
     boot();
     installHelpApi();
     installHelpKeys();
@@ -106,7 +107,8 @@ describe('the help button', () => {
       new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }),
     );
     expect(document.querySelector('.helper-search-overlay, .helper-search')).toBeNull();
-    expect(useHelpStore.getState().open).toBe(true);
+    expect(isPaletteOpen()).toBe(true);
+    closePalette();
   });
 
   it('knows the page from the shell when a vanilla page is not active', () => {

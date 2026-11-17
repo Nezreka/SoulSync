@@ -174,12 +174,16 @@ describe('opening and closing', () => {
     expect(useHelpStore.getState().open).toBe(true);
   });
 
-  it('Ctrl K opens it at the search field', async () => {
+  it('Ctrl K with the sheet open puts the caret in its search field (closed, it opens the palette)', async () => {
     serve();
     mount();
-    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true });
+    act(() => window.SoulSyncHelp!.open());
     const dialog = await screen.findByRole('dialog', { name: 'Help' });
-    await waitFor(() => expect(within(dialog).getByRole('searchbox')).toHaveFocus());
+    const field = within(dialog).getByRole('searchbox');
+    await waitFor(() => expect(field).toHaveFocus());
+    field.blur();
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(field).toHaveFocus());
   });
 
   it('Esc from the page beside the open sheet closes it too', async () => {
