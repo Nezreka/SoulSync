@@ -49,6 +49,15 @@ def read_tag_field(audio, field: str) -> Any:
     if audio is None or audio.tags is None:
         return None
     field = _FIELD_ALIASES.get(field, field)
+    if field == 'artists':
+        if isinstance(audio.tags, ID3):
+            frame = audio.tags.get('TXXX:Artists')
+            values = frame.text if frame else []
+        elif isinstance(audio, MP4):
+            values = audio.get('----:com.apple.iTunes:ARTISTS') or audio.get('\xa9ART', [])
+        else:
+            values = audio.get('artists', [])
+        return [v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in values if v]
     if field in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
         pair = read_number_pair(audio, 'disc' if field in ('disc_number', 'total_discs') else 'track')
         return pair[1 if field.startswith('total_') else 0]
@@ -305,6 +314,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             return result
 
         result['format'] = ext.lstrip('.').upper()
+        result['artists'] = read_tag_field(audio, 'artists')
         from core.metadata.musicbrainz_tags import read_tag
         from core.metadata.common import get_mutagen_symbols
         symbols = get_mutagen_symbols()
@@ -760,6 +770,22 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             diffs.append({'field': tag.replace('_', ' '), 'file_key': tag,
                           'file_value': str(actual or ''), 'db_value': str(expected),
                           'changed': str(actual or '') != str(expected)})
+
+    # The multi-value ARTISTS list (#587 convention), when the user writes it.
+    # A matching display string says nothing about it: a credit healed into
+    # two artists keeps "Camellia, Toby Fox" as its display with the default
+    # separator, and only this row tells Re-tag the files are behind.
+    db_artists = [str(n).strip() for n in (db_data.get('artists_list') or []) if str(n or '').strip()]
+    if len(db_artists) > 1 and _multi_artist_write_enabled():
+        file_artists = [str(n).strip() for n in (file_tags.get('artists') or [])
+                        if str(n or '').strip()]
+        diffs.append({
+            'field': 'Artists',
+            'file_key': 'artists',
+            'file_value': '; '.join(file_artists),
+            'db_value': '; '.join(db_artists),
+            'changed': [n.casefold() for n in file_artists] != [n.casefold() for n in db_artists],
+        })
 
     # Cover art — special row
     diffs.append({

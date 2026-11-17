@@ -15,6 +15,7 @@ import sqlite3
 import pytest
 
 from core.library2.importer import _credit_names_for_import, normalize_name
+from core.matching.artist_credit import decide_credit
 from core.library2.native_enrich import split_combined_credits_locally
 from core.library2.schema import ensure_library_v2_schema
 
@@ -26,23 +27,35 @@ def _known(*names):
     return lambda name: normalize_name(name) in keys
 
 
+def _proposes(credit, *, album_artist=None, library=()):
+    """what Split Artists proposes for an imported credit, from the same
+    context the import has (the album's artist, the artists the library has)"""
+    known = _known(*library)
+    return list(decide_credit(credit, known=[album_artist] if album_artist else [],
+                              is_act=known, is_artist=known).names)
+
+
+def test_the_import_keeps_a_credit_as_written():
+    # who an artist is, is Split Artists' to say; the import records
+    assert _credit_names_for_import("1788-L, Deathpact") == ["1788-L, Deathpact"]
+    assert _credit_names_for_import("  ") == []
+
+
 def test_a_credit_with_the_album_artist_in_it_is_a_list():
-    assert _credit_names_for_import("1788-L, Deathpact", _known("1788-L"),
-                                    album_artist="1788-L") == ["1788-L", "Deathpact"]
+    assert _proposes("1788-L, Deathpact", album_artist="1788-L",
+                     library=("1788-L",)) == ["1788-L", "Deathpact"]
 
 
 def test_without_the_album_artist_an_unknown_band_name_stays_whole():
     # one known part on someone else's album is not enough
-    assert _credit_names_for_import("Earth, Wind & Fire", _known("Earth"),
-                                    album_artist="Various Artists") == ["Earth, Wind & Fire"]
+    assert _proposes("Earth, Wind & Fire", album_artist="Various Artists",
+                     library=("Earth",)) == ["Earth, Wind & Fire"]
 
 
 def test_a_band_on_its_own_album_is_never_split():
-    assert _credit_names_for_import("Earth, Wind & Fire", _known("Earth, Wind & Fire"),
-                                    album_artist="Earth, Wind & Fire") == ["Earth, Wind & Fire"]
+    assert _proposes("Earth, Wind & Fire", album_artist="Earth, Wind & Fire",
+                     library=("Earth, Wind & Fire",)) == ["Earth, Wind & Fire"]
 
-
-# ── the healer ───────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def conn():
@@ -69,6 +82,14 @@ def _credited_track(conn, album_artist, credited, title="Song"):
     return track
 
 
+def _provider(conn, track, *names):
+    """the list a provider credits on the track: what confirms a split"""
+    for position, name in enumerate(names):
+        conn.execute("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                     "position, name, source_artist_id) VALUES('track', ?, 'deezer', ?, ?, ?)",
+                     (track, position, name, f"dz-{name}"))
+
+
 def _credits(conn, track):
     return [r[0] for r in conn.execute(
         "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
@@ -79,21 +100,29 @@ def _exists(conn, artist_id):
     return conn.execute("SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)).fetchone() is not None
 
 
-def test_a_ghost_with_the_album_artist_in_it_splits(conn):
+@pytest.fixture
+def asked(monkeypatch):
+    """what the pass hands to Split Artists, the one job that splits"""
+    import core.repair_worker as rw
+    calls = []
+    monkeypatch.setattr(rw, "request_artist_split",
+                        lambda ids, reason="": calls.extend(ids) or True)
+    return calls
+
+
+def test_a_ghost_with_the_album_artist_in_it_goes_to_split_artists(conn, asked):
     lead = _artist(conn, "1788-L", spotify="sp-1788", legacy=5)
     ghost = _artist(conn, "1788-L, Deathpact")
     track = _credited_track(conn, lead, ghost)
 
     stats = split_combined_credits_locally(conn)
 
-    assert (stats["split"], stats["created"]) == (1, 1)
-    assert not _exists(conn, ghost)
-    assert _credits(conn, track) == ["1788-L", "Deathpact"]
-    # the known part kept its artist, ids and all
-    assert conn.execute("SELECT spotify_id FROM lib2_artists WHERE id=?", (lead,)).fetchone()[0] == "sp-1788"
+    assert stats["handed_to_split_artists"] == 1 and asked == [ghost]
+    # nothing split here: the credit stands until Split Artists confirms it
+    assert _exists(conn, ghost) and _credits(conn, track) == ["1788-L", "1788-L, Deathpact"]
 
 
-def test_a_ghost_named_like_a_known_artist_merges(conn):
+def test_a_ghost_named_like_a_known_artist_merges(conn, asked):
     real = _artist(conn, "Tyler, The Creator", spotify="sp-tyler", legacy=9)
     host = _artist(conn, "Kali Uchis", spotify="sp-kali", legacy=10)
     ghost = _artist(conn, "Tyler, The Creator")
@@ -101,46 +130,39 @@ def test_a_ghost_named_like_a_known_artist_merges(conn):
 
     stats = split_combined_credits_locally(conn)
 
-    assert stats["merged"] == 1 and stats["split"] == 0
+    # one artist written the same way twice: a merge, not a split. The real
+    # "Tyler, The Creator" reads as a list too: Split Artists keeps it whole
+    assert stats["merged"] == 1 and asked == [real]
     assert not _exists(conn, ghost)
     assert _credits(conn, track) == ["Kali Uchis", "Tyler, The Creator"]
     assert conn.execute("SELECT COUNT(*) FROM lib2_track_artists WHERE artist_id=?",
                         (real,)).fetchone()[0] == 1
 
 
-def test_an_unknown_band_on_someone_elses_album_is_left_for_the_online_pass(conn):
+@pytest.mark.parametrize("name, spotify", [
+    ("Crosby, Stills & Nash", None),              # an unknown band
+    ("Asian Doll & Antha Pantha", None),          # every part known
+    ("Øneheart, Malek", "sp-wrong-match"),        # an id picked up by name
+    ("Earth, Wind & Fire", "sp-ewf"),             # an identified band
+])
+def test_every_name_reading_as_a_list_goes_to_split_artists_untouched(conn, asked, name, spotify):
     host = _artist(conn, "Various Artists", spotify="sp-va", legacy=11)
-    _artist(conn, "Crosby", spotify="sp-crosby", legacy=12)
-    ghost = _artist(conn, "Crosby, Stills & Nash")
+    for part in ("Asian Doll", "Antha Pantha", "Øneheart"):
+        _artist(conn, part, spotify=f"sp-{part}")
+    ghost = _artist(conn, name, spotify=spotify)
     track = _credited_track(conn, host, ghost)
 
-    stats = split_combined_credits_locally(conn)
+    split_combined_credits_locally(conn)
 
-    assert stats["left"] == 1 and stats["split"] == 0
-    assert _exists(conn, ghost)
-    assert _credits(conn, track) == ["Various Artists", "Crosby, Stills & Nash"]
-
-
-def test_every_part_known_splits_even_off_the_album_artist(conn):
-    host = _artist(conn, "Various Artists", spotify="sp-va", legacy=11)
-    a = _artist(conn, "Asian Doll", spotify="sp-ad", legacy=13)
-    b = _artist(conn, "Antha Pantha", spotify="sp-ap", legacy=14)
-    ghost = _artist(conn, "Asian Doll & Antha Pantha")
-    track = _credited_track(conn, host, ghost)
-
-    stats = split_combined_credits_locally(conn)
-
-    assert stats["split"] == 1 and stats["created"] == 0
-    assert not _exists(conn, ghost)
-    assert {r[0] for r in conn.execute("SELECT artist_id FROM lib2_track_artists WHERE track_id=?",
-                                       (track,))} == {host, a, b}
+    assert asked == [ghost]
+    assert _exists(conn, ghost) and _credits(conn, track) == ["Various Artists", name]
 
 
-def test_a_ghost_that_owns_an_album_is_never_touched(conn):
+def test_a_ghost_that_owns_an_album_is_never_touched(conn, asked):
     ghost = _artist(conn, "Owner, Of Albums")
     conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Mine')", (ghost,))
     stats = split_combined_credits_locally(conn)
-    assert stats["considered"] == 0 and _exists(conn, ghost)
+    assert stats["considered"] == 0 and _exists(conn, ghost) and asked == []
 
 
 def test_the_automatic_online_pass_only_takes_what_the_workers_cannot(conn):
@@ -155,32 +177,6 @@ def test_the_automatic_online_pass_only_takes_what_the_workers_cannot(conn):
     assert automatic == {combined}
 
 
-def test_an_anchored_ghost_splits_even_with_an_id_it_picked_up_by_name(conn):
-    """"Øneheart, Malek" on Øneheart's own album got a provider id from a name
-    match, and the split skipped anything identified, so it stayed a fileless
-    "artist" in the Library list (258 of 289 left-over ghosts on a big
-    library). A credit carrying the album's own artist as a part is a list
-    whatever id it has."""
-    album_artist = _artist(conn, "Øneheart", spotify="sp-oneheart")
-    ghost = _artist(conn, "Øneheart, Malek", spotify="sp-wrong-match")
-    track = _credited_track(conn, album_artist, ghost)
-    stats = split_combined_credits_locally(conn)
-    assert stats["split"] == 1
-    assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE id=?", (ghost,)).fetchone()[0] == 0
-    names = {r[0] for r in conn.execute(
-        "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
-        "WHERE ta.track_id=?", (track,))}
-    assert names == {"Øneheart", "Malek"}
-
-
-def test_an_identified_band_name_with_no_anchor_is_left_alone(conn):
-    band = _artist(conn, "Earth, Wind & Fire", spotify="sp-ewf")
-    other = _artist(conn, "Various Artists")
-    _credited_track(conn, other, band)
-    split_combined_credits_locally(conn)
-    assert conn.execute("SELECT name FROM lib2_artists WHERE id=?", (band,)).fetchone()[0] == "Earth, Wind & Fire"
-
-
 # ── the band a frontman leads ────────────────────────────────────────────────
 # "<artist> & The <band>" carries the album artist as a part and is still one
 # artist. the anchor rule read it as a list: "Nick Cave & The Bad Seeds" on a
@@ -192,39 +188,28 @@ def test_an_identified_band_name_with_no_anchor_is_left_alone(conn):
     ("Marina and the Diamonds", "Marina"),
     ("Florence + the Machine", "Florence"),
 ])
-def test_the_band_a_frontman_leads_stays_whole_at_import(band, lead):
-    assert _credit_names_for_import(band, _known(lead), album_artist=lead) == [band]
+def test_the_band_a_frontman_leads_stays_whole(band, lead):
+    assert _proposes(band, album_artist=lead, library=(lead,)) == [band]
 
 
-def test_a_list_with_the_album_artist_still_splits_at_import():
-    assert _credit_names_for_import("Drake & Future", _known("Drake"),
-                                    album_artist="Drake") == ["Drake", "Future"]
-    assert _credit_names_for_import("Bob Marley & The Wailers feat. Lauryn Hill",
-                                    _known("Bob Marley"), album_artist="Bob Marley") == [
-        "Bob Marley", "The Wailers", "Lauryn Hill"]
+def test_a_list_with_the_album_artist_is_proposed_as_a_list():
+    assert _proposes("Drake & Future", album_artist="Drake",
+                     library=("Drake",)) == ["Drake", "Future"]
+    # the feat. makes Lauryn Hill a guest; it does not make the band a list
+    assert _proposes("Bob Marley & The Wailers feat. Lauryn Hill", album_artist="Bob Marley",
+                     library=("Bob Marley",)) == ["Bob Marley & The Wailers", "Lauryn Hill"]
 
 
-def test_an_identified_band_a_frontman_leads_is_not_split(conn):
+def test_an_identified_band_a_frontman_leads_keeps_its_watch(conn, asked):
     lead = _artist(conn, "Bob Marley", spotify="sp-marley")
     band = _artist(conn, "Bob Marley & The Wailers", spotify="sp-wailers")
     conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, "
                  "provenance) VALUES('artist', ?, 3, 1, 'user_explicit')", (band,))
     track = _credited_track(conn, lead, band)
 
-    stats = split_combined_credits_locally(conn)
+    split_combined_credits_locally(conn)
 
-    assert stats["split"] == 0
     assert _exists(conn, band)
     assert _credits(conn, track) == ["Bob Marley", "Bob Marley & The Wailers"]
     assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_id=?",
                         (band,)).fetchone()[0] == 1
-
-
-def test_an_anchored_list_with_an_id_still_splits(conn):
-    lead = _artist(conn, "Drake", spotify="sp-drake")
-    ghost = _artist(conn, "Drake & Future", spotify="sp-wrong-match")
-    track = _credited_track(conn, lead, ghost)
-
-    assert split_combined_credits_locally(conn)["split"] == 1
-    assert not _exists(conn, ghost)
-    assert set(_credits(conn, track)) == {"Drake", "Future"}

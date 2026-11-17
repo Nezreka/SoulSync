@@ -8,6 +8,22 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Dict, List, Optional, Any
+
+
+def artist_credit_list(entity: Any) -> Optional[List[Dict[str, str]]]:
+    """A recording's or release's ``artist-credit`` as ``[{"id", "name"}]``,
+    in order, each the name as credited. None when there is none."""
+    if not isinstance(entity, dict):
+        return None
+    out: List[Dict[str, str]] = []
+    for credit in entity.get('artist-credit') or []:
+        if not isinstance(credit, dict):
+            continue
+        artist = credit.get('artist') if isinstance(credit.get('artist'), dict) else {}
+        name = str(credit.get('name') or artist.get('name') or '').strip()
+        if name and artist.get('id'):
+            out.append({'id': str(artist['id']), 'name': name})
+    return out or None
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
@@ -966,6 +982,27 @@ class MusicBrainzClient:
                 raise
             logger.error(f"Error fetching recording {mbid}: {e}")
             return None
+
+    def track_artist_credits(self, recording_id: str) -> Optional[List[Dict[str, str]]]:
+        """The artists a recording credits, in order, as ``[{"id", "name"}]``
+        (the name as the release prints it). None when MusicBrainz can't say."""
+        if not str(recording_id or "").strip():
+            return None
+        return artist_credit_list(self.get_recording(str(recording_id).strip(),
+                                                     includes=['artist-credits']))
+
+    def track_artist_credits_by_isrc(self, isrc: str) -> Optional[tuple]:
+        """``(recording id, credits)`` for the recording an ISRC names, exact
+        and without a text search. None when MusicBrainz knows no recording
+        for it, or its recordings credit different artists."""
+        lists = [(str(r.get('id') or ''), artist_credit_list(r))
+                 for r in self.lookup_recordings_by_isrc(isrc) or [] if isinstance(r, dict)]
+        lists = [(rid, credits) for rid, credits in lists if rid and credits]
+        if not lists:
+            return None
+        if len({tuple(c['name'].casefold() for c in credits) for _rid, credits in lists}) != 1:
+            return None  # the ISRC's recordings disagree: nothing exact to say
+        return lists[0]
 
     def lookup_recordings_by_isrc(self, isrc: str, raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """

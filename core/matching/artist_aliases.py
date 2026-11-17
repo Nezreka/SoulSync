@@ -96,13 +96,12 @@ def split_artist_credit(credit: str) -> List[str]:
     - ``"Artist1 / Artist2 / Artist3"`` → ``["Artist1", "Artist2", "Artist3"]``
     - ``"Solo Artist"`` → ``["Solo Artist"]`` (no separators → single-entry list)
 
-    Empty string / whitespace-only entries dropped. Always returns at
-    least one entry when input is non-empty (the single-artist case).
+    The one credit tokenizer (``core.matching.artist_credit.split_names``),
+    keeping a spelled-out " and " inside a name. For comparing only.
     """
-    if not credit:
-        return []
-    parts = _CREDIT_SPLITTER.split(str(credit))
-    return [p.strip() for p in parts if p and p.strip()]
+    from core.matching.artist_credit import split_names
+
+    return split_names(credit, conjunctions=False)
 
 
 def _coerce_aliases(aliases: Optional[Iterable[str]]) -> Tuple[str, ...]:

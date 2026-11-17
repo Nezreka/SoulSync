@@ -30,6 +30,7 @@ import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from utils.logging_config import get_logger
+from core.matching.artist_credit import split_names
 
 logger = get_logger("playlists.user_playlists")
 
@@ -147,7 +148,6 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
 _BRACKETED = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')
 _DASH_SUFFIX = re.compile(r'\s+-\s+.*$')
 _FEAT = re.compile(r'\s+(feat\.?|ft\.?|featuring|with)\s+.*$', re.I)
-_ARTIST_SPLIT = re.compile(r'\s*(,|&|\bx\b|\band\b|;|/)\s*', re.I)
 _NON_WORD = re.compile(r'[^\w\s]')
 
 
@@ -168,7 +168,7 @@ def track_key(track: Dict[str, Any]) -> Tuple[str, str]:
     # collapsing to nothing and matching every other such title
     title_key = _plain(stripped) or _plain(title)
     artist = str(track.get('artist_name') or '')
-    main = _ARTIST_SPLIT.split(_FEAT.sub('', artist))[0]
+    main = (split_names(_FEAT.sub('', artist)) or [''])[0]
     artist_key = _plain(main) or _plain(artist)
     if artist_key.startswith('the '):
         artist_key = artist_key[4:]

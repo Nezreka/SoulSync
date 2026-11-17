@@ -29,6 +29,7 @@ import unicodedata
 from typing import Any, FrozenSet, Iterable, List, Tuple
 
 from utils.logging_config import get_logger
+from core.matching.artist_credit import split_names
 
 logger = get_logger("playlists.uncatalogued")
 
@@ -46,7 +47,6 @@ _OTHER_VERSION = frozenset({
 # said in a credit without naming anything
 _FILLER = frozenset({"feat", "ft", "featuring", "with", "prod", "by", "the", "a", "an", "and"})
 _BRACKETS = re.compile(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]")
-_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\band\b)\s*", re.I)
 
 # how far a file's length may be from the playlist's
 LENGTH_SLACK_SECONDS = 7.0
@@ -82,7 +82,7 @@ def _artists(artist: Any) -> List[List[str]]:
     for name in names:
         if isinstance(name, dict):
             name = name.get("name")
-        for part in _ARTIST_SPLIT.split(str(name or "")):
+        for part in split_names(str(name or "")):
             words = tokens(part)
             if words:
                 out.append(words)

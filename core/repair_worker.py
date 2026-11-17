@@ -745,6 +745,11 @@ RETAG_DIFFERS_REVIEW = (
     "one waits for you: open it to see both values, then apply or dismiss it."
 )
 
+SPLIT_NEEDS_CONFIRMATION = (
+    "No provider confirms this split, so Fix all leaves it alone. Check the artists, "
+    "then use this finding's own button: Split Artists, One artist or Edit split."
+)
+
 RETAG_NO_COVER_FOUND = (
     "No cover art was found for this album on any source. Open the album in the Library, "
     "pick one with Change Cover, then apply again."
@@ -815,6 +820,81 @@ def attach_retag_preview(conn, items: List[dict]) -> None:
             item['preview'] = rows
 
 
+# the worker the app runs, for code outside a job that hands work to one (a
+# healer asking Retag / Reorganize to look at what it changed). None until a
+# worker exists; tests construct their own.
+_ACTIVE_WORKER: Optional["RepairWorker"] = None
+
+
+def active_repair_worker() -> Optional["RepairWorker"]:
+    """the running app's repair worker, or None"""
+    return _ACTIVE_WORKER
+
+
+# the projection writers a healer can hand its changes to: they compare the
+# files with the committed catalogue and act by their own settings (findings
+# by default, writing only when the user turned that on), manual tags and
+# locks included. A healer never writes tags or moves files itself.
+PROJECTION_JOBS = {"retag": "library_retag", "reorganize": "library_reorganize"}
+# the one job that splits a combined artist; everything else asks it
+SPLIT_JOB = "comma_artist_splitter"
+
+
+def request_artist_split(artist_ids, *, reason: str = "") -> bool:
+    """:meth:`RepairWorker.request_split` on the app's worker, for code that
+    is not a repair job (enrichment, the import). False without a worker."""
+    worker = active_repair_worker()
+    return worker.request_split(artist_ids, reason=reason) if worker is not None else False
+
+
+_PROJECTION_NAMES = {"retag": "Re-tag", "reorganize": "Reorganize"}
+
+
+def split_projection(config_manager: Any) -> Dict[str, bool]:
+    """Split Artists' Request Re-tag / Request Reorganize (both on by
+    default). Every heal of a combined artist asks by them: the finding's
+    fix and the settle after an import."""
+    settings = {}
+    if config_manager is not None:
+        settings = config_manager.get('repair.jobs.comma_artist_splitter.settings', {}) or {}
+    return {"retag": settings.get("request_retag", True) is not False,
+            "reorganize": settings.get("request_reorganize", True) is not False}
+
+
+def _projection_note(projected: dict) -> str:
+    """what a heal's projection request did, for the fix's message"""
+    queued = " and ".join(_PROJECTION_NAMES[k] for k in projected.get("queued") or ())
+    if not queued or not projected.get("files"):
+        return ""
+    return f"; {queued} will check {projected['files']} file(s)"
+
+
+def _merge_scope(existing: Optional[dict], new: Optional[dict], queued: bool) -> Optional[dict]:
+    """the scope a queued run takes when it is asked for again before it
+    starts. a waiting library-wide run already covers everything; two file
+    lists of the same library are one run over both; anything else is the
+    newest request, as before"""
+    if queued and existing is None:
+        return None
+    if not new:
+        return None
+    lists = ("file_paths", "artist_ids")
+
+    def only_lists(scope: dict) -> bool:
+        return bool(scope) and set(scope) - {"library"} <= set(lists)
+
+    if (queued and existing and only_lists(existing) and only_lists(new)
+            and existing.get("library") == new.get("library")):
+        # files and artists asked for before it starts: one run over all of
+        # them, a file scope and an artist request side by side included
+        merged = dict(existing)
+        for key in lists:
+            if key in existing or key in new:
+                merged[key] = sorted({*existing.get(key, ()), *new.get(key, ())})
+        return merged
+    return new
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -823,8 +903,10 @@ class RepairWorker:
     """
 
     def __init__(self, database, transfer_folder: str = None):
+        global _ACTIVE_WORKER
         self.db = database
         self.transfer_folder = transfer_folder or './Transfer'
+        _ACTIVE_WORKER = self
 
         # Worker state
         self.running = False
@@ -1987,6 +2069,11 @@ class RepairWorker:
             logger.warning("Unknown job: %s", job_id)
             return False
 
+        if scope and "artist_ids" in scope and not getattr(
+                self._jobs[job_id], "supports_artist_id_scope", False):
+            raise ValueError(
+                f"{getattr(self._jobs[job_id], 'display_name', job_id)} cannot be "
+                "scoped to artists by id")
         if scope and "file_paths" in scope:
             job = self._jobs[job_id]
             if not getattr(job, "supports_file_scope", False):
@@ -2007,13 +2094,87 @@ class RepairWorker:
                 logger.debug("Could not read config for %s, allowing the run", job_id, exc_info=True)
 
         with self._force_run_lock:
-            if scope:
-                self._force_run_scopes[job_id] = scope
+            queued = job_id in self._force_run_queue
+            merged = _merge_scope(self._force_run_scopes.get(job_id), scope, queued)
+            if merged:
+                self._force_run_scopes[job_id] = merged
+            else:
+                self._force_run_scopes.pop(job_id, None)
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
                 logger.info("Job %s queued for immediate run%s", job_id,
                             f" (scope: {scope})" if scope else "")
         return True
+
+    def request_projection(self, track_ids, *, retag: bool = True, reorganize: bool = True,
+                           reason: str = "") -> Dict[str, Any]:
+        """Hand a healer's catalogue changes to the projection writers.
+
+        Queues Retag and / or Reorganize scoped to the active files of
+        ``track_ids``. Each runs in its own mode: by default it files
+        findings for the files that no longer match the catalogue, and
+        writes only when the user switched its automatic mode on; manual
+        tags, locks and history are its business, not the healer's. The
+        jobs' own switch is their library-wide schedule (both ship off);
+        whether a heal asks is the healer's setting (``retag`` /
+        ``reorganize``), so a request runs a job that has no schedule.
+        Returns what was queued.
+        Never raises: the catalogue change stands either way, and the
+        jobs' own schedules catch up later."""
+        out: Dict[str, Any] = {"files": 0, "queued": []}
+        ids = sorted({int(t) for t in track_ids or ()})
+        if not ids or not (retag or reorganize):
+            return out
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            marks = ",".join("?" for _ in ids)
+            paths = sorted({str(r[0]) for r in conn.execute(
+                f"SELECT path FROM lib2_track_files WHERE track_id IN ({marks}) "
+                "AND path IS NOT NULL AND TRIM(path)<>'' "
+                "AND COALESCE(file_state,'active')='active'", ids).fetchall()})
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            logger.debug("projection scope for %d track(s) unreadable: %s", len(ids), exc)
+            return out
+        finally:
+            if conn is not None:
+                conn.close()
+        out["files"] = len(paths)
+        if not paths:
+            return out
+        for kind, wanted in (("retag", retag), ("reorganize", reorganize)):
+            if not wanted:
+                continue
+            try:
+                if self.run_job_now(PROJECTION_JOBS[kind], scope={"file_paths": paths}):
+                    out["queued"].append(kind)
+            except Exception as exc:  # noqa: BLE001 - see docstring
+                logger.debug("%s not requested: %s", kind, exc)
+        if out["queued"]:
+            logger.info("%s: %s requested for %d file(s)", reason or "catalogue change",
+                        " and ".join(out["queued"]), len(paths))
+        return out
+
+    def request_split(self, artist_ids, *, reason: str = "") -> bool:
+        """Hand combined-artist candidates to Split Artists, the one job that
+        splits an artist: it decides with the credit kernel, asks the credit
+        fetcher for evidence, confirms, heals and requests Re-tag /
+        Reorganize, all by its own settings (dry run: findings). No other
+        job splits; one that meets a name reading as a list asks here. Like
+        a projection request, its switch is its schedule, not a veto.
+        Returns whether a run was queued. Never raises."""
+        ids = sorted({int(a) for a in artist_ids or () if str(a).strip().lstrip("-").isdigit()})
+        if not ids:
+            return False
+        try:
+            queued = self.run_job_now(SPLIT_JOB, scope={"artist_ids": ids})
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            logger.debug("split not requested: %s", exc)
+            return False
+        if queued:
+            logger.info("%s: Split Artists requested for %d artist(s)",
+                        reason or "combined artist", len(ids))
+        return bool(queued)
 
     def _update_progress(self, scanned: int, total: int, report=None):
         """Callback for jobs to report progress.
@@ -4004,31 +4165,16 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
-        """Split a separator-joined artist tag into properly separated artists (jadux).
+        """Heal the selected catalogue credits, commit, then use scoped retag.
 
-        Re-tags every file still under the combined artist: display artist
-        becomes "A; B", the per-artist list goes into the multi-value Artists
-        tag (same frames as issue #587's writer — TXXX:Artists for ID3,
-        `artists` for Vorbis, a real list for MP4), and an album-artist equal
-        to the combined string becomes the primary artist. The list is written
-        unconditionally — the user explicitly approved this split, so the
-        global write_multi_artist opt-in doesn't gate it.
-
-        Stale-finding guard: a file whose CURRENT artist tag no longer matches
-        the combined string (user edited it) is left untouched and the finding
-        is retired. A file that already carries the split list counts as done,
-        not stale. The file list comes from the finding details, which scanned
-        the actual file metadata (not the database).
+        No direct tag codec or save here. A failed tag projection leaves the
+        catalogue healed and the finding retryable. File paths in older
+        findings are resolved through the catalogue, never arbitrary writes.
         """
-        # Current scans name a native row. During the transition, a few
-        # text-keyed findings already stored complete Lib2 links; keep those
-        # fixable, but never reinterpret a bare legacy numeric row id.
-        if (_lib2_id(entity_id) is None
-                and not details.get('library_v2_native')
+        if (_lib2_id(entity_id) is None and not details.get('library_v2_native')
                 and not (details.get('library_v2') or {}).get('track_ids')):
             return _stale_legacy_subject(entity_id) or {
                 'success': False, 'error': 'Finding has no Library subject'}
-
         parts = details.get('split_artists')
         combined = details.get('combined_name') or details.get('artist_name')
         if not isinstance(parts, list) or len(parts) < 2 or not combined:
@@ -4036,9 +4182,6 @@ class RepairWorker:
         parts = [str(p).strip() for p in parts if str(p).strip()]
         if len(parts) < 2:
             return {'success': False, 'error': 'Finding has no split_artists list'}
-        display = details.get('new_display_artist') or '; '.join(parts)
-        primary = details.get('primary_artist') or parts[0]
-
         # #2150: the user corrects the finding. "keep_whole" says the whole
         # credit is one artist, "split:A; B" is their own split of it. a name
         # they join is remembered, so no splitter takes it apart again.
@@ -4062,9 +4205,11 @@ class RepairWorker:
             if len(parts) < 2:
                 return {'success': True, 'action': 'kept_whole',
                         'message': f'"{parts[0]}" stays one artist and won\'t be split again'}
-            display = '; '.join(parts)
-            primary = parts[0]
         else:
+            if details.get('needs_confirmation') and not details.get('_explicit_single_fix'):
+                # names alone proposed it: only the user's own click splits it
+                return {'success': False, 'skipped_by_design': True,
+                        'error': SPLIT_NEEDS_CONFIRMATION}
             broken = self._comma_split_breaks_a_name(combined, parts)
             if broken:
                 # filed before the name was known as one artist (an older
@@ -4073,194 +4218,115 @@ class RepairWorker:
                     f'"{broken}" is one artist. Run Split Artists again for a fresh split, '
                     f'or edit the split')}
 
-        # Get file list from finding details
-        file_infos = details.get('all_files') or details.get('files') or []
-        files = [f.get('file_path') if isinstance(f, dict) else f for f in file_infos]
-        if not files:
-            files = self._comma_split_files_from_db(entity_id, details)
-        if not files:
-            # No list in the finding AND the DB fallback found nothing under
-            # this artist: the files are gone, so there is nothing left to
-            # split. This must stay a SUCCESS — only success resolves the
-            # finding (fix_finding checks result['success'] before calling
-            # resolve_finding), so returning an error here left a finding for
-            # deleted files permanently stuck: the Fix button errored with
-            # "re-run the scan", and a rescan is exactly the thing that can't
-            # find files that no longer exist. Restores the pre-#1081 return.
-            return {'success': True, 'action': 'already_gone',
-                    'message': 'No files under this artist anymore'}
+        from contextlib import closing
+        from core.library2.native_enrich import heal_combined_artist
 
-        from mutagen import File as MutagenFile
-        from mutagen.id3 import ID3, TPE1, TPE2, TXXX
-        from mutagen.mp4 import MP4
-        from core.library.path_resolver import resolve_library_file_path
-        from core.metadata.common import save_audio_file, get_mutagen_symbols
-        from core.repair_jobs.comma_artist_splitter import file_already_split
+        wanted = split_projection(self._config_manager)
+        try:
+            with closing(self.db._get_connection()) as conn:
+                artist_id = self._comma_split_artist(conn, entity_id, details, combined)
+                if artist_id is None:
+                    # no artist row carries the combined name any more: the
+                    # catalogue is split already (an older finding read the
+                    # tags). what is left is the files, Re-tag's to compare
+                    track_ids = self._comma_split_tracks(conn, entity_id, details)
+                    projected = self.request_projection(
+                        track_ids, retag=wanted['retag'], reorganize=False,
+                        reason=f'Split Artists "{combined}"')
+                    return {'success': True, 'action': 'catalogue_already_split', 'fixed': 0,
+                            'projection': projected,
+                            'message': ('The library already credits these artists separately'
+                                        + _projection_note(projected))}
+                healed = heal_combined_artist(
+                    conn, artist_id, parts, lead=details.get('primary_artist'),
+                    reason='Split Artists')
+                if healed is None:
+                    return {'success': False, 'stale': True,
+                            'error': f'"{combined}" no longer splits into these artists'}
+                if healed.get('refused'):
+                    why = ('a name you set by hand' if healed['refused'] == 'manual'
+                           else 'a metadata lock')
+                    return {'success': False, 'healing': healed,
+                            'error': f'"{combined}" is protected by {why}; nothing was changed'}
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.error('Artist split failed: %s', exc)
+            return {'success': False, 'error': str(exc)}
+        # the catalogue change stands; the projection writers check the files
+        projected = self.request_projection(
+            healed['track_ids'], **wanted, reason=f'Split Artists "{combined}"')
+        return {'success': True, 'action': 'artists_split', 'catalogue_healed': True,
+                'fixed': len(healed['track_ids']), 'healing': healed, 'projection': projected,
+                'message': (f'"{combined}" split into {len(healed["component_ids"])} artists'
+                            + _projection_note(projected))}
 
+    def _comma_split_artist(self, conn, entity_id, details, combined):
+        """the catalogue artist a split finding is about: the finding's own
+        artist, else an artist it names, while it still carries the combined
+        name. None when no row does any more."""
+        from core.matching.artist_credit import name_key
+        candidates = []
+        native_id = _lib2_id(entity_id)
+        if native_id is not None and str(entity_id).startswith('lib2:') and \
+                (details.get('library_v2_native') or details.get('db_artist_id')):
+            candidates.append(native_id)
         linked = details.get('library_v2') or {}
-        native_subject = bool(
-            details.get('library_v2_native')
-            or _lib2_id(entity_id) is not None
-            or linked.get('artist_ids') or linked.get('track_ids') or linked.get('file_ids')
-        )
-
-        def _norm(v):
-            return ' '.join(str(v or '').casefold().split())
-
-        def _matches_norm(raw, target_norm):
-            """does ANY value of the current tag equal the combined string?
-            the scan reads text[0], so the fix must accept whatever the scan
-            accepted: a zero-padded id3v2.4 TPE1 reads back from mutagen as
-            ['A; B', ''] (two values) and the old exactly-one-value guard
-            called every such file stale, forever. mutagen only strips that
-            padding for v2.3 (its #276)."""
-            if raw is None:
-                return False
-            if isinstance(raw, (list, tuple, set)):
-                return any(_norm(x) == target_norm for x in raw if x)
-            return _norm(raw) == target_norm
-
-        combined_norm = _norm(combined)
-        fixed = stale = missing = errors = already_split = 0
-
-        for fp in files:
-            if native_subject:
-                # Guide §5: every V2 file access goes through the lib2 resolver
-                # — the stored path can be the media-server view.
-                from core.library2.paths import resolve_lib2_path
-                resolved = fp if os.path.isfile(fp) else resolve_lib2_path(
-                    fp, config_manager=self._config_manager)
-            else:
-                resolved = resolve_library_file_path(
-                    fp, transfer_folder=self.transfer_folder,
-                    config_manager=self._config_manager)
-            if not resolved or not os.path.exists(resolved):
-                missing += 1
-                continue
+        for value in [details.get('db_artist_id'), *(linked.get('artist_ids') or [])]:
             try:
-                audio = MutagenFile(resolved)
-                if audio is None:
-                    errors += 1
-                    continue
-                if audio.tags is None:
-                    audio.add_tags()
+                candidates.append(int(value))
+            except (TypeError, ValueError):
+                pass
+        want = name_key(combined)
+        for artist_id in candidates:
+            row = conn.execute(
+                "SELECT COALESCE(canonical_artist_id, id), name FROM lib2_artists WHERE id=?",
+                (artist_id,)).fetchone()
+            if row and name_key(row[1]) == want:
+                return int(row[0])
+        row = conn.execute(
+            "SELECT id FROM lib2_artists WHERE canonical_artist_id IS NULL "
+            "AND LOWER(TRIM(name)) = LOWER(TRIM(?)) ORDER BY id LIMIT 1", (combined,)).fetchone()
+        return int(row[0]) if row else None
 
-                # already carries the split list (our earlier fix, or picard):
-                # nothing to write, but the finding IS done. counted apart
-                # from stale so it resolves as a success below.
-                if file_already_split(audio, parts):
-                    already_split += 1
-                    continue
-
-                changed = False
-                if isinstance(audio.tags, ID3):
-                    tpe1 = audio.tags.get('TPE1')
-                    tpe1_text = getattr(tpe1, 'text', None) if tpe1 else None
-                    if not _matches_norm(tpe1_text, combined_norm):
-                        stale += 1
-                        continue
-                    audio.tags.delall('TPE1')
-                    audio.tags.add(TPE1(encoding=3, text=[display]))
-                    audio.tags.delall('TXXX:Artists')
-                    audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(parts)))
-                    tpe2 = audio.tags.get('TPE2')
-                    if tpe2 and _matches_norm(getattr(tpe2, 'text', None), combined_norm):
-                        audio.tags.delall('TPE2')
-                        audio.tags.add(TPE2(encoding=3, text=[primary]))
-                    changed = True
-                elif isinstance(audio, MP4):
-                    art = audio.tags.get('\xa9ART') if audio.tags else None
-                    if not _matches_norm(art, combined_norm):
-                        stale += 1
-                        continue
-                    # MP4 artist carries the list directly (#587 convention).
-                    audio.tags['\xa9ART'] = list(parts)
-                    if _matches_norm(audio.tags.get('aART'), combined_norm):
-                        audio.tags['aART'] = [primary]
-                    changed = True
-                elif hasattr(audio, 'get'):  # Vorbis family (FLAC/Ogg/Opus)
-                    artist_val = audio.get('artist')
-                    if not _matches_norm(artist_val, combined_norm):
-                        stale += 1
-                        continue
-                    audio['artist'] = [display]
-                    audio['artists'] = list(parts)
-                    if _matches_norm(audio.get('albumartist'), combined_norm):
-                        audio['albumartist'] = [primary]
-                    changed = True
-                else:
-                    errors += 1
-                    continue
-
-                if changed:
-                    # Atomic + audio-integrity-verified save (#819/#1000).
-                    save_audio_file(audio, get_mutagen_symbols())
-                    fixed += 1
-            except Exception as e:
-                logger.error("Comma-artist split failed for %s: %s", resolved, e)
-                errors += 1
-
-        if fixed > 0:
-            msg = f'Re-tagged {fixed} file(s) as "{display}"'
-            extras = []
-            if already_split:
-                extras.append(f'{already_split} already split')
-            if stale:
-                extras.append(f'{stale} skipped (tag changed since scan)')
-            if missing:
-                extras.append(f'{missing} not found on disk')
-            if errors:
-                extras.append(f'{errors} failed')
-            if extras:
-                msg += f' ({", ".join(extras)})'
-            logger.info("Comma-artist split: %s → %s — %s", combined, parts, msg)
-            return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': fixed}
-
-        if already_split > 0 and not errors:
-            msg = f'All {already_split} file(s) already have split artist tags'
-            if missing or stale:
-                extras = []
-                if stale:
-                    extras.append(f'{stale} skipped (tag changed since scan)')
-                if missing:
-                    extras.append(f'{missing} not found on disk')
-                msg = f'{already_split} file(s) already split ({", ".join(extras)})'
-            logger.info("Comma-artist split: %s already split — %s", combined, msg)
-            return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': 0}
-
-        if stale and not errors and not missing:
-            # can never succeed: the tag the finding is about is gone. 'stale'
-            # retires it (#1143 path) instead of leaving it pending to fail
-            # on every run; the next scan re-raises it if anything is left.
-            return {'success': False, 'stale': True,
-                    'error': f'All {stale} file(s) no longer carry "{combined}" — '
-                             f'tags changed since the scan; re-run the job'}
-        if missing == len(files):
-            return {'success': True, 'action': 'already_gone',
-                    'message': 'No files found on disk for this artist'}
-        return {'success': False,
-                'error': f'No files re-tagged ({stale} stale, {missing} missing, {errors} errors)'}
+    def _comma_split_tracks(self, conn, entity_id, details):
+        """the tracks an older split finding named: its track / file ids, its
+        file paths"""
+        linked = details.get('library_v2') or {}
+        tracks = {int(t) for t in linked.get('track_ids') or [] if str(t).isdigit()}
+        file_ids = [int(f) for f in linked.get('file_ids') or [] if str(f).isdigit()]
+        paths = [f.get('file_path') if isinstance(f, dict) else f
+                 for f in (details.get('all_files') or details.get('files') or [])]
+        for column, values in (('id', file_ids), ('path', [p for p in paths if p])):
+            if values:
+                marks = ','.join('?' for _ in values)
+                tracks |= {int(r[0]) for r in conn.execute(
+                    f"SELECT track_id FROM lib2_track_files WHERE {column} IN ({marks})", values)}
+        return sorted(tracks)
 
     def _comma_split_breaks_a_name(self, combined, parts):
         """the first name in ``combined`` that is one artist (kept whole by
         the user, or identified in the library) but that ``parts`` breaks
         up. '' when the split leaves every such name whole (#2150)."""
-        from core.imports.collab_artist import kept_whole_keys, library_has_identified_artist
-        from core.repair_jobs.comma_artist_splitter import split_keeping_known
+        from core.imports.collab_artist import library_has_identified_artist
+        from core.matching.artist_credit import known_act_keys, name_key as _key, split_names
 
-        def _key(name):
-            return ' '.join(str(name or '').split()).casefold()
-
-        keys = kept_whole_keys(self._config_manager)
+        keys = known_act_keys(self._config_manager)
         conn = None
         try:
             conn = self.db._get_connection()
 
+            whole = _key(combined)
+
             def _known(name):
-                return _key(name) in keys or library_has_identified_artist(name, conn=conn)
+                if _key(name) in keys:
+                    return True
+                # the combined artist's own row vouches for nothing: its id may
+                # be one it picked up by name ("Øneheart, Malek"), and the scan
+                # already weighed it (the album's artist inside the name wins)
+                return _key(name) != whole and library_has_identified_artist(name, conn=conn)
 
             have = {_key(p) for p in parts}
-            for name in split_keeping_known(combined, [',', ';', '/', '&'], _known):
+            for name in split_names(combined, known=_known):
                 if _key(name) not in have and _known(name):
                     return name
         except Exception as e:  # noqa: BLE001 - the scan already checked, don't block on this
@@ -4269,60 +4335,6 @@ class RepairWorker:
             if conn is not None:
                 conn.close()
         return ''
-
-    def _comma_split_files_from_db(self, entity_id, details):
-        """Resolve an older finding's files from the Library-v2 catalogue."""
-        linked = details.get('library_v2') or {}
-        artist_ids = set()
-        for value in linked.get('artist_ids') or []:
-            try:
-                artist_ids.add(int(value))
-            except (TypeError, ValueError):
-                pass
-        native_id = _lib2_id(entity_id)
-        if native_id is not None:
-            artist_ids.add(native_id)
-        try:
-            if details.get('db_artist_id'):
-                artist_ids.add(int(details['db_artist_id']))
-        except (TypeError, ValueError):
-            pass
-        combined = (details.get('combined_name') or details.get('artist_name') or '').strip()
-        if not artist_ids and not combined:
-            return []
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            if combined:
-                cursor.execute(
-                    "SELECT id FROM lib2_artists WHERE LOWER(TRIM(name))=LOWER(TRIM(?))",
-                    (combined,),
-                )
-                artist_ids.update(int(row[0]) for row in cursor.fetchall())
-            if not artist_ids:
-                return []
-            marks = ','.join('?' for _ in artist_ids)
-            ids = sorted(artist_ids)
-            cursor.execute(f"""
-                SELECT DISTINCT f.path
-                FROM lib2_track_files f
-                JOIN lib2_tracks t ON t.id=f.track_id
-                LEFT JOIN lib2_albums al ON al.id=t.album_id
-                WHERE COALESCE(f.file_state,'active')='active'
-                  AND f.path IS NOT NULL AND f.path<>''
-                  AND (al.primary_artist_id IN ({marks}) OR EXISTS (
-                      SELECT 1 FROM lib2_track_artists ta
-                      WHERE ta.track_id=t.id AND ta.artist_id IN ({marks})
-                  ))
-            """, ids + ids)
-            return [row[0] for row in cursor.fetchall() if row[0]]
-        except Exception as e:
-            logger.debug("Could not derive comma-split files from DB: %s", e)
-            return []
-        finally:
-            if conn:
-                conn.close()
 
     def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
         """Apply an approved native edition review through the manual pin contract."""

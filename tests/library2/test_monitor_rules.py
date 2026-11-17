@@ -27,8 +27,8 @@ def _rule(conn, entity_type, entity_id, profile_id=1):
         (entity_type, entity_id, profile_id)).fetchone()
 
 
-def test_import_labels_flags_with_import_provenance(imported_conn):
-    conn = imported_conn
+def test_import_labels_flags_with_import_provenance(imported_only_conn):
+    conn = imported_only_conn
     track = conn.execute(
         "SELECT id, monitored FROM lib2_tracks WHERE legacy_track_id=100"
     ).fetchone()
