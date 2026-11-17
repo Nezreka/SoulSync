@@ -42,9 +42,15 @@ def client(monkeypatch):
 
     monkeypatch.setattr(sa, "get_activity", lambda: {"ok": True, "sessions": [{"user": "someone"}],
                                                      "summary": {"streams": 1}})
-    monkeypatch.setattr(sa, "get_history", lambda limit=40: {"ok": True, "history": [{"user": "someone"}]})
-    monkeypatch.setattr(sa, "get_stats", lambda days=30: {"ok": True, "top_users": [{"user": "someone"}]})
+    monkeypatch.setattr(sa, "get_history", lambda **kw: {"ok": True, "history": [{"user": "someone"}]})
+    monkeypatch.setattr(sa, "get_history_group", lambda key: {"ok": True, "user": "someone"})
+    monkeypatch.setattr(sa, "get_stats", lambda **kw: {"ok": True, "people": [{"user": "someone"}]})
     monkeypatch.setattr(sa, "stop_session", lambda key, msg: {"ok": True})
+    monkeypatch.setattr(sa, "message_session", lambda key, msg, header="": {"ok": True})
+    monkeypatch.setattr(sa, "get_settings", lambda: {"stop_presets": ["someone"]})
+    monkeypatch.setattr(sa, "save_settings", lambda patch: {"stop_presets": ["someone"]})
+    monkeypatch.setattr(sa, "clear_play_log", lambda: {"ok": True, "removed": 1, "who": "someone"})
+    monkeypatch.setattr(sa, "fetch_avatar", lambda key: (b"someone", "image/png"))
     monkeypatch.setattr(sa, "fetch_image", lambda path: None)
     # the session side of is_admin_request: no login gate, no launch pin
     monkeypatch.setattr("core.settings.config_manager", _Cfg(), raising=False)
@@ -66,7 +72,11 @@ def client(monkeypatch):
     return app.test_client()
 
 
-READS = ["/api/server-activity", "/api/server-activity/history", "/api/server-activity/stats"]
+READS = ["/api/server-activity", "/api/server-activity/history", "/api/server-activity/stats",
+         "/api/server-activity/history/abc123", "/api/server-activity/settings",
+         "/api/server-activity/avatar?user=plex:1"]
+WRITES = ["/api/server-activity/stop", "/api/server-activity/message", "/api/server-activity/settings",
+          "/api/server-activity/plays/clear"]
 
 
 @pytest.mark.parametrize("path", READS)
@@ -83,6 +93,20 @@ def test_an_admin_still_reads_them(client, path):
     assert b"someone" in r.data
 
 
+@pytest.mark.parametrize("path", WRITES)
+def test_every_control_is_admin_only(client, path):
+    body = {"session_key": "jellyfin:abc", "message": "bye"}
+    r = client.post(path, json=body, headers={"X-Test-Profile": "member"})
+    assert r.status_code == 403 and b"someone" not in r.data
+    r = client.post(path, json=body, headers={"X-Test-Profile": "admin"})
+    assert r.status_code == 200
+
+
+@pytest.mark.parametrize("path", WRITES)
+def test_a_read_only_api_key_cannot_control(client, path):
+    assert client.post(path + "?api_key=" + READ_KEY, json={}).status_code == 403
+
+
 def test_stopping_a_stream_is_still_admin_only(client):
     body = {"session_key": "1", "message": "bye"}
     assert client.post("/api/server-activity/stop", json=body,
@@ -93,13 +117,13 @@ def test_stopping_a_stream_is_still_admin_only(client):
 
 @pytest.mark.parametrize("path", READS)
 def test_an_admin_api_key_keeps_working(client, path):
-    r = client.get(path + "?api_key=" + ADMIN_KEY)
+    r = client.get(path + ("&" if "?" in path else "?") + "api_key=" + ADMIN_KEY)
     assert r.status_code == 200
 
 
 @pytest.mark.parametrize("path", READS)
 def test_a_read_only_api_key_is_refused(client, path):
-    assert client.get(path + "?api_key=" + READ_KEY).status_code == 403
+    assert client.get(path + ("&" if "?" in path else "?") + "api_key=" + READ_KEY).status_code == 403
 
 
 def test_the_image_proxy_stays_open_for_library_thumbs(client):

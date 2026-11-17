@@ -1176,6 +1176,19 @@ class ConfigManager:
                 # out by leaving this off.
                 "merge_m4b": False,
             },
+            "server_activity": {
+                # remote upload speed in Mbps; None hides the bar
+                "upload_mbps": None,
+                "geo_lookup": True,
+                # play log days; 0 keeps it forever
+                "retention_days": 0,
+                "stop_presets": [
+                    "The server is restarting for an update. Back in 5 minutes.",
+                    "Server maintenance, back soon.",
+                    "Too many streams right now, please try again later.",
+                    "Please watch at home tonight.",
+                ],
+            },
             "podcasts": {
                 "download_path": default_podcast_path,
                 "media_format": "audio",  # "audio", "video", "both"

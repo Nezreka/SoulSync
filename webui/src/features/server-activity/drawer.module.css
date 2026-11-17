@@ -1,0 +1,288 @@
+/* the drawer: 480px for Now playing, about 1120px for History and Stats, a
+   full height sheet on a phone. it sits on the floating buttons' own layer and
+   is added after them, so it covers them while open (#2090). */
+
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-float);
+  color: var(--sa-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--black-a50);
+  opacity: 0;
+  transition: opacity var(--dur-slower) var(--ease-standard);
+}
+
+.root[data-shown] .scrim {
+  opacity: 1;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  max-width: 100vw;
+  border-left: 1px solid var(--white-a09);
+  outline: none;
+  background: linear-gradient(180deg, var(--sa-panel), var(--sa-panel-deep));
+  box-shadow: -24px 0 60px var(--black-a55);
+  transform: translateX(100%);
+  transition:
+    transform 0.42s var(--ease-emphasized),
+    width 0.46s var(--ease-emphasized);
+  will-change: transform;
+}
+
+.drawer[data-wide] {
+  width: min(1120px, calc(100vw - var(--sidebar-w, 0px) - 24px));
+}
+
+.root[data-shown] .drawer {
+  transform: none;
+}
+
+/* ── head ── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px 0;
+}
+
+.title {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  color: var(--sa-text);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  background: var(--white-a30);
+  transition:
+    background var(--dur-slow) var(--ease-standard),
+    box-shadow var(--dur-slow) var(--ease-standard);
+}
+
+.liveDot[data-live] {
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(var(--success-rgb), 0.14);
+  animation: glow 2.6s var(--ease-standard) infinite;
+}
+
+.servers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 14px;
+  min-width: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  color: var(--white-a45);
+  font-size: 11.5px;
+  list-style: none;
+}
+
+.servers li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.servers i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--danger-light);
+}
+
+.servers li[data-ok] i {
+  background: var(--success);
+}
+
+.close {
+  all: unset;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: -4px;
+  border-radius: var(--radius-md);
+  color: var(--white-a45);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.servers + .close {
+  margin-left: 0;
+}
+
+.title + .close {
+  margin-left: auto;
+}
+
+.close:hover {
+  background: var(--white-a06);
+  color: var(--sa-text);
+}
+
+.close:focus-visible,
+.widthToggle:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.85);
+  outline-offset: 2px;
+}
+
+/* ── tab bar ── */
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 16px 22px 14px;
+  border-bottom: 1px solid var(--white-a06);
+}
+
+.barEnd {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.widthToggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  color: var(--white-a45);
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+
+.widthToggle:hover {
+  background: var(--white-a05);
+  color: var(--sa-text);
+}
+
+/* ── body: the container every view's layout reads ── */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 22px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+  container: sa / inline-size;
+  scrollbar-color: var(--white-a14) transparent;
+  scrollbar-width: thin;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes glow {
+  50% {
+    box-shadow: 0 0 0 6px rgba(var(--success-rgb), 0.05);
+  }
+}
+
+/* ── phone: a full height sheet at every tab ── */
+
+@media (max-width: 768px) {
+  .drawer,
+  .drawer[data-wide] {
+    top: 0;
+    width: 100%;
+    border-left: 0;
+    border-radius: 0;
+    box-shadow: none;
+    transform: translateY(100%);
+  }
+
+  .head {
+    padding: max(16px, env(safe-area-inset-top)) 16px 0;
+  }
+
+  .bar {
+    padding: 14px 16px 12px;
+  }
+
+  .widthToggle {
+    display: none;
+  }
+
+  .barEnd {
+    margin-left: 0;
+  }
+
+  .body {
+    padding: 16px 16px max(28px, env(safe-area-inset-bottom));
+  }
+
+  .servers {
+    display: none;
+  }
+
+  .title + .close,
+  .servers + .close {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .scrim {
+    transition: opacity var(--dur-fast) linear;
+  }
+
+  .drawer {
+    opacity: 0;
+    transform: none;
+  }
+
+  .root[data-shown] .drawer {
+    opacity: 1;
+  }
+
+  .liveDot[data-live] {
+    animation: none;
+  }
+}

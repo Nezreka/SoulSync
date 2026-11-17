@@ -1650,6 +1650,9 @@ class MusicDatabase:
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
             self._add_listening_history_table(cursor)
+            # server activity play log (who played what, how, from where)
+            from core.server_activity.store import ensure_schema as _ensure_server_activity_schema
+            _ensure_server_activity_schema(cursor)
 
             # Per-artist auto_download ("follow only") column. MUST run after the
             # profile-support migrations above — those recreate watchlist_artists
@@ -2367,6 +2370,7 @@ class MusicDatabase:
         'wishlist_lib2_album_dates_v2': ('table', '_wishlist_lib2_album_dates_v2'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
+        'server_plays_v1':          ('table', 'server_plays'),
     }
 
     def _record_migration(self, cursor, name):

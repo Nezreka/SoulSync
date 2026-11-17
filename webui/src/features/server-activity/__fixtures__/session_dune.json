@@ -1,0 +1,197 @@
+{
+  "id": "plex:27",
+  "server": "plex",
+  "server_name": "Basement",
+  "session_key": "27",
+  "kind": "movie",
+  "activity": "watching",
+  "state": "playing",
+  "title": "Dune: Part Two",
+  "subtitle": "2024",
+  "year": 2024,
+  "show": null,
+  "music": null,
+  "book": null,
+  "thumb": "/library/metadata/5101/thumb/1710000001",
+  "art": "/library/metadata/5101/art/1710000001",
+  "duration_ms": 9960000,
+  "offset_ms": 4092000,
+  "progress_pct": 41,
+  "user": "maya",
+  "user_id": "7341",
+  "user_avatar": "/api/server-activity/avatar?user=plex:7341",
+  "player": {
+    "product": "Plex for Apple TV",
+    "version": "8.41",
+    "platform": "tvOS",
+    "platform_version": "18.1",
+    "device": "Apple TV",
+    "model": "J305AP",
+    "name": "Living room"
+  },
+  "connection": {
+    "ip": "73.41.208.17",
+    "public_ip": "73.41.208.17",
+    "remote": true,
+    "secure": true,
+    "relayed": false,
+    "location": null
+  },
+  "bandwidth_kbps": 11800,
+  "playback": {
+    "method": "transcode",
+    "method_label": "Transcode",
+    "video": {
+      "source": {
+        "codec": "HEVC",
+        "resolution": "4K",
+        "width": 3840,
+        "height": 2160,
+        "profile": "Main 10",
+        "bit_depth": 10,
+        "hdr": "HDR10",
+        "bitrate_kbps": 58000,
+        "frame_rate": "23.976",
+        "label": "4K HEVC Main 10 · HDR10"
+      },
+      "stream": {
+        "codec": "H.264",
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "profile": null,
+        "bit_depth": null,
+        "hdr": null,
+        "bitrate_kbps": 11000,
+        "frame_rate": null,
+        "label": "1080p H.264 · SDR"
+      },
+      "decision": "transcode",
+      "changed": true
+    },
+    "audio": {
+      "source": {
+        "codec": "TrueHD",
+        "channels": 8,
+        "channel_layout": "7.1",
+        "language": "English",
+        "bit_depth": null,
+        "sample_rate_hz": null,
+        "bitrate_kbps": null,
+        "atmos": true,
+        "lossless": true,
+        "hires": false,
+        "quality": "TrueHD",
+        "label": "TrueHD Atmos 7.1 · English"
+      },
+      "stream": {
+        "codec": "AAC",
+        "channels": 6,
+        "channel_layout": "5.1",
+        "language": null,
+        "bit_depth": null,
+        "sample_rate_hz": null,
+        "bitrate_kbps": 384,
+        "atmos": false,
+        "lossless": false,
+        "hires": false,
+        "quality": "AAC 384 kbps",
+        "label": "AAC 5.1"
+      },
+      "decision": "transcode",
+      "changed": true
+    },
+    "subtitles": {
+      "source": {
+        "codec": "SRT",
+        "language": "English",
+        "kind": "text",
+        "label": "English (SRT)"
+      },
+      "stream": {
+        "label": "Sent as text"
+      },
+      "decision": "copy",
+      "changed": false
+    },
+    "container": {
+      "source": "MKV",
+      "stream": "HLS",
+      "changed": true
+    },
+    "bitrate_kbps": {
+      "source": 62400,
+      "stream": 11800
+    },
+    "summary": {
+      "quality": "4K HEVC",
+      "change": "4K → 1080p"
+    }
+  },
+  "reason": {
+    "codes": ["over_remote_limit", "hdr", "audio_codec"],
+    "items": [
+      {
+        "code": "over_remote_limit",
+        "label": "Over the player's remote quality"
+      },
+      {
+        "code": "hdr",
+        "label": "HDR on a screen without HDR"
+      },
+      {
+        "code": "audio_codec",
+        "label": "Audio format the player can't play"
+      }
+    ],
+    "inferred": true,
+    "text": "Converting because the file is bigger than the player's remote quality setting, the player can't show HDR, so the picture is mapped to SDR and the player can't play this audio format. The source runs at 62.4 Mbps and 11.8 Mbps is sent."
+  },
+  "transcoder": {
+    "hw": true,
+    "hw_decode": "Intel Quick Sync",
+    "hw_encode": "Intel Quick Sync",
+    "hw_full_pipeline": true,
+    "speed": 2.4,
+    "buffered_s": 220.0,
+    "throttled": true,
+    "progress_pct": 41,
+    "video": "transcode",
+    "audio": "transcode"
+  },
+  "controls": {
+    "stop": true,
+    "message": false,
+    "stop_note": null
+  },
+  "keys": {
+    "rating_key": "5101",
+    "parent_key": null,
+    "grandparent_key": null
+  },
+  "link": {
+    "kind": "movie",
+    "id": "693134",
+    "source": "tmdb"
+  },
+  "started_at": 1794898345.9604685,
+  "paused_ms": 0,
+  "pause_count": 0,
+  "buffering_ms": 0,
+  "play_key": "b348193aa18f4d52b39f0f2b49493481",
+  "group_key": "b348193aa18f4d52b39f0f2b49493481",
+  "media_type": "movie",
+  "grandparent": "",
+  "location": "wan",
+  "stream": {
+    "method": "Transcode",
+    "video": "HEVC → H.264",
+    "audio": "TrueHD → AAC",
+    "resolution": "4K",
+    "bitrate_kbps": 62400,
+    "transcode_progress": 41,
+    "throttled": true,
+    "hw": true,
+    "container": "HLS"
+  }
+}

@@ -659,11 +659,22 @@ declare global {
     _mlmDeleteMatch?: (id: number) => Promise<void>;
     ServerActivity?: {
       toggle: () => void;
-      open: () => void;
+      open: (tab?: string) => void;
       close: () => void;
       refresh: () => Promise<unknown>;
       _onSocket: (d: unknown) => void;
       _wantsLive: () => boolean;
+      /** the open drawer hands each payload over, for the badge */
+      _sawActivity?: (d: unknown) => void;
+    };
+    /** the React drawer (features/server-activity/host.tsx); the shell opens it */
+    SoulSyncActivityDrawer?: {
+      open: (tab?: string) => void;
+      close: () => void;
+      toggle: () => void;
+      isOpen: () => boolean;
+      wantsLive: () => boolean;
+      push: (payload: unknown) => void;
     };
     SoulSyncActivitySocket?: {
       isConnected: () => boolean;

@@ -4535,7 +4535,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'seerr_compat', 'mcp', 'server_activity']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -23063,18 +23063,21 @@ _activity_sids = set()
 _activity_sids_lock = threading.Lock()
 
 def _emit_server_activity_loop():
-    """Push live server activity to subscribed drawers every 3s. Skips the upstream
-    poll entirely when no client is subscribed, so it costs nothing at rest."""
-    while not globals().get('IS_SHUTTING_DOWN', False):
-        socketio.sleep(3)
-        try:
-            with _activity_sids_lock:
-                if not _activity_sids:
-                    continue
-            from core.server_activity import get_activity
-            socketio.emit('activity:update', get_activity(), room='activity:live')
-        except Exception as e:
-            logger.debug(f"Error in server activity emit loop: {e}")
+    """push live server activity to open drawers every 3 s, and keep sampling
+    every 10 s while nobody looks so the play log records every play. does
+    nothing at all without a plex or jellyfin server."""
+    from core.server_activity import run_sampler_forever
+
+    def _has_subscribers():
+        with _activity_sids_lock:
+            return bool(_activity_sids)
+
+    run_sampler_forever(
+        sleep=socketio.sleep,
+        should_stop=lambda: globals().get('IS_SHUTTING_DOWN', False),
+        has_subscribers=_has_subscribers,
+        emit=lambda data: socketio.emit('activity:update', data, room='activity:live'),
+    )
 
 # --- Socket.IO event handlers ---
 

@@ -14,6 +14,7 @@ import { ServerConnections } from './connections-servers';
 import { ServicesPart } from './connections-services';
 import { VideoApiGroup } from './connections-video-api';
 import { VideoServerConnection } from './connections-video-server';
+import { ServerActivitySettingsCard } from './server-activity-settings';
 import { NotificationsSection } from './video-row-lists';
 
 export function ConnectionsTab({ store, part, opened }: SettingsTabProps) {
@@ -23,7 +24,14 @@ export function ConnectionsTab({ store, part, opened }: SettingsTabProps) {
   if (part === 'api-video') return <VideoApiGroup />;
   if (part === 'video-server') return <VideoServerConnection />;
   if (part === 'notifications') return <NotificationsSection />;
-  if (part === 'servers') return <ServerConnections store={store} />;
+  if (part === 'servers')
+    return (
+      <>
+        <ServerConnections store={store} />
+        {/* next to the media server it reports on (Plex and Jellyfin, both sides) */}
+        <ServerActivitySettingsCard />
+      </>
+    );
   if (part === 'metasync') return <MetaSyncSection opened={opened} />;
   return null;
 }
