@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 73   # v73: video_request_log (the request limit counts asks, not surviving rows) + video_downloads/video_download_history.profile_id (who started a grab); v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 74   # v74: quality_profiles.media_type (movie | tv | NULL = both, #2168); v73: video_request_log (the request limit counts asks, not surviving rows) + video_downloads/video_download_history.profile_id (who started a grab); v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -540,6 +540,10 @@ _COLUMN_MIGRATIONS = [
     # own in the queue and the history
     ("video_downloads", "profile_id", "INTEGER"),
     ("video_download_history", "profile_id", "INTEGER"),
+    # v74: what a quality profile is for (#2168): 'movie', 'tv', or NULL for
+    # both, so nothing disappears on upgrade. requests only offer a member
+    # the profiles for that kind of title
+    ("quality_profiles", "media_type", "TEXT"),
 ]
 
 
@@ -11426,7 +11430,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT id, name, cutoff, items FROM quality_profiles ORDER BY name COLLATE NOCASE")]
+                "SELECT id, name, cutoff, items, media_type FROM quality_profiles ORDER BY name COLLATE NOCASE")]
         except sqlite3.Error:
             logger.exception("named_quality_profiles failed")
             return []
@@ -11436,7 +11440,7 @@ class VideoDatabase:
     def get_named_quality_profile(self, profile_id) -> dict | None:
         conn = self._get_connection()
         try:
-            row = conn.execute("SELECT id, name, cutoff, items FROM quality_profiles WHERE id=?",
+            row = conn.execute("SELECT id, name, cutoff, items, media_type FROM quality_profiles WHERE id=?",
                                (int(profile_id),)).fetchone()
             return dict(row) if row else None
         except (sqlite3.Error, TypeError, ValueError):
@@ -11470,6 +11474,27 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("upsert_named_quality_profile failed")
             return None
+        finally:
+            conn.close()
+
+    QUALITY_MEDIA_TYPES = ("movie", "tv")
+
+    def set_named_quality_profile_media_type(self, profile_id, media_type) -> bool:
+        """what a named profile is for: 'movie', 'tv', or None for both.
+        anything else is refused (ValueError), never stored."""
+        if media_type in ("", "both"):
+            media_type = None
+        if media_type is not None and media_type not in self.QUALITY_MEDIA_TYPES:
+            raise ValueError("media_type is movie, tv or null")
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE quality_profiles SET media_type=? WHERE id=?",
+                               (media_type, int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_named_quality_profile_media_type failed")
+            return False
         finally:
             conn.close()
 

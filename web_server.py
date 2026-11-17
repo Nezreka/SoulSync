@@ -1071,6 +1071,24 @@ def _set_profile_context():
             # read the music db themselves
             g.request_limit = int((profile or {}).get('request_limit') or 0)
             g.request_limit_days = int((profile or {}).get('request_limit_days') or 7)
+            # what this profile may do (#2166): policy > template > personal
+            # changes, once per request for can() and @requires. a map that
+            # can't be built fails closed: no admin, no downloads, no side,
+            # and a page-only api is refused (its page list can't be trusted)
+            from core.permission_store import effective_for as _perm_effective_for
+            try:
+                g.perms, g.perms_source = _perm_effective_for(database, profile)
+            except Exception as _perm_exc:
+                logger.warning("permissions unavailable for profile %s: %s", pid, _perm_exc)
+                g.perms, g.perms_source = None, 'none'
+                g.is_admin = False
+                g.can_download = False
+                g.allowed_sides = 'none'
+                g.profile_id = pid
+                from core.permissions import page_for_path as _perm_page_for_path
+                if _perm_page_for_path(path) is not None:
+                    return jsonify({"success": False, "error": "page_not_allowed"}), 403
+                return
             # a page left off the profile's list: its own apis refuse too,
             # not just the hidden nav button
             from core.permissions import page_denied
@@ -1086,11 +1104,15 @@ def _set_profile_context():
             g.is_admin = False
             g.can_download = False
             g.allowed_sides = 'none'
+            g.perms, g.perms_source = None, 'none'
             g.profile_id = pid
             from core.permissions import page_for_path
             if page_for_path(path) is not None:
                 return jsonify({"success": False, "error": "page_not_allowed"}), 403
 
+    if g.is_admin:
+        from core.permissions import admin_map as _perm_admin_map
+        g.perms, g.perms_source = _perm_admin_map(), 'admin'
     g.profile_id = pid
 
 
@@ -24376,6 +24398,19 @@ from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
 _cfg_pa(get_database=get_database, config_manager=config_manager,
         require_login_enabled=_require_login_enabled)
 app.register_blueprint(_bp_pa())
+
+# people and permissions (#2166): catalogue, policy, templates, per-profile
+# permissions and the member's own map. contract: scrap/permissions/API.md
+from api.permissions_routes import configure as _cfg_perm, create_blueprint as _bp_perm
+
+
+def _perm_video_db():
+    from api.video import get_video_db as _gvd
+    return _gvd()
+
+
+_cfg_perm(get_database=get_database, get_video_db=_perm_video_db)
+app.register_blueprint(_bp_perm())
 
 # per-profile notes (request approved, issue answered): pushed to the
 # requester's profile room; core.profile_notify journals them too
