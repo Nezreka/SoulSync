@@ -88,6 +88,14 @@ def _track(conn, album, credits):
     return track
 
 
+def _provider(conn, track, *names):
+    """the list a provider credits on the track: the confirmation a split needs"""
+    for position, name in enumerate(names):
+        conn.execute("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                     "position, name, source_artist_id) VALUES('track', ?, 'spotify', ?, ?, ?)",
+                     (track, position, name, f"sp-{name}"))
+
+
 def _credits(conn, track):
     return [r[0] for r in conn.execute(
         "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
@@ -109,6 +117,7 @@ def test_the_local_split_keeps_the_band(conn):
     _artist(conn, "Mat Zo", spotify="2n7USVO8fO8FF8zq4kG2N1")
     ghost = _artist(conn, "Above & Beyond & Mat Zo")
     track = _track(conn, _album(conn, band), [band, ghost])
+    _provider(conn, track, "Above & Beyond", "Mat Zo")
 
     NE.split_combined_credits_locally(conn)
 
@@ -120,6 +129,7 @@ def test_the_online_split_keeps_the_band(conn):
     _artist(conn, "Above & Beyond", spotify="10gzBoINW3cLJfZUka8Zoe")
     ghost = _artist(conn, "Above & Beyond & Mat Zo")
     track = _track(conn, _album(conn, ghost), [ghost])
+    _provider(conn, track, "Above & Beyond", "Mat Zo")
 
     assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is not None
 
@@ -139,6 +149,9 @@ def test_the_online_split_leaves_a_name_the_library_already_knows(conn):
 def test_a_real_collab_still_splits_online(conn):
     ghost = _artist(conn, "Ian Asher & Galantis")
     track = _track(conn, _album(conn, ghost), [ghost])
+    # names alone propose it; the provider's list confirms it
+    assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is None
+    _provider(conn, track, "Ian Asher", "Galantis")
 
     assert NE.smart_split_combined_artist(conn, ghost, resolver=_resolver) is not None
     assert _credits(conn, track) == ["Ian Asher", "Galantis"]

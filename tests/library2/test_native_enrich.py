@@ -512,8 +512,17 @@ def _artist_id_by_name(conn, name):
     return row["id"] if row else None
 
 
-def _make_collab_release(conn, combined_id):
-    """A collab single owned by the combined artist as PRIMARY, with a track."""
+def _provider_credits(conn, track_id, names, source="spotify"):
+    """what a provider credits on the track: the confirmation a split needs"""
+    for position, name in enumerate(names):
+        conn.execute("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                     "position, name, source_artist_id) VALUES('track', ?, ?, ?, ?, ?)",
+                     (track_id, source, position, name, f"{source}-{name}"))
+
+
+def _make_collab_release(conn, combined_id, credits=()):
+    """A collab single owned by the combined artist as PRIMARY, with a track.
+    ``credits``: the provider list stored for the track, if any."""
     cur = conn.execute(
         "INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
         "VALUES(?, 'Runaway (U & I)', 'single')",
@@ -535,6 +544,8 @@ def _make_collab_release(conn, combined_id):
         "VALUES(?, ?, 'primary', 0)",
         (track_id, combined_id),
     )
+    if credits:
+        _provider_credits(conn, track_id, credits)
     return album_id, track_id
 
 
@@ -546,7 +557,8 @@ def _component_resolver(name):
 def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
     imported_conn.execute("UPDATE lib2_artists SET monitored=0 WHERE id=?", (combined,))
-    album_id, track_id = _make_collab_release(imported_conn, combined)
+    album_id, track_id = _make_collab_release(imported_conn, combined,
+                                              credits=("Ian Asher", "Galantis"))
 
     result = NE.smart_split_combined_artist(
         imported_conn, combined, resolver=_component_resolver
@@ -588,6 +600,21 @@ def test_smart_split_rehomes_primary_album_and_deletes_ghost(imported_conn):
     ).fetchone() is not None
 
 
+def test_a_split_no_provider_list_confirms_waits_for_the_user(imported_conn):
+    """strict: every part resolving somewhere and the "&" proposing it is not
+    enough. No provider credits the parts on its tracks: nothing changes, and
+    Split Artists files it for the user to confirm"""
+    combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
+    album_id, track_id = _make_collab_release(imported_conn, combined)
+    assert NE.smart_split_combined_artist(
+        imported_conn, combined, resolver=_component_resolver) is None
+    _provider_credits(imported_conn, track_id, ("Ian Asher",))     # one part only
+    assert NE.smart_split_combined_artist(
+        imported_conn, combined, resolver=_component_resolver) is None
+    assert _artist_id_by_name(imported_conn, "Ian Asher & Galantis") == combined
+    assert _artist_id_by_name(imported_conn, "Ian Asher") is None
+
+
 def test_smart_split_aborts_when_a_component_does_not_resolve(imported_conn):
     combined = _insert_native_artist(imported_conn, "Foo & Bar")
     album_id, _track = _make_collab_release(imported_conn, combined)
@@ -620,9 +647,10 @@ def test_smart_split_reuses_existing_component_artist(imported_conn):
     # not create a duplicate.
     existing_gal = _insert_native_artist(imported_conn, "Galantis")
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
-    _make_collab_release(imported_conn, combined)
+    _make_collab_release(imported_conn, combined, credits=("Ian Asher", "Galantis"))
 
-    NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
+    assert NE.smart_split_combined_artist(imported_conn, combined,
+                                          resolver=_component_resolver) is not None
 
     gal_rows = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Galantis'"
@@ -633,7 +661,7 @@ def test_smart_split_reuses_existing_component_artist(imported_conn):
 
 def test_reconcile_splits_unmatched_combined_and_counts_it(imported_conn):
     combined = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
-    _make_collab_release(imported_conn, combined)
+    _make_collab_release(imported_conn, combined, credits=("Ian Asher", "Galantis"))
 
     def resolver(name):
         # The combined name matches nothing; each component resolves.
@@ -683,7 +711,7 @@ def test_smart_split_legacy_backed_artist_becomes_alias(imported_conn):
     imported_conn.execute(
         "UPDATE lib2_artists SET legacy_artist_id=9999 WHERE id=?", (combined,)
     )
-    album_id, track_id = _make_collab_release(imported_conn, combined)
+    album_id, track_id = _make_collab_release(imported_conn, combined, credits=("A", "B"))
 
     result = NE.smart_split_combined_artist(
         imported_conn, combined, resolver=_component_resolver
@@ -1626,7 +1654,8 @@ def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
     beyonce = _insert_native_artist(imported_conn, "Beyoncé")
     imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_Beyonce' WHERE id=?", (beyonce,))
     combined = _insert_native_artist(imported_conn, "Ian Asher & Beyonce")
-    album_id, _track = _make_collab_release(imported_conn, combined)
+    album_id, _track = _make_collab_release(imported_conn, combined,
+                                            credits=("Ian Asher", "Beyonce"))
 
     NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
 
@@ -1703,7 +1732,7 @@ def test_a_split_creates_the_guest_component_unwatched(imported_conn):
     the ghost's watch, before the rehome gave it to the primary only"""
     ghost = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
     imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
-    _make_collab_release(imported_conn, ghost)
+    _make_collab_release(imported_conn, ghost, credits=("Ian Asher", "Galantis"))
 
     result = NE.smart_split_combined_artist(imported_conn, ghost, resolver=_component_resolver)
 
@@ -1725,6 +1754,10 @@ def test_a_local_split_creates_the_guest_unwatched(imported_conn):
                                   "VALUES(?, 'Snow', 1)", (album,)).lastrowid
     imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
                           "VALUES(?,?, 'primary', 0)", (track, ghost))
+    imported_conn.commit()
+    # the album's artist inside the name proposes it; no provider confirms yet
+    assert NE.split_combined_credits_locally(imported_conn)["split"] == 0
+    _provider_credits(imported_conn, track, ("Oneheart", "Malek"))
     imported_conn.commit()
 
     assert NE.split_combined_credits_locally(imported_conn)["split"] == 1

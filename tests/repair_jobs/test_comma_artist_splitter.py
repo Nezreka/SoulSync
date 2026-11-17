@@ -446,3 +446,77 @@ def test_the_finding_says_which_albums_move_to_the_lead(db, no_fetch):
         own = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (tracks[0],)).fetchone()[0]
     assert finding['details']['primary_album_ids'] == [own]
     assert guest in finding['details']['library_v2']['track_ids']
+
+
+# ── strict: the providers confirm a split, or the user does ─────────────────
+
+def test_a_split_names_alone_propose_waits_for_the_user(db, no_fetch):
+    # a ";" proposes "ODESZA" and "RY X", but no provider credits them on the
+    # track: filed for the user to check, never applied on its own
+    _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth')
+    _result, findings = _scan(db)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding['severity'] == 'info'
+    assert finding['details']['split_artists'] == ['ODESZA', 'RY X']
+    assert finding['details']['needs_confirmation'] is True
+    assert finding['details']['confirmed'] is False
+    assert finding['details']['checked_sources'] == []
+
+
+def test_a_split_every_part_of_which_a_provider_credits_is_confirmed(db, no_fetch):
+    tracks = _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth')
+    _credits(db, tracks[0], ['ODESZA', 'RY X'], source='musicbrainz')
+    _result, findings = _scan(db)
+    details = findings[0]['details']
+    assert findings[0]['severity'] == 'warning'
+    assert details['confirmed'] is True and details['needs_confirmation'] is False
+    assert details['verified_via'] == 'musicbrainz credits'
+    assert no_fetch == []                  # the stored list settled it
+
+
+def test_a_part_no_provider_credits_leaves_the_split_unconfirmed(db, no_fetch):
+    tracks = _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth')
+    _credits(db, tracks[0], ['ODESZA'])    # Spotify credits ODESZA alone
+    _result, findings = _scan(db)
+    assert findings[0]['details']['needs_confirmation'] is True
+
+
+def test_the_fetcher_looks_the_tracks_up_under_the_proposed_artists(db, monkeypatch):
+    tracks = _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth')
+    asked = []
+
+    def ensure(database, track_id, services=None, **kw):
+        asked.append(kw.get('artist_hints'))
+        _credits(db, track_id, ['ODESZA', 'RY X'], source='deezer')
+        return True
+    monkeypatch.setattr(pc, 'ensure_track_credits', ensure)
+    _result, findings = _scan(db)
+    assert asked == [['ODESZA', 'RY X']]
+    assert findings[0]['details']['confirmed'] is True and tracks
+
+
+def test_live_mode_applies_only_what_the_providers_confirmed(db, no_fetch, monkeypatch):
+    confirmed = _album_by(db, 'Camellia, Toby Fox', 'One')
+    _credits(db, confirmed[0], ['Camellia', 'Toby Fox'])
+    _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth', album='A Moment Apart')
+    import core.repair_worker as rw
+    worker = _worker(db, _settings(dry_run=False))
+    monkeypatch.setattr(rw, '_ACTIVE_WORKER', worker)
+    result, findings = _scan(db, _settings(dry_run=False))
+    assert result.auto_fixed == 1 and _artist_id(db, 'Camellia, Toby Fox') is None
+    assert [f['details']['combined_name'] for f in findings] == ['ODESZA; RY X']
+    assert _artist_id(db, 'ODESZA; RY X') is not None
+
+
+def test_fix_all_leaves_an_unconfirmed_split_its_own_button_applies_it(db, no_fetch):
+    _album_by(db, 'ODESZA; RY X', 'Corners Of The Earth')
+    finding = _finding(db, 'ODESZA; RY X')
+    worker = _worker(db)
+    out = worker._fix_comma_artist_split('artist', finding['entity_id'], None, finding['details'])
+    assert out['success'] is False and out['skipped_by_design'] is True
+    assert _artist_id(db, 'ODESZA; RY X') is not None and worker.asked == []
+    out = worker._fix_comma_artist_split('artist', finding['entity_id'], None,
+                                         {**finding['details'], '_explicit_single_fix': True})
+    assert out['success'] is True and out['action'] == 'artists_split'
+    assert _artist_id(db, 'ODESZA; RY X') is None

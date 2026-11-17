@@ -2273,6 +2273,14 @@ function FindingCard({
                 Locked
               </span>
             ) : null}
+            {finding.status === 'pending' && finding.details?.needs_confirmation ? (
+              <span
+                className="repair-finding-status-badge locked"
+                title="No provider confirms this. Fix all leaves it alone. The button on this row still works."
+              >
+                Check it
+              </span>
+            ) : null}
           </div>
           {copy.sub ? <div className="repair-finding-sub">{copy.sub}</div> : null}
         </div>

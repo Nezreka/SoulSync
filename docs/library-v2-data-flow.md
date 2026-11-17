@@ -65,8 +65,11 @@ that disagrees with the catalogue is the projection job's finding.
 
 Scoped operations already available:
 
-- `provider_credits.ensure_track_credits(db, track_id, services)`: fetch and
-  store a track's provider credits, matching it first when necessary
+- `provider_credits.ensure_track_credits(db, track_id, services, artist_hints=...)`:
+  fetch and store a track's provider credits from every configured credit
+  source (`credit_services()`), matching it first when necessary: by ISRC at
+  MusicBrainz, under the album's artist, then under each hint (the parts of a
+  combined artist)
 - `native_enrich.enrich_native_entity_all_services(conn, type, id, services=...)`:
   ingest provider identities for one entity
 - `native_enrich.heal_combined_artist(conn, artist_id, names, lead=...)`: the
@@ -83,6 +86,22 @@ credit kernel (stored credits, the credit fetcher on request, album anchors,
 identified artists, keep-whole names), heals through `heal_combined_artist`,
 and requests Re-tag and Reorganize for the affected files. It has no tag
 codec, no file mover and no provider search of its own.
+
+**A combined artist splits on its own only when the providers confirm it.**
+`native_enrich.split_confirmed(conn, artist_id, parts)`: every part is
+credited on one of its tracks by a stored provider list, so the track exists
+under each of them there. Names (a ";", the album's artist inside the name,
+parts the library knows) only propose a split. Every automatic split asks
+this (the local credit split, the provider split, the split after an import,
+Split Artists' live mode); a split it does not confirm is a Split Artists
+finding the user confirms on the finding itself, and Fix All leaves it alone.
+
+**Credit sources** are the providers whose track lookup gives a real artist
+list with ids: Spotify, Deezer, MusicBrainz, Tidal, Discogs, JioSaavn
+(`provider_credits.CREDIT_SOURCES`). Each client reads its own format in
+`track_artist_credits(track_id)` into `[{"id", "name"}]`. A source that only
+has a string ("A & B") or one name is not evidence of who is on a track. A
+one-artist answer is stored too: it is what keeps a band whole.
 
 When a needed scoped operation is absent, extend its existing owner rather
 than create another tag writer, rename planner, provider search or identity

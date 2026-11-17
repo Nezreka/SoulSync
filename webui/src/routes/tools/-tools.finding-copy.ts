@@ -510,12 +510,18 @@ const WRITERS: Record<string, Writer> = {
   comma_artist_split: (finding, d, _s, verb) => {
     const parts = arr(d.split_artists).map(str).filter(Boolean);
     const count = Number(d.track_count);
+    // names alone proposed it: no provider credits these artists on its tracks
+    const unconfirmed = Boolean(d.needs_confirmation);
     return {
       title: first(d.combined_name) || withoutPrefix(finding.title),
       sub: count > 0 ? `${count} track${count === 1 ? '' : 's'}` : '',
-      problem: `This artist is really ${parts.length || 'several'} artists in one name.`,
+      problem: unconfirmed
+        ? `This may be ${parts.length || 'several'} artists in one name. No provider confirms it.`
+        : `This artist is really ${parts.length || 'several'} artists in one name.`,
       // the split happens in the library; Re-tag and Reorganize bring the files along
-      fix: parts.length ? `${verb} splits it into ${listWords(parts)} in your library.` : '',
+      fix: parts.length
+        ? `${unconfirmed ? 'Check it first. ' : ''}${verb} splits it into ${listWords(parts)} in your library.`
+        : '',
     };
   },
 

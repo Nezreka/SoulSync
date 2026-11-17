@@ -861,7 +861,14 @@ function FindingDetailBody({
         });
       }
       const checked = list<string>(d.checked_sources);
-      if (checked.length) rows.push(['Checked against', checked.join(', ')]);
+      if (d.needs_confirmation) {
+        rows.push([
+          'Confirmed by',
+          'Nobody yet: Spotify and Deezer don\'t list these artists on its tracks. Fix all leaves it alone',
+        ]);
+      } else if (checked.length) {
+        rows.push(['Confirmed by', checked.join(', ')]);
+      }
       if (d.track_count != null) rows.push(['Tracks affected', text(d.track_count)]);
       // the split changes the library; the files follow through Re-tag and
       // Reorganize (docs/library-v2-data-flow.md)

@@ -115,9 +115,14 @@ def test_parts_that_merely_exist_never_mint_artists_after_a_download(tmp_path, w
     assert names == {"Kay & Dee"}
 
 
-def test_a_sure_separator_is_evidence_enough(tmp_path, writer):
+def test_a_sure_separator_alone_waits_for_the_user(tmp_path, writer):
+    # strict: "feat." proposes the split, a provider's list confirms it
     db = MusicDatabase(str(tmp_path / "m.db"))
     _aid, album, _t = _album(db, "Camellia feat. Toby Fox")
+    assert NE.settle_new_album_artist(
+        db, album, resolver=_resolver({"Camellia", "Toby Fox"})) is None
+    assert _primary(db, album) == "Camellia feat. Toby Fox"
+    writer.credits = ["Camellia", "Toby Fox"]
     result = NE.settle_new_album_artist(db, album, resolver=_resolver({"Camellia", "Toby Fox"}))
     assert result and _primary(db, album) == "Camellia"
 

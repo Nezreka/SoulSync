@@ -745,6 +745,11 @@ RETAG_DIFFERS_REVIEW = (
     "one waits for you: open it to see both values, then apply or dismiss it."
 )
 
+SPLIT_NEEDS_CONFIRMATION = (
+    "No provider confirms this split, so Fix all leaves it alone. Check the artists, "
+    "then use this finding's own button: Split Artists, One artist or Edit split."
+)
+
 RETAG_NO_COVER_FOUND = (
     "No cover art was found for this album on any source. Open the album in the Library, "
     "pick one with Change Cover, then apply again."
@@ -4157,6 +4162,10 @@ class RepairWorker:
                 return {'success': True, 'action': 'kept_whole',
                         'message': f'"{parts[0]}" stays one artist and won\'t be split again'}
         else:
+            if details.get('needs_confirmation') and not details.get('_explicit_single_fix'):
+                # names alone proposed it: only the user's own click splits it
+                return {'success': False, 'skipped_by_design': True,
+                        'error': SPLIT_NEEDS_CONFIRMATION}
             broken = self._comma_split_breaks_a_name(combined, parts)
             if broken:
                 # filed before the name was known as one artist (an older

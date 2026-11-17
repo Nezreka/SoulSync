@@ -154,6 +154,9 @@ class CommaArtistSplitterJob(RepairJob):
         '2. The album\'s own artist inside the name, the artists the library already '
         'identified, and your Keep Whole Names.\n'
         'A name nothing explains is left as it is.\n\n'
+        'A split is confirmed when Spotify or Deezer credit every part on one of the '
+        'artist\'s tracks. A split only the names suggest is filed for you to check: '
+        'Fix all and live mode leave it alone, the finding\'s own button applies it.\n\n'
         'In dry run mode (default), each finding shows how the artist would be split. '
         'Applying it splits the artist in your library (albums, credits and watches move to '
         'the real artists) and asks Re-tag and Reorganize to check exactly those files. '
@@ -236,7 +239,8 @@ class CommaArtistSplitterJob(RepairJob):
             return result
         kept = {name_key(n) for n in parse_kept_whole_names(settings.get('keep_whole_names'))}
         allowed = get_scope_file_paths(context)
-        services = {'deezer'} | (set() if context.is_spotify_rate_limited() else {'spotify'})
+        from core.library2.provider_credits import credit_services
+        services = credit_services() - ({'spotify'} if context.is_spotify_rate_limited() else set())
 
         cursor_start = _gap_cursor(context, _CURSOR_KEY)
         total = self.estimate_scope(context)
@@ -304,20 +308,27 @@ class CommaArtistSplitterJob(RepairJob):
                               f'artists ({details["track_count"]} track(s))'),
                     log_type='warning')
             entity_id = f'lib2:{info["artist_id"]}'
-            if dry_run:
+            unconfirmed = bool(details.get('needs_confirmation'))
+            if dry_run or unconfirmed:
+                # live mode applies only what the providers confirmed; a split
+                # names alone propose waits for the user either way
                 if not context.create_finding:
                     continue
+                count = len(details["split_artists"])
                 try:
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='comma_artist_split',
-                        severity='warning',
+                        severity='info' if unconfirmed else 'warning',
                         entity_type='artist',
                         entity_id=entity_id,
                         file_path=None,
                         title=f'Combined artist: {details["combined_name"]}',
                         description=(
-                            f'"{details["combined_name"]}" is {len(details["split_artists"])} '
+                            f'"{details["combined_name"]}" may be {count} artists. No '
+                            f'provider confirms it: check it before you split it'
+                            if unconfirmed else
+                            f'"{details["combined_name"]}" is {count} '
                             f'artists — the fix splits it in your library for '
                             f'{details["track_count"]} track(s)'),
                         details=details,
@@ -399,12 +410,16 @@ class CommaArtistSplitterJob(RepairJob):
                 services: set, allowed) -> Optional[dict]:
         """the finding for one combined artist, None to leave it alone.
 
-        Reads the catalogue only. When the stored credit lists of its tracks
-        decide nothing, the credit fetcher is asked for a few of them and the
-        lists are read again. A split only ever happens at a separator this
-        job has switched on."""
+        Reads the catalogue only. A split is confirmed when Spotify / Deezer
+        credit every part on one of its tracks (``split_confirmed``). When the
+        stored lists neither confirm a split nor keep the name whole, the
+        credit fetcher is asked for a few of the tracks, looking them up under
+        the proposed artists too, and the lists are read again. A split names
+        alone propose is still filed, as a finding the user confirms. A split
+        only ever happens at a separator this job has switched on."""
         from core.library2.native_enrich import (
             _ghost_credit_evidence, _identified_name_keys, combined_artist_scope,
+            split_confirmed,
         )
         from core.library2.importer import normalize_name
 
@@ -440,29 +455,37 @@ class CommaArtistSplitterJob(RepairJob):
         def act(n):
             return known(n) or (self_identified and normalize_name(n) == whole)
 
-        def evidence():
-            # what the library holds; only when that decides nothing is the
-            # credit fetcher asked for a few of the tracks, and it read again
+        def decide():
+            # what the library holds, read fresh each time
             conn = context.db._get_connection()
             try:
                 stored = list(_ghost_credit_evidence(conn, artist_id))
             finally:
                 conn.close()
-            yield from stored
-            if self._fetch_credits(context, scope['track_ids'], services):
-                conn = context.db._get_connection()
-                try:
-                    seen = {(via, tuple(n)) for via, n in stored}
-                    fresh = [e for e in _ghost_credit_evidence(conn, artist_id)
-                             if (e[0], tuple(e[1])) not in seen]
-                finally:
-                    conn.close()
-                yield from fresh
+            return decide_credit(name, evidence=stored, known=anchors, is_act=act,
+                                 is_artist=known, config=context.config_manager)
 
-        decision = decide_credit(name, evidence=evidence(), known=anchors,
-                                 is_act=act, is_artist=known, config=context.config_manager)
+        def confirmed(decision):
+            if not decision.split:
+                return False
+            conn = context.db._get_connection()
+            try:
+                return split_confirmed(conn, artist_id, decision.names)
+            finally:
+                conn.close()
+
+        decision = decide()
+        settled = confirmed(decision) or (
+            not decision.split and decision.via.endswith(' credits'))
+        if not settled:
+            # the providers asked about the proposed artists: a track the
+            # combined name finds nowhere is looked up under each of them
+            hints = list(decision.names) if decision.split else names
+            if self._fetch_credits(context, scope['track_ids'], services, hints):
+                decision = decide()
         if not decision.split or not _splits_only_at(name, list(decision.names), symbols):
             return None
+        is_confirmed = confirmed(decision)
         parts = list(decision.names)
         lead = next((p for p in parts if normalize_name(p) in {normalize_name(a) for a in anchors}),
                     parts[0])
@@ -485,7 +508,10 @@ class CommaArtistSplitterJob(RepairJob):
             'db_artist_id': artist_id,
             'db_artist_name': name,
             'verified_via': decision.via,
-            'checked_sources': [decision.via],
+            'checked_sources': [decision.via] if is_confirmed else [],
+            # names alone proposed it: never applied without the user
+            'confirmed': is_confirmed,
+            'needs_confirmation': not is_confirmed,
             'parts_resolution': resolution,
             'file_count': len(files),
             'track_count': len(scope['track_ids']),
@@ -519,23 +545,20 @@ class CommaArtistSplitterJob(RepairJob):
                  'lib2_track_id': int(r[1])}
                 for r in rows if allowed is None or file_path_in_scope(r[2], allowed)]
 
-    def _fetch_credits(self, context: JobContext, track_ids: list, services: set) -> bool:
-        """ask the credit fetcher for a few of the tracks' Spotify / Deezer
-        credits (matching them there first when they have no id); only the
-        providers this instance configured"""
-        try:
-            from core.library2.match_status import configured_services
-            configured = configured_services()
-            if configured is not None:
-                services = services & set(configured)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("configured credit services unavailable: %s", exc)
+    def _fetch_credits(self, context: JobContext, track_ids: list, services: set,
+                       hints=()) -> bool:
+        """ask the credit fetcher for a few of the tracks' credit lists from
+        ``services`` (the configured sources that give one: Spotify, Deezer,
+        MusicBrainz, Tidal, Discogs, JioSaavn), matching them there first when
+        they have no id: under the album's artist, then under each of
+        ``hints``"""
         if not services:
             return False
         from core.library2.provider_credits import ensure_track_credits
         stored = False
         for track_id in list(track_ids)[:_FETCH_TRACKS]:
-            stored = ensure_track_credits(context.db, int(track_id), services) or stored
+            stored = ensure_track_credits(context.db, int(track_id), services,
+                                          artist_hints=hints) or stored
         return stored
 
     def _library_artist_id(self, conn, name: str):

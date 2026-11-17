@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -1402,12 +1402,30 @@ def _ghost_credit_evidence(conn, artist_id: int, limit: int = 25):
                 yield via, names
 
 
+def split_confirmed(conn, artist_id: int, parts: Iterable[str]) -> bool:
+    """Whether the providers confirm splitting a combined artist into
+    ``parts``: every part is credited on one of its tracks by a stored
+    Spotify / Deezer list, so the track exists under each of them there.
+
+    Names alone (a ";", the album's artist inside the name, parts the
+    library knows) only propose a split. Nothing splits a combined artist on
+    its own without this; Split Artists files a finding the user confirms.
+    """
+    from core.matching.artist_credit import name_key
+
+    wanted = {name_key(p) for p in parts or ()} - {""}
+    if len(wanted) < 2:
+        return False
+    credited = {name_key(n) for _via, names in _ghost_credit_evidence(conn, artist_id)
+                for n in names}
+    return wanted <= credited
+
+
 def smart_split_combined_artist(
     conn,
     artist_id: int,
     *,
     resolver: Optional[ArtistResolver] = None,
-    require_evidence: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Split a combined-name artist ("A & B") into its real components.
 
@@ -1457,11 +1475,9 @@ def smart_split_combined_artist(
     # the library knows, then parts a provider resolves
     decision = decide_credit(row["name"], evidence=_ghost_credit_evidence(conn, artist_id),
                              is_act=known, is_artist=lambda n: known(n) or resolves(n))
-    if not decision.split:
-        return None
-    if require_evidence and decision.via == "artist":
-        # every part exists somewhere, and that is all: "K" and "DA" both do.
-        # A caller that asks for evidence never mints artists on that alone
+    if not decision.split or not split_confirmed(conn, artist_id, decision.names):
+        # every part existing somewhere is not enough ("K" and "DA" both
+        # do): the providers credit them on its tracks, or it waits for the user
         return None
     for component in decision.names:
         if not resolves(component):
@@ -1512,15 +1528,10 @@ def settle_new_album_artist(database: Any, album_id: int, *,
     finally:
         if conn is not None:
             conn.close()
-    try:
-        from core.library2.match_status import configured_services
-        configured = configured_services()
-    except Exception:  # noqa: BLE001
-        configured = None
-    services = {"spotify", "deezer"} & (set(configured) if configured is not None
-                                        else {"spotify", "deezer"})
+    services = provider_credits.credit_services()
+    hints = tokens(row[1] or "")[0]
     for track_id in track_ids:
-        provider_credits.ensure_track_credits(database, track_id, services)
+        provider_credits.ensure_track_credits(database, track_id, services, artist_hints=hints)
     resolver = resolver or default_artist_resolver
     # smart_split's contract: the whole name is asked first. A provider that
     # models it as one artist ("Hall & Oates") settles it as it is
@@ -1536,8 +1547,7 @@ def settle_new_album_artist(database: Any, album_id: int, *,
         conn = database._get_connection()
         # a new download's artist is split on evidence only: the tracks'
         # provider credits, a sure separator. Never on parts merely existing
-        result = smart_split_combined_artist(conn, artist_id, resolver=resolver,
-                                             require_evidence=True)
+        result = smart_split_combined_artist(conn, artist_id, resolver=resolver)
         conn.commit()
         if result:
             logger.info("settled album %s artist %r into %d artists",
@@ -2206,10 +2216,10 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
             # provider credits of its tracks, the album's own artist as a part
             # (not the band that artist leads: "Nick Cave & The Bad Seeds" on a
             # Nick Cave album), and for a ghost with no id of its own, parts
-            # that are all identified artists. A ghost that picked up an id
-            # splits only on its album's artist or on a provider's list. An
-            # identified artist inside the name stays whole either way (#2136);
-            # the ghost's own row never vouches for itself
+            # that are all identified artists. An identified artist inside the
+            # name stays whole (#2136); the ghost's own row never vouches for
+            # itself. It splits here only when the providers confirm the parts
+            # (split_confirmed); anything less is Split Artists' to propose
             def other_identified(n, gid=gid):
                 return identified.get(normalize_name(n)) not in (None, gid)
             decision = decide_credit(
@@ -2218,8 +2228,8 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 is_artist=None if settled else other_identified)
             pieces = list(decision.names)
             keys = [normalize_name(piece) for piece in pieces]
-            trusted = decision.via == "known" or decision.via.endswith(" credits")
-            if not decision.split or (settled and not trusted):
+            if not decision.split or not split_confirmed(conn, gid, pieces):
+                # a split names alone propose waits for the user (Split Artists)
                 stats["left"] += 1
             else:
                 # the album's own artist leads, the guests follow
@@ -2488,6 +2498,7 @@ __all__ = [
     "clear_placeholder_artist_images",
     "identity_is_free",
     "smart_split_combined_artist",
+    "split_confirmed",
     "heal_combined_artist",
     "combined_artist_scope",
     "drop_band_fragment_credits",

@@ -65,6 +65,10 @@ class TestPriorityOrder:
         from core.library2.worker_queue import invalidate_pending_cache
         conn.execute("UPDATE lib2_artists SET name='Eminem, Nate Dogg' WHERE id=1")
         conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(1,1)')
+        # what Deezer credits on the track: the confirmation the split needs
+        conn.executemany("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                         "position, name, source_artist_id) VALUES('track', 1, 'deezer', ?, ?, ?)",
+                         [(0, 'Eminem', '10'), (1, 'Nate Dogg', '20')])
         conn.commit()
         assert next_pending(conn, 'lastfm') is None
         identities = {

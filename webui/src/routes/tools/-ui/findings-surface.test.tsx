@@ -2510,6 +2510,30 @@ describe('the detail renderer', () => {
     expect(detail.textContent).toContain('…and 2 more track(s)');
   });
 
+  it('comma_artist_split names the provider that confirmed the split', async () => {
+    const confirmed = await openDetail({
+      finding_type: 'comma_artist_split',
+      details: {
+        combined_name: 'A; B', split_artists: ['A', 'B'],
+        confirmed: true, checked_sources: ['musicbrainz credits'],
+      },
+    });
+    expect(gridPairs(confirmed)).toContainEqual(['Confirmed by', 'musicbrainz credits']);
+  });
+
+  it('comma_artist_split without a provider confirmation says Fix all leaves it', async () => {
+    const unconfirmed = await openDetail({
+      finding_type: 'comma_artist_split',
+      details: {
+        combined_name: 'A; B', split_artists: ['A', 'B'],
+        confirmed: false, needs_confirmation: true, checked_sources: [],
+      },
+    });
+    const row = gridPairs(unconfirmed).find(([label]) => label === 'Confirmed by');
+    expect(row?.[1]).toMatch(/^Nobody yet/);
+    expect(row?.[1]).toContain('Fix all leaves it alone');
+  });
+
   it('orphan_file uppercases the format and formats the size', async () => {
     const detail = await openDetail({
       finding_type: 'orphan_file',

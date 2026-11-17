@@ -69,6 +69,14 @@ def _credited_track(conn, album_artist, credited, title="Song"):
     return track
 
 
+def _provider(conn, track, *names):
+    """the list a provider credits on the track: what confirms a split"""
+    for position, name in enumerate(names):
+        conn.execute("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                     "position, name, source_artist_id) VALUES('track', ?, 'deezer', ?, ?, ?)",
+                     (track, position, name, f"dz-{name}"))
+
+
 def _credits(conn, track):
     return [r[0] for r in conn.execute(
         "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
@@ -83,6 +91,9 @@ def test_a_ghost_with_the_album_artist_in_it_splits(conn):
     lead = _artist(conn, "1788-L", spotify="sp-1788", legacy=5)
     ghost = _artist(conn, "1788-L, Deathpact")
     track = _credited_track(conn, lead, ghost)
+    # the album's artist inside the name proposes it; no provider confirms yet
+    assert split_combined_credits_locally(conn)["split"] == 0 and _exists(conn, ghost)
+    _provider(conn, track, "1788-L", "Deathpact")
 
     stats = split_combined_credits_locally(conn)
 
@@ -127,6 +138,7 @@ def test_every_part_known_splits_even_off_the_album_artist(conn):
     b = _artist(conn, "Antha Pantha", spotify="sp-ap", legacy=14)
     ghost = _artist(conn, "Asian Doll & Antha Pantha")
     track = _credited_track(conn, host, ghost)
+    _provider(conn, track, "Asian Doll", "Antha Pantha")
 
     stats = split_combined_credits_locally(conn)
 
@@ -164,6 +176,7 @@ def test_an_anchored_ghost_splits_even_with_an_id_it_picked_up_by_name(conn):
     album_artist = _artist(conn, "Øneheart", spotify="sp-oneheart")
     ghost = _artist(conn, "Øneheart, Malek", spotify="sp-wrong-match")
     track = _credited_track(conn, album_artist, ghost)
+    _provider(conn, track, "Øneheart", "Malek")
     stats = split_combined_credits_locally(conn)
     assert stats["split"] == 1
     assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE id=?", (ghost,)).fetchone()[0] == 0
@@ -225,6 +238,7 @@ def test_an_anchored_list_with_an_id_still_splits(conn):
     lead = _artist(conn, "Drake", spotify="sp-drake")
     ghost = _artist(conn, "Drake & Future", spotify="sp-wrong-match")
     track = _credited_track(conn, lead, ghost)
+    _provider(conn, track, "Drake", "Future")
 
     assert split_combined_credits_locally(conn)["split"] == 1
     assert not _exists(conn, ghost)
