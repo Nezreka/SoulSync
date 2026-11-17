@@ -10308,6 +10308,17 @@ def reorganize_all_artist_albums(artist_id):
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
+        # #1504, the single-album rule for every album: a non-admin profile
+        # moves only albums in its own library, never the shared one or
+        # another profile's
+        if not getattr(g, 'is_admin', False):
+            from core.library_reorganize import resolve_album_profile_id
+            _me = getattr(g, 'profile_id', None)
+            albums = [a for a in albums if _me is not None and resolve_album_profile_id(
+                get_database(), a['album_id'], resolve_file_path_fn=_resolve_library_file_path) == _me]
+            if not albums:
+                return jsonify({"success": False, "error": "Not your artist"}), 403
+
         # The queue's bulk-enqueue helper owns the loop+tally.
         result = get_queue().enqueue_many(albums)
 
@@ -10334,13 +10345,27 @@ def reorganize_queue_snapshot():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _reorganize_item_is_callers(item) -> bool:
+    """may the caller cancel this queued reorganize? the admin, any; anyone
+    else, only one queued in their own library (the single-album rule, #1504)"""
+    if getattr(g, 'is_admin', False):
+        return True
+    me = getattr(g, 'profile_id', None)
+    try:
+        return me is not None and item.library is not None and int(item.library) == int(me)
+    except (TypeError, ValueError):
+        return False
+
+
 @app.route('/api/library/reorganize/queue/<queue_id>/cancel', methods=['POST'])
 def reorganize_queue_cancel(queue_id):
     """Cancel a queued item (running items can't be cleanly cancelled —
     see the queue module's design rules)."""
     try:
         from core.reorganize_queue import get_queue
-        result = get_queue().cancel(queue_id)
+        result = get_queue().cancel(queue_id, may=_reorganize_item_is_callers)
+        if result.get('reason') == 'not_yours':
+            return jsonify({"success": False, **result, "error": "Not your reorganize"}), 403
         status_code = 200 if result.get('cancelled') else 409
         return jsonify({"success": result.get('cancelled', False), **result}), status_code
     except Exception as e:
@@ -10353,7 +10378,10 @@ def reorganize_queue_clear():
     """Cancel all queued items at once (the running item continues)."""
     try:
         from core.reorganize_queue import get_queue
-        cancelled = get_queue().clear_queued()
+        # the admin clears the whole queue; anyone else only what's queued
+        # in their own library
+        cancelled = get_queue().clear_queued(
+            only=None if getattr(g, 'is_admin', False) else _reorganize_item_is_callers)
         return jsonify({"success": True, "cancelled": cancelled})
     except Exception as e:
         logger.error(f"Reorganize clear error: {e}")
