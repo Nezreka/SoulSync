@@ -485,7 +485,7 @@ def test_get_feature_off_with_no_location(client, monkeypatch):
     body = client.get("/api/weather").get_json()
     assert body == {"success": True, "enabled": True, "location": None,
                     "units": "fahrenheit", "snapshot": None, "scene": None,
-                    "holidays": True}
+                    "holidays": True, "own": False}
     assert _forecast_calls([]) == []
 
 
@@ -652,17 +652,174 @@ def test_rain_scene_end_to_end(client, monkeypatch):
 # auth
 # ---------------------------------------------------------------------------
 
-def test_puts_require_admin_but_get_is_open(client, monkeypatch):
-    # simulate a non-admin profile: the PUTs must 403, GET must stay 200
-    monkeypatch.setattr("core.profile_context.is_admin_request", lambda: False)
+class _FakeDb:
+    """the metadata table, which is all a member's weather needs"""
+
+    def __init__(self):
+        self.rows = {}
+        self.writes = 0
+
+    def get_metadata(self, key):
+        return self.rows.get(key)
+
+    def set_metadata(self, key, value):
+        self.writes += 1
+        self.rows[key] = value
+
+    def delete_metadata(self, key):
+        return self.rows.pop(key, None) is not None
+
+
+@pytest.fixture
+def db(cfg):
+    fake = _FakeDb()
+    sw.configure(config_manager=cfg, get_database=lambda: fake)
+    sw._member_cache.clear()
+    yield fake
+    sw._member_cache.clear()
+
+
+def _as(monkeypatch, pid, admin=False):
+    """the request comes from this profile"""
+    monkeypatch.setattr("core.profile_context.is_admin_request", lambda: admin)
+    monkeypatch.setattr("core.profile_context.get_current_profile_id", lambda: pid)
+
+
+def _admin_in_medford(client, monkeypatch):
+    _as(monkeypatch, 1, admin=True)
+    resp, _calls = _put_location(client, monkeypatch)
+    assert resp.status_code == 200
+
+
+def test_member_never_sees_the_admins_weather(client, monkeypatch, cfg, db):
+    """#2163: a member's sidebar showed the admin's town, temp and clock."""
+    _admin_in_medford(client, monkeypatch)
+    _as(monkeypatch, 5)
+    calls = _fake_http(monkeypatch)
+    body = client.get("/api/weather").get_json()
+    assert body["location"] is None
+    assert body["snapshot"] is None and body["scene"] is None
+    assert body["own"] is True
+    assert "Medford" not in json.dumps(body)
+    assert _forecast_calls(calls) == []
+
+
+def test_member_sets_their_own_place(client, monkeypatch, cfg, db, tmp_path):
+    _admin_in_medford(client, monkeypatch)
+    admin_snapshot = dict(sw._cache)
+    sidecar_before = sw._snapshot_path().read_text(encoding="utf-8")
+    _as(monkeypatch, 5)
+    _fake_http(monkeypatch, geocode=_GEOCODE_DE)
+    resp = client.put("/api/weather/location", json={"location": "Berlin"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["location"]["name"] == "Berlin"
+    assert body["units"] == "celsius"
+    assert body["snapshot"] is not None
+    # written to their own row, the install's config untouched
+    assert json.loads(db.rows["weather_profile:5"])["location_name"] == "Berlin"
+    assert cfg.get("weather.location_name") == "Medford"
+    assert cfg.get("weather.use_celsius") is False
+    # the install's cache and sidecar still hold the admin's town
+    assert sw._cache == admin_snapshot
+    assert sw._snapshot_path().read_text(encoding="utf-8") == sidecar_before
+    # and each side reads its own
+    assert client.get("/api/weather").get_json()["location"]["name"] == "Berlin"
+    _as(monkeypatch, 1, admin=True)
+    admin_view = client.get("/api/weather").get_json()
+    assert admin_view["location"]["name"] == "Medford"
+    assert admin_view["own"] is False
+
+
+def test_members_dont_share_settings(client, monkeypatch, db):
+    _as(monkeypatch, 5)
+    _fake_http(monkeypatch, geocode=_GEOCODE_DE)
+    client.put("/api/weather/location", json={"location": "Berlin"})
+    _as(monkeypatch, 6)
+    assert client.get("/api/weather").get_json()["location"] is None
+
+
+def test_member_toggles_only_touch_their_own(client, monkeypatch, cfg, db):
+    _admin_in_medford(client, monkeypatch)
+    _as(monkeypatch, 5)
+    _fake_http(monkeypatch, geocode=_GEOCODE_DE)
+    client.put("/api/weather/location", json={"location": "Berlin"})
+    assert client.put("/api/weather/units", json={"use_celsius": False}).status_code == 200
+    assert client.put("/api/weather/display", json={"enabled": False}).status_code == 200
+    assert client.put("/api/weather/holidays", json={"enabled": False}).status_code == 200
+    mine = json.loads(db.rows["weather_profile:5"])
+    assert mine["use_celsius"] is False
+    assert mine["enabled"] is False and mine["holidays"] is False
+    assert cfg.get("weather.enabled", True) is True
+    assert cfg.get("weather.holidays", True) is True
+    assert cfg.get("weather.use_celsius") is False  # medford's, as the admin left it
+
+
+def test_member_clear_leaves_the_install_snapshot(client, monkeypatch, cfg, db):
+    _admin_in_medford(client, monkeypatch)
+    _as(monkeypatch, 5)
+    _fake_http(monkeypatch, geocode=_GEOCODE_DE)
+    client.put("/api/weather/location", json={"location": "Berlin"})
+    resp = client.put("/api/weather/location", json={"location": ""})
+    assert resp.get_json()["location"] is None
+    assert sw._cache["snapshot"] is not None
+    assert sw._snapshot_path().exists()
+    assert cfg.get("weather.location") == "97501"
+
+
+def test_member_snapshot_is_cached(client, monkeypatch, db):
+    _as(monkeypatch, 5)
+    calls = _fake_http(monkeypatch, geocode=_GEOCODE_DE)
+    client.put("/api/weather/location", json={"location": "Berlin"})
+    client.get("/api/weather")
+    client.get("/api/weather")
+    assert len(_forecast_calls(calls)) == 1
+
+
+def test_member_cache_is_capped(monkeypatch, db):
     _fake_http(monkeypatch)
-    assert client.put("/api/weather/location",
-                      json={"location": "97501"}).status_code == 403
-    assert client.put("/api/weather/display",
-                      json={"enabled": False}).status_code == 403
-    assert client.put("/api/weather/units",
-                      json={"use_celsius": True}).status_code == 403
-    assert client.get("/api/weather").status_code == 200
+    for i in range(sw.MEMBER_CACHE_MAX + 5):
+        sw._get_member_snapshot({"latitude": float(i), "longitude": 0.0}, "celsius")
+    assert len(sw._member_cache) == sw.MEMBER_CACHE_MAX
+
+
+def test_no_profile_gets_nothing_and_cannot_write(client, monkeypatch, cfg, db):
+    _admin_in_medford(client, monkeypatch)
+    _as(monkeypatch, None)
+    body = client.get("/api/weather").get_json()
+    assert body["enabled"] is False and body["location"] is None and body["snapshot"] is None
+    for path, payload in (("/api/weather/location", {"location": "Berlin"}),
+                          ("/api/weather/display", {"enabled": False}),
+                          ("/api/weather/holidays", {"enabled": False}),
+                          ("/api/weather/units", {"use_celsius": True})):
+        assert client.put(path, json=payload).status_code == 403, path
+    assert db.rows == {}
+    assert cfg.get("weather.location") == "97501"
+
+
+def test_profile_weather_batch_writes_once(db):
+    store = sw._ProfileWeather(db, 7)
+    with store.batch():
+        store.set("weather.location", "x")
+        store.set("weather.latitude", 1.0)
+    assert db.writes == 1
+    assert sw._ProfileWeather(db, 7).get("weather.location") == "x"
+
+
+def test_profile_weather_unreadable_row_reads_as_unset(db):
+    db.rows["weather_profile:7"] = "{not json"
+    assert sw._ProfileWeather(db, 7).get("weather.location", "") == ""
+
+
+def test_forget_profile_drops_their_weather(db):
+    db.rows["weather_profile:7"] = "{}"
+    sw.forget_profile(db, 7)
+    assert "weather_profile:7" not in db.rows
+
+
+def test_deleting_a_profile_forgets_its_weather():
+    src = (_ROOT / "api" / "user_profiles.py").read_text(encoding="utf-8")
+    assert "_forget_weather(database, profile_id)" in src
 
 
 # ---------------------------------------------------------------------------
@@ -673,7 +830,7 @@ def test_webserver_registers_sidebar_weather_blueprint():
     src = (_ROOT / "web_server.py").read_text(encoding="utf-8")
     assert ("from api.sidebar_weather import configure as _cfg_sw, "
             "create_blueprint as _bp_sw") in src
-    assert "_cfg_sw(config_manager=config_manager)" in src
+    assert "_cfg_sw(config_manager=config_manager, get_database=get_database)" in src
     assert "app.register_blueprint(_bp_sw())" in src
 
 

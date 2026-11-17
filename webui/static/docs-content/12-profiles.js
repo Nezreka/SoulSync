@@ -124,6 +124,10 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Your sidebar weather
+
+The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.
+
 ## Scrobbling your plays
 
 Your own plays can scrobble to your own accounts, from the moment you turn it on (nothing older is sent):

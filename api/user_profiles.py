@@ -761,6 +761,9 @@ def delete_profile(profile_id):
                 ui_features.clear(database, profile_id)
             except Exception as e:  # noqa: BLE001 - a leftover pref is harmless
                 logger.debug("features clear for %s failed: %s", profile_id, e)
+            # and their own sidebar weather (#2163)
+            from api.sidebar_weather import forget_profile as _forget_weather
+            _forget_weather(database, profile_id)
             _audit('profile_deleted', profile_id, target.get('name'))
             # its folder is no library any more (#1199)
             from core.library_scope import library_config_changed

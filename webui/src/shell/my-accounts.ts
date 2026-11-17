@@ -16,8 +16,9 @@
  *
  * Backend: GET /api/profiles/me/connections, the per-service save/OAuth
  * routes, POST /api/profiles/me/connections/<service>/disconnect, and the
- * media-server routes the old My Settings used, and GET/DELETE
- * /api/profiles/me/oidc for the sign-in card.
+ * media-server routes the old My Settings used, GET/DELETE
+ * /api/profiles/me/oidc for the sign-in card, and /api/weather for your own
+ * sidebar weather (#2163: the server answers each profile with its own).
  */
 
 import { appURL } from '@/platform/url-base';
@@ -110,6 +111,15 @@ interface OidcStatus {
   last?: { connected?: boolean; error?: string | null } | null;
 }
 
+/** GET /api/weather as a member sees it: their own place, never the admin's */
+interface MaWeather {
+  enabled?: boolean;
+  units?: 'celsius' | 'fahrenheit';
+  holidays?: boolean;
+  location?: { query?: string; name?: string } | null;
+  snapshot?: { current?: { temp?: number | null; condition?: string | null } | null } | null;
+}
+
 export const OIDC_CONNECT_URL = '/api/profiles/me/oidc-connect/start';
 
 interface ImportStatus {
@@ -178,6 +188,7 @@ const _ma: {
   oidc: OidcStatus | null;
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
   scrobbling: MaScrobbling | null;
+  weather: MaWeather | null;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
 } = {
@@ -186,6 +197,7 @@ const _ma: {
   oidc: null,
   imports: {},
   scrobbling: null,
+  weather: null,
   open: null,
   poll: null,
 };
@@ -302,16 +314,18 @@ async function _maJson<T>(url: string): Promise<T | null> {
 }
 
 async function _maLoad(): Promise<void> {
-  const [data, server, oidc, scrobbling] = await Promise.all([
+  const [data, server, oidc, scrobbling, weather] = await Promise.all([
     _maJson<MaConnections>('/api/profiles/me/connections'),
     _maLoadServer(),
     _maJson<OidcStatus>('/api/profiles/me/oidc'),
     _maJson<MaScrobbling>('/api/profiles/me/scrobbling'),
+    _maJson<MaWeather>('/api/weather'),
   ]);
   _ma.data = data || { connections: {}, is_admin: false };
   _ma.server = server;
   _ma.oidc = oidc;
   _ma.scrobbling = scrobbling;
+  _ma.weather = weather;
   _maRefreshHeader();
   _maRender();
   const last = oidc?.last;
@@ -473,6 +487,7 @@ function _maRender(): void {
       <h4 class="ma-section-title" id="ma-services-h">Music services</h4>
       <div class="ma-group">${_MA_SERVICES.map(_maServiceRow).join('')}</div>
     </section>
+    ${_maWeatherSection()}
     ${_maSignInSection()}
     <p class="ma-foot">The app's own accounts are set up by the admin in Settings. Anything you change here only affects you.</p>`;
   for (const s of ['listenbrainz', 'lastfm'] as const) _maPaintImport(s);
@@ -505,6 +520,77 @@ export function _maSignInSection(): string {
             </div>
             ${trailing}
           </div>
+        </div>
+      </div>
+    </section>`;
+}
+
+const _SUN = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+
+/** what the weather row says: your place and its sky, or how to turn it on */
+export function _maWeatherLine(w: MaWeather | null): string {
+  const loc = w?.location;
+  if (!loc) return 'Off. Add your town to see its weather and time in the sidebar.';
+  const name = loc.name || loc.query || 'Your place';
+  if (w?.enabled === false) return `${name}. Hidden from the sidebar.`;
+  const cur = w?.snapshot?.current;
+  if (!cur || typeof cur.temp !== 'number') return `${name}. Forecast on its way.`;
+  const unit = w?.units === 'celsius' ? 'C' : 'F';
+  const sky = cur.condition ? `, ${cur.condition.toLowerCase()}` : '';
+  return `${name}, ${Math.round(cur.temp)}°${unit}${sky}`;
+}
+
+/** your own sidebar weather (#2163). the admin's lives in Settings and is
+ * never shown here: the server answers each profile with its own */
+function _maWeatherSection(): string {
+  const w = _ma.weather;
+  if (!w) return '';
+  const open = _ma.open === 'weather';
+  const loc = w.location;
+  const trailing = open
+    ? ''
+    : `<button type="button" class="ma-btn ma-btn-outline" data-ma="toggle" data-id="weather" aria-expanded="false">${loc ? 'Change' : 'Set up'}</button>`;
+  const sw = (key: string, label: string, on: boolean) => `
+    <div class="ma-scrobble">
+      <span>${label}</span>
+      <label class="ma-switch">
+        <input type="checkbox" data-ma-weather="${key}" aria-label="${label}"${on ? ' checked' : ''}>
+        <span></span>
+      </label>
+    </div>`;
+  const panel = open
+    ? `
+      <div class="ma-panel">
+        ${_maField(
+          'ma-wx-loc',
+          'Your town',
+          `<input class="ma-input" id="ma-wx-loc" type="text" autocomplete="off" spellcheck="false"
+             placeholder="ZIP or city, e.g. 97501 or Berlin" value="${escapeHtml(loc?.query || '')}" data-submit="weather">`,
+          'Only you see this. The sidebar shows its weather and its local time.',
+        )}
+        ${loc ? sw('celsius', 'Use °C', w.units === 'celsius') : ''}
+        ${loc ? sw('holidays', 'Holiday decorations', w.holidays !== false) : ''}
+        <div class="ma-actions">
+          <button type="button" class="ma-btn ma-btn-quiet" data-ma="toggle" data-id="weather">Cancel</button>
+          ${loc ? '<button type="button" class="ma-btn ma-btn-quiet" data-ma="wx-clear">Turn off</button>' : ''}
+          <button type="button" class="ma-btn ma-btn-primary" data-ma="wx-save">Save</button>
+        </div>
+      </div>`
+    : '';
+  return `
+    <section class="ma-section" aria-labelledby="ma-weather-h">
+      <h4 class="ma-section-title" id="ma-weather-h">Sidebar weather</h4>
+      <div class="ma-group">
+        <div class="ma-row${open ? ' is-open' : ''}">
+          <div class="ma-row-main">
+            <span class="ma-logo ma-logo-key">${_SUN}</span>
+            <div class="ma-row-text">
+              <div class="ma-row-name">Weather</div>
+              <div class="ma-row-sub" id="ma-sub-weather">${escapeHtml(_maWeatherLine(w))}</div>
+            </div>
+            ${trailing}
+          </div>
+          ${panel}
         </div>
       </div>
     </section>`;
@@ -1006,6 +1092,20 @@ function _maOnClick(e: Event): void {
     case 'scrobble-signin':
       void _maLastfmScrobbleSignIn(btn);
       break;
+    case 'wx-save': {
+      const place = _maValue('ma-wx-loc');
+      if (!place) {
+        toast('Type your town or ZIP first', 'info');
+        break;
+      }
+      void _maWeatherCall('/location', { location: place }, (w) =>
+        w.location?.name ? `Weather set to ${w.location.name}` : 'Weather saved',
+      );
+      break;
+    }
+    case 'wx-clear':
+      void _maWeatherCall('/location', { location: '' }, () => 'Sidebar weather turned off');
+      break;
     case 'scrobble-stop':
       void _maScrobbleCall(
         '/api/profiles/me/lastfm/scrobble',
@@ -1031,6 +1131,20 @@ function _maOnClick(e: Event): void {
 
 function _maOnChange(e: Event): void {
   const el = e.target as HTMLElement;
+  if (el instanceof HTMLInputElement && el.dataset.maWeather) {
+    const on = el.checked;
+    if (el.dataset.maWeather === 'celsius') {
+      void _maWeatherCall('/units', { use_celsius: on }, () => `Using °${on ? 'C' : 'F'}`, true);
+    } else {
+      void _maWeatherCall(
+        '/holidays',
+        { enabled: on },
+        () => (on ? 'Holiday decorations on' : 'Holiday decorations off'),
+        true,
+      );
+    }
+    return;
+  }
   if (el instanceof HTMLInputElement && el.dataset.maScrobble === 'listenbrainz') {
     void _maScrobbleCall(
       '/api/profiles/me/listenbrainz/scrobble',
@@ -1052,6 +1166,10 @@ function _maOnFieldKey(e: KeyboardEvent): void {
   const el = e.target as HTMLElement;
   if (e.key !== 'Enter' || !el.dataset.submit) return;
   e.preventDefault();
+  if (el.dataset.submit === 'weather') {
+    (document.querySelector('[data-ma="wx-save"]') as HTMLElement | null)?.click();
+    return;
+  }
   void saveMyAccountToken(el.dataset.submit);
 }
 
@@ -1324,6 +1442,48 @@ export async function _maPlexConnect(
       btn.textContent = label;
     }
   }
+}
+
+/**
+ * change your own sidebar weather, then redraw the row from what the server
+ * holds and let the sidebar pick it up without a reload. keepOpen leaves the
+ * panel open (a switch flipped inside it).
+ */
+async function _maWeatherCall(
+  path: string,
+  body: Record<string, unknown>,
+  done: (w: MaWeather) => string,
+  keepOpen = false,
+): Promise<boolean> {
+  let ok = false;
+  try {
+    const res = await fetch('/api/weather' + path, {
+      method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as MaWeather & {
+      success?: boolean;
+      error?: string;
+    };
+    if (!res.ok || data.success === false) {
+      toast(_maError(data as Record<string, unknown>, "Couldn't save the weather"), 'error');
+    } else {
+      ok = true;
+      if (!keepOpen) _ma.open = null;
+      _ma.weather = (await _maJson<MaWeather>('/api/weather')) || _ma.weather;
+      toast(done(_ma.weather || data), 'success');
+    }
+  } catch {
+    toast("Couldn't save the weather", 'error');
+  }
+  _maRender();
+  try {
+    void Promise.resolve(window.bootSidebarWeather?.()).catch(() => {});
+  } catch {
+    // the sidebar catches up on the next page load
+  }
+  return ok;
 }
 
 /** change where your plays scrobble, then redraw from what the server says */

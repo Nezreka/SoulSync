@@ -24207,7 +24207,7 @@ app.register_blueprint(_create_audiobooks_blueprint())
 # Sidebar weather (api/sidebar_weather.py): opt-in Open-Meteo fetch with a
 # 30-min lazy cache. Blank weather.location = feature off.
 from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
-_cfg_sw(config_manager=config_manager)
+_cfg_sw(config_manager=config_manager, get_database=get_database)
 app.register_blueprint(_bp_sw())
 
 # MetaSync connection (api/metasync_settings.py): pairing with the local
