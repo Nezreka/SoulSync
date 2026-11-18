@@ -66,6 +66,10 @@ interface StubOptions {
   listening?: Record<string, unknown> | null;
   /** what scans added to the wishlist, by release */
   found?: Record<string, unknown>[];
+  /** #2175: the library-wide release statuses, absent on an older server */
+  libraryStatuses?: string[];
+  /** #2175: the artist's own release statuses, null = the library's */
+  artistStatuses?: string[] | null;
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -86,6 +90,8 @@ function stubFetch(options: StubOptions = {}) {
     library = null,
     listening = null,
     found = [],
+    libraryStatuses,
+    artistStatuses = null,
   } = options;
 
   const calls: string[] = [];
@@ -143,6 +149,7 @@ function stubFetch(options: StubOptions = {}) {
             exclude_terms: '',
             global_auto_download: globalAutoDownload,
             custom_artist_count: customCount,
+            ...(libraryStatuses ? { release_statuses: libraryStatuses } : {}),
           },
         });
       }
@@ -196,6 +203,8 @@ function stubFetch(options: StubOptions = {}) {
             global_auto_download: globalAutoDownload,
             quality_profile_id: null,
             follow_defaults: followDefaults,
+            release_statuses: artistStatuses,
+            ...(libraryStatuses ? { library_release_statuses: libraryStatuses } : {}),
             defaults: {
               include_albums: true,
               include_eps: true,
@@ -809,6 +818,86 @@ describe('watchlist route', () => {
     await waitFor(() => {
       expect(calls.some((url) => url.includes('/api/watchlist/reset-to-defaults'))).toBe(true);
     });
+  });
+
+  // ── #2175: MusicBrainz release statuses, library wide and per artist ──────
+
+  it('saves the library-wide release statuses, every one on until you pick', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    // an older server says nothing about statuses: that is every one
+    stubFetch({ bodies });
+    renderWatchlistRoute(['/watchlist?settings=true']);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
+    const statuses = within(dialog).getByRole('group', { name: 'Release statuses' });
+    const pills = within(statuses).getAllByRole('button');
+    expect(pills.map((pill) => pill.textContent)).toEqual([
+      'Official',
+      'Promotion',
+      'Bootleg',
+      'Pseudo-Release',
+      'Withdrawn',
+      'Expunged',
+      'Cancelled',
+    ]);
+    expect(pills.every((pill) => pill.getAttribute('aria-pressed') === 'true')).toBe(true);
+
+    for (const pill of pills.slice(1)) fireEvent.click(pill);
+    // the last one on stays on: a filter that lets nothing through is never meant
+    expect(within(statuses).getByRole('button', { name: 'Official' })).toBeDisabled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save defaults' }));
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/api/watchlist/global-config'))).toBe(true);
+    });
+    const saved = bodies.find((call) => call.url.includes('/api/watchlist/global-config'))!.body;
+    expect(saved.release_statuses).toEqual(['official']);
+  });
+
+  it('an artist follows the library statuses until it picks its own', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, libraryStatuses: ['official', 'promotion'] });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    const select = await screen.findByLabelText('Release status');
+    expect(select).toHaveValue('inherit');
+    expect(
+      screen.getByRole('option', { name: 'Use the default (Official, Promotion)' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Release statuses' })).not.toBeInTheDocument();
+
+    // picking its own starts from the library's
+    fireEvent.change(select, { target: { value: 'custom' } });
+    const chips = screen.getByRole('group', { name: 'Release statuses' });
+    expect(within(chips).getByRole('checkbox', { name: 'Official' })).toBeChecked();
+    expect(within(chips).getByRole('checkbox', { name: 'Promotion' })).toBeChecked();
+    fireEvent.click(within(chips).getByRole('checkbox', { name: 'Bootleg' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    const saved = bodies.find((call) => call.url.includes('/config'))!.body;
+    expect(saved.release_statuses).toEqual(['official', 'promotion', 'bootleg']);
+  });
+
+  it('an artist with its own statuses goes back to the library with null', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, libraryStatuses: ['official'], artistStatuses: ['bootleg'] });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    const select = await screen.findByLabelText('Release status');
+    expect(select).toHaveValue('custom');
+    const chips = screen.getByRole('group', { name: 'Release statuses' });
+    expect(within(chips).getByRole('checkbox', { name: 'Bootleg' })).toBeChecked();
+    expect(within(chips).getByRole('checkbox', { name: 'Official' })).not.toBeChecked();
+
+    fireEvent.change(select, { target: { value: 'inherit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    expect(bodies.find((call) => call.url.includes('/config'))!.body.release_statuses).toBeNull();
   });
 
   it('opens artist config from the URL with the stored values', async () => {

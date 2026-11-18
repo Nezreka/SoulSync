@@ -43,14 +43,16 @@ _RESOLVED_RECURRENCE_GRACE_DAYS = 7
 _SUPERSEDED_BY_SCAN_ACTION = "superseded by a newer scan"
 
 
-def _publish_video_event(event_type: str, data: dict) -> None:
+def _publish_video_event(event_type: str, data: dict, owner=None) -> None:
     """Relay a library change to the video automation event bus. The DB layer is
     the one spine every wishlist/watchlist write flows through, so publishing
     here means no caller can forget. Lazy import; a missing forwarder (tests,
-    early startup) makes it a no-op — never disturbs the write itself."""
+    early startup) makes it a no-op — never disturbs the write itself.
+    ``owner`` is the profile whose list changed (an admin approving a request
+    writes the requester's wishlist: the event is the requester's)."""
     try:
-        from core.video.download_events import publish
-        publish(event_type, data)
+        from core.video.download_events import owned, publish
+        publish(event_type, owned(data, owner))
     except Exception:   # noqa: BLE001
         logger.debug("video event publish failed for %s", event_type, exc_info=True)
 
@@ -89,7 +91,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 72   # v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 75   # v75: video_request_log.kind (music, movies and TV each have their own request limit); v74: quality_profiles.media_type (movie | tv | NULL = both, #2168); v73: video_request_log (the request limit counts asks, not surviving rows) + video_downloads/video_download_history.profile_id (who started a grab); v72: idx_episodes_summary (the library manager sums a show up from the index alone); v71: video_title_freshness (when each source was last asked about a title, for the detail page refresh); v70: video_file_changes (file history and undo) + movies/shows.hands_off (the padlock: automation leaves the title and its files alone); v69: episode_scene_numbers (a lumped anime season the server numbers TMDB's way is searched by its split numbers) + re-sync those shows; v68: re-sync anime whose split the anime map's stale or early entries held back (Dandadan, Apothecary Diaries, Tokyo Revengers); v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -535,6 +537,19 @@ _COLUMN_MIGRATIONS = [
     # a season's monitored flag was set by the user (the season toggle), so
     # nothing automatic may move it. 0 = never set by hand.
     ("seasons", "monitor_locked", "INTEGER NOT NULL DEFAULT 0"),
+    # v73: the profile that started a grab by hand (NULL = an automatic one,
+    # the admin's). a member may cancel only their own, and sees only their
+    # own in the queue and the history
+    ("video_downloads", "profile_id", "INTEGER"),
+    ("video_download_history", "profile_id", "INTEGER"),
+    # v74: what a quality profile is for (#2168): 'movie', 'tv', or NULL for
+    # both, so nothing disappears on upgrade. requests only offer a member
+    # the profiles for that kind of title
+    ("quality_profiles", "media_type", "TEXT"),
+    # v75: what each logged ask was for (movie | show | episode | youtube):
+    # movies and TV each have their own request limit now. a row from before
+    # it whose request is gone stays NULL and counts toward both
+    ("video_request_log", "kind", "TEXT"),
 ]
 
 
@@ -1194,6 +1209,19 @@ class VideoDatabase:
                 "AND s.server_id IS NOT NULL) "
                 "AND EXISTS (SELECT 1 FROM episodes l WHERE l.show_id=e.show_id "
                 "AND l.season_number>e.season_number AND l.server_id IS NOT NULL))")
+
+        if prev_version < 75:
+            # v75: the asks already logged take their request's kind
+            conn.execute(
+                "UPDATE video_request_log SET kind=(SELECT r.kind FROM video_requests r "
+                "WHERE r.id=video_request_log.request_id) WHERE kind IS NULL")
+
+        if prev_version < 73:
+            # v73: the request limit counts from video_request_log, so the
+            # requests already filed count as they did before
+            conn.execute(
+                "INSERT OR IGNORE INTO video_request_log (profile_id, request_id, created_at, kind) "
+                "SELECT profile_id, id, created_at, kind FROM video_requests")
 
         if prev_version < 59:
             # v59: the v56 regroup moved an episode only to a TVDB episode on
@@ -3398,7 +3426,8 @@ class VideoDatabase:
                   "client_ref",   # torrent/usenet client tracking id
                   "indexer_id",   # prowlarr indexer that served it (per indexer seed goals)
                   "quality_profile_id",   # the profile the grab was judged under (P2)
-                  "video_library_id")     # a second copy's library (#2029)
+                  "video_library_id",     # a second copy's library (#2029)
+                  "profile_id")           # who started it by hand (None = automatic)
 
     def add_video_download(self, rec: dict) -> int:
         """Insert a download row (status defaults to 'downloading'); returns its id."""
@@ -3416,13 +3445,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def list_video_downloads(self, limit: int = 100) -> list:
+    def list_video_downloads(self, limit: int = 100, profile_id=None) -> list:
+        """the queue, live rows first. ``profile_id`` keeps only the rows that
+        profile started by hand (a member's own queue)."""
+        where, args = "", []
+        if profile_id is not None:
+            where, args = "WHERE profile_id = ? ", [int(profile_id)]
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT * FROM video_downloads ORDER BY "
+                "SELECT * FROM video_downloads " + where + "ORDER BY "
                 "CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, "
-                "id DESC LIMIT ?", (int(limit),)
+                "id DESC LIMIT ?", (*args, int(limit))
             ).fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -4693,15 +4727,17 @@ class VideoDatabase:
                        (download_id, kind, media_type, title, year, season_number, episode_number,
                         release_title, source, username, filename, dest_path, size_bytes,
                         quality_label, resolution, video_codec, media_id, media_source, poster_url,
-                        outcome, error, grabbed_at, completed_at, channel_id, published_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        outcome, error, grabbed_at, completed_at, channel_id, published_at,
+                        profile_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (row.get("id"), kind, media_type, row.get("title"), row.get("year"), sn, en,
                  rel, row.get("source"), row.get("username"), fn, row.get("dest_path"),
                  int(row.get("size_bytes") or 0), row.get("quality_label"),
                  self._parse_resolution(rel, fn, row.get("quality_label")), self._codec(rel, fn),
                  row.get("media_id"), row.get("media_source"), row.get("poster_url"),
                  outcome, row.get("error"), row.get("created_at"),
-                 row.get("completed_at"), channel_id, published_at))
+                 row.get("completed_at"), channel_id, published_at,
+                 int(row["profile_id"]) if row.get("profile_id") is not None else None))
             # Opportunistic LOG trim (the user-visible diary keeps a rolling year;
             # the YouTube ownership ledger is exempt and lives forever).
             conn.execute(
@@ -4717,9 +4753,10 @@ class VideoDatabase:
             conn.close()
 
     def query_download_history(self, *, kind=None, search=None, outcome=None,
-                               page=1, limit=40) -> dict:
+                               page=1, limit=40, profile_id=None) -> dict:
         """Paged history slice for the modal. ``kind`` ∈ movie|show (None=all);
-        ``outcome`` filters by result. Newest first. {items, pagination}."""
+        ``outcome`` filters by result; ``profile_id`` keeps only the grabs that
+        profile started (a member's own). Newest first. {items, pagination}."""
         try:
             page = max(1, int(page or 1)); limit = max(1, min(200, int(limit or 40)))
         except (TypeError, ValueError):
@@ -4738,6 +4775,8 @@ class VideoDatabase:
             where.append(_yt)
         if outcome:
             where.append("outcome = ?"); args.append(outcome)
+        if profile_id is not None:
+            where.append("profile_id = ?"); args.append(int(profile_id))
         s = (search or "").strip()
         if s:
             where.append("(title LIKE ? OR release_title LIKE ?) COLLATE NOCASE")
@@ -4766,7 +4805,7 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def download_history_counts(self) -> dict:
+    def download_history_counts(self, profile_id=None) -> dict:
         """{movie, show(=TV: episodes + show/season packs), youtube, total} of completed
         grabs (for the modal tabs/badge). Classifies by kind+source so episodes (kind=
         'episode') land under TV and YouTube (source='youtube') gets its own bucket —
@@ -4780,7 +4819,9 @@ class VideoDatabase:
                 "SUM(CASE WHEN kind = 'movie' AND NOT " + _yt + " THEN 1 ELSE 0 END) AS mv, "
                 "SUM(CASE WHEN kind <> 'movie' AND NOT " + _yt + " THEN 1 ELSE 0 END) AS tv, "
                 "COUNT(*) AS total FROM video_download_history "
-                "WHERE outcome='completed' AND cleared_at IS NULL").fetchone()
+                "WHERE outcome='completed' AND cleared_at IS NULL"
+                + ("" if profile_id is None else " AND profile_id = ?"),
+                () if profile_id is None else (int(profile_id),)).fetchone()
             return {"movie": row["mv"] or 0, "show": row["tv"] or 0,
                     "youtube": row["yt"] or 0, "total": row["total"] or 0}
         finally:
@@ -10167,7 +10208,7 @@ class VideoDatabase:
             conn.commit()
             # A refresh-upsert of an existing follow is not a new follow.
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": kind, "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": kind, "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_to_watchlist failed (%s %s)", kind, tmdb_id)
@@ -10288,6 +10329,38 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishing_profile_ids(self, *, kind: str, tmdb_id=None, season_number=None,
+                            episode_number=None, youtube_id=None) -> list:
+        """the profiles whose wishlist wants this title: a movie, one episode
+        (or a whole season with no episode), or a youtube video. whose a
+        download is when nobody grabbed it by hand. [] on any error."""
+        conn = self._get_connection()
+        try:
+            if youtube_id:
+                rows = conn.execute("SELECT DISTINCT profile_id FROM video_wishlist "
+                                    "WHERE kind='video' AND source_id=?", (str(youtube_id),))
+            elif kind == "movie" and tmdb_id:
+                rows = conn.execute("SELECT DISTINCT profile_id FROM video_wishlist "
+                                    "WHERE kind='movie' AND tmdb_id=?", (int(tmdb_id),))
+            elif tmdb_id:
+                sql = "SELECT DISTINCT profile_id FROM video_wishlist WHERE kind='episode' AND tmdb_id=?"
+                args = [int(tmdb_id)]
+                if season_number not in (None, ""):
+                    sql += " AND season_number=?"
+                    args.append(int(season_number))
+                if episode_number not in (None, ""):
+                    sql += " AND episode_number=?"
+                    args.append(int(episode_number))
+                rows = conn.execute(sql, args)
+            else:
+                return []
+            return sorted(int(r[0]) for r in rows if r[0] is not None)
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.debug("wishing_profile_ids failed", exc_info=True)
+            return []
+        finally:
+            conn.close()
+
     def remove_from_watchlist(self, kind: str, tmdb_id: int, profile_id: int = 1) -> bool:
         """Un-follow. Stored as a 'mute' tombstone (not a delete) so an
         actively-airing library show — watched by default — is not silently
@@ -10313,7 +10386,7 @@ class VideoDatabase:
             # (muting something never followed is just a tombstone write).
             if was and was["state"] == "follow":
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": kind, "title": was["title"] or ""})
+                                     {"kind": kind, "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -10618,7 +10691,7 @@ class VideoDatabase:
             conn.commit()
             if not existed:   # a refresh-upsert is not a new wish
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "movie", "title": title, "count": 1})
+                                     {"kind": "movie", "title": title, "count": 1}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_movie_to_wishlist failed (%s)", tmdb_id)
@@ -11025,7 +11098,7 @@ class VideoDatabase:
             conn.commit()
             if new_rows > 0:   # refresh-upserts of already-wished episodes don't fire
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "episode", "title": show_title, "count": new_rows})
+                                     {"kind": "episode", "title": show_title, "count": new_rows}, owner=profile_id)
             return new_rows
         except Exception:
             logger.exception("add_episodes_to_wishlist failed (%s)", show_tmdb_id)
@@ -11401,7 +11474,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT id, name, cutoff, items FROM quality_profiles ORDER BY name COLLATE NOCASE")]
+                "SELECT id, name, cutoff, items, media_type FROM quality_profiles ORDER BY name COLLATE NOCASE")]
         except sqlite3.Error:
             logger.exception("named_quality_profiles failed")
             return []
@@ -11411,7 +11484,7 @@ class VideoDatabase:
     def get_named_quality_profile(self, profile_id) -> dict | None:
         conn = self._get_connection()
         try:
-            row = conn.execute("SELECT id, name, cutoff, items FROM quality_profiles WHERE id=?",
+            row = conn.execute("SELECT id, name, cutoff, items, media_type FROM quality_profiles WHERE id=?",
                                (int(profile_id),)).fetchone()
             return dict(row) if row else None
         except (sqlite3.Error, TypeError, ValueError):
@@ -11445,6 +11518,27 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("upsert_named_quality_profile failed")
             return None
+        finally:
+            conn.close()
+
+    QUALITY_MEDIA_TYPES = ("movie", "tv")
+
+    def set_named_quality_profile_media_type(self, profile_id, media_type) -> bool:
+        """what a named profile is for: 'movie', 'tv', or None for both.
+        anything else is refused (ValueError), never stored."""
+        if media_type in ("", "both"):
+            media_type = None
+        if media_type is not None and media_type not in self.QUALITY_MEDIA_TYPES:
+            raise ValueError("media_type is movie, tv or null")
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE quality_profiles SET media_type=? WHERE id=?",
+                               (media_type, int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            logger.exception("set_named_quality_profile_media_type failed")
+            return False
         finally:
             conn.close()
 
@@ -11977,6 +12071,9 @@ class VideoDatabase:
                  str(youtube_id) if youtube_id else None,
                  str(channel_youtube_id) if channel_youtube_id else None,
                  str(channel_title) if channel_title else None))
+            # the request limit counts from this log, which outlives the row
+            conn.execute("INSERT OR IGNORE INTO video_request_log (profile_id, request_id, kind) "
+                         "VALUES (?, ?, ?)", (int(profile_id), cur.lastrowid, kind))
             conn.commit()
             return cur.lastrowid, True
         except sqlite3.Error:
@@ -12377,17 +12474,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def count_video_requests_since(self, profile_id, days) -> int:
+    def count_video_requests_since(self, profile_id, days, kinds=None) -> int | None:
         """how many requests a profile filed in the last ``days`` days (any
-        status: a declined ask still spent the quota)."""
+        status: a declined ask still spent the quota). counted from the
+        request log, so withdrawing a request or clearing it from the history
+        doesn't hand the ask back. ``kinds`` narrows it to those request
+        kinds (one limit's asks); a logged ask whose kind isn't known (from
+        before v75, its request gone) counts toward every limit. None when
+        the count can't be read: the caller treats that as no asks left."""
         conn = self._get_connection()
         try:
-            return int(conn.execute(
-                "SELECT COUNT(*) FROM video_requests WHERE profile_id=? "
-                "AND created_at >= datetime('now', ?)",
-                (int(profile_id), f"-{int(days)} days")).fetchone()[0])
+            sql = ("SELECT COUNT(*) FROM video_request_log WHERE profile_id=? "
+                   "AND created_at >= datetime('now', ?)")
+            args = [int(profile_id), f"-{int(days)} days"]
+            if kinds is not None:
+                kinds = [str(k) for k in kinds]
+                marks = ",".join("?" * len(kinds))
+                sql += (" AND (kind IS NULL OR kind IN (%s))" % marks) if kinds else " AND kind IS NULL"
+                args += kinds
+            return int(conn.execute(sql, args).fetchone()[0])
         except (sqlite3.Error, TypeError, ValueError):
-            return 0
+            logger.warning("video request count failed for profile %s", profile_id, exc_info=True)
+            return None
         finally:
             conn.close()
 
@@ -12622,7 +12730,7 @@ class VideoDatabase:
                 (int(profile_id), youtube_surrogate_id(cid), title, channel.get("avatar_url"), cid))
             conn.commit()
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": "channel", "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": "channel", "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_channel_to_watchlist failed (%s)", cid)
@@ -12645,7 +12753,7 @@ class VideoDatabase:
             conn.commit()
             if was and cur.rowcount:
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": "channel", "title": was["title"] or ""})
+                                     {"kind": "channel", "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -12844,7 +12952,7 @@ class VideoDatabase:
                 (int(profile_id), youtube_surrogate_id(pid), title, (playlist or {}).get("thumbnail_url"), pid))
             conn.commit()
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": "playlist", "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": "playlist", "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_playlist_to_watchlist failed (%s)", pid)
@@ -12865,7 +12973,7 @@ class VideoDatabase:
             conn.commit()
             if was and cur.rowcount:
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": "playlist", "title": was["title"] or ""})
+                                     {"kind": "playlist", "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -12963,7 +13071,7 @@ class VideoDatabase:
             conn.commit()
             if new_rows > 0:   # refresh-upserts of already-wished videos don't fire
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "youtube", "title": ctitle, "count": new_rows})
+                                     {"kind": "youtube", "title": ctitle, "count": new_rows}, owner=profile_id)
             return n
         except Exception:
             logger.exception("add_videos_to_wishlist failed (%s)", cid)
@@ -13247,26 +13355,47 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def youtube_wishlist_to_download(self, limit: int = 0, profile_id: int | None = None) -> list:
+    def youtube_wishlist_to_download(self, limit: int = 0, profile_id: int | None = None,
+                                     owner_may_download=None) -> list:
         """Flat list of wished YouTube videos for the fulfillment worker to grab, newest
         upload first. Each carries what organising + the download row need: the video id,
         its channel, the video title, thumbnail, and upload date. (A completed download
         removes its wishlist row, so this list naturally shrinks as the queue drains.)
 
         ``profile_id=None`` (default) covers ALL profiles — the drain feeds the
-        shared library. Pass a profile id to restrict to one profile's rows."""
+        shared library. Pass a profile id to restrict to one profile's rows.
+
+        ``owner_may_download(profile_id) -> bool``: a row a follow wished on its
+        own (auto_wish) is left out when its owner may not download. A row the
+        person wished themselves, or an approved request filed for them, stays."""
         conn = self._get_connection()
         try:
             pf, pargs = ("", []) if profile_id is None else ("AND profile_id=? ", [int(profile_id)])
             sql = ("SELECT source_id AS video_id, parent_source_id AS channel_id, "
                    "title AS channel_title, episode_title AS video_title, "
-                   "still_url AS thumbnail_url, air_date AS published_at "
+                   "still_url AS thumbnail_url, air_date AS published_at, "
+                   "profile_id AS _owner, "
+                   "(json_valid(detail_json) AND json_extract(detail_json, '$.auto_wish') = 1) AS _auto "
                    "FROM video_wishlist WHERE kind='video' AND source='youtube' "
                    + pf +
                    "AND source_id IS NOT NULL ORDER BY air_date DESC, id DESC")
-            if limit and int(limit) > 0:
+            if limit and int(limit) > 0 and owner_may_download is None:
                 sql += " LIMIT %d" % int(limit)
             rows = [dict(r) for r in conn.execute(sql, pargs)]
+            if owner_may_download is not None:
+                verdicts: dict = {}
+
+                def _allowed(owner) -> bool:
+                    if owner not in verdicts:
+                        verdicts[owner] = bool(owner_may_download(owner))
+                    return verdicts[owner]
+
+                rows = [r for r in rows if not r["_auto"] or _allowed(r["_owner"])]
+                if limit and int(limit) > 0:
+                    rows = rows[:int(limit)]
+            for r in rows:
+                r.pop("_owner", None)
+                r.pop("_auto", None)
             # Per-profile wishlists can hold the same video twice; the drain
             # feeds the shared library, so collapse to one row per video.
             return _dedupe_wishlist_by_media(rows, lambda r: ("video", r.get("video_id")))

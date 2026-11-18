@@ -16,6 +16,8 @@ import type {
   RepairJobRun,
 } from './-tools.types';
 
+import { needsYouClause } from './-tools.keep-best-bulk';
+
 // ── Duplicate "Keep Best" ranking ────────────────────────────────────────────
 //
 // From `_dupFmtRank` / `_dupKey` in enrichment.js (_renderFindingDetail's
@@ -345,6 +347,7 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   deleted_file: 'File Deleted',
   genres_cleaned: 'Genres Cleaned',
   artists_split: 'Artists Split',
+  kept_whole: 'Kept As One Artist',
   already_gone: 'Already Gone',
   fixed_track_number: 'Track # Fixed',
   applied_cover_art: 'Art Applied',
@@ -984,14 +987,29 @@ export function findingsBulkBarState(
 export function bulkFixRunMessage(
   status: Pick<
     BulkFixStatus,
-    'fixed' | 'failed' | 'skipped' | 'partial' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
+    | 'fixed'
+    | 'failed'
+    | 'skipped'
+    | 'partial'
+    | 'total'
+    | 'stopped'
+    | 'error'
+    | 'note'
+    | 'errors'
+    | 'needs_you'
+    | 'finding_type'
   >,
 ): { message: string; type: 'success' | 'error' } {
   const fixed = status.fixed || 0;
   const failed = status.failed || 0;
   const skipped = status.skipped || 0;
   const partial = status.partial || 0;
-  let message = `Fixed ${fixed}${partialClause(partial)}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''} of ${status.total || 0}`;
+  // #2179: a Keep Best all says what it kept and who it left for you, never
+  // a bare "skipped" that reads like it did the work
+  const held = heldCount(status.needs_you);
+  const verb = status.finding_type === 'native_duplicate_tracks' ? 'Kept best on' : 'Fixed';
+  const otherSkipped = Math.max(skipped - held, 0);
+  let message = `${verb} ${fixed}${partialClause(partial)}${needsYouClause(status.needs_you, held)}${failed ? `, ${failed} failed` : ''}${otherSkipped ? `, ${otherSkipped} skipped` : ''} of ${status.total || 0}`;
   if (status.stopped) {
     message = `Bulk fix stopped — ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
   }
@@ -1014,6 +1032,11 @@ export function bulkFixRunMessage(
   };
 }
 
+/** findings a run left for you: the server counts each one under one reason */
+function heldCount(needs: Record<string, number> | null | undefined): number {
+  return Object.values(needs || {}).reduce((sum, n) => sum + (n || 0), 0);
+}
+
 /** a bulk re-tag fills blank tags and leaves the tags that differ on the
  *  finding: said apart, so "fixed" never counts a row that is still open. */
 function partialClause(partial: number): string {
@@ -1031,8 +1054,13 @@ export function bulkFixLoopMessage(
   skipped = 0,
   otherArtistSkipped = 0,
   partial = 0,
+  keepBest?: { needs: Record<string, number>; only: boolean },
 ): { message: string; type: 'success' | 'error' } {
-  let message = `Fixed ${fixed}${partialClause(partial)}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
+  // #2179: the duplicates a Keep Best left for you, by why
+  const held = heldCount(keepBest?.needs);
+  const verb = keepBest?.only ? 'Kept best on' : 'Fixed';
+  const otherSkipped = Math.max(skipped - held, 0);
+  let message = `${verb} ${fixed}${partialClause(partial)}${needsYouClause(keepBest?.needs, held)}${failed ? `, ${failed} failed` : ''}${otherSkipped ? `, ${otherSkipped} skipped` : ''}`;
   if (failed && lastError) message += `: ${lastError}`;
   // A failed gated finding's own error already carries this sentence.
   if (otherArtistSkipped && !lastError.includes('other artists were not added')) {

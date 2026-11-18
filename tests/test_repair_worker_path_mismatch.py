@@ -141,3 +141,33 @@ def test_a_bare_integer_subject_is_refused_as_pre_library_v2(tmp_path):
     assert res['success'] is False
     assert res['stale_subject'] is True
     assert os.path.isfile(src), 'a refused finding must not have touched the file'
+
+
+def _finding(src, dst):
+    return {'from': str(src), 'to': str(dst), 'from_abs': str(src), 'to_abs': str(dst)}
+
+
+def test_applying_every_finding_of_a_folder_takes_its_cover_and_removes_it(tmp_path):
+    """#2010: applying the Library Reorganize findings one track at a time moved
+    the audio and left cover.jpg, so the old folder stayed. the last track out
+    takes the album's own files along, the way a queued reorganize does."""
+    db, w = _worker(tmp_path)
+    old = tmp_path / "lib" / "2 Pistols" / "2 Pistols - Bhad (feat. Tory Lanez)"
+    new = tmp_path / "lib" / "2 Pistols" / "Single" / "Bhad (feat. Tory Lanez) [E] (2018)"
+    old.mkdir(parents=True)
+    (old / "cover.jpg").write_bytes(b"cover")
+    for n in (1, 2):
+        (old / f"{n}.flac").write_bytes(b"audio")
+        _insert_track(db, 20 + n, str(old / f"{n}.flac"))
+
+    first = w._fix_path_mismatch('track', 'lib2:21', str(old / "1.flac"),
+                                 _finding(old / "1.flac", new / "01 - Bhad.flac"))
+    assert first['success'] is True, first
+    assert (old / "cover.jpg").exists(), 'a folder still holding a track keeps its cover'
+
+    last = w._fix_path_mismatch('track', 'lib2:22', str(old / "2.flac"),
+                                _finding(old / "2.flac", new / "02 - Bhad.flac"))
+    assert last['success'] is True, last
+    assert (new / "cover.jpg").read_bytes() == b"cover"
+    assert not old.exists()
+    assert sorted(os.listdir(new)) == ["01 - Bhad.flac", "02 - Bhad.flac", "cover.jpg"]

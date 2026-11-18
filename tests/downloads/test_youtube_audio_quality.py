@@ -1788,23 +1788,29 @@ def _slice_between(text, start, end):
     return text[i:j]
 
 
+def _youtube_panel(root) -> str:
+    """the React YouTube source panel, where the settings ui for it lives now"""
+    src = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'source-panels-more.tsx').read_text(
+        encoding='utf-8')
+    panel = src.split('export function YoutubePanel(', 1)[1].split('\nexport function', 1)[0]
+    # jsx wraps its text across lines: read it the way it renders
+    import re
+    return re.sub(r'\s+', ' ', panel)
+
+
 def test_docs_mention_youtube_reencode_default():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
-    helper = (root / 'webui' / 'static' / 'helper.js').read_text(encoding='utf-8')
+    # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
+    index = _youtube_panel(root)
     docs = ' '.join(
         f.read_text(encoding='utf-8')
         for f in sorted((root / 'webui' / 'static' / 'docs-content').glob('*.js'))
     )
     youtube_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
-    youtube_help = _slice_between(helper, "'#youtube-settings-container'", "'#quality-profile-section'")
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
     assert 'Re-encode YouTube audio' in youtube_docs
     assert 'MP3 320' in youtube_docs
-    assert 'Re-encode to MP3 320 (on by default)' in youtube_help
-    assert 'Netscape cookies.txt' in youtube_help
-    assert 'Premium audio' in youtube_help
     assert 'Paste cookies.txt' in youtube_docs
     assert 'Netscape' in youtube_docs
     assert 'Premium audio qualities' in index
@@ -1819,12 +1825,9 @@ def test_docs_mention_youtube_reencode_default():
 def test_quality_profile_help_covers_youtube():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    helper = (root / 'webui' / 'static' / 'helper.js').read_text(encoding='utf-8')
-    index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
-    qp_help = _slice_between(helper, "'#quality-profile-section'", "'.preset-button'")
+    # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
+    index = _youtube_panel(root)
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
-    assert 'YouTube' in qp_help
-    assert 'Soulseek downloads' not in qp_help
     assert 'Opus or AAC' in transcode_help
     assert 'quality list' in transcode_help
 
@@ -1832,39 +1835,40 @@ def test_quality_profile_help_covers_youtube():
 def test_settings_ui_has_no_preferred_youtube_audio_control():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
-    settings = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
+    index = _youtube_panel(root)
+    settings = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
     assert 'id="youtube-audio-format"' not in index
     assert 'Preferred YouTube audio' not in index
     assert 'youtube-audio-format' not in settings
-    assert 'id="youtube-transcode" checked' in index
-    assert 'id="youtube-transcode-options" style="display: none;"' not in index
-    assert "settings.youtube?.transcode !== false" in settings
-    # The accessor changed shape: `el?.value || 'mp3'` wrote 'mp3' over the
-    # stored setting whenever the element was missing, so the payload now reads
-    # through _cfgStr, which omits the key entirely in that case. The defaults
-    # this test is really about are unchanged.
-    assert "transcode_codec: _cfgStr('youtube-transcode-codec', { fallback: 'mp3' })" in settings
-    assert "transcode_bitrate: _cfgStr('youtube-transcode-bitrate', { fallback: '320' })" in settings
+    # re-encode is on unless saved as off, and its options show with it
+    assert "const transcode = y.transcode !== false;" in index
+    assert 'id="youtube-transcode"' in index and 'checked={transcode}' in index
+    assert "style={{ display: transcode ? 'block' : 'none' }}" in index
+    # The defaults this test is really about: mp3 at 320. The panel saves only
+    # what is changed (store.set), so a missing value is never written over the
+    # stored one, which is what the _cfgStr accessor protected before.
+    assert "str(y.transcode_codec, 'mp3')" in index
+    assert "str(y.transcode_bitrate, '320')" in index
+    assert "youtube-transcode" not in settings
 
 
 def test_user_facing_youtube_quality_copy_is_not_internal():
     """YouTube re-encode copy must not mention itags, yt-dlp, probes, or the ladder."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    helper = (root / 'webui' / 'static' / 'helper.js').read_text(encoding='utf-8')
     docs = ' '.join(
         f.read_text(encoding='utf-8')
         for f in sorted((root / 'webui' / 'static' / 'docs-content').glob('*.js'))
     )
-    index = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
+    # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
+    index = _youtube_panel(root)
 
-    youtube_help = _slice_between(helper, "'#youtube-settings-container'", "'#quality-profile-section'")
     other_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
 
     forbidden = ('itag', 'yt-dlp', 'bestaudio', 'extract_flat', 'ladder', 'probe', 'stamp')
-    for chunk in (youtube_help, other_docs, transcode_help):
+    for chunk in (other_docs, transcode_help):
         lower = chunk.lower()
         for word in forbidden:
             assert word not in lower, f'{word!r} leaked into user-facing copy:\n{chunk}'

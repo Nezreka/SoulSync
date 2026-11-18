@@ -352,18 +352,33 @@ NOT_A_SURFACE = {
 # by wraps: every wrapper hide_blocked_in_response builds shares this one.
 _FILTER_CODE = hide_blocked_in_response({})(lambda: None).__code__
 
+# permission gates (requires / requires_any) may sit outside the filter: they
+# either refuse or call straight through, never return rows of their own and
+# never cache, so a new block can't wait behind them. every route of a kind
+# shares one wrapper code object, same as the filter's.
+from core.permissions import requires as _requires, requires_any as _requires_any  # noqa: E402
+_GATE_CODES = {
+    _requires("music.access")(lambda: None).__code__,
+    _requires_any("music.access")(lambda: None).__code__,
+}
+
 
 def _is_hidden(view) -> bool:
-    """True only when the blocked-artist filter is the OUTERMOST wrapper.
+    """True only when the blocked-artist filter is the OUTERMOST wrapper (past any permission gate).
 
     Under a shelf cache the filter must wrap the cache: a cached response
     would otherwise skip the filter and a new block would wait out the TTL.
     Walks the __wrapped__ chain (both decorators use functools.wraps, so it is
     intact); the first frame has to be the filter's.
     """
-    if getattr(view, '__code__', None) is _FILTER_CODE:
+    node = view
+    while node is not None and getattr(node, '__code__', None) in _GATE_CODES:
+        node = getattr(node, '__wrapped__', None)  # a gate, not a row source
+    if node is None:
+        return False
+    if getattr(node, '__code__', None) is _FILTER_CODE:
         return True
-    node = getattr(view, '__wrapped__', None)
+    node = getattr(node, '__wrapped__', None)
     while node is not None:
         if getattr(node, '__code__', None) is _FILTER_CODE:
             return False  # present, but inside another wrapper: not outermost

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { ReleaseStatus } from '@/components/release-statuses';
+
 // ---------------------------------------------------------------------------
 // Search params
 // ---------------------------------------------------------------------------
@@ -201,6 +203,8 @@ export interface WatchlistGlobalConfig {
   prefer_explicit_edition: boolean;
   /** #1822: artists with their own release rules instead of these defaults. */
   custom_artist_count?: number;
+  /** #2175: the MusicBrainz release statuses let through. Every one by default. */
+  release_statuses: ReleaseStatus[];
 }
 
 export interface WatchlistGlobalConfigResponse {
@@ -272,6 +276,10 @@ export interface WatchlistArtistConfig {
   follow_defaults?: boolean;
   /** the current defaults, so the panel can show them when following. */
   defaults?: Partial<Record<string, boolean>>;
+  /** #2175: the artist's own MusicBrainz release statuses, null = the library's. */
+  release_statuses?: ReleaseStatus[] | null;
+  /** #2175: the library-wide statuses, so the panel can say what it follows. */
+  library_release_statuses?: ReleaseStatus[];
 }
 
 export interface WatchlistArtistInfo {

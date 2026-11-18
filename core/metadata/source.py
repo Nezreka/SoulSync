@@ -26,8 +26,9 @@ from core.imports.context import (
     is_real_provider_album_id,
     normalize_import_context,
 )
-from core.imports.collab_artist import collab_primary, library_has_artist
+from core.imports.collab_artist import collab_primary, library_has_artist, library_has_identified_artist
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
+from core.imports.library_names import library_names, swap_credit, swap_names
 from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
@@ -2234,6 +2235,17 @@ def _album_identity_disagrees(own_album: Dict[str, Any], album_ctx: Any) -> bool
     return False
 
 
+def album_context_vouched(track_info: Any, album_ctx: Any) -> bool:
+    """an album context nobody guessed: the library's own album (reorganize)
+    or the album the user typed in (manual download). its artist is the
+    release's album artist even when no track performs on it, a dj mix or a
+    label comp ("Group Therapy" by Above & Beyond), so a track by someone
+    else is not a sign the context was poisoned (#2133, #2135)."""
+    if isinstance(album_ctx, dict) and album_ctx.get("_library_album"):
+        return True
+    return isinstance(track_info, dict) and bool(track_info.get("_manual_metadata"))
+
+
 def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explicit_artist):
     """Pure function (R4F3): evaluate whether the batch album context is
     poisoned, without running the full metadata extraction.
@@ -2314,9 +2326,11 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     # Artists credit is a genuine multi-artist compilation — both stay
     # trusted. Empty ground truth never fires.
     _ctx_album_id = str(album_ctx.get("id") or "").strip()
+    _ctx_vouched = album_context_vouched(track_info_ctx, album_ctx)
     _ctx_artist_norm = (own_album_artist or "").strip().casefold()
     _ctx_artist_untrusted = (
-        bool(track_own_artists)
+        not _ctx_vouched
+        and bool(track_own_artists)
         and bool(_ctx_artist_norm)
         and _ctx_artist_norm != "unknown artist"
         and _ctx_artist_norm not in VARIOUS_ARTIST_NAMES
@@ -2342,7 +2356,7 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
                 )
 
     # Wires 1 and 2 (skipped when wire 3 already fired).
-    if not batch_album_distrusted:
+    if not batch_album_distrusted and not _ctx_vouched:
         claimed_album_artist = explicit_name or own_album_artist
         claimed_norm = (claimed_album_artist or "").strip().casefold()
         ctx_album_name = (album_ctx.get("name") or "").strip()
@@ -2451,6 +2465,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # track object). Deezer-direct contexts populate `original_search.artists`
     # directly. Pure helper handles all three shapes.
     all_artists = resolve_track_artists(original_search, track_info, artist_dict)
+    # #2165: the library's name for each artist it knows by another one (the
+    # source says "Machine Gun Kelly", the library, which finds them by id,
+    # "mgk"). the same names the folder was built with
+    library_artist_names = library_names(context, artist_dict)
     if all_artists:
         # Deezer upgrade path: Deezer's `/search` endpoint only returns
         # the primary artist for each track. The full contributors
@@ -2485,6 +2503,7 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         # "artists" key for Vorbis) when `write_multi_artist` is on.
         # Without this assignment the field was always empty and the
         # multi-artist write path silently no-op'd.
+        all_artists = swap_names(list(all_artists), library_artist_names)
         metadata["_artists_list"] = list(all_artists)
 
         # `feat_in_title` (when true): pull featured artists out of the
@@ -2530,7 +2549,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 artist_separator, metadata["artist"],
             )
     else:
-        metadata["artist"] = artist_dict.get("name", "") or get_import_clean_artist(context)
+        metadata["artist"] = swap_credit(
+            artist_dict.get("name", "") or get_import_clean_artist(context), library_artist_names)
         logger.info("Metadata: Using primary artist: '%s'", metadata["artist"])
 
     raw_album_artist = artist_dict.get("name", "") or metadata["artist"]
@@ -2628,7 +2648,7 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         primary = collab_primary(
             raw_album_artist, context_artists, _track_artists,
             known_names=[n for n in (artist_dict.get("name"), *(all_artists or [])) if n],
-            library_has=library_has_artist)
+            library_has=library_has_artist, library_knows=library_has_identified_artist)
         if primary:
             raw_album_artist = primary
         elif len(context_artists) == 1 and ("," in raw_album_artist or " & " in raw_album_artist):
@@ -2642,11 +2662,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                             raw_album_artist = resolved
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
-    metadata["album_artist"] = raw_album_artist
+    metadata["album_artist"] = swap_credit(raw_album_artist, library_artist_names)
     # every album artist, for the multi-value ALBUMARTISTS tag. only from an
     # album context that names more than one. track artists aren't album
     # artists, a feature doesn't make it a collab album
-    metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
+    metadata["_album_artists_list"] = swap_names(
+        _album_artist_names(album_artists_for_collab), library_artist_names)
 
     # 'Unknown Album' in any slot is the no-album placeholder, not a name —
     # tracks from paste-link playlists / discovery-pool rows / TXT imports

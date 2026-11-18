@@ -11,6 +11,11 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.native_duplicate_detector")
 
+# settings that are not part of a file review's fingerprint: the catalogue
+# option, and the playlist rules (#2172), which apply reads live
+_NOT_REVIEW_SETTINGS = frozenset({
+    "auto_merge_catalogue", "playlists_that_never_protect", "move_playlist_entries"})
+
 
 @register_job
 class NativeDuplicateDetectorJob(RepairJob):
@@ -34,6 +39,13 @@ class NativeDuplicateDetectorJob(RepairJob):
         "Redundant files move through the delete journal into recoverable quarantine. "
         "Intentional companion formats, shared files, playlists, manual metadata, "
         "hand tags, pins and profile ownership are protected.\n\n"
+        "Playlists (your media server's): a copy in a playlist is kept, unless every "
+        "playlist it is in also holds the kept copy, so removing it loses no entry. "
+        "Playlists That Never Protect lists playlists (names, one per ';') that never keep "
+        "a copy, such as a smart playlist of unsorted files. With Move Playlist Entries on, "
+        "Keep Best points the removed copy's playlist entries at the kept copy first, in "
+        "the same place, so no playlist breaks; you can also choose this on each finding. "
+        "Smart and read-only playlists are never written, so a copy in one stays.\n\n"
         "Settings: title_similarity and artist_similarity (0–1); ignore_cross_album "
         "limits candidates to the same native album."
     )
@@ -42,7 +54,9 @@ class NativeDuplicateDetectorJob(RepairJob):
     library_v2_effects = frozenset({"observe", "metadata", "delete", "wanted"})
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {**DEFAULT_SETTINGS, "auto_merge_catalogue": False}
+    default_settings = {**DEFAULT_SETTINGS, "auto_merge_catalogue": False,
+                        # #2172: read live at apply time, not part of a review
+                        "playlists_that_never_protect": "", "move_playlist_entries": False}
     auto_fix = False
     supports_file_scope = True
     supports_artist_scope = True
@@ -74,7 +88,7 @@ class NativeDuplicateDetectorJob(RepairJob):
             from core.library.playlist_membership import _active_server_and_client
             server, _ = _active_server_and_client()
             # File reviews fingerprint their settings; catalogue options are not theirs.
-            file_settings = {k: v for k, v in settings.items() if k != "auto_merge_catalogue"}
+            file_settings = {k: v for k, v in settings.items() if k not in _NOT_REVIEW_SETTINGS}
             # never wait_if_paused here: the catalogue merge holds a write
             # transaction while it asks
             stop = context.stop_or_paused

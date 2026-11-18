@@ -1,0 +1,421 @@
+                                        <div id="organization-video-panel" role="tabpanel"
+                                            aria-labelledby="organization-video-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Video organization</strong><span
+                                                    class="stg-media-summary">Path templates, post-processing &amp;
+                                                    recycle</span></div>
+
+                                            <div class="settings-group" data-stg="library">
+
+
+                                                <div class="form-group">
+                                                    <label>Movie Path Template:</label>
+                                                    <input type="text" id="vo-movie-template"
+                                                        placeholder="$title ($year)/$title ($year) $quality">
+                                                    <small class="settings-hint">Variables: $title, $titlefirst, $year,
+                                                        $quality (e.g. Bluray-1080p), $resolution, $source, $codec,
+                                                        $edition, $audiolangs, $sublangs, $tmdbid, $imdbid. Folders split
+                                                        on "/", the last segment is the filename. <code>[$audiolangs]</code>
+                                                        gives <code>[JA+EN]</code> and disappears when a file has no
+                                                        language tags.</small>
+                                                    <small class="settings-hint">Example: <code
+                                                            id="vo-movie-preview">&hellip;</code></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Episode Path Template:</label>
+                                                    <input type="text" id="vo-episode-template"
+                                                        placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
+                                                    <small class="settings-hint">Variables: $series, $season (01),
+                                                        $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
+                                                        $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid,
+                                                        $imdbid, $tvdbid (the show's ids).</small>
+                                                    <small class="settings-hint">Example: <code
+                                                            id="vo-episode-preview">&hellip;</code></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label for="vo-colon-replacement">Colons in titles:</label>
+                                                    <select id="vo-colon-replacement">
+                                                        <option value="delete">Delete (Dexter Resurrection)</option>
+                                                        <option value="smart">Smart (Dexter - Resurrection, 12:30 becomes 12-30)</option>
+                                                        <option value="space_dash_space">Space dash space (Dexter - Resurrection)</option>
+                                                        <option value="dash">Dash (Dexter- Resurrection)</option>
+                                                    </select>
+                                                    <small class="settings-hint">File systems don't allow a colon, so
+                                                        it's replaced in movie and episode names. Mass Rename can
+                                                        bring files you already have in line.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>YouTube Path Template:</label>
+                                                    <input type="text" id="vo-youtube-template"
+                                                        placeholder="$channel/Season $year/$channel - $sxe - $title">
+                                                    <small class="settings-hint">Followed YouTube channels organize as a
+                                                        TV show. Variables: $channel, $year, $sxe (s2024e0315 &mdash;
+                                                        lets Plex/Jellyfin index episodes without an online agent),
+                                                        $date (2024-03-15), $month (03), $day (15), $title,
+                                                        $videoid.</small>
+                                                    <small class="settings-hint">Plex tip: set the YouTube library's
+                                                        agent to <strong>Personal Media Shows</strong> &mdash; episode
+                                                        titles then come straight from the filename, and the channel
+                                                        folder gets its poster/fanart automatically.</small>
+                                                    <small class="settings-hint">Example: <code
+                                                            id="vo-youtube-preview">&hellip;</code></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>YouTube: videos to grab when you follow a channel:</label>
+                                                    <input type="number" id="vo-yt-follow-count" min="0" max="100"
+                                                        placeholder="5">
+                                                    <small class="settings-hint">Following a channel backfills its most
+                                                        recent N videos, then watches for anything new posted after you
+                                                        follow. This is also the rolling "keep the last N current" net
+                                                        the channel scan uses. <strong>0</strong> = don't backfill
+                                                        anything, only grab new uploads going forward. It never pulls
+                                                        the whole back catalog.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>When a file finishes:</label>
+                                                    <select id="vo-transfer-mode" class="form-select">
+                                                        <option value="copy">Copy in, then remove the source (kept for
+                                                            torrents)</option>
+                                                        <option value="move">Move into the library</option>
+                                                    </select>
+                                                    <small class="settings-hint">How a finished download moves from the
+                                                        download folder into your library.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-verify">
+                                                        <span>Verify with ffprobe</span>
+                                                    </label>
+                                                    <small class="settings-hint">Tag by the file's real resolution and
+                                                        reject corrupt / sample files. Needs ffmpeg; falls back to the
+                                                        release name when absent.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-replace">
+                                                        <span>Replace an existing copy when the new one is better</span>
+                                                    </label>
+                                                    <small class="settings-hint">Deletes the old file when an upgrade
+                                                        lands.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-subs">
+                                                        <span>Carry matching subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">Bring sibling .srt / .ass files
+                                                        alongside the video, renamed to match.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-artwork">
+                                                        <span>Save artwork into the folder</span>
+                                                    </label>
+                                                    <small class="settings-hint">Download the full artwork set &mdash;
+                                                        poster.jpg, fanart.jpg, clearlogo.png (plus season posters for
+                                                        shows) &mdash; next to the movie / into the show folder. Off by
+                                                        default; Plex/Jellyfin usually fetch their own once the folder
+                                                        is named cleanly. Turn on to pin specific art or for
+                                                        offline/local-assets setups.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-nfo">
+                                                        <span>Write NFO metadata files</span>
+                                                    </label>
+                                                    <small class="settings-hint">Write Kodi/Jellyfin-style movie.nfo /
+                                                        tvshow.nfo (title, plot, rating, genres, cast, ids) so the
+                                                        library is fully portable. Off by default &mdash; Plex ignores
+                                                        these, but Jellyfin/Kodi/Emby use them.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-recycle">
+                                                        <span>Recycle deleted files instead of erasing them</span>
+                                                    </label>
+                                                    <small class="settings-hint">Upgrade-replaced copies,
+                                                        retention-cleaned YouTube episodes and dismissed imports move
+                                                        into an <code>ss_recycle</code> folder inside the library
+                                                        instead of being deleted &mdash; a safety net if something gets
+                                                        replaced by mistake.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Keep recycled files for (days):</label>
+                                                    <input type="number" id="vo-recycle-days" min="1" max="365"
+                                                        placeholder="7">
+                                                    <small class="settings-hint">Recycled files older than this are
+                                                        removed for good (cleaned automatically as new files are
+                                                        recycled).</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Recycle folder (optional):</label>
+                                                    <input type="text" id="vo-recycle-path"
+                                                        placeholder="auto — ss_recycle inside each library">
+                                                    <small class="settings-hint">Set a single folder to collect
+                                                        everything (keep it on the same drive as your libraries so moves
+                                                        are instant). Blank = an <code>ss_recycle</code> folder per
+                                                        library.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Minimum free disk space (GB):</label>
+                                                    <input type="number" id="vo-min-free" min="0" step="1"
+                                                        placeholder="0 = off">
+                                                    <small class="settings-hint">New grabs are refused (and the wishlist
+                                                        drains pause) when the target drive has less free space than
+                                                        this &mdash; so a download can never fill the disk. 0 disables
+                                                        the check.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>YouTube: SponsorBlock</label>
+                                                    <select id="vo-sponsorblock">
+                                                        <option value="off">Off</option>
+                                                        <option value="mark">Mark segments as chapters</option>
+                                                        <option value="remove">Cut sponsor segments out</option>
+                                                    </select>
+                                                    <small class="settings-hint">Uses the community SponsorBlock
+                                                        database at download time. <strong>Mark</strong> adds skippable
+                                                        chapters (sponsor, self-promo, intro, outro);
+                                                        <strong>Cut</strong> removes sponsor/self-promo/interaction
+                                                        segments from the file entirely.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-yt-subs">
+                                                        <span>YouTube: embed subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">Embeds YouTube's subtitles (your
+                                                        Subtitle Languages above) into the downloaded file so
+                                                        Plex/Jellyfin offer them without sidecar files.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <button class="test-button" id="vo-reset"
+                                                        style="background: #666;">&#128260; Reset to Defaults</button>
+                                                    <small class="settings-hint">Restores the Radarr/Sonarr standard
+                                                        layout.</small>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+
+                                                <div class="post-processing-section-title">Subtitles</div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-subs-dl">
+                                                        <span>Download subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">Fetch external .srt files next to
+                                                        the video from the provider chain below, only for what's
+                                                        missing. On by default for new imports &mdash; free tiers
+                                                        are quota-limited (~20 downloads/day each), so anything
+                                                        missed is retried later.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Subtitle Languages:</label>
+                                                    <input type="text" id="vo-sub-langs" placeholder="en">
+                                                    <small class="settings-hint">Language codes to fetch, in
+                                                        priority order (e.g. <code>en,es</code>). One .srt per
+                                                        language is written as
+                                                        &lt;video&gt;.&lt;lang&gt;.srt.</small>
+                                                    <small class="settings-hint">Each code is 2&ndash;3 letters;
+                                                        separate codes with commas, spaces, or semicolons.</small>
+                                                    <small class="settings-hint" id="vo-sub-langs-error" hidden
+                                                        style="color: #ff6b6b;"></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label for="vo-sub-hi-forced">Hearing-impaired
+                                                        preference:</label>
+                                                    <select id="vo-sub-hi-forced">
+                                                        <option value="off">Off — best match wins</option>
+                                                        <option value="prefer_hi">Prefer hearing-impaired</option>
+                                                    </select>
+                                                    <small class="settings-hint">A tiebreak only, never a filter:
+                                                        when two subtitles score the same, the hearing-impaired
+                                                        one (sound cues, speaker names) wins.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-forced">
+                                                        <span>Also grab forced subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">On top of the full track, fetch a
+                                                        forced (foreign-parts-only) track per language, written as
+                                                        &lt;video&gt;.&lt;lang&gt;.forced.srt &mdash; the lines
+                                                        for scenes in another language, for when you watch
+                                                        without full subtitles. Many titles have none, so these
+                                                        often stay missing.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Already have it when&hellip;</label>
+                                                    <small class="settings-hint">Before fetching, SoulSync checks what
+                                                        the video already has: any sidecar next to it
+                                                        (<code>.en.srt</code>, <code>.eng.srt</code>,
+                                                        <code>.English.sdh.srt</code>, or an unlabeled
+                                                        <code>.srt</code> whose language it detects) and the
+                                                        file's own embedded tracks.</small>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-use-embedded">
+                                                        <span>Count embedded subtitles</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-pgs">
+                                                        <span>&hellip;except PGS (Blu-ray image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-vobsub">
+                                                        <span>&hellip;except VobSub (DVD image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-ass">
+                                                        <span>&hellip;except ASS/SSA (styled subs)</span>
+                                                    </label>
+                                                    <small class="settings-hint">Ignore image subs if your players
+                                                        can't show them (or have to transcode for them) and you'd
+                                                        rather have a text .srt.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-autosync">
+                                                        <span>Auto-sync subtitles to audio</span>
+                                                    </label>
+                                                    <small class="settings-hint">After a download, shift the
+                                                        subtitle timing to match the video's own audio
+                                                        (ffsubsync, offline). Requires the
+                                                        <code>ffsubsync</code> Python package on the server;
+                                                        a failed sync keeps the original file.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Subtitle provider chain:</label>
+                                                    <div id="subchain-widget">
+                                                        <div class="dlchain-columns">
+                                                            <div class="dlchain-col">
+                                                                <div class="dlchain-col-head">
+                                                                    <span class="dlchain-col-label">Available</span>
+                                                                    <span class="dlchain-col-hint">drag one across, or click it</span>
+                                                                </div>
+                                                                <div class="dlchain-pool" id="subchain-pool"></div>
+                                                            </div>
+                                                            <div class="dlchain-col">
+                                                                <div class="dlchain-col-head">
+                                                                    <span class="dlchain-col-label">Provider chain</span>
+                                                                    <span class="dlchain-col-hint"
+                                                                        id="subchain-mode-hint"></span>
+                                                                </div>
+                                                                <div class="dlchain-list" id="subchain-list"></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <small class="settings-hint">Each provider is tried in order,
+                                                        top first, until subtitles are found. Whisper stays
+                                                        pinned last as the last resort when enabled.</small>
+                                                    <small class="settings-hint">API keys live under
+                                                        Services &rarr; OpenSubtitles, SubDL, SubSource.
+                                                        Embedded needs no key.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Local transcription (Whisper):</label>
+                                                    <div class="vo-whisper-row">
+                                                        <select id="vo-whisper-model"
+                                                            aria-label="Whisper model">
+                                                            <option value="tiny">tiny</option>
+                                                            <option value="base">base</option>
+                                                            <option value="small">small</option>
+                                                        </select>
+                                                        <button class="test-button" id="vo-whisper-dl"
+                                                            type="button">Download model</button>
+                                                    </div>
+                                                    <div class="vo-whisper-progress" id="vo-whisper-progress"
+                                                        hidden>
+                                                        <div class="vo-whisper-progress-bar"
+                                                            id="vo-whisper-progress-bar"></div>
+                                                    </div>
+                                                    <small class="settings-hint"
+                                                        id="vo-whisper-status"></small>
+                                                    <small class="settings-hint" id="vo-whisper-error" hidden
+                                                        style="color: #ff6b6b;"></small>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-whisper-enabled">
+                                                        <span>Enable local transcription</span>
+                                                    </label>
+                                                    <small class="settings-hint">Last-resort fallback: when no
+                                                        provider has subtitles, this server transcribes the
+                                                        video's own audio &mdash; no API key, no quota, fully
+                                                        offline after the one-time model download. Transcription
+                                                        runs in the background subtitle worker (a 45-minute
+                                                        episode takes roughly 10&ndash;20 minutes on a typical
+                                                        CPU). Requires the
+                                                        <code>faster-whisper</code> Python package on the
+                                                        server.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Advanced:</label>
+                                                    <div class="vo-sub-adv-grid">
+                                                        <div>
+                                                            <label for="vo-sub-min-score">Minimum match score</label>
+                                                            <input type="number" id="vo-sub-min-score" min="0" max="200" step="1">
+                                                            <small class="settings-hint">Candidates scoring below this are a miss and never download.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-daily-quota">Daily quota per provider</label>
+                                                            <input type="number" id="vo-sub-daily-quota" min="1" max="1000" step="1">
+                                                            <small class="settings-hint">Max subtitle downloads per provider per day (UTC).</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-upgrade-delta">Upgrade threshold</label>
+                                                            <input type="number" id="vo-sub-upgrade-delta" min="0" max="200" step="1">
+                                                            <small class="settings-hint">A new candidate must beat the current subtitle by this much to replace it.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-worker-interval">Retry every (minutes)</label>
+                                                            <input type="number" id="vo-sub-worker-interval" min="5" max="1440" step="1">
+                                                            <small class="settings-hint">How often the wanted loop retries misses.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-worker-batch">Retries per cycle</label>
+                                                            <input type="number" id="vo-sub-worker-batch" min="1" max="200" step="1">
+                                                            <small class="settings-hint">Max wanted rows attempted per worker cycle.</small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Videos already in your library:</label>
+                                                    <div>
+                                                        <button class="test-button" id="vo-sub-open-job"
+                                                            type="button">Missing Subtitles job &rarr;</button>
+                                                    </div>
+                                                    <small class="settings-hint" id="vo-sub-job-status"></small>
+                                                    <small class="settings-hint">New imports are covered
+                                                        automatically. The Missing Subtitles job on the Tools
+                                                        page checks everything you already own on a schedule
+                                                        and queues what's missing; turn on its Dry Run to
+                                                        review findings first.</small>
+                                                </div>
+                                            </div>
+
+                                        </div>

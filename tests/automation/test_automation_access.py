@@ -5,7 +5,11 @@ asked. Any profile could open another profile's automation (its notification
 settings hold webhook urls and bot tokens), edit, toggle, delete or run it,
 turn the install's system automations off, and save one that runs a script
 on the server. The run_script path check also let "../scripts_old/x.sh"
-through, because "/app/scripts_old" starts with "/app/scripts"."""
+through, because "/app/scripts_old" starts with "/app/scripts".
+
+Nov 17 2026 (#2166, S4): a system automation is read by anyone and run only
+by an admin, and a member's own automation is a personal one
+(tests/test_permissions_enforcement.py covers the personal rules)."""
 
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ SYSTEM = {"id": 12, "profile_id": 1, "is_system": 1, "name": "system"}
 @pytest.mark.parametrize("automation, read, run, change", [
     (MINE, True, True, True),
     (THEIRS, False, False, False),
-    (SYSTEM, True, True, False),
+    (SYSTEM, True, False, False),
     (None, True, True, True),          # not there: the handler answers 404
 ])
 def test_what_a_non_admin_profile_may_do(automation, read, run, change):
@@ -66,6 +70,8 @@ class _Database:
     def __init__(self):
         self.rows = {a["id"]: dict(a, then_actions="[]", action_type="process_wishlist")
                      for a in (MINE, THEIRS, SYSTEM)}
+        # a member's own automation is a personal one (S4)
+        self.rows[MINE["id"]]["action_type"] = "refresh_mirrored"
         self.rows[13] = dict(MINE, id=13, action_type="run_script", then_actions="[]")
 
     def get_automation(self, automation_id):
@@ -147,8 +153,11 @@ def test_a_system_automation_is_changed_by_an_admin_only(client, method, url, bo
 
 
 @pytest.mark.parametrize("method, url, body", READS)
-def test_a_system_automation_is_read_and_run_by_anyone(client, method, url, body):
-    http, _api, _caller = client
+def test_a_system_automation_is_read_by_anyone_and_run_by_an_admin(client, method, url, body):
+    http, _api, caller = client
+    member_may = method == "get"
+    assert (_send(http, method, url, body, SYSTEM["id"]).status_code == 200) is member_may
+    caller["admin"] = True
     assert _send(http, method, url, body, SYSTEM["id"]).status_code == 200
 
 
@@ -166,7 +175,7 @@ def test_only_an_admin_saves_an_automation_that_runs_a_script(client):
     assert http.put(f"/api/automations/{MINE['id']}", json=body).status_code == 403
     assert http.post("/api/automations/13/duplicate").status_code == 403
     assert api.calls == []
-    assert http.post("/api/automations", json={"name": "x", "action_type": "process_wishlist"}).status_code == 200
+    assert http.post("/api/automations", json={"name": "x", "action_type": "refresh_mirrored"}).status_code == 200
     caller["admin"] = True
     assert http.post("/api/automations", json=body).status_code == 200
 

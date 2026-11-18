@@ -175,20 +175,34 @@ def test_socket_connected_mirror_stays_in_lockstep() -> None:
 
 
 def test_jiosaavn_bubble_writer_dispatches() -> None:
-    body = _handler_body("settings.js", "syncJiosaavnEnrichmentBubble")
-    assert "CustomEvent('ss:jiosaavn-experimental'" in body, (
-        "syncJiosaavnEnrichmentBubble no longer re-broadcasts — the React "
+    # the Experimental switch is React (SETTINGS_PORT.md step 10a): its
+    # jiosaavnBubble is what settings.js syncJiosaavnEnrichmentBubble was
+    src = (STATIC.parent / "src/features/settings/tabs/connections-metadata.tsx").read_text(
+        encoding="utf-8"
+    )
+    start = src.index("function jiosaavnBubble(")
+    body = src[start : src.index("\n}\n", start)]
+    assert "new CustomEvent('ss:jiosaavn-experimental'" in body, (
+        "jiosaavnBubble no longer re-broadcasts — the React "
         "JioSaavn orb misses live experimental toggles"
     )
+    # the switch and every load both call it
+    assert src.count("jiosaavnBubble(") >= 4
 
 
 def test_dev_mode_writers_dispatch() -> None:
-    settings = (STATIC / "settings.js").read_text(encoding="utf-8")
+    settings = (STATIC.parent / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
     enabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: true } })")
-    disabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
-    assert enabled == 2, (
-        f"expected the dev-mode ENABLE dispatch at both write sites (initial "
-        f"check + activateDevMode), found {enabled}"
+    # the Hydrabase page's disconnect moved to pages-extra.js (SETTINGS_PORT.md step V4a)
+    hydra = (STATIC / "pages-extra.js").read_text(encoding="utf-8")
+    disabled = hydra.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
+    assert enabled == 1, (
+        f"expected the dev-mode ENABLE dispatch at the initial check, found {enabled}"
+    )
+    # activateDevMode is React (SETTINGS_PORT.md step 9b) and dispatches too
+    system = (STATIC.parent / "src/features/settings/tabs/system-tab.tsx").read_text(encoding="utf-8")
+    assert "new CustomEvent('ss:dev-mode', { detail: { enabled: true } })" in system, (
+        "the System tab's Activate no longer dispatches the dev-mode event"
     )
     assert disabled == 1, (
         f"expected the dev-mode DISABLE dispatch at the hydra disconnect site, found {disabled}"
@@ -261,9 +275,6 @@ FIXTURE = (
 )
 
 ALLOWED_DASHBOARD_ID_REFS = {
-    # helper.js: the help-search/tour CONTENT — read-only selectors resolved
-    # against React's ids.
-    "helper.js": None,  # None = any id allowed (read-only by construction)
     # worker-orbs.js: anchors #dashboard-page .dashboard-header, reads only.
     "worker-orbs.js": {"dashboard-page"},
     # wishlist-tools.js: the Active Downloads ADOPTED REGION — React renders

@@ -44,8 +44,26 @@ function mockAccount({
     string,
     unknown
   >,
+  weather = WEATHER_OFF as Record<string, unknown>,
+  perms = MEMBER_PERMS as Record<string, unknown>,
+  asks = {} as Record<string, unknown>,
 } = {}) {
   server.use(
+    http.get('/api/profiles/me/permissions', () =>
+      HttpResponse.json({
+        success: true,
+        profile_id: 7,
+        is_admin: isAdmin,
+        source: 'template',
+        effective: perms,
+        summary: { sentence: 'You use music.', lines: [], never: [] },
+      }),
+    ),
+    http.get('/api/profiles', () =>
+      HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Boulder', is_admin: true }] }),
+    ),
+    http.get('/api/profiles/me/asks', () => HttpResponse.json({ success: true, asks })),
+    http.get('/api/weather', () => HttpResponse.json(weather)),
     http.get('/api/profiles/me/navidrome-libraries', () =>
       HttpResponse.json({ success: true, ...navidromeLibraries }),
     ),
@@ -67,6 +85,48 @@ function mockAccount({
     ),
   );
 }
+
+// a member on Adult: everything on, downloads right away, no limit
+const MEMBER_PERMS: Record<string, unknown> = {
+  'music.access': true,
+  'music.get': 'download',
+  'music.hide_explicit': false,
+  'movies.access': true,
+  'movies.get': 'download',
+  'movies.max_rating': 'any',
+  'tv.access': true,
+  'tv.get': 'download',
+  'tv.max_rating': 'follow',
+  'books.access': true,
+  'books.get': 'download',
+  'podcasts.access': true,
+  'podcasts.get': 'download',
+  'requests.limit': { n: 0, days: 7 },
+  'requests.see_all': false,
+  'requests.moderate': false,
+  'account.connect': true,
+  'chat.use': true,
+  'automations.personal': true,
+};
+
+// what /api/weather answers a member with no place of their own (#2163)
+const WEATHER_OFF = {
+  success: true,
+  enabled: true,
+  location: null,
+  units: 'fahrenheit',
+  snapshot: null,
+  scene: null,
+  holidays: true,
+  own: true,
+};
+
+const WEATHER_BERLIN = {
+  ...WEATHER_OFF,
+  units: 'celsius',
+  location: { query: 'Berlin', name: 'Berlin', latitude: 52.52, longitude: 13.41 },
+  snapshot: { current: { temp: 11.4, condition: 'Light drizzle' } },
+};
 
 function capturePosts(url: string, reply: Record<string, unknown> = { success: true }) {
   server.use(
@@ -139,12 +199,17 @@ describe('My Account', () => {
     expect(modal().getAttribute('role')).toBe('dialog');
     expect(modal().textContent).toContain('Kim');
     const titles = [...body().querySelectorAll('.ma-section-title')].map((h) => h.textContent);
-    expect(titles).toEqual(['Media server', 'Music services']);
+    expect(titles).toEqual([
+      'What you can do',
+      'Media server',
+      'Music services',
+      'Sidebar weather',
+    ]);
     expect(body().textContent).toContain(
       'Signed in as kim. Your playlists sync to your own account.',
     );
     const names = [...body().querySelectorAll('.ma-row-name')].map((n) => n.textContent);
-    expect(names).toEqual(['Navidrome', 'Spotify', 'Tidal', 'ListenBrainz', 'Last.fm']);
+    expect(names).toEqual(['Navidrome', 'Spotify', 'Tidal', 'ListenBrainz', 'Last.fm', 'Weather']);
   });
 
   it('the old My Settings entry point opens the same modal', async () => {
@@ -688,5 +753,168 @@ describe('My Account: scrobbling your own plays (Phonk_Ben_67)', () => {
     expect(ok).toBe(false);
     expect(popup.close).toHaveBeenCalled();
     expect(toasts).toContain('ask the admin');
+  });
+});
+
+describe('My Account: your own sidebar weather (#2163)', () => {
+  let puts: Array<{ url: string; body: unknown }> = [];
+  let current: Record<string, unknown> = WEATHER_OFF;
+
+  function captureWeatherPuts() {
+    puts = [];
+    server.use(
+      http.get('/api/weather', () => HttpResponse.json(current)),
+      http.put('/api/weather/:what', async ({ request, params }) => {
+        const body = JSON.parse(await request.text()) as Record<string, unknown>;
+        puts.push({ url: `/api/weather/${String(params.what)}`, body });
+        if (params.what === 'location') current = body.location ? WEATHER_BERLIN : WEATHER_OFF;
+        return HttpResponse.json({ ...current, success: true });
+      }),
+    );
+  }
+
+  const row = () => document.getElementById('ma-sub-weather')?.textContent || '';
+
+  beforeEach(() => {
+    current = WEATHER_OFF;
+    window.bootSidebarWeather = vi.fn(() => Promise.resolve());
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'bootSidebarWeather');
+  });
+
+  it('is off until you add your own place', async () => {
+    mockAccount({});
+    await opened();
+    expect(row()).toBe('Off. Add your town to see its weather and time in the sidebar.');
+    expect(body().querySelector('[data-ma="toggle"][data-id="weather"]')?.textContent).toBe(
+      'Set up',
+    );
+  });
+
+  it('saves your town, says so and refreshes the sidebar', async () => {
+    mockAccount({});
+    captureWeatherPuts();
+    await opened();
+    click('[data-ma="toggle"][data-id="weather"]');
+    (document.getElementById('ma-wx-loc') as HTMLInputElement).value = 'Berlin';
+    click('[data-ma="wx-save"]');
+    await vi.waitFor(() => expect(row()).toBe('Berlin, 11°C, light drizzle'));
+    expect(puts).toEqual([{ url: '/api/weather/location', body: { location: 'Berlin' } }]);
+    expect(toasts).toContain('Weather set to Berlin');
+    expect(window.bootSidebarWeather).toHaveBeenCalled();
+  });
+
+  it('asks for a town before saving an empty one', async () => {
+    mockAccount({});
+    captureWeatherPuts();
+    await opened();
+    click('[data-ma="toggle"][data-id="weather"]');
+    click('[data-ma="wx-save"]');
+    expect(toasts).toContain('Type your town or ZIP first');
+    expect(puts).toEqual([]);
+  });
+
+  it('flips units and turns it off for you only', async () => {
+    current = WEATHER_BERLIN;
+    mockAccount({ weather: WEATHER_BERLIN });
+    captureWeatherPuts();
+    await opened();
+    click('[data-ma="toggle"][data-id="weather"]');
+    const celsius = document.querySelector('[data-ma-weather="celsius"]') as HTMLInputElement;
+    expect(celsius.checked).toBe(true);
+    celsius.click();
+    await vi.waitFor(() =>
+      expect(puts).toContainEqual({ url: '/api/weather/units', body: { use_celsius: false } }),
+    );
+    click('[data-ma="wx-clear"]');
+    await vi.waitFor(() =>
+      expect(puts).toContainEqual({ url: '/api/weather/location', body: { location: '' } }),
+    );
+    await vi.waitFor(() => expect(row()).toMatch(/^Off\./));
+  });
+
+  it('the admin keeps theirs in Settings, not here', async () => {
+    mockAccount({ isAdmin: true, weather: WEATHER_BERLIN });
+    openMyAccountsModal();
+    await vi.waitFor(() => expect(body().querySelector('.ma-empty')).not.toBeNull());
+    expect(document.getElementById('ma-sub-weather')).toBeNull();
+  });
+});
+
+// what you can do (#2166): the member's own summary, read-only, from the
+// server's map. no switches, and who to ask when something is off
+describe('What you can do', () => {
+  const card = () => document.getElementById('ma-cando') as HTMLElement;
+  const row = (id: string) =>
+    (document.querySelector(`#ma-cando [data-can="${id}"]`) as HTMLElement).textContent || '';
+
+  it('a downloader: everything right away, nothing to ask about', async () => {
+    mockAccount({});
+    await opened();
+    await vi.waitFor(() => expect(card()).not.toBeNull());
+    expect(card().textContent).toContain(
+      'You get music, movies, shows, audiobooks and podcast episodes right away.',
+    );
+    expect(row('music')).toContain('Downloads right away');
+    expect(row('requests')).toContain('Nothing to ask: it comes right away');
+    expect(card().textContent).not.toContain('Ask Boulder');
+    // read-only: nothing in it can be pressed or switched
+    expect(card().querySelector('button, input, select')).toBeNull();
+  });
+
+  it('asks first, with the limit and how many are used', async () => {
+    mockAccount({
+      perms: {
+        ...MEMBER_PERMS,
+        'music.get': 'ask',
+        'movies.get': 'ask',
+        'movies.max_rating': 'PG-13',
+        'tv.get': 'ask',
+        'music.request_limit': { n: 5, days: 7 },
+        'movies.request_limit': { n: 3, days: 7 },
+        'tv.request_limit': { n: 0, days: 7 },
+      },
+      asks: {
+        music: { kind: 'music', limit: 5, days: 7, used: 2, remaining: 3 },
+        movies: { kind: 'movies', limit: 3, days: 7, used: 1, remaining: 2 },
+      },
+    });
+    await opened();
+    // each kind counts on its own, on its own row
+    await vi.waitFor(() => expect(row('music')).toContain('5 asks a week, 2 used'));
+    expect(row('movies')).toContain('3 asks a week, 1 used');
+    expect(card().textContent).toContain(
+      'You ask first for music, movies and shows, 5 music asks a week and 3 movie asks a week.',
+    );
+    expect(row('requests')).toContain('5 music asks a week and 3 movie asks a week');
+    expect(row('movies')).toContain('up to PG-13');
+    expect(row('tv')).toContain('up to TV-14');
+    expect(row('tv')).not.toContain('asks a week');
+  });
+
+  it('books off: says so and who to ask', async () => {
+    mockAccount({
+      perms: { ...MEMBER_PERMS, 'books.access': false, 'podcasts.access': false },
+    });
+    await opened();
+    await vi.waitFor(() => expect(row('books')).toContain('Not part of your profile'));
+    expect(card().textContent).toContain('Ask Boulder');
+  });
+
+  it('a moderator is told what they answer', async () => {
+    mockAccount({
+      perms: { ...MEMBER_PERMS, 'requests.moderate': true, 'requests.see_all': true },
+    });
+    await opened();
+    await vi.waitFor(() => expect(row('requests')).toContain('moderator'));
+    expect(row('requests')).toContain('you answer everyone’s asks but your own');
+  });
+
+  it('see everyone’s, without answering', async () => {
+    mockAccount({ perms: { ...MEMBER_PERMS, 'requests.see_all': true } });
+    await opened();
+    await vi.waitFor(() => expect(row('requests')).toContain('you see everyone’s'));
+    expect(row('requests')).not.toContain('moderator');
   });
 });

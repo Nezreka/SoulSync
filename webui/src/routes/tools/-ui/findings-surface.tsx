@@ -53,6 +53,7 @@ import {
   fetchFindingCounts,
   fetchFindingGroups,
   fetchFindingTypes,
+  fetchKeepBestSummary,
   fetchRepairFindings,
   fixFinding,
   reopenFinding,
@@ -80,7 +81,18 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { describeFinding, readApplied, tagChangeLabel } from '../-tools.finding-copy';
-import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
+import {
+  fixAllSafePlan,
+  jobFilterOptions,
+  safeFixablePending,
+  visibleGroups,
+} from '../-tools.groups';
+import {
+  needsYouLine,
+  recordingPairs,
+  tallyFindings,
+  tallySummary,
+} from '../-tools.keep-best-bulk';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
@@ -187,6 +199,16 @@ const SORT_OPTIONS = [
   { value: 'quality_desc', label: 'Best quality first' },
   { value: 'path', label: 'File path' },
 ] as const;
+
+/** #2179: duplicates a Keep Best all can't act on by itself, first */
+const NEEDS_YOU_SORT = { value: 'needs_you', label: 'Needs you first' } as const;
+
+/** the fix action for a bulk Keep Best choice. unticked, moving follows the
+ *  job setting: the scan planned each finding with it, so the counts the
+ *  prompt showed are the run's */
+export function keepBestAction(choice: { move: boolean; confirm: boolean }): string {
+  return `keep_best${choice.confirm ? ':confirmed' : ''}${choice.move ? ':move' : ''}`;
+}
 
 /**
  * the newest finished run, as a key. the run history reloads when a job
@@ -373,6 +395,12 @@ export function FindingsSurface({
    *  the failure the inbox is supposed to remove. */
   const searching = query.trim().length > 0;
   const listType = searching ? '' : openType;
+  // "needs you first" is a duplicates sort (#2179): another list goes back
+  // to newest rather than show a sort its menu does not have
+  const sortMissing = sort === 'needs_you' && listType !== 'native_duplicate_tracks';
+  useEffect(() => {
+    if (sortMissing) setSort('newest');
+  }, [sortMissing]);
   /** a drill-in only narrows the open type's list; a search leaves both */
   const activeDrill = !searching && openType ? drill : null;
 
@@ -797,7 +825,7 @@ export function FindingsSurface({
 
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
-    async (findingId: number, trackId: string) => {
+    async (findingId: number, trackId: string, planned?: string) => {
       const catalogue = trackId.startsWith('merge-');
       const native = trackId.startsWith('file-') || trackId.startsWith('keep_best');
       const confirmed = await window.showConfirmDialog?.({
@@ -805,7 +833,9 @@ export function FindingsSurface({
         message: catalogue
           ? 'Merge these catalogue entries into the selected release? Both provider editions and all physical audio files are preserved.'
           : native
-            ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
+            ? // #2172: the plan for this keeper, when the finding fetched one
+              planned ||
+              'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
             : 'Keep this version and remove the other duplicate(s)?',
         confirmText: catalogue ? 'Merge' : 'Keep',
         destructive: true,
@@ -941,22 +971,20 @@ export function FindingsSurface({
       }
     }
 
+    // #2179: what goes through and what needs you, before anything runs.
+    // differently named pairs are listed, and confirmed only when ticked
     const nativeDuplicateIds = withType('native_duplicate_tracks');
     let nativeDuplicateAction: string | null = null;
     if (nativeDuplicateIds.length) {
-      const weak = nativeDuplicateIds.some((id) =>
-        Boolean(byId.get(id)?.details?.requires_recording_confirmation),
+      const rows = nativeDuplicateIds
+        .map((id) => byId.get(id))
+        .filter((finding): finding is RepairFinding => Boolean(finding));
+      const choice = await prompts.promptKeepBest(
+        (move, confirm) => tallyFindings(rows, { move, confirm }),
+        recordingPairs(rows),
       );
-      const confirmed = await window.showConfirmDialog?.({
-        title: weak ? 'Confirm Recordings & Keep Best' : 'Keep Best',
-        message: weak
-          ? 'Confirm that each selected duplicate group contains the same recording after reviewing its files. Keep the recommended copies and quarantine redundant files? Protected copies stay.'
-          : 'Keep the recommended copies and move redundant files to recoverable quarantine? Protected copies stay.',
-        confirmText: weak ? 'Confirm Recordings & Keep Best' : 'Keep Best',
-        destructive: true,
-      });
-      if (!confirmed) return;
-      nativeDuplicateAction = weak ? 'keep_best:confirmed' : 'keep_best';
+      if (!choice) return;
+      nativeDuplicateAction = keepBestAction(choice);
     }
 
     let fixed = 0;
@@ -966,6 +994,7 @@ export function FindingsSurface({
     let refused = 0;
     let otherArtistSkipped = 0;
     let lastError = '';
+    const needsYou: Record<string, number> = {};
     toast(`Fixing ${ids.length} findings...`, 'info');
 
     // Backfill "Just Clear" and quality "Ignore" both dismiss rather than
@@ -1018,6 +1047,7 @@ export function FindingsSurface({
         // finding, and without this the held-back tracks are silent here
         // (the background Fix All reports them in its run note).
         otherArtistSkipped += result.other_artist_skipped || 0;
+        if (result.needs_you) needsYou[result.needs_you] = (needsYou[result.needs_you] || 0) + 1;
         if (result.refused) refused++;
         // blank tags filled, the tags that differ left on the row: still open
         else if (result.partial) partial++;
@@ -1039,6 +1069,9 @@ export function FindingsSurface({
       skipped,
       otherArtistSkipped,
       partial,
+      nativeDuplicateIds.length
+        ? { needs: needsYou, only: nativeDuplicateIds.length === ids.length }
+        : undefined,
     );
     toast(message, type);
     if (refused) {
@@ -1190,14 +1223,17 @@ export function FindingsSurface({
           if (!confirmed) return;
         }
       } else if (group.finding_type === 'native_duplicate_tracks') {
-        const confirmed = await window.showConfirmDialog?.({
-          title: 'Keep Best',
-          message: `Keep recommended copies for ${count.toLocaleString()} duplicate findings and move redundant files to recoverable quarantine? Protected copies stay. Weak matches remain pending for individual recording confirmation.`,
-          confirmText: 'Keep Best',
-          destructive: true,
-        });
-        if (!confirmed) return;
-        fixAction = 'keep_best';
+        // #2179: the whole type is never confirmed as one recording blind;
+        // those stay open for you. moving playlist entries is the run's
+        // choice, off until ticked
+        const summary = await fetchKeepBestSummary(groupFilters);
+        const choice = await prompts.promptKeepBest((move) =>
+          summary
+            ? tallySummary(summary, move)
+            : { total: count, ready: count, needs: {}, held: 0 },
+        );
+        if (!choice) return;
+        fixAction = keepBestAction({ move: choice.move, confirm: false });
       } else if (!(await confirmDefault())) {
         return;
       }
@@ -1471,6 +1507,11 @@ export function FindingsSurface({
   const bar = findingsBulkBarState(selected.size, items?.length || 0, total);
   const pagination = findingsPagination(total, serverPage, pageSize);
   const runningJobs = jobs.filter((job) => job.is_running).length;
+  /** the job filter in the list's own words, A to Z, only what has results (#2113) */
+  const jobOptions = useMemo(
+    () => jobFilterOptions(jobs, groups, types, statusFilter, jobFilter),
+    [jobs, groups, types, statusFilter, jobFilter],
+  );
   const statusCount = (value: string) => {
     if (!counts) return null;
     if (value === 'pending') return counts.pending || 0;
@@ -1670,7 +1711,12 @@ export function FindingsSurface({
                 setPage(0);
               }}
             >
-              {(video ? VIDEO_SORT_OPTIONS : SORT_OPTIONS).map((option) => (
+              {(video
+                ? VIDEO_SORT_OPTIONS
+                : listType === 'native_duplicate_tracks'
+                  ? [...SORT_OPTIONS, NEEDS_YOU_SORT]
+                  : SORT_OPTIONS
+              ).map((option) => (
                 <option value={option.value} key={option.value}>
                   {option.label}
                 </option>
@@ -1725,9 +1771,12 @@ export function FindingsSurface({
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
                   onReidentify={setReidentifyingFinding}
-                  onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
+                  onKeepDuplicate={(findingId, trackId, planned) =>
+                    void keepDuplicate(findingId, trackId, planned)
+                  }
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
+                  onChanged={refreshAll}
                 />
               ))
             )}
@@ -1913,10 +1962,10 @@ export function FindingsSurface({
               setPage(0);
             }}
           >
-            <option value="">All Jobs</option>
-            {jobs.map((job) => (
-              <option value={job.job_id} key={job.job_id}>
-                {job.display_name}
+            <option value="">All findings</option>
+            {jobOptions.map((option) => (
+              <option value={option.value} key={option.value}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -2188,6 +2237,7 @@ function FindingCard({
   onUndo,
   onReidentify,
   onInspectRedownload,
+  onChanged,
 }: {
   finding: RepairFinding;
   video?: boolean;
@@ -2206,11 +2256,13 @@ function FindingCard({
   onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
-  onKeepDuplicate: (findingId: number, trackId: string) => void;
+  onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
+  /** something changed the finding outside a fix (a cover picked for it) */
+  onChanged?: () => void;
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
@@ -2218,6 +2270,7 @@ function FindingCard({
   const typeLabel = info?.label || findingTypeLabel(finding.finding_type);
   const age = formatCacheAge(finding.created_at);
   const copy = describeFinding(finding, fixLabel);
+  const needsYou = finding.status === 'pending' ? needsYouLine(finding) : null;
 
   return (
     <div
@@ -2239,7 +2292,9 @@ function FindingCard({
         </div>
         <FindingArt
           album={finding.album_thumb_url}
-          artist={finding.artist_thumb_url}
+          // #2169: a cover finding with no cover shows an empty tile, never
+          // the artist's photo standing in for one
+          artist={finding.finding_type === 'missing_cover_art' ? null : finding.artist_thumb_url}
           file={finding.entity_type === 'file' || finding.entity_type === 'folder'}
         />
         <div className="repair-finding-content">
@@ -2255,6 +2310,11 @@ function FindingCard({
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
+            {needsYou ? (
+              <span className="repair-finding-status-badge needs-you" title={needsYou}>
+                Needs you
+              </span>
+            ) : null}
             {finding.locked && finding.status === 'pending' ? (
               <span
                 className="repair-finding-status-badge locked"
@@ -2265,6 +2325,7 @@ function FindingCard({
             ) : null}
           </div>
           {copy.sub ? <div className="repair-finding-sub">{copy.sub}</div> : null}
+          {needsYou ? <div className="repair-finding-needs">{needsYou}</div> : null}
         </div>
         {/* what is wrong, as a sentence, in the middle of the row where a wide
             screen used to leave a gap */}
@@ -2429,6 +2490,8 @@ function FindingCard({
                 onKeepDuplicate={onKeepDuplicate}
                 onApplyCoverArt={onApplyCoverArt}
                 onUndo={onUndo}
+                onFixAction={(target, action) => void onFix(target, action)}
+                onChanged={onChanged}
               />
             )
           ) : null}

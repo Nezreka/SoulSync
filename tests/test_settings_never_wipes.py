@@ -42,7 +42,7 @@ def _read(rel: str) -> str:
 
 @pytest.fixture(scope="module")
 def save_body() -> str:
-    js = _read("webui/static/settings.js")
+    js = _read("webui/src/features/settings/shell.ts")
     body = js.split("async function saveSettings", 1)[1]
     for end in ("\n}\n", "\r\n}\r\n"):
         if end in body:
@@ -72,11 +72,16 @@ def test_every_field_the_save_reads_exists_on_the_page(save_body, index):
     )
 
 
-def test_the_audit_is_actually_looking_at_something(save_body):
-    # A parse that silently found nothing would make the check above pass.
-    ids = _ids_read(save_body)
-    assert len(ids) > 150, f"only found {len(ids)} fields; the parse is wrong"
-    assert "prowlarr-url" in ids
+def test_the_save_reads_no_field_now(save_body):
+    """Every field on the music side is React since SETTINGS_PORT.md step 10c,
+    and saves only what changed: the page-wide save reads none off the page,
+    so it cannot write over a stored value from a field that is not there.
+    A field read here again would be a step backwards, and the check above
+    would be looking at it."""
+    assert _ids_read(save_body) == set()
+    # the parse still sees the save: its body is there to read (the page's
+    # shell is shell.ts since SETTINGS_PORT.md step V4b)
+    assert "reactSaved = await host.flush();" in save_body
 
 
 def test_no_payload_field_blanks_a_missing_element(save_body):
@@ -87,23 +92,16 @@ def test_no_payload_field_blanks_a_missing_element(save_body):
     assert not bad, "these overwrite stored settings when their field is missing:\n" + "\n".join(bad)
 
 
-def test_the_helpers_omit_rather_than_blank():
-    """undefined is the point: JSON.stringify drops undefined-valued keys, so
-    the key never reaches the server and the stored value survives."""
-    js = _read("webui/static/settings.js")
-    for name in ("_cfgStr", "_cfgBool", "_cfgInt", "_cfgFloat"):
-        fn = js.split(f"function {name}(", 1)[1].split("\n}", 1)[0]
-        assert "if (!el) return undefined" in fn or "el ? " in fn, f"{name} does not omit"
+def test_the_page_save_sends_no_value_at_all(save_body):
+    """The _cfg* helpers made a missing field omit its key rather than blank
+    it. They went with settings.js (SETTINGS_PORT.md step V4b): no field is
+    read here any more, so the page's own post carries sections with nothing
+    in them, and every value goes out from its React tab, only when changed."""
+    js = _read("webui/src/features/settings/shell.ts")
+    assert "_cfg" not in js
+    sent = save_body.split("const settings = {", 1)[1].split("};", 1)[0]
+    sections = re.findall(r"^\s*([a-z0-9_]+): (\{\}),?$", sent, re.M)
+    assert len(sections) == 7, sent
+    assert re.sub(r"^\s*[a-z0-9_]+: \{\},?$", "", sent, flags=re.M).strip() == "", sent
 
 
-def test_an_empty_string_the_user_typed_is_still_saved():
-    """Clearing a field on purpose has to keep working — the guard is about a
-    field that is not THERE, not a field that is empty."""
-    js = _read("webui/static/settings.js")
-    fn = js.split("function _cfgStr(", 1)[1].split("\n}", 1)[0]
-    assert "fallback !== undefined" in fn, "an empty value must still be sent"
-
-
-def test_the_helpers_are_used_widely(save_body):
-    # If most of the payload bypassed them the guard above would be hollow.
-    assert save_body.count("_cfgStr(") + save_body.count("_cfgBool(") > 40

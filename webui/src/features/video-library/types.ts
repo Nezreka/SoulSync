@@ -145,7 +145,10 @@ export interface LibrarySeason {
   title: string;
   owned: number;
   total: number;
+  /** aired, no file and monitored: what SoulSync hunts (#2177) */
   missing: number;
+  /** aired, no file, nobody hunting it */
+  missing_unmonitored?: number;
   upcoming: number;
   size_bytes: number;
   monitored: boolean;
@@ -163,7 +166,10 @@ export interface ShowLibrary {
   summary: {
     owned: number;
     total: number;
+    /** aired, no file and monitored: what SoulSync hunts (#2177) */
     missing: number;
+    /** aired, no file, nobody hunting it */
+    missing_unmonitored?: number;
     upcoming: number;
     specials_owned: number;
     files: number;

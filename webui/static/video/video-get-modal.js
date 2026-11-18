@@ -178,6 +178,12 @@
         if (e.air_date && e.air_date > today) return 'upcoming';
         return 'missing';
     }
+    // #2177: a missing episode nobody monitors (its season, or it, turned off)
+    // is listed and pickable but never pre-ticked, like sonarr's missing. a
+    // tmdb preview carries no flag, so everything there is wanted.
+    function wantedMissing(e, today) {
+        return epState(e, today) === 'missing' && e.monitored !== false;
+    }
 
     function openModal(o) {
         closeModal();
@@ -355,16 +361,19 @@
         // Already-wishlisted episodes render badged and UN-checked — re-adding
         // is a silent no-op, so don't pre-select them into the Add count.
         var wished = st === 'missing' && !!(modalState && modalState.wishedEps && modalState.wishedEps[key]);
-        // missing-aired -> pre-checked; owned -> selectable for re-download (not
-        // pre-checked); upcoming -> locked (can't grab what hasn't aired).
+        var off = st === 'missing' && e.monitored === false;
+        // missing-aired -> pre-checked unless unmonitored; owned -> selectable
+        // for re-download (not pre-checked); upcoming -> locked (can't grab
+        // what hasn't aired).
         var ctrl = (st === 'upcoming')
             ? '<span class="vgm-ep-lock">◷</span>'
-            : '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '"' + (st === 'missing' && !wished ? ' checked' : '') + '>';
+            : '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '"' + (st === 'missing' && !wished && !off ? ' checked' : '') + '>';
         var badge = st === 'owned' ? '<span class="vgm-ep-badge vgm-ep-badge--owned">In library</span>'
             : st === 'upcoming' ? '<span class="vgm-ep-badge vgm-ep-badge--soon">' + (date || 'Upcoming') + '</span>'
             : wished ? '<span class="vgm-ep-badge vgm-ep-badge--wish">Wishlisted</span>'
+            : off ? '<span class="vgm-ep-badge vgm-ep-badge--soon">Not monitored</span>'
             : '<span class="vgm-ep-badge vgm-ep-badge--missing">Missing</span>';
-        return '<label class="vgm-ep vgm-ep--' + st + '">' +
+        return '<label class="vgm-ep vgm-ep--' + st + '"' + (off ? ' data-vgm-unmonitored' : '') + '>' +
             '<span class="vgm-ep-ctrl">' + ctrl + '</span>' +
             '<span class="vgm-ep-num">E' + (e.episode_number != null ? e.episode_number : '') + '</span>' +
             '<span class="vgm-ep-title">' + esc(e.title || ('Episode ' + e.episode_number)) + '</span>' +
@@ -381,7 +390,7 @@
         // id so the lazy loader can fetch them.
         var tvId = (o && o.source === 'tmdb') ? parseInt(o.id, 10) : null;
         modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today, epMeta: {}, seasonPoster: {} };
-        var totalMissing = 0, anyLazy = false;
+        var totalMissing = 0, totalOff = 0, anyLazy = false;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
             '<div class="vgm-eps-head-actions">' +
             '<button class="vgm-select-missing" type="button" data-vgm-select-missing ' +
@@ -409,20 +418,25 @@
                     '</div>';
                 return;
             }
-            var missing = 0;
+            var missing = 0, off = 0;
             eps.forEach(function (e) {
                 modalState.epMeta[s.season_number + '_' + e.episode_number] = { title: e.title, air_date: e.air_date,
                     overview: e.overview, still: e.has_still ? ('/api/video/poster/episode/' + e.id) : null };
-                if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); }
+                if (wantedMissing(e, today)) { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); }
+                else if (epState(e, today) === 'missing') off++;
             });
             totalMissing += missing;
+            totalOff += off;
             // Fully-owned seasons are hidden while "Missing only" is on (turn it off
-            // to re-download); otherwise an owned season expanded to nothing.
-            html += '<div class="vgm-season' + (missing ? '' : ' vgm-season--owned') + '">' +
+            // to re-download); otherwise an owned season expanded to nothing. An
+            // unmonitored season's gaps stay listed, unticked: nothing is hidden.
+            var meta = missing ? missing + ' missing · '
+                : off ? off + ' not monitored · ' : 'owned · ';
+            html += '<div class="vgm-season' + (missing || off ? '' : ' vgm-season--owned') + '">' +
                 '<div class="vgm-season-head" data-vgm-season-toggle>' +
                     '<span class="vgm-season-check"><input type="checkbox" data-vgm-season-all="' + s.season_number + '"' + (missing && missing === eps.length ? ' checked' : '') + '></span>' +
                     '<span class="vgm-season-name">' + esc(s.title || ('Season ' + s.season_number)) + '</span>' +
-                    '<span class="vgm-season-meta">' + (missing ? missing + ' missing · ' : 'owned · ') + eps.length + ' eps</span>' +
+                    '<span class="vgm-season-meta">' + meta + eps.length + ' eps</span>' +
                     '<span class="vgm-season-chev" aria-hidden="true">⌄</span>' +
                 '</div>' +
                 '<div class="vgm-season-eps">' + eps.map(function (e) { return epRow(s.season_number, e, today); }).join('') + '</div>' +
@@ -431,7 +445,7 @@
         html += '</div>';
         // When you own everything, the missing-only view would be blank — say so.
         // (Skipped for lazy/un-owned shows: nothing is owned, episodes load on expand.)
-        if (totalMissing === 0 && !anyLazy) {
+        if (totalMissing === 0 && totalOff === 0 && !anyLazy) {
             html += '<div class="vgm-eps-allowned">✓ You have every episode. Turn off “Missing only” to re-download.</div>';
         }
         wrap.innerHTML = html;
@@ -462,7 +476,8 @@
         Promise.all(lazies.map(function (el) { return loadSeason(el) || Promise.resolve(); }))
             .then(function () {
                 if (!modalEl) return;   // modal closed mid-load
-                var boxes = ov.querySelectorAll('.vgm-ep--missing .vgm-ep-cb');
+                // monitored gaps only (#2177): an unmonitored one is ticked by hand
+                var boxes = ov.querySelectorAll('.vgm-ep--missing:not([data-vgm-unmonitored]) .vgm-ep-cb');
                 for (var j = 0; j < boxes.length; j++) {
                     boxes[j].checked = true;
                     toggleSel(boxes[j].getAttribute('data-vgm-ep'), true);
@@ -657,7 +672,7 @@
             return;
         }
         if (o.kind !== 'show' || !d.seasons || !d.seasons.length) { box.hidden = true; return; }
-        var today = isoToday(), missing = 0, ownedCount = 0, upcoming = 0, lazy = 0;
+        var today = isoToday(), missing = 0, ownedCount = 0, upcoming = 0, lazy = 0, off = 0;
         (d.seasons || []).forEach(function (s) {
             var eps = s.episodes || [];
             if (!eps.length && (s.episode_total || 0) > 0) { lazy += s.episode_total; return; }
@@ -665,6 +680,7 @@
                 var st = epState(e, today);
                 if (st === 'owned') ownedCount++;
                 else if (st === 'upcoming') upcoming++;
+                else if (e.monitored === false) off++;
                 else missing++;
             });
         });
@@ -678,6 +694,7 @@
             metric('missing', missing + (lazy ? '+' : ''), 'vgm-plan-missing') +
             metric('owned', ownedCount, 'vgm-plan-ok') +
             (upcoming ? metric('upcoming', upcoming, 'vgm-plan-soon') : '') +
+            (off ? metric('not monitored', off, '') : '') +
             '</div>';
         box.hidden = false;
     }
@@ -775,11 +792,21 @@
     //   airing show     → eye + get   (follow new episodes AND grab the back catalog)
     //   ended show      → get
     // Returns a positioned wrapper holding 0–2 buttons.
+    // may this profile get this kind right away? per kind (#2166): movies and
+    // shows each have their own mode, which VideoRequests loads at start.
+    // until it's in, the old one switch answers
+    function canGetKind(kind) {
+        var vr = window.VideoRequests;
+        if (vr && typeof vr.canGet === 'function') return vr.canGet(kind);
+        return (typeof canDownload !== 'function') || canDownload();
+    }
+
     function cardButton(o) {
         if (!o || !o.kind) return '';
-        // a profile without download rights asks instead: the get modal and the
+        // a profile that can't get this kind right away asks instead (or gets
+        // nothing, when it can't request it at all): the get modal and the
         // watchlist are gated for it. owned titles have nothing left to ask for.
-        if ((o.kind === 'movie' || o.kind === 'show') && typeof canDownload === 'function' && !canDownload()) {
+        if ((o.kind === 'movie' || o.kind === 'show') && !canGetKind(o.kind)) {
             var ask = (o.source !== 'library' && window.VideoRequests) ? VideoRequests.cardButton(o) : '';
             return ask ? '<span class="vcard-ctrls">' + ask + '</span>' : '';
         }
@@ -801,5 +828,6 @@
         return parts.length ? '<span class="vcard-ctrls">' + parts.join('') + '</span>' : '';
     }
 
-    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, close: closeModal, cardButton: cardButton };
+    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, close: closeModal, cardButton: cardButton,
+        canGetKind: canGetKind };
 })();

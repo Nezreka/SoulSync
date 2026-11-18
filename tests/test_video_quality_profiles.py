@@ -24,7 +24,6 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
 _MANAGE_JS = (_ROOT / "webui" / "static" / "video" / "video-manage-panel.js").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _WLBTN_JS = (_ROOT / "webui" / "static" / "video" / "video-watchlist-btn.js").read_text(encoding="utf-8")
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
 
@@ -275,9 +274,11 @@ def test_manage_panel_has_the_profile_picker():
 
 
 def test_settings_editor_grew_the_profile_bar():
-    assert "data-vq-profile-select" in _SETTINGS_JS
-    assert "QUALITY_URL + '/profiles'" in _SETTINGS_JS
-    assert "showConfirmDialog" in _SETTINGS_JS     # delete is confirm-gated (house rule)
+    # the editor is React (SETTINGS_PORT.md, video pass V1)
+    q = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "video-quality.tsx").read_text(encoding="utf-8")
+    assert "data-vq-profile-select" in q
+    assert "`${QUALITY_URL}/profiles`" in q
+    assert "showConfirmDialog" in q     # delete is confirm-gated (house rule)
 
 
 def test_follow_menu_is_shows_only_with_future_default():

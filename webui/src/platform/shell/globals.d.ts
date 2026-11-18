@@ -7,9 +7,44 @@ import type { MirroredPipelineState } from '@/routes/sync/-sync.pipeline';
 
 import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './bridge';
 
+/** the profile fields the sidebar rule reads (profile-nav.js) */
+interface SoulSyncNavProfile {
+  id: number;
+  is_admin: boolean;
+  can_download?: boolean;
+  allowed_pages?: string[] | null;
+  allowed_sides?: string | null;
+  home_page?: string | null;
+}
+
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
+    SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;
+    /** static/profile-nav.js: the sidebar's permission rule and the landing page (#2154, #2156) */
+    SoulSyncProfileNav?: {
+      MUSIC_LANDING: string[];
+      VIDEO_LANDING: string[];
+      normalizePageId: (pageId: string) => string;
+      allowedSides: (profile: SoulSyncNavProfile | null) => 'music' | 'video' | 'both';
+      navButtonVisible: (
+        profile: SoulSyncNavProfile | null,
+        pageId: string,
+        video: boolean,
+      ) => boolean;
+      apply: (profile: SoulSyncNavProfile | null, root?: Document) => void;
+      featureHiddenPages: () => string[];
+      landingPage: (opts: {
+        home?: string;
+        isAdmin?: boolean;
+        adminPage?: string;
+        order?: string[];
+        allowed?: (pageId: string) => boolean;
+        hidden?: string[];
+        fallback: string;
+      }) => string;
+    };
     /** core.js: the latest server-side active music download count from the status push. */
     __soulsyncMusicActiveDownloads?: number;
     /** src/shell/oidc-signin.ts: sign-in is OIDC only right now (#1839), from /api/auth/oidc/available. */
@@ -558,6 +593,11 @@ declare global {
     getWeatherPreview?: () => { preset: string; date: string | null } | null;
     setWeatherPreview?: (preview: { preset: string; date: string | null } | null) => void;
     weatherPreviewPresets?: () => Array<{ key: string; label: string }>;
+    /** ...and wiring its controls once the React System tab renders them */
+    initWeatherPreviewSettings?: () => void;
+    /** src/shell/oidc-signin.ts / oidc-only.ts: the OIDC boxes in Security & Access */
+    initOidcAdminStatus?: () => void;
+    refreshOidcOnlySettingsStatus?: () => Promise<void>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
     /** init.js - the active profile, or null before profiles load */
@@ -619,11 +659,32 @@ declare global {
     _mlmDeleteMatch?: (id: number) => Promise<void>;
     ServerActivity?: {
       toggle: () => void;
-      open: () => void;
+      open: (tab?: string) => void;
       close: () => void;
       refresh: () => Promise<unknown>;
       _onSocket: (d: unknown) => void;
       _wantsLive: () => boolean;
+      /** the open drawer hands each payload over, for the badge */
+      _sawActivity?: (d: unknown) => void;
+    };
+    /** the help sheet (features/help/host.tsx); the ? button's shim in helper.js opens it */
+    SoulSyncHelp?: {
+      open: (view?: string, params?: Record<string, string>) => void;
+      close: () => void;
+      toggle: () => void;
+      isOpen: () => boolean;
+      openSearch: () => void;
+    };
+    /** docs.js: open a docs article on the Help & Docs page */
+    navigateToDocsSection?: (id: string) => void;
+    /** the React drawer (features/server-activity/host.tsx); the shell opens it */
+    SoulSyncActivityDrawer?: {
+      open: (tab?: string) => void;
+      close: () => void;
+      toggle: () => void;
+      isOpen: () => boolean;
+      wantsLive: () => boolean;
+      push: (payload: unknown) => void;
     };
     SoulSyncActivitySocket?: {
       isConnected: () => boolean;
@@ -655,6 +716,8 @@ declare global {
     videoEnrichmentPrime?: () => void;
     /** video-side.js: the calendar on a day, optionally with an episode open. */
     videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
+    /** #2128: the video Library's recycle bin button (video-side.js) */
+    videoOpenRecycleBin?: () => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.
@@ -871,10 +934,6 @@ declare global {
     showLaunchPinScreen?: () => void;
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
-
-    /** Ask the tools page to show whichever tab holds `selector`. True when it
-     *  had to switch, so the caller knows to wait a frame before measuring. */
-    revealToolsTabFor?: (selector: string) => boolean;
   }
 }
 

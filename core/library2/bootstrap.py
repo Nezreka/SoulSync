@@ -870,6 +870,28 @@ def _fold_artist_twins_once(database: Any, conn: Any, *,
     return stats
 
 
+def _split_same_named_releases_once(database: Any, conn: Any) -> Dict[str, int]:
+    """#2110: albums of one name (weezer's three "weezer"s) a tag-only import
+    merged into one row get their own rows back, once per finished import.
+    the fix keeps new files apart, this heals the rows made before it."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    key = f"{state.get('finished_at') or ''}|same-named-releases"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (key,)).fetchone():
+        return {}
+    from core.library2.release_split import split_same_named_releases
+    stats = split_same_named_releases(conn)
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (key, int(stats.get("albums_made") or 0)))
+    conn.commit()
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -910,6 +932,10 @@ def run_deferred_backfills(database: Any, *,
                 database, conn, should_stop=should_stop)
             stats["artist_twins"] = _fold_artist_twins_once(
                 database, conn, should_stop=should_stop)
+            try:
+                stats["same_named_releases"] = _split_same_named_releases_once(database, conn)
+            except sqlite3.Error as exc:
+                logger.warning("same-named releases not split yet: %s", exc)
             # guests an older twin merge dropped from the kept album, once
             # (review 5 W2-WE-1)
             try:

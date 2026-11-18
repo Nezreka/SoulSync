@@ -8,7 +8,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
 
-Alternatively, if no keys exist yet, use the bootstrap endpoint:
+Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
 ```bash
 curl -X POST http://localhost:8008/api/v1/api-keys/bootstrap \
@@ -124,6 +124,18 @@ SoulSync supports multiple user profiles. Profile-scoped endpoints (watchlist, w
 
 If omitted, defaults to profile 1 (admin). Profile scoping applies to: watchlist, wishlist, and discovery endpoints.
 
+### What a member's session gets (web UI routes)
+
+What the server is doing is the admin's. A member's session is refused (`403`) these, and the web UI never asks:
+
+- `GET /api/system/stats` (downloads across the server, speed, uptime, memory) and its push, `dashboard:stats`, which only the admins' sockets get
+- `GET /api/repair/progress`, `GET /api/video/health`, `GET /api/video/bulk/status`
+- the diagnostics: `GET /api/debug-info`, `GET /api/logs/tail`, `/api/settings/log-level`, `/api/help/health`, `/api/help/bundle`, `/api/help/logs*`
+
+`GET /api/automations/progress` and the `automation:progress` push give a member the runs of their own automations only, never a system one.
+
+In the music library, `POST /api/library/v2/<entity>/<id>/search` (Automatic Search) and `/enhance` (Enhance Quality, Upgrade) download right away, so a profile that asks first is refused them; its way in is the Wishlist. `GET /api/library/v2/enabled` says what the caller may do: `can_wish`, `can_download`, and `can_grab` (an Interactive Search pick for a library row).
+
 ---
 
 ## MCP for AI clients
@@ -194,6 +206,40 @@ In the request app, set the Lidarr URL to `http://<host>:8008/lidarr` and paste 
 ### Supported routes
 
 All under `/lidarr/api/v1`: `system/status`, `qualityprofile`, `metadataprofile`, `rootfolder`, `tag`, `artist` (list, lookup, add, edit, editor, delete), `album` (list, lookup, add, edit, monitor, delete), `track`, `trackfile`, `command` (`AlbumSearch`, `ArtistSearch`, `RefreshArtist`; other commands are accepted and do nothing), `queue`, `history` and `wanted/missing`.
+
+---
+
+## Seerr compatible API
+
+Apps built for Seerr (Jellyseerr, Overseerr) can use SoulSync's video side instead. They browse and search through SoulSync's TMDB data, see what's already in your library, and their movie and show requests land on SoulSync's video wishlist. Built for **Litefin** and its Jellyfin plugin.
+
+### Turn it on
+
+Go to **Settings > System > SoulSync API > Seerr Compatible API**:
+
+1. Tick **Answer as Seerr at /seerr**. While it's off, every `/seerr` route answers `404`.
+2. Pick **Jellyfin users with no profile request as**.
+
+### Connect the app
+
+In the app, set the Seerr URL to `http://<host>:8008/seerr` and paste a SoulSync **admin** API key as the Seerr API key. For Litefin that's the **Seerr Integration** on the Litefin plugin's page in your Jellyfin dashboard. A read key gets `403`. The app talks to `/seerr/api/v1` like it would to a real Seerr.
+
+### Who asks
+
+Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin user under **Settings > Connections**, else the profile with the same name, else the profile picked above. A profile without the video side can't request, and a kids profile can't request a title over its rating cap.
+
+### What happens
+
+- A profile that can download gets it straight away: a movie goes on its video wishlist, and for a show every aired episode of the seasons asked for that isn't in the library yet. Asking for the newest season also follows the show, so its next episodes come too.
+- A profile that can't download files a video request that waits on the **Requests** page. SoulSync requests pick a whole-show policy, so when the seasons asked for aren't all, the first or the newest, the request asks for every season and the note says which ones were picked. The admin can change it when approving.
+- Request limits apply like they do in SoulSync.
+- Cards show **Available** when it's in your library, **Partially available** for a show with episodes missing, **Processing** when it's on a wishlist, followed, approved or downloading, and **Pending** while a request waits. It's the same status the video pages show on their posters.
+- Asking for something already on its way answers `409`, like Seerr does for a duplicate.
+- Downloads use your normal quality profiles. There are no Radarr or Sonarr servers to pick and no separate 4K request.
+
+### Supported routes
+
+All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `discover/movies` (plus `upcoming`, `studio`, `genre`), `discover/tv` (plus `upcoming`, `network`, `genre`), `discover/genreslider`, `search`, `movie` and `tv` (details, `similar`, `recommendations`), `person` (with `combined_credits`), `collection`, `request` (list, create, cancel) and `media`. Seerr's watch-later list, outside ratings and Radarr/Sonarr service lists answer empty, since SoulSync doesn't keep them.
 
 ---
 
@@ -1186,6 +1232,7 @@ List all watched artists for the current profile.
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
 | `follow_defaults` | bool | The artist uses the watchlist defaults. The `include_*` fields then show the defaults, which are the rules a scan applies |
+| `release_statuses` | string[]? | The MusicBrainz release statuses this artist lets through (`official`, `promotion`, `bootleg`, `pseudo-release`, `withdrawn`, `expunged`, `cancelled`). `null` = the library-wide list from the watchlist defaults |
 
 #### `POST /api/v1/watchlist`
 
@@ -1210,7 +1257,9 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`, `release_statuses`.
+
+`release_statuses` is a list of MusicBrainz statuses the artist lets through, or `null` to follow the library-wide list. A release group passes when any of its releases has one of them; a release from another source, or with no status, always passes. An empty list or an unknown status is a 400.
 
 Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 
@@ -1675,7 +1724,7 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 
 Session route (#2031). For the signed-in profile: `own_library` (the admin gave it a library of its own), `supported` (the active server can: Plex, Jellyfin, or Navidrome 0.58+), `message` (why not, or what is missing, e.g. no Navidrome login yet), `selected` (the picked library id) and `folders`: the Navidrome libraries the profile's own login sees (`getMusicFolders` as that user), each `{id, name, shared}`. `folders` is empty unless the profile has an own library on a supported server.
 
-The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type": "navidrome", "library_id": "2"}`. The id must be one the profile's own login sees and not the shared library's folder; otherwise `400`.
+The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type": "navidrome", "library_id": "2"}`. The id must be one the profile's own login sees and not the shared library's folder; otherwise `400`. For Jellyfin, `{"server_type": "jellyfin", "user_id": "..."}` must name a user the Jellyfin server lists (`400` otherwise, `503` when it can't be checked) that no other profile already is (`409`). `POST /api/profiles/me/plex-home-user` likewise answers `409` for a Plex home user another profile is linked to.
 
 `GET /api/profiles` also returns `own_library_unsupported_reason` (null when own libraries work on the active server). Turning a profile to `library_mode: "own"` on Navidrome needs Navidrome 0.58+ and the shared library's music folder picked in Settings.
 
@@ -2421,6 +2470,15 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 #### `GET /api/v1/video/downloads/history`
 
+#### Who may do what on the video downloads (web UI session API)
+
+- `GET /api/video/downloads/active`, `/downloads/history` and `/downloads/status?id=`: a member gets the grabs they started, an admin everyone's. Queue rows carry `can_cancel`.
+- `POST /api/video/downloads/cancel`: an admin any download, a member only one they started (`403` otherwise). An automatic grab has no owner, so it's the admin's.
+- `POST /downloads/clear`, `/downloads/remove`, `/downloads/recycle/restore`, `/downloads/recycle/purge`, `/downloads/history/clear`, `DELETE /downloads/history/{id}`, `POST /scan/request`, `/scan/stop`, `/scan/server`, and writes to `/discover/languages` and `/discover/providers-pref`: admin only.
+- `POST /youtube/follow`, `/youtube/playlist/follow`, `/youtube/subscriptions/import` and `/youtube/channel/{id}/settings`: need download rights.
+- A kids profile's rating cap holds on requests, wishlist and watchlist adds, manual search and grab, and the title reads (acquisition, history, title status, posters).
+- The video request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back.
+
 #### Release ranking (web UI session API)
 
 The video search the web UI runs (`POST /api/video/downloads/search`, `/downloads/search/start` and `GET /downloads/search/poll`) returns each result with:
@@ -2428,6 +2486,8 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 - `breakdown`: every factor that scored it, `[{group, label, points}]`. `group` is `quality`, `formats` or `tiebreak`.
 - `rank`: the values it's compared on, best first: `[accepted, quality, formats, tiebreak, size_fit, availability, size_bytes]`. Results come back sorted by it, and the wishlist, RSS sync, upgrades and download retries sort by the same values.
 - `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
+
+A `query` in the search body (`/downloads/search/start`, `/downloads/search`) is run as typed on every source: one text search, no ids or structured search added. Leave it out for the usual search.
 
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 
@@ -2549,7 +2609,7 @@ Revoke an API key by its UUID.
 
 #### `POST /api/v1/api-keys/bootstrap`
 
-Generate the first API key when none exist. **No authentication required.** Returns `403` if keys already exist.
+Generate the first API key when none exist. No API key needed, but the caller must be the admin: a signed-in admin session, or any request on a single-profile install with no login or launch PIN. Returns `403` if keys already exist or the caller isn't the admin.
 
 ```json
 {
@@ -2841,4 +2901,4 @@ curl -H "Authorization: Bearer sk_..." \
 | GET | `/api-keys` | List API keys |
 | POST | `/api-keys` | Generate new key |
 | DELETE | `/api-keys/<id>` | Revoke key |
-| POST | `/api-keys/bootstrap` | Bootstrap first key (no auth) |
+| POST | `/api-keys/bootstrap` | Bootstrap first key (no key, admin only) |

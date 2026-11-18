@@ -106,9 +106,10 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
-            // React-owned pages have no .page.active node — the shell's
-            // currentPage covers both worlds.
-            const activePage = document.querySelector('.page.active');
+            // React-owned pages render inside #webui-react-root (itself a .page)
+            // and have no page node of their own — the shell's currentPage
+            // covers both worlds.
+            const activePage = document.querySelector('.page.active:not(#webui-react-root)');
             const activeId = activePage
                 ? activePage.id.replace('-page', '')
                 : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -141,61 +142,8 @@ function applyWorkerOrbsSetting(enabled) {
     if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
 }
 
-function initAccentColorListeners() {
-    const presetSelect = document.getElementById('accent-preset');
-    const customGroup = document.getElementById('custom-color-group');
-    const customPicker = document.getElementById('accent-custom-color');
-    if (!presetSelect) return;
-
-    presetSelect.addEventListener('change', () => {
-        const val = presetSelect.value;
-        if (val === 'custom') {
-            if (customGroup) customGroup.style.display = '';
-            if (customPicker) applyAccentColor(customPicker.value);
-        } else {
-            if (customGroup) customGroup.style.display = 'none';
-            applyAccentColor(val);
-        }
-    });
-
-    if (customPicker) {
-        customPicker.addEventListener('input', () => {
-            applyAccentColor(customPicker.value);
-        });
-    }
-
-    // Particles toggle — apply immediately on change
-    const particlesCheckbox = document.getElementById('particles-enabled');
-    if (particlesCheckbox) {
-        particlesCheckbox.addEventListener('change', () => {
-            applyParticlesSetting(particlesCheckbox.checked);
-        });
-    }
-
-    // Worker orbs toggle — apply immediately on change
-    const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
-    if (workerOrbsCheckbox) {
-        workerOrbsCheckbox.addEventListener('change', () => {
-            applyWorkerOrbsSetting(workerOrbsCheckbox.checked);
-        });
-    }
-
-    // Reduce effects toggle — apply immediately on change
-    const reduceEffectsCheckbox = document.getElementById('reduce-effects-enabled');
-    if (reduceEffectsCheckbox) {
-        reduceEffectsCheckbox.addEventListener('change', () => {
-            applyReduceEffects(reduceEffectsCheckbox.checked);
-        });
-    }
-
-    // Max Performance toggle — apply immediately on change
-    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
-    if (maxPerfCheckbox) {
-        maxPerfCheckbox.addEventListener('change', () => {
-            applyMaxPerformance(maxPerfCheckbox.checked);
-        });
-    }
-}
+// (initAccentColorListeners lived here. The Appearance tab is React now and
+// calls applyAccentColor and the four appliers itself: appearance-tab.tsx)
 
 function applyReduceEffects(enabled) {
     if (enabled) {
@@ -215,7 +163,7 @@ function applyReduceEffects(enabled) {
         if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
     } else {
         // Restore only what the user's own toggles still allow.
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -277,7 +225,7 @@ function applyMaxPerformance(enabled) {
     } else {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
-        const activePage = document.querySelector('.page.active');
+        const activePage = document.querySelector('.page.active:not(#webui-react-root)');
         const activeId = activePage
             ? activePage.id.replace('-page', '')
             : (typeof currentPage !== 'undefined' ? currentPage : null);
@@ -517,6 +465,15 @@ function notifyProfileContextChanged() {
     window.dispatchEvent(new CustomEvent(PROFILE_CONTEXT_CHANGED_EVENT));
 }
 
+// an admin changed what this profile may do (src/shell/my-permissions.ts):
+// the sidebar follows without a reload (Requests for a new moderator, and
+// the body classes the download buttons hide on)
+window.addEventListener('ss:perms-changed', () => {
+    if (!currentProfile) return;
+    window.SoulSyncProfileNav?.apply(currentProfile);
+    window.SoulSyncFeatures?.apply();
+});
+
 function setCurrentProfile(profile) {
     currentProfile = profile;
     // Script-scoped let — unreachable from React modules, so the name is
@@ -547,6 +504,18 @@ const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? win
             // 403 restricted. one quiet toast every few seconds, not one per call
             if (res && res.status === 403) {
                 res.clone().json().then((body) => {
+                    // a permission the page thought they had (an admin just
+                    // changed it): the server's own words, and the map
+                    // refreshes so the control goes away
+                    if (body && body.error === 'not_allowed') {
+                        if (window.SoulSyncPerms) window.SoulSyncPerms.load({ force: true });
+                        if (Date.now() - restrictedToastAt < 4000) return;
+                        restrictedToastAt = Date.now();
+                        if (typeof showToast === 'function') {
+                            showToast(body.message || "That isn't part of your profile. Ask an admin if you'd like it.", 'info');
+                        }
+                        return;
+                    }
                     if (!body || body.restricted !== true) return;
                     if (Date.now() - restrictedToastAt < 4000) return;
                     restrictedToastAt = Date.now();
@@ -591,16 +560,21 @@ function normalizeProfilePageList(pageIds) {
 // always a music page the profile can open: the react router and the denied
 // page bounce both land here, so a home they can't see would loop or render
 // the page they were refused. video homes are handled at boot
-// (profileVideoHomePage).
+// (profileVideoHomePage), the video side's landing in video-side.js.
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
     const home = currentProfile.home_page ? normalizeProfilePageId(currentProfile.home_page) : '';
-    if (home && !home.startsWith('video-') && isPageAllowed(home)) return home;
-    if (currentProfile.is_admin) return 'dashboard';
-    if (isPageAllowed('discover')) return 'discover';
-    // discover is switched off for them: the first page they do have
-    const firstAllowed = PROFILE_PAGE_GROUPS[0].pages.find(pageId => isPageAllowed(pageId));
-    return firstAllowed || 'help';
+    const nav = window.SoulSyncProfileNav;
+    return nav.landingPage({
+        home: home && !home.startsWith('video-') ? home : '',
+        isAdmin: !!currentProfile.is_admin,
+        adminPage: 'dashboard',
+        // discover first, then the first page they have and haven't hidden
+        order: nav.MUSIC_LANDING,
+        allowed: isPageAllowed,
+        hidden: nav.featureHiddenPages(),
+        fallback: 'help',
+    });
 }
 
 // a video page picked as home, when the profile can still reach it
@@ -618,7 +592,12 @@ function isPageAllowed(pageId) {
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
     // requests: admins answer them, profiles without download rights make them
-    if (normalizedPageId === 'requests') return !!currentProfile.is_admin || !canDownload();
+    // (and moderators answer them, #2166: profile-nav.js holds the rule)
+    if (normalizedPageId === 'requests') {
+        const nav = window.SoulSyncProfileNav;
+        return nav && nav.requestsVisible ? nav.requestsVisible(currentProfile, 'music')
+            : (!!currentProfile.is_admin || !canDownload());
+    }
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -639,6 +618,13 @@ function isPageAllowed(pageId) {
 function canDownload() {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
+    // the server's permission map once it's in for this profile, so an
+    // admin's change reaches an open page (src/shell/my-permissions.ts).
+    // the profile's own column until then
+    const perms = window.SoulSyncPerms;
+    if (perms && perms.live() && perms.get().profileId === currentProfile.id) {
+        return perms.mode('music') === 'download';
+    }
     return currentProfile.can_download !== false && currentProfile.can_download !== 0;
 }
 
@@ -948,206 +934,8 @@ function showLaunchPinScreen() {
     });
 }
 
-// ── Security Settings Helpers ──────────────────────────────────────────
-
-async function saveLoginPassword() {
-    const input = document.getElementById('security-login-password');
-    const confirmInput = document.getElementById('security-login-password-confirm');
-    const msg = document.getElementById('security-login-password-msg');
-    const password = input?.value || '';
-    const confirm = confirmInput?.value || '';
-    const show = (text, ok) => {
-        if (!msg) return;
-        msg.textContent = text;
-        msg.style.color = ok ? '#4caf50' : '#ff5252';
-        msg.style.display = 'block';
-    };
-    if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
-    if (password !== confirm) { show('Passwords do not match', false); return; }
-    try {
-        const res = await fetch('/api/profiles/1/set-password', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            show('Admin login password saved', true);
-            if (input) { input.value = ''; input.placeholder = 'Enter a new password to change it'; }
-            if (confirmInput) confirmInput.value = '';
-            updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
-            const st = document.getElementById('security-login-password-status');
-            if (st) st.style.display = 'block';
-        }
-        else show(data.error || 'Failed to save password', false);
-    } catch (e) { show('Connection error', false); }
-}
-
-// Lock/unlock the "Require login" toggle based on whether the admin has a
-// password — makes the prerequisite (anti-lockout) visible instead of a
-// surprise 400 on save.
-function updateRequireLoginGate(hasPassword) {
-    const toggle = document.getElementById('security-require-login');
-    const wrap = document.getElementById('security-login-toggle-wrap');
-    const help = document.getElementById('security-require-login-help');
-    if (!toggle) return;
-    toggle.disabled = !hasPassword;
-    if (!hasPassword) toggle.checked = false;
-    if (wrap) wrap.classList.toggle('security-locked', !hasPassword);
-    if (help) {
-        help.innerHTML = hasPassword
-            ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
-            : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
-    }
-}
-
-// Reflect already-saved login credentials. Passwords are never sent to the
-// browser, so instead of an empty field (which looks unset after a refresh) we
-// show that one is set and pre-fill the saved recovery question.
-function applyLoginSavedState(profile) {
-    const hasPassword = profile?.has_password || false;
-    const hasRecovery = profile?.has_recovery || false;
-    const question = profile?.recovery_question || '';
-
-    const pwStatus = document.getElementById('security-login-password-status');
-    const pwField = document.getElementById('security-login-password');
-    const pwConfirm = document.getElementById('security-login-password-confirm');
-    if (pwStatus) pwStatus.style.display = hasPassword ? 'block' : 'none';
-    if (hasPassword) {
-        if (pwField) pwField.placeholder = 'Enter a new password to change it';
-        if (pwConfirm) pwConfirm.placeholder = 'Confirm new password';
-    }
-
-    const recStatus = document.getElementById('security-recovery-status');
-    const recSel = document.getElementById('security-recovery-question');
-    const recCustom = document.getElementById('security-recovery-custom');
-    const recAnswer = document.getElementById('security-recovery-answer');
-    if (recStatus) {
-        recStatus.style.display = hasRecovery ? 'block' : 'none';
-        recStatus.textContent = hasRecovery
-            ? ('✓ Recovery question saved' + (question ? ': “' + question + '”' : ''))
-            : '';
-    }
-    if (hasRecovery) {
-        if (recSel && question) {
-            recSel.value = question;            // preset options default value = their text
-            if (recSel.value !== question) {    // not a preset → custom question
-                recSel.value = '__custom__';
-                if (recCustom) { recCustom.style.display = 'block'; recCustom.value = question; }
-            }
-        }
-        if (recAnswer) recAnswer.placeholder = 'Enter a new answer to change it';
-    }
-}
-
-function handleRecoveryQuestionChange() {
-    const sel = document.getElementById('security-recovery-question');
-    const custom = document.getElementById('security-recovery-custom');
-    if (sel && custom) custom.style.display = (sel.value === '__custom__') ? 'block' : 'none';
-}
-
-async function saveRecoveryQuestion() {
-    const sel = document.getElementById('security-recovery-question');
-    const custom = document.getElementById('security-recovery-custom');
-    const answer = document.getElementById('security-recovery-answer')?.value || '';
-    const msg = document.getElementById('security-recovery-msg');
-    const show = (text, ok) => {
-        if (!msg) return;
-        msg.textContent = text;
-        msg.style.color = ok ? '#4caf50' : '#ff5252';
-        msg.style.display = 'block';
-    };
-    let question = sel?.value || '';
-    if (question === '__custom__') question = (custom?.value || '').trim();
-    if (!question) { show('Pick or type a question', false); return; }
-    if (!answer.trim()) { show('Enter an answer', false); return; }
-    try {
-        const res = await fetch('/api/profiles/1/set-recovery', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, answer }),
-        });
-        const data = await res.json();
-        if (data.success) {
-            show('Recovery question saved', true);
-            const a = document.getElementById('security-recovery-answer');
-            if (a) { a.value = ''; a.placeholder = 'Enter a new answer to change it'; }
-            const rst = document.getElementById('security-recovery-status');
-            if (rst) { rst.style.display = 'block'; rst.textContent = '✓ Recovery question saved: “' + question + '”'; }
-        }
-        else show(data.error || 'Failed to save', false);
-    } catch (e) { show('Connection error', false); }
-}
-
-async function saveSecurityPin() {
-    const pin = document.getElementById('security-new-pin').value;
-    const confirm = document.getElementById('security-confirm-pin').value;
-    const msg = document.getElementById('security-pin-msg');
-
-    const pinProblem = profilePinError(pin || '');
-    if (pinProblem) {
-        msg.textContent = pinProblem;
-        msg.style.display = 'block';
-        msg.style.color = '#ff5252';
-        return;
-    }
-    if (pin !== confirm) {
-        msg.textContent = 'PINs do not match';
-        msg.style.display = 'block';
-        msg.style.color = '#ff5252';
-        return;
-    }
-
-    try {
-        const res = await fetch('/api/profiles/1/set-pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            msg.textContent = 'PIN saved! You can now enable the lock screen.';
-            msg.style.color = '#4caf50';
-            msg.style.display = 'block';
-
-            // Update UI — hide setup, show change, enable toggle
-            document.getElementById('security-pin-setup').style.display = 'none';
-            document.getElementById('security-change-pin-section').style.display = 'block';
-            document.getElementById('security-require-pin').disabled = false;
-
-            // Clear inputs
-            document.getElementById('security-new-pin').value = '';
-            document.getElementById('security-confirm-pin').value = '';
-        } else {
-            msg.textContent = data.error || 'Failed to save PIN';
-            msg.style.color = '#ff5252';
-            msg.style.display = 'block';
-        }
-    } catch (e) {
-        msg.textContent = 'Connection error';
-        msg.style.color = '#ff5252';
-        msg.style.display = 'block';
-    }
-}
-
-function handleSecurityPinToggle(checkbox) {
-    // If trying to enable but no PIN, show the setup section
-    if (checkbox.checked) {
-        const setupSection = document.getElementById('security-pin-setup');
-        if (setupSection.style.display !== 'none' || checkbox.disabled) {
-            checkbox.checked = false;
-            setupSection.style.display = 'block';
-            document.getElementById('security-new-pin').focus();
-            return;
-        }
-    }
-    // Auto-save this setting
-    saveSettings(true);
-}
-
-function showChangeSecurityPin() {
-    document.getElementById('security-pin-setup').style.display = 'block';
-    document.getElementById('security-new-pin').focus();
-}
+// the Security & Access helpers (the PIN, the admin password, the recovery
+// question): the System tab is React (system-security.tsx)
 
 // ── Forgot PIN Recovery ────────────────────────────────────────────────
 
@@ -2002,12 +1790,21 @@ async function toggleProfileQuickSwitch() {
     openProfileQuickSwitch(button, profiles);
 }
 
+// who the quick switch offers: nobody for a member in login mode (#2162),
+// otherwise every other profile that can be opened
+function pfQuickSwitchTargets(profiles, me, loginMode) {
+    if (!me || (loginMode && !me.is_admin)) return [];
+    return (profiles || []).filter(p => p.id !== me.id && !(p.disabled && !p.is_admin));
+}
+
 function openProfileQuickSwitch(button, profiles) {
     pfCloseMenus(false);
     const me = currentProfile;
     if (!me) return;
-    // turned-off profiles can't be opened, so they aren't offered here
-    const others = profiles.filter(p => p.id !== me.id && !(p.disabled && !p.is_admin));
+    // turned-off profiles can't be opened, so they aren't offered here.
+    // in login mode a member signs in as themselves and nobody else, so
+    // there's no one to switch to (#2162; the server lists only them too)
+    const others = pfQuickSwitchTargets(profiles, me, profileLoginMode);
     const menu = pfEl('div', { class: 'pf-popover', id: 'profile-quick-switch', role: 'menu', 'aria-label': 'Profiles' });
 
     const item = (children, run, extra = '') => {
@@ -2073,6 +1870,13 @@ function updateProfileIndicator() {
     // for non-admins so it doesn't look interactive.
     const statusSection = document.querySelector('.status-section--clickable');
     if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
+    // and the panel itself is the admin's (#2155): which services the server
+    // runs on and whether they're up. /status stays open (search and the
+    // source pickers read it), only the panel goes.
+    const statusAdmin = !!currentProfile.is_admin || currentProfile.id === 1;
+    document.querySelectorAll('.status-section').forEach((el) => {
+        el.style.display = statusAdmin ? '' : 'none';
+    });
 
     // My Account (your media server identity + your own music services) is
     // inert for the admin, who uses the app's accounts and the full Settings
@@ -2087,42 +1891,12 @@ function updateProfileIndicator() {
         indicatorButton.setAttribute('aria-label', `${currentProfile.name}, switch profile`);
     }
 
-    // Filter sidebar pages based on profile permissions
-    document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
-        const page = btn.getAttribute('data-page');
-        if (page === 'hydrabase') return; // Managed by dev mode toggle
-        if (page === 'settings') {
-            // Settings always gated by is_admin
-            btn.style.display = currentProfile.is_admin ? '' : 'none';
-        } else if (page === 'requests') {
-            btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none';
-        } else if (page === 'help' || page === 'issues') {
-            btn.style.display = ''; // Always visible
-        } else if (currentProfile.id === 1) {
-            btn.style.display = ''; // Root admin sees all
-        } else {
-            // old rows still carry retired page ids (downloads, artists)
-            const ap = normalizeProfilePageList(currentProfile.allowed_pages);
-            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
-        }
-    });
-
-    // Video side — same model. Control surfaces (Import, Settings, Automations) are
-    // admin-only; the Overlay Studio launcher is admin-only via a body class (robust
-    // to the dashboard re-rendering it); everything else is a per-profile page toggle
-    // sharing the same allowed_pages list. Help/Issues always visible.
-    const VIDEO_ADMIN_ONLY = ['video-import', 'video-settings', 'video-automations'];
-    document.querySelectorAll('.video-nav .nav-button[data-video-page]').forEach(btn => {
-        const page = btn.getAttribute('data-video-page');
-        if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
-        if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
-        // requests: admins answer them, profiles without download rights make
-        // them. same rule as the music side's requests, not a page toggle
-        if (page === 'video-requests') { btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none'; return; }
-        if (currentProfile.id === 1) { btn.style.display = ''; return; }
-        const ap = currentProfile.allowed_pages;
-        btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
-    });
+    // the sidebar, cut down to what this profile may open (profile-nav.js
+    // holds the rules; the server-rendered profile already ran them before
+    // first paint, this is the authoritative pass and every profile switch)
+    window.SoulSyncProfileNav.apply(currentProfile);
+    // the Overlay Studio launcher is admin-only via a body class (robust to
+    // the dashboard re-rendering it)
     document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
 
     // what this profile chose to see (#1909). goes on top of the permission
@@ -2317,7 +2091,21 @@ function _pfSummary(p, loginMode) {
     return { text: bits.join(' · '), warn };
 }
 
+// Settings > People (#2166) is where people and access live now. the old
+// Profiles modal below stays only for when the settings bundle isn't there
+function pfOpenPeople(pill) {
+    if (typeof window.openPeopleSettings !== 'function') return false;
+    pfCloseMenus(false);
+    const picker = document.getElementById('profile-picker-overlay');
+    if (currentProfile && picker && picker.style.display !== 'none') hideProfilePicker();
+    const manage = document.getElementById('profile-manage-panel');
+    if (manage && manage.childElementCount) pfCloseLayer(manage);
+    window.openPeopleSettings(pill);
+    return true;
+}
+
 async function openProfileManager() {
+    if (pfOpenPeople()) return;
     pfCloseMenus(false);
     const layer = document.getElementById('profile-manage-panel');
     layer.innerHTML = '';
@@ -2443,6 +2231,30 @@ async function loadProfileManageList() {
                 add,
             ]));
         }
+    }
+
+    // what new people see is each template's Sidebar & look now (#2166)
+    if (me && me.is_admin && typeof window.openPeopleSettings === 'function') {
+        const open = pfEl('button', { type: 'button', class: 'pf-btn', id: 'pf-feature-defaults-btn', text: 'Open templates' });
+        open.addEventListener('click', () => pfOpenPeople('templates'));
+        list.append(pfEl('div', { class: 'pf-nudge', id: 'pf-feature-defaults' }, [
+            pfEl('div', {}, [
+                pfEl('strong', { text: 'What new people see' }),
+                pfEl('span', { text: 'Each template has its own Sidebar & look, and People > Templates sets the one new people start as.' }),
+            ]),
+            open,
+        ]));
+    } else if (me && me.is_admin) {
+        // no settings bundle: the old global default, as before (#2157)
+        const line = pfEl('span', { text: 'Everything SoulSync has.' });
+        const change = pfEl('button', { type: 'button', class: 'pf-btn', id: 'pf-feature-defaults-btn', text: 'Change' });
+        const fill = (d) => { line.textContent = `${pfFeaturesLine(d, d.off, d.locked)}. Profiles that never picked their own follow it.`; };
+        change.addEventListener('click', () => openFeatureDefaults(fill));
+        list.append(pfEl('div', { class: 'pf-nudge', id: 'pf-feature-defaults' }, [
+            pfEl('div', {}, [pfEl('strong', { text: 'What new profiles see' }), line]),
+            change,
+        ]));
+        fetch('/api/profiles/feature-defaults').then(pfReadJson).then(d => { if (d && d.success) fill(d); }).catch(() => {});
     }
 
     const grid = pfEl('div', { class: 'pf-cards' });
@@ -2614,44 +2426,13 @@ async function revokeInvite(inv) {
 function openInviteCreator() {
     const modal = pfModal({
         title: 'Create an invite link',
-        subtitle: 'Whoever opens it picks a name and joins with the access you choose here.',
+        subtitle: 'Whoever opens it picks a name and joins following the template you choose here.',
         size: 'small', layerClass: 'pf-layer--small',
     });
-    let preset = PROFILE_PRESETS[0];
     let hours = 72;
 
-    const presets = pfEl('div', { class: 'pf-presets pf-presets--2', role: 'radiogroup', 'aria-label': 'Access' });
-    const presetButtons = PROFILE_PRESETS.map(pr => {
-        const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio' }, [
-            pfEl('span', { class: 'pf-preset-name', text: pr.name }),
-            pfEl('span', { class: 'pf-preset-desc', text: pr.desc }),
-        ]);
-        btn.addEventListener('click', () => {
-            preset = pr;
-            // a preset with other sides redraws the page list for them
-            const sidesChanged = more.sides !== pr.sides;
-            more.sides = pr.sides;
-            more.can_download = pr.can_download;
-            if (sidesChanged) pages.render();
-            limit.sync();
-            sync();
-        });
-        presets.append(btn);
-        return [btn, pr];
-    });
-    // "more": the same page list and request limit the editor has
-    const more = {
-        sides: preset.sides, can_download: preset.can_download, allowed_pages: null,
-        request_limit: 0, request_limit_days: 7,
-    };
-    const pages = pfPagePicker(more);
-    const limit = pfLimitRow(more);
-    const moreBox = pfEl('details', { class: 'pf-details pf-invite-more' }, [
-        pfEl('summary', { text: 'More' }),
-        pfEl('div', { class: 'pf-section-title', text: 'Pages' }), pages.box,
-        pfEl('div', { class: 'pf-section-title', text: 'Limits' }),
-        pfEl('div', { class: 'pf-group' }, limit.row),
-    ]);
+    // what they start as (#2166): a template, fine-tuned per person later
+    const templatePick = pfTemplatePicker({ label: 'They start as' });
     const noteId = 'pf-invite-note-' + (++_pfUid);
     const note = pfEl('input', { type: 'text', id: noteId, class: 'pf-input', maxlength: '200', autocomplete: 'off', placeholder: 'For Kim' });
     const expiry = pfEl('div', { class: 'pf-seg', role: 'group', 'aria-label': 'Runs out after' });
@@ -2663,7 +2444,8 @@ function openInviteCreator() {
     });
     const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
     const form = pfEl('div', {}, [
-        pfEl('div', { class: 'pf-section-title', text: 'Access' }), presets, moreBox,
+        pfEl('div', { class: 'pf-section-title', text: 'They start as' }), templatePick.box,
+        pfEl('p', { class: 'pf-help', text: 'Fine-tune anything in their permissions once they join.' }),
         pfEl('div', { class: 'pf-field', style: 'margin-top:18px' }, [
             pfEl('label', { class: 'pf-label', for: noteId, text: 'Note (optional)' }), note,
             pfEl('p', { class: 'pf-help', text: 'Only you see it, to tell your links apart.' }),
@@ -2674,7 +2456,6 @@ function openInviteCreator() {
     modal.body.append(form);
 
     function sync() {
-        presetButtons.forEach(([btn, pr]) => btn.setAttribute('aria-checked', String(pr === preset)));
         expiryButtons.forEach(([btn, h]) => btn.setAttribute('aria-pressed', String(h === hours)));
     }
     sync();
@@ -2683,16 +2464,17 @@ function openInviteCreator() {
     const create = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Create link' });
     create.addEventListener('click', async () => {
         error.textContent = '';
+        const template = templatePick.value();
+        if (!template) {
+            error.textContent = 'Pick the template they start as.';
+            return;
+        }
         create.disabled = true;
         try {
             const res = await fetch('/api/profiles/invites', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    preset: {
-                        allowed_sides: preset.sides, can_download: preset.can_download, allowed_pages: more.allowed_pages,
-                        hide_explicit: preset.hide_explicit, max_rating: preset.max_rating || null,
-                        request_limit: more.request_limit, request_limit_days: more.request_limit_days,
-                    },
+                    preset: { template_id: template.id },
                     note: note.value.trim() || undefined,
                     expires_hours: hours,
                 }),
@@ -2746,7 +2528,8 @@ function openInviteCreator() {
         setTimeout(() => copy.focus(), 0);
     }
 
-    modal.open(() => presetButtons[0][0]);
+    modal.open(() => note);
+    templatePick.ready.then(() => templatePick.focus());
 }
 
 // ── Activity: the admin log ────────────────────────────────────────────
@@ -2779,6 +2562,8 @@ function pfAuditSentence(entry) {
         case 'avatar_changed': return `${actor} changed ${theirs} picture`;
         case 'profile_disabled': return `${actor} turned ${theirs} profile off`;
         case 'profile_enabled': return `${actor} turned ${theirs} profile back on`;
+        case 'features_changed': return `${actor} changed what ${target} sees`;
+        case 'feature_defaults_changed': return `${actor} changed what new profiles see`;
         case 'device_signed_out': {
             // the device's label rides in detail when the server keeps it
             const where = entry.detail ? ` on ${entry.detail}` : ' on one device';
@@ -3130,6 +2915,62 @@ const PROFILE_PRESETS = [
     { id: 'guest', name: 'Guest', desc: 'Listens to music, nothing else', sides: 'music', can_download: false, hide_explicit: false, max_rating: '' },
 ];
 
+// templates (#2166): what a new person starts from. one radio card per
+// template, the sign-up template picked first. `ready` settles once the list
+// is in (or failed: then value() is null and the box says so)
+function pfTemplatePicker({ label = 'Start from' } = {}) {
+    const box = pfEl('div', { class: 'pf-presets', role: 'radiogroup', 'aria-label': label });
+    box.append(pfEl('p', { class: 'pf-help', text: 'Loading templates…' }));
+    let picked = null;
+    let list = [];
+    const buttons = [];
+    function sync() {
+        buttons.forEach(([btn, t]) => {
+            const on = picked != null && t.id === picked.id;
+            btn.setAttribute('aria-checked', String(on));
+            btn.tabIndex = on ? 0 : -1;
+        });
+    }
+    const ready = fetch('/api/permissions/templates', { headers: { Accept: 'application/json' } })
+        .then(pfReadJson)
+        .then((d) => {
+            if (!d || !d.success || !Array.isArray(d.templates) || !d.templates.length) throw new Error('none');
+            list = d.templates;
+            box.innerHTML = '';
+            list.forEach((t) => {
+                const n = Array.isArray(t.followers) ? t.followers.length : 0;
+                const desc = t.description || (n ? `${n} ${n === 1 ? 'person follows' : 'people follow'} it` : '');
+                const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio', 'data-template-id': String(t.id) }, [
+                    pfEl('span', { class: 'pf-preset-name', text: t.name }),
+                    desc ? pfEl('span', { class: 'pf-preset-desc', text: desc }) : null,
+                ]);
+                btn.addEventListener('click', () => { picked = t; sync(); });
+                btn.addEventListener('keydown', (e) => {
+                    const i = buttons.findIndex(([b]) => b === btn);
+                    let next = -1;
+                    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % buttons.length;
+                    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + buttons.length) % buttons.length;
+                    if (next < 0) return;
+                    e.preventDefault();
+                    picked = buttons[next][1];
+                    sync();
+                    buttons[next][0].focus();
+                });
+                box.append(btn);
+                buttons.push([btn, t]);
+            });
+            picked = list.find((t) => t.id === d.signup_template_id) || list[0];
+            sync();
+            return true;
+        })
+        .catch(() => {
+            box.innerHTML = '';
+            box.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load the templates. Close this and try again." }));
+            return false;
+        });
+    return { box, ready, value: () => picked, focus: () => { const on = buttons.find(([, t]) => picked && t.id === picked.id); if (on) on[0].focus(); } };
+}
+
 // which preset a profile's settings line up with, if any
 function pfPresetOf(p) {
     if (!p || p.is_admin) return null;
@@ -3152,6 +2993,128 @@ function pfLimitsLine(p) {
     const limit = pfLimitText(p.request_limit, p.request_limit_days);
     if (limit) bits.push(limit);
     return bits.join(' · ');
+}
+
+// ── what a profile sees (#2157) ────────────────────────────────────────
+// the same list and presets as Customize (core/ui_features.py), set by an
+// admin for someone else or for new profiles, with a lock. it hides, it never
+// grants: what they can open is still the page list above.
+
+// the switches worth showing a profile with these sides and pages. mirrors
+// ui_features.offered so the list follows the form before it's saved
+function pfFeaturesOffered(features, sides, allowedPages) {
+    return (features || []).filter(f => {
+        // a video-only profile can't hide its only side
+        if (f.id === 'video' && sides === 'video') return false;
+        const pages = f.pages.filter(pg => sides === 'both' || profilePageSide(pg) === sides);
+        if (f.pages.length && !pages.length) return false;
+        if (!f.pages.length && sides === 'video') return false;   // music videos live in music search
+        if (Array.isArray(allowedPages) && pages.length && !pages.some(pg => allowedPages.includes(pg))) return false;
+        return true;
+    }).map(f => f.id);
+}
+
+// "Simple, locked" / "Everything" / "3 parts hidden"
+function pfFeaturesLine(payload, off, locked) {
+    const list = off || [];
+    const preset = ((payload && payload.presets) || []).find(pr => pr.off.length === list.length && pr.off.every(x => list.includes(x)));
+    const what = preset ? preset.label : `${list.length} ${list.length === 1 ? 'part' : 'parts'} hidden`;
+    return locked ? `${what}, locked` : what;
+}
+
+// presets, one switch per part, and the lock. fst holds {off, locked} and
+// gets dirty on any change, offDirty / lockDirty say which half (#2164);
+// offered() says which switches show right now
+function pfFeatureChooser(payload, fst, { offered = null, lockTitle = 'Lock it', lockDesc = '', onChange = null } = {}) {
+    const box = pfEl('div');
+    const changed = (redraw, half = 'off') => {
+        fst.dirty = true;
+        if (half === 'lock') fst.lockDirty = true; else fst.offDirty = true;
+        if (redraw) render();
+        if (onChange) onChange();
+    };
+    function render() {
+        box.innerHTML = '';
+        const presets = pfEl('div', { class: 'pf-presets pf-presets--2', role: 'radiogroup', 'aria-label': 'Start from' });
+        (payload.presets || []).forEach(pr => {
+            const same = pr.off.length === fst.off.length && pr.off.every(x => fst.off.includes(x));
+            const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio', 'aria-checked': String(same) }, [
+                pfEl('span', { class: 'pf-preset-name', text: pr.label }),
+                pfEl('span', { class: 'pf-preset-desc', text: pr.desc }),
+            ]);
+            btn.addEventListener('click', () => { fst.off = pr.off.slice(); changed(true); });
+            presets.append(btn);
+        });
+        box.append(presets);
+        const shown = typeof offered === 'function' ? offered() : null;
+        (payload.groups || []).forEach(group => {
+            const rows = (payload.features || []).filter(f => f.group === group.id
+                && (!shown || shown.includes(f.id))
+                // the video side's own switches mean nothing while it's off
+                && !(f.group === 'video' && fst.off.includes('video')));
+            if (!rows.length) return;
+            box.append(pfEl('div', { class: 'pf-pages-group', text: group.label }));
+            box.append(pfEl('div', { class: 'pf-group' }, rows.map(f => pfSwitch({
+                title: f.label, desc: f.desc, checked: !fst.off.includes(f.id),
+                onChange: (on) => {
+                    fst.off = on ? fst.off.filter(x => x !== f.id) : fst.off.concat(f.id);
+                    changed(f.id === 'video');
+                },
+            }).row)));
+        });
+        const lock = pfSwitch({ title: lockTitle, desc: lockDesc, checked: fst.locked, onChange: (on) => { fst.locked = on; changed(false, 'lock'); } });
+        box.append(pfEl('div', { class: 'pf-group', style: 'margin-top:12px' }, lock.row));
+    }
+    render();
+    return { box, render };
+}
+
+// what new profiles see, and every profile that never picked its own
+async function openFeatureDefaults(onSaved = null) {
+    const modal = pfModal({
+        title: 'What new profiles see',
+        subtitle: 'Every profile that never picked its own follows this too. Admins always choose their own.',
+        layerClass: 'pf-layer--small',
+    });
+    const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
+    const cancel = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Cancel', onclick: () => modal.close() });
+    const save = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Save', disabled: true });
+    modal.foot.append(cancel, save);
+    modal.open();
+    let payload;
+    try {
+        const res = await fetch('/api/profiles/feature-defaults');
+        payload = await pfReadJson(res);
+        if (!res.ok || !payload.success) throw new Error(payload.error || "Couldn't load it");
+    } catch (e) {
+        modal.body.append(pfEl('p', { class: 'pf-form-error', text: e.message || 'Connection error' }));
+        return;
+    }
+    const fst = { off: (payload.off || []).slice(), locked: !!payload.locked, dirty: false, reset: false };
+    const chooser = pfFeatureChooser(payload, fst, {
+        lockTitle: 'Lock it',
+        lockDesc: "They see this, can't change it and don't get Customize. Anything they picked before is set aside. You still can, from their profile.",
+    });
+    modal.body.append(chooser.box, error);
+    save.disabled = false;
+    save.addEventListener('click', async () => {
+        error.textContent = '';
+        save.disabled = true;
+        try {
+            const res = await fetch('/api/profiles/feature-defaults', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ off: fst.off, locked: fst.locked }),
+            });
+            const data = await pfReadJson(res);
+            if (!res.ok || !data.success) throw new Error(data.error || "That didn't save");
+            modal.close();
+            showToast('Saved', 'success');
+            if (onSaved) onSaved(data);
+        } catch (e) {
+            error.textContent = e.message || 'Connection error';
+            save.disabled = false;
+        }
+    });
 }
 
 // the page checklist, shared by the editor and the invite modal. st holds
@@ -3223,7 +3186,7 @@ function pfLimitRow(st) {
     return { row, sync };
 }
 
-async function openProfileEditor({ mode = 'create', profile = null } = {}) {
+async function openProfileEditor({ mode = 'create', profile = null, identityOnly = false } = {}) {
     pfCloseMenus(false);
     const me = currentProfile;
     if (!me) return;
@@ -3232,6 +3195,13 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const isSelf = mode === 'self';
     const adminEditsOther = !isCreate && !isSelf && !!me.is_admin;
     const p = profile || {};
+    // what someone can do lives in the person editor sheet now (#2166).
+    // this editor keeps who they are, the PIN and the library folder, and
+    // the sheet sends people here for those (identityOnly). no sheet (the
+    // react bundle didn't load): the old editor below still has every field
+    if (adminEditsOther && !identityOnly && typeof window.openPersonEditor === 'function'
+        && window.openPersonEditor(p.id)) return;
+    const permsElsewhere = adminEditsOther && identityOnly && typeof window.openPersonEditor === 'function';
     const loginMode = _pfManageState ? _pfManageState.loginMode : profileLoginMode;
     const librarySupported = _pfManageState ? _pfManageState.librarySupported : true;
     const libraryAvailable = _pfManageState ? _pfManageState.libraryAvailable !== false : true;
@@ -3269,10 +3239,20 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     };
     const original = { ...st };
 
+    // what shows for them (#2157), filled once it loads
+    let featureState = null;
+    // add: the template they start from (#2166)
+    let templatePick = null;
+    let featureChooser = null;
+
     const title = isCreate ? 'Add a profile' : isSelf ? 'Your profile' : `Edit ${p.name}`;
-    const modal = pfModal({ title, size: '', layerClass: 'pf-layer--editor', dismissable: false });
+    // from the sheet, closing comes back to it
+    const modal = pfModal({
+        title, size: '', layerClass: 'pf-layer--editor', dismissable: false,
+        onClose: permsElsewhere ? () => setTimeout(() => window.openPersonEditor(p.id), 0) : null,
+    });
     const stepIds = ['identity', 'access'];
-    const stepNames = isSelf ? ['Profile', 'Sign-in'] : ['Who', 'Access'];
+    const stepNames = isSelf ? ['Profile', 'Sign-in'] : permsElsewhere ? ['Who', 'PIN & library'] : isCreate ? ['Who', 'Start from'] : ['Who', 'Access'];
     let step = 0;
     let furthest = isCreate ? 0 : 1;
 
@@ -3435,6 +3415,32 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const passwordError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
     passwordInput.addEventListener('input', () => { st.password = passwordInput.value; passwordError.textContent = ''; });
 
+    // own library (#1199): the switch and the folder, an existing profile only
+    function ownLibraryGroup() {
+        const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
+        folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
+        const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
+            folderInput,
+            pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex, Jellyfin or Navidrome (0.58+, give their Navidrome user only that library) and pick that library under their account.' }),
+        ]);
+        const inactive = !librarySupported;
+        // parked beats unsupported in the message: the server can be the
+        // right one and the feature still be off, and a control that
+        // cannot succeed has to say so rather than fail on save
+        const parked = !libraryAvailable;
+        const ownSwitch = pfSwitch({
+            title: 'Own library',
+            desc: parked ? 'Not available in this build yet.'
+                : inactive ? `${libraryReason || 'Needs Plex, Jellyfin or Navidrome 0.58+.'} Until then their downloads go to the shared folder.`
+                : 'Their downloads go to their own folder and their own server library.',
+            checked: st.library_mode === 'own',
+            disabled: parked || (inactive && st.library_mode !== 'own'),
+            onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
+        });
+        folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
+        return pfEl('div', { class: 'pf-group', style: 'margin-top:4px' }, [ownSwitch.row, folderBox]);
+    }
+
     if (isSelf) {
         pane2.append(
             pfEl('div', { class: 'pf-section-title', text: 'Privacy' }),
@@ -3481,6 +3487,36 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             signOutOthers,
         ]));
         pane2.append(pfEl('div', { class: 'pf-section-title', text: 'This device' }), pfEl('div', { class: 'pf-group' }, deviceRows));
+    } else if (permsElsewhere) {
+        // who they are, their PIN and their folder. templates, downloads,
+        // ratings, quality and the sidebar are one click away in the sheet
+        const openPerms = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Open permissions' });
+        openPerms.addEventListener('click', () => modal.close());
+        pane2.append(
+            pfEl('div', { class: 'pf-nudge', id: 'pf-open-permissions' }, [
+                pfEl('div', {}, [
+                    pfEl('strong', { text: 'What they can do' }),
+                    pfEl('span', { text: 'Templates, downloads, ratings, quality and their sidebar are in their permissions. Closing this goes back there.' }),
+                ]),
+                openPerms,
+            ]),
+            pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
+            pfEl('div', { class: 'pf-section-title', text: 'Library' }), ownLibraryGroup(),
+        );
+    } else if (isCreate) {
+        // a new person follows a template (#2166): pick one here, fine-tune
+        // anything in their permissions once they exist
+        templatePick = pfTemplatePicker();
+        pane2.append(
+            pfEl('div', { class: 'pf-section-title', text: 'Start from' }), templatePick.box,
+            pfEl('p', { class: 'pf-help', text: "Fine-tune anything in their permissions once they're added." }),
+            pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
+        );
+        if (loginMode) {
+            pane2.append(pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
+                pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
+                    pfEl('p', { class: 'pf-help', text: 'Login mode is on, so they need one to sign in.' })]));
+        }
     } else {
         // admin switch (editing someone else only)
         const accessBox = pfEl('div');
@@ -3564,42 +3600,37 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             syncAccess();
         }
 
-        // advanced: the page list, the home page, own library
+        // the page list, the home page, own library
         const pagePicker = pfPagePicker(st, () => renderHomeOptions());
         const pagesBox = pagePicker.box;
         const renderPages = pagePicker.render;
 
-        const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: 'Choose pages' })]);
-        details.append(pagesBox, homeField);
-        if (!isCreate) {
-            const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
-            folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
-            const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
-                folderInput,
-                pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex, Jellyfin or Navidrome (0.58+, give their Navidrome user only that library) and pick that library under their account.' }),
-            ]);
-            const inactive = !librarySupported;
-            // parked beats unsupported in the message: the server can be the
-            // right one and the feature still be off, and a control that
-            // cannot succeed has to say so rather than fail on save
-            const parked = !libraryAvailable;
-            const ownSwitch = pfSwitch({
-                title: 'Own library',
-                desc: parked ? 'Not available in this build yet.'
-                    : inactive ? `${libraryReason || 'Needs Plex, Jellyfin or Navidrome 0.58+.'} Until then their downloads go to the shared folder.`
-                    : 'Their downloads go to their own folder and their own server library.',
-                checked: st.library_mode === 'own',
-                disabled: parked || (inactive && st.library_mode !== 'own'),
-                onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
-            });
-            folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
-            details.append(pfEl('div', { class: 'pf-group', style: 'margin-top:4px' }, [ownSwitch.row, folderBox]));
-        }
+        // the page list sits with the sides: both are what they can open (#2164)
+        const pagesSummary = pfEl('summary');
+        const pagesDetails = pfEl('details', { class: 'pf-details', style: 'margin-top:10px' }, [pagesSummary, pagesBox]);
+        const syncPagesSummary = () => { pagesSummary.textContent = pfPagesSummary(st); };
+        pagesBox.addEventListener('change', syncPagesSummary);
+        const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: isCreate ? 'Home page' : 'Home page and library' })]);
+        details.append(homeField);
+        if (!isCreate) details.append(ownLibraryGroup());
 
+        // what shows for them (#2157): an existing profile only, a new one
+        // starts with what new profiles see
+        const featuresBox = pfEl('div');
+        if (adminEditsOther) {
+            featuresBox.append(pfEl('p', { class: 'pf-help', text: 'Loading…' }));
+            _pfLoadProfileFeatures(p.id, featuresBox, st, (fs, chooser) => { featureState = fs; featureChooser = chooser; });
+        } else if (isCreate) {
+            featuresBox.append(pfEl('p', { class: 'pf-help', text: 'They start with what new profiles see. Change it from their profile once they exist.' }));
+        }
+        // access first, then what shows of it: two layers, one place (#2164)
         const accessParts = [
             pfEl('div', { class: 'pf-section-title', text: 'Start from' }), presets,
-            pfEl('div', { class: 'pf-section-title', text: 'What they can use' }),
+            pfEl('div', { class: 'pf-section-title', text: 'What they can open' }),
+            pfEl('p', { class: 'pf-help', text: "Anything off here is gone for them: not in their sidebar, and SoulSync refuses it." }),
             pfEl('div', { class: 'pf-group' }, [musicSwitch.row, videoSwitch.row, sideError]),
+            pagesDetails,
+            pfEl('div', { class: 'pf-section-title', text: 'What shows in their sidebar' }), featuresBox,
             pfEl('div', { class: 'pf-section-title', text: 'Downloads' }),
             pfEl('div', { class: 'pf-group' }, dlSwitch.row),
             pfEl('div', { class: 'pf-section-title', text: 'Kids & limits' }),
@@ -3641,7 +3672,10 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             explicitSwitch.row.style.display = st.sides === 'video' ? 'none' : '';
             ratingRow.style.display = st.sides === 'music' ? 'none' : '';
             renderPages();
+            syncPagesSummary();
             renderHomeOptions();
+            // the switches follow the sides and pages picked above
+            if (featureChooser) featureChooser.render();
         }
         if (!isCreate) st.preset = _pfMatchPreset();
         syncAccess();
@@ -3789,8 +3823,16 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     }
 
     async function submitCreate() {
+        const template = templatePick && templatePick.value();
+        if (!template) {
+            formError.textContent = "Pick a template they start from. If none showed, close this and try again.";
+            goTo(1);
+            return;
+        }
+        // made small (music only, asks first) and then put on the template,
+        // so a failure in between never leaves them with more than that
         const body = {
-            ...identityPayload(), ...accessPayload(),
+            ...identityPayload(), can_download: false,
             pin: st.pinOn ? st.pin : undefined,
             password: st.password || undefined,
         };
@@ -3808,21 +3850,41 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             }
             return;
         }
-        if (st.avatarFile && created.profile_id) {
+        const newId = created.profile_id;
+        const problems = [];
+        try {
+            await send(`/api/profiles/${newId}/permissions`, 'PUT', { template_id: template.id, reset: 'all' });
+        } catch (e) {
+            // the profile exists; it just isn't on the template yet
+            problems.push(`they don't follow ${template.name} yet (${e.message || 'connection error'}), set it in their permissions`);
+        }
+        if (st.avatarFile && newId) {
             try {
-                await uploadAvatar(created.profile_id);
+                await uploadAvatar(newId);
             } catch (e) {
-                // the profile is made; say so, and don't pretend the picture is too
-                modal.close();
-                showToast(`${body.name} is ready, but the picture didn't upload: ${e.message}`, 'warning');
-                _pfAfterSave();
-                return;
+                problems.push(`the picture didn't upload: ${e.message}`);
             }
         }
         clearPicked();
         modal.close();
-        showToast(`${body.name} is ready`, 'success');
         _pfAfterSave();
+        if (problems.length) {
+            showToast(`${body.name} is ready, but ${problems.join('; ')}`, 'warning');
+        } else {
+            showToast(`${body.name} is ready and follows ${template.name}`, 'success');
+        }
+        // the template is a start: offer the sheet to fine-tune it
+        if (newId && typeof window.openPersonEditor === 'function' && typeof showConfirmDialog === 'function') {
+            const go = await showConfirmDialog({
+                title: `${body.name} is ready`,
+                message: problems.length
+                    ? `Open their permissions to finish setting them up.`
+                    : `They follow ${template.name}. Fine-tune anything for them now, or later from People.`,
+                confirmText: 'Open permissions',
+                cancelText: 'Done',
+            });
+            if (go) window.openPersonEditor(newId);
+        }
     }
 
     // one PUT for what changed, then the picture, the pin and the password on
@@ -3901,6 +3963,14 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
                 failed.push(['PIN', e.message]);
             }
         }
+        if (adminEditsOther && !st.is_admin && featureState && featureState.dirty) {
+            try {
+                await send(`/api/profiles/${targetId}/features`, 'POST', pfFeaturesBody(featureState));
+                saved.push('what shows');
+            } catch (e) {
+                failed.push(['what shows', e.message]);
+            }
+        }
         if (isSelf && st.password) {
             try {
                 const data = await send(`/api/profiles/${targetId}/set-password`, 'POST', { password: st.password });
@@ -3925,6 +3995,94 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
 
     goTo(0);
     modal.open(nameInput);
+}
+
+// "Pages: all of them" / "Pages: 12 of 23", the page list's summary line
+function pfPagesSummary(st) {
+    const pages = PROFILE_PAGE_GROUPS.filter(g => _pfSidesAllow(st.sides, g.side)).flatMap(g => g.pages);
+    if (!Array.isArray(st.allowed_pages)) return 'Pages: all of them';
+    const on = pages.filter(pg => st.allowed_pages.includes(pg)).length;
+    return `Pages: ${on} of ${pages.length}`;
+}
+
+// what the editor sends for "what shows" (#2164): only the halves the admin
+// touched, so flipping the lock alone doesn't pin a copy of the default
+function pfFeaturesBody(fst) {
+    const body = {};
+    if (fst.reset) body.reset = true;
+    if (fst.offDirty) body.off = fst.off;
+    if (fst.lockDirty) body.locked = fst.locked;
+    return body;
+}
+
+// the editor's "what shows" section for one profile (#2157). the switches
+// are the admin's set for them (what a lock shows), never their own pick:
+// that one is named on its own line so it can't pass for the admin's (#2164)
+async function _pfLoadProfileFeatures(profileId, box, st, ready) {
+    let payload;
+    try {
+        const res = await fetch(`/api/profiles/${profileId}/features`);
+        payload = await pfReadJson(res);
+        if (!res.ok || !payload.success) throw new Error(payload.error || "Couldn't load it");
+    } catch (e) {
+        box.innerHTML = '';
+        box.append(pfEl('p', { class: 'pf-form-error', text: `Couldn't load what shows for them: ${e.message || 'connection error'}` }));
+        return;
+    }
+    const setOff = Array.isArray(payload.set_off) ? payload.set_off : (payload.off || []);
+    const fst = {
+        off: setOff.slice(), locked: !!payload.locked,
+        dirty: false, offDirty: false, lockDirty: false, reset: false,
+        // the switches follow the default until an admin sets this profile
+        follows: payload.admin_set === undefined ? !!payload.follows_default : !payload.admin_set,
+    };
+    const own = Array.isArray(payload.own_off) ? payload.own_off : null;
+    const status = pfEl('span', { class: 'pf-switch-desc' });
+    const ownNote = pfEl('p', { class: 'pf-note', style: 'margin:0 0 10px' });
+    const resetBtn = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Reset to default' });
+    const syncStatus = () => {
+        const following = (fst.reset || fst.follows) && !fst.offDirty;
+        status.textContent = following
+            ? `Follows what new profiles see.${fst.locked ? ' Locked.' : ''}`
+            : `${pfFeaturesLine(payload, fst.off, fst.locked)}. Saved with the profile.`;
+        // nothing of their own to drop: no set, no lock by hand, no own pick
+        resetBtn.disabled = (fst.reset && !fst.offDirty && !fst.lockDirty)
+            || (fst.follows && !fst.dirty && !payload.lock_set && !own);
+        ownNote.style.display = own && !fst.reset ? '' : 'none';
+        if (!own) return;
+        const theirs = pfFeaturesLine(payload, own, false);
+        ownNote.textContent = fst.dirty
+            ? `They picked their own (${theirs}). Saving replaces it with this.`
+            : fst.locked
+                ? `They picked their own before (${theirs}). It's ignored while this is locked.`
+                : `They picked their own (${theirs}), so that's what shows for them. Changing anything here replaces it.`;
+    };
+    const chooser = pfFeatureChooser(payload, fst, {
+        offered: () => pfFeaturesOffered(payload.features, st.sides, st.allowed_pages),
+        lockTitle: 'Lock it',
+        lockDesc: "They can't change it and Customize goes away for them.",
+        onChange: syncStatus,
+    });
+    resetBtn.addEventListener('click', () => {
+        const d = payload.default || { off: [], locked: false };
+        fst.off = (d.off || []).slice();
+        fst.locked = !!d.locked;
+        fst.dirty = true;
+        fst.offDirty = false;
+        fst.lockDirty = false;
+        fst.reset = true;
+        chooser.render();
+        syncStatus();
+    });
+    box.innerHTML = '';
+    box.append(
+        pfEl('p', { class: 'pf-help', text: "Of what they can open, which parts are in their sidebar. A hidden part still opens from a link. Unlocked, they can change it in Customize." }),
+        ownNote,
+        chooser.box,
+        pfEl('div', { class: 'pf-action-row', style: 'margin-top:8px' }, [pfEl('span', { class: 'pf-switch-text' }, status), resetBtn]),
+    );
+    syncStatus();
+    ready(fst, chooser);
 }
 
 function _pfAfterSave() {
@@ -4214,6 +4372,12 @@ function initApp() {
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
     // component init below measures real layout, not a display:none container.
     document.body.classList.remove('app-locked');
+    // no profile came back (the profile check failed): show the nav the old
+    // way rather than leave it hidden
+    document.documentElement.classList.remove('nav-pending');
+    // the video side waits for this before it picks a page it can't yet check
+    window._soulsyncAppStarted = true;
+    window.dispatchEvent(new CustomEvent('ss:app-started'));
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();
@@ -4928,22 +5092,8 @@ async function loadPageData(pageId) {
             // loadPageData only runs for legacy-kind pages. The vanilla page it
             // used to call lived in pages-extra.js and is deleted, along with
             // #playlist-explorer-page.
-            case 'settings':
-                // Suppress auto-save while the form is being populated, so opening
-                // Settings no longer fires a spurious full save (4 POSTs + backend
-                // service re-init) on every visit.
-                window._suppressSettingsAutoSave = true;
-                try {
-                    initializeSettings();
-                    switchSettingsTab('connections');
-                    await loadSettingsData();
-                    await loadQualityProfile();
-                    loadApiKeys();
-                    loadBlacklistCount();
-                } finally {
-                    window._suppressSettingsAutoSave = false;
-                }
-                break;
+            // 'settings' is React (src/routes/settings/route.tsx, SETTINGS_PORT.md
+            // step V4c): it opens the page itself, as this case did
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
                 try {

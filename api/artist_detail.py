@@ -35,8 +35,9 @@ from core.edition_grouping import (
 from core.search import by_id as _search_by_id
 from core.search import orchestrator as _search_orchestrator
 from core.metadata.cache import get_metadata_cache
-from core.profile_context import get_current_profile_id
+from core.profile_context import admin_only, get_current_profile_id
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -346,6 +347,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
 
 
 @bp.route('/api/artist-detail/library/<int:artist_id>/identity')
+@requires("music.access")
 def get_library_artist_identity(artist_id):
     """A catalogue artist's provider identity, so a profile that may search but
     may not open the library still gets the provider artist page for it, the
@@ -376,6 +378,7 @@ def get_library_artist_identity(artist_id):
 
 
 @bp.route('/api/artist-detail/<artist_id>')
+@requires("music.access")
 def get_artist_detail(artist_id):
     """Artist detail for an artist the catalogue does NOT hold.
 
@@ -416,6 +419,7 @@ def get_artist_detail(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/library/debug-photos')
+@admin_only
 def debug_library_photos():
     """Debug endpoint to check artist photo URLs"""
     try:
@@ -458,6 +462,7 @@ def debug_library_photos():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/artist/similar/<path:artist_name>/stream')
+@requires("music.access")
 def get_similar_artists_stream(artist_name):
     """Stream MusicMap similar artists using source-priority metadata matching."""
     from core.metadata.similar_artists import iter_fallback_similar_artist_events
@@ -482,6 +487,7 @@ def get_similar_artists_stream(artist_name):
     return Response(generate(), mimetype='text/event-stream')
 
 @bp.route('/api/artist/similar/<path:artist_name>')
+@requires("music.access")
 def get_similar_artists(artist_name):
     """Get MusicMap similar artists using source-priority metadata matching."""
     from core.metadata_service import get_musicmap_similar_artists
@@ -516,6 +522,7 @@ def get_similar_artists(artist_name):
         }), 500
 
 @bp.route('/api/artist/<artist_id>/write-image-to-disk', methods=['POST'])
+@admin_only
 def write_artist_image_to_disk(artist_id):
     """Write `artist.jpg` to the artist's folder on disk.
 
@@ -545,7 +552,6 @@ def write_artist_image_to_disk(artist_id):
     """
     try:
         from core.library.artist_image import (
-            download_image_bytes,
             find_artist_folder,
             write_artist_jpg,
         )
@@ -603,7 +609,9 @@ def write_artist_image_to_disk(artist_id):
             return jsonify({"success": False,
                             "error": "No artist image URL found from metadata sources."}), 404
 
-        image_bytes = download_image_bytes(image_url)
+        # the guarded fetch: a pasted image_url is fetched by the server, so
+        # never a lan, loopback or metadata address
+        image_bytes = _download_art(image_url)
         if not image_bytes:
             return jsonify({"success": False,
                             "error": f"Failed to download image from {image_url}"}), 502
@@ -639,6 +647,7 @@ def write_artist_image_to_disk(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/image', methods=['GET'])
+@requires("music.access")
 def get_artist_image(artist_id):
     """Get an artist image URL using source-aware metadata resolution."""
     try:
@@ -671,6 +680,7 @@ def get_artist_image(artist_id):
         return jsonify({"success": False, "image_url": None, "error": str(e)})
 
 @bp.route('/api/artist/<artist_id>/top-tracks', methods=['GET'])
+@requires("music.access")
 def get_artist_top_tracks_endpoint(artist_id):
     """Return an artist's top-N tracks via the primary metadata source.
 
@@ -885,6 +895,7 @@ def _catalogue_release_cards(library_artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/discography/gap-fill', methods=['GET'])
+@requires("music.access")
 def get_artist_discography_gap_fill(artist_id):
     """Releases OTHER metadata sources know that the base source's
     discography doesn't (#1067 — the hybrid/gap-fill view option).
@@ -1019,6 +1030,7 @@ def get_artist_discography_gap_fill(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/discography', methods=['GET'])
+@requires("music.access")
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
     try:
@@ -1242,6 +1254,7 @@ def _looks_like_image(data: bytes) -> bool:
 
 
 @bp.route('/api/album/<album_id>/art-options', methods=['GET'])
+@requires("music.access")
 def get_album_art_options(album_id):
     """Candidate cover-art images for an album, for the art picker (read-only).
 
@@ -1308,15 +1321,32 @@ def _derive_album_folder(db, album_id):
 
 def _download_art(url):
     """the chosen image's bytes, or None when the download fails. best-effort on
-    purpose: hotlink-protected art still renders in the browser."""
-    import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
-        with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
-            return resp.read() or None
-    except Exception as exc:
-        logger.warning("[set-art] image download failed: %s", exc)
-        return None
+    purpose: hotlink-protected art still renders in the browser.
+
+    the server fetches this url, so it goes through the library's guarded
+    artwork fetch: http/https to public addresses only (every redirect hop and
+    the connected peer re-checked), a size cap and timeouts. a lan, loopback or
+    cloud-metadata address is never fetched."""
+    from core.library2.artwork import _download_remote_artwork
+    return _download_remote_artwork(url)
+
+
+# the guarded fetch's reasons that mean "this url is not usable", as opposed to
+# a site that refused a hotlink (that pick still stands, the browser loads it)
+_ART_URL_REFUSALS = (
+    "That link is not a public",
+    "That link opens a web page",
+    "That link is not an image",
+    "That image is too large",
+    "That link redirects",
+)
+
+
+def _art_url_refusal(url):
+    """why the last _download_art of this url can't be used, or None."""
+    from core.library2.artwork import remote_artwork_failure
+    reason = remote_artwork_failure(url)
+    return reason if reason and reason.startswith(_ART_URL_REFUSALS) else None
 
 
 def _write_cover_jpg(data, folder):
@@ -1401,6 +1431,7 @@ def _push_album_poster(album_id, image_bytes):
 
 
 @bp.route('/api/album/<album_id>/art', methods=['POST'])
+@admin_only
 def set_album_art(album_id):
     """Apply a cover chosen in the picker, the same three places the artist twin writes to:
 
@@ -1420,6 +1451,9 @@ def set_album_art(album_id):
             return jsonify({"error": "url is required"}), 400
 
         image_bytes = _download_art(url)
+        refusal = _art_url_refusal(url) if image_bytes is None else None
+        if refusal:
+            return jsonify({"error": refusal}), 400
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 
@@ -1448,6 +1482,7 @@ def set_album_art(album_id):
 
 
 @bp.route('/api/album/<album_id>/metadata-lock', methods=['GET'])
+@requires("music.access")
 def get_album_metadata_lock(album_id):
     """Whether a lib2 album was hand-tagged from basic search, so the library
     view can offer the unlock only where there is something to unlock."""
@@ -1468,6 +1503,7 @@ def get_album_metadata_lock(album_id):
 
 
 @bp.route('/api/album/<album_id>/metadata-lock', methods=['DELETE'])
+@admin_only
 def clear_album_metadata_lock(album_id):
     """Unlock a hand-tagged album. it was tagged by hand from basic search
     ("tag it yourself") and locked so nothing rematched it to a studio release.
@@ -1484,6 +1520,7 @@ def clear_album_metadata_lock(album_id):
 
 
 @bp.route('/api/album/<album_id>/art', methods=['DELETE'])
+@admin_only
 def clear_album_art_lock(album_id):
     """Hand this album's cover back to the media server.
 
@@ -1502,6 +1539,7 @@ def clear_album_art_lock(album_id):
 
 
 @bp.route('/api/artist/<artist_id>/art', methods=['DELETE'])
+@admin_only
 def clear_artist_art_lock(artist_id):
     """Hand this artist's photo back to the media server. See the album twin."""
     try:
@@ -1520,6 +1558,7 @@ def clear_artist_art_lock(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/art-options', methods=['GET'])
+@requires("music.access")
 def get_artist_art_options(artist_id):
     """Candidate artist photos for the artist image picker (read-only).
 
@@ -1697,6 +1736,7 @@ def push_artist_art_outbound(artist_id, image_bytes) -> dict:
 
 
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
+@admin_only
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
 
@@ -1729,15 +1769,10 @@ def set_artist_art(artist_id):
         # validate: a custom URL that resolves to an HTML page must abort
         # before anything is pinned. A failed download stays best-effort —
         # hotlink-protected art can still render in the browser.
-        image_bytes = None
-        try:
-            import urllib.request
-            req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0",
-                                                       "Accept": "image/*"})
-            with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
-                image_bytes = resp.read() or None
-        except Exception as exc:
-            logger.warning("[set-artist-art] image download failed: %s", exc)
+        image_bytes = _download_art(url)
+        refusal = _art_url_refusal(url) if image_bytes is None else None
+        if refusal:
+            return jsonify({"error": refusal}), 400
         if image_bytes is not None and not _looks_like_image(image_bytes):
             return jsonify({"error": "That URL doesn't point to an image"}), 400
 
@@ -1806,6 +1841,7 @@ def set_artist_art(artist_id):
 
 
 @bp.route('/api/graph/library', methods=['GET'])
+@requires("music.discover")
 def get_library_graph():
     """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.
 
@@ -1842,6 +1878,7 @@ def get_library_graph():
 
 
 @bp.route('/api/graph/discovery', methods=['GET'])
+@requires("music.discover")
 def get_discovery_graph():
     """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
 
@@ -1909,6 +1946,7 @@ def _discovery_load_inputs(cur):
 
 
 @bp.route('/api/graph/discovery/expand', methods=['POST'])
+@requires("music.discover")
 def expand_discovery_graph():
     """Expand-on-click for the Discovery Web: one node's similar artists, minus what's on screen.
 
@@ -1944,6 +1982,7 @@ def expand_discovery_graph():
 
 
 @bp.route('/api/graph/discovery/preview/<deezer_id>', methods=['GET'])
+@requires("music.discover")
 def get_discovery_preview(deezer_id):
     """30-second Deezer preview for a discovery candidate's top track (hear it before you add it).
 
@@ -1973,6 +2012,7 @@ def get_discovery_preview(deezer_id):
 
 
 @bp.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
+@requires("music.access")
 def get_library_artist_thumb(artist_id):
     """Browser-loadable thumb URL for ONE library artist, by library DB id.
 
@@ -2001,6 +2041,7 @@ def get_library_artist_thumb(artist_id):
 
 
 @bp.route('/api/library/export/m3u', methods=['GET'])
+@requires("music.access")
 def export_library_m3u():
     """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
     try:
@@ -2022,6 +2063,7 @@ def export_library_m3u():
 
 
 @bp.route('/api/album/<album_id>/tracks', methods=['GET'])
+@requires("music.access")
 def get_album_tracks(album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""
     try:
@@ -2070,6 +2112,7 @@ def get_album_tracks(album_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/artist/<artist_id>/concerts', methods=['GET'])
+@requires("music.access")
 def artist_concerts(artist_id):
     """Upcoming dates and recent setlists for one artist.
 
@@ -2108,6 +2151,7 @@ def artist_concerts(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/record', methods=['GET'])
+@requires("music.access")
 def get_artist_db_record(artist_id):
     """Return the COMPLETE database record for a library artist — every column of
     the ``artists`` row (all source IDs + match statuses, cached bios / tags /
@@ -2188,6 +2232,7 @@ def get_artist_db_record(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/quality-profile', methods=['GET'])
+@requires("music.access")
 def get_artist_quality_profile(artist_id):
     """The Quality Profile a download of this artist's release starts on (#2022).
 
@@ -2216,6 +2261,7 @@ def get_artist_quality_profile(artist_id):
 
 
 @bp.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
+@requires("music.access")
 def download_discography(artist_id):
     """Add selected albums from an artist's discography to the wishlist.
 
@@ -2351,6 +2397,9 @@ def download_discography(artist_id):
         # them back with everything the client needs to retry the release.
         failed_releases = []
 
+        from core.metadata import deezer_credits
+        deezer_album_credits = {}
+
         def generate_ndjson():
             nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
 
@@ -2451,7 +2500,14 @@ def download_discography(artist_id):
                         # artist isn't in the track's artists list
                         # (cross-artist compilation / appears_on
                         # contamination). Keeps features.
-                        if not track_artist_matches(track_artists, hint_artist):
+                        if not track_artist_matches(track_artists, hint_artist) and not (
+                                # deezer's tracklist names only a track's first
+                                # artist; a co-main artist is on the album's or
+                                # the track's own credits (#2104)
+                                resolved_source == 'deezer'
+                                and deezer_credits.credits_artist(
+                                    hint_artist, album_id=resolved_album_id,
+                                    track_id=track_id, memo=deezer_album_credits)):
                             skipped_artist += 1
                             continue
 
@@ -2604,6 +2660,7 @@ def download_discography(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/artist/<artist_id>/completion', methods=['POST'])
+@requires("music.access")
 def check_artist_discography_completion(artist_id):
     """Check completion status for artist's albums and singles"""
     try:
@@ -2627,6 +2684,7 @@ def check_artist_discography_completion(artist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/artist/<artist_id>/completion-stream', methods=['POST'])
+@requires("music.access")
 def check_artist_discography_completion_stream(artist_id):
     """Stream completion status for artist's albums and singles one by one"""
     # Capture request data BEFORE the generator function
@@ -2673,6 +2731,7 @@ def check_artist_discography_completion_stream(artist_id):
 
 
 @bp.route('/api/artist/<int:artist_id>/appears-on', methods=['GET'])
+@requires("music.access")
 def get_artist_appears_on(artist_id):
     from contextlib import closing
     from core.library2.artist_page import appears_on_payload

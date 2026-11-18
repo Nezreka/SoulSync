@@ -28,6 +28,7 @@ import {
   vdlIsFail,
   vdlIsPackRow,
   vdlIsRetryable,
+  vdlLangLabel,
   vdlKindIcon,
   vdlMatchesFilter,
   vdlMetaURL,
@@ -260,14 +261,19 @@ describe('formatters', () => {
 
 describe('vdlMetaURL', () => {
   it('builds the TMDB detail URL', () => {
-    expect(vdlMetaURL(dl({ kind: 'movie', media_id: 123 }))).toBe(
+    expect(vdlMetaURL(dl({ kind: 'movie', media_id: 123, media_source: 'tmdb' }))).toBe(
       '/api/video/downloads/meta/movie/123',
     );
   });
   it('appends season+episode for episode rows', () => {
     expect(
       vdlMetaURL(
-        dl({ kind: 'episode', media_id: 9, search_ctx: JSON.stringify({ season: 2, episode: 4 }) }),
+        dl({
+          kind: 'episode',
+          media_id: 9,
+          media_source: 'tmdb',
+          search_ctx: JSON.stringify({ season: 2, episode: 4 }),
+        }),
       ),
     ).toBe('/api/video/downloads/meta/show/9?season=2&episode=4');
   });
@@ -278,6 +284,24 @@ describe('vdlMetaURL', () => {
   });
   it('skips owned re-grabs (media_id is not a TMDB id)', () => {
     expect(vdlMetaURL(dl({ kind: 'movie', media_id: 5, media_source: 'library' }))).toBeNull();
+  });
+  it('never reads a library id as a TMDB id when media_source is missing (#2176)', () => {
+    // a show-page grab stored library show 37 with no media_source; TMDB 37 is
+    // a different show (Seven of One), and the card showed it
+    expect(vdlMetaURL(dl({ kind: 'show', media_id: 37, media_source: null }))).toBeNull();
+    expect(vdlMetaURL(dl({ kind: 'show', media_id: 37 }))).toBeNull();
+  });
+  it('uses the TMDB id in the search context for a library row', () => {
+    expect(
+      vdlMetaURL(
+        dl({
+          kind: 'show',
+          media_id: 37,
+          media_source: 'library',
+          search_ctx: JSON.stringify({ tmdb_id: 60694 }),
+        }),
+      ),
+    ).toBe('/api/video/downloads/meta/show/60694');
   });
 });
 
@@ -312,5 +336,22 @@ describe('row text', () => {
     expect(vdlBlockWhat({ id: 1 })).toBe('Unknown release');
     expect(vdlBlockSxe({ id: 1, season_number: 2, episode_number: 4 })).toBe('S02E04');
     expect(vdlBlockSxe({ id: 1 })).toBe('');
+  });
+});
+
+describe('vdlLangLabel (#2120)', () => {
+  it('says the audio and the subtitles in scene shorthand', () => {
+    expect(vdlLangLabel({ audio: ['fr'], multi: true, subs: [], subbed: false })).toBe('MULTi FR');
+    expect(vdlLangLabel({ audio: [], multi: false, subs: ['fr'], subbed: true })).toBe('FR subs');
+    expect(vdlLangLabel({ audio: [], multi: true, subs: ['fr'], subbed: true })).toBe(
+      'MULTi · FR subs',
+    );
+    expect(vdlLangLabel({ audio: ['it', 'en'], multi: false })).toBe('IT EN');
+    expect(vdlLangLabel({ audio: [], subs: [], subbed: true })).toBe('subs');
+  });
+
+  it('is empty when the name tags nothing', () => {
+    expect(vdlLangLabel(null)).toBe('');
+    expect(vdlLangLabel({ audio: [], multi: false, subs: [], subbed: false })).toBe('');
   });
 });

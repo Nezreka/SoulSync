@@ -186,10 +186,10 @@
     function hydrate(root) {
         root = root || document;
         // Piggyback: every card surface already calls this after a render, so
-        // it's the one hook that reaches ALL cards — hydrate wishlist ribbons
-        // in the same pass (separate module; one batched POST of its own).
-        if (window.VideoWishState) VideoWishState.hydrate(root);
-        // and the Requested / Available ribbons for profiles that ask instead
+        // it's the one hook that reaches ALL cards. the status ribbons (In
+        // Library, Requested, Downloading...) come from one batched POST (#2160)
+        if (window.VideoTitleStatus) VideoTitleStatus.hydrate(root);
+        // and the episode / youtube request states for profiles that ask instead
         if (window.VideoRequests) VideoRequests.hydrate(root);
         ['show', 'person', 'studio'].forEach(function (kind) {
             var nodes = root.querySelectorAll('.vwl-btn[data-vwl-kind="' + kind + '"]');

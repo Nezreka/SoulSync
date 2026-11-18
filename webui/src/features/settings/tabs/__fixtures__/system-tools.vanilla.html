@@ -1,0 +1,284 @@
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>SoulSync API</h3>
+                                        <span class="settings-section-hint">REST keys &amp; inbound endpoint</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+
+                                            <div class="api-service-frame">
+                                                <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 12px; color: #888; font-size: 12px;">
+                                                    Generate API keys to access SoulSync remotely via the
+                                                    <code>/api/v1/</code> endpoints.
+                                                    Keys are shown once at creation — store them securely.
+                                                </div>
+
+                                                <!-- Existing API Keys List -->
+                                                <div id="api-keys-list" style="margin-bottom: 12px;">
+                                                    <div style="color: #666; font-size: 13px; padding: 8px 0;">
+                                                        Loading...</div>
+                                                </div>
+
+                                                <!-- Generate New Key -->
+                                                <div class="form-group" style="margin-bottom: 8px;">
+                                                    <label>New Key Label:</label>
+                                                    <input type="text" id="api-key-label"
+                                                        placeholder="e.g. Discord Bot, Home Assistant">
+                                                </div>
+                                                <div class="form-group" style="margin-bottom: 8px;">
+                                                    <label>Access:</label>
+                                                    <select id="api-key-scope">
+                                                        <option value="read" selected>Read-only (stats and library, for dashboards)</option>
+                                                        <option value="admin">Admin (can change settings and everything else)</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        A read-only key can fetch library and status data. It cannot
+                                                        change anything or read settings, keys or profiles.
+                                                    </div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="auth-button" onclick="generateApiKey()">🔑 Generate
+                                                        API Key</button>
+                                                </div>
+
+                                                <!-- Newly Generated Key Display (hidden by default) -->
+                                                <div id="api-key-generated"
+                                                    style="display: none; margin-top: 12px; padding: 12px; background: rgba(100, 255, 218, 0.08); border: 1px solid rgba(100, 255, 218, 0.2); border-radius: 8px;">
+                                                    <div
+                                                        style="font-size: 11px; color: #64ffda; margin-bottom: 6px; font-weight: 600;">
+                                                        Copy this key now — it won't be shown again!
+                                                    </div>
+                                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                                        <code id="api-key-value"
+                                                            style="flex: 1; font-size: 12px; word-break: break-all; color: #fff; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                                                        <button onclick="copyApiKey()"
+                                                            style="padding: 6px 12px; background: rgba(100,255,218,0.15); border: 1px solid rgba(100,255,218,0.3); color: #64ffda; border-radius: 4px; cursor: pointer; white-space: nowrap;">Copy</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Inbound Webhook Info -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Inbound Request
+                                                    Endpoint</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Trigger music downloads from external tools (Discord bots, Home
+                                                    Assistant, curl, etc.)
+                                                    using any API key above.
+                                                </div>
+                                                <div
+                                                    style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px; font-size: 12px; color: #ccc; overflow-x: auto;">
+                                                    <code style="white-space: pre; display: block;">curl -X POST http://&lt;host&gt;:8008/api/v1/request \
+  -H "Authorization: Bearer &lt;your-api-key&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Artist - Track Name"}'</code>
+                                                </div>
+                                                <div class="setting-help-text"
+                                                    style="margin-top: 8px; color: #666; font-size: 11px;">
+                                                    Returns a <code>request_id</code> for status polling. Add
+                                                    <code>"notify_url"</code> to POST results to a webhook on
+                                                    completion.
+                                                    Also triggers any <strong>Webhook Received</strong> automations in
+                                                    the Automation Hub.
+                                                </div>
+                                            </div>
+
+                                            <!-- MCP for AI clients -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">MCP for AI
+                                                    Clients</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets Claude and other AI apps search, check your library and
+                                                    download through SoulSync. Add
+                                                    <code>http://&lt;host&gt;:8008/mcp</code> as an MCP server and
+                                                    send an API key from above as a Bearer token. A read-only key
+                                                    can look but not change anything. Settings, keys and profiles
+                                                    are never reachable.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="mcp-enabled">
+                                                        Answer MCP requests at /mcp
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Lidarr compatible API (#1799) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Lidarr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets request apps that only talk to Lidarr (Singarr, MusicSeerr
+                                                    1.x) use SoulSync instead. In the app, set the Lidarr URL to
+                                                    <code>http://&lt;host&gt;:8008/lidarr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Albums it asks for
+                                                    go on the wishlist of the profile below.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="lidarr-compat-enabled">
+                                                        Answer as Lidarr at /lidarr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Requests go to profile:</label>
+                                                    <select id="lidarr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        Pick a profile without download rights and every request
+                                                        waits for approval on the Requests page first.
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Seerr compatible API (#2151) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Seerr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets apps built for Seerr (Jellyseerr, Overseerr), like
+                                                    Litefin's Jellyfin plugin, discover and request movies and
+                                                    shows through SoulSync's video side. In the app, set the Seerr
+                                                    URL to <code>http://&lt;host&gt;:8008/seerr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Each Jellyfin user
+                                                    requests as the profile linked to their Jellyfin account, or
+                                                    the profile with the same name.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="seerr-compat-enabled">
+                                                        Answer as Seerr at /seerr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="seerr-compat-refuse-unknown">
+                                                        Refuse Jellyfin users with no profile
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Jellyfin users with no profile act as:</label>
+                                                    <select id="seerr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        Right now anyone without a profile browses and requests as
+                                                        this profile, with its permissions. Turn on Refuse above to
+                                                        stop that.
+                                                    </div>
+                                                </div>
+                                                <div class="setting-help-text"
+                                                    style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                    Each person gets what their profile allows: movies and shows
+                                                    separately, Download right away or Ask first, their rating
+                                                    limit, request limit and quality.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div><!-- end SoulSync API body -->
+
+                                    <!-- Developer Mode -->
+                                    <!-- Developer Mode (collapsible tile) -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Developer Mode</h3>
+                                        <span class="settings-section-hint">Advanced log viewer</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+
+                                            <div class="form-group">
+                                                <label>Password:</label>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <input type="password" id="dev-mode-password"
+                                                        placeholder="Enter dev password">
+                                                    <button class="test-button"
+                                                        onclick="activateDevMode()">Activate</button>
+                                                </div>
+                                                <div id="dev-mode-status" style="margin-top: 8px; color: #888;">Inactive
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Developer Mode body -->
+
+                                    <!-- Artwork cache. Deliberately NOT marked video-only: one cache
+                                 serves covers on the music side and posters on the video side,
+                                 same as the yt-dlp tile above. -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Artwork Cache</h3>
+                                        <span class="settings-section-hint">Local copies of cover &amp; poster
+                                            art</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+
+                                            <div class="form-group">
+                                                <label>Cached images:</label>
+                                                <span id="imgcache-entries" class="readonly-field">Loading...</span>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Disk used:</label>
+                                                <span id="imgcache-size" class="readonly-field">Loading...</span>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="imgcache-max-mb">Size limit (MB):</label>
+                                                <input type="number" id="imgcache-max-mb" min="0" step="128"
+                                                    style="max-width:160px;" onchange="onImageCacheSettingChanged()">
+                                            </div>
+                                            <div class="help-text">
+                                                Oldest-unused art is removed once the cache passes this size.
+                                                <strong>0</strong> means no limit.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="imgcache-thumbnails"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="imgcache-thumbnails"
+                                                        onchange="onImageCacheSettingChanged()">
+                                                    Serve resized thumbnails
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Off by default. When on, SoulSync resizes art server-side so a grid of
+                                                tiles
+                                                doesn't pull full-size originals — the big win on large libraries, at
+                                                the cost
+                                                of some CPU the first time each image is seen. Everything else about the
+                                                cache
+                                                is unchanged.
+                                            </div>
+
+                                            <div class="form-actions" style="flex-wrap: wrap;">
+                                                <button class="test-button" id="imgcache-prune-btn"
+                                                    onclick="runImageCachePrune()">Reclaim space now</button>
+                                                <button class="test-button" id="imgcache-clear-btn"
+                                                    onclick="runImageCacheClear()">Clear cache</button>
+                                            </div>
+                                            <div class="help-text">
+                                                Nothing here is irreplaceable — every image is re-downloaded on demand,
+                                                so
+                                                clearing only costs a slower first load.
+                                            </div>
+                                            <div id="imgcache-status"
+                                                style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;">
+                                            </div>
+                                        </div>
+                                    </div><!-- end Artwork Cache body -->

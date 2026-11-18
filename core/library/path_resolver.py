@@ -316,13 +316,31 @@ def resolve_library_file_path_with_diagnostic(
 
     sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
     if sibling and allowed(sibling):
-        return sibling, attempt
+        return _unless_another_records(file_path, sibling), attempt
     # Filename wrong as well as the album folder — Navidrome synthesizes the
     # whole path from tags, so no exact segment is left to match on (#1127).
     resolved = _resolve_via_synthesized_filename(path_parts, base_dirs)
     if resolved and not allowed(resolved):
         resolved = None
-    return resolved, attempt
+    return _unless_another_records(file_path, resolved), attempt
+
+
+def _unless_another_records(file_path: str, found: Optional[str]) -> Optional[str]:
+    """A last-resort match, unless the Library records that file under another
+    record (core/library2/paths.held_by_another_record). Both last resorts
+    answer "which file did this path mean", and the old record of a file that
+    moved means none: the file they find is another record's."""
+    if not found:
+        return found
+    try:
+        from core.library2.paths import held_by_another_record
+        if held_by_another_record(file_path, found):
+            logger.debug("%r is not on disk; the file found for it, %s, belongs "
+                         "to another record", file_path, found)
+            return None
+    except Exception as exc:  # noqa: BLE001 - the resolver never raises
+        logger.debug("holder check failed for %r: %s", file_path, exc)
+    return found
 
 
 def _inside_library_root(path, root):
@@ -626,5 +644,7 @@ def resolve_via_last_resort_fallbacks(
     if not isinstance(file_path, str) or not file_path or not base_dirs:
         return None
     path_parts = file_path.replace("\\", "/").split("/")
-    return (_resolve_via_sibling_album_folder(path_parts, base_dirs)
-            or _resolve_via_synthesized_filename(path_parts, base_dirs))
+    return _unless_another_records(
+        file_path,
+        _resolve_via_sibling_album_folder(path_parts, base_dirs)
+        or _resolve_via_synthesized_filename(path_parts, base_dirs))

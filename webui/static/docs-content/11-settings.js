@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'settings',
+    needs: 'admin',
     title: 'Settings',
     icon: '⚙️',
     pages: [
@@ -11,6 +12,8 @@ registerDocsSection({
 SoulSync needs credentials for the services it queries for metadata and enrichment. The Settings search finds any setting by name — handy when you're not sure which tab it lives under.
 
 Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed. Rather save by hand? Turn off **Save settings as I change them** under System, Saving. Changes then wait for the save button, and leaving Settings without saving drops them.
+
+![Service credentials in Settings: the service cards grouped under Metadata, Scrobbling and Extras](settings-services.jpg)
 
 ## Service list
 
@@ -37,7 +40,7 @@ Each service card shows **configured** or **missing** in its header — the colo
             body: `
 Connect your media server to enable library scans, metadata syncing, and in-app playback.
 
-![Media server settings](settings-media-server.jpg)
+![Media server settings: server connections for Plex, Jellyfin, Navidrome, Music Assistant and standalone](settings-media-server.jpg)
 
 ## Plex
 
@@ -75,7 +78,7 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **HiFi** | Free lossless downloads via community-run hifi-api instances — no account needed |
 | **Deezer** | Download from Deezer (ARL token) |
 | **Lidarr** | Hand off to your Lidarr server |
-| **SoundCloud** | Download from SoundCloud — nothing to set up |
+| **SoundCloud** | Download from SoundCloud, nothing to set up. Optional: paste a free account's oauth_token to get the original file when the uploader allows downloads |
 | **Torrent** | Search via Prowlarr indexers through your torrent client |
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
 | **Hybrid** | Drag sources into a priority chain — SoulSync works down the list and uses the first source that returns a match |
@@ -116,7 +119,7 @@ These live on other tabs, not Downloads:
 - **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
 - **YouTube cookies** — on the **Sources** tab, in the YouTube source panel ("YouTube Browser Cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
-![Downloads settings](settings-downloads.jpg)
+![Downloads settings: the download chain with Soulseek tried first and YouTube as fallback](settings-downloads.jpg)
 `
         },
         {
@@ -124,7 +127,7 @@ These live on other tabs, not Downloads:
             title: 'Processing & Organization',
             lede: 'How downloads are verified, enhanced, tagged, and filed.',
             body: `
-![Processing settings](settings-processing.jpg)
+![Processing settings: post-processing options for verification, artwork sources, lyrics and ReplayGain](settings-processing.jpg)
 
 ## Verification & enhancement
 
@@ -134,6 +137,7 @@ These live on other tabs, not Downloads:
 ## Organization
 
 - **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, \`$explicit\` (\`[E]\` on explicit tracks), \`$contentrating\` (\`[E]\` or \`[C]\`), \`$albumartistinfo\` / \`$albumartistcomposite\` / \`$albumartistclash\` (MusicBrainz's note, country or genre, to keep same-named artists apart), and more
+- **Artist names**: \`$artist\` and \`$albumartist\` use the name your library has for the artist, found by id, so a source that spells them differently (Deezer's "Machine Gun Kelly" for a library's "mgk") doesn't start a second folder. Set your own name in the artist's **Artist Settings > Folder and tag name**
 - **Live preview** — under each template is the path it makes for an example release, updated as you type and before you save. Switch the example between **Standard**, **Explicit**, **Multi-disc** and **Shared artist name** to see the content rating badges, the disc folder and the artist notes come out. It runs through the same code a real download does, so what it shows is what you get
 - **Singles with several tracks**: a release your source calls a single can hold more than one track. On a customized Single Path Template each one keeps its own \`$track\` and \`$disc\`.
 - **Explicit and clean versions** (Filtering): **Prefer explicit versions when matching** ranks explicit files above clean ones and never skips anything. **Never download clean versions** goes further: a file marked Clean, Censored, Edited or Radio Edit is not picked at all unless the track is that cut itself, and the track waits on your Wishlist until a real one turns up.
@@ -158,7 +162,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 - **Upgrade until** — **Any accepted target** stops once a file matches any target; **Selected target or better** keeps replacing lower-quality files until they reach the selected cutoff target or better
 - **Quick Presets** — one-click starting points for common quality setups
 
-![Quality profiles](dl-quality-profiles.jpg)
+![Quality profile settings: the format priority ladder, upgrade rules and quick presets](dl-quality-profiles.jpg)
 
 Quality profiles are checked during downloads and auto-import. The Library evaluates monitored tracks against their upgrade cutoff and sends the ones with no file to the Wishlist through **Watchlist & Wishlist Reconcile**.
 
@@ -178,6 +182,8 @@ Quality profiles are checked during downloads and auto-import. The Library evalu
             title: 'Miscellaneous',
             lede: 'Appearance, API keys, logging, extra libraries, and the remaining toggles.',
             body: `
+![Appearance settings: accent color, visualizer and interface toggles](settings-other.jpg)
+
 ## Appearance
 
 Accent color, theme, visualizer effects, and interface controls. Changes apply immediately — no restart needed.
@@ -186,10 +192,13 @@ Accent color, theme, visualizer effects, and interface controls. Changes apply i
 
 Generate API keys for external integrations. A key is either **admin** (full rights, the default) or **read** (can look, can't change anything). Guard admin keys like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
 
-The same section has two switches, both off by default:
+![The SoulSync API settings: REST API keys, the inbound request endpoint, and the MCP and Lidarr compatible API switches](api-keys.jpg)
+
+The same section has three switches, all off by default:
 
 - **MCP for AI Clients** answers at \`/mcp\`, so Claude and other AI apps can drive SoulSync with one of these keys. See [MCP for AI clients](#api-mcp).
 - **Lidarr Compatible API** answers at \`/lidarr\`, so request apps that only speak Lidarr can use SoulSync. Pick which profile's wishlist their requests land on. See [Lidarr compatible API](#api-lidarr).
+- **Seerr Compatible API** answers at \`/seerr\`, so Seerr apps like Litefin can browse and request movies and shows. Pick the profile Jellyfin users with no profile of their own request as. See [Seerr compatible API](#api-seerr).
 
 ## Log level
 
@@ -212,6 +221,8 @@ Your **Music Library Folder** above is already covered — you don't need to rep
             title: 'Database Maintenance',
             lede: 'Backups, vacuuming, and cache management to keep SoulSync healthy.',
             body: `
+![Database maintenance: database size, Compact Database (VACUUM) and incremental vacuum](settings-maintenance.jpg)
+
 ## Backups
 
 Backups don't live in Settings — they're on the **Tools** page, in the **Backup Manager** card: create a backup now, download copies for off-site storage, and restore from any previous backup. Scheduled backups run through the Backup Database system automation.

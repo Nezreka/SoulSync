@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { acquireVerb } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import type {
   LibraryCheckTrack,
@@ -297,8 +297,11 @@ export function SearchResults({
   onTrackClick: (track: SearchTrack) => void;
   onPlaylistClick?: (playlist: SearchPlaylist) => void;
   onTrackPlay: (track: SearchTrack, libraryRow: LibraryCheckTrack | undefined) => void;
-  onVideoDownload: (video: SearchVideo) => void;
+  /** absent when getting music isn't part of the profile */
+  onVideoDownload?: (video: SearchVideo) => void;
 }) {
+  // download, ask first, or can't request (#2166): the last offers no button
+  const { verb, cantRequest } = useMusicGet();
   if (activeSource === 'youtube_videos') {
     return <VideoGrid videos={videos} progress={videoProgress} onDownload={onVideoDownload} />;
   }
@@ -347,8 +350,8 @@ export function SearchResults({
         image={albumImage(album)}
         badge={ownership.ownedAlbums.has(identity) ? 'In library' : undefined}
         onOpen={() => onAlbumClick(album)}
-        actionLabel={`${acquireVerb()} ${album.name ?? 'album'}`}
-        onAction={() => onAlbumClick(album)}
+        actionLabel={cantRequest ? undefined : `${verb} ${album.name ?? 'album'}`}
+        onAction={cantRequest ? undefined : () => onAlbumClick(album)}
         sources={album.sources}
       />
     );
@@ -526,6 +529,7 @@ function TopAndTracks({
   renderTracks: () => React.ReactNode;
   showAllTracks?: () => void;
 }) {
+  const { verb, cantRequest } = useMusicGet();
   const topArtist = faces[0]?.artist;
   const libraryArtist = faces[0]?.inLibrary ?? false;
   const topAlbum = topArtist ? undefined : (fullAlbums[0] ?? singles[0]);
@@ -561,14 +565,24 @@ function TopAndTracks({
         sub={albumMetaLine(topAlbum)}
         image={albumImage(topAlbum)}
         actions={
-          <button
-            type="button"
-            className={`${styles.button} ${styles.primary}`}
-            onClick={() => onAlbumClick(topAlbum)}
-          >
-            <DownloadIcon />
-            {acquireVerb()}
-          </button>
+          cantRequest ? (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary}`}
+              onClick={() => onAlbumClick(topAlbum)}
+            >
+              Open album
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`${styles.button} ${styles.primary}`}
+              onClick={() => onAlbumClick(topAlbum)}
+            >
+              <DownloadIcon />
+              {verb}
+            </button>
+          )
         }
       />
     );
@@ -589,10 +603,16 @@ function TopAndTracks({
               <PlayIcon />
               Play
             </button>
-            <button type="button" className={styles.button} onClick={() => onTrackClick(topTrack)}>
-              <DownloadIcon />
-              {acquireVerb()}
-            </button>
+            {cantRequest ? null : (
+              <button
+                type="button"
+                className={styles.button}
+                onClick={() => onTrackClick(topTrack)}
+              >
+                <DownloadIcon />
+                {verb}
+              </button>
+            )}
           </>
         }
       />

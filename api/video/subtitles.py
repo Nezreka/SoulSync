@@ -140,6 +140,28 @@ def _settings_for(db):
         return {}
 
 
+def tracks_in_file(file_path, lang, forced, get_setting) -> list:
+    """The subtitle tracks this video already has in ``lang``: sidecars beside
+    it and tracks inside it. manual search shows them, so a title whose french
+    subs only live inside the file says so instead of 'none found' (#2126).
+    ``bitmap`` marks a picture track (PGS, VobSub): players show it, but it
+    can't be turned into a .srt without OCR. Never raises."""
+    from core.video.subtitles import existing as existing_subs
+    from core.video.subtitles.languages import satisfies_language
+    if not file_path or not os.path.exists(file_path):
+        return []
+    try:
+        tracks = existing_subs.existing_tracks(file_path, get_setting)
+    except Exception:  # noqa: BLE001 - a bonus line, never a failed search
+        logger.debug("in-file subtitle check failed for %s", file_path, exc_info=True)
+        return []
+    bitmap = existing_subs._PGS_CODECS | existing_subs._VOBSUB_CODECS
+    return [{"language": t.language, "where": t.source, "forced": bool(t.forced),
+             "hi": bool(t.hi), "codec": t.codec, "bitmap": t.codec in bitmap}
+            for t in tracks
+            if satisfies_language(t.language, lang) and bool(t.forced) == bool(forced)]
+
+
 def register_routes(bp):
     @bp.route("/subtitles/whisper/status", methods=["GET"])
     def subtitles_whisper_status():
@@ -317,7 +339,8 @@ def register_routes(bp):
                         "download_count": c["download_count"],
                         "language": c["language"], "hi": c["hi"],
                         "forced": c["forced"]})
-        return jsonify({"candidates": out})
+        return jsonify({"candidates": out,
+                        "in_file": tracks_in_file(file_path, lang, forced, get_setting)})
 
     @bp.route("/subtitles/manual-download", methods=["POST"])
     def subtitles_manual_download():

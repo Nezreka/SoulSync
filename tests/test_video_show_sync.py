@@ -226,10 +226,14 @@ def test_jellyfin_gone_requires_a_live_server():
 
 def test_endpoint_and_admin_gate():
     api = (_ROOT / "api" / "video" / "detail.py").read_text(encoding="utf-8", errors="replace")
-    gate = (_ROOT / "api" / "video" / "__init__.py").read_text(encoding="utf-8", errors="replace")
     assert '"/detail/show/<int:show_id>/sync"' in api
     assert '"/detail/movie/<int:movie_id>/sync"' in api
-    assert '"/sync"' in gate
+    # the gate's admin rules moved to api/video/access.py with the
+    # permissions overhaul; ask the table itself, not a file's text
+    from api.video.access import route_access
+    for rule in ("/api/video/detail/show/<int:show_id>/sync",
+                 "/api/video/detail/movie/<int:movie_id>/sync"):
+        assert route_access(rule, "POST") == ("admin", None), rule
 
 
 def test_ui_button_and_handler():

@@ -71,8 +71,9 @@ def test_web_server_writers_use_the_shared_finalizer():
 
 
 def test_settings_ui_round_trip_wiring():
-    js = (_ROOT.parent / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
-    html = (_ROOT.parent / 'webui' / 'index.html').read_text(encoding='utf-8')
-    assert 'id="m3u-rewrite-from"' in html and 'id="m3u-rewrite-to"' in html
-    assert "rewrite_from: document.getElementById('m3u-rewrite-from').value || ''" in js
-    assert "settings.m3u_export?.rewrite_from || ''" in js
+    # the field is in the React Folders card (SETTINGS_PORT.md step 8a)
+    ui = (_ROOT.parent / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'library-folders.tsx').read_text(encoding='utf-8')
+    assert 'id="m3u-rewrite-from"' in ui and 'id="m3u-rewrite-to"' in ui
+    assert "value={text(m3u.rewrite_from)}" in ui
+    assert "store.set('m3u_export', 'rewrite_from', event.target.value)" in ui
+    assert "store.set('m3u_export', 'rewrite_to', event.target.value)" in ui

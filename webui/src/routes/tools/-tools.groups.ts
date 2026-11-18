@@ -10,7 +10,7 @@
  * safe, one-click type. Grouping turns "3,000 findings" into four decisions.
  */
 
-import type { RepairJobRun } from './-tools.types';
+import type { RepairJob, RepairJobRun } from './-tools.types';
 
 // ── Shapes served by the backend ─────────────────────────────────────────────
 
@@ -36,6 +36,8 @@ export interface FindingGroup {
    *  edits" are two different requests, and the choice has to be made before
    *  the click — not after walking every finding's diff. */
   manual_conflicts?: number;
+  /** #2179: open duplicates a Keep Best all leaves for a person */
+  needs_you?: number;
   /** rows per status per severity, e.g. {pending: {warning: 3, error: 1}}.
    *  what the severity filter reads: severity_max is the worst pending row
    *  only, so it hid resolved errors and pending warnings (review 5 R5-L-3) */
@@ -433,4 +435,52 @@ export function sparklinePoints(values: readonly number[], width = 120, height =
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
+}
+
+// ── The job filter ───────────────────────────────────────────────────────────
+
+export interface JobFilterOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * The job filter's options, in the words the list uses.
+ *
+ * The list names findings ("Album Tag Drift") and the dropdown named the jobs
+ * that raise them ("Album Tag Consistency"), in no order, so reading the list
+ * and typing a letter in the dropdown never landed (#2113). A job that raises
+ * one kind of finding now goes by that finding's name, from the same catalog
+ * the list reads; a job raising several keeps its own name. Sorted A to Z,
+ * and a job with nothing under `status` ('' is every status) is left out,
+ * unless it is the one picked. Before the groups load, every job shows.
+ */
+export function jobFilterOptions(
+  jobs: readonly RepairJob[],
+  groups: readonly FindingGroup[],
+  types: readonly FindingTypeInfo[],
+  status: string,
+  selected = '',
+): JobFilterOption[] {
+  const typeLabel = (type: string) =>
+    types.find((info) => info.type === type)?.label || type.replace(/_/g, ' ');
+  const counted = groups.length > 0;
+  const options: JobFilterOption[] = [];
+  for (const job of jobs) {
+    const fed = groups.filter((group) => group.job_ids?.includes(job.job_id));
+    const count = fed.reduce((sum, group) => sum + groupCountForStatus(group, status), 0);
+    if (counted && count === 0 && job.job_id !== selected) continue;
+    const labels = [...new Set(fed.map((group) => typeLabel(group.finding_type)))];
+    options.push({ value: job.job_id, label: labels.length === 1 ? labels[0] : job.display_name });
+  }
+  // two jobs raising the same kind of finding: say which job each is
+  const seen = new Map<string, number>();
+  for (const option of options) seen.set(option.label, (seen.get(option.label) || 0) + 1);
+  for (const option of options) {
+    if ((seen.get(option.label) || 0) > 1) {
+      const job = jobs.find((entry) => entry.job_id === option.value);
+      if (job && job.display_name !== option.label) option.label += ` (${job.display_name})`;
+    }
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }

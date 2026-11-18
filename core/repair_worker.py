@@ -26,6 +26,7 @@ from core.metadata_service import (
     get_primary_source,
 )
 from core.library.path_resolver import resolve_library_file_path
+from core.library2.duplicate_review import NEEDS_YOU_SQL as _NEEDS_YOU_SQL
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -815,6 +816,38 @@ def attach_retag_preview(conn, items: List[dict]) -> None:
             item['preview'] = rows
 
 
+def attach_keep_best_needs(items: list) -> None:
+    """#2179: an open duplicate finding a bulk Keep Best can't act on by
+    itself says so on the row: ``needs_you`` holds why, and why with moving
+    playlist entries on (empty there when moving settles it)"""
+    from core.library2.duplicate_review import keep_best_blockers
+    for item in items:
+        if item.get('finding_type') != 'native_duplicate_tracks' or item.get('status') != 'pending':
+            continue
+        reasons = keep_best_blockers(item.get('details'))
+        if reasons:
+            item['needs_you'] = {'reasons': reasons,
+                                 'with_move': keep_best_blockers(item.get('details'), move=True)}
+
+
+def _duplicate_fix_action(action) -> tuple:
+    """a Keep Best action: 'keep_best' or 'file-<id>', then any of
+    ':confirmed' (the same recording, confirmed) and ':move' / ':nomove'
+    (#2172: move playlist entries to the kept copy, or not; neither follows
+    the job setting). (keeper file id or None, confirmed, move or None)"""
+    base, *flags = str(action or '').split(':')
+    flags = set(flags)
+    if not flags <= {'confirmed', 'move', 'nomove'}:
+        raise ValueError('Choose Keep Best or an exact native file from this review')
+    confirmed = 'confirmed' in flags or base == 'keep_best_confirmed'
+    move = True if 'move' in flags else False if 'nomove' in flags else None
+    if base.startswith('file-'):
+        return int(base.removeprefix('file-')), confirmed, move
+    if base in {'keep_best', 'keep_best_confirmed'}:
+        return None, confirmed, move
+    raise ValueError('Choose Keep Best or an exact native file from this review')
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -1482,9 +1515,23 @@ class RepairWorker:
             self.thread.join(timeout=2)
         logger.info("Repair worker stopped")
 
+    def _sync_master(self) -> bool:
+        """the switch the automation engine gates scheduled jobs on, which is
+        also the automations page's music toggle. the tools page showed its
+        own saved copy, so flipping it on in automations left tools saying
+        "disabled" while jobs ran (#2113). read it from where it lives."""
+        try:
+            raw = self.db.get_metadata('automation_master_music_enabled')
+        except Exception as e:  # noqa: BLE001 - keep the last known state
+            logger.debug("Could not read the automations master: %s", e)
+            raw = None
+        if raw is not None and str(raw).strip() != '':
+            self.enabled = str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+        return self.enabled
+
     def toggle(self) -> bool:
         """Toggle master enabled state. Returns new state."""
-        self.set_enabled(not self.enabled)
+        self.set_enabled(not self._sync_master())
         logger.info("Repair worker %s", "enabled" if self.enabled else "disabled")
         return self.enabled
 
@@ -1548,6 +1595,7 @@ class RepairWorker:
     # Stats
     # ------------------------------------------------------------------
     def get_stats(self) -> Dict[str, Any]:
+        self._sync_master()
         is_actually_running = self.running and (self.thread is not None and self.thread.is_alive())
         is_idle = (
             is_actually_running
@@ -2388,6 +2436,8 @@ class RepairWorker:
         'quality': (_QUALITY_SCORE_SQL + " ASC, created_at DESC"),
         'quality_desc': (_QUALITY_SCORE_SQL + " DESC, created_at DESC"),
         'path': 'file_path IS NULL, file_path ASC, created_at DESC',
+        # #2179: duplicates a bulk Keep Best can't act on by itself first
+        'needs_you': f"CASE WHEN {_NEEDS_YOU_SQL} THEN 0 ELSE 1 END, created_at DESC",
     }
 
     @staticmethod
@@ -2534,6 +2584,7 @@ class RepairWorker:
             attach_finding_art(conn, items)
             attach_retag_preview(conn, items)
             attach_finding_locks(conn, items)
+            attach_keep_best_needs(items)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
         except Exception as e:
@@ -2972,6 +3023,12 @@ class RepairWorker:
             if last_seen and (group['last_seen'] is None or last_seen > group['last_seen']):
                 group['last_seen'] = last_seen
 
+        if groups.get('native_duplicate_tracks', {}).get('pending'):
+            # #2179: how many open duplicates a Keep Best all leaves for a person
+            # counted in sql: the groups load often, and parsing every
+            # finding's details here would grow with the library
+            groups['native_duplicate_tracks']['needs_you'] = self._needs_you_count(
+                job_id=job_id, severity=severity)
         for finding_type, group in groups.items():
             group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
             group['manual_conflicts'] = manual_by_type.get(finding_type, 0)
@@ -3849,21 +3906,108 @@ class RepairWorker:
             members = details.get('tracks') or []
             if native_id not in {int(row['track_id']) for row in members}:
                 raise ValueError('Finding subject is not in this native duplicate review')
-            action = str(details.get('_fix_action') or '')
-            confirm_recording = action.endswith(':confirmed') or action == 'keep_best_confirmed'
-            action = action.removesuffix(':confirmed')
-            keeper = None
-            if action.startswith('file-'):
-                keeper = int(action.removeprefix('file-'))
-            elif action not in {'keep_best', 'keep_best_confirmed'}:
-                raise ValueError('Choose Keep Best or an exact native file from this review')
+            keeper, confirm_recording, move = _duplicate_fix_action(details.get('_fix_action'))
         except (KeyError, TypeError, ValueError) as exc:
             return {'success': False, 'error': str(exc)}
-        return apply_keep_best(
+        # #2179: in a bulk run a Keep Best that removes nothing is not a fix.
+        # it resolved the finding like a dismiss; now it stays open, marked
+        # with why, and the run counts it as needing you. a Keep Best on the
+        # finding itself showed its plan first, so it still settles it
+        bulk = not details.get('_explicit_single_fix')
+        result = apply_keep_best(
             self.db, details, config_manager=self._config_manager,
             transfer_folder=self.transfer_folder, approved=True, keep_file_id=keeper,
-            confirm_recording=confirm_recording,
+            confirm_recording=confirm_recording, move_playlist_entries=move,
+            require_removal=bulk,
         )
+        if bulk and result.get('needs_you'):
+            result['skipped_by_design'] = True
+        return result
+
+    def duplicate_finding_preview(self, finding_id: int, action: str = '') -> Optional[dict]:
+        """#2172: what Keep Best would do for one duplicate finding, changing
+        nothing. ``action`` is the same string a fix sends"""
+        from core.library2.duplicate_review import preview_keep_best
+        details = self._finding_details(finding_id, 'native_duplicate_tracks')
+        if details is None:
+            return None
+        try:
+            keeper, confirm_recording, move = _duplicate_fix_action(action or 'keep_best')
+        except (TypeError, ValueError) as exc:
+            return {'success': False, 'error': str(exc)}
+        return preview_keep_best(
+            self.db, details, config_manager=self._config_manager, keep_file_id=keeper,
+            confirm_recording=confirm_recording, move_playlist_entries=move)
+
+    def _needs_you_count(self, job_id: str = None, severity: str = None) -> int:
+        """#2179: open duplicates a Keep Best all leaves for a person, by the
+        sql twin of keep_best_blockers. 0 when it can't be read"""
+        where = ["status = 'pending'", _NEEDS_YOU_SQL]
+        params: List[Any] = []
+        if job_id:
+            where.append("job_id = ?")
+            params.append(job_id)
+        if severity:
+            where.append("severity = ?")
+            params.append(severity)
+        library = _findings_library_clause()
+        if library:
+            where.append(library)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM repair_findings WHERE {' AND '.join(where)}",
+                params).fetchone()
+            return int(row[0] or 0) if row else 0
+        except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+            logger.debug("Keep Best needs-you count unavailable: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def keep_best_summary(self, job_id: str = None, severity: str = None,
+                          finding_ids: List[int] = None) -> Optional[dict]:
+        """#2179: what a bulk Keep Best over the open duplicate findings (in
+        this view, or these ids) would do before it runs: how many go
+        through, how many need you and why, with moving playlist entries off
+        and on. None when they could not be read"""
+        from core.library2.duplicate_review import keep_best_summary
+        where = ["status = 'pending'", "finding_type = 'native_duplicate_tracks'"]
+        params: List[Any] = []
+        if job_id:
+            where.append("job_id = ?")
+            params.append(job_id)
+        if severity:
+            where.append("severity = ?")
+            params.append(severity)
+        if finding_ids:
+            where.append(f"id IN ({_JSON_IDS})")
+            params.append(_json_ids(finding_ids))
+        library = _findings_library_clause()
+        if library:
+            where.append(library)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                f"SELECT details_json FROM repair_findings WHERE {' AND '.join(where)}",
+                params).fetchall()
+        except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+            logger.debug("Keep Best summary unavailable: %s", e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+        details = []
+        for (raw,) in rows:
+            try:
+                value = json.loads(raw) if raw else {}
+            except (TypeError, ValueError):
+                value = {}
+            details.append(value if isinstance(value, dict) else {})
+        return keep_best_summary(details)
 
     def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
         """A suspect album tag is fixed by picking the right release, which
@@ -4023,6 +4167,40 @@ class RepairWorker:
             return {'success': False, 'error': 'Finding has no split_artists list'}
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
+
+        # #2150: the user corrects the finding. "keep_whole" says the whole
+        # credit is one artist, "split:A; B" is their own split of it. a name
+        # they join is remembered, so no splitter takes it apart again.
+        from core.repair_jobs.comma_artist_splitter import custom_split_parts
+        action = str(details.get('_fix_action') or '')
+        if action == 'keep_whole' or action.startswith('split:'):
+            if action == 'keep_whole':
+                parts, joined = [combined.strip()], [combined.strip()]
+            else:
+                try:
+                    parts, joined = custom_split_parts(combined, action[len('split:'):])
+                except ValueError as e:
+                    return {'success': False, 'error': str(e)}
+            if joined:
+                from core.imports.collab_artist import remember_kept_whole_names
+                try:
+                    remember_kept_whole_names(joined, self._config_manager)
+                except Exception as e:  # noqa: BLE001 - said once, nothing written yet
+                    logger.error("Could not save keep-whole names %s: %s", joined, e)
+                    return {'success': False, 'error': 'Could not save the name, nothing was changed'}
+            if len(parts) < 2:
+                return {'success': True, 'action': 'kept_whole',
+                        'message': f'"{parts[0]}" stays one artist and won\'t be split again'}
+            display = '; '.join(parts)
+            primary = parts[0]
+        else:
+            broken = self._comma_split_breaks_a_name(combined, parts)
+            if broken:
+                # filed before the name was known as one artist (an older
+                # scan made "K", "DA" out of "K/DA"): never write fragments
+                return {'success': False, 'error': (
+                    f'"{broken}" is one artist. Run Split Artists again for a fresh split, '
+                    f'or edit the split')}
 
         # Get file list from finding details
         file_infos = details.get('all_files') or details.get('files') or []
@@ -4191,6 +4369,35 @@ class RepairWorker:
                     'message': 'No files found on disk for this artist'}
         return {'success': False,
                 'error': f'No files re-tagged ({stale} stale, {missing} missing, {errors} errors)'}
+
+    def _comma_split_breaks_a_name(self, combined, parts):
+        """the first name in ``combined`` that is one artist (kept whole by
+        the user, or identified in the library) but that ``parts`` breaks
+        up. '' when the split leaves every such name whole (#2150)."""
+        from core.imports.collab_artist import kept_whole_keys, library_has_identified_artist
+        from core.repair_jobs.comma_artist_splitter import split_keeping_known
+
+        def _key(name):
+            return ' '.join(str(name or '').split()).casefold()
+
+        keys = kept_whole_keys(self._config_manager)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+
+            def _known(name):
+                return _key(name) in keys or library_has_identified_artist(name, conn=conn)
+
+            have = {_key(p) for p in parts}
+            for name in split_keeping_known(combined, [',', ';', '/', '&'], _known):
+                if _key(name) not in have and _known(name):
+                    return name
+        except Exception as e:  # noqa: BLE001 - the scan already checked, don't block on this
+            logger.debug("split check failed for %r: %s", combined, e)
+        finally:
+            if conn is not None:
+                conn.close()
+        return ''
 
     def _comma_split_files_from_db(self, entity_id, details):
         """Resolve an older finding's files from the Library-v2 catalogue."""
@@ -5907,6 +6114,61 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_artist_art',
                 'message': 'Applied artist image'}
 
+    def _finding_details(self, finding_id: int, finding_type: str) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT details_json FROM repair_findings WHERE id = ? AND finding_type = ?",
+                (int(finding_id), finding_type)).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0] or '{}') or {}
+        except (TypeError, ValueError):
+            return {}
+
+    def cover_finding_state(self, finding_id: int) -> Optional[dict]:
+        """#2169: a cover finding's three places as they are now, the found
+        cover, and what Apply Art would do in each"""
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_state
+        return cover_state(self.db, self._config_manager, finding_id, details)
+
+    def cover_finding_image(self, finding_id: int, place: str) -> Optional[bytes]:
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_image
+        return cover_image(self.db, self._config_manager, details, place)
+
+    def _cover_bytes_for_apply(self, album_id, found_url, library_has):
+        """the exact cover apply writes into files and folders: what the
+        library shows when it has a saved cover, else the found image. None
+        leaves the older lookup in charge"""
+        try:
+            if library_has:
+                from contextlib import closing
+                from core.library2.artwork import build_artwork
+                with closing(self.db._get_connection()) as conn:
+                    conn.row_factory = sqlite3.Row
+                    path = build_artwork(self.db, conn, self._config_manager, 'album', int(album_id))
+                if path and os.path.isfile(path):
+                    with open(path, 'rb') as handle:
+                        return handle.read() or None
+                return None
+            if found_url:
+                from core.library2.artwork import _download_remote_artwork
+                return _download_remote_artwork(found_url)
+        except Exception as e:  # noqa: BLE001 - the older lookup still runs
+            logger.debug("cover bytes for album %s not read: %s", album_id, e)
+        return None
+
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
         """Apply found artwork. ``_fix_action`` selects the target (Pache711):
         'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
@@ -5960,7 +6222,8 @@ class RepairWorker:
             if existing is None:
                 return {'success': False, 'error': 'Album not found in database'}
 
-            locked = bool(existing[1]) and bool((existing[0] or '').strip())
+            library_has = bool((existing[0] or '').strip())
+            locked = bool(existing[1]) and library_has
             if locked:
                 # A manual pick outranks a repair/provider candidate. Use the
                 # chosen URL for the sidecar/embed work below as well.
@@ -5970,10 +6233,11 @@ class RepairWorker:
                     "[repair] album %s art is locked — keeping the chosen cover",
                     native_album_id,
                 )
-            elif artwork_url and (details.get('db_missing', True) or not (existing[0] or '').strip()):
+            elif artwork_url and not library_has:
                 # only when the library has no cover: a finding for a file
                 # with no embedded art replaced the album's cover with the
-                # provider's (a 360px discogs image over a good one)
+                # provider's (a 360px discogs image over a good one). judged
+                # now, not at scan time: a cover saved since then is kept
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
@@ -6045,6 +6309,12 @@ class RepairWorker:
                 msg += ' + applied artist image'
             return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
+        # #2169: the files and the folder get one cover, the one the finding
+        # showed: the library's own when it has one (a pick included), else
+        # the found one. a lookup by the art order here could embed another
+        cover_bytes = self._cover_bytes_for_apply(
+            native_album_id, artwork_url if not library_has else None, library_has)
+
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
             'artist': artist_name, 'album_artist': artist_name,
@@ -6074,7 +6344,7 @@ class RepairWorker:
         art_result = {}
         for folder, folder_files in sorted(by_folder.items()):
             folder_result = apply_art_to_album_files(
-                folder_files, metadata, album_info, folder=folder,
+                folder_files, metadata, album_info, folder=folder, image_bytes=cover_bytes,
             )
             if not art_result:
                 art_result = dict(folder_result)
@@ -7560,6 +7830,15 @@ class RepairWorker:
                     ),
                 }
 
+            # #2010: the last track out takes cover.jpg, the cue and the rest of
+            # the album's own files, the same tidy a queued reorganize does.
+            # one finding at a time left every old folder holding its cover.
+            try:
+                from core.library_reorganize import tidy_moved_from
+                tidy_moved_from({src_dir}, {src_dir: {dst_dir}})
+            except Exception as e:  # noqa: BLE001 - the track moved; the extras stay put
+                logger.warning("Path mismatch fix: album files in %s stayed: %s", src_dir, e)
+
             # Clean up empty source directories (never a configured root, even
             # when nested under the transfer folder — #976 / Specialmed)
             protected = self._protected_root_dirs()
@@ -7729,7 +8008,7 @@ class RepairWorker:
                 '-map_metadata', '0',
             ] + extra_args + ['-y', out_path]
 
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
 
             if proc.returncode != 0 or not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
                 if os.path.exists(out_path):
@@ -7916,6 +8195,7 @@ class RepairWorker:
             skipped = 0
             partial = 0
             other_artist_skipped = 0
+            needs_you: Dict[str, int] = {}
             errors = []
             for fid in ids_to_fix:
                 try:
@@ -7931,6 +8211,9 @@ class RepairWorker:
                 # Tracks the album gate held back, counted even on a
                 # successful finding so a partial gate is never silent.
                 other_artist_skipped += result.get('other_artist_skipped', 0) or 0
+                if result.get('needs_you'):
+                    reason = str(result['needs_you'])
+                    needs_you[reason] = needs_you.get(reason, 0) + 1
                 if result.get('partial'):
                     # blanks filled, differences left: still open, not failed
                     partial += 1
@@ -7949,6 +8232,7 @@ class RepairWorker:
 
             return {'fixed': fixed, 'failed': failed, 'skipped': skipped, 'partial': partial,
                     'other_artist_skipped': other_artist_skipped,
+                    'needs_you': needs_you,
                     'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
@@ -8034,6 +8318,10 @@ class RepairWorker:
                 # for a person: still open, and not a failure
                 'partial': 0,
                 'other_artist_skipped': 0,
+                # #2179: findings a bulk Keep Best left open for a person,
+                # by why ({'same_recording': 3, 'playlist': 2}). replaced
+                # whole on each count, never changed in place
+                'needs_you': {},
                 'stopped': False,
                 'job_id': job_id,
                 'finding_type': finding_type,
@@ -8210,6 +8498,11 @@ class RepairWorker:
                 state['other_artist_skipped'] = (
                     state.get('other_artist_skipped', 0)
                     + (result.get('other_artist_skipped', 0) or 0))
+                if result.get('needs_you'):
+                    reason = str(result['needs_you'])
+                    counts = dict(state.get('needs_you') or {})
+                    counts[reason] = counts.get(reason, 0) + 1
+                    state['needs_you'] = counts
                 skipped_by_design = bool(result.get('skipped_by_design'))
                 if slug and not skipped_by_design:
                     tally = state['per_type'].get(slug)
@@ -8278,6 +8571,7 @@ class RepairWorker:
         with self._bulk_fix_lock:
             state = dict(self._bulk_fix_state)
             state['errors'] = list(state.get('errors', []))
+            state['needs_you'] = dict(state.get('needs_you') or {})
             return state
 
     def stop_bulk_fix(self) -> bool:

@@ -129,9 +129,17 @@ def reset_all_to_defaults(database, profile_id: int) -> int:
     """every artist on this profile's watchlist follows the defaults again."""
     conn = database._get_connection()
     try:
-        cur = conn.execute(
-            "UPDATE watchlist_artists SET follow_defaults = 1 "
-            "WHERE profile_id = ? AND COALESCE(follow_defaults, 0) = 0", (int(profile_id),))
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")}
+        if 'allowed_release_statuses' in columns:
+            # #2175: its own release statuses go back to the library's too
+            cur = conn.execute(
+                "UPDATE watchlist_artists SET follow_defaults = 1, allowed_release_statuses = NULL "
+                "WHERE profile_id = ? AND (COALESCE(follow_defaults, 0) = 0 "
+                "OR allowed_release_statuses IS NOT NULL)", (int(profile_id),))
+        else:
+            cur = conn.execute(
+                "UPDATE watchlist_artists SET follow_defaults = 1 "
+                "WHERE profile_id = ? AND COALESCE(follow_defaults, 0) = 0", (int(profile_id),))
         conn.commit()
         return cur.rowcount or 0
     finally:

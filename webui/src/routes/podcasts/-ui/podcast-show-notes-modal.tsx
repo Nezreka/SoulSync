@@ -139,7 +139,7 @@ export function PodcastShowNotesModal({
               <button
                 type="button"
                 className={styles.showNotesDownloadBtn}
-                data-download-action=""
+                data-podcasts-action=""
                 onClick={() => onDownloadEpisode(episode)}
                 disabled={isDownloading || isDownloaded}
               >

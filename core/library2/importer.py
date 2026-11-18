@@ -204,6 +204,56 @@ def split_artist_credits(*sources: str) -> List[str]:
     return out
 
 
+def split_known_artist_credits(raw: str, known: Callable[[str], bool]) -> List[str]:
+    """``split_artist_credits``, but a run of pieces that spells an artist
+    ``known`` already knows stays one name.
+
+    "Above & Beyond, Mat Zo" is two artists when "Above & Beyond" is known,
+    not three ("Above", "Beyond", "Mat Zo"): the blind split made those two
+    phantom artists, and every folder, tag and reorganize built on them
+    (#2131, #2136). the longest known run wins. a feat. marker is always a
+    boundary.
+    """
+    out: List[str] = []
+    seen: Set[str] = set()
+
+    def _known(name: str) -> bool:
+        try:
+            return bool(known(name))
+        except Exception as exc:  # noqa: BLE001 - a lookup never breaks a split
+            logger.debug("known-artist check failed for %r: %s", name, exc)
+            return False
+
+    def _add(name: str) -> None:
+        name = name.strip().strip("-").strip()
+        key = normalize_name(name)
+        if name and key and key not in seen:
+            seen.add(key)
+            out.append(name)
+
+    display = unwrap_bytes_repr(raw or "")
+    for chunk in _FEAT_RE.split(display):
+        # piece spans in the original text, so a merged run keeps its own
+        # spelling ("Above & Beyond", not "Above, Beyond")
+        spans = []
+        pos = 0
+        for sep in _LIST_SEP_RE.finditer(chunk):
+            spans.append((pos, sep.start()))
+            pos = sep.end()
+        spans.append((pos, len(chunk)))
+        spans = [(s, e) for s, e in spans if chunk[s:e].strip().strip("-").strip()]
+        i = 0
+        while i < len(spans):
+            taken = 1
+            for j in range(len(spans), i + 1, -1):
+                if _known(chunk[spans[i][0]:spans[j - 1][1]].strip()):
+                    taken = j - i
+                    break
+            _add(chunk[spans[i][0]:spans[i + taken - 1][1]])
+            i += taken
+    return out
+
+
 # "<frontman> & The <band>": the band an artist leads, filed on that artist's
 # own album ("Bob Marley & The Wailers" on Bob Marley's Legend, "Nick Cave &
 # The Bad Seeds", "Tom Petty and the Heartbreakers", "Marina and the
@@ -257,7 +307,9 @@ def _credit_names_for_import(
     if known_name(display):
         return [display]
 
-    pieces = split_artist_credits(display)
+    # a known band inside the credit stays whole: "Above & Beyond, Mat Zo"
+    # is two artists, never "Above", "Beyond" and "Mat Zo" (#2136)
+    pieces = split_known_artist_credits(display, known_name)
     if len(pieces) <= 1:
         return pieces
     if _EXPLICIT_CREDIT_RE.search(display):
@@ -466,7 +518,9 @@ def _server_identity(row: Any) -> Tuple[Optional[str], Optional[str]]:
     server knows it would be worse than saying nothing.
     """
     server_source = _pick(row, "server_source")
-    if not server_source:
+    # the legacy id is TEXT PRIMARY KEY, which sqlite lets be NULL: no id,
+    # no server item (str(None) is not one)
+    if not server_source or row["id"] is None:
         return None, None
     # an own-library Jellyfin artist carried an ``own-jellyfin:<pid>:`` prefix
     # upstream; Library v2 keeps the server's native id (#1199)
@@ -538,6 +592,27 @@ def _legacy_key(legacy_id: Any) -> Optional[str]:
     (#38/#40 — duplicate artists AND albums/EPs/singles on re-import). Coerce to
     str on both write and read so re-imports always match the same row."""
     return None if legacy_id is None else str(legacy_id)
+
+
+def _keyless_file_tracks(cursor) -> Dict[str, int]:
+    """Legacy file path -> lib2 track, for the files no legacy id owns.
+
+    A legacy row with no id has nothing else to be found again by, so a re-run
+    (resume or Reimport) matches it on the path it observed. The path the file
+    has now is the fallback for a file imported before that was recorded.
+    """
+    found: Dict[str, int] = {}
+    rows = cursor.execute(
+        "SELECT track_id, path, legacy_source_path FROM lib2_track_files "
+        "WHERE legacy_track_id IS NULL AND track_id IS NOT NULL"
+    ).fetchall()
+    for track_id, _path, source_path in rows:
+        if source_path:
+            found.setdefault(str(source_path), int(track_id))
+    for track_id, path, _source_path in rows:
+        if path:
+            found.setdefault(str(path), int(track_id))
+    return found
 
 
 def _detect_single(track_count: Optional[int], actual_tracks: int) -> bool:
@@ -709,6 +784,8 @@ class _ArtistResolver:
         # Stufe 5) keeps numerically-colliding ids of different providers
         # (a Deezer id equal to some iTunes id) from merging two artists.
         self._by_provider: Dict[tuple, int] = {}
+        # names the user said are one artist each (#2150), read once
+        self._kept_whole: Optional[set] = None
 
     @staticmethod
     def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -792,8 +869,15 @@ class _ArtistResolver:
         return self._by_legacy.get(_legacy_key(legacy_id))
 
     def known_name(self, name: str) -> bool:
-        """Whether an artist with exactly this (normalized) name already exists."""
-        return normalize_name(name) in self._by_name
+        """Whether an artist with exactly this (normalized) name already
+        exists, or the user said this name is one artist (#2150)."""
+        key = normalize_name(name)
+        if key in self._by_name:
+            return True
+        if self._kept_whole is None:
+            from core.imports.collab_artist import kept_whole_keys
+            self._kept_whole = kept_whole_keys()
+        return key in self._kept_whole
 
     def get_or_create_by_name(self, name: str, *,
                               provider_ids: Optional[Dict[str, Any]] = None,
@@ -1814,6 +1898,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             name = row["name"]
             if not name:
                 continue
+            if row["id"] is None:
+                # no album or track can point at an id-less artist, and every
+                # id-less row would land on the one legacy key None
+                stats["keyless_rows_skipped"] = stats.get("keyless_rows_skipped", 0) + 1
+                continue
             server_source, server_id = _server_identity(row)
             lib2_artist_id = resolver.upsert_legacy(row["id"], {
                 "name": name,
@@ -1947,6 +2036,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                          after_rowid=album_from or 0)
             if album_from is not None else ()
         ):
+            if row["id"] is None:
+                # an id-less album has no tracks (none can point at it), and
+                # every such row would land on the one legacy key None
+                stats["keyless_rows_skipped"] = stats.get("keyless_rows_skipped", 0) + 1
+                continue
             # Through the alias registry: a merge moved this release onto the
             # surviving artist, and the legacy row still names the folded one.
             # An album whose artist row is gone keeps its files under the
@@ -2258,6 +2352,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         else:
             dirty_credit_album_ids = set(imported_album_ids)
         placeholder_albums: Dict[int, int] = {}
+        keyless_files: Optional[Dict[str, int]] = None  # built on the first id-less row
 
         def _placeholder_album(legacy_artist_id: Any) -> int:
             artist = canonical_artists.resolve(resolver.get_legacy(legacy_artist_id)) \
@@ -2290,6 +2385,20 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     continue
                 album_id = _placeholder_album(_pick(row, "artist_id"))
                 stats["orphaned_tracks_rescued"] = stats.get("orphaned_tracks_rescued", 0) + 1
+            legacy_key = _legacy_key(row["id"])
+            keyless_file = None
+            if legacy_key is None:
+                # a legacy row with no id (sqlite allows NULL in the TEXT
+                # primary key). its file is still music, so it gets a track
+                # and a file, just no back-reference; a re-run finds it again
+                # by that file. with no file there is nothing to keep.
+                if not _pick(row, "file_path"):
+                    stats["keyless_rows_skipped"] = stats.get("keyless_rows_skipped", 0) + 1
+                    continue
+                if keyless_files is None:
+                    keyless_files = _keyless_file_tracks(cursor)
+                keyless_file = str(_pick(row, "file_path"))
+                stats["keyless_rows"] = stats.get("keyless_rows", 0) + 1
             title = row["title"]
             tfields = (
                 album_id, title, _pick(row, "track_number"),
@@ -2307,13 +2416,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _parked_soul_id(row, "soul_id"), _parked_soul_id(row, "album_soul_id"),
                 _pick(row, "play_count"), _pick(row, "last_played"),
             )
-            existing = track_map.get(_legacy_key(row["id"]))
+            existing = (track_map.get(legacy_key) if legacy_key is not None
+                        else keyless_files.get(keyless_file))
             owner = _live_owner(row, live_owners)
             joined = None
-            origin = playlist_origins.get(_legacy_key(row["id"]))
+            origin = playlist_origins.get(legacy_key) if legacy_key is not None else None
             slot = (owner, origin["name"] if origin else None)
             if existing is None and album_id in copied_albums:
-                joined = joined_track_map.get(_legacy_key(row["id"])) or _track_of_copy(
+                joined = joined_track_map.get(legacy_key) or _track_of_copy(
                     cursor, copied_tracks, album_id, row, slot, repeated_titles)
             adopted = joined is not None and owner is not None
             if adopted:
@@ -2412,7 +2522,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                      _pick(row, "created_at")),
                 )
                 track_id = cursor.lastrowid
-                track_map[_legacy_key(row["id"])] = track_id
+                if legacy_key is not None:
+                    track_map[legacy_key] = track_id
+                else:
+                    keyless_files[keyless_file] = track_id
                 if owner is not None and album_id in copied_albums:
                     tracks_by_a_copy.add(int(track_id))
             dirty_credit_album_ids.add(int(album_id))
@@ -2497,7 +2610,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # A native rename keeps the file identity/back-reference. A
                 # frozen legacy path is not permission to resurrect its old
                 # location and prune the real, now-organized version.
-                imported_file = imported_files.get((int(track_id), _legacy_key(row["id"])))
+                imported_file = imported_files.get((int(track_id), legacy_key))
                 if (imported_file and imported_file["path"]
                         and imported_file["path"] != imported_file["legacy_source_path"]):
                     file_path = imported_file["path"]
@@ -2545,12 +2658,16 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     )
                 # A file a second legacy row also points at keeps its first
                 # owner/back-reference; this row's observation is provenance only.
-                cursor.execute(
-                    "INSERT OR REPLACE INTO lib2_file_origins(file_id, legacy_track_id, owner_profile_id, "
-                    "playlist_name, source, source_playlist_id) VALUES(?,?,?,?,?,?)",
-                    (existing_files[file_key], row["id"], owner,
-                     origin["name"] if origin else None, origin["source"] if origin else None,
-                     origin["source_playlist_id"] if origin else None))
+                # provenance names a legacy row, and an id-less row has none.
+                if legacy_key is not None:
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO lib2_file_origins(file_id, legacy_track_id, "
+                        "owner_profile_id, playlist_name, source, source_playlist_id) "
+                        "VALUES(?,?,?,?,?,?)",
+                        (existing_files[file_key], row["id"], owner,
+                         origin["name"] if origin else None,
+                         origin["source"] if origin else None,
+                         origin["source_playlist_id"] if origin else None))
             if copied_tracks.get(album_id) is not None:
                 entry = next((t for t in copied_tracks[album_id] if t["id"] == track_id), None)
                 if entry is None:
@@ -2571,6 +2688,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 dirty_credit_album_ids.clear()
                 checkpoint("tracks", track_done + i + 1, track_total,
                            int(row["__lib2_source_rowid"]))
+        if stats.get("keyless_rows") or stats.get("keyless_rows_skipped"):
+            logger.info("Library import: %d legacy tracks had no id, imported by their file; "
+                        "%d id-less rows with nothing to keep skipped",
+                        stats.get("keyless_rows", 0), stats.get("keyless_rows_skipped", 0))
         # The walk marks the album a track's LEGACY row maps to. A §63
         # duplicate fold deliberately moves a track onto a different lib2
         # album, and that fold target is never the legacy-mapped id — so its
@@ -2911,14 +3032,18 @@ def _row_provider_ids(row, key: str = "external_ids") -> Dict[str, str]:
 
 
 def _album_type_from_payload(album: Dict[str, Any], total_tracks: int) -> str:
+    """the payload's own type, else the store rule (1-3 tracks under 30 min a
+    single, 4-6 an ep, else an album) with the runtime when the payload
+    carries its tracks."""
+    from core.metadata.release_type import release_type_from_shape, tracklist_runtime_ms
     typ = str(album.get("album_type") or album.get("type") or "").lower()
     if typ in {"album", "single", "ep", "compilation", "live"}:
         return typ
-    if total_tracks and total_tracks <= 1:
-        return "single"
-    if total_tracks and total_tracks <= 6:
-        return "ep"
-    return "album"
+    tracks = album.get("tracks")
+    if isinstance(tracks, dict):
+        tracks = tracks.get("items")
+    return release_type_from_shape(
+        total_tracks, album.get("duration_ms") or tracklist_runtime_ms(tracks, total_tracks))
 
 
 def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
@@ -3622,6 +3747,7 @@ __all__ = [
     "apply_monitoring_from_watchlist_wishlist",
     "reconcile_import_monitoring",
     "split_artist_credits",
+    "split_known_artist_credits",
     "leads_a_band",
     "featured_from_title",
     "normalize_name",

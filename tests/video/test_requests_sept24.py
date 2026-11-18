@@ -36,6 +36,7 @@ def client(tmp_path, monkeypatch):
         g.profile_id = int(request.headers.get("X-Test-Profile", 1))
         g.profile_name = "Tester %s" % g.profile_id
         g.can_download = True
+        g.request_limit = 0   # web_server stamps it for every member (0 = no limit)
         g.is_admin = g.profile_id == 1
 
     try:
@@ -172,9 +173,11 @@ def test_request_quality_profile_lands_on_the_wishlist(client):
     qp = cur.lastrowid
     conn.commit()
     conn.close()
-    # quality profiles are admin-only: a non-admin's pick is ignored at filing
+    # a member's pick is kept when it's one they may have (#2168: every
+    # profile, on an open set); tests/video/test_video_permissions_2168.py
+    # holds the limits
     rid = _file(c, 2, quality_profile_id=qp).get_json()["id"]
-    assert db.get_video_request(rid)["quality_profile_id"] is None
+    assert db.get_video_request(rid)["quality_profile_id"] == qp
     # admin filing keeps the pick, and it lands on the wishlist on approve
     rid = _file(c, 1, quality_profile_id=qp).get_json()["id"]
     assert db.get_video_request(rid)["quality_profile_id"] == qp

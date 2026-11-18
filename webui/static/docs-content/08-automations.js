@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'automations',
+    needs: 'automations.personal',
     title: 'Automations',
     icon: '🤖',
     pages: [
@@ -9,6 +10,8 @@ registerDocsSection({
             lede: 'Automations run SoulSync on autopilot — schedule maintenance, react to events, and chain workflows together with a visual builder.',
             body: `
 Automations follow a simple **WHEN → DO → THEN** model: a trigger fires, an action runs, and optional follow-up steps (usually notifications) happen after.
+
+![Automations list showing each automation's trigger, action and run status](auto-overview.jpg)
 
 ::: cards
 ### ⏰ Schedules
@@ -49,7 +52,7 @@ Click **+ New Automation** to open the builder. Blocks from the sidebar drop int
 3. **THEN** (follow-ups) — up to 5 post-actions that run after DO completes, typically notifications or signals.
 :::
 
-![Automation builder](auto-builder.jpg)
+![Automation builder with WHEN, DO and THEN slots](auto-builder.jpg)
 
 ## Conditions
 
@@ -70,6 +73,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             title: 'All Triggers',
             lede: 'Every event and schedule that can start an automation.',
             body: `
+![Builder with the trigger picker open](auto-triggers.jpg)
+
 ## Time-based
 
 | Trigger | What it does |
@@ -151,6 +156,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             title: 'All Actions',
             lede: 'Every task an automation can perform.',
             body: `
+![Builder with the action picker open](auto-actions.jpg)
+
 ## Wishlist & downloads
 
 | Action | What it does |
@@ -224,6 +231,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             body: `
 After the DO action completes, up to **5 THEN actions** run:
 
+![Builder showing the THEN follow-up actions area](auto-then.jpg)
+
 - **Discord Webhook** — post a message to a Discord channel
 - **Pushbullet** — push notification to phone or desktop
 - **Telegram** — send a message via a Telegram bot
@@ -288,6 +297,7 @@ Each automation card shows its **last run time**, **run count**, and last result
         },
         {
             id: 'auto-system',
+            needs: 'admin',
             title: 'System Automations',
             lede: 'Built-in maintenance automations that keep SoulSync healthy out of the box.',
             body: `

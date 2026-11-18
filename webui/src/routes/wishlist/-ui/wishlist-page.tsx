@@ -105,7 +105,8 @@ export function WishlistPage() {
 }
 
 function MusicWishlistPage() {
-  const { profileId } = useProfile();
+  // the retry profile is install-wide, so only an admin changes it
+  const { profileId, isAdmin } = useProfile();
   const search = Route.useSearch();
   const media = search.media;
   const navigate = useNavigate({ from: Route.fullPath });
@@ -627,7 +628,11 @@ function MusicWishlistPage() {
                             'How long repeatedly-failing tracks wait between scheduled retries'
                           }
                           value={retryProfileData?.profile?.name ?? 'standard'}
-                          disabled={retryProfileQuery.isPending || retryProfileMutation.isPending}
+                          disabled={
+                            !isAdmin ||
+                            retryProfileQuery.isPending ||
+                            retryProfileMutation.isPending
+                          }
                           onChange={(event) => retryProfileMutation.mutate(event.target.value)}
                         >
                           {retryProfileOptions.map((p) => (

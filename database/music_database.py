@@ -538,6 +538,9 @@ class WatchlistArtist:
     profile_id: int = 1
     # #1822: True = uses the watchlist defaults for the release rules above
     follow_defaults: bool = False
+    # #2175: the MusicBrainz release statuses this artist lets through, a JSON
+    # list. None = the library-wide ones (core.release_statuses)
+    allowed_release_statuses: Optional[str] = None
 
 @dataclass
 class SimilarArtist:
@@ -1645,11 +1648,17 @@ class MusicDatabase:
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_device_oidc_session(cursor)
+            # people and permissions (#2166): templates, policy, personal
+            # changes. after every profile column above it reads
+            self._add_permission_layers(cursor)
             self._revoke_stale_device_rows(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
             self._add_listening_history_table(cursor)
+            # server activity play log (who played what, how, from where)
+            from core.server_activity.store import ensure_schema as _ensure_server_activity_schema
+            _ensure_server_activity_schema(cursor)
 
             # Per-artist auto_download ("follow only") column. MUST run after the
             # profile-support migrations above — those recreate watchlist_artists
@@ -1663,6 +1672,8 @@ class MusicDatabase:
             self._add_watchlist_follow_defaults_column(cursor)
             # #2082: live tracks apart from live albums. same ordering rule.
             self._add_watchlist_live_tracks_column(cursor)
+            # #2175: per-artist release statuses. same ordering rule.
+            self._add_watchlist_release_statuses_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2367,6 +2378,7 @@ class MusicDatabase:
         'wishlist_lib2_album_dates_v2': ('table', '_wishlist_lib2_album_dates_v2'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
+        'server_plays_v1':          ('table', 'server_plays'),
     }
 
     def _record_migration(self, cursor, name):
@@ -4437,6 +4449,22 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding include_live_tracks to watchlist_artists: {e}")
 
+    def _add_watchlist_release_statuses_column(self, cursor):
+        """Add allowed_release_statuses (#2175): the MusicBrainz release
+        statuses an artist lets through, a JSON list. NULL follows the
+        library-wide list, and nothing is stamped, so every artist's scan
+        applies the rules it applied the day before."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if not columns or 'allowed_release_statuses' in columns:
+                return
+            cursor.execute(
+                "ALTER TABLE watchlist_artists ADD COLUMN allowed_release_statuses TEXT DEFAULT NULL")
+            logger.info("Added allowed_release_statuses column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding allowed_release_statuses to watchlist_artists: {e}")
+
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
         try:
@@ -5805,6 +5833,152 @@ class MusicDatabase:
             'session_epoch': int(val('session_epoch', 0) or 0),
             'disabled': bool(val('disabled', 0)),
         }
+
+    # ── people and permissions (#2166, #2167, #2168) ─────────────────────
+    # global policy (metadata perm_policy) > template (permission_templates) >
+    # personal changes (profiles.perm_overrides) = effective. the old profile
+    # columns stay as the written-through cache; see core/permissions.py.
+
+    def _add_permission_layers(self, cursor):
+        """the tables and the zero-change mapping. idempotent and safe on a
+        live install: it only ever adds a table, two columns and metadata
+        keys, and writes template_id / perm_overrides for a profile whose
+        mapping recomputes to exactly what its old columns do. it never
+        writes an old column. a profile that doesn't map keeps its columns,
+        stays template-less and is listed in perm_needs_look."""
+        try:
+            cursor.execute("PRAGMA table_info(profiles)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if not cols:
+                return
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS permission_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slug TEXT UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    perms TEXT NOT NULL,
+                    sidebar TEXT,
+                    builtin INTEGER NOT NULL DEFAULT 0,
+                    sort INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            for col, decl in (("template_id", "INTEGER"), ("perm_overrides", "TEXT")):
+                if col not in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE profiles ADD COLUMN {col} {decl}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" not in str(e).lower():
+                            raise
+            cursor.execute("SELECT value FROM metadata WHERE key = 'perm_migrated_v1' LIMIT 1")
+            if not cursor.fetchone():
+                self._seed_permission_templates(cursor)
+                cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('perm_policy', '{}')")
+                cursor.execute("SELECT id FROM permission_templates WHERE slug = 'guest'")
+                guest = cursor.fetchone()
+                if guest:
+                    cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('perm_signup_template', ?)",
+                                   (str(guest[0]),))
+                cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('perm_migrated_v1', '1')")
+            self._map_legacy_profiles(cursor)
+        except Exception as e:
+            logger.error(f"Error in permission layers migration: {e}")
+
+    def _seed_permission_templates(self, cursor):
+        """the four built-ins from init.js PROFILE_PRESETS, each with what
+        new profiles see today (ui_features_default) as its sidebar."""
+        from core.permissions import BUILTIN_TEMPLATES
+        cursor.execute("SELECT value FROM metadata WHERE key = 'ui_features_default' LIMIT 1")
+        row = cursor.fetchone()
+        sidebar = {"off": [], "locked": False}
+        if row and row[0]:
+            try:
+                saved = json.loads(row[0])
+                if isinstance(saved, dict):
+                    from core.ui_features import normalize_off
+                    sidebar = {"off": normalize_off(saved.get("off")), "locked": bool(saved.get("locked"))}
+            except (TypeError, ValueError):
+                pass
+        for order, tpl in enumerate(BUILTIN_TEMPLATES):
+            cursor.execute(
+                "INSERT OR IGNORE INTO permission_templates (slug, name, description, perms, sidebar, builtin, sort) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?)",
+                (tpl["slug"], tpl["name"], tpl["description"], json.dumps(tpl["perms"], sort_keys=True),
+                 json.dumps(sidebar), order))
+
+    def _legacy_profile_from_row(self, row, columns) -> Dict[str, Any]:
+        """the permission fields of a profile row, read the way get_profile
+        reads them (so the mapping sees what every check sees)."""
+        is_admin = bool(row['is_admin'])
+        ap_raw = row['allowed_pages'] if 'allowed_pages' in columns else None
+        try:
+            pages = json.loads(ap_raw) if ap_raw else None
+        except (TypeError, ValueError):
+            pages = {"unreadable": ap_raw}
+        return {
+            'id': row['id'], 'name': row['name'], 'is_admin': is_admin,
+            'allowed_pages': pages,
+            'allowed_sides': self._profile_sides(row, columns, is_admin),
+            'can_download': bool(row['can_download']) if 'can_download' in columns else True,
+            **self._profile_controls(row, columns),
+        }
+
+    def _map_legacy_profiles(self, cursor):
+        """steps 3 and 4: every non-admin profile without a template gets
+        the built-in its old columns already equal, its real differences as
+        personal changes, then a recompute that must match its columns. any
+        mismatch: nothing is written for it and it's listed for a look.
+        runs every boot, so a profile made the old way since is mapped too."""
+        from core.permissions import PermissionDataError, match_template
+        cursor.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1")
+        row = cursor.fetchone()
+        policy = row[0] if row and row[0] else None
+        try:
+            from core.permissions import clean_layer
+            clean_layer(policy)
+        except PermissionDataError as e:
+            logger.error("permission mapping skipped: the global policy is unreadable (%s)", e)
+            return
+        cursor.execute("SELECT id, slug, name, perms FROM permission_templates WHERE builtin = 1 ORDER BY sort, id")
+        templates = []
+        for t in cursor.fetchall():
+            try:
+                perms = json.loads(t['perms'])
+            except (TypeError, ValueError):
+                continue
+            templates.append({"id": t['id'], "slug": t['slug'], "name": t['name'], "perms": perms})
+        cursor.execute("SELECT * FROM profiles WHERE template_id IS NULL AND id != 1 AND COALESCE(is_admin, 0) = 0")
+        rows = cursor.fetchall()
+        if not rows:
+            return
+        columns = [d[0] for d in cursor.description]
+        cursor.execute("SELECT value FROM metadata WHERE key = 'perm_needs_look' LIMIT 1")
+        nl = cursor.fetchone()
+        try:
+            needs_look = json.loads(nl[0]) if nl and nl[0] else {}
+            if not isinstance(needs_look, dict):
+                needs_look = {}
+        except (TypeError, ValueError):
+            needs_look = {}
+        mapped = 0
+        for r in rows:
+            profile = self._legacy_profile_from_row(r, columns)
+            result = match_template(profile, templates, policy)
+            if result["ok"]:
+                cursor.execute("UPDATE profiles SET template_id = ?, perm_overrides = ? "
+                               "WHERE id = ? AND template_id IS NULL",
+                               (result["template_id"], json.dumps(result["overrides"], sort_keys=True), r['id']))
+                needs_look.pop(str(r['id']), None)
+                mapped += 1
+            else:
+                needs_look[str(r['id'])] = result["reasons"]
+                logger.warning("permissions: profile %s (%s) kept on its own settings: %s",
+                               r['id'], profile.get('name'), "; ".join(result["reasons"]))
+        cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('perm_needs_look', ?)",
+                       (json.dumps(needs_look, sort_keys=True),))
+        if mapped:
+            logger.info("permissions: %d profile(s) now follow a template, nothing they can do changed", mapped)
 
     def _add_profile_sides(self, cursor):
         """Add the allowed_sides column ('music'|'video'|'both') to profiles.
@@ -9243,6 +9417,23 @@ class MusicDatabase:
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _profile_signin(row, columns) -> str:
+        """how this profile signs in, for the people editor's header (#2166):
+        oidc or plex when an account is linked (sign-in lands on it), else a
+        password, a pin, or just the profile picker."""
+        def has(col):
+            return col in columns and row[col] is not None and row[col] != ''
+        if has('oidc_identity'):
+            return 'oidc'
+        if has('plex_account_id'):
+            return 'plex'
+        if has('password_hash'):
+            return 'password'
+        if has('pin_hash'):
+            return 'pin'
+        return 'picker'
+
     def get_all_profiles(self) -> List[Dict[str, Any]]:
         """Get all profiles"""
         try:
@@ -9278,14 +9469,17 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     })
                 return results
         except Exception as e:
             logger.error(f"Error getting profiles: {e}")
             return [{'id': 1, 'name': 'Admin', 'avatar_color': '#6366f1', 'avatar_url': None, 'is_admin': True, 'has_pin': False}]
 
-    def get_profile(self, profile_id: int) -> Optional[Dict[str, Any]]:
-        """Get a single profile by ID"""
+    def get_profile(self, profile_id: int, raise_errors: bool = False) -> Optional[Dict[str, Any]]:
+        """Get a single profile by ID. None for no such profile, and (unless
+        ``raise_errors``) for a read that failed too; a permission check that
+        must not read "unreadable" as "no row" passes raise_errors=True."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -9315,10 +9509,13 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     }
                 return None
         except Exception as e:
             logger.error(f"Error getting profile {profile_id}: {e}")
+            if raise_errors:
+                raise
             return None
 
     def create_profile(self, name: str, avatar_color: str = '#6366f1',
@@ -9346,6 +9543,9 @@ class MusicDatabase:
             logger.error(f"Error creating profile: {e}")
             return None
 
+    _PERMISSION_CACHE_FIELDS = frozenset({'allowed_pages', 'can_download', 'allowed_sides', 'request_limit',
+                                           'request_limit_days', 'hide_explicit', 'max_rating', 'is_admin'})
+
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
         allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
@@ -9372,13 +9572,145 @@ class MusicDatabase:
                     values
                 )
                 conn.commit()
-                return cursor.rowcount > 0
+                ok = cursor.rowcount > 0
+            # an access change made through the old editor reaches the
+            # permission layers, so the effective map and the columns agree
+            if ok and set(updates) & self._PERMISSION_CACHE_FIELDS:
+                try:
+                    from core.permission_store import resync_after_legacy_update
+                    resync_after_legacy_update(self, int(profile_id))
+                except Exception as e:  # noqa: BLE001 - the edit itself is saved; the layers catch up on boot
+                    logger.error("permissions: resync after profile %s edit failed: %s", profile_id, e)
+            return ok
         except sqlite3.IntegrityError:
             logger.warning("Profile update failed (duplicate name?)")
             return False
         except Exception as e:
             logger.error(f"Error updating profile {profile_id}: {e}")
             return False
+
+    # ── permission layers: plain reads and writes. the rules live in
+    #    core/permissions.py, the glue in core/permission_store.py. reads
+    #    raise on error: a permission check must never read "unreadable" as
+    #    "nothing set" ─────────────────────────────────────────────────────
+
+    def get_permission_inputs(self, profile_id: int) -> Dict[str, Any]:
+        """{profile_id, template_id, overrides, template_perms, template_found,
+        policy} for one profile in one connection. raises on a read error."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT template_id, perm_overrides FROM profiles WHERE id = ?", (int(profile_id),))
+            row = cursor.fetchone()
+            if row is None:
+                return {"profile_id": int(profile_id), "missing": True}
+            tid = row['template_id']
+            perms = None
+            if tid is not None:
+                cursor.execute("SELECT perms FROM permission_templates WHERE id = ?", (tid,))
+                t = cursor.fetchone()
+                perms = t['perms'] if t else None
+            cursor.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1")
+            pol = cursor.fetchone()
+            return {"profile_id": int(profile_id), "missing": False, "template_id": tid,
+                    "overrides": row['perm_overrides'], "template_perms": perms,
+                    "template_found": tid is None or perms is not None,
+                    "policy": pol['value'] if pol else None}
+
+    def get_permission_policy_raw(self) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1").fetchone()
+            return row['value'] if row else None
+
+    def set_permission_policy_raw(self, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                         "VALUES ('perm_policy', ?, CURRENT_TIMESTAMP)", (value,))
+            conn.commit()
+
+    def list_permission_templates(self) -> List[Dict[str, Any]]:
+        """every template with who follows it, in rail order."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM permission_templates ORDER BY sort, id").fetchall()
+            follow = conn.execute(
+                "SELECT template_id, id, name FROM profiles WHERE template_id IS NOT NULL "
+                "AND id != 1 AND COALESCE(is_admin, 0) = 0 ORDER BY id").fetchall()
+        by_tpl: Dict[int, List[Dict[str, Any]]] = {}
+        for f in follow:
+            by_tpl.setdefault(f['template_id'], []).append({"id": f['id'], "name": f['name']})
+        return [dict(dict(r), followers=by_tpl.get(r['id'], [])) for r in rows]
+
+    def get_permission_template(self, template_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM permission_templates WHERE id = ?", (int(template_id),)).fetchone()
+            return dict(row) if row else None
+
+    def create_permission_template(self, *, name: str, description: str, perms: str, sidebar: Optional[str],
+                                   sort: int = 100) -> int:
+        with self._get_connection() as conn:
+            cur = conn.execute("INSERT INTO permission_templates (name, description, perms, sidebar, builtin, sort) "
+                               "VALUES (?, ?, ?, ?, 0, ?)", (name, description, perms, sidebar, int(sort)))
+            conn.commit()
+            return int(cur.lastrowid)
+
+    def update_permission_template(self, template_id: int, **fields) -> bool:
+        allowed = {k: v for k, v in fields.items() if k in ("name", "description", "perms", "sidebar", "sort")}
+        if not allowed:
+            return False
+        with self._get_connection() as conn:
+            sets = ", ".join(f"{k} = ?" for k in allowed)
+            cur = conn.execute(f"UPDATE permission_templates SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (*allowed.values(), int(template_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_permission_template(self, template_id: int, reassign_to: Optional[int] = None) -> bool:
+        """delete a template. its followers move to ``reassign_to`` (their
+        personal changes come along), or the delete is refused while anyone
+        follows it (returns False)."""
+        with self._get_connection() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM profiles WHERE template_id = ?", (int(template_id),)).fetchone()[0]
+            if n and reassign_to is None:
+                return False
+            if n:
+                conn.execute("UPDATE profiles SET template_id = ? WHERE template_id = ?",
+                             (int(reassign_to), int(template_id)))
+            cur = conn.execute("DELETE FROM permission_templates WHERE id = ?", (int(template_id),))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def set_profile_permission_layers(self, profile_id: int, template_id: Optional[int], overrides: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE profiles SET template_id = ?, perm_overrides = ? WHERE id = ?",
+                               (template_id, overrides, int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def write_profile_permission_cache(self, profile_id: int, columns: Dict[str, Any]) -> bool:
+        """write the old columns from an effective map (the cache). a raw
+        write on purpose: update_profile would read it as an edit made the
+        old way and map it back."""
+        cols = {k: v for k, v in columns.items()
+                if k in ("allowed_sides", "allowed_pages", "can_download", "hide_explicit", "max_rating",
+                         "request_limit", "request_limit_days")}
+        if "allowed_pages" in cols:
+            cols["allowed_pages"] = json.dumps(cols["allowed_pages"]) if cols["allowed_pages"] is not None else None
+        for k in ("can_download", "hide_explicit"):
+            if k in cols:
+                cols[k] = int(bool(cols[k]))
+        if not cols:
+            return False
+        with self._get_connection() as conn:
+            sets = ", ".join(f"{k} = ?" for k in cols)
+            cur = conn.execute(f"UPDATE profiles SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (*cols.values(), int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def remap_legacy_profiles(self) -> None:
+        """map any template-less member onto a template now (the boot step)."""
+        with self._get_connection() as conn:
+            self._map_legacy_profiles(conn.cursor())
+            conn.commit()
 
     def bump_profile_session_epoch(self, profile_id: int,
                                    keep_device_id: Optional[str] = None) -> Optional[int]:
@@ -10128,34 +10460,32 @@ class MusicDatabase:
                 if server_source:
                     # Server mappings are counted only where owned file evidence
                     # exists; the server never owns the catalogue row itself.
+                    from core.library2.sql_util import on_server_sql
+                    on_sql, on_params = on_server_sql('artist', 'a', server_source)
                     cursor.execute(
-                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE ("
-                        "EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                        "WHERE m.entity_type='artist' AND m.entity_id=a.id "
-                        "AND m.server_source=?) OR a.server_source=?) AND EXISTS (SELECT 1 FROM lib2_albums al "
+                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE "
+                        + on_sql + " AND EXISTS (SELECT 1 FROM lib2_albums al "
                         "JOIN lib2_tracks t ON t.album_id=al.id JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE al.primary_artist_id=a.id AND "
                         "f.path IS NOT NULL AND TRIM(f.path)<>'' AND "
                         "COALESCE(f.file_state,'active')='active'" + owner + ")",
-                        (server_source, server_source))
+                        on_params)
                     artist_count = cursor.fetchone()[0]
 
+                    on_sql, on_params = on_server_sql('album', 'al', server_source)
                     cursor.execute(
-                        "SELECT COUNT(*) FROM lib2_albums al WHERE (EXISTS (SELECT 1 "
-                        "FROM lib2_media_server_mappings m WHERE m.entity_type='album' "
-                        "AND m.entity_id=al.id AND m.server_source=?) OR al.server_source=?) AND "
+                        "SELECT COUNT(*) FROM lib2_albums al WHERE " + on_sql + " AND "
                         "EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE t.album_id=al.id AND f.path IS NOT NULL "
                         "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active'"
                         + owner + ")",
-                        (server_source, server_source))
+                        on_params)
                     album_count = cursor.fetchone()[0]
 
+                    on_sql, on_params = on_server_sql('track', 't', server_source)
                     cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t "
-                                   f"WHERE (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                                   f"WHERE m.entity_type='track' AND m.entity_id=t.id "
-                                   f"AND m.server_source=?) OR t.server_source=?) AND {_owned_track()}",
-                                   (server_source, server_source))
+                                   f"WHERE {on_sql} AND {_owned_track()}",
+                                   on_params)
                     track_count = cursor.fetchone()[0]
                 return {
                     'artists': artist_count,
@@ -12256,10 +12586,10 @@ class MusicDatabase:
                    "WHERE files.path IS NOT NULL AND files.path != ''")
             params: list = [server_source or ""]
             if server_source:
-                sql += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                        "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
-                        "AND m.server_source=?) OR tracks.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+                sql += " AND " + on_sql
+                params.extend(on_params)
             cursor.execute(sql, params)
             return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
                     for r in cursor.fetchall()]
@@ -12414,11 +12744,10 @@ class MusicDatabase:
 
         # Add server filter if specified
         if server_source:
-            where_conditions.append(
-                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
-                "OR tracks.server_source=?)")
-            params.extend((server_source, server_source))
+            from core.library2.sql_util import on_server_sql
+            on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+            where_conditions.append(on_sql)
+            params.extend(on_params)
 
         if not where_conditions:
             return []
@@ -12591,11 +12920,10 @@ class MusicDatabase:
             where_parts.insert(0, scope[0])
             params[:0] = scope[1]
         if server_source:
-            where_parts.append(
-                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
-                "OR tracks.server_source=?)")
-            params.extend((server_source, server_source))
+            from core.library2.sql_util import on_server_sql
+            on_sql, on_params = on_server_sql('track', 'tracks', server_source)
+            where_parts.append(on_sql)
+            params.extend(on_params)
 
         from core.library2.sql_util import owned_in_library_sql, in_library_sql, scoped_primary_file_join
         where_clause = " AND ".join(where_parts) + owned_in_library_sql("track", "tracks")
@@ -12746,11 +13074,10 @@ class MusicDatabase:
                     params.extend(ids)
 
             if server_source:
-                where_conditions.append(
-                    "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-                    "m.entity_type='album' AND m.entity_id=albums.id AND m.server_source=?) "
-                    "OR albums.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('album', 'albums', server_source)
+                where_conditions.append(on_sql)
+                params.extend(on_params)
 
             if not where_conditions:
                 # If no search criteria, return empty list
@@ -13164,13 +13491,10 @@ class MusicDatabase:
 
                         conn = self._get_connection()
                         cursor = conn.cursor()
-                        source_filter = (
-                            "AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                            "WHERE m.entity_type='track' AND m.entity_id=t.id "
-                            "AND m.server_source=?) OR t.server_source=?)" if server_source else ""
-                        )
-                        params = [album_candidate.id] + (
-                            [server_source, server_source] if server_source else [])
+                        from core.library2.sql_util import on_server_sql
+                        on_sql, on_params = on_server_sql('track', 't', server_source)
+                        source_filter = "AND " + on_sql if server_source else ""
+                        params = [album_candidate.id] + (on_params if server_source else [])
                         mapping_projection = "NULL AS requested_server_id"
                         mapping_params = []
                         # an album's missing slots (completeness, discography,
@@ -13789,10 +14113,10 @@ class MusicDatabase:
                     params: list = list(artist_ids)
                     src = ""
                     if server_source:
-                        src = (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                               "WHERE m.entity_type='album' AND m.entity_id=albums.id "
-                               "AND m.server_source=?) OR albums.server_source = ?)")
-                        params.extend((server_source, server_source))
+                        from core.library2.sql_util import on_server_sql
+                        on_sql, on_params = on_server_sql('album', 'albums', server_source)
+                        src = " AND " + on_sql
+                        params.extend(on_params)
                     params.append(limit)
                     from core.library2.sql_util import owned_in_library_sql, in_library_sql
                     src += owned_in_library_sql("album", "albums")
@@ -13867,10 +14191,10 @@ class MusicDatabase:
                      f"WHERE ta.artist_id IN ({placeholders}))")
             params: list = list(artist_ids) * 2
             if server_source:
-                where += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-                          "WHERE m.entity_type='track' AND m.entity_id=t.id "
-                          "AND m.server_source=?) OR t.server_source=?)")
-                params.extend((server_source, server_source))
+                from core.library2.sql_util import on_server_sql
+                on_sql, on_params = on_server_sql('track', 't', server_source)
+                where += " AND " + on_sql
+                params.extend(on_params)
             params.append(limit)
             from core.library2.sql_util import (
                 owned_in_library_sql,
@@ -15095,6 +15419,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error setting metadata {key}: {e}")
     
+    def delete_metadata(self, key: str) -> bool:
+        """drop a metadata value, so get_metadata reads None again."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM metadata WHERE key = ?", (key,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error deleting metadata {key}: {e}")
+            return False
+
     def get_metadata(self, key: str) -> Optional[str]:
         """Get a metadata value"""
         try:
@@ -16225,6 +16561,17 @@ class MusicDatabase:
                 )
                 return self._wishlist_outcome("rejected", reason="unknown quality_profile_id")
 
+            # the owner's permissions (#2166): a member who can't request
+            # music, or whose explicit music is hidden, is held to it here,
+            # whichever page, job or scan made the add. an admin's add for
+            # them (request_approved: the Library v2 mirror) is the admin's
+            if not request_approved and isinstance(spotify_track_data, dict):
+                from core.permission_store import wish_refusal
+                _refused = wish_refusal(self, profile_id, spotify_track_data)
+                if _refused:
+                    logger.info("Skipping wishlist add for profile %s: %s", profile_id, _refused)
+                    return self._wishlist_outcome("rejected", spotify_track_data.get('id'), reason=_refused)
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -16315,8 +16662,13 @@ class MusicDatabase:
                             cursor, profile_id, spotify_track_data, source_type, track_id):
                         logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
                         return self._wishlist_outcome("rejected", track_id, reason="request_limit")
-                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
-                    logger.debug("request quota check skipped: %s", _quota_exc)
+                except Exception as _quota_exc:  # noqa: BLE001
+                    # a quota that can't be read is not an unlimited one: the
+                    # ask is refused with a reason that says to try again
+                    logger.warning("request quota check failed for profile %s: %s", profile_id, _quota_exc)
+                    return self._wishlist_outcome(
+                        "rejected", track_id,
+                        reason="Couldn't check your request limit. Try again in a moment.")
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
@@ -18956,7 +19308,7 @@ class MusicDatabase:
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
                                    'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults',
-                                   'include_live_tracks']
+                                   'include_live_tracks', 'allowed_release_statuses']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -19043,6 +19395,9 @@ class MusicDatabase:
                         follow_defaults=bool(row['follow_defaults'])
                         if 'follow_defaults' in existing_columns and row['follow_defaults'] is not None
                         else False,
+                        allowed_release_statuses=(row['allowed_release_statuses']
+                                                  if 'allowed_release_statuses' in existing_columns
+                                                  else None),
                     ))
 
                 return watchlist_artists
@@ -24614,6 +24969,17 @@ class MusicDatabase:
                            "WHERE event_type = 'download' AND origin IS NOT NULL "
                            "AND cleared_at IS NULL" + keep)
             removed += cursor.rowcount
+            if not keep_review:
+                # the list also shows any row still waiting for review, an
+                # import included, and nothing above takes those: they sat in
+                # Downloads for months with no way to clear them (Storm, Nov 14
+                # 2026). the row is the import's own history, so it stays; only
+                # the review flag that put it on the Downloads page goes
+                cursor.execute(
+                    "UPDATE library_history SET verification_status = NULL "
+                    "WHERE event_type NOT IN ('download', 'podcast') "
+                    "AND verification_status IN ('unverified', 'force_imported')")
+                removed += cursor.rowcount
             conn.commit()
             if keep_review:
                 return removed
@@ -28595,6 +28961,25 @@ class MusicDatabase:
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_profile ON music_requests (profile_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_requests_status ON music_requests (status)")
+        self._ensure_music_ask_log(cursor)
+
+    @staticmethod
+    def _ensure_music_ask_log(cursor) -> None:
+        """every ask a limited profile made, kept when its wishlist rows or
+        request history are withdrawn or deleted: the request limit counts
+        from here too, so deleting your own rows doesn't hand the asks back.
+        ``kind`` is 'track' (an album or track group key) or 'video'."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_request_ask_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                ask_key TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_ask_log_profile "
+                       "ON music_request_ask_log (profile_id, kind, created_at)")
 
     def music_request_asks_since(self, cursor, profile_id: int, days: int) -> set:
         """the asks (album or single-track group keys) a profile made in the
@@ -28616,15 +29001,29 @@ class MusicDatabase:
         cursor.execute("SELECT group_key FROM music_requests WHERE profile_id = ? "
                        "AND created_at >= datetime('now', ?)", (int(profile_id), window))
         keys.update(r[0] for r in cursor.fetchall())
+        # asks whose rows were withdrawn or deleted since: still asked
+        cursor.execute("SELECT ask_key FROM music_request_ask_log WHERE profile_id = ? "
+                       "AND kind = 'track' AND created_at >= datetime('now', ?)",
+                       (int(profile_id), window))
+        keys.update(r[0] for r in cursor.fetchall())
         return keys
 
     def _music_request_quota_blocks(self, cursor, profile_id, track_data, source_type, track_id) -> bool:
-        from core.permissions import profile_can_download
         from core.requests.music import group_key
-        from core.requests.quota import quota_for
         profile = self.get_profile(profile_id)
-        quota = quota_for(profile)
-        if not quota or profile_can_download(profile):
+        if not profile or int(profile_id) == 1:
+            return False
+        # mode and limit from the profile's permissions (#2166): music.get and
+        # requests.limit, under the global policy. a profile whose rights
+        # can't be read gets no new asks
+        from core.permission_store import music_rights
+        rights = music_rights(self, profile)
+        if rights["mode"] == "download":
+            return False
+        if rights["mode"] == "none":
+            return True
+        quota = rights["quota"]
+        if not quota:
             return False
         # this branch keys a row <track>::<album> from its first insert
         # (core/wishlist/identity.py), so the row an add would refresh -- and
@@ -28640,7 +29039,21 @@ class MusicDatabase:
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
         if key in asks:
             return False
-        return len(asks) >= quota['limit']
+        # the music limit (core/requests/asks.py): music videos count too,
+        # movies and shows have their own. a count that can't be read is a
+        # full limit
+        try:
+            others = self._music_video_asks_since(cursor, profile_id, quota['days'])
+        except Exception:  # noqa: BLE001
+            logger.warning("music video ask count failed for profile %s", profile_id, exc_info=True)
+            return True
+        if len(asks) + others >= quota['limit']:
+            return True
+        # a new ask: logged in the add's own transaction, so it counts even
+        # after the rows it makes are withdrawn or deleted
+        cursor.execute("INSERT INTO music_request_ask_log (profile_id, kind, ask_key) "
+                       "VALUES (?, 'track', ?)", (int(profile_id), key))
+        return False
 
     def get_pending_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
         """the not-yet-approved wishlist rows of one profile."""
@@ -28854,6 +29267,7 @@ class MusicDatabase:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_profile ON music_video_requests(profile_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_status ON music_video_requests(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_video ON music_video_requests(video_id)")
+        self._ensure_music_ask_log(cursor)
 
     def add_music_video_request(self, *, profile_id: int, requester_name: str,
                                 video_id: str, url: str, title: str,
@@ -28869,8 +29283,13 @@ class MusicDatabase:
                     "title, channel, artist, thumbnail_url, status) VALUES (?,?,?,?,?,?,?,?,?)",
                     (int(profile_id), requester_name, video_id, url, title,
                      channel, artist, thumbnail_url, "pending"))
+                rid = cursor.lastrowid
+                # the request limit counts this ask from the log, which
+                # outlives a withdrawn or deleted request row
+                cursor.execute("INSERT INTO music_request_ask_log (profile_id, kind, ask_key) "
+                               "VALUES (?, 'video', ?)", (int(profile_id), "video:" + str(video_id)))
                 conn.commit()
-                return cursor.lastrowid
+                return rid
         except Exception as e:
             logger.error("Error recording music video request: %s", e)
             return None
@@ -28987,20 +29406,27 @@ class MusicDatabase:
             return 0
 
     def count_music_video_requests_since(self, profile_id: int, days: int) -> int:
-        """Count video requests filed by a profile in the last N days (for quota)."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                self._ensure_music_video_request_schema(cursor)
-                cursor.execute(
-                    "SELECT COUNT(*) FROM music_video_requests "
-                    "WHERE profile_id = ? AND created_at >= datetime('now', ?)",
-                    (int(profile_id), f"-{int(days)} days"))
-                row = cursor.fetchone()
-                return int(row[0]) if row else 0
-        except Exception as e:
-            logger.error("Error counting music video requests: %s", e)
-            return 0
+        """Count the videos a profile asked for in the last N days (for quota):
+        the request rows plus the ask log, so a withdrawn or deleted request
+        still counts. One video asked twice in the window is one ask. Raises
+        on a db error: the quota check fails closed on it."""
+        with self._get_connection() as conn:
+            return self._music_video_asks_since(conn.cursor(), profile_id, days)
+
+    def _music_video_asks_since(self, cursor, profile_id: int, days: int) -> int:
+        """count_music_video_requests_since on a cursor the caller holds (the
+        wishlist add counts inside its own transaction)."""
+        window = f"-{int(days)} days"
+        self._ensure_music_video_request_schema(cursor)
+        cursor.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT 'video:' || video_id AS k FROM music_video_requests "
+            "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
+            "UNION SELECT ask_key FROM music_request_ask_log "
+            "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
+            (int(profile_id), window, int(profile_id), window))
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

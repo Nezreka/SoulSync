@@ -206,15 +206,23 @@ def resolve_album_for_release(get_deezer: Optional[Callable], artist: str, album
 
 
 def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
-                        profile_id: int = 1, on_add: Optional[Callable] = None):
+                        profile_id: int = 1, on_add: Optional[Callable] = None, gate=None):
     """Wire the real seams for run_label_watchlist_scan. Import-light so the
     pure engine + tests never pull these in. ``on_add(track_name, artist_name,
     album_name, album_image_url)`` fires per wishlisted track — lets the caller
     drive a live progress feed (the shared watchlist-scan display)."""
     from core.metadata import label_catalog as lc
+    from core.owner_gate import quality_kw
     if database is None:
         from database.music_database import get_database
         database = get_database()
+    if gate is None:
+        # the label's follower may still have each track (#2166), read from
+        # this database, again every minute of a long scan
+        from core.owner_gate import OwnerGate
+        from core.permission_store import context_for
+        gate = OwnerGate(profile_id, load_context=lambda pid: context_for(database, pid),
+                         load_profile=lambda pid: database.get_profile(pid), label='label scan')
 
     def get_labels():
         try:
@@ -261,6 +269,10 @@ def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
                 payload['artists'] = album_payload['artists']
             if not payload.get('id') or not payload.get('name'):
                 continue
+            want = gate.want('music', explicit=payload.get('explicit'), part='music.watchlist',
+                             title=str(payload.get('name') or ''))
+            if want.skip:
+                continue
             try:
                 ok = database.add_to_wishlist(
                     spotify_track_data=payload,
@@ -268,6 +280,7 @@ def build_default_seams(*, database=None, get_deezer: Optional[Callable] = None,
                     source_type="watchlist_label",
                     source_info=source_info,
                     profile_id=profile_id,
+                    **quality_kw(want),
                 )
                 if ok:
                     added_any = True

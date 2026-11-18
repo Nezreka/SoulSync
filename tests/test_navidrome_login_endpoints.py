@@ -5,6 +5,8 @@ http; the navidrome client is a fake on the engine."""
 
 from __future__ import annotations
 
+import re
+
 import os
 import tempfile
 
@@ -125,19 +127,18 @@ def test_admin_playlist_account_is_what_sync_writes_as(client, as_admin, navidro
 def test_settings_page_wires_the_playlist_account():
     from pathlib import Path
     root = Path(web_server.__file__).resolve().parent
-    html = (root / 'webui' / 'index.html').read_text(encoding='utf-8')
-    js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    # the Navidrome card is React (SETTINGS_PORT.md step 10c)
+    src = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'connections-servers.tsx').read_text(encoding='utf-8')
+    login = src[src.index('function PlaylistLogin('):]
+    login = login[:login.index('\n}\n')]
     for el in ('navidrome-playlist-username', 'navidrome-playlist-password',
                'navidrome-playlist-status', 'navidrome-playlist-clear'):
-        assert f'id="{el}"' in html
-        assert f"'{el}'" in js
-    for fn in ('saveNavidromePlaylistLogin', 'clearNavidromePlaylistLogin'):
-        assert f'onclick="{fn}()"' in html
-        assert f'async function {fn}()' in js
-    # loaded with the rest of the navidrome fields
-    load = js.index("document.getElementById('navidrome-password').value = settings.navidrome")
-    assert js.index('loadNavidromePlaylistLogin();', load) - load < 200
-    # and never sent with the app config: the main save builds navidrome from
-    # its own three fields only
-    save = js.index("username: document.getElementById('navidrome-username').value")
-    assert 'navidrome-playlist' not in js[save - 400:save + 400]
+        assert f'id="{el}"' in login
+    assert re.search(r"fetch\(\s*'/api/profiles/me/navidrome-login',\s*post\(\{ username, password: pass \}\)", login)
+    assert "fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' })" in login
+    # loaded with each settings load
+    assert "json<{ success?: boolean; navidrome_username?: string }>('/api/profiles/me/server-library')" in login
+    assert '}, [loads]);' in login
+    # and never sent with the app config: it is kept out of the store
+    assert 'store.set' not in login and 'store.patch' not in login
+    assert '<PlaylistLogin store={store} />' in src

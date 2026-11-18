@@ -259,15 +259,18 @@ def _alpha_key(column: str) -> str:
     return _library_sort_key_sql(column)
 
 
-_SORTS = {
+# each sort's keys, first key first. the first one turns with the direction
+# (#2107); the rest only break ties
+_SORT_KEYS = {
     # An empty or NULL sort_name sorts by the name rather than ahead of A.
-    "name": (_alpha_key("COALESCE(NULLIF(a.sort_name, ''), a.name)")
-             + ", a.name COLLATE NOCASE"),
-    "added": "a.added_at DESC",
-    "recent": "a.added_at DESC, a.id DESC",
-    "albums": "album_count DESC, a.name COLLATE NOCASE",
-    "tracks": "track_count DESC, a.name COLLATE NOCASE",
+    "name": (_alpha_key("COALESCE(NULLIF(a.sort_name, ''), a.name)"),
+             "a.name COLLATE NOCASE"),
+    "added": ("a.added_at DESC",),
+    "recent": ("a.added_at DESC", "a.id DESC"),
+    "albums": ("album_count DESC", "a.name COLLATE NOCASE"),
+    "tracks": ("track_count DESC", "a.name COLLATE NOCASE"),
 }
+_SORTS = {name: ", ".join(keys) for name, keys in _SORT_KEYS.items()}
 
 
 # The two count-based artist sorts read their ordering key from
@@ -280,7 +283,26 @@ _SORTS = {
 _ORDER_ROLLUP_COLUMNS = {"albums": "album_count", "tracks": "track_count"}
 
 
-def _artist_page_order(sort: str) -> Tuple[str, str, str, str]:
+_SORT_DIRECTIONS = ("", "asc", "desc")
+
+#: the most ids "select all" hands back in one go (#2109)
+MAX_SELECT_IDS = 10000
+
+
+def _flipped(key: str) -> str:
+    """One ORDER BY key turned the other way."""
+    if key.endswith(" DESC"):
+        return key[: -len(" DESC")]
+    if key.endswith(" ASC"):
+        return key[: -len(" ASC")] + " DESC"
+    return key + " DESC"
+
+
+# the first key of each sort runs this way unless asked otherwise
+_NATURAL_DESC = {"name": False, "added": True, "recent": True, "albums": True, "tracks": True}
+
+
+def _artist_page_order(sort: str, direction: str = "") -> Tuple[str, str, str, str]:
     """How to order the artist page, and what it costs to compute.
 
     Returns ``(page_join, page_order, outer_order, needs_rollup)``:
@@ -290,16 +312,30 @@ def _artist_page_order(sort: str) -> Tuple[str, str, str, str]:
     - ``outer_order``  -- ORDER BY on the final projection, which can only
       reference columns carried through ``page_artists``.
     - ``needs_rollup`` -- the roll-up column, or "" for the cheap sorts.
+
+    ``direction`` (#2107) is "asc", "desc", or "" for the sort's own way.
     """
+    sort = sort if sort in _SORTS else "name"
+    flip = direction in ("asc", "desc") and (direction == "desc") != _NATURAL_DESC[sort]
     column = _ORDER_ROLLUP_COLUMNS.get(sort)
     if column:
+        first = f"COALESCE(ar.{column}, 0) DESC"
+        outer_first = "a._order_count DESC"
+        if flip:
+            first, outer_first = _flipped(first), _flipped(outer_first)
         return (
             "LEFT JOIN lib2_artist_rollup ar ON ar.artist_id=a.id",
-            f"COALESCE(ar.{column}, 0) DESC, a.name COLLATE NOCASE, a.id",
-            "a._order_count DESC, a.name COLLATE NOCASE, a.id",
+            f"{first}, a.name COLLATE NOCASE, a.id",
+            f"{outer_first}, a.name COLLATE NOCASE, a.id",
             column,
         )
-    plain = _SORTS.get(sort, _SORTS["name"]) + ", a.id"
+    keys = list(_SORT_KEYS[sort])
+    if flip:
+        # the name sort's alpha key and the name itself both turn, or a
+        # reversed list is only half reversed
+        turn = len(keys) if sort == "name" else 1
+        keys = [_flipped(k) for k in keys[:turn]] + keys[turn:]
+    plain = ", ".join(keys) + ", a.id"
     return "", plain, plain, ""
 
 
@@ -381,11 +417,28 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                  watchlist_filter: str = "all", source_filter: str = "",
                  quality_filter: str = "", profile_id: int = 1,
                  require_legacy_id: bool = False,
-                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                 review_filter: str = "",
+                 direction: str = "",
+                 completeness: Dict[str, Any] | None = None,
+                 credit: str = "",
+                 ids_only: bool = False,
+                 collection: bool = False) -> Tuple[List[Dict[str, Any]], int]:
     """Paginated artist overview with per-artist roll-up stats.
 
     ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
     ``'unmonitored'``.
+
+    ``direction`` turns any sort around; ``completeness`` (from
+    ``artist_completeness.completeness_filters``) and the completeness sorts
+    read each artist's kept completeness (#2106, #2107). ``credit`` picks the
+    release artists (default), the ones only credited on others' tracks
+    ("featured"), or both ("all").
+
+    ``collection`` reads ``track_count`` / ``track_files_present`` /
+    ``unverified_albums`` by the completeness rule the cards, sorts and
+    filters share (``artist_completeness.rule_ctes``), so an artist nobody
+    watches is measured against the albums you have. Without it the counts
+    are the wanted-or-held ones the older callers have always read.
 
     ``include_size`` (perf25-03) controls the disk-space roll-up, which needs a
     window function over every file of the page's artists plus a SUM on top of
@@ -400,7 +453,13 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     album_visible = scope_visibility_sql("album", "al") or "1=1"
     album_monitored = monitored_sql("album", "al")
     track_monitored = monitored_sql("track", "t")
-    page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
+    from .artist_completeness import COMPLETENESS_SORTS
+    completeness = completeness or {}
+    by_completeness = sort in COMPLETENESS_SORTS
+    if direction not in _SORT_DIRECTIONS:
+        direction = ""
+    page_join, page_order, outer_order, rollup_column = _artist_page_order(
+        "name" if by_completeness else sort, "" if by_completeness else direction)
     if rollup_column:
         # Rebuilt only when missing or stale; a few minutes of drift moves an
         # artist by a row, which is the whole reason a cache is acceptable for
@@ -425,6 +484,20 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     from core.library2.member_version import cached_member_ids
     member_sql = library_index_artist_ids_sql()
     member_ids = cached_member_ids(conn, member_sql)
+    if credit in ("featured", "all"):
+        # #2107: the artists only credited on other people's tracks. the
+        # library's wider membership (every credit you own or want) less the
+        # release artists the page lists by default
+        from core.library2.sql_util import library_artist_ids_sql
+        index_ids = member_ids if member_ids is not None else [
+            int(r[0]) for r in conn.execute(member_sql) if r[0] is not None]
+        wide_sql = library_artist_ids_sql()
+        wide_ids = cached_member_ids(conn, wide_sql)
+        if wide_ids is None:
+            wide_ids = [int(r[0]) for r in conn.execute(wide_sql) if r[0] is not None]
+        index_set = set(index_ids)
+        featured = [i for i in wide_ids if i not in index_set]
+        member_ids = featured if credit == "featured" else list(index_set | set(featured))
     if member_ids is None:
         conn.execute(f"INSERT OR IGNORE INTO temp.lib2_artist_page_members {member_sql}")
     else:
@@ -552,9 +625,35 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
         clauses.append("a.id IN (SELECT value FROM json_each(:upgrade_artists))")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
-    total = conn.execute(
-        f"SELECT COUNT(*) AS c FROM lib2_artists a {where}", params
-    ).fetchone()["c"]
+    ordered_ids: List[int] | None = None
+    if by_completeness or completeness:
+        # #2106/#2107: completeness is kept per artist, not in a column, so
+        # the matching artists come back in name order and are filtered and
+        # sorted against it here. a library is a few thousand artists
+        from .artist_completeness import Completeness, artist_completeness, matches, order_ids
+        facts = artist_completeness(conn)
+        empty = Completeness()
+        ordered_ids = [
+            int(row[0]) for row in conn.execute(
+                f"SELECT a.id FROM lib2_artists a {page_join} {where} ORDER BY {page_order}",
+                params)
+            if matches(facts.get(int(row[0]), empty), completeness)]
+        if by_completeness:
+            upgrades = library_upgradable_counts(conn) if sort == "upgrades" else None
+            ordered_ids = order_ids(ordered_ids, sort, direction, facts, upgrades)
+        total = len(ordered_ids)
+    else:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS c FROM lib2_artists a {where}", params
+        ).fetchone()["c"]
+
+    if ids_only:
+        # #2109: "select all that match": every id in list order, no stats
+        if ordered_ids is None:
+            ordered_ids = [int(row[0]) for row in conn.execute(
+                f"SELECT a.id FROM lib2_artists a {page_join} {where} ORDER BY {page_order}",
+                params)]
+        return [{"id": i} for i in ordered_ids[:MAX_SELECT_IDS]], int(total)
 
     # I8: disk-space roll-up, kept separate from track_stats below — that CTE's
     # plain (unranked) tf join fans out per historical file row, which would
@@ -597,15 +696,41 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     size_join = "LEFT JOIN artist_size asz ON asz.artist_id=a.id" if include_size else ""
     order_count_col = f"COALESCE(ar.{rollup_column}, 0)" if rollup_column else "0"
 
-    rows = conn.execute(
-        f"""
-        WITH page_artists AS MATERIALIZED (
+    if collection:
+        # #2106: the cards' numbers, by the one rule the kept pass also reads
+        from .artist_completeness import _scope_parts, rule_ctes
+        collection_cte = "," + rule_ctes("canonical_members", _scope_parts())
+        counts_select = ("COALESCE(cc.unverified_albums, 0) AS unverified_albums,"
+                         " COALESCE(cc.total, 0) AS track_count,"
+                         " COALESCE(cc.present, 0) AS track_files_present,"
+                         " COALESCE(cc.watched, 0) AS completeness_watched")
+        counts_join = "LEFT JOIN cc_completeness cc ON cc.artist_id=a.id"
+    else:
+        collection_cte = ""
+        counts_select = ("COALESCE(als.unverified_albums, 0) AS unverified_albums,"
+                         " COALESCE(ts.track_count, 0) AS track_count,"
+                         " COALESCE(ts.track_files_present, 0) AS track_files_present")
+        counts_join = "LEFT JOIN track_stats ts ON ts.artist_id=a.id"
+
+    if ordered_ids is not None:
+        # the page is already chosen: keep its order through the projection
+        params = {**params, "page_ids": json.dumps(ordered_ids[offset:offset + limit])}
+        page_artists = """
+            SELECT a.*, j.key AS _order_count
+              FROM json_each(:page_ids) j
+              CROSS JOIN lib2_artists a ON a.id = j.value"""
+        outer_order = "a._order_count, a.id"
+    else:
+        page_artists = f"""
             SELECT a.*, {order_count_col} AS _order_count
               FROM lib2_artists a
               {page_join}
               {where}
              ORDER BY {page_order}
-             LIMIT :limit OFFSET :offset
+             LIMIT :limit OFFSET :offset"""
+    rows = conn.execute(
+        f"""
+        WITH page_artists AS MATERIALIZED ({page_artists}
         ),
         -- perf25-03: only alias members that fold into an artist ON THIS PAGE
         -- matter; materializing the whole artist table here made every list
@@ -648,7 +773,11 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                    COUNT(DISTINCT CASE
                        WHEN al.album_type = 'single'
                         AND (al.origin='library' OR {album_monitored}=1)
-                       THEN al.id END) AS single_count
+                       THEN al.id END) AS single_count,
+                   COUNT(DISTINCT CASE
+                       WHEN al.expected_track_count IS NULL
+                        AND (al.origin='library' OR {album_monitored}=1)
+                       THEN al.id END) AS unverified_albums
               FROM artist_albums aa
               -- CROSS JOIN for the same reason as above: with a plain JOIN the
               -- planner scanned all of lib2_albums against the page's few
@@ -678,7 +807,7 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                      ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
               LEFT JOIN lib2_track_files tf ON tf.track_id=t.id{tf_owner}
              GROUP BY cm.canonical_id
-        ){size_cte}
+        ){collection_cte}{size_cte}
         SELECT a.id, a.legacy_artist_id, a.name, a.sort_name, a.image_url, a.genres,
                a.spotify_id, a.musicbrainz_id, a.external_ids, a.soul_id, a.server_source,
                {watchlist_predicate} AS is_watched,
@@ -686,12 +815,11 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                a.quality_profile_explicit, a.added_at,
                COALESCE(als.album_count, 0) AS album_count,
                COALESCE(als.single_count, 0) AS single_count,
-               COALESCE(ts.track_count, 0) AS track_count,
-               COALESCE(ts.track_files_present, 0) AS track_files_present,
+               {counts_select},
                {size_select} AS total_size_bytes
         FROM page_artists a
         LEFT JOIN album_stats als ON als.artist_id=a.id
-        LEFT JOIN track_stats ts ON ts.artist_id=a.id
+        {counts_join}
         {size_join}
         ORDER BY {outer_order}
         """,

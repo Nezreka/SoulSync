@@ -205,6 +205,9 @@ describe('the request flow', () => {
   let requests: Row[];
   let profiles: Row[];
   let showType: Row | null;
+  // what /api/video/requests/options?kind= answers (#2168: the ask sheet's
+  // qualities come from the profile's own rules, never the profile list)
+  let options: Row;
   // every test evaluates a fresh copy of the module, and each copy's document
   // listeners and 200ms repaint timers outlive its test. a stale copy's repaint,
   // landing inside a later slow test, painted from its own cache and flipped
@@ -236,6 +239,7 @@ describe('the request flow', () => {
     requests = [];
     showType = null;
     profiles = [{ id: 0, name: 'Default' }];
+    options = { success: true, mode: 'ask', qualities: [], quota: null, asks_who: 'Boulder' };
     document.body.innerHTML = '';
     vi.stubGlobal('showToast', (m: string, t: string) => toasts.push([m, t]));
     vi.stubGlobal('canDownload', () => false);
@@ -248,6 +252,7 @@ describe('the request flow', () => {
         if (url.startsWith('/api/video/downloads/quality/profiles')) body = { profiles };
         else if (url.includes('/series-type'))
           body = showType ?? { owned: false, anime_folder: false };
+        else if (url.startsWith('/api/video/requests/options')) body = options;
         else if (url === '/api/video/requests' && init?.method === 'POST') {
           posts.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}'));
           body = { success: true, id: 1 };
@@ -282,30 +287,84 @@ describe('the request flow', () => {
     expect(toasts[0]).toEqual(['You’ve used all 2 requests this week', 'warning']);
   });
 
-  it('offers a quality select with the named profiles and sends the pick', async () => {
-    profiles = [
-      { id: 0, name: 'Default' },
-      { id: 4, name: '4K' },
-    ];
+  const openAsk = async () => {
+    for (let i = 0; i < 10 && !document.querySelector('.vreq-sheet--ask'); i++) await flush();
+    expect(document.querySelector('.vreq-sheet--ask')).not.toBeNull();
+  };
+
+  it('offers only the allowed qualities and sends the pick', async () => {
+    options = {
+      ...options,
+      mode: 'download',
+      qualities: [
+        { id: 2, name: 'Movie 1080p', default: true },
+        { id: 4, name: 'Movie 4K', asks: true },
+      ],
+    };
     const pending = api().request({ kind: 'movie', tmdb_id: 9, title: 'Heat' });
-    for (let i = 0; i < 10 && !document.querySelector('[data-vreq-quality]'); i++) await flush();
-    const sel = document.querySelector<HTMLSelectElement>('[data-vreq-quality]');
-    expect(sel).not.toBeNull();
-    expect([...sel!.options].map((o) => o.textContent)).toEqual(['Default', '4K']);
+    await openAsk();
+    const opts = [...document.querySelectorAll<HTMLElement>('[data-vreq-q]')];
+    expect(opts.map((o) => o.querySelector('.vreq-qname')!.textContent)).toEqual([
+      'Movie 1080p',
+      'Movie 4K',
+    ]);
+    // the usual one starts picked; a downloader gets it right away
+    expect(opts[0].getAttribute('aria-checked')).toBe('true');
+    const go = document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!;
+    expect(go.textContent).toBe('Get it');
     // movies get no season choices
     expect(document.querySelector('[data-vreq-choice]')).toBeNull();
-    sel!.value = '4';
-    document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
+    // the 4K one asks first, and the button follows
+    expect(opts[1].textContent).toContain('Asks first');
+    opts[1].click();
+    expect(go.textContent).toBe('Ask for it');
+    go.click();
     await pending;
     expect(posts).toEqual([
       expect.objectContaining({ kind: 'movie', tmdb_id: 9, quality_profile_id: 4 }),
     ]);
+    expect(posts[0]).not.toHaveProperty('get');
   });
 
-  it('skips the sheet for a movie when there is only the default', async () => {
-    await api().request({ kind: 'movie', tmdb_id: 9, title: 'Heat' });
-    expect(posts).toHaveLength(1);
-    expect(posts[0]).not.toHaveProperty('quality_profile_id');
+  it('gets it right away when a downloader keeps the usual quality', async () => {
+    options = {
+      ...options,
+      mode: 'download',
+      qualities: [
+        { id: 2, name: 'Movie 1080p', default: true },
+        { id: 4, name: 'Movie 4K', asks: true },
+      ],
+    };
+    const pending = api().request({ kind: 'movie', tmdb_id: 9, title: 'Heat' });
+    await openAsk();
+    document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
+    await pending;
+    expect(posts).toEqual([
+      expect.objectContaining({ kind: 'movie', tmdb_id: 9, quality_profile_id: 2, get: true }),
+    ]);
+  });
+
+  it('shows one allowed quality as a line, not a menu', async () => {
+    options = { ...options, qualities: [{ id: 3, name: 'Movie 1080p', default: true }] };
+    const pending = api().request({ kind: 'movie', tmdb_id: 9, title: 'Heat' });
+    await openAsk();
+    expect(document.querySelector('[data-vreq-q]')).toBeNull();
+    expect(document.querySelector('[data-vreq-ask-quality]')!.textContent).toBe(
+      'Comes in Movie 1080p',
+    );
+    expect(document.querySelector('[data-vreq-sheet-go]')!.textContent).toBe('Ask for it');
+    document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
+    await pending;
+    expect(posts).toEqual([expect.objectContaining({ quality_profile_id: 3 })]);
+  });
+
+  it('opens no sheet and sends nothing for a kind the profile can not request', async () => {
+    options = { ...options, mode: 'none', qualities: [] };
+    const res = await api().request({ kind: 'movie', tmdb_id: 9, title: 'Heat' });
+    expect(res).toBeNull();
+    expect(document.querySelector('.vreq-sheet')).toBeNull();
+    expect(posts).toEqual([]);
+    expect(toasts[0][0]).toContain('Movies aren’t part of your profile');
   });
 
   it('leaves the default out of the body', async () => {

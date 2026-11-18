@@ -123,9 +123,57 @@ describe('describeFinding: plain words per type', () => {
     );
     expect(copy.title).toBe('Sprung');
     expect(copy.sub).toBe('Baron Grand');
+    // #2169: the library has a cover, so that is the one apply copies; the
+    // source's is not used and is not offered as if it were
     expect(copy.problem).toBe(
-      'No cover in the audio files and the album folder. Cover Art Archive has one.',
+      'No cover in the audio files and the album folder. The library has a cover to copy.',
     );
+    expect(copy.fix).toBe(
+      "Apply Art copies the library's cover into the audio files without one and a cover.jpg in the album folder. A cover you already have is kept.",
+    );
+  });
+
+  it('missing cover art names the source when the library has none (#2169)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Stuck',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          found_artwork_url: 'https://x/front',
+          artwork_source: 'deezer',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe('No cover in the library and the album folder. Deezer has one.');
+    expect(copy.fix).toBe(
+      'Apply Art saves the Deezer cover to the library. It also writes a cover.jpg into the album folder from the cover inside the audio files. A cover you already have is kept.',
+    );
+  });
+
+  it('missing cover art with nothing found copies the files cover to the folder (#2169)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Punkrocker',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          sidecar_from_embedded: true,
+          found_artwork_url: null,
+          artwork_source: 'embedded',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe(
+      'No cover in the library and the album folder. The audio files have one to copy.',
+    );
+    expect(copy.fix).toContain('from the cover inside the audio files');
   });
 
   it('an edition finding names the closest release without row ids or ratios', () => {
@@ -179,6 +227,20 @@ describe('describeFinding: the fix line is never a guess', () => {
       'Delete File removes this file. It asks first.',
     );
     expect(describeFinding(corrupt, 'Something Else').fix).toBe('');
+  });
+
+  it('a release pair that is blocked never promises a merge (#2146)', () => {
+    const pair = (eligible: boolean) => ({
+      finding_type: 'native_duplicate_releases',
+      title: 'Duplicate release: Ark',
+      details: { album: 'Ark', merge_eligible: eligible },
+    });
+    expect(describeFinding(pair(true), 'Review Merge').fix).toBe(
+      'Review Merge joins them under one release. Every file and edition is kept.',
+    );
+    expect(describeFinding(pair(false), 'Review Merge').fix).toBe(
+      "These can't be merged yet. The reason is below.",
+    );
   });
 
   it('a finding with no fix button gets no fix line', () => {

@@ -12,7 +12,9 @@ from core.automation.handlers.video_auto_wishlist_airing import (
     auto_video_add_airing_episodes_all_profiles,
 )
 from core.automation.handlers.video_profile_fanout import extra_profiles, run_per_profile
+from core.owner_gate import OwnerGate
 from core.profile_context import get_current_profile_id
+from tests.permissions_fixtures import member_ctx
 
 
 class _Deps:
@@ -112,6 +114,8 @@ def _airing(**overrides):
         tmdb_airings=lambda tid, s, e: {'poster_url': None, 'episodes': []},
         fetch_follows=lambda pid: [{'tmdb_id': 5}] if pid == 2 else [],
         follower_profiles=lambda kinds: [1, 2],
+        # profile 2 downloads right away (#2166: each pass asks its owner)
+        gate_for=lambda pid: OwnerGate(pid, context=member_ctx(profile_id=pid)),
     )
     kw.update(overrides)
     out = auto_video_add_airing_episodes_all_profiles(

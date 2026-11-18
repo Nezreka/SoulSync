@@ -128,7 +128,15 @@ def test_movie_wish_fires_once_and_refresh_upserts_stay_silent(db, events):
     db.add_movie_to_wishlist(603, "The Matrix", year=1999)
     db.add_movie_to_wishlist(603, "The Matrix", year=1999)    # refresh
     assert _types(events) == ["video_wishlist_item_added"]
-    assert events[0][1] == {"kind": "movie", "title": "The Matrix", "count": 1}
+    # the wishlist's own profile owns it (#2166 follow-up 25)
+    assert events[0][1] == {"kind": "movie", "title": "The Matrix", "count": 1, "_event_owner": 1}
+
+
+def test_list_events_belong_to_the_profile_whose_list_it_is(db, events):
+    db.add_movie_to_wishlist(604, "Heat", profile_id=7)
+    db.add_to_watchlist("show", 100, "Severance", profile_id=8)
+    db.remove_from_watchlist("show", 100, profile_id=8)
+    assert [e[1]["_event_owner"] for e in events] == [7, 8, 8]
 
 
 def test_episode_wish_counts_only_new_rows(db, events):
@@ -145,7 +153,7 @@ def test_youtube_wish_counts_only_new_rows(db, events):
     db.add_videos_to_wishlist(chan, vids)
     db.add_videos_to_wishlist(chan, vids)                     # all refresh → silent
     assert _types(events) == ["video_wishlist_item_added"]
-    assert events[0][1] == {"kind": "youtube", "title": "Veritasium", "count": 2}
+    assert events[0][1] == {"kind": "youtube", "title": "Veritasium", "count": 2, "_event_owner": 1}
 
 
 def test_watchlist_follow_and_unfollow_fire_once(db, events):
@@ -154,7 +162,7 @@ def test_watchlist_follow_and_unfollow_fire_once(db, events):
     db.remove_from_watchlist("show", 100)
     db.remove_from_watchlist("show", 100)                     # already muted → silent
     assert _types(events) == ["video_watchlist_added", "video_watchlist_removed"]
-    assert events[1][1] == {"kind": "show", "title": "Severance"}
+    assert events[1][1] == {"kind": "show", "title": "Severance", "_event_owner": 1}
 
 
 def test_mute_of_something_never_followed_is_not_an_unfollow(db, events):

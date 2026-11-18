@@ -21,6 +21,17 @@ from core.audiobook_watchlist import (
 )
 
 
+@pytest.fixture(autouse=True)
+def owners_may_download(monkeypatch):
+    """every profile here may download: the passes ask about a row's owner
+    through the music db, which a unit test must never open. the refusal is
+    tested in tests/test_security_nov17_audiobooks.py."""
+    import core.permissions as perms
+    monkeypatch.setattr(perms, "owner_may_download", lambda pid, get_profile=None: True)
+    # books.get is its own permission (#2166): the passes ask owner_may_get
+    monkeypatch.setattr(perms, "owner_may_get", lambda pid, permission, db=None: True)
+
+
 @pytest.fixture
 def db(tmp_path):
     return AudiobookDatabase(str(tmp_path / "audiobooks.db"))

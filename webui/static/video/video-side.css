@@ -158,16 +158,11 @@ body[data-side="video"] .page.video-page {
 /* ── Shared pages: show the REAL music page on the video side ───────────── */
 /* The shared Settings page is filtered per side: video-only groups/sections carry
    data-video-only, music-only ones carry data-music-only (plus the per-tab rules
-   below hide whole music tabs on the video side). The id selector + extra
-   attribute outrank the blanket music-page hide rule. */
-body[data-side="video"][data-video-page="video-settings"] #settings-page {
-    display: block !important;
-}
-body[data-side="video"][data-video-page="video-settings"] #video-page-host {
-    display: none !important;
-}
+   below hide whole music tabs on the video side). It is the React /settings page
+   on ?media=video, revealed with the other React pages below. */
 /* Help & Docs is the SAME docs page as the music side — reuse it verbatim (it'll
-   carry both music + video docs). Same reveal mechanism as Settings above. */
+   carry both music + video docs). The id selector + extra attribute outrank the
+   blanket music-page hide rule. */
 body[data-side="video"][data-video-page="video-help"] #help-page {
     display: block !important;
 }
@@ -200,7 +195,9 @@ body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root,
    the shared vanilla one, in this shell's own automations subpage: while it
    is open the React page puts vauto-building on the body, and the screen
    goes back to the video host until it closes. */
-body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #webui-react-root {
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #webui-react-root,
+/* Settings too (/settings?media=video, SETTINGS_PORT.md step V4c) */
+body[data-side="video"][data-video-page="video-settings"] #webui-react-root {
     display: block !important;
 }
 body[data-side="video"][data-video-page="video-downloads"] #video-page-host,
@@ -208,7 +205,8 @@ body[data-side="video"][data-video-page="video-wishlist"] #video-page-host,
 body[data-side="video"][data-video-page="video-tools"] #video-page-host,
 body[data-side="video"][data-video-page="video-calendar"] #video-page-host,
 body[data-side="video"][data-video-page="video-dashboard"] #video-page-host,
-body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #video-page-host {
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #video-page-host,
+body[data-side="video"][data-video-page="video-settings"] #video-page-host {
     display: none !important;
 }
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
@@ -550,7 +548,9 @@ body[data-side="video"] .dashboard-header-sweep {
     /* the polish section's copy overrides this max-width; it stays because
        video-detail-page-measure.test.ts pins it */
     position: relative; z-index: 2; max-width: 720px; padding: 0 0 52px 56px;
-    animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    /* backwards, not both: a rise held at its end keeps an identity transform,
+       which traps the fixed More menu inside the clipped billboard (#2124) */
+    animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 .vd-title {
     font-size: clamp(2.6em, 5vw, 4.4em); line-height: 0.98; font-weight: 900; margin: 0 0 18px;
@@ -718,6 +718,13 @@ body[data-side="video"] .dashboard-header-sweep {
     background: rgba(16, 18, 24, 0.97); border: 1px solid var(--white-a12);
     box-shadow: 0 18px 46px var(--black-a55); backdrop-filter: blur(14px);
 }
+/* Once opened, the page pins it to the screen (placeMoreMenu in video-detail.js):
+   up or down, whichever side has the room, never taller than what you can see.
+   Fixed is what gets it past the billboard's overflow and the scroll edge, which
+   cut the top items off a long menu (#2124). */
+.vd-more .vd-more-menu.vd-more-menu--placed { position: fixed; bottom: auto; margin: 0; }
+/* the hero sits under the sticky back button; lift it while its menu is open */
+.vd-bb-content:has(.vd-more--open) { z-index: 9; }
 .vd-more-menu .vd-manage-btn {
     width: 100%; justify-content: flex-start; margin: 0; background: transparent;
     border-color: transparent; box-shadow: none;
@@ -2403,6 +2410,60 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     font: inherit; font-size: 13px; border: 1px solid var(--white-a12); background: var(--black-a30); color: #fff; }
 .vreq-sheet-select:focus-visible { outline: none; border-color: rgba(var(--accent-rgb), 0.7); }
 .vreq-sheet-select option { background: #18181c; color: #fff; }
+/* the member's ask (#2168): the title as art, then plain facts: the quality
+   (a line when there is one, a short radio list when there are more), who
+   gets asked or "starts downloading", and the quota with its meter */
+.vreq-sheet--ask { max-width: 440px; padding: 0; overflow: hidden auto; max-height: calc(100dvh - 32px);
+    overscroll-behavior: contain; }
+.vreq-ask-art { position: relative; min-height: 136px; display: flex; align-items: flex-end; padding: 16px 20px;
+    background: radial-gradient(120% 130% at 80% 0%, rgba(var(--accent-rgb), 0.5) 0%,
+        rgba(var(--accent-rgb), 0.12) 45%, var(--black-a60) 90%); }
+.vreq-ask-art.has-art { background-image: linear-gradient(180deg, var(--black-a10) 15%, var(--black-a85) 100%),
+    var(--vreq-art); background-size: cover; background-position: center 22%; }
+.vreq-ask-art-in { position: relative; min-width: 0; }
+.vreq-ask-title { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2;
+    overflow-wrap: anywhere; }
+.vreq-ask-meta { font-size: 12.5px; color: var(--white-a70); margin-top: 3px; }
+.vreq-ask-body { padding: 14px 20px 20px; }
+.vreq-ask-body .vreq-choices { margin-bottom: 6px; }
+.vreq-ask-fact { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; font-size: 13.5px;
+    line-height: 1.45; border-top: 1px solid var(--white-a06); }
+.vreq-ask-body > .vreq-ask-fact:first-child { border-top: 0; }
+.vreq-ask-fact > svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--white-a60);
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.vreq-ask-fact b { font-weight: 650; }
+.vreq-ask-soft { color: var(--white-a60); }
+.vreq-ask-grow { flex: 1; min-width: 0; }
+.vreq-qpick { margin-top: 8px; border: 1px solid var(--white-a08); border-radius: var(--radius-control); overflow: hidden; }
+.vreq-qopt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--white-a06); background: transparent;
+    color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.vreq-qopt:first-child { border-top: 0; }
+.vreq-qopt:hover { background: var(--white-a04); }
+.vreq-qopt[aria-checked="true"] { background: var(--white-a05); }
+.vreq-qopt:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: -2px; }
+.vreq-qrad { width: 16px; height: 16px; border-radius: var(--radius-circle); border: 1.5px solid var(--white-a40);
+    position: relative; box-sizing: border-box; }
+.vreq-qopt[aria-checked="true"] .vreq-qrad { border-color: rgb(var(--accent-rgb)); }
+.vreq-qopt[aria-checked="true"] .vreq-qrad::after { content: ""; position: absolute; inset: 3px;
+    border-radius: var(--radius-circle); background: rgb(var(--accent-rgb)); }
+.vreq-qname { min-width: 0; overflow-wrap: anywhere; }
+.vreq-qtag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--radius-pill); white-space: nowrap;
+    color: rgb(var(--success-rgb)); background: rgba(var(--success-rgb), 0.14); }
+.vreq-qtag--ask { color: rgb(var(--warning-rgb)); background: rgba(var(--warning-rgb), 0.14); }
+.vreq-ask-quota { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--white-a50);
+    min-height: 4px; }
+.vreq-ask-quota:empty { display: none; }
+.vreq-ask-meter { flex: 1; height: 5px; border-radius: 3px; background: var(--white-a08); overflow: hidden; }
+.vreq-ask-meter i { display: block; height: 100%; border-radius: 3px; background: rgb(var(--accent-rgb)); }
+.vreq-sheet--ask .vreq-sheet-foot { margin-top: 18px; }
+@media (max-width: 640px) {
+    .vreq-sheet-overlay:has(.vreq-sheet--ask) { align-items: flex-end; padding: 0; }
+    .vreq-sheet--ask { max-width: none; max-height: calc(100dvh - 24px);
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .vreq-sheet--ask .vreq-ask-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .vreq-sheet--ask .vreq-sheet-foot .vreq-btn { flex: 1; padding: 11px 14px; }
+}
 /* cards, for profiles that ask instead of download: the quick Request
    action (same shape as the get button) and the Requested / Available ribbon */
 .vreq-card-btn { width: 30px; height: 30px; border-radius: 9px; padding: 0;
@@ -2421,6 +2482,62 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @media (hover: none) { .vreq-card-btn { opacity: 1; transform: none; } }
 .vsr-ribbon--req { background: rgba(59, 130, 246, 0.9); border: none; }
 .vsr-ribbon--req-here { background: rgba(var(--success-strong-rgb), 0.95); }
+
+/* where a title stands (#2160, video-title-status.js). the same few looks on
+   every poster: In Library (owned), Partial, Requested (req), on the way
+   (wish), Searching / Downloading (active), Failed. */
+.vsr-ribbon--partial { background: var(--black-a65); color: rgb(var(--success-rgb));
+    border: 1px solid rgba(var(--success-rgb), 0.5); }
+.vsr-ribbon--active { background: rgba(var(--accent-rgb), 0.92); border: none; }
+.vsr-ribbon--failed { background: var(--black-a65); color: rgb(var(--warning-rgb));
+    border: 1px solid rgba(var(--warning-rgb), 0.5); }
+.vsr-ribbon--active::before, .vd-sim-wishchip--active::before, .vts-block--active .vts-dot {
+    animation: vsrBasicPulse 1.6s ease-in-out infinite; }
+.vsr-ribbon--active::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px;
+    border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.vdsc-page .vsr-ribbon--req, .vdsc-page .vsr-ribbon--active {
+    background: var(--black-a60); color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.5); }
+.vdsc-page .vsr-ribbon--req { color: rgb(var(--info-rgb)); border-color: rgba(var(--info-rgb), 0.5); }
+.vdsc-page .vsr-ribbon--partial, .vdsc-page .vsr-ribbon--failed { background: var(--black-a60); }
+.vd-sim-wishchip--req { background: rgba(var(--info-rgb), 0.92); }
+.vd-sim-wishchip--partial { background: var(--black-a65); color: rgb(var(--success-rgb)); }
+.vd-sim-wishchip--failed { background: var(--black-a65); color: rgb(var(--warning-rgb)); }
+
+/* the detail page's block above the actions */
+.vts-host { margin: 0 0 14px; }
+.vts-host[hidden] { display: none; }
+.vts-block { --vts-c: var(--accent-rgb); display: flex; align-items: flex-start; gap: 11px;
+    max-width: 560px; padding: 10px 14px; border-radius: var(--radius-md);
+    background: var(--black-a35); border: 1px solid var(--white-a10);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.vts-block--owned, .vts-block--partial { --vts-c: var(--success-rgb); }
+.vts-block--req { --vts-c: var(--info-rgb); }
+.vts-block--wish { --vts-c: var(--accent-light-rgb); }
+.vts-block--failed { --vts-c: var(--warning-rgb); }
+.vts-dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%;
+    background: rgb(var(--vts-c)); box-shadow: 0 0 0 4px rgba(var(--vts-c), 0.16); }
+.vts-main { min-width: 0; flex: 1; }
+.vts-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
+.vts-sub { margin-top: 2px; font-size: 12.5px; color: var(--white-a60); }
+.vts-link { margin-left: 4px; padding: 0; border: 0; background: none; font: inherit;
+    color: rgb(var(--vts-c)); cursor: pointer; text-decoration: underline;
+    text-underline-offset: 2px; text-decoration-color: rgba(var(--vts-c), 0.45); }
+.vts-link:hover, .vts-link:focus-visible { text-decoration-color: currentColor; outline: none; }
+.vts-bar { margin-top: 8px; height: 3px; border-radius: var(--radius-pill); background: var(--white-a10);
+    overflow: hidden; }
+.vts-bar-fill { display: block; height: 100%; border-radius: inherit; background: rgb(var(--vts-c));
+    transition: width var(--dur-slow) ease; }
+.vts-seasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.vts-season { padding: 2px 9px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600;
+    background: var(--white-a06); border: 1px solid var(--white-a12); color: var(--white-a75); }
+.vts-season-tail { font-weight: 500; color: var(--white-a50); }
+.vts-season--available { border-color: rgba(var(--success-rgb), 0.4); }
+.vts-season--available .vts-season-tail { color: rgb(var(--success-rgb)); }
+.vts-season--processing .vts-season-tail { color: rgb(var(--accent-light-rgb)); }
+@media (prefers-reduced-motion: reduce) {
+    .vsr-ribbon--active::before, .vd-sim-wishchip--active::before, .vts-block--active .vts-dot { animation: none; }
+}
 @media (max-width: 640px) {
     .vreq-page { padding: 22px 16px 48px; }
     .vreq-row { flex-wrap: wrap; }
@@ -2920,6 +3037,9 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 
 /* ── Page canvas ────────────────────────────────────────────────────────── */
 .vdsc-page {
+    /* one poster width for every rail (ranked ones too); the breakpoints below step it down */
+    --vdsc-card-w: 168px;
+    --vdsc-gap: 18px;
     position: relative;
     max-width: 1480px;
     margin: 0 auto;
@@ -3176,43 +3296,42 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 /* ── Sticky jump-nav ────────────────────────────────────────────────────── */
 .vdsc-jumpnav {
     position: sticky; top: 0; z-index: 20;
-    display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap;
-    margin: 0 0 30px; padding: 12px 2px;
+    display: flex; gap: 6px; overflow-x: auto; flex-wrap: nowrap;
+    margin: 0; padding: 12px 2px;
     scrollbar-width: none;
-    background: linear-gradient(180deg, rgba(10, 13, 20, 0.94) 0%, rgba(10, 13, 20, 0.86) 70%, transparent 100%);
+    background: linear-gradient(180deg, var(--black-a75) 0%, var(--black-a60) 70%, transparent 100%);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 .vdsc-jumpnav::-webkit-scrollbar { display: none; }
 .vdsc-jump {
-    flex: 0 0 auto; height: 34px; padding: 0 16px; border-radius: var(--radius-pill);
+    flex: 0 0 auto; height: 32px; padding: 0 14px; border-radius: var(--radius-pill);
     border: 1px solid var(--white-a08);
-    background: var(--white-a06);
-    color: rgba(255, 255, 255, 0.78);
-    font-size: 0.86rem; font-weight: 600; white-space: nowrap; cursor: pointer;
+    background: var(--white-a05);
+    color: var(--white-a70);
+    font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
     transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
-.vdsc-jump:hover { background: rgba(255, 255, 255, 0.13); color: #fff; border-color: var(--white-a16); }
+.vdsc-jump:hover { background: var(--white-a12); color: var(--text-bright); border-color: var(--white-a16); }
+/* the group you're reading */
+.vdsc-jump--on, .vdsc-jump--on:hover { background: var(--white-a90); border-color: transparent; color: var(--bg-primary); }
 
 /* ── Groups, shelves, rails ─────────────────────────────────────────────── */
-.vdsc-group { margin: 0 0 54px; content-visibility: auto; contain-intrinsic-size: auto 760px; }
+.vdsc-group { margin: 0; padding: 36px 0 8px; border-top: 1px solid var(--white-a06); scroll-margin-top: 56px; }
+.vdsc-jumpnav + .vdsc-group { border-top: 0; padding-top: 20px; }
 .vdsc-group--empty { display: none; }
-.vdsc-group-head { margin: 0 0 18px; }
+.vdsc-group-head { margin: 0 0 20px; }
 .vdsc-group-head h2 {
     margin: 0; font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em;
     line-height: 1.1; color: #fff;
 }
 .vdsc-group-head p { margin: 6px 0 0; font-size: 0.9rem; color: var(--white-a50); }
-.vdsc-shelf { margin: 0 0 34px; }
-.vdsc-shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 18px; }
+.vdsc-shelf { margin: 0 0 24px; }
+.vdsc-shelf:last-child { margin-bottom: 16px; }
+.vdsc-shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; min-height: 32px; }
 .vdsc-shelf-title {
     margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em;
     line-height: 1.2; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-/* ML-personalized shelves keep their gradient-title accent */
-.vdsc-shelf--ml .vdsc-shelf-title {
-    background: linear-gradient(135deg, #fff 30%, rgb(var(--accent-rgb)) 130%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .vdsc-shelf--in .vdsc-rail .vsr-card { animation: vdscCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
 .vdsc-shelf--in .vdsc-rail .vsr-card:nth-child(2) { animation-delay: 0.04s; }
@@ -3225,15 +3344,15 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @keyframes vdscCardIn { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes vdscKenBurns { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.12) translate(-1.5%, 1%); } }
 .vdsc-rail {
-    display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
-    padding: 6px 2px 20px;
+    display: flex; gap: var(--vdsc-gap); overflow-x: auto; overscroll-behavior-x: contain;
+    padding: 8px 2px 14px;
     scroll-snap-type: x mandatory;
     scrollbar-width: thin; scrollbar-color: var(--white-a18) transparent;
 }
 .vdsc-rail::-webkit-scrollbar { height: 6px; }
 .vdsc-rail::-webkit-scrollbar-thumb { background: var(--white-a16); border-radius: 3px; }
 .vdsc-rail::-webkit-scrollbar-track { background: transparent; }
-.vdsc-rail .vsr-card { flex: 0 0 180px; width: 180px; scroll-snap-align: start; }
+.vdsc-rail .vsr-card { flex: 0 0 var(--vdsc-card-w); width: var(--vdsc-card-w); scroll-snap-align: start; }
 
 /* ── Cards: the music side's tactile treatment ──────────────────────────── */
 .vdsc-rail .vsr-card,
@@ -3292,15 +3411,17 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 @media (hover: none) { .vdsc-page .vsr-notint { opacity: 0.95; } }
 
 /* ── Ranked (Top 10) rails ──────────────────────────────────────────────── */
-.vdsc-shelf--ranked .vdsc-rail { gap: 6px; align-items: center; }
+.vdsc-shelf--ranked .vdsc-rail { gap: calc(var(--vdsc-gap) + 6px); align-items: flex-start; }
+.vsr-ranked { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; scroll-snap-align: start; }
 .vsr-rank {
     display: flex; align-items: flex-end; flex: 0 0 auto;
-    font-size: 120px; font-weight: 900; line-height: 0.8; letter-spacing: -0.05em;
-    color: transparent;
-    -webkit-text-stroke: 2px var(--white-a35);
-    margin-right: -6px; user-select: none;
+    height: calc(var(--vdsc-card-w) * 1.5);
+    font-size: calc(var(--vdsc-card-w) * 1.1); font-weight: 900; line-height: 0.74; letter-spacing: -0.07em;
+    color: var(--white-a04);
+    -webkit-text-stroke: 2px var(--white-a40);
+    user-select: none;
 }
-.vdsc-shelf--ranked .vsr-card { flex: 0 0 150px; width: 150px; }
+.vdsc-shelf--ranked .vsr-card { flex: 0 0 var(--vdsc-card-w); width: var(--vdsc-card-w); }
 .vdsc-shelf--ranked .vsr-card:hover {
     box-shadow: 0 10px 28px var(--black-a50), 0 0 18px var(--white-a18);
 }
@@ -3308,20 +3429,31 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdsc-shelf--ranked .vsr-ranked:first-child .vsr-rank { -webkit-text-stroke-color: var(--white-a90); }
 
 /* ── Skeletons ──────────────────────────────────────────────────────────── */
-.vdsc-skel { display: flex; gap: 18px; overflow: hidden; padding: 6px 2px 20px; }
-.vdsc-skel-card {
-    flex: 0 0 180px; height: 302px; border-radius: var(--radius-xl);
-    background: linear-gradient(100deg, var(--white-a04) 40%, var(--white-a10) 50%, var(--white-a04) 60%);
+/* the skeleton fills the rail; as a shrinkable flex item firefox squeezed it to one card */
+.vdsc-skel { display: flex; flex: 0 0 100%; gap: var(--vdsc-gap); overflow: hidden; }
+.vdsc-skel-card { flex: 0 0 var(--vdsc-card-w); }
+.vdsc-skel-poster, .vdsc-skel-line {
+    background: linear-gradient(100deg, var(--white-a04) 40%, var(--white-a08) 50%, var(--white-a04) 60%);
     background-size: 200% 100%;
     animation: vdscShimmer 1.6s linear infinite;
-    border: 1px solid var(--white-a05);
 }
+.vdsc-skel-poster { aspect-ratio: 2 / 3; border-radius: var(--radius-lg); }
+.vdsc-skel-line { height: 11px; width: 78%; margin-top: 12px; border-radius: var(--radius-xs); }
+.vdsc-skel-line--short { width: 46%; margin-top: 7px; }
+/* a row that couldn't load: one quiet line and a retry, not a poster-tall hole */
+.vdsc-rail-msg {
+    display: flex; align-items: center; gap: 14px; flex: 1 1 auto;
+    min-height: 56px; padding: 0 18px;
+    border: 1px dashed var(--white-a10); border-radius: var(--radius-lg);
+    color: var(--white-a55); font-size: 13.5px;
+}
+.vdsc-shelf--failed .vdsc-arrow { display: none; }
 @keyframes vdscShimmer { to { background-position: -200% 0; } }
 
 /* ── Rail controls ──────────────────────────────────────────────────────── */
 .vdsc-shelf-nav { display: flex; align-items: center; gap: 8px; }
 .vdsc-arrow {
-    flex: 0 0 auto; width: 34px; height: 34px; border-radius: var(--radius-circle);
+    flex: 0 0 auto; width: 32px; height: 32px; border-radius: var(--radius-circle);
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--white-a08);
     border: 1px solid var(--white-a12);
@@ -3329,20 +3461,22 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     transition: background 160ms ease, transform 160ms ease;
 }
 .vdsc-arrow:hover { background: var(--white-a18); transform: scale(1.06); }
-.vdsc-seeall {
+.vdsc-seeall, .vdsc-rail-retry {
     flex: 0 0 auto; align-self: center;
     background: none; border: none; cursor: pointer;
     font-size: 13px; font-weight: 600; color: var(--white-a55);
     padding: 8px 10px; border-radius: var(--radius-md); white-space: nowrap;
     transition: color 160ms ease, background 160ms ease;
 }
-.vdsc-seeall:hover { color: #fff; background: var(--white-a08); }
+.vdsc-seeall:hover, .vdsc-rail-retry:hover { color: var(--text-bright); background: var(--white-a08); }
+.vdsc-rail-retry { color: var(--text-bright); border: 1px solid var(--white-a14); }
 
 /* ── Browse strip ───────────────────────────────────────────────────────── */
 .vdsc-browse-strip { margin: 0 0 8px; }
-.vdsc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+/* the genres in even rows, Browse all as one slim bar under them (no ragged last row) */
+.vdsc-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 .vdsc-tile {
-    position: relative; height: 148px; border-radius: var(--radius-sheet); overflow: hidden;
+    position: relative; height: 104px; border-radius: var(--radius-sheet); overflow: hidden; scroll-snap-align: start;
     border: 1px solid var(--white-a10);
     background: rgba(28, 34, 48, 0.7);
     cursor: pointer; text-align: left; padding: 0;
@@ -3385,11 +3519,14 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     box-shadow: 0 12px 28px var(--black-a45), 0 0 22px rgba(var(--c, 88, 101, 242), 0.22);
 }
 .vdsc-tile-name {
-    position: absolute; left: 16px; bottom: 14px; z-index: 2;
-    font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
+    position: absolute; left: 16px; right: 14px; bottom: 14px; z-index: 2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 17px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
     text-shadow: 0 2px 14px var(--black-a75);
 }
-.vdsc-tile--all { border-style: dashed; }
+.vdsc-tile--all { border-style: dashed; grid-column: 1 / -1; height: 52px; }
+.vdsc-tile--all .vdsc-tile-name { bottom: 50%; transform: translateY(50%); font-size: 15px; }
+.vdsc-tile--all .vdsc-tile-name::before { display: none; }
 
 /* ── Filter bar: monochrome pills (music standard) ──────────────────────── */
 .vdsc-filterbar {
@@ -3625,14 +3762,8 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     .vdsc-hero-body { max-width: 100%; padding: 24px 24px 78px; }
     .vdsc-dots { padding: 0 24px 22px; }
     .vdsc-hero-nav { display: none; }
-    .vdsc-rail .vsr-card { flex-basis: 140px; width: 140px; }
-    .vdsc-shelf--ranked .vsr-card { flex-basis: 128px; width: 128px; }
-    .vdsc-skel-card { flex-basis: 140px; }
-    .vsr-rank { font-size: 88px; }
     .vdsc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
-    .vdsc-group-head h2 { font-size: 1.4rem; }
-    .vdsc-shelf-title { font-size: 1.15rem; }
-    .vdsc-tiles { grid-template-columns: repeat(2, 1fr); }
+
     .vdsc-bar-title { font-size: 1.4rem; }
 }
 
@@ -4608,6 +4739,26 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vimp-btn--danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
 .vimp-btn--danger:disabled { opacity: 0.45; cursor: default; }
 
+/* the import folder (#2129): a section head with the folder and the auto switch,
+   then the same cards as the queue below it */
+.vimp-folder { margin-bottom: 28px; }
+.vimp-section-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; }
+.vimp-section-h { margin: 0; font-size: 15px; font-weight: 700; color: var(--text-1); }
+.vimp-folder-path { flex: 1; min-width: 0; font-size: 12px; color: var(--text-3);
+    font-family: 'JetBrains Mono', ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vimp-auto { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.vimp-auto input { accent-color: rgb(var(--accent-rgb)); }
+.vimp-folder-note { padding: 18px 16px; border-radius: var(--radius-card); font-size: 13px; color: var(--text-3);
+    background: var(--white-a04); border: 1px dashed var(--white-a12); }
+.vimp-folder-note[hidden] { display: none; }
+.vimp-card--folder { cursor: default; }
+.vimp-folder-why { margin-top: 5px; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+    .vimp-folder-path { flex-basis: 100%; order: 3; }
+    .vimp-card--folder .vimp-card-row { flex-wrap: wrap; }
+    .vimp-card--folder .vimp-card-side { width: 100%; justify-content: flex-end; }
+}
+
 .vimp-state { text-align: center; padding: 64px 20px; }
 .vimp-state-ic { font-size: 38px; color: #6cd391; }
 .vimp-state-title { font-size: 17px; font-weight: 700; color: #fff; margin-top: 10px; }
@@ -4628,7 +4779,12 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vimp-kindtab { padding: 7px 16px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 700;
     color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a10); }
 .vimp-kindtab--on { color: #06210f; background: rgb(var(--accent-rgb)); border-color: transparent; }
-.vimp-search { padding: 0 20px 10px; }
+/* the modal lives on body, outside .vd-page and its [hidden] rule */
+.vimp-modal [hidden] { display: none; }
+.vimp-search { position: relative; padding: 0 20px 10px; }
+.vimp-search-icon { position: absolute; left: 32px; top: 12px; width: 16px; height: 16px;
+    color: var(--text-3); pointer-events: none; }
+.vimp-search .vimp-search-input { padding-left: 36px; }
 .vimp-search-input { width: 100%; padding: 10px 13px; border-radius: var(--radius-control); font-size: 14px; color: #fff;
     background: var(--white-a05); border: 1px solid var(--white-a14); }
 .vimp-search-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); }
@@ -4857,6 +5013,14 @@ body[data-side="video"] #gsearch-aura {
 .vms-sub { font-size: 12px; color: var(--white-a45); margin-top: 8px; }
 .vms-prof { margin-top: 10px; }
 .vms-prof[hidden] { display: none; }
+/* the editable query, prefilled with what the search starts from (#2121) */
+.vms-query { display: flex; gap: 8px; margin-top: 12px; }
+.vms-query-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: var(--radius-md);
+    border: 1px solid var(--white-a12); background: var(--white-a06); color: var(--text-1); font: inherit; font-size: 13.5px; }
+.vms-query-input:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 1px; }
+.vms-query-btn { flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--white-a12);
+    background: var(--white-a10); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.vms-query-btn:hover { background: var(--white-a14); }
 /* the title's quality profile picker (Get + Manual search) */
 .vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
@@ -5721,6 +5885,9 @@ body[data-side="video"] #gsearch-aura {
     display: inline-flex; align-items: center; min-height: 22px; border-radius: var(--radius-sm); font-size: 10.5px; font-weight: 800;
 }
 .vsr-basic-query-label { color: rgba(255,255,255,0.42); text-transform: uppercase; letter-spacing: 0.06em; }
+/* every result past the first page of a releases source (#2127) */
+.vsr-basic-more { display: block; margin: 10px auto 0; }
+
 .vsr-basic-query-chip {
     max-width: min(360px, 100%); padding: 3px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: rgba(255,255,255,0.68); background: rgba(0,0,0,0.18); border: 1px solid var(--white-a07);
@@ -7031,7 +7198,7 @@ body[data-side="video"] #gsearch-aura {
    eyebrow, big title, subtitle, actions, drifting backdrop art, scrim. */
 .vdsc-stories { margin: 26px 0 8px; }
 .vdsc-stories-row {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px;
 }
 .vdsc-story {
     position: relative; overflow: hidden; border-radius: 20px;
@@ -7107,7 +7274,7 @@ body[data-side="video"] #gsearch-aura {
     position: relative; overflow: hidden; border-radius: 26px;
     min-height: 430px; display: flex; align-items: flex-end;
     border: 1px solid var(--white-a10);
-    isolation: isolate; margin: 46px 0;
+    isolation: isolate; margin: 12px 0 28px;
     opacity: 0; transform: translateY(30px);
     transition: opacity 0.9s ease, transform 0.9s var(--ease-emphasized);
     box-shadow: 0 30px 80px var(--black-a50);
@@ -7251,7 +7418,7 @@ body[data-side="video"] #gsearch-aura {
 
 /* ── Story blocks: phone + reduced motion ──────────────────────────────────── */
 @media (max-width: 900px) {
-    .vdsc-stories-row { grid-template-columns: 1fr; }
+    .vdsc-stories-row { grid-auto-flow: row; grid-template-columns: 1fr; }
     .vdsc-story { min-height: 300px; }
     .vdsc-story-title { font-size: 1.6rem; }
     .vdsc-hero-picks { right: 20px; bottom: 18px; padding: 8px 14px; }
@@ -7999,6 +8166,17 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     border-radius: 50%;
     background: var(--success-strong);
 }
+/* the other title states (#2160): the same quiet glass, the dot says which */
+.vd-page .vd-sim-wishchip--req, .vd-page .vd-sim-wishchip--wish, .vd-page .vd-sim-wishchip--active,
+.vd-page .vd-sim-wishchip--partial, .vd-page .vd-sim-wishchip--failed { padding-left: 18px; }
+.vd-page .vd-sim-wishchip--req::before, .vd-page .vd-sim-wishchip--wish::before,
+.vd-page .vd-sim-wishchip--active::before, .vd-page .vd-sim-wishchip--partial::before,
+.vd-page .vd-sim-wishchip--failed::before {
+    content: ''; position: absolute; left: 8px; top: 50%; width: 6px; height: 6px; margin-top: -3px;
+    border-radius: 50%; background: rgb(var(--accent-light-rgb)); }
+.vd-page .vd-sim-wishchip--req::before { background: rgb(var(--info-rgb)); }
+.vd-page .vd-sim-wishchip--partial::before { background: rgb(var(--success-rgb)); }
+.vd-page .vd-sim-wishchip--failed::before { background: rgb(var(--warning-rgb)); }
 
 /* videos + photos */
 .vd-page .vd-videos { gap: 18px; margin-top: 20px; }
@@ -8779,9 +8957,9 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vdsc-page.vdsc2 .vdsc-bar-title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .vdsc-page.vdsc2 .vdsc-bar-sub { font-size: 14px; font-weight: 500; color: var(--white-a55); }
 .vdsc-page.vdsc2 .vdsc-btn { border-radius: var(--radius-pill); font-weight: 600; }
-.vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; }
-.vdsc-page.vdsc2 .vdsc-group-head p { font-weight: 500; color: var(--white-a45); }
-.vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 16px; font-weight: 600; letter-spacing: 0; }
+.vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.vdsc-page.vdsc2 .vdsc-group-head p { margin-top: 4px; font-size: 13.5px; font-weight: 500; color: var(--white-a45); }
+.vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--white-a90); }
 .vdsc-page.vdsc2 .vdsc-tile-name { font-weight: 700; }
 .vdsc-page.vdsc2 .vdsc-grid-title,
 .vdsc-page.vdsc2 .vdsc-ig-title,
@@ -8808,3 +8986,37 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     background: var(--black-a65); }
 .vdsc-page.vdsc2 .vsr-new { font-weight: 700; }
 .vdsc-page.vdsc2 .vdsc-stories:not(.hidden) { margin-bottom: 26px; }
+
+/* discover rhythm on smaller screens: one poster width per size, tighter groups */
+@media (max-width: 1100px) {
+    .vdsc-page.vdsc2 .vdsc-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+    /* touch sizes: the genres become one swipeable row */
+    .vdsc-page.vdsc2 .vdsc-tiles {
+        grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 150px;
+        overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; padding-bottom: 8px;
+    }
+    .vdsc-page.vdsc2 .vdsc-tile { height: 88px; }
+    .vdsc-page.vdsc2 .vdsc-tile--all { grid-column: auto; height: 88px; }
+    .vdsc-page.vdsc2 { --vdsc-card-w: 146px; --vdsc-gap: 14px; }
+    .vdsc-page.vdsc2 .vdsc-group { padding-top: 28px; }
+    .vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 21px; }
+    .vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 16px; }
+}
+@media (max-width: 560px) {
+    .vdsc-page.vdsc2 { --vdsc-card-w: 118px; --vdsc-gap: 12px; }
+    .vdsc-page.vdsc2 .vdsc-group { padding-top: 24px; }
+    .vdsc-page.vdsc2 .vdsc-group-head { margin-bottom: 14px; }
+    .vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 19px; }
+    .vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 15px; }
+    .vdsc-page.vdsc2 .vdsc-arrow { display: none; }
+    .vdsc-page.vdsc2 .vsr-name { font-size: 12.5px; }
+    .vdsc-page.vdsc2 .vsr-rank { -webkit-text-stroke-width: 1.5px; }
+}
+/* with a mouse the rail arrows wait until you're on the rail, calmer at rest */
+@media (hover: hover) and (pointer: fine) {
+    .vdsc-page.vdsc2 .vdsc-arrow { opacity: 0; transition: opacity 160ms ease, background 160ms ease, transform 160ms ease; }
+    .vdsc-page.vdsc2 .vdsc-shelf:hover .vdsc-arrow,
+    .vdsc-page.vdsc2 .vdsc-arrow:focus-visible { opacity: 1; }
+}

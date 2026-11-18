@@ -109,6 +109,7 @@ class ConfigManager:
         # Download sources
         'soulseek.api_key',
         'deezer_download.arl',
+        'soundcloud_download.oauth_token',
         'lidarr_download.api_key',
         'prowlarr.api_key',
         'torrent_client.password',
@@ -698,6 +699,15 @@ class ConfigManager:
                 "enabled": False,
                 "profile_id": 1,
             },
+            # soulsync answering as seerr for video request apps (#2151). off
+            # by default. a missing or unknown X-Api-User is refused on a new
+            # install (#2166); an install from before has no refuse_unknown
+            # key and keeps acting as profile_id until the admin switches it
+            "seerr_compat": {
+                "enabled": False,
+                "profile_id": 1,
+                "refuse_unknown": True,
+            },
             # ai clients over /mcp, with an api key. off by default
             "mcp": {
                 "enabled": False,
@@ -787,11 +797,11 @@ class ConfigManager:
                 "remove_completed": "off",
             },
             "soundcloud_download": {
-                # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
-                # added later, with credentials living under a "session" subkey
-                # alongside Tidal/Qobuz. No quality knob: anonymous SoundCloud
-                # caps at the upload's transcoding (typically 128 kbps MP3 or
-                # AAC). yt-dlp resolves bestaudio at download time.
+                # a free account's oauth_token cookie. with it, a track whose
+                # uploader turned on the free download comes as the original
+                # file instead of the ~128 kbps stream (#2116). empty stays
+                # anonymous. never go+, that needs a paid account.
+                "oauth_token": "",
             },
             "listenbrainz": {
                 "base_url": "",
@@ -977,6 +987,8 @@ class ConfigManager:
                 # import creates it. Jellyfin/Kodi/Emby use it to identify
                 # the artist instead of guessing by name. Off by default —
                 # the Artist NFO Backfill repair job covers existing folders.
+                # #2138: the same switch writes poster.jpg / background.jpg
+                # beside it when the artist folder has no artwork.
                 "write_artist_nfo": False,
                 # Library v2: a monitored track whose file was deleted outside
                 # SoulSync is downloaded again (Lidarr behaviour). Off, the
@@ -1166,6 +1178,19 @@ class ConfigManager:
                 # copy, and a listener who prefers the per-file layout opts
                 # out by leaving this off.
                 "merge_m4b": False,
+            },
+            "server_activity": {
+                # remote upload speed in Mbps; None hides the bar
+                "upload_mbps": None,
+                "geo_lookup": True,
+                # play log days; 0 keeps it forever
+                "retention_days": 0,
+                "stop_presets": [
+                    "The server is restarting for an update. Back in 5 minutes.",
+                    "Server maintenance, back soon.",
+                    "Too many streams right now, please try again later.",
+                    "Please watch at home tonight.",
+                ],
             },
             "podcasts": {
                 "download_path": default_podcast_path,

@@ -29,14 +29,15 @@ const DASH = readFileSync(
 );
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
-function symbols(health: unknown): HTMLElement {
+function symbols(health: unknown, admin = true): HTMLElement {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const fn = new Function(
     '_notifHealth',
+    '_notifViewerIsAdmin',
     `${extractFunction('_notifHealthHTML', JS)}\nreturn _notifHealthHTML();`,
-  ) as (h: unknown) => string;
+  ) as (h: unknown, isAdmin: () => boolean) => string;
   const host = document.createElement('div');
-  host.innerHTML = fn(health);
+  host.innerHTML = fn(health, () => admin);
   return host;
 }
 
@@ -81,6 +82,10 @@ describe('the health symbols', () => {
   it('renders nothing at all before health has loaded', () => {
     expect(symbols(null).innerHTML).toBe('');
     expect(symbols({ checks: [] }).innerHTML).toBe('');
+  });
+
+  it('is an admin thing: a member gets no health in the panel (#2170)', () => {
+    expect(symbols({ checks: [C('error', 'a'), C('ok', 'b')] }, false).innerHTML).toBe('');
   });
 
   it('opens the detail modal rather than expanding in place', () => {

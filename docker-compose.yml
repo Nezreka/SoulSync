@@ -74,6 +74,12 @@ services:
       # An existing collection on another drive: mount it at its own path and add
       # it under Settings → Library → Folders → Audiobooks → More audiobook folders.
       # - /mnt/drive2/Audiobooks:/app/audiobooks2:rw
+      # ─── Playlist folders (OUTPUT), optional: uncomment + set your path ───
+      # "Organize by playlist" builds one folder per playlist here (copies,
+      # hardlinks or symlinks to your library). The default Playlist Folder is
+      # /app/Playlists; without a mount it lives in the container and is lost
+      # when the container is recreated.
+      # - ./Playlists:/app/Playlists
       # ─── Sample Studio folders (OUTPUT) — optional: uncomment + set your path ───
       # Saved Sample Studio chops are rendered here, organized as Artist/Track
       # folders by the sample path template. UNCOMMENT the line below, point the

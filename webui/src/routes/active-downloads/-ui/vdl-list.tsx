@@ -28,6 +28,7 @@ import {
   vdlFmtElapsed,
   vdlFmtEta,
   vdlFmtRuntime,
+  vdlLangLabel,
   vdlFmtSize,
   vdlFmtSpeed,
   vdlFmtViews,
@@ -62,6 +63,11 @@ export function useVdlCanImport(): boolean {
 function vdlGotoVideoImport(): void {
   if (document.body.getAttribute('data-side') !== 'video') window._switchAppSide?.('video');
   document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-import' }));
+}
+
+/** the server says who may stop a row; an older server sends nothing (yes). */
+function mayCancel(d: VdlDownload): boolean {
+  return d.can_cancel !== false;
 }
 
 function clampPct(v: number | null | undefined): number {
@@ -195,11 +201,13 @@ function VdlCard({
   const ctx = vdlParseCtx(d);
   const vt = vdlRowType(d);
   const target = openTarget(d);
-  const canBlock = vdlCanBlock(d);
+  // blocking writes the household's blocklist: admin only, like the server
+  const canBlock = canImport && vdlCanBlock(d);
   const needsImport = d.status === 'import_failed' && canImport;
   const downloading = d.status === 'downloading';
   const sub = rowSub(d, importElapsed, Boolean(inGroup));
   const tag = formatTag(d.quality_label);
+  const langs = vdlLangLabel(d.release_langs);
   const when = d.status === 'completed' ? clockTime(parseStamp(d.completed_at)) : '';
 
   const title = inGroup && ctx.episode != null ? `Episode ${ctx.episode}` : vdlCardTitle(d);
@@ -218,7 +226,7 @@ function VdlCard({
           },
         ]
       : []),
-    ...(vdlIsRemovable(d.status)
+    ...(vdlIsRemovable(d.status) && canImport
       ? [{ key: 'remove', label: 'Remove from list', onSelect: () => actions.onRemove(d.id) }]
       : []),
     ...(canBlock
@@ -284,8 +292,18 @@ function VdlCard({
           ) : null}
         </div>
         <div className="dlc-meta">
-          {tag ? (
-            <span className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}>{tag}</span>
+          {tag || langs ? (
+            // the languages sit under the quality tag (#2120)
+            <span className="dlc-tags">
+              {tag ? (
+                <span className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}>{tag}</span>
+              ) : null}
+              {langs ? (
+                <span className="dlc-tag dlc-tag-lang" title="Languages the release name tags">
+                  {langs}
+                </span>
+              ) : null}
+            </span>
           ) : null}
           {downloading ? (
             <>
@@ -308,7 +326,7 @@ function VdlCard({
           )}
         </div>
         <div className="dlc-acts">
-          {active ? (
+          {active && mayCancel(d) ? (
             <button
               type="button"
               className="dlc-icon-btn dlc-hover dlc-cancel"
@@ -566,6 +584,7 @@ function VdlSheet({
         ['Source', [d.username, d.source].filter(Boolean).join(' · ')],
         ['Format', [d.resolution, d.codec].filter(Boolean).join(' · ')],
         ['Target', d.quality_label || ''],
+        ['Languages', vdlLangLabel(d.release_langs)],
         ['Size', d.size_bytes ? vdlFmtSize(d.size_bytes) : ''],
         ['Peer', availability],
         ['Backups', backups ? `${backups} release${backups === 1 ? '' : 's'} to fall back on` : ''],
@@ -575,7 +594,7 @@ function VdlSheet({
       ];
 
   const needsImport = d.status === 'import_failed' && canImport;
-  const canBlock = vdlCanBlock(d);
+  const canBlock = canImport && vdlCanBlock(d);
 
   return (
     <DlSheet
@@ -619,7 +638,7 @@ function VdlSheet({
               {d.status === 'failed' ? 'Block and retry' : 'Block release'}
             </DlButton>
           ) : null}
-          {active ? (
+          {active && mayCancel(d) ? (
             <DlButton onClick={() => actions.onCancel(d.id)}>Cancel download</DlButton>
           ) : null}
         </>
@@ -691,16 +710,19 @@ function VdlGroup({
   const headVisible = pack ? vdlMatchesFilter(pack.status, filter) : false;
 
   const onGroupCancel = () => {
-    const ids = episodes.filter((d) => vdlIsActive(d.status)).map((d) => d.id);
+    const ids = episodes.filter((d) => vdlIsActive(d.status) && mayCancel(d)).map((d) => d.id);
     // the pack is the head, not a card in the body. without this, cancelling
     // a batch whose episodes don't exist yet would cancel nothing at all.
-    if (pack && packActive && !ids.includes(pack.id)) ids.push(pack.id);
+    if (pack && packActive && mayCancel(pack) && !ids.includes(pack.id)) ids.push(pack.id);
     onCancel(ids);
   };
+  const cancellable =
+    episodes.some((d) => vdlIsActive(d.status) && mayCancel(d)) ||
+    Boolean(pack && packActive && mayCancel(pack));
   const target = openTarget(first);
   const menu = [
     ...(target ? [{ key: 'open', label: target.label, onSelect: target.run }] : []),
-    ...(act || packActive
+    ...((act || packActive) && cancellable
       ? [
           {
             key: 'cancel',

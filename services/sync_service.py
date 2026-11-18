@@ -31,6 +31,13 @@ _WRITE_LOCKS: Dict[str, threading.Lock] = {}
 _WRITE_LOCKS_GUARD = threading.Lock()
 
 
+def _db_backed(server_type: str) -> bool:
+    """every server but plex takes a playlist track as the db row's server
+    id. plex wants its own item from fetchItem. a list of the others left
+    music assistant out (#2111)."""
+    return bool(server_type) and server_type != "plex"
+
+
 def _playlist_write_lock(server_type: str) -> threading.Lock:
     with _WRITE_LOCKS_GUARD:
         lock = _WRITE_LOCKS.get(server_type)
@@ -463,6 +470,15 @@ class PlaylistSyncService:
                     logger.error("SoulSync library client not provided to sync service")
                     return None, "soulsync"
                 return client, "soulsync"
+            elif active_server and active_server != "plex":
+                # music assistant and any server added later: by its registered
+                # name. it used to fall through to plex, so a music assistant
+                # sync logged "syncing to PLEX" and failed (#2111)
+                client = self._media_client(active_server)
+                if not client:
+                    logger.error("%s client not provided to sync service", active_server)
+                    return None, active_server
+                return client, active_server
             else:  # Default to Plex
                 client = self._media_client('plex')
                 if profile_id and client:
@@ -1438,7 +1454,7 @@ class PlaylistSyncService:
                 dbt = cache_db.get_track_by_server_id(server_track_id, active_server)
                 if not dbt:
                     return None
-                if server_type in ("jellyfin", "navidrome", "soulsync"):
+                if _db_backed(server_type):
                     class DbTrackFromCache:
                         def __init__(self, db_t):
                             self.ratingKey = db_t.id
@@ -1650,7 +1666,7 @@ class PlaylistSyncService:
                         
                         # Fetch the actual track object from active media server using the database track ID
                         try:
-                            if server_type in ("jellyfin", "navidrome", "soulsync"):
+                            if _db_backed(server_type):
                                 # DB-backed servers — no remote fetchItem (SoulSync standalone included).
                                 class DbTrackFromDB:
                                     def __init__(self, db_track):

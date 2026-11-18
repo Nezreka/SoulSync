@@ -161,7 +161,7 @@ def _default_runner(path: str) -> str | None:
         proc = subprocess.run(
             [_FFPROBE, "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
-            capture_output=True, text=True, timeout=120, check=False,
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120, check=False,
         )
     except Exception:   # noqa: BLE001 - missing binary / timeout / OS error → unverified
         return None

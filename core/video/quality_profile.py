@@ -273,6 +273,68 @@ def list_profiles(db) -> list:
     return out
 
 
+def profile_tags(prof: Any, name: Any = "") -> list:
+    """display tags for a profile (#2168): "4k" when it files into the 4K
+    library or any 2160p tier is on (it can fetch 4K, so "4K always asks"
+    covers it), "extended" when its name says so. read from the blob, never
+    stored."""
+    tags = []
+    prof = prof if isinstance(prof, dict) else {}
+    tiers = prof.get("tiers") or []
+    uhd = any(isinstance(t, dict) and t.get("enabled") and "2160p" in str(t.get("key") or "")
+              for t in tiers)
+    if str(prof.get("library") or "").lower() == "4k" or uhd:
+        tags.append("4k")
+    if "extended" in str(name or "").lower():
+        tags.append("extended")
+    return tags
+
+
+_RANGE_ORDER = ("SD", "720p", "1080p", "2160p")
+
+
+def profile_range(prof: Any) -> str:
+    """a short line for what a profile fetches (#2166): "720p to 1080p",
+    "1080p", "SD to 4K". from its enabled tiers, never stored. empty when
+    nothing is on."""
+    prof = prof if isinstance(prof, dict) else {}
+    seen = set()
+    for t in prof.get("tiers") or []:
+        if not (isinstance(t, dict) and t.get("enabled")):
+            continue
+        key = str(t.get("key") or "")
+        res = key.rsplit("-", 1)[-1] if "-" in key else "SD"
+        if res in _RANGE_ORDER:
+            seen.add(res)
+    if not seen:
+        return ""
+    ranked = [r for r in _RANGE_ORDER if r in seen]
+    words = ["4K" if r == "2160p" else r for r in (ranked[0], ranked[-1])]
+    return words[0] if words[0] == words[1] else "%s to %s" % (words[0], words[1])
+
+
+def quality_options(db) -> list:
+    """every profile a request can name, without its blob: [{id, name,
+    media_type, tags, range}], Default (id 0, both kinds) first. what the
+    request resolver, a member's quality list and the people editor are
+    built from."""
+    default = load(db)
+    out = [{"id": DEFAULT_PROFILE_ID, "name": "Default", "media_type": None,
+            "tags": profile_tags(default, "Default"), "range": profile_range(default)}]
+    for row in db.named_quality_profiles():
+        prof = _profile_from_row(row)
+        out.append({"id": row["id"], "name": row["name"], "media_type": row.get("media_type") or None,
+                    "tags": profile_tags(prof, row["name"]), "range": profile_range(prof)})
+    return out
+
+
+def options_for_kind(options: list, kind: Any) -> list:
+    """the options a movie (or a show) can use: its own media type or both."""
+    k = title_kind(kind)
+    want = "movie" if k == "movie" else "tv"
+    return [o for o in options if (o.get("media_type") or None) in (None, want)]
+
+
 def _profile_from_row(row: Any) -> dict:
     try:
         return normalize(json.loads(row["items"] or "{}"))
@@ -422,4 +484,5 @@ __all__ = [
     "normalize_tiers", "load", "save", "list_profiles", "profile_by_id",
     "save_named", "delete_named", "load_for_item",
     "title_kind", "kind_default_id", "kind_defaults", "set_kind_default",
+    "profile_tags", "quality_options", "options_for_kind",
 ]

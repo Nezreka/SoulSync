@@ -353,7 +353,9 @@ def collect(db) -> dict:
     try:
         from core.video import download_monitor as mon
         active = db.get_active_video_downloads() or []
-        slskd_active = [d for d in active if str(d.get("source") or "").lower() != "youtube"]
+        # import folder rows run on their own thread, not the monitor's (#2129)
+        slskd_active = [d for d in active
+                        if str(d.get("source") or "").lower() not in ("youtube", "import")]
         if slskd_active and not mon._started:
             checks.append(_check("monitor", "Download monitor", "warning",
                                  f"{len(slskd_active)} download(s) in flight but the monitor "

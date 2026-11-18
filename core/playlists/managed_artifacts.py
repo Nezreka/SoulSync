@@ -36,40 +36,62 @@ def safe_output_dir(root: str, folder: str, *, create: bool = True) -> str:
 def artifact_fingerprint(path: str):
     """Describe the directory entry itself, never its symlink target.
 
-    Metadata detects replacements cheaply. Copies also retain a content digest:
-    Windows/filesystem ctime semantics may not expose an in-place edit when the
-    writer restores size and mtime. Symlinks never read their target's bytes.
+    Only what survives a remount goes in (#2137): device, inode and ctime
+    change when a FAT/exFAT drive or a network share comes back, and fat
+    mount options can shift permission bits and mtimes too. A copy is its
+    size and sha256 (the digest is what catches an edit, ctime never did on
+    windows), a symlink is where it points. Symlinks never read their
+    target's bytes.
     """
     try:
         st = os.lstat(path)
-        if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
-            return None
-        result = {"device": st.st_dev, "inode": st.st_ino, "mode": st.st_mode,
-                  "size": st.st_size, "mtime_ns": st.st_mtime_ns, "ctime_ns": st.st_ctime_ns}
         if stat.S_ISLNK(st.st_mode):
-            result["target"] = os.readlink(path)
-        else:
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-            with os.fdopen(os.open(path, flags), "rb") as stream:
-                opened = os.fstat(stream.fileno())
-                if (opened.st_dev, opened.st_ino, opened.st_mode) != (st.st_dev, st.st_ino, st.st_mode):
-                    return None
-                digest = hashlib.sha256()
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(block)
-                after = os.fstat(stream.fileno())
-                if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
-                        opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns):
-                    return None
-                result["sha256"] = digest.hexdigest()
-        return result
+            return {"kind": "symlink", "target": os.readlink(path)}
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            # same call, same mount: these still prove the open hit the entry we lstat'd.
+            if (opened.st_dev, opened.st_ino, opened.st_mode) != (st.st_dev, st.st_ino, st.st_mode):
+                return None
+            digest = hashlib.sha256()
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+            after = os.fstat(stream.fileno())
+            if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
+                    opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns):
+                return None
+        return {"kind": "file", "size": opened.st_size, "sha256": digest.hexdigest()}
     except OSError:
         return None
 
 
+def stable_fingerprint(record):
+    """A stored fingerprint in today's shape.
+
+    manifests before #2137 also kept device, inode, mode, mtime and ctime.
+    their stable part (sha256 + size, or the link target) is still exact, so
+    an upgrade keeps owning every entry instead of calling it changed.
+    anything else grants nothing."""
+    if not isinstance(record, dict):
+        return None
+    kind = record.get("kind")
+    if kind is None and isinstance(record.get("mode"), int):
+        kind = "symlink" if stat.S_ISLNK(record["mode"]) else "file"
+    if kind == "symlink" and isinstance(record.get("target"), str):
+        return {"kind": "symlink", "target": record["target"]}
+    if (kind == "file" and isinstance(record.get("sha256"), str)
+            and isinstance(record.get("size"), int)):
+        return {"kind": "file", "size": record["size"], "sha256": record["sha256"]}
+    return None
+
+
 def entry_is_owned(path: str, record) -> bool:
-    return isinstance(record, dict) and record.get("fingerprint") is not None and (
-        artifact_fingerprint(path) == record["fingerprint"])
+    if not isinstance(record, dict):
+        return False
+    expected = stable_fingerprint(record.get("fingerprint"))
+    return expected is not None and artifact_fingerprint(path) == expected
 
 
 def manifest_path(root: str, folder: str, *, create: bool = True) -> str:
@@ -103,6 +125,11 @@ def load_manifest(root: str, folder: str) -> dict:
         if isinstance(name, str) and name not in ("", ".", "..")
         and "/" not in name and "\\" not in name and isinstance(record, dict)
     }
+    for record in value["entries"].values():
+        # pre #2137 fingerprints move to the remount-safe shape on load, so the
+        # next save writes them back without device/inode/ctime.
+        if "fingerprint" in record:
+            record["fingerprint"] = stable_fingerprint(record["fingerprint"])
     return value
 
 

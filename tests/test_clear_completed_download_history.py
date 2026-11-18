@@ -114,6 +114,26 @@ def test_does_not_touch_non_download_history():
     assert [r[0] for r in rows] == ["import"]
 
 
+def test_clear_everything_takes_an_import_off_the_review_queue_and_keeps_its_history():
+    """Storm, Nov 14 2026: imports still flagged unverified showed on the
+    Downloads page (it lists every row waiting for review) and no clear took
+    them. The import's history row stays, without the flag that listed it."""
+    db = _InMemoryDB()
+    db._add("import", "unverified", title="Junjou Spectra")
+    db._add("import", "force_imported")
+    db._add("import", "verified")
+    assert db.clear_completed_download_history() == 2
+    assert db._statuses() == [None, None, "verified"]
+    assert db.clear_completed_download_history() == 0       # and it is done
+
+
+def test_clear_finished_leaves_an_import_in_the_review_queue():
+    db = _InMemoryDB()
+    db._add("import", "unverified")
+    assert db.clear_completed_download_history(keep_review=True) == 0
+    assert db._statuses() == ["unverified"]
+
+
 def test_empty_history_returns_zero():
     db = _InMemoryDB()
     assert db.clear_completed_download_history() == 0

@@ -7,29 +7,43 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INDEX = (ROOT / 'webui' / 'index.html').read_text(encoding='utf-8')
-SETTINGS = (ROOT / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+# the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
+PANEL = (ROOT / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'source-panels-more.tsx').read_text(
+    encoding='utf-8')
+SETTINGS = (ROOT / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
 
-def _download_source_block(js: str) -> str:
-    start = js.index('async function saveSettings(')
-    block = js.index('download_source: {', start)
-    return js[block:js.index('\n        },', block)]
+def _youtube(src: str) -> str:
+    return src.split('export function YoutubePanel(', 1)[1].split('\nexport function', 1)[0]
+
+
+def _album_bundle(src: str) -> str:
+    """the album bundle CheckRow, from its id to the end of its props"""
+    panel = _youtube(src)
+    start = panel.index('id="youtube-album-bundle"')
+    return panel[start:panel.index('/>', start)]
 
 
 def test_the_checkbox_sits_in_the_youtube_section_unchecked():
-    assert '<input type="checkbox" id="youtube-album-bundle">' in INDEX
+    panel = _youtube(PANEL)
+    # unchecked unless saved as on (a CheckRow renders a checkbox for this id)
+    assert "checked={d.youtube_album_bundle === true}" in _album_bundle(PANEL)
+    row = PANEL.split('function CheckRow(', 1)[1].split('\n}\n', 1)[0]
+    assert 'type="checkbox"' in row and 'id={id}' in row
     # same section as the other youtube download knobs
-    assert INDEX.index('id="youtube-download-delay"') < INDEX.index('id="youtube-album-bundle"') \
-        < INDEX.index('id="youtube-transcode"')
+    assert panel.index('id="youtube-download-delay"') < panel.index('id="youtube-album-bundle"') \
+        < panel.index('id="youtube-transcode"')
 
 
 def test_save_writes_it_under_download_source_where_the_album_flow_reads_it():
-    assert "youtube_album_bundle: _cfgBool('youtube-album-bundle')" in _download_source_block(SETTINGS)
+    assert "store.set('download_source', 'youtube_album_bundle', checked)" in _album_bundle(PANEL)
+    # and the page save no longer writes it from a field that is not there
+    assert "youtube_album_bundle" not in SETTINGS.split('async function saveSettings(', 1)[1]
 
 
 def test_load_only_ticks_it_when_it_is_really_on():
-    assert "settings.download_source?.youtube_album_bundle === true" in SETTINGS
+    assert "d.youtube_album_bundle === true" in _album_bundle(PANEL)
+    assert "const d = (settings.download_source || {})" in _youtube(PANEL)
 
 
 def test_the_docs_describe_it():

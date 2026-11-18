@@ -708,6 +708,24 @@ function _isMassOrphanFix(jobId, count) {
 // ===============================
 let socket = null;
 let socketConnected = false;
+
+// The live log viewer on Settings > Logs is React (src/features/settings/tabs/
+// logs-tab.tsx, SETTINGS_PORT.md step 3). `socket` is a script-scoped let a
+// module cannot reach, so the tab subscribes through these. Same calls the
+// vanilla viewer made.
+window.soulsyncLogStream = {
+    subscribe(source, onLive) {
+        if (!socket || !socket.connected) return false;
+        socket.emit('logs:subscribe', { source });
+        socket.on('logs:live', onLive);
+        return true;
+    },
+    unsubscribe(onLive) {
+        if (!socket) return;
+        socket.off('logs:live', onLive);
+        socket.emit('logs:unsubscribe', {});
+    },
+};
 // Mirrored onto window so the React dashboard's fallback pollers can apply the
 // SAME socket gate the vanilla poller twins do (`socketConnected` is a
 // script-scoped `let` no module can read). Kept in lockstep at every write.
@@ -766,9 +784,13 @@ window.refreshMusicRequestsBadge = refreshMusicRequestsBadge;
 let _requestAdminName = null;
 function announceWishlistRequest() {
     if (typeof canDownload !== 'function' || canDownload()) return false;
+    // with a limit, the toast says what's left ("2 of 5 asks left this week")
     const say = (name) => {
-        if (typeof showToast === 'function') showToast(`Sent to ${name || 'your admin'} as a request`, 'info');
+        const sent = `Sent to ${name || 'your admin'} as a request`;
         refreshMusicRequestsBadge();
+        _musicAsksLeftLine().then((left) => {
+            if (typeof showToast === 'function') showToast(left ? `${sent}. ${left}` : sent, 'info');
+        });
     };
     if (_requestAdminName) { say(_requestAdminName); return true; }
     fetch('/api/profiles', { headers: { 'Accept': 'application/json' } })
@@ -789,11 +811,53 @@ window.announceWishlistRequest = announceWishlistRequest;
 // resolves true when the add should go ahead (and on any doubt).
 function _requestLimitMessage(quota) {
     const days = Number(quota.days) || 7;
-    const noun = Number(quota.limit) === 1 ? 'request' : 'requests';
+    // music, movies and TV each have their own limit: this one is music's
+    const noun = Number(quota.limit) === 1 ? 'music request' : 'music requests';
     const span = days === 1 ? 'for today' : days === 7 ? 'for this week' : days === 30 ? 'for this month' : `for the last ${days} days`;
     return `You've used your ${quota.limit} ${noun} ${span}`;
 }
+// "3 of 5 music asks left this week", or '' with no limit (or on any doubt)
+function _musicAsksLeftLine() {
+    if (typeof canDownload !== 'function' || canDownload()) return Promise.resolve('');
+    return fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then((d) => {
+            const q = d && d.quota;
+            const limit = q ? Number(q.limit) || 0 : 0;
+            if (!limit) return '';
+            const days = Number(q.days) || 7;
+            const span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : `in the last ${days} days`;
+            const left = Math.max(0, Number(q.remaining) || 0);
+            if (left <= 0) return `No music asks left ${span}`;
+            return `${left} of ${limit} ${limit === 1 ? 'music ask' : 'music asks'} left ${span}`;
+        })
+        .catch(() => '');
+}
+window.musicAsksLeftLine = _musicAsksLeftLine;
+
+// "3 of 5 asks left this week" next to a modal's Request button. only for a
+// profile that asks first; everyone else's placeholder stays empty (hidden)
+function fillMusicAsksLeft(root) {
+    const spots = root ? root.querySelectorAll('[data-asks-left]') : [];
+    if (!spots.length) return;
+    const perms = window.SoulSyncPerms;
+    const asks = perms ? perms.mode('music') === 'ask' : (typeof canDownload === 'function' && !canDownload());
+    spots.forEach((el) => { el.textContent = ''; });
+    if (!asks) return;
+    _musicAsksLeftLine().then((line) => {
+        spots.forEach((el) => { el.textContent = line; });
+    });
+}
+window.fillMusicAsksLeft = fillMusicAsksLeft;
+
 async function checkMusicRequestQuota() {
+    // getting music isn't part of this profile: the control should not be
+    // there at all (a stale page after an admin's change); say so calmly
+    const perms = window.SoulSyncPerms;
+    if (perms && perms.mode('music') === 'none') {
+        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info');
+        return false;
+    }
     if (typeof canDownload !== 'function' || canDownload()) return true;
     try {
         const res = await fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } });
@@ -1087,15 +1151,8 @@ function handleServiceStatusUpdate(data) {
     // Cache for library status card
     _lastStatusPayload = data;
 
-    if (typeof syncSpotifySettingsAuthState === 'function') {
-        syncSpotifySettingsAuthState(data?.spotify || null);
-    }
-    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(data?.spotify || null);
-    }
-    if (typeof sanitizeMetadataSourceSelection === 'function') {
-        sanitizeMetadataSourceSelection({ quiet: true });
-    }
+    // the Settings metadata source picker and Spotify card follow the
+    // dispatch above (connections-metadata.tsx)
 
     // The dashboard service cards are React-rendered from the dispatch above
     // since the flip (service-cards.tsx) — only the sidebar half survives here.

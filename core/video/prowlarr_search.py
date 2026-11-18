@@ -269,7 +269,8 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
                     tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
                     absolute: Any = None, series_type: Any = None,
                     max_wait_seconds: Any = None, indexer_names: Any = None,
-                    alt: Any = None, alt_titles: Any = None, indexer_ids: Any = None) -> dict:
+                    alt: Any = None, alt_titles: Any = None, indexer_ids: Any = None,
+                    query: Any = None, any_category: bool = False) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
@@ -277,7 +278,11 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     ``max_wait_seconds`` bounds how long this will sit in the shared Prowlarr
     budget (core.prowlarr_throttle) before giving up. Pass it from anything a
     person is waiting on: the background drain is happy to queue, a manual
-    search should say "busy" rather than hold a request worker for a minute."""
+    search should say "busy" rather than hold a request worker for a minute.
+
+    ``query``: words typed into manual search (#2121). Run as written, one text
+    search, nothing added: Prowlarr's own search box.
+    ``any_category``: no category filter, the Releases tab's search (#2127)."""
     client = _client()
     if not client.is_configured():
         return {"configured": False, "hits": []}
@@ -286,7 +291,7 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     # tracker, do not send Radarr/Sonarr category filters. Some Jackett/Prowlarr
     # public tracker adapters either ignore or reject those categories, which made
     # obvious searches like "interstellar" return zero on The Pirate Bay.
-    cats = [] if indexer_names else _categories(scope)
+    cats = [] if (indexer_names or any_category) else _categories(scope)
     target_ids = _indexer_ids_matching(indexer_names, want_proto)
     if target_ids == []:
         label = ", ".join(str(n) for n in (indexer_names if isinstance(indexer_names, (list, tuple, set)) else [indexer_names]))
@@ -295,10 +300,12 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     # global allowlist, as before
     ids = target_ids if target_ids is not None else (
         [int(i) for i in indexer_ids] if indexer_ids else _indexer_ids())
-    strategies = build_strategies(scope, title, year=year, season=season, episode=episode,
-                                  imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
-                                  air_date=air_date, absolute=absolute, series_type=series_type,
-                                  alt=alt, alt_titles=alt_titles)
+    typed = " ".join(str(query or "").split())
+    strategies = [("search", typed, [])] if typed else build_strategies(
+        scope, title, year=year, season=season, episode=episode,
+        imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
+        air_date=air_date, absolute=absolute, series_type=series_type,
+        alt=alt, alt_titles=alt_titles)
     if not strategies:
         return {"configured": True, "hits": []}
 

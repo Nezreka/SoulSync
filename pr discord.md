@@ -1,15 +1,21 @@
-**SoulSync 3.6.6 is out** :musical_note:
+**SoulSync 3.6.7 is out** :musical_note:
 
-The video library is now a full library manager. The Library page shows your movies and shows as posters, as a sortable table of titles, or as a table of the files themselves, with filters for what needs a look and for what the files are. You can act on a selection or on everything a filter matches: rename with a preview, move to another drive or library, set a quality profile, look for upgrades, fetch subtitles and more. Every rename, move and delete is recorded and can be undone, and a padlock keeps automation away from a title you have finished curating.
+**People and permissions.** Settings, People is one place for who can do what: templates, personal changes, a global policy, moderators, separate movie and TV access, request quality and a request limit per kind. Members only see their own notifications, download actions and help guides. Nothing changes on upgrade (thanks SeadogsBooty, #2166 to #2168, #2170, #2173, #2174).
 
-Movie and show pages now manage their own seasons, episodes and files: rename, renumber and delete with a preview, stop hunting single episodes, and undo any change from the page. Pages also keep themselves current, checking your media server, the metadata provider and ratings in the background when they have gone stale.
+Security: only the admin can make the first API key now, and members can only do what their profile allows. Worth updating soon.
 
-It is fast. On a large library the Files view went from several seconds a page to instant.
+The Settings page is rebuilt in React, and SoulSync can answer as a Seerr server for Litefin and other Seerr apps (thanks Thibs, #2151).
 
-Server Activity now shows album and book covers for music and audiobooks (thanks SeadogsBooty, #2089), and its drawer no longer sits under the floating buttons (#2090).
+The ? is a real help panel: answers for the page you're on, Ctrl K search, Health with fixes, Report a problem with secrets removed, log downloads, and every docs screenshot is new.
 
-Thanks to onnwee for two contributions: cam releases are caught however they are spelled (#2088), and a new setting starts SoulSync's torrents on a qBittorrent that adds them stopped (#2087).
+Server Activity is rebuilt for Plex and Jellyfin: what is playing and why it transcodes, stop with a message, and its own history and stats.
 
-Also: live albums and live tracks are separate rules (#2082), original release and clean version filters (#2080, #2081), Albums You're Missing no longer lists albums you own (#2083), dead file rows can be removed (thanks wolf39us, #2086), Discogs artist images download again (thanks Ktzenjammer, #2079), anime numbered as one long season is handled (thanks Thibs), one shared page frame across the app, a security pass, MetaSync pairing now gives the node a read-only key (#2099), and a lighter sidebar and player on phones.
+Albums get an Other versions picker that also merges an album split in two (thanks wolf39us, #2145, #2178), a MusicBrainz release status filter (thanks Ericsson, #2175), popular tracks get a flame (#2144), and band names like Above & Beyond stay one artist (thanks SeadogsBooty, #2131 to #2136).
+
+Tools: cover art findings show the library, files, folder and found cover side by side with Change cover (thanks Vidariondr, #2169), and Keep Best works when duplicates share playlists and says which ones need you (thanks Storm, #2172, #2179).
+
+On video, missing episodes count only monitored seasons, and torrent imports wait for qBittorrent to finish moving the file (thanks hilburn, #2176, #2177). For request users, posters show where a title stands and Discover always loads (#2158 to #2160).
+
+Thanks to nstrelow, PapaBearDoes and ginevra-70 for their contributions.
 
 Full notes on GitHub.

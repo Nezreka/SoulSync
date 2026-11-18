@@ -6,6 +6,11 @@
  * The list, the presets and the rules are the server's (core/ui_features.py).
  * This only draws them and skips what the profile isn't allowed to open
  * anyway, so nobody gets a switch for a page they can't reach.
+ *
+ * An admin can lock a profile's choice (#2157). Locked, there's no way in
+ * (#2164): the sidebar and Settings drop Customize and a stray call opens
+ * nothing. A lock that lands while it's open turns it read only; the server
+ * refuses the save anyway.
  */
 
 import { Dialog } from '@base-ui/react/dialog';
@@ -15,6 +20,7 @@ import type { FeatureDef, FeaturesPayload, FeaturesSave } from '@/shell/features
 
 import { DialogFrame } from '@/components/dialog';
 import { Switch } from '@/components/form/form';
+import { isFeaturesLocked } from '@/platform/features';
 
 import styles from './feature-picker.module.css';
 import { FeatureIcon } from './icons';
@@ -28,10 +34,13 @@ type ShellGlobals = {
   _currentProfileName?: string;
 };
 
-/** a feature this profile could open. no pages = lives inside other pages. */
+/** a feature this profile could open. no pages = lives inside other pages.
+ *  only a fallback: the server sends `offered` and that wins. */
 export function reachable(feature: FeatureDef, g: ShellGlobals = window as ShellGlobals): boolean {
+  const sides = typeof g.profileAllowedSides === 'function' ? g.profileAllowedSides() : 'both';
+  // a video-only profile can't hide its only side (#2157)
+  if (feature.id === 'video' && sides === 'video') return false;
   if (feature.id === 'video' || feature.group === 'video') {
-    const sides = typeof g.profileAllowedSides === 'function' ? g.profileAllowedSides() : 'both';
     if (sides === 'music') return false;
   }
   if (!feature.pages.length || typeof g.isPageAllowed !== 'function') return true;
@@ -60,6 +69,7 @@ export function FeaturePicker() {
 
   useEffect(() => {
     window.openFeaturePicker = () => {
+      if (isFeaturesLocked()) return;
       setOpen(true);
       void load();
     };
@@ -91,7 +101,10 @@ export function FeaturePicker() {
     [off],
   );
 
+  const locked = !!data?.locked;
+
   const toggle = (id: string, on: boolean) => {
+    if (locked) return;
     const next = on ? off.filter((x) => x !== id) : [...off, id];
     save({ off: next }, next);
   };
@@ -116,13 +129,21 @@ export function FeaturePicker() {
   };
 
   const pickPreset = (id: string) => {
+    if (locked) return;
     const preset = data?.presets.find((p) => p.id === id);
     if (preset) save({ preset: id }, preset.off);
   };
 
+  const resetToDefault = () => {
+    if (!locked) save({ reset: true }, off);
+  };
+
   // the video side's own switches mean nothing while the whole side is off
+  const offered = data?.offered;
   const features = (data?.features ?? []).filter(
-    (f) => reachable(f) && !(f.group === 'video' && off.includes('video')),
+    (f) =>
+      (offered ? offered.includes(f.id) : reachable(f)) &&
+      !(f.group === 'video' && off.includes('video')),
   );
   const presetNow =
     data?.presets.find((p) => p.off.length === off.length && p.off.every((x) => off.includes(x)))
@@ -142,8 +163,9 @@ export function FeaturePicker() {
         <div>
           <Dialog.Title className={styles.title}>Make SoulSync yours</Dialog.Title>
           <Dialog.Description className={styles.lead}>
-            Show only what you use. Hidden parts keep working in the background and come back with
-            one switch.
+            {locked
+              ? 'An admin set what this profile shows. Ask them if you want something changed.'
+              : 'Show only what you use. Hidden parts keep working in the background and come back with one switch.'}
           </Dialog.Description>
         </div>
         <Dialog.Close className={styles.close} aria-label="Close">
@@ -167,6 +189,8 @@ export function FeaturePicker() {
               type="button"
               role="radio"
               aria-checked={presetNow === p.id}
+              aria-disabled={locked || undefined}
+              disabled={locked}
               className={styles.preset}
               onClick={() => pickPreset(p.id)}
             >
@@ -213,6 +237,7 @@ export function FeaturePicker() {
                         <Switch
                           aria-labelledby={labelId}
                           checked={on}
+                          disabled={locked}
                           onCheckedChange={(next) => toggle(f.id, next)}
                         />
                       </label>
@@ -256,13 +281,23 @@ export function FeaturePicker() {
             <span className={styles.error}>{error}</span>
           ) : busy ? (
             'Saving…'
+          ) : data && locked ? (
+            `${shown} of ${features.length} extras on${name ? ` for ${name}` : ''}. Set by an admin.`
           ) : data ? (
             `${shown} of ${features.length} extras on${name ? ` for ${name}` : ''}. Each profile picks its own.`
           ) : (
             'Loading…'
           )}
         </span>
-        <Dialog.Close className={styles.done}>Done</Dialog.Close>
+        <span className={styles.actions}>
+          {/* back to what an admin set for new profiles, everything if nothing */}
+          {data && !locked && !data.follows_default ? (
+            <button type="button" className={styles.reset} onClick={resetToDefault} disabled={busy}>
+              Reset to default
+            </button>
+          ) : null}
+          <Dialog.Close className={styles.done}>Done</Dialog.Close>
+        </span>
       </div>
     </DialogFrame>
   );

@@ -123,6 +123,8 @@ export interface AutomationCardRow {
   /** Live state from /api/automations/progress while a run is in flight. */
   running: { phase: string; progress: number } | null;
   runCount: number;
+  /** the install's own automation: only an admin runs or pauses it (S4) */
+  system: boolean;
 }
 
 /** How far ahead the dashboard's Up next line looks. */
@@ -265,6 +267,7 @@ export function automationCardRows(
           }
         : null,
       runCount: Number(row.run_count) || 0,
+      system: row.is_system === true || row.is_system === 1,
     });
   }
 

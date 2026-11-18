@@ -50,6 +50,12 @@ FILE_SOURCE_DOMAINS = ('filesystem_local', 'filesystem_smb')
 #: The provider instance or domain that addresses Music Assistant's own
 #: library in ``music/*/get`` and ``*_tracks`` commands.
 LIBRARY = 'library'
+#: Music Assistant's own playlist provider. playlists are created there, and
+#: only playlists that live there are SoulSync's to write (#2111). 'library'
+#: is not a provider, create_playlist on it fails with ProviderUnavailable.
+BUILTIN = 'builtin'
+#: how often a dropped connection is retried on its own
+RECONNECT_INTERVAL = 30.0
 PAGE_SIZE = 500
 TASK_DONE = ('finished', 'completed', 'success', 'done')
 TASK_FAILED = ('failed', 'error', 'cancelled', 'canceled')
@@ -208,7 +214,17 @@ class MusicAssistantClient(MediaServerBase):
         self.user_name: Optional[str] = None
         self.last_fetch_failed = False
         self._connected = False
+        self._last_connect_attempt = 0.0
         self._transport = transport
+        self._scan_task_cache: Dict[str, Dict[str, Any]] = {}
+        self._scan_task_snapshot_valid = False
+        self._scan_task_ids: Optional[set[str]] = None
+        self._scan_task_baseline: Dict[str, Dict[str, Any]] = {}
+        self._scan_task_baseline_valid = False
+        self._scan_task_preexisting: set[str] = set()
+        self._scan_task_unverified: set[str] = set()
+        self._scan_task_wait_for_start: set[str] = set()
+        self._scan_task_verified_started_at: Dict[str, str] = {}
         self._session = requests.Session()
         self._timeout = 30
         self._progress_callback = None
@@ -295,6 +311,7 @@ class MusicAssistantClient(MediaServerBase):
         try:
             response = self._session.post(f"{self.base_url}/api", json=body, headers=headers, timeout=self._timeout)
         except requests.RequestException as exc:
+            self._connected = False
             raise MusicAssistantError(f"{command}: {exc}") from exc
         if response.status_code == 401:
             raise MusicAssistantError(f"{command}: authentication required (HTTP 401); check the token")
@@ -344,6 +361,7 @@ class MusicAssistantClient(MediaServerBase):
     def ensure_connection(self) -> bool:
         if self._connected:
             return True
+        self._last_connect_attempt = time.monotonic()
         if not self.base_url:
             logger.warning("Music Assistant: no URL configured")
             return False
@@ -364,6 +382,11 @@ class MusicAssistantClient(MediaServerBase):
             return False
 
     def is_connected(self) -> bool:
+        # nothing reconnected after either side restarted, so it read "not
+        # connected" until someone pressed test. retry now and then (#2111)
+        if (not self._connected and self.base_url and self.token
+                and time.monotonic() - self._last_connect_attempt >= RECONNECT_INTERVAL):
+            self.ensure_connection()
         return self._connected
 
     def test_connection(self) -> Tuple[bool, str]:
@@ -615,14 +638,113 @@ class MusicAssistantClient(MediaServerBase):
     # Scan trigger
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _task_records(value: Any) -> Optional[List[Dict[str, Any]]]:
+        if isinstance(value, dict):
+            value = value.get('items')
+        if not isinstance(value, list):
+            return None
+        return [task for task in value if isinstance(task, dict)]
+
+    @staticmethod
+    def _task_id(task: Dict[str, Any]) -> str:
+        return str(task.get('id') or task.get('task_id') or '')
+
+    @staticmethod
+    def _task_status(task: Dict[str, Any]) -> str:
+        return str(task.get('status') or '').strip().lower()
+
+    @staticmethod
+    def _task_signature(tasks: Dict[str, Dict[str, Any]]) -> tuple:
+        return tuple(sorted(
+            (
+                task_id,
+                MusicAssistantClient._task_status(task),
+                str(task.get('started_at') or ''),
+                str(task.get('finished_at') or ''),
+                str(task.get('updated_at') or ''),
+                str(task.get('last_run') or ''),
+            )
+            for task_id, task in tasks.items()
+        ))
+
+    def _is_file_sync_task(self, task: Dict[str, Any]) -> bool:
+        metadata = task.get('metadata')
+        if not isinstance(metadata, dict):
+            return False
+        if metadata.get('provider_domain') not in FILE_SOURCE_DOMAINS:
+            return False
+        instance = str(metadata.get('provider_instance') or '')
+        return bool(instance) and (not self.source_instance or instance == self.source_instance)
+
     def trigger_library_scan(self, library_name: str = "Music") -> bool:
         if not self.ensure_connection():
             return False
+        self._scan_task_ids = set()
+        self._scan_task_baseline_valid = self._scan_task_snapshot_valid
+        self._scan_task_baseline = (
+            dict(self._scan_task_cache) if self._scan_task_baseline_valid else {}
+        )
+        self._scan_task_snapshot_valid = False
+        self._scan_task_preexisting.clear()
+        self._scan_task_unverified.clear()
+        self._scan_task_wait_for_start.clear()
+        self._scan_task_verified_started_at.clear()
         try:
-            self._call('music/sync', providers=[self.source_instance] if self.source_instance else None)
-            logger.info("Music Assistant sync triggered for %s", self.source_instance or 'all sources')
+            result = self._call(
+                'music/sync',
+                providers=[self.source_instance] if self.source_instance else None,
+            )
+            tasks = self._task_records(result)
+            if tasks is None:
+                tasks = []
+
+            for task in tasks:
+                if not self._is_file_sync_task(task):
+                    continue
+                task_id = self._task_id(task)
+                if not task_id:
+                    continue
+                self._scan_task_ids.add(task_id)
+                baseline = self._scan_task_baseline.get(task_id, {})
+                status = self._task_status(task)
+                started_at = str(task.get('started_at') or '')
+                baseline_started_at = str(baseline.get('started_at') or '')
+
+                if status == 'pending':
+                    # The task ID is stable across runs. Wait until started_at
+                    # proves this accepted request has begun before using its status.
+                    self._scan_task_wait_for_start.add(task_id)
+                    continue
+                if status == 'running':
+                    if (baseline.get('status') == 'running' and started_at
+                            and started_at == baseline_started_at):
+                        self._scan_task_preexisting.add(task_id)
+                    elif not started_at or (baseline and started_at == baseline_started_at):
+                        self._scan_task_unverified.add(task_id)
+                    else:
+                        self._scan_task_verified_started_at[task_id] = started_at
+                    continue
+                if status in ('success', 'partial_success', 'failed', 'cancelled'):
+                    if not started_at or (baseline and started_at == baseline_started_at):
+                        self._scan_task_unverified.add(task_id)
+                    else:
+                        self._scan_task_verified_started_at[task_id] = started_at
+                    continue
+                self._scan_task_unverified.add(task_id)
+
+            if not self._scan_task_ids:
+                logger.warning("Music Assistant accepted sync request but returned no local-source tasks")
+            else:
+                logger.info(
+                    "Music Assistant sync triggered for %s (%d local-source tasks)",
+                    self.source_instance or 'all file sources',
+                    len(self._scan_task_ids),
+                )
             return True
         except MusicAssistantError as exc:
+            self._scan_task_ids = None
+            self._scan_task_baseline_valid = False
             logger.error("Music Assistant sync trigger failed: %s", exc)
             return False
 
@@ -640,7 +762,176 @@ class MusicAssistantClient(MediaServerBase):
                 return True
         return False
 
-    # ------------------------------------------------------------------
+    def _unreadable_scan_state(self) -> Dict[str, Any]:
+        """Keep task monitoring explicit when the API cannot be read."""
+        self._scan_task_snapshot_valid = False
+        return {
+            'task_monitor': True,
+            'scanning': False,
+            'outcome': None,
+            'last_scan': self._task_signature(self._scan_task_cache) or None,
+            'state_readable': False,
+        }
+
+    def get_scan_state(self) -> Optional[Dict[str, Any]]:
+        """Read tasks for the most recent Music Assistant sync request.
+
+        Task IDs are stable per provider and media type. A run is distinguished
+        by a new started_at value compared with the pre-trigger snapshot; stale
+        status for the prior generation is never terminal.
+        """
+        if not self.ensure_connection():
+            return self._unreadable_scan_state()
+        try:
+            tasks = self._task_records(self._call('tasks/list') or [])
+        except MusicAssistantError as exc:
+            logger.debug("Music Assistant scan state unavailable: %s", exc)
+            return self._unreadable_scan_state()
+        if tasks is None:
+            return self._unreadable_scan_state()
+
+        file_tasks = {
+            self._task_id(task): task
+            for task in tasks
+            if self._task_id(task) and self._is_file_sync_task(task)
+        }
+        self._scan_task_cache = file_tasks
+        self._scan_task_snapshot_valid = True
+        signature = self._task_signature(file_tasks)
+
+        if self._scan_task_ids is None:
+            return {
+                'task_monitor': True,
+                'scanning': False,
+                'outcome': None,
+                'last_scan': signature or None,
+            }
+
+        if not self._scan_task_baseline_valid:
+            return {
+                'task_monitor': True,
+                'scanning': False,
+                'outcome': 'unknown',
+                'last_scan': signature or None,
+                'task_statuses': {},
+                'reason': 'pre_trigger_baseline_unavailable',
+            }
+
+        if not self._scan_task_ids:
+            return {
+                'task_monitor': True,
+                'scanning': False,
+                'outcome': 'unknown',
+                'last_scan': None,
+                'task_statuses': {},
+            }
+
+        current = {
+            task_id: file_tasks[task_id]
+            for task_id in self._scan_task_ids
+            if task_id in file_tasks
+        }
+        missing = self._scan_task_ids - current.keys()
+        statuses = {
+            task_id: self._task_status(task)
+            for task_id, task in current.items()
+        }
+        if missing or self._scan_task_unverified:
+            return {
+                'task_monitor': True,
+                'scanning': False,
+                'outcome': 'unknown',
+                'last_scan': self._task_signature(current) or None,
+                'task_statuses': statuses,
+                'missing_task_ids': sorted(missing),
+                'unverified_task_ids': sorted(self._scan_task_unverified),
+            }
+
+        awaiting_start = set()
+        for task_id, task in current.items():
+            if task_id in self._scan_task_preexisting:
+                continue
+            started_at = str(task.get('started_at') or '')
+            baseline_started_at = str(
+                self._scan_task_baseline.get(task_id, {}).get('started_at') or ''
+            )
+            verified_started_at = self._scan_task_verified_started_at.get(task_id)
+            if task_id in self._scan_task_wait_for_start:
+                if started_at and (not baseline_started_at or started_at != baseline_started_at):
+                    self._scan_task_verified_started_at[task_id] = started_at
+                    self._scan_task_wait_for_start.discard(task_id)
+                else:
+                    awaiting_start.add(task_id)
+            elif verified_started_at and started_at != verified_started_at:
+                return {
+                    'task_monitor': True,
+                    'scanning': False,
+                    'outcome': 'unknown',
+                    'last_scan': self._task_signature(current) or None,
+                    'task_statuses': statuses,
+                    'changed_task_generation_ids': [task_id],
+                }
+
+        active_ids = {
+            task_id for task_id, status in statuses.items()
+            if task_id not in self._scan_task_preexisting and status in ('pending', 'running')
+        }
+        # a sync that was already running swallowed our request. wait for that
+        # run to end so the follow-up scan isn't swallowed too
+        active_ids |= {
+            task_id for task_id in self._scan_task_preexisting
+            if statuses.get(task_id) == 'running'
+            and str(current[task_id].get('started_at') or '') == str(
+                self._scan_task_baseline.get(task_id, {}).get('started_at') or '')
+        }
+        # how an old run ended says nothing about the request it swallowed
+        own_statuses = {
+            task_id: status for task_id, status in statuses.items()
+            if task_id not in self._scan_task_preexisting
+        }
+        if awaiting_start:
+            outcome = 'running'
+            scanning = True
+        elif any(status not in {
+                'pending', 'running', 'success', 'partial_success', 'failed', 'cancelled'
+        } for status in statuses.values()):
+            outcome = 'unknown'
+            scanning = False
+        elif active_ids:
+            outcome = 'running'
+            scanning = True
+        elif any(status == 'failed' for status in own_statuses.values()):
+            outcome = 'failed'
+            scanning = False
+        elif any(status == 'cancelled' for status in own_statuses.values()):
+            outcome = 'cancelled'
+            scanning = False
+        elif any(status == 'partial_success' for status in own_statuses.values()):
+            outcome = 'partial_success'
+            scanning = False
+        elif self._scan_task_preexisting:
+            outcome = 'already_running'
+            scanning = False
+        elif all(
+                task_id in self._scan_task_verified_started_at
+                and status == 'success'
+                for task_id, status in own_statuses.items()
+        ):
+            outcome = 'success'
+            scanning = False
+        else:
+            outcome = 'unknown'
+            scanning = False
+
+        return {
+            'task_monitor': True,
+            'scanning': scanning,
+            'outcome': outcome,
+            'last_scan': self._task_signature(current) or None,
+            'task_statuses': statuses,
+            'awaiting_started_at_ids': sorted(awaiting_start),
+        }
+
     # Search
     # ------------------------------------------------------------------
 
@@ -697,7 +988,16 @@ class MusicAssistantClient(MediaServerBase):
         except MusicAssistantError as exc:
             logger.error("Music Assistant playlists fetch failed: %s", exc)
             return []
-        return [self._playlist_info(i) for i in items if i.get('is_editable', True)]
+        return [self._playlist_info(i) for i in items if i.get('is_editable', True) and self._is_own_playlist(i)]
+
+    @staticmethod
+    def _is_own_playlist(item: Optional[Dict[str, Any]]) -> bool:
+        """Music Assistant's own playlists only. a spotify playlist you own
+        is editable too, and music assistant writes edits through to
+        spotify: a same-named mirror reconciled it down to one track (#2111)."""
+        mappings = (item or {}).get('provider_mappings') or []
+        return bool(mappings) and all(
+            BUILTIN in (m.get('provider_domain'), m.get('provider_instance')) for m in mappings)
 
     def get_playlist_by_name(self, name: str) -> Optional[PlaylistInfo]:
         wanted = (name or '').strip().lower()
@@ -713,7 +1013,7 @@ class MusicAssistantClient(MediaServerBase):
             item = self._call('music/playlists/get', item_id=str(playlist_id), provider_instance_id_or_domain=LIBRARY)
         except MusicAssistantError:
             return None
-        return self._playlist_info(item) if item else None
+        return self._playlist_info(item) if item and self._is_own_playlist(item) else None
 
     def get_playlist_tracks(self, playlist_id: str) -> List[MusicAssistantTrack]:
         if not self.ensure_connection():
@@ -818,7 +1118,7 @@ class MusicAssistantClient(MediaServerBase):
                                    update={'item_id': str(playlist_id), 'provider': LIBRARY, 'name': name,
                                            'media_type': 'playlist', 'provider_mappings': []})
                     return str(playlist_id) if self._add_tracks(playlist_id, tracks) else False
-            created = self._call('music/playlists/create_playlist', name=name, provider_instance_or_domain=LIBRARY) or {}
+            created = self._call('music/playlists/create_playlist', name=name, provider_instance_or_domain=BUILTIN) or {}
             new_id = created.get('item_id') if isinstance(created, dict) else None
             if new_id is None:
                 logger.error("Music Assistant create_playlist '%s' returned no id", name)
@@ -903,6 +1203,10 @@ class MusicAssistantClient(MediaServerBase):
 
     def delete_playlist(self, playlist_id: str) -> bool:
         if not self.ensure_connection():
+            return False
+        if not self.get_playlist_by_id(playlist_id):
+            # gone, or a streaming service's playlist: never ours to remove
+            logger.error("Music Assistant delete_playlist %s: not a Music Assistant playlist", playlist_id)
             return False
         try:
             self._call('music/playlists/remove', item_id=str(playlist_id))

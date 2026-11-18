@@ -22,8 +22,8 @@ Corpus (where settings labels reach the DOM):
   - webui/index.html — static settings markup (labels, headings, buttons).
   - webui/static/settings.js — renders some labels dynamically (e.g. the
     "Incremental Vacuum" button text), so it is part of the corpus.
-  Settings labels do NOT live in webui/src (that tree is the newer
-  shell; the settings page itself is still index.html + static/settings.js).
+  - webui/src/features/settings/tabs/*.ts(x) — the Settings tabs ported to
+    React (SETTINGS_PORT.md). A ported tab's labels moved there, verbatim.
 
 Robustness:
   - Comparison is case-insensitive with punctuation/whitespace collapsed.
@@ -39,9 +39,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parent.parent
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8")
+# the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+_INDEX = index_with_settings_page()
+_SETTINGS_JS = (_ROOT / "webui" / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
 _DOCS_DIR = _ROOT / "webui" / "static" / "docs-content"
 # The Tools page is React-rendered (webui/src); its card titles and button
 # labels don't reach the static corpus above.
@@ -49,8 +52,15 @@ _REACT_SERVER_CARDS = (
     _ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "server-cards.tsx"
 ).read_text(encoding="utf-8")
 
+# The Settings tabs already ported to React render their labels from here.
+_REACT_SETTINGS_TABS = "\n".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted((_ROOT / "webui" / "src" / "features" / "settings" / "tabs").glob("*.ts*"))
+    if ".test." not in p.name
+)
+
 # Where settings labels can appear in the rendered UI.
-_CORPUS = "\n".join((_INDEX, _SETTINGS_JS))
+_CORPUS = "\n".join((_INDEX, _SETTINGS_JS, _REACT_SETTINGS_TABS))
 
 
 def _norm(text: str) -> str:

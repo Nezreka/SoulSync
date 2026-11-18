@@ -17,7 +17,7 @@ const SIDE_CSS = read('static/video/video-side.css');
 const INIT = read('static/init.js');
 const INDEX = read('index.html');
 const CORE = read('static/core.js');
-const SETTINGS = read('static/video/video-settings.js');
+const SETTINGS = read('src/features/settings/tabs/library-video-organization.tsx');
 const ISSUES = read('static/video/video-issues.js');
 
 function between(src: string, start: string, end: string): string {
@@ -65,13 +65,14 @@ describe('the sidebar hands video tools off to the React page', () => {
     expect(handoff).toContain('if (job) query.job = job;');
     const listener = between(SIDE, "addEventListener('soulsync:video-navigate'", '});');
     expect(listener).toContain('navigate(pageId, undefined, job || undefined)');
-    expect(SETTINGS).toContain("{ detail: { page: 'video-tools', job: MISSING_SUBS_JOB } }");
+    // the settings signpost is React (library-video-organization.tsx, SETTINGS_PORT.md video pass V2b)
+    expect(SETTINGS).toContain("detail: { page: 'video-tools', job: MISSING_SUBS_JOB },");
     expect(ISSUES).toContain("{ detail: { page: 'video-tools', job: 'duplicate_movies' } }");
   });
 
   it('is handed off, so the boot never re-asserts /video-tools over the React url', () => {
     expect(SIDE).toContain(
-      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1, 'video-automations': 1 };",
+      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1, 'video-automations': 1, 'video-settings': 1 };",
     );
   });
 

@@ -127,6 +127,10 @@ export interface RepairFinding {
   /** #2046: its album or artist is reviewed and locked. a bulk fix leaves
    *  it alone; Fix on the row itself still works */
   locked?: { entity_type: 'album' | 'artist'; entity_id: number } | null;
+  /** #2179: an open duplicate a bulk Keep Best can't act on by itself.
+   *  `reasons` are why (same_recording, playlist, protected); `with_move`
+   *  are why with moving playlist entries on (empty when moving settles it) */
+  needs_you?: { reasons: string[]; with_move: string[] } | null;
   /** the cover and artist picture to show beside the row, looked up by the
    *  server from the catalogue when the finding stored none */
   album_thumb_url?: string | null;
@@ -174,6 +178,10 @@ export interface BulkFixStatus {
   /** Tracks the album gate held back across the run, including on
    *  findings that otherwise fixed successfully. */
   other_artist_skipped?: number;
+  /** #2179: findings a bulk Keep Best left open for a person, by why */
+  needs_you?: Record<string, number> | null;
+  /** the one type the run was scoped to, when it was */
+  finding_type?: string | null;
   stopped?: boolean;
   error?: string | null;
   note?: string | null;

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepairFinding } from '../-tools.types';
@@ -152,7 +152,12 @@ const nativeFinding = (requiresConfirmation = false): RepairFinding =>
   });
 
 describe('Native duplicate review', () => {
-  it('uses the native recommendation, keeps protected copies, and selects an exact file', () => {
+  it('uses the native recommendation, keeps protected copies, and selects an exact file', async () => {
+    // no plan from the server: the scan's own view stands
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
     const select = vi.fn();
     const { container } = render(
       <FindingDetail
@@ -169,10 +174,15 @@ describe('Native duplicate review', () => {
     expect(rows[2].textContent).toContain('Road Trip');
     expect(container.textContent).not.toContain('REMOVE');
     fireEvent.click(screen.getAllByRole('button', { name: 'Keep this file' })[1]);
-    expect(select).toHaveBeenCalledWith(1, 'file-102');
+    await waitFor(() => expect(select).toHaveBeenCalledWith(1, 'file-102', undefined));
+    vi.unstubAllGlobals();
   });
 
-  it('requires explicit same-recording confirmation before choosing a fuzzy copy', () => {
+  it('requires explicit same-recording confirmation before choosing a fuzzy copy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
     const select = vi.fn();
     render(
       <FindingDetail
@@ -187,9 +197,12 @@ describe('Native duplicate review', () => {
     expect(select).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: /same recording/i }));
     fireEvent.click(pick);
-    expect(select).toHaveBeenCalledWith(1, 'file-102:confirmed');
+    await waitFor(() => expect(select).toHaveBeenCalledWith(1, 'file-102:confirmed', undefined));
     fireEvent.click(screen.getByRole('button', { name: 'Keep Best' }));
-    expect(select).toHaveBeenLastCalledWith(1, 'keep_best:confirmed');
+    await waitFor(() =>
+      expect(select).toHaveBeenLastCalledWith(1, 'keep_best:confirmed', undefined),
+    );
+    vi.unstubAllGlobals();
   });
 });
 
@@ -238,6 +251,28 @@ describe('Catalogue duplicate review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Merge into release #1125' }));
     expect(choose).toHaveBeenCalledWith(1, 'merge-1125');
     expect(container.textContent).not.toContain('quarantine');
+    expect(container.textContent).not.toContain("Can't merge yet");
+  });
+
+  it('says up front why a blocked pair cannot be merged (#2146)', () => {
+    // the buttons were disabled with the reasons as loose lines, so they read
+    // as live buttons that did nothing
+    const { container } = render(
+      <FindingDetail
+        finding={catalogueFinding(false)}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+      />,
+    );
+    const note = screen.getByRole('note');
+    expect(note.textContent).toContain("Can't merge yet");
+    expect(note.textContent).toContain('An acquisition is still active.');
+    expect(note.textContent).toContain('run the Duplicate Detector again');
+    expect(container.textContent).not.toContain('Select the release group to keep');
+    expect(screen.getByRole('button', { name: 'Merge into release #1125' })).toHaveAttribute(
+      'title',
+      "Can't merge yet, the reason is above",
+    );
   });
 
   it('explains an active-download blocker and disables merging', () => {
@@ -248,7 +283,7 @@ describe('Catalogue duplicate review', () => {
         onApplyCoverArt={vi.fn()}
       />,
     );
-    expect(screen.getByText('An acquisition is still active.')).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent('An acquisition is still active.');
     expect(screen.getByRole('button', { name: 'Merge into release #995' })).toBeDisabled();
   });
 });
@@ -333,5 +368,77 @@ describe('Library re-tag checks (Storm)', () => {
     expect(text).toContain('Rock   →   Pop   (set by hand)');
     // the checks still show, below
     expect(text).toContain('Tag checks');
+  });
+});
+
+describe('FindingDetail split artists correction (#2150)', () => {
+  const credit = 'K/DA; League Of Legends; Mimi Webb';
+  const splitFinding = (status = 'pending'): RepairFinding =>
+    ({
+      id: 7,
+      finding_type: 'comma_artist_split',
+      severity: 'warning',
+      status,
+      entity_type: 'artist',
+      entity_id: 'lib2:1',
+      title: `Combined artist: ${credit}`,
+      description: '',
+      details: {
+        combined_name: credit,
+        split_artists: ['K', 'DA', 'League Of Legends', 'Mimi Webb'],
+        new_display_artist: 'K; DA; League Of Legends; Mimi Webb',
+        primary_artist: 'K',
+      },
+    }) as unknown as RepairFinding;
+
+  it('sends the hand-edited split as the fix', () => {
+    const onFixAction = vi.fn();
+    render(
+      <FindingDetail
+        finding={splitFinding()}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={onFixAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit split' }));
+    const input = screen.getByLabelText('Split artists') as HTMLInputElement;
+    expect(input.value).toBe('K; DA; League Of Legends; Mimi Webb');
+    fireEvent.change(input, { target: { value: 'K/DA; League Of Legends; Mimi Webb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply this split' }));
+    expect(onFixAction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7 }),
+      'split:K/DA; League Of Legends; Mimi Webb',
+    );
+  });
+
+  it('asks before keeping the whole credit as one artist', async () => {
+    const onFixAction = vi.fn();
+    const confirm = vi.fn().mockResolvedValue(true);
+    window.showConfirmDialog = confirm as typeof window.showConfirmDialog;
+    render(
+      <FindingDetail
+        finding={splitFinding()}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={onFixAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'One artist' }));
+    await vi.waitFor(() => expect(onFixAction).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(onFixAction).toHaveBeenCalledWith(expect.objectContaining({ id: 7 }), 'keep_whole');
+  });
+
+  it('offers no correction on a finding that is already settled', () => {
+    render(
+      <FindingDetail
+        finding={splitFinding('resolved')}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+        onFixAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Edit split' })).toBeNull();
   });
 });

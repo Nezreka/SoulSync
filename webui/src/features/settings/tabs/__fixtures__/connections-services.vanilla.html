@@ -1,0 +1,29 @@
+                                    <div class="dlchain-tabs" id="svc-tabs" role="tablist" data-stg="connections"></div>
+                                    <div class="svc-required-note" data-stg="connections" data-video-only>
+                                        <p class="stg-required-note">
+                                            <strong>TMDB &amp; TVDB are required.</strong> The video side matches,
+                                            enriches and automates
+                                            everything from these &mdash; library matching, artwork, airing shows,
+                                            collections &mdash; so nothing
+                                            works until both keys are set. Both are free. OMDb and fanart.tv below are
+                                            optional extras.
+                                        </p>
+                                    </div>
+                                    <div class="src-tile-grid" id="service-tile-grid" data-stg="connections"></div>
+                                    <div class="src-modal-overlay" id="service-config-modal" data-stg="connections"
+                                        hidden onclick="if (event.target === this) closeServiceModal()">
+                                        <div class="src-modal" role="dialog" aria-modal="true"
+                                            aria-labelledby="svc-modal-title">
+                                            <div class="src-modal-header">
+                                                <span class="src-modal-icon" id="svc-modal-icon"></span>
+                                                <span class="src-modal-titles">
+                                                    <h3 id="svc-modal-title">Service</h3>
+                                                    <span class="src-modal-sub" id="svc-modal-sub"></span>
+                                                </span>
+                                                <button type="button" class="src-modal-close"
+                                                    onclick="closeServiceModal()" aria-label="Close">&times;</button>
+                                            </div>
+                                            <div class="src-modal-body" id="svc-modal-body"></div>
+                                        </div>
+                                    </div>
+

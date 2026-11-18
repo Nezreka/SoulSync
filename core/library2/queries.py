@@ -284,11 +284,15 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                  source_filter: str = "", quality_filter: str = "",
                  profile_id: int = 1,
                  include_upgradable: bool = False,
-                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                 review_filter: str = "",
+                 direction: str = "",
+                 completeness: Dict[str, Any] | None = None,
+                 credit: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """Library-v2 display adapter over the shared artist page reader.
 
     include_upgradable adds each card's "could be better" count, judged by
     the same live evaluator as the upgradable filter, for this page only."""
+    from .artist_completeness import completion_state
     from .artist_reader import read_artist_page, upgradable_track_counts
 
     rows, total = read_artist_page(
@@ -296,7 +300,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         limit=limit, include_size=include_size, letter=letter,
         watchlist_filter=watchlist_filter, source_filter=source_filter,
         quality_filter=quality_filter, profile_id=profile_id,
-        review_filter=review_filter)
+        review_filter=review_filter, direction=direction,
+        completeness=completeness, credit=credit, collection=True)
     projected = project_metadata_many(
         conn,
         entity_type="artist",
@@ -336,6 +341,13 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "track_count": track_count,
             "tracks_present": present,
             "tracks_missing": max(0, track_count - present),
+            # #2106: releases of unknown size, and what that makes the artist
+            "unverified_albums": r["unverified_albums"] or 0,
+            "completion": completion_state(track_count, present, r["unverified_albums"] or 0),
+            # what the count is against: the Watchlist artist's collection
+            # settings (missing ones are in Wanted), or the albums you have
+            # (missing ones are on the artist's page)
+            "completeness_basis": "watchlist" if r["completeness_watched"] else "albums",
             "total_size_bytes": r["total_size_bytes"] or 0,
             "media_server_sources": media_sources.get(int(r["id"]), []),
             "user_overrides": overrides,
@@ -2013,6 +2025,7 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
         "duration": None,
         "bpm": None,
         "explicit": None,
+        "popular": False,
         "style": None,
         "mood": None,
         "isrc": None,
@@ -2125,6 +2138,11 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         album_for_tracks["primary_artist_name"] = artist_effective["name"]
         album_for_tracks["primary_artist_id"] = artist["id"]
     tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
+    # #2144: the album's hits, from the last.fm playcount already on the rows.
+    from core.library2.track_popularity import popular_ids_for_rows
+    popular = popular_ids_for_rows(track_rows)
+    for t in tracks:
+        t["popular"] = t.get("id") in popular
     present_count = sum(1 for t in tracks if t["file_status"] != "missing")
 
     upgrades_available = _apply_quality_verdicts(conn, tracks)

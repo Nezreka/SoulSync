@@ -587,14 +587,18 @@ def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str
     if follow:
         from core.watchlist.library_match import library_artist_ids
         before = library_artist_ids(conn.cursor(), entity_id)
+    from core.metadata.canonical_version import should_pin_manual_canonical
+    pin = should_pin_manual_canonical(canonical, service)
+    # the row as it was: the pin compares the new release against the old one
+    album_before = conn.execute("SELECT * FROM lib2_albums WHERE id=?",
+                                (int(entity_id),)).fetchone() if pin else None
     set_library_v2_match(conn, entity_type, entity_id, service, service_id,
                          actor=actor, steal=True)
     # #758: a manual ALBUM match also pins and locks that release; clearing the
     # match lifts a pin it made.
-    from core.metadata.canonical_version import should_pin_manual_canonical
-    if should_pin_manual_canonical(canonical, service):
+    if pin:
         from core.library2.editions import pin_album_release
-        pin_album_release(conn, entity_id, service, service_id)
+        pin_album_release(conn, entity_id, service, service_id, before=album_before)
     if follow and before:
         # the watchlist follows, but never fails the match itself (upstream)
         from core.watchlist.library_match import follow_library_artist_match

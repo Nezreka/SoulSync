@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'workflows',
+    needs: 'admin',
     title: 'Quick-Start Guides',
     icon: '🧭',
     pages: [
@@ -8,6 +9,8 @@ registerDocsSection({
             title: 'What Should I Do First?',
             lede: 'Five essential workflows that cover 90% of what most users need. Start with whichever matches your goal.',
             body: `
+![Dashboard top, the starting point for the five core workflows](wf-first.jpg)
+
 ## Pick your workflow
 
 ::: cards
@@ -38,10 +41,13 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-download',
+            needs: 'music.get',
             title: 'How to: Download an Album',
             lede: 'Find an album and download it with full metadata, cover art, and proper file organization.',
             body: `
 **Prerequisites:** at least one download source connected (Soulseek, YouTube, Tidal, or Qobuz), and Input/Output paths configured ([Folder Setup](#gs-folders)).
+
+![Album download modal with the track checklist and download options](wf-download.jpg)
 
 ::: steps
 1. **Open Search** — click Search in the sidebar (Enhanced Search gives the richest results).
@@ -59,9 +65,12 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-sync',
+            needs: 'music.playlist_sync',
             title: 'How to: Sync a Spotify Playlist',
             lede: 'Import a Spotify playlist and download all its tracks to your local library.',
             body: `
+![Sync page with a playlist loaded and its tracks matched against the library](wf-sync.jpg)
+
 ::: steps
 1. **Go to the Sync page** — click Sync in the sidebar.
 2. **Load your playlists** — click Refresh to pull your Spotify playlists (or paste a playlist URL directly).
@@ -75,9 +84,12 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-auto',
+            needs: 'music.watchlist',
             title: 'How to: Set Up Auto-Downloads',
             lede: 'Automatically download new releases from your favorite artists — no manual intervention.',
             body: `
+![Watchlist showing a monitored artist and its scan status](wf-auto.jpg)
+
 ::: steps
 1. **Add artists to your Watchlist** — find an artist via Search (or click any artist name in the app), then click **Watch** on the artist detail page.
 2. **Enable watchlist scanning** — the built-in **Auto-Scan Watchlist** automation checks your watched artists for new releases (daily by default).
@@ -91,9 +103,12 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-import',
+            needs: 'music.import',
             title: 'How to: Import Existing Music',
             lede: 'Bring music files you already own into SoulSync with proper metadata and organization.',
             body: `
+![Import inbox with files waiting to be matched to albums](wf-import.jpg)
+
 ::: steps
 1. **Place files in your import folder** — put album folders (e.g. \`Artist - Album/\`) in the Import Folder configured in Settings.
 2. **Go to the Import page** — SoulSync detects the files and suggests album matches (the Inbox).
@@ -111,6 +126,8 @@ Once your services are connected, do these five things to get the most out of So
             title: 'How to: Connect Your Media Server',
             lede: 'Link your media server so downloaded music appears in your library and streams in the built-in player.',
             body: `
+![Server Connections in Settings, with connection cards for Plex, Jellyfin, Navidrome and the other supported servers](settings-media-server.jpg)
+
 ::: steps
 1. **Go to Settings** — scroll to the Server Connections section.
 2. **Enter your server details** — URL plus credentials: Plex (URL + Token), Jellyfin/Emby (URL + API Key), or Navidrome (URL + Username + Password). Then select your music library from the dropdown.

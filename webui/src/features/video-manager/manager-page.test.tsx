@@ -21,7 +21,7 @@ import {
 import { describeDone } from './manager-bulk';
 import { EpisodesTab } from './manager-extras';
 import { ManagerPage } from './manager-page';
-import { PosterGrid } from './manager-views';
+import { PosterGrid, TitleTable } from './manager-views';
 import { changedFields } from './title-sheet';
 import { EMPTY_FILTERS } from './types';
 
@@ -469,6 +469,48 @@ describe('the views', () => {
     expect(within(matrix).getByText('HEVC · HDR10')).toBeInTheDocument();
     expect(within(matrix).getByText('EN, JA · Atmos')).toBeInTheDocument();
     expect(window.localStorage.getItem('vmgr:view')).toBe('"table"');
+  });
+
+  it('a long title truncates in the table and shows in full on hover', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Titles' }));
+    const name = await screen.findByText('Alien');
+    expect(name).toHaveAttribute('title', 'Alien');
+    fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+    const file = (await screen.findAllByText('The Matrix'))[0];
+    expect(file).toHaveAttribute('title', 'The Matrix');
+  });
+
+  it('a long language list is cut short in the table and shown in full on hover', () => {
+    render(
+      <TitleTable
+        rows={[
+          title({
+            audio_languages: ['en', 'fr', 'de', 'es'],
+            subtitle_languages: ['en', 'fr', 'de', 'es', 'it', 'ja'],
+          }),
+        ]}
+        side="movies"
+        facets={null}
+        columns={['audio', 'subtitles']}
+        onColumns={() => {}}
+        sort={{ by: 'title', dir: 'asc' }}
+        onSort={() => {}}
+        selected={new Set()}
+        onToggle={() => {}}
+        onTogglePage={() => {}}
+        loading={false}
+        onEdit={() => {}}
+      />,
+    );
+    expect(screen.getByText('EN, FR, DE, ES +2')).toHaveAttribute(
+      'title',
+      'EN, FR, DE, ES, IT, JA',
+    );
+    expect(screen.getByText('EN, FR, DE +1 · Atmos')).toHaveAttribute(
+      'title',
+      'EN, FR, DE, ES · Atmos',
+    );
   });
 
   it('sorts by a column on the server, and flips on a second click', async () => {

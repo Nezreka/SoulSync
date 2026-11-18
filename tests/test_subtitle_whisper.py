@@ -772,14 +772,15 @@ def test_organization_whisper_defaults_and_normalize():
 def test_settings_ui_has_whisper_section():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
-    html = (root / "webui/index.html").read_text(encoding="utf-8")
-    js = (root / "webui/static/video/video-settings.js").read_text(
-        encoding="utf-8")
+    # React (SETTINGS_PORT.md video pass V2b)
+    tabs = root / "webui/src/features/settings/tabs"
+    html = (tabs / "library-video-organization.tsx").read_text(encoding="utf-8")
+    js = (tabs / "video-organization.ts").read_text(encoding="utf-8")
     for el in ("vo-whisper-model", "vo-whisper-dl", "vo-whisper-enabled",
                "vo-whisper-status", "vo-whisper-progress"):
         assert ('id="%s"' % el) in html, el
-    for fn in ("loadWhisperStatus", "renderWhisperStatus",
-               "startWhisperDownload", "whisper_enabled", "whisper_model"):
+    for fn in ("async function loadWhisper(", "download: async () =>",
+               "whisper_enabled", "whisper_model"):
         assert fn in js, fn
 
 

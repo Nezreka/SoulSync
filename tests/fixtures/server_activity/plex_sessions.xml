@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- shaped after a real PMS 1.41 /status/sessions reply (names, ips and ids made up) -->
+<MediaContainer size="4">
+  <Video addedAt="1710000000" art="/library/metadata/5101/art/1710000001" audienceRating="9.2" duration="9960000" guid="plex://movie/5d776be17a53e9001e732ab9" key="/library/metadata/5101" librarySectionID="1" librarySectionKey="/library/sections/1" librarySectionTitle="Movies" ratingKey="5101" sessionKey="27" thumb="/library/metadata/5101/thumb/1710000001" title="Dune: Part Two" type="movie" viewOffset="4092000" year="2024">
+    <Media audioChannels="6" audioCodec="aac" bitrate="11800" container="mpegts" duration="9960000" height="1080" id="9001" protocol="hls" videoCodec="h264" videoResolution="1080" width="1920" selected="1">
+      <Part container="mpegts" duration="9960000" height="1080" id="9101" protocol="hls" width="1920" decision="transcode" selected="1">
+        <Stream bitrate="11000" codec="h264" displayTitle="1080p (H.264)" height="1080" id="30001" streamType="1" width="1920" decision="transcode" location="segments-video"/>
+        <Stream bitrate="384" channels="6" codec="aac" displayTitle="English (AAC 5.1)" language="English" id="30002" streamType="2" selected="1" decision="transcode" location="segments-audio"/>
+        <Stream codec="srt" displayTitle="English (SRT)" id="30003" language="English" streamType="3" selected="1" decision="copy" location="segments-subs"/>
+      </Part>
+    </Media>
+    <Guid id="imdb://tt15239678"/>
+    <Guid id="tmdb://693134"/>
+    <User id="7341" thumb="https://plex.tv/users/a1b2c3d4e5f6/avatar?c=1711111111" title="maya"/>
+    <Player address="73.41.208.17" device="Apple TV" machineIdentifier="ATV-123" model="J305AP" platform="tvOS" platformVersion="18.1" product="Plex for Apple TV" profile="tvOS" remotePublicAddress="73.41.208.17" state="playing" title="Living room" vendor="Apple" version="8.41" local="0" relayed="0" secure="1" userID="7341"/>
+    <Session id="b9c8d7e6f5" bandwidth="11800" location="wan"/>
+    <TranscodeSession key="/transcode/sessions/abc" throttled="1" complete="0" progress="41.1" size="-22" speed="2.4" error="0" duration="9960000" remaining="200" context="streaming" sourceVideoCodec="hevc" sourceAudioCodec="truehd" videoDecision="transcode" audioDecision="transcode" subtitleDecision="copy" protocol="hls" container="mpegts" videoCodec="h264" audioCodec="aac" audioChannels="6" width="1920" height="1080" transcodeHwRequested="1" transcodeHwDecoding="qsv" transcodeHwDecodingTitle="Intel Quick Sync" transcodeHwEncoding="qsv" transcodeHwEncodingTitle="Intel Quick Sync" transcodeHwFullPipeline="1" timeStamp="1731790000.1" maxOffsetAvailable="4312.0" minOffsetAvailable="4000.0"/>
+  </Video>
+  <Track addedAt="1700000000" art="/library/metadata/700/art/1700000001" duration="251000" grandparentKey="/library/metadata/700" grandparentRatingKey="700" grandparentThumb="/library/metadata/700/thumb/1700000001" grandparentTitle="Radiohead" index="1" key="/library/metadata/702" librarySectionID="3" librarySectionTitle="Music" parentIndex="1" parentRatingKey="701" parentThumb="/library/metadata/701/thumb/1700000002" parentTitle="Kid A" ratingKey="702" sessionKey="31" thumb="/library/metadata/701/thumb/1700000002" title="Everything In Its Right Place" type="track" viewOffset="95000">
+    <Media audioChannels="2" audioCodec="flac" bitrate="2900" container="flac" duration="251000" id="9301" selected="1">
+      <Part container="flac" duration="251000" file="/data/music/Radiohead/Kid A/01 Everything In Its Right Place.flac" id="9311" decision="directplay" selected="1">
+        <Stream audioChannelLayout="stereo" bitDepth="24" bitrate="2900" channels="2" codec="flac" displayTitle="FLAC (Stereo)" id="31001" samplingRate="96000" streamType="2" selected="1" location="direct"/>
+      </Part>
+    </Media>
+    <User id="1" thumb="https://plex.tv/users/0f0f0f0f0f/avatar?c=1700000000" title="sam"/>
+    <Player address="192.168.1.61" device="iPhone" machineIdentifier="PLEXAMP-1" model="iPhone15,2" platform="iOS" platformVersion="18.0" product="Plexamp" state="playing" title="sam's iPhone" vendor="Apple" version="4.11.2" local="1" relayed="0" secure="1" userID="1"/>
+    <Session id="aa11bb22cc" bandwidth="2900" location="lan"/>
+  </Track>
+  <Track addedAt="1700000000" duration="1890000" grandparentRatingKey="800" grandparentTitle="Andy Weir" grandparentThumb="/library/metadata/800/thumb/1" index="14" librarySectionID="5" librarySectionTitle="Audiobooks" parentIndex="1" parentRatingKey="801" parentThumb="/library/metadata/801/thumb/1700000003" parentTitle="Project Hail Mary" ratingKey="814" sessionKey="33" thumb="/library/metadata/801/thumb/1700000003" title="Chapter 14" type="track" viewOffset="1100000">
+    <Media audioChannels="2" audioCodec="aac" bitrate="64" container="mp4" duration="1890000" id="9401" selected="1">
+      <Part container="mp4" duration="1890000" file="/data/audiobooks/Andy Weir/Project Hail Mary/14.m4b" id="9411" decision="copy" selected="1">
+        <Stream bitrate="64" channels="2" codec="aac" displayTitle="AAC (Stereo)" id="41001" streamType="2" selected="1" decision="copy" location="segments-audio"/>
+      </Part>
+    </Media>
+    <User id="9182" thumb="https://plex.tv/users/9182abc/avatar?c=1700000000" title="ruth"/>
+    <Player address="81.2.69.160" device="Pixel 8" machineIdentifier="ANDROID-1" platform="Android" platformVersion="15" product="Plex for Android (Mobile)" state="paused" title="Pixel 8" version="10.20.0" local="0" relayed="1" secure="1" userID="9182"/>
+    <Session id="dd33ee44ff" bandwidth="70" location="wan"/>
+    <TranscodeSession key="/transcode/sessions/book" throttled="0" progress="100" speed="0" context="streaming" sourceAudioCodec="aac" audioDecision="copy" protocol="http" container="mp4" audioCodec="aac" audioChannels="2" transcodeHwRequested="0" maxOffsetAvailable="1890.0"/>
+  </Track>
+  <Video addedAt="1720000000" duration="3600000" grandparentRatingKey="900" grandparentThumb="/library/metadata/900/thumb/1" grandparentTitle="Shōgun" index="9" librarySectionID="2" librarySectionTitle="TV Shows" parentIndex="1" parentRatingKey="901" parentTitle="Season 1" ratingKey="909" sessionKey="35" thumb="/library/metadata/909/thumb/1" title="Crimson Sky" type="episode" viewOffset="600000" year="2024">
+    <Media audioChannels="2" audioCodec="aac" bitrate="8000" container="mpegts" height="1080" id="9501" videoCodec="h264" videoResolution="1080" width="1920" selected="1">
+      <Part container="mpegts" id="9511" decision="transcode" selected="1">
+        <Stream bitrate="7700" codec="h264" height="1080" id="50001" streamType="1" width="1920" decision="transcode"/>
+        <Stream bitrate="256" channels="2" codec="aac" id="50002" streamType="2" selected="1" decision="transcode"/>
+        <Stream codec="pgs" id="50003" language="English" streamType="3" selected="1" decision="burn" burn="1"/>
+      </Part>
+    </Media>
+    <User id="7341" thumb="https://plex.tv/users/a1b2c3d4e5f6/avatar?c=1711111111" title="maya"/>
+    <Player address="192.168.1.20" device="iPad" platform="iOS" product="Plex for iOS" state="buffering" title="iPad" version="2024.1" local="1" relayed="0" secure="1"/>
+    <Session id="ff55gg66" bandwidth="8000" location="lan"/>
+    <TranscodeSession key="/transcode/sessions/sh" throttled="0" progress="12" speed="1.1" context="streaming" sourceVideoCodec="h264" sourceAudioCodec="eac3" videoDecision="transcode" audioDecision="transcode" subtitleDecision="burn" protocol="hls" container="mpegts" videoCodec="h264" audioCodec="aac" audioChannels="2" width="1920" height="1080" transcodeHwRequested="0" maxOffsetAvailable="660.0"/>
+  </Video>
+</MediaContainer>

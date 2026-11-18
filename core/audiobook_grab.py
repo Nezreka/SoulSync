@@ -282,7 +282,7 @@ def record_grab(db: Any, *, asin: str, ref: str, client_ref: str, release: Dict[
         from core.audiobook_events import announce, first_author, series_title
 
         book_info = book or {}
-        announce("audiobook_grab_started",
+        announce("audiobook_grab_started", owner=profile_id,
                  title=book_info.get("title") or title or release.get("title") or "",
                  author=first_author(book_info, author),
                  series=series_title(book_info),

@@ -4,7 +4,9 @@
  * The server owns the list (core/ui_features.py). This keeps the current
  * answer, hides what's off in the sidebar, and tells the React pages through
  * window.SoulSyncFeatures + an event. It's a preference, not access: a hidden
- * page still opens from a link, permissions stay in init.js.
+ * page still opens from a link, permissions stay in init.js. An admin can
+ * set it for a profile and lock it (#2157); a locked profile gets no
+ * Customize at all, there's nothing for it to change (#2164).
  *
  * The last answer is cached in localStorage so the inline script under the
  * sidebar can hide the same items before first paint. Without that every
@@ -16,6 +18,8 @@ import { refreshHiddenPageNote, watchHiddenPageNote } from './hidden-page-note';
 export const FEATURES_CHANGED_EVENT = 'ss:features-changed';
 export const FEATURES_CACHE_KEY = 'ss_features';
 const HIDDEN = 'nav-feature-hidden';
+/** on <html> while an admin has this profile locked: css drops Customize */
+export const LOCKED_ATTR = 'data-features-locked';
 
 export interface FeatureDef {
   id: string;
@@ -28,6 +32,18 @@ export interface FeatureDef {
 export interface FeaturesPayload {
   /** false until this profile saves a choice; the dashboard offers the picker */
   chosen?: boolean;
+  /** an admin set it and locked it (#2157): shown, not changeable */
+  locked?: boolean;
+  /** never chose, so it follows what an admin set for new profiles */
+  follows_default?: boolean;
+  /** the switches worth showing this profile (the server's call) */
+  offered?: string[];
+  /** admin view only (#2164): what the admin set, what a lock shows */
+  set_off?: string[];
+  /** admin view only: the admin saved a set for this profile */
+  admin_set?: boolean;
+  /** admin view only: the member's own pick, null when they never made one */
+  own_off?: string[] | null;
   /** admins only: podcasts / audiobooks jobs, paused and hidden-by-everyone */
   background?: Record<string, { paused: boolean; everyone_hid: boolean }>;
   features: FeatureDef[];
@@ -38,7 +54,11 @@ export interface FeaturesPayload {
   hidden_pages: string[];
 }
 
-export type FeaturesSave = { off: string[] } | { preset: string } | { purposes: string[] };
+export type FeaturesSave =
+  | { off: string[] }
+  | { preset: string }
+  | { purposes: string[] }
+  | { reset: true };
 
 interface State {
   loaded: boolean;
@@ -49,22 +69,32 @@ interface State {
 
 const state: State = { loaded: false, payload: null, off: [], hiddenPages: [] };
 
-function readCache(): { off: string[]; pages: string[] } {
+/** hiding the video side moved this tab to music. turning it back on undoes
+ *  that, or the sidebar stays on a side with nothing in it (#2157). */
+let movedOffVideo = false;
+
+type SideGlobals = {
+  _switchAppSide?: (s: string, o?: object) => void;
+  profileAllowedSides?: () => string;
+};
+
+function readCache(): { off: string[]; pages: string[]; locked: boolean } {
   try {
     const raw = JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY) || 'null') as {
       off?: unknown;
       pages?: unknown;
+      locked?: unknown;
     } | null;
     const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
-    return { off: list(raw?.off), pages: list(raw?.pages) };
+    return { off: list(raw?.off), pages: list(raw?.pages), locked: raw?.locked === true };
   } catch {
-    return { off: [], pages: [] };
+    return { off: [], pages: [], locked: false };
   }
 }
 
-function writeCache(off: string[], pages: string[]): void {
+function writeCache(off: string[], pages: string[], locked: boolean): void {
   try {
-    localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off, pages }));
+    localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off, pages, locked }));
   } catch {
     /* storage blocked: the sidebar just flashes once per load */
   }
@@ -107,12 +137,37 @@ export function applyFeatures(
   });
   refreshSectionLabels(root);
 
-  const videoOff = off.includes('video');
+  const g = window as SideGlobals;
+  const sides = typeof g.profileAllowedSides === 'function' ? g.profileAllowedSides() : 'both';
+  // a video-only profile can't hide its only side: music is a side it can't
+  // open, so it would land on an empty sidebar with no way back (#2157)
+  const videoOff = off.includes('video') && sides !== 'video';
   root.querySelector('.side-toggle')?.classList.toggle(HIDDEN, videoOff);
-  if (videoOff && root.body?.getAttribute('data-side') === 'video') {
-    const sw = (window as { _switchAppSide?: (s: string, o?: object) => void })._switchAppSide;
+  const side = root.body?.getAttribute('data-side');
+  const sw = g._switchAppSide;
+  if (videoOff && side === 'video') {
     if (typeof sw === 'function') sw('music', { force: true });
+    movedOffVideo = true;
+  } else if (!videoOff && side !== 'video' && (movedOffVideo || sides === 'video')) {
+    movedOffVideo = false;
+    if (typeof sw === 'function') sw('video', { force: true });
+  } else if (!videoOff) {
+    movedOffVideo = false;
   }
+}
+
+/** for tests: forget a side move from an earlier case */
+export function resetSideMemory(): void {
+  movedOffVideo = false;
+}
+
+/** a locked profile has nothing to change, so Customize goes away (#2164).
+ *  the attribute on <html> also covers the button in Settings and the
+ *  pre-paint replay in index.html sets it from the cache. */
+export function renderCustomizeLock(locked: boolean, root: Document = document): void {
+  root.documentElement.toggleAttribute(LOCKED_ATTR, locked);
+  const box = root.querySelector<HTMLElement>('.sidebar-customize');
+  if (box) box.hidden = locked;
 }
 
 function publish(payload: FeaturesPayload): void {
@@ -120,10 +175,12 @@ function publish(payload: FeaturesPayload): void {
   state.payload = payload;
   state.off = payload.off.slice();
   state.hiddenPages = payload.hidden_pages.slice();
-  writeCache(state.off, state.hiddenPages);
+  writeCache(state.off, state.hiddenPages, !!payload.locked);
   applyFeatures(state.off, state.hiddenPages);
   refreshNote();
-  renderOffer(payload.chosen);
+  // a locked profile has nothing to choose, so no offer either
+  renderOffer(payload.locked ? true : payload.chosen);
+  renderCustomizeLock(!!payload.locked);
   window.dispatchEvent(new CustomEvent(FEATURES_CHANGED_EVENT, { detail: { off: state.off } }));
 }
 
@@ -151,13 +208,14 @@ export async function loadFeatures(): Promise<FeaturesPayload | null> {
 }
 
 export async function saveFeatures(body: FeaturesSave): Promise<FeaturesPayload> {
-  const payload = await readJson(
-    await fetch('/api/profiles/me/features', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-    }),
-  );
+  const res = await fetch('/api/profiles/me/features', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  // an admin locked it since this tab loaded: show the locked state
+  if (res.status === 403) void loadFeatures();
+  const payload = await readJson(res);
   publish(payload);
   return payload;
 }
@@ -166,8 +224,20 @@ export function isFeatureOn(id: string): boolean {
   return !state.off.includes(id);
 }
 
-export function getFeatures(): { loaded: boolean; off: string[]; payload: FeaturesPayload | null } {
-  return { loaded: state.loaded, off: state.off.slice(), payload: state.payload };
+export function getFeatures(): {
+  loaded: boolean;
+  off: string[];
+  /** the pages hidden right now (the cache until the server answers). the
+   *  landing page skips them (profile-nav.js, #2154) */
+  hiddenPages: string[];
+  payload: FeaturesPayload | null;
+} {
+  return {
+    loaded: state.loaded,
+    off: state.off.slice(),
+    hiddenPages: state.hiddenPages.slice(),
+    payload: state.payload,
+  };
 }
 
 /** before the server answers, trust the cache so React's first render
@@ -178,6 +248,7 @@ export function primeFromCache(): void {
   state.hiddenPages = cached.pages;
   if (document.documentElement) {
     document.documentElement.setAttribute('data-features-off', cached.off.join(' '));
+    document.documentElement.toggleAttribute(LOCKED_ATTR, cached.locked);
   }
 }
 
@@ -201,8 +272,14 @@ export function showFeature(id: string): Promise<FeaturesPayload> {
   return saveFeatures({ off: state.off.filter((x) => x !== id) });
 }
 
+/** back to what an admin set for new profiles (everything, if nothing) */
+export function resetFeatures(): Promise<FeaturesPayload> {
+  return saveFeatures({ reset: true });
+}
+
 function refreshNote(): void {
-  refreshHiddenPageNote(state.payload, showFeature);
+  // a locked profile can't turn it back on, so the note offers nothing
+  refreshHiddenPageNote(state.payload, state.payload?.locked ? null : showFeature);
 }
 
 const OFFER_CLASS = 'sidebar-customize-offer';

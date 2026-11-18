@@ -814,10 +814,26 @@
   d: path('M3 5l3 3 3-3');
 }
 
+/* max-width: 0 lets a cell give way: an auto-layout table sizes a cell to its
+   content, so a long name or language list widened its column and pushed the
+   right-hand columns out of view. These cells take their share and truncate;
+   the full text is on hover. */
 .titleCell {
   width: 30%;
-  min-width: 220px;
-  max-width: 420px;
+  min-width: 160px;
+  max-width: 0;
+}
+
+.clipCell {
+  width: 14%;
+  min-width: 72px;
+  max-width: 0;
+}
+
+.clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .titleLink {

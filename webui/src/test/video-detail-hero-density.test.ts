@@ -126,7 +126,13 @@ describe('the overflow menu opens and closes', () => {
       '<button class="vd-manage-btn vd-more-btn" data-vd-act="more" aria-expanded="false"></button>' +
       '<div class="vd-more-menu" data-vd-more-menu hidden></div></div>';
     const preamble = `function q(sel) { return host.querySelector(sel); }`;
-    const bodies = ['toggleMoreMenu', 'closeMoreMenu']
+    const bodies = [
+      'moreMenuPlacement',
+      'moreMenuArea',
+      'placeMoreMenu',
+      'toggleMoreMenu',
+      'closeMoreMenu',
+    ]
       .map((n) => extractFunction(n, SRC))
       .join('\n');
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -166,6 +172,79 @@ describe('the overflow menu opens and closes', () => {
     api.closeMoreMenu();
     expect(menu.hidden).toBe(true);
     expect(btn.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('pins itself to the screen when it opens and drops the lift when it closes (#2124)', () => {
+    const { api, btn, menu } = wire();
+    const wrap = menu.parentElement as HTMLElement;
+    api.toggleMoreMenu(btn);
+    expect(menu.classList.contains('vd-more-menu--placed')).toBe(true);
+    expect(menu.style.top).toMatch(/px$/);
+    expect(menu.style.maxHeight).toMatch(/px$/);
+    expect(wrap.classList.contains('vd-more--open')).toBe(true);
+    api.closeMoreMenu();
+    expect(wrap.classList.contains('vd-more--open')).toBe(false);
+  });
+});
+
+describe('the overflow menu always fits on screen (#2124)', () => {
+  // the report: on a detail page the menu opened upward from a button near the
+  // top of the screen and its first items sat under the page top, out of reach.
+  type Rect = { top: number; bottom: number; left: number; right: number };
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const place = new Function(
+    `${extractFunction('moreMenuPlacement', SRC)}\nreturn moreMenuPlacement;`,
+  )() as (
+    btn: Rect,
+    size: { height: number; width: number },
+    area: Rect,
+  ) => { top: number; left: number; maxHeight: number; up: boolean };
+  const area = { top: 8, bottom: 792, left: 208, right: 1392 };
+  const btnAt = (top: number, left = 300) => ({ top, bottom: top + 44, left, right: left + 90 });
+
+  it('opens upward when the hero has the room', () => {
+    const p = place(btnAt(600), { height: 400, width: 260 }, area);
+    expect(p.up).toBe(true);
+    expect(p.top).toBe(600 - 6 - 400);
+    expect(p.maxHeight).toBe(400);
+  });
+
+  it('opens downward when the button is near the top of the screen', () => {
+    const p = place(btnAt(60), { height: 480, width: 260 }, area);
+    expect(p.up).toBe(false);
+    expect(p.top).toBe(60 + 44 + 6);
+    expect(p.top).toBeGreaterThanOrEqual(area.top);
+    expect(p.top + p.maxHeight).toBeLessThanOrEqual(area.bottom);
+  });
+
+  it('scrolls inside on the roomier side when it fits on neither', () => {
+    const p = place(btnAt(300), { height: 900, width: 260 }, area);
+    expect(p.up).toBe(false);
+    expect(p.top).toBeGreaterThanOrEqual(area.top);
+    expect(p.top + p.maxHeight).toBeLessThanOrEqual(area.bottom);
+    expect(p.maxHeight).toBeLessThan(900);
+    const q = place(btnAt(600), { height: 900, width: 260 }, area);
+    expect(q.up).toBe(true);
+    expect(q.top).toBeGreaterThanOrEqual(area.top);
+    expect(q.top + q.maxHeight).toBeLessThanOrEqual(600 - 6);
+  });
+
+  it('never runs off the right edge or under the sidebar', () => {
+    expect(place(btnAt(600, 1300), { height: 100, width: 260 }, area).left).toBe(1392 - 260);
+    expect(place(btnAt(600, 100), { height: 100, width: 260 }, area).left).toBe(208);
+  });
+
+  it('is pinned fixed in css, and the hero no longer holds a transform that would trap it', () => {
+    const CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
+    const placed = CSS.slice(CSS.indexOf('.vd-more .vd-more-menu.vd-more-menu--placed {'));
+    expect(placed.slice(0, placed.indexOf('}'))).toContain('position: fixed');
+    // a rise animation held at its end (fill both/forwards) leaves an identity
+    // transform on the hero, which makes it the fixed menu's containing block,
+    // so the clipped billboard cuts the menu off again. measured in chromium.
+    const bb = CSS.slice(CSS.indexOf('\n.vd-bb-content {'));
+    const anim = bb.slice(0, bb.indexOf('}')).match(/animation:[^;]*vdRise[^;]*;/)?.[0] ?? '';
+    expect(anim).not.toBe('');
+    expect(anim).not.toMatch(/\b(both|forwards)\b/);
   });
 });
 

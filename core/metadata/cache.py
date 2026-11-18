@@ -1278,14 +1278,10 @@ class MetadataCache:
             fields['artist_id'] = str(data.get('artistId', ''))
             fields['release_date'] = data.get('releaseDate', '')[:10] if data.get('releaseDate') else ''
             fields['total_tracks'] = data.get('trackCount', 0)
-            # Infer album type from track count
-            tc = data.get('trackCount', 0)
-            if tc <= 3:
-                fields['album_type'] = 'single'
-            elif tc <= 6:
-                fields['album_type'] = 'ep'
-            else:
-                fields['album_type'] = 'album'
+            from core.metadata.release_type import itunes_release_type
+            fields['album_type'] = itunes_release_type(
+                data.get('collectionName'), data.get('collectionType'),
+                data.get('trackCount', 0))
             fields['image_url'] = _upscale_artwork(data.get('artworkUrl100'))
             urls = {}
             if data.get('collectionViewUrl'):

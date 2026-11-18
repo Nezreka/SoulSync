@@ -159,10 +159,14 @@ def _wrong_song(db, tmp_path, monkeypatch, **history):
     import api.verification as ver
     f = tmp_path / 'Alive.flac'
     f.write_bytes(b'x')
+    # the row the import really writes: title/artist_name are the ask,
+    # source_track_title/source_artist are what the source handed over
+    history.setdefault('title', 'Dead or Alive')
+    history.setdefault('artist_name', 'Lil Yee')
     history_id = db.add_library_history_entry(
-        event_type='download', title='Alive', artist_name='Lil Jon',
-        file_path=str(f), download_source='Tidal', source_filename='1||Lil Jon - Alive',
-        verification_status='unverified', **history)
+        event_type='download', file_path=str(f), download_source='Tidal',
+        source_filename='1||Lil Jon - Alive', source_track_title='Alive',
+        source_artist='Lil Jon', verification_status='unverified', **history)
     monkeypatch.setattr(ver, 'get_database', lambda: db)
     monkeypatch.setattr(ver, 'get_current_profile_id', lambda: 1)
     monkeypatch.setattr(ver, '_resolve_history_audio_path', lambda row: str(f))
@@ -175,10 +179,13 @@ def _wrong_song(db, tmp_path, monkeypatch, **history):
 def test_wrong_song_rejects_the_file_and_wishlists_what_was_asked_for(db, tmp_path, monkeypatch):
     """TheHomeGuy: lil jon's "alive" came in for lil yee's "dead or alive".
     deleting it only blacklisted the file; there was no way to go and find
-    the right one from review."""
+    the right one from review.
+
+    in-app chat (makiel, asked for / got reversed): this read the source's
+    title as the ask, so it wishlisted the wrong file's name ("Alive" by
+    lil jon) and went hunting for the wrong song again."""
     f, history_id, out, status = _wrong_song(
-        db, tmp_path, monkeypatch, source_track_id='sp-dead-or-alive',
-        source_track_title='Dead or Alive', source_artist='Lil Yee', album_name='Alive')
+        db, tmp_path, monkeypatch, source_track_id='sp-dead-or-alive', album_name='Alive')
 
     assert status == 200 and out['success'] is True
     assert not f.exists()
@@ -196,7 +203,7 @@ def test_wrong_song_rejects_the_file_and_wishlists_what_was_asked_for(db, tmp_pa
 
 
 def test_wrong_song_without_a_record_of_the_ask_touches_nothing(db, tmp_path, monkeypatch):
-    f, history_id, out, status = _wrong_song(db, tmp_path, monkeypatch)
+    f, history_id, out, status = _wrong_song(db, tmp_path, monkeypatch, title='', artist_name='')
     assert status == 400 and out['success'] is False
     assert f.exists()
     assert not db.is_blacklisted('tidal', '1||Lil Jon - Alive')

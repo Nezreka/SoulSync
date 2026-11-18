@@ -12,7 +12,12 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="ignore")
-_SETTINGS_JS = (_ROOT / "webui" / "static" / "settings.js").read_text(encoding="utf-8", errors="ignore")
+# the card is React (SETTINGS_PORT.md step 10b): connections-extras.tsx
+_CARDS = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "connections-extras.tsx").read_text(
+    encoding="utf-8", errors="ignore"
+)
+_CARD = _CARDS[_CARDS.index("function ListenbrainzCard(") :]
+_CARD = _CARD[: _CARD.index("\n}\n")]
 
 
 def _strip_comments(text: str) -> str:
@@ -21,26 +26,29 @@ def _strip_comments(text: str) -> str:
 
 
 def test_the_field_exists_on_the_settings_page():
-    assert 'id="listenbrainz-username"' in _INDEX
+    assert 'id="listenbrainz-username"' in _CARD
 
 
 def test_it_sits_in_the_listenbrainz_service_card():
-    card = _INDEX.split('data-service="listenbrainz"', 1)[1].split("</div>\n                                        </div>", 1)[0]
-    assert 'id="listenbrainz-username"' in card
-    assert 'id="listenbrainz-token"' in card
+    """Next to the credentials: anywhere else and it is lost again."""
+    assert 'service="listenbrainz"' in _CARD
+    assert 'id="listenbrainz-username"' in _CARD
+    assert 'id="listenbrainz-token"' in _CARD
 
 
 def test_the_saved_value_is_read_back_into_the_field():
-    js = _strip_comments(_SETTINGS_JS)
-    assert "settings.listenbrainz?.username" in js
+    """Without the load half the field is blank every time settings open."""
+    assert "useTrimmed(store, 'listenbrainz', 'username')" in _strip_comments(_CARD)
 
 
-def test_the_save_uses_cfgstr_not_a_raw_value_read():
-    js = _strip_comments(_SETTINGS_JS)
-    assert re.search(r"username:\s*_cfgStr\('listenbrainz-username'", js), (
-        "the username must be collected with _cfgStr"
-    )
-    assert not re.search(r"username:\s*document\.getElementById\('listenbrainz-username'\)\.value", js)
+def test_the_save_sends_only_what_was_typed():
+    """The settings-wipe class: a save that reads a field off a page that does
+    not have it writes '' over the stored value. The card saves this key only
+    when it is typed in, trimmed as the page's _cfgStr did."""
+    trimmed = _CARDS[_CARDS.index("function useTrimmed(") :]
+    trimmed = trimmed[: trimmed.index("\n}\n")]
+    assert "store.set(section, key, shape(raw.trim()))" in trimmed
+    assert "getElementById" not in _CARD
 
 
 def test_the_key_path_is_the_one_the_importer_reads():

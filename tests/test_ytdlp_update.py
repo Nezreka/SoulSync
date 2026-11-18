@@ -219,28 +219,37 @@ def test_a_timeout_is_reported_rather_than_swallowed():
 
 
 # ── the Settings tile ────────────────────────────────────────────────────────
-# The tile lives in the shared settings shell with no side marker, so it renders
-# on the music side (YouTube-sourced audio) and the video side (YouTube
-# downloads) from one definition — it is one package.
+# The tile lives in the YouTube source panel on the shared Sources tab, with no
+# side marker, so it renders on the music side (YouTube-sourced audio) and the
+# video side (YouTube downloads) from one definition — it is one package. The
+# panel is React now (SETTINGS_PORT.md step 7g): its markup and its script are
+# the same file, source-panels-more.tsx.
 
 def _html() -> str:
-    from pathlib import Path
-    return Path("webui/index.html").read_text(encoding="utf-8")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    from tests.support.settings_page import index_with_settings_page
+    return index_with_settings_page()
 
 
-def _settings_js() -> str:
+def _panels() -> str:
     from pathlib import Path
-    return Path("webui/static/settings.js").read_text(encoding="utf-8")
+    return Path("webui/src/features/settings/tabs/source-panels-more.tsx").read_text(encoding="utf-8")
+
+
+def _youtube() -> str:
+    """the YouTube panel component, markup and handlers together"""
+    src = _panels()
+    return src.split("export function YoutubePanel(", 1)[1].split("\nexport function", 1)[0]
 
 
 def _tile() -> str:
     """Just the yt-dlp tile. Slicing a fixed width from its start reads whatever
     markup follows, which turns 'the tile must not say X' into 'no later tile may
     say X' — a false pass or a false failure depending on the day."""
-    h = _html()
-    start = h.index("<!-- yt-dlp updater")
-    end = h.index("<!-- end yt-dlp body -->", start)
-    return h[start:end]
+    panel = _youtube()
+    start = panel.index("the yt-dlp updater lives with YouTube")
+    end = panel.index("</Panel>", start)
+    return panel[start:end]
 
 
 def test_the_tile_renders_on_both_sides():
@@ -251,7 +260,9 @@ def test_the_tile_renders_on_both_sides():
     inside the YouTube source panel on the Sources tab - "it belongs where
     somebody debugging YouTube will actually look" - so that assertion was
     pinning an address it had already left. The Sources tab is shared by both
-    sides, which is what actually delivers the both-sides requirement now.
+    sides, which is what actually delivers the both-sides requirement now. The
+    panel is React (step 7g): it renders into a slot inside the Sources tab's
+    hidden panel home, and its own Panel is the YouTube container.
     """
     tile = _tile()
     assert "data-video-only" not in tile and "data-music-only" not in tile
@@ -259,11 +270,14 @@ def test_the_tile_renders_on_both_sides():
     import re
 
     index = _html()
-    at = index.index("<!-- yt-dlp updater")
+    at = index.index('data-stg-part="youtube"')
     stg = index.rfind('data-stg="', 0, at)
     tab = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 32]).group(1)
     assert tab == "sources", f"the updater is on the {tab} tab, not with its source"
-    assert index.rfind('id="youtube-settings-container"', 0, at) != -1, (
+    home = index.index('id="source-config-home"')
+    # inside the parked panels: before the modal's slot, which follows them
+    assert home < at < index.index('data-stg-part="modal"', home)
+    assert '<Panel id="youtube-settings-container"' in _youtube(), (
         "no longer inside the YouTube panel - which is the whole reason it moved"
     )
 
@@ -275,63 +289,79 @@ def test_the_tile_states_the_restart_requirement_in_the_markup():
 
 
 def test_nightly_is_the_preselected_channel():
+    # React picks an option by the select's value, not a selected attribute
+    assert "useState('nightly')" in _youtube()
     tile = _tile()
-    assert 'value="nightly" selected' in tile
+    assert 'value="nightly"' in tile
     assert 'value="stable"' in tile, "stable must remain a choice"
 
 
 def test_every_element_the_script_touches_exists_in_the_markup():
     """The classic silent break: a renamed id leaves the button doing nothing at
-    all, with no error anyone would notice."""
+    all, with no error anyone would notice. React renders every element it
+    updates, so what has to hold is that each id the tile has is rendered once
+    and nothing outside the panel still reaches for one."""
     import re
-    h, js = _html(), _settings_js()
-    ids = set(re.findall(r"getElementById\('(ytdlp-[a-z-]+)'\)", js))
-    assert ids, "the script should address the tile by id"
-    assert [i for i in ids if 'id="%s"' % i in h] == list(ids)
+    tile = _tile()
+    ids = re.findall(r'id="(ytdlp-[a-z-]+)"', tile)
+    assert {"ytdlp-installed", "ytdlp-latest", "ytdlp-channel", "ytdlp-update-btn",
+            "ytdlp-status", "ytdlp-detail"} <= set(ids)
+    assert len(ids) == len(set(ids))
+    from pathlib import Path
+    js = Path("webui/src/features/settings/shell.ts").read_text(encoding="utf-8")
+    assert not re.findall(r"getElementById\('(ytdlp-[a-z-]+)'\)", js), "settings.js still drives the tile"
 
 
 def test_the_handlers_the_markup_calls_are_defined():
+    """the old markup called globals by name; the panel calls its own functions,
+    so each one the tile names must be defined in the panel"""
     import re
-    tile, js = _tile(), _settings_js()
-    for fn in set(re.findall(r'on(?:click|change)="([a-zA-Z_$][\w$]*)\(', tile)):
-        assert ("function %s" % fn) in js or fn == "toggleSettingHelp", fn
+    tile, panel = _tile(), _youtube()
+    called = set(re.findall(r"void ([a-zA-Z_$][\w$]*)\(", tile))
+    assert called, "the tile should call its handlers"
+    for fn in called:
+        assert (f"async function {fn}(" in panel) or (f"function {fn}(" in panel), fn
 
 
-def test_opening_the_advanced_tab_loads_the_version_panel():
-    js = _settings_js()
-    assert "typeof loadYtdlpStatus === 'function'" in js
+def test_the_version_panel_loads_where_it_lives():
+    """It used to load when the Advanced tab opened (the tile's old home), and
+    the Sources tab got the same hook when it moved there. Both are gone with
+    the vanilla tile: the React panel loads the version on arriving at Sources
+    and when the YouTube modal opens."""
+    panel = _youtube()
+    assert "if (active && opened) void loadYtdlp();" in panel
+    assert "useOnOpen(model, 'youtube', () => void loadYtdlp());" in panel
+    from pathlib import Path
+    js = Path("webui/src/features/settings/shell.ts").read_text(encoding="utf-8")
+    assert "loadYtdlpStatus" not in js
 
 
 def test_a_pypi_outage_does_not_read_as_up_to_date():
     """'Unknown' and 'newest available' are different facts. Showing the latter
     when we could not look would tell the user their 403s are something else."""
-    assert "Couldn't check" in _settings_js()
+    assert "Couldn't check" in _youtube()
 
 
 def test_the_toast_is_guarded_like_the_rest_of_the_codebase():
     """showToast is a global owned by downloads.js; chat.js guards it the same
     way. This tile renders on the video side too, so an unguarded call would throw
     and abandon the rest of the handler — leaving the button stuck on 'Updating...'
-    after an update that actually succeeded."""
-    js = _settings_js()
-    start = js.index("async function runYtdlpUpdate")
-    end = js.index("\n}", start)
-    lines = js[start:end].split("\n")
-    guard = "typeof showToast === 'function'"
-    unguarded, open_guard = [], False
-    for ln in lines:
-        if guard in ln:
-            open_guard = ln.rstrip().endswith("{")     # block guard stays open
-            continue
-        if "showToast(" in ln and not open_guard:
-            unguarded.append(ln.strip())
-        if open_guard and ln.strip() == "}":
-            open_guard = False
-    assert not unguarded, "unguarded showToast call(s): %s" % unguarded
-    assert "showToast(" in js[start:end], "the handler should still toast"
+    after an update that actually succeeded. The panel toasts through the
+    shared `toast`, which calls window.showToast?.()."""
+    panel = _youtube()
+    start = panel.index("async function runUpdate(")
+    end = panel.index("\n  }\n", start)
+    body = panel[start:end]
+    assert "toast(" in body, "the handler should still toast"
+    assert "showToast(" not in body, "a bare showToast call in the handler"
+    from pathlib import Path
+    parts = Path("webui/src/features/settings/tabs/source-panels.tsx").read_text(encoding="utf-8")
+    assert "export const toast = (message: string, type: string) => window.showToast?.(message, type);" in parts
+    # and the button is released whatever happens
+    assert "finally {\n      setUpdating(false);" in body
 
 
 def test_pip_s_own_output_is_kept_available():
     """Each failure mode needs a different action and the output is what says
     which — so it is shown, not swallowed into a generic message."""
-    assert "ytdlp-detail" in _tile() and "d.detail" in _settings_js()
+    assert "ytdlp-detail" in _tile() and "data.detail" in _youtube()

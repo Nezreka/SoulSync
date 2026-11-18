@@ -5,6 +5,7 @@
 // Podcasts: Overview — RSS-based podcasts, the watchlist model, what lives where.
 registerDocsSection({
     id: 'podcasts',
+    needs: 'podcasts.access',
     title: 'Podcasts',
     icon: '🎙️',
     pages: [
@@ -16,6 +17,8 @@ registerDocsSection({
 SoulSync's **Podcasts** side is an RSS-powered podcast manager. Browse a global podcast directory, open any show, and **follow** it by adding it to your podcast **Watchlist** — SoulSync then checks the show's RSS feed on a schedule, auto-downloads new episodes, and prunes old ones per your retention settings.
 
 There is no separate "subscribe" concept: **following = watchlisting**. Everything downstream — new-episode checks, auto-download, retention cleanup — keys off the Watchlist.
+
+![The Podcasts hub, where directory browsing, following and episode downloads all start](pod-overview.jpg)
 
 ::: cards
 ### 🎙️ Directory & Search
@@ -38,6 +41,8 @@ Downloaded episodes older than your retention window are deleted from disk autom
             lede: 'The podcast hub: search, 20 categories, a featured spotlight, and the show grid.',
             body: `
 The **Podcasts** hub page (\`/podcasts\`) is laid out top to bottom:
+
+![Browsing a category on the Podcasts hub: show cards with episode counts and a watchlist eye on every cover](pod-browse.jpg)
 
 ## Header & search
 
@@ -115,6 +120,8 @@ The **Download** button calls the download endpoint for that episode's enclosure
 
 The **Add RSS** button opens the **Add Podcast by RSS Feed** modal ("Add custom, Patreon, Substack, or private member podcast feeds."):
 
+![Adding a podcast by RSS feed URL — the path used for private member feeds too](pod-add.jpg)
+
 ::: steps
 1. Paste the feed into **RSS Feed URL** (placeholder: \`https://feeds.patreon.com/private/12345\` or \`https://example.com/rss\`).
 2. The URL must begin with \`http://\` or \`https://\` — anything else is rejected with a validation error.
@@ -151,6 +158,8 @@ Every external URL passes through the ingest guard:
 ## Following = watchlisting
 
 Podcasts have no separate subscribe button. Every **Add to Watchlist** / eye-icon toggle calls the same flow, defaulting to **auto-download: on** and **retention: 14 days**. Toasts confirm: **Added "{title}" to Watchlist** / **Removed "{title}" from Watchlist**.
+
+![Per-show watchlist settings: auto-download new episodes, the retention period, and removing the show](pod-watchlist.jpg)
 
 ## Per-show settings
 
@@ -232,10 +241,13 @@ The **Podcast Media Format** setting (Settings → Library → Organization) cho
         },
         {
             id: 'pod-settings',
+            needs: 'admin',
             title: 'Podcast Settings',
             lede: 'Every podcast setting, where it lives, and the config-only flags.',
             body: `
 All podcast settings live under **Settings → Library** (inside the Music media sub-tab — there is no Podcasts sub-tab):
+
+![Podcast settings live under Settings → Library, inside the Music media sub-tab](pod-settings.jpg)
 
 | Setting (exact label) | Location | Default |
 |----------------------|----------|---------|
@@ -265,10 +277,13 @@ These live in \`core/settings.py\` defaults under \`podcasts.*\`:
         },
         {
             id: 'pod-api',
+            needs: 'admin',
             title: 'Podcast API Reference',
             lede: 'Every podcast endpoint: search, shows, downloads, watchlist, and OPML.',
             body: `
 Base path: \`/api/podcasts\`. No per-route auth decorators — access follows the app-global login gate (\`security.require_login\`, off by default); \`POST /download\` additionally honours your profile's download permission.
+
+![Podcast settings in Settings → Library — the server-side behaviour the podcast endpoints expose](pod-settings.jpg)
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -296,6 +311,7 @@ Base path: \`/api/podcasts\`. No per-route auth decorators — access follows th
 // Audiobooks: Overview — the Audible/Apple catalogue side, what "owned" means.
 registerDocsSection({
     id: 'audiobooks',
+    needs: 'books.access',
     title: 'Audiobooks',
     icon: '📚',
     pages: [
@@ -305,6 +321,8 @@ registerDocsSection({
             lede: 'An Audible-class audiobook manager: browse, wishlist, grab releases, and keep a real library.',
             body: `
 SoulSync's **Audiobooks** side is a full audiobook manager built around the Audible catalogue (with Apple as a fallback source). Browse bestsellers and genres, wishlist titles, and let the pipeline search your indexers — torrents and Usenet via Prowlarr plus Soulseek — rank every release, download the best one, and file it into your library.
+
+![The Audiobooks hub: catalogue shelves, genres and new releases](abk-overview.jpg)
 
 The model mirrors the music side but adapted to books:
 
@@ -331,6 +349,8 @@ Scan your audiobook folder, auto-match files to catalogue editions, review ambig
             lede: 'The audiobook hub: home shelves, genre views, search modes, and the sample player.',
             body: `
 The **Audiobooks** hub (\`/audiobooks\`) has three views driven by the URL, so the Back button from a detail page preserves exactly where you were:
+
+![Catalogue search with title, author and narrator modes, genre chips, and people results](abk-browse.jpg)
 
 - **Home** (no params): hero billboard + shelves.
 - **Genre** (\`genre=<name>\` — the genre *name*, not id, because Audible's ids differ per storefront): heading plus **Top sellers** and **New releases** rails.
@@ -378,6 +398,8 @@ Every Audible title carries a preview. A persistent player bar in the layout str
             body: `
 The detail page (\`/audiobooks/$asin\`) opens on a blurred-cover backdrop with a back button.
 
+![A book detail page: metadata, series position, ratings and the releases under it](abk-detail.jpg)
+
 ## Header
 
 - Large cover with a full-width **Add to wishlist** / **Wishlisted** button, a **Find releases** button (Audible titles), and **Play sample** / **Pause sample** when a sample exists.
@@ -414,6 +436,8 @@ After grabbing, the row becomes live status — **Queued**, **Downloading**, **H
             lede: 'Scan your audiobook folder, match files to catalogue editions, and manage what you own.',
             body: `
 **Library** (\`/audiobooks/library\`) is a full page — "a library is a place, not a dialog." Its header reads **Audiobooks / On your shelves** and **Your library**, with **N books · X GB on disk**.
+
+![Your audiobook library, scanned from your folder and matched to catalogue editions](abk-library.jpg)
 
 ## Scan panel
 
@@ -454,6 +478,8 @@ Server-side, automatic matching requires score **≥ 96 with an 8-point margin**
             body: `
 There is no separate audiobooks wishlist tab: \`/audiobooks/wishlist\` redirects to \`/wishlist?media=audiobooks\` — one shared wishlist page for all media, with an audiobooks half.
 
+![The audiobook titles on the shared wishlist, waiting for the next processing run](abk-wishlist.jpg)
+
 ## Adding titles
 
 - The **heart** on any Audible catalogue card (one click, optimistic UI).
@@ -490,6 +516,8 @@ The **Auto-Process Audiobook Wishlist** automation runs the worker **hourly** (t
 ## Author & narrator pages
 
 Author (\`/audiobooks/author/$name\`) and narrator (\`/audiobooks/narrator/$name\`) pages are keyed on **name**, not ASIN — Audible's author ASIN is accepted as a filter then ignored (it returns the whole storefront anyway), and narrators have no ASIN at all.
+
+![An author page: the Watching toggle, narrator chips and the author's works](abk-people.jpg)
 
 - Header: blurred covers as backdrop, a fan of up to 3 best-rated covers (the catalogue has no author photos), an **Author** / **Narrator** role label, name, and facts: **N titles**, **N series**, **N hours**, plus genres.
 - **Collaborators:** author pages show the top **Narrated by** narrators; narrator pages show the top **Writes with** authors — with counts, linking to each other's pages.
@@ -581,12 +609,15 @@ Post-processing is best-effort (mutagen): narrator → COMPOSER tag, embedded co
         },
         {
             id: 'abk-bin',
+            needs: 'admin',
             title: 'Recycle Bin & Blocklist',
             lede: 'Soft deletes with restore, expiring bins, and per-release blocks.',
             body: `
 ## Recycle bin
 
 Deleting a book from the library doesn't nuke it — with **Recycle deleted audiobooks** on, the folder moves to a hidden \`.deleted\` folder inside the audiobook library, timestamped and manifest-backed. **Restore** puts the book back exactly where it was.
+
+![The recycle bin and blocklist: restore removed books, or keep refused releases blocked](abk-bin.jpg)
 
 - **Empty The Recycle Bin After:** (default **7** days) — bin entries expire automatically; **0 turns the bin off** (deletes are permanent).
 - The **Empty Audiobook Recycle Bin** system automation runs **daily** — the schedule is what matters, because the opportunistic pass only fires when something else is deleted.
@@ -603,12 +634,15 @@ The **Bin** button in the browse header opens the **Removed & refused** review m
         },
         {
             id: 'abk-settings',
+            needs: 'admin',
             title: 'Audiobook Settings',
             lede: 'Quality, folders, path templates, download sources, and import behaviour — every control.',
             body: `
 ## Audiobook Quality
 
 "What counts as a good file. One profile for every audiobook — the per-author card carries the settings that differ by author." (The per-author card = the Author Watchlist Settings modal: auto-wishlist on/off, narrator mode, since date.)
+
+![Audiobook settings: quality, folders, path templates and download sources](abk-settings.jpg)
 
 | Control (exact label) | Options / behaviour |
 |----------------------|---------------------|
@@ -669,10 +703,13 @@ The **Audiobooks** subsection carries its own chain, separate from music on purp
         },
         {
             id: 'abk-automations',
+            needs: 'admin',
             title: 'Audiobook Automations',
             lede: 'The four system automations that run the audiobook side: wishlist, authors, bin, library.',
             body: `
 Audiobooks drain through the automation engine like every other side. Four system automations (no owned_by — audio-side automations sit on the same page as music):
+
+![The audiobook system automations that process the wishlist, watch authors and empty the bin](abk-automations.jpg)
 
 | Automation | Schedule | What it does |
 |-----------|----------|--------------|
@@ -686,10 +723,13 @@ All four are schedule-triggered system automations: pausable, reschedulable, and
         },
         {
             id: 'abk-api',
+            needs: 'admin',
             title: 'Audiobook API Reference',
             lede: 'Every audiobook endpoint: catalogue, wishlist, watchlist, releases, library, and downloads.',
             body: `
 Base path: \`/api/audiobooks\`.
+
+![Audiobook settings — the server-side behaviour the audiobook endpoints expose](abk-settings.jpg)
 
 ## Catalogue
 
@@ -714,19 +754,21 @@ Base path: \`/api/audiobooks\`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | \`/wishlist\` | Items + counts + worker status for the profile |
-| POST | \`/wishlist\` | Add by ASIN (metadata resolved server-side; \`narrator_mode\` exact/any; idempotent) |
+| POST | \`/wishlist\` | Add by ASIN (metadata resolved server-side; \`narrator_mode\` exact/any; idempotent). Needs download rights: audiobooks have no requests yet, so a profile with downloads off gets 403 |
 | PATCH | \`/wishlist/<asin>\` | \`{"status":"wanted"}\` retries a cancelled/failed row; or change \`narrator_mode\` (no backoff reset) |
 | DELETE | \`/wishlist\` | Clear the profile's wishlist |
 | DELETE | \`/wishlist/<asin>\` | Remove one entry |
 | POST | \`/wishlist/search\` | Run a wishlist pass now (force=true bypasses backoff) |
 | POST | \`/wishlist/<asin>/search\` | Search + grab one book now |
 
+The wishlist pass and the author scan run as the system, so they check each row's owner when they get to it: a book whose owner has downloads off isn't searched or grabbed (it stays wanted), and a follow of theirs wishlists nothing.
+
 ## Watchlist (authors)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | \`/watchlist\` | Followed authors |
-| POST | \`/watchlist\` | Follow an author (\`name\`, \`cover_url\`, \`since\` cutoff defaults to today) |
+| POST | \`/watchlist\` | Follow an author (\`name\`, \`cover_url\`, \`since\` cutoff defaults to today). Needs download rights, like the wishlist |
 | PATCH | \`/watchlist/<name>\` | Per-author settings (\`auto_wishlist\`, \`narrator_mode\`, \`since_date\`) |
 | DELETE | \`/watchlist/<name>\` | Unfollow |
 | POST | \`/watchlist/scan\` | Check followed authors now (same path as the daily automation) |

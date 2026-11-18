@@ -15,6 +15,8 @@ from flask import Blueprint, jsonify, request
 from core.quality.schema import RELEASE_IMPORT_MODES, normalize_release_import_mode
 
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only
 
 logger = get_logger("api.quality_profiles")
 
@@ -56,6 +58,7 @@ def _validate_profile_data(data):
 
 
 @bp.route('/api/quality-profile', methods=['GET'])
+@requires("music.access")
 def get_quality_profile():
     """Get current quality profile configuration"""
     try:
@@ -72,6 +75,7 @@ def get_quality_profile():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/quality-profile', methods=['POST'])
+@admin_only
 def save_quality_profile():
     """Save quality profile configuration"""
     try:
@@ -101,6 +105,7 @@ def save_quality_profile():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/quality-profile/presets', methods=['GET'])
+@requires("music.access")
 def get_quality_presets():
     """Get all available quality presets"""
     try:
@@ -122,6 +127,7 @@ def get_quality_presets():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
+@admin_only
 def apply_quality_preset(preset_name):
     """Switch to a quality preset, restoring its saved edits if it has any."""
     try:
@@ -160,6 +166,7 @@ def apply_quality_preset(preset_name):
 
 
 @bp.route('/api/quality-profile/preset/<preset_name>/reset', methods=['POST'])
+@admin_only
 def reset_quality_preset(preset_name):
     """Discard a preset's saved edits and restore its factory defaults."""
     try:
@@ -198,6 +205,7 @@ def reset_quality_preset(preset_name):
 # `quality_profiles`. ──────────
 
 @bp.route('/api/quality-profile/custom', methods=['GET'])
+@requires("music.access")
 def list_custom_quality_profiles():
     """List every quality profile (built-ins + user-created), default first.
 
@@ -214,6 +222,7 @@ def list_custom_quality_profiles():
 
 
 @bp.route('/api/quality-profile/custom', methods=['POST'])
+@admin_only
 def create_custom_quality_profile():
     """Save the current Quality-page settings as a new named profile.
 
@@ -245,6 +254,7 @@ def create_custom_quality_profile():
 
 
 @bp.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
+@requires("music.access")
 def get_custom_quality_profile(profile_id):
     """Read-only: a single profile in the same full v3 shape `/apply` and
     `/api/quality-profile` return (parsed ranked_targets, real booleans,
@@ -266,6 +276,7 @@ def get_custom_quality_profile(profile_id):
 
 
 @bp.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
+@admin_only
 def apply_custom_quality_profile(profile_id):
     """Make a named profile the app-wide default AND push every setting it
     captures (AcoustID strictness, downsample, deep verify, import
@@ -289,6 +300,7 @@ def apply_custom_quality_profile(profile_id):
 
 
 @bp.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
+@admin_only
 def update_custom_quality_profile(profile_id):
     """Overwrite a named profile's captured settings with whatever is
     currently on the Quality page (edit-in-place, keeps the name)."""
@@ -325,6 +337,7 @@ def update_custom_quality_profile(profile_id):
 
 
 @bp.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
+@admin_only
 def rename_custom_quality_profile(profile_id):
     try:
         from database.music_database import MusicDatabase
@@ -348,6 +361,7 @@ def rename_custom_quality_profile(profile_id):
 
 
 @bp.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
+@admin_only
 def delete_custom_quality_profile(profile_id):
     """Delete any profile, including the built-ins. Only refuses when it
     would leave zero profiles — deleting the current default auto-promotes

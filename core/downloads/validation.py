@@ -6,6 +6,7 @@ constructed in web_server.py and referenced by name throughout
 the body.
 """
 from utils.logging_config import get_logger
+import copy
 import re
 
 from core.settings import config_manager
@@ -890,7 +891,71 @@ def _score_streaming_candidates(results, spotify_track, why=None):
 _ZERO_SCORE_VERSIONS = frozenset({'live', 'remix', 'acoustic', 'instrumental', 'slowed', 'sped_up'})
 
 
-def _note_unmatched(results, matched, max_q, why):
+def _artist_aliases(name):
+    """other names the library or musicbrainz knows this artist by: the same
+    lookup the acoustid check uses, cached per name."""
+    from core.acoustid_verification import _resolve_expected_artist_aliases
+    return _resolve_expected_artist_aliases(name)
+
+
+def _segments_name(filename, words) -> bool:
+    for segment in re.split(r'[/\\]', str(filename or '')):
+        seg_words = set(matching_engine.normalize_string(segment).split()) if segment else set()
+        if seg_words and words.issubset(seg_words):
+            return True
+    return False
+
+
+def _rescue_by_artist_alias(results, accepted, spotify_track, max_q):
+    """Score the refused soulseek files again under each alias of the artist.
+
+    Only files whose path names the alias are rescored, each as if the
+    request had named the artist that way. Returns the alias word sets, for
+    the path gate after the quality filter. Looked up only when something
+    was refused, so a clean search never asks.
+    """
+    artists = list(getattr(spotify_track, 'artists', None) or [])
+    if not artists or matching_engine is None:
+        return []
+    taken = {id(r) for r in accepted}
+    leftovers = [r for r in results or ()
+                 if id(r) not in taken
+                 and getattr(r, 'username', None) not in _STREAMING_USERNAMES
+                 and (max_q <= 0 or (getattr(r, 'queue_length', 0) or 0) <= max_q)]
+    if not leftovers:
+        return []
+    primary = artists[0].get('name', '') if isinstance(artists[0], dict) else str(artists[0] or '')
+    known = {matching_engine.normalize_string(str(a.get('name', '') if isinstance(a, dict) else a))
+             for a in artists}
+    try:
+        aliases = list(_artist_aliases(primary) or [])
+    except Exception as exc:  # noqa: BLE001 - no alias is the old behaviour
+        logger.debug("artist alias lookup failed for %r: %s", primary, exc)
+        return []
+    word_sets = []
+    for alias in dict.fromkeys(str(a or '').strip() for a in aliases):
+        normalized = matching_engine.normalize_string(alias) if alias else ''
+        words = set(normalized.split())
+        if not words or normalized in known:
+            continue
+        word_sets.append(words)
+        named = [r for r in leftovers if id(r) not in taken and _segments_name(r.filename, words)]
+        if not named:
+            continue
+        alias_track = copy.copy(spotify_track)
+        try:
+            alias_track.artists = [alias, *artists[1:]]
+        except AttributeError:
+            continue
+        for row in matching_engine.find_best_slskd_matches_enhanced(alias_track, named):
+            if id(row) not in taken:
+                taken.add(id(row))
+                accepted.append(row)
+                logger.info("[Soulseek] %s accepted under the artist's alias %r", row.filename, alias)
+    return word_sets
+
+
+def _note_unmatched(results, matched, max_q, why, spotify_track=None):
     """Say why find_best_slskd_matches_enhanced (+ recovery) left rows out.
 
     The engine only returns survivors, so read its footprints: its queue gate
@@ -918,7 +983,15 @@ def _note_unmatched(results, matched, max_q, why):
                 version = matching_engine.detect_version_type(r.filename or '')[0]
             except Exception:  # noqa: BLE001 - stub engines, odd filenames
                 version = ''
-            if version in _ZERO_SCORE_VERSIONS:
+            asked = ''
+            if version and spotify_track is not None:
+                try:
+                    asked = matching_engine.detect_version_type(
+                        getattr(spotify_track, 'name', '') or '')[0]
+                except Exception:  # noqa: BLE001 - stub engines
+                    asked = ''
+            # a live file on a live request was refused for something else
+            if version in _ZERO_SCORE_VERSIONS and version != asked:
                 _note(why, r, 'version_conflict', f"{version} version, asked for the original",
                       0.0, keep_existing=True)
                 continue
@@ -989,8 +1062,12 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
             identity = match_track(spotify_track, row)
             if identity.matches and identity.artist_path_evidence:
                 initial_candidates.append(row)
+    # a folder can name the artist the way his own country does (久石譲 for
+    # joe hisaishi) or the other way round; the artist's known aliases count
+    # as naming him (#2105)
+    alias_words = _rescue_by_artist_alias(results, initial_candidates, spotify_track, _max_q)
     if why is not None:
-        _note_unmatched(results, initial_candidates, _max_q, why)
+        _note_unmatched(results, initial_candidates, _max_q, why, spotify_track)
     if not initial_candidates:
         return []
 
@@ -1047,6 +1124,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
         words = set(normalized.split())
         if words:
             artist_word_sets.append(words)
+    artist_word_sets.extend(alias_words)
 
     for candidate in quality_filtered_candidates:
         # Streaming results: the matching engine already scored the title.

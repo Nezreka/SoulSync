@@ -153,7 +153,7 @@ describe('Basic Search grab descriptor', () => {
 
   it('sends a Prowlarr torrent hit with its carriers and its own indexer id', () => {
     const { identifyGrabDescriptor } = lift();
-    const d = identifyGrabDescriptor(TORRENT, 'thepiratebay', [TORRENT]);
+    const d = identifyGrabDescriptor(TORRENT, 'prowlarr', [TORRENT]);
     expect(d.source).toBe('torrent');
     expect(d.download_url).toBe('https://prowlarr/dl.torrent');
     expect(d.magnet_uri).toBe('magnet:?xt=1'); // #1139 fallback when the .torrent fetch fails
@@ -164,8 +164,8 @@ describe('Basic Search grab descriptor', () => {
   it('falls back to the tab for an indexer id the hit did not carry', () => {
     const { identifyGrabDescriptor } = lift();
     expect(
-      identifyGrabDescriptor({ title: 'x', magnet_uri: 'magnet:?y' }, '1337x', null).indexer_id,
-    ).toBe('1337x');
+      identifyGrabDescriptor({ title: 'x', magnet_uri: 'magnet:?y' }, 'extto', null).indexer_id,
+    ).toBe('extto');
   });
 
   it('keeps EXT.to hits branded as EXT.to and lets the server map them to a torrent', () => {
@@ -209,8 +209,8 @@ describe('Basic Search grabbability', () => {
     const { basicHitGrabbable } = lift();
     expect(basicHitGrabbable(SOULSEEK, 'soulseek')).toBe(true);
     expect(basicHitGrabbable({ title: 'x', username: 'peer' }, 'soulseek')).toBe(false); // listing with no file
-    expect(basicHitGrabbable(SOULSEEK, 'thepiratebay')).toBe(false); // no magnet/.torrent
-    expect(basicHitGrabbable(TORRENT, 'thepiratebay')).toBe(true);
+    expect(basicHitGrabbable(SOULSEEK, 'prowlarr')).toBe(false); // no magnet/.torrent
+    expect(basicHitGrabbable(TORRENT, 'prowlarr')).toBe(true);
     expect(basicHitGrabbable(EXTTO, 'extto')).toBe(true); // magnet only is enough
     // an EXT.to hit with ONLY a detail page is still grabbable — the magnet is
     // resolved server-side at grab time. Requiring a link here is what put 'No link'
@@ -219,9 +219,9 @@ describe('Basic Search grabbability', () => {
       true,
     );
     // ...but a detail page means nothing to a Prowlarr indexer, which must have a link
-    expect(
-      basicHitGrabbable({ title: 'x', info_url: 'https://tpb/x' } as Row, 'thepiratebay'),
-    ).toBe(false);
+    expect(basicHitGrabbable({ title: 'x', info_url: 'https://tpb/x' } as Row, 'prowlarr')).toBe(
+      false,
+    );
   });
 });
 
@@ -258,7 +258,7 @@ describe('Basic Search grab payload', () => {
   const FILM = { tmdb_id: 157336, title: 'Interstellar', year: 2014, poster: '/i.jpg' };
 
   it('scopes an episode grab to that episode', () => {
-    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'episode', SHOW, {
+    const p = lift().buildPayload(TORRENT, 'prowlarr', 'episode', SHOW, {
       season: 3,
       episode: 8,
     });
@@ -278,7 +278,7 @@ describe('Basic Search grab payload', () => {
   });
 
   it('scopes a season grab to the season with NO episode — that is what makes the monitor map the folder', () => {
-    const p = lift().buildPayload(TORRENT, 'thepiratebay', 'season', SHOW, {
+    const p = lift().buildPayload(TORRENT, 'prowlarr', 'season', SHOW, {
       season: 3,
       episode: 8,
     });
@@ -337,13 +337,13 @@ describe('the card and the modal agree on what is grabbable', () => {
     },
     {
       label: 'Prowlarr torrent with a link',
-      sourceId: 'thepiratebay',
+      sourceId: 'prowlarr',
       grabbable: true,
       row: TORRENT,
     },
     {
       label: 'Prowlarr torrent with only a detail page',
-      sourceId: 'thepiratebay',
+      sourceId: 'prowlarr',
       grabbable: false,
       row: { title: 'x', info_url: 'https://tpb/x' },
     },

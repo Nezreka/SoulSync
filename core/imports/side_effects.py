@@ -272,14 +272,17 @@ def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> No
         if isinstance(album, dict):
             album = album.get("name") or album.get("title") or ""
 
+        # the download's own profile (its batch's), not whoever's thread this is
+        from core.automation.owners import owned
+        from core.imports.paths import import_profile_id
         automation_engine.emit(
             "track_downloaded",
-            {
+            owned({
                 "artist": artist_name,
                 "title": ti.get("name", ti.get("title", "")),
                 "album": album,
                 "quality": context.get("_audio_quality", "Unknown"),
-            },
+            }, import_profile_id(context)),
         )
     except Exception as e:
         logger.debug("track_downloaded emit failed: %s", e)

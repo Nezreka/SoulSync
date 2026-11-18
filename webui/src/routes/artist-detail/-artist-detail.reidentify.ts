@@ -91,3 +91,26 @@ export async function applyReidentifyRequest(
   if (!response.ok || !data.success) throw new Error(data.error || 'Re-identify failed');
   return `Re-filing under “${data.album_name || 'the chosen release'}” — it'll update after the next import pass.`;
 }
+
+const REPLACE_KEY = 'reidentify_replace_original';
+
+/**
+ * #2114: the "move the file" choice is remembered per browser, so someone
+ * who always keeps the original copy doesn't untick it every time. On until
+ * someone turns it off.
+ */
+export function reidentifyReplaceDefault(): boolean {
+  try {
+    return localStorage.getItem(REPLACE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function rememberReidentifyReplace(on: boolean): void {
+  try {
+    localStorage.setItem(REPLACE_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: the box still works for this modal, it just won't stick
+  }
+}

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from core.downloads.asked_vs_got import history_asked_and_got
 from core.downloads.live_detail import build_live_detail, resolve_source_label
 from core.downloads.source_policy import (
     RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
@@ -864,6 +865,7 @@ def _build_history_download_item(entry: dict) -> dict:
     album = entry.get('album_name') or ''
     created_at = entry.get('created_at') or entry.get('completed_at') or ''
     source = entry.get('download_source') or ''
+    asked, got = history_asked_and_got(entry)
     return {
         'task_id': f'history-{history_id}' if history_id else f'history-{title}-{created_at}',
         'title': title,
@@ -888,11 +890,14 @@ def _build_history_download_item(entry: dict) -> dict:
         'is_persistent_history': True,
         'download_source': source,
         # the downloads page detail sheet: podcast vs track, what acoustid
-        # said, and what we asked for (so a wrong-file grab shows both)
+        # said, and what we asked for beside what the source handed over
+        # (so a wrong-file grab shows both, the right way round)
         'event_type': entry.get('event_type') or '',
         'acoustid_result': entry.get('acoustid_result') or '',
-        'expected_title': entry.get('source_track_title') or '',
-        'expected_artist': entry.get('source_artist') or '',
+        'expected_title': asked['title'],
+        'expected_artist': asked['artist'],
+        'got_title': got['title'],
+        'got_artist': got['artist'],
     }
 
 

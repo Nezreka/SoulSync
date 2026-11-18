@@ -131,7 +131,10 @@
                 source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
                 media_id: opts.mediaId, media_source: opts.mediaSource, year: opts.year, poster_url: opts.poster,
                 search_ctx: { scope: 'episode', title: opts.title, year: opts.year,
-                    season: opts.season, episode: opts.episode }
+                    season: opts.season, episode: opts.episode,
+                    // the show's tmdb id: media_id is a library id here, and the
+                    // downloads card needs the tmdb one for its detail (#2176)
+                    tmdb_id: opts.tmdbId != null ? opts.tmdbId : null }
             };
             if (src === 'soulseek') {
                 // The other accepted hits become the auto-retry pool (same as the modal).

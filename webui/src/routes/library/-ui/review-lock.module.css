@@ -7,17 +7,17 @@
   flex: none;
 }
 
-.shackle {
-  transform: translateY(-2.5px) rotate(-18deg);
-  transform-origin: 16px 11px;
-  transition: transform var(--dur-base, 220ms) var(--ease-out);
-}
-
-.padlockClosed .shackle {
-  transform: none;
+/* the locked body is filled; the keyhole cuts back through it */
+.padlockClosed .keyhole {
+  stroke: var(--bg-primary);
 }
 
 /* -- the button -------------------------------------------------------- */
+
+/* holds the portaled sheet in the react tree only, so it takes no room */
+.sheetHost {
+  display: contents;
+}
 
 .button {
   display: inline-flex;
@@ -73,6 +73,22 @@
 
 .buttonLocked {
   color: rgb(var(--accent-rgb));
+}
+
+/* #2119: on an album row a locked padlock sits in a lit disc, so it reads at
+   a glance from across the list, not only when you look for it */
+.buttonLocked.row {
+  background: rgba(var(--accent-rgb), 0.18);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45);
+}
+
+.buttonLocked.row:hover {
+  background: rgba(var(--accent-rgb), 0.26);
+}
+
+.buttonChanged.row {
+  background: rgba(var(--warning-rgb), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--warning-rgb), 0.4);
 }
 
 .buttonLocked.hero,
@@ -516,7 +532,6 @@
     animation: none;
   }
 
-  .shackle,
   .switch::after {
     transition: none;
   }

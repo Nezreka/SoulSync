@@ -6,6 +6,7 @@ from flask import request, current_app
 from . import key_store
 from .auth import SCOPE_ADMIN, VALID_SCOPES, require_api_key
 from .helpers import api_success, api_error
+from core.profile_context import admin_only
 
 # Keys that must NEVER be exposed via the API
 _SENSITIVE_KEYS = {
@@ -136,15 +137,21 @@ def register_routes(bp):
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
 
-    # ---- Bootstrap endpoint (no auth required) ----
+    # ---- Bootstrap endpoint (no key yet, but the admin's) ----
 
     @bp.route("/api-keys/bootstrap", methods=["POST"])
+    @admin_only
     def bootstrap_api_key():
-        """Generate the first API key when none exist (no auth required).
+        """Generate the first API key when none exist.
 
-        This endpoint only works when zero API keys are configured.
+        No key is needed (there is none yet), but the caller must be the
+        admin: /api/v1 skips the login gate, so without this anyone who could
+        reach the server minted an admin key on an install with no keys.
         Body: {"label": "My First Key"}
         """
+        if not _bootstrap_allowed():
+            return api_error("FORBIDDEN",
+                             "Sign in as an admin, or create the first key in Settings.", 403)
         try:
             cfg = current_app.soulsync["config_manager"]
             body = request.get_json(silent=True) or {}
@@ -155,6 +162,29 @@ def register_routes(bp):
             return api_success(key_store.created_view(*created), status=201)
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
+
+
+def _profile_count():
+    from database.music_database import get_database
+    return len(get_database().get_all_profiles() or [])
+
+
+def _bootstrap_allowed():
+    """only the admin mints the first key. with login or a launch pin on,
+    is_admin_request needs a signed-in admin session. with neither, a request
+    with no session reads as profile 1, which is only really the admin when
+    the install has one profile: with several, the session must say admin."""
+    from flask import session
+
+    from core.profile_context import is_admin_request
+    try:
+        if not is_admin_request():
+            return False
+        if session.get("profile_id") is not None:
+            return True
+        return _profile_count() <= 1
+    except Exception:  # noqa: BLE001 - can't tell who's asking, refuse
+        return False
 
 
 def _redact_sensitive(config, prefix=""):

@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { myPermissions, offTitle, permMode } from '@/platform/shell/my-permissions';
+
 import type {
   AudiobookItem,
   AudiobookNarratorMode,
@@ -99,6 +101,16 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       if (!asin || busy.has(asin)) return wishlisted.has(asin);
 
       const wanted = !wishlisted.has(asin);
+      // the add button is hidden for a profile that can't get books (#2166);
+      // a stray click (a stale page after an admin's change) says why calmly
+      // instead of 403ing
+      if (wanted && permMode('books') !== 'download') {
+        window.showToast?.(
+          `${offTitle(myPermissions(), 'books')}. Ask your admin if you'd like it.`,
+          'info',
+        );
+        return false;
+      }
       setBusy((current) => new Set(current).add(asin));
       // Optimistic: the button answers immediately and rolls back if the
       // server disagrees, because a wishlist toggle that waits on an indexer

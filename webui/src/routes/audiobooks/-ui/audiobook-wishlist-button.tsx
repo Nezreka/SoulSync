@@ -36,6 +36,10 @@ export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWis
 
   const wanted = isWishlisted(book.asin);
   const busy = isWishlistBusy(book.asin);
+  // a wished book is grabbed by the wishlist pass, so adding is a download:
+  // hidden for a profile that can't get books (body[data-books-get=none]), like
+  // every other download button. taking a book off stays.
+  const addHook = wanted ? undefined : '';
   const label = wanted ? 'On your wishlist' : 'Add to wishlist';
 
   const icon = wanted ? (
@@ -53,6 +57,7 @@ export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWis
       <button
         type="button"
         className={`${styles.wishlistFull} ${wanted ? styles.wishlistFullOn : ''}`}
+        data-books-action={addHook}
         onClick={() => void toggleWishlist(book)}
         disabled={busy}
         aria-pressed={wanted}
@@ -67,6 +72,7 @@ export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWis
     <button
       type="button"
       className={`${styles.wishlistIcon} ${wanted ? styles.wishlistIconOn : ''}`}
+      data-books-action={addHook}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

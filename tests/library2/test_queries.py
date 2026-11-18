@@ -99,12 +99,12 @@ def test_list_artists_stats(imported_conn):
     assert drake["album_count"] == 1
     assert drake["single_count"] == 1
     # §16.2: 'Views' is only partially owned (Hotline Bling has no file), so the
-    # album is no longer blanket-monitored and its missing track is not wanted —
-    # the index stat therefore counts only owned-or-wanted tracks (both present
-    # 'One Dance' cuts), not the un-wanted missing one.
-    assert drake["track_count"] == 2
+    # album is no longer blanket-monitored and its missing track is not wanted.
+    # Drake isn't on the Watchlist, so the count is the albums you have
+    # (#2106 follow-up): Views' missing track counts, as missing.
+    assert drake["track_count"] == 3
     assert drake["tracks_present"] == 2
-    assert drake["tracks_missing"] == 0
+    assert drake["tracks_missing"] == 1
     assert "Wizkid" not in by_name
     wizkid = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Wizkid'").fetchone()[0]
     assert Q.get_artist(imported_conn, wizkid)["in_library"] is True
@@ -553,7 +553,8 @@ def test_list_artists_search_and_totals_include_alias_members(imported_conn):
     assert [artist["id"] for artist in artists] == [drake_id]
     assert artists[0]["album_count"] == 2
     assert artists[0]["single_count"] == 1
-    assert artists[0]["track_count"] == 3
+    # the albums you have: Views' missing track counts too (#2106 follow-up)
+    assert artists[0]["track_count"] == 4
     assert artists[0]["tracks_present"] == 3
     assert artists[0]["total_size_bytes"] == 10777
 
@@ -1217,7 +1218,7 @@ def test_list_artists_can_skip_the_disk_space_rollup(imported_conn):
     # Everything the collapsed list actually renders is unchanged.
     assert by_name["Drake"]["album_count"] == 1
     assert by_name["Drake"]["single_count"] == 1
-    assert by_name["Drake"]["track_count"] == 2
+    assert by_name["Drake"]["track_count"] == 3
     assert by_name["Drake"]["tracks_present"] == 2
     assert by_name["Drake"]["total_size_bytes"] == 0
 
@@ -1329,15 +1330,48 @@ def test_a_split_single_appears_on_the_second_artists_page(imported_conn):
     assert [a["title"] for a in data["appears_on"]] == ["Lead versus Other"]
 
 
+def _views_with(conn, name, *, album_role, lead_tracks):
+    """an artist on Drake's Views (2 tracks, one on disk): an album credit
+    with ``album_role``, and the lead credit on ``lead_tracks`` of its tracks."""
+    views = conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (name,)).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, ?)",
+                 (views, artist, album_role))
+    tracks = [r[0] for r in conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (views,))]
+    for position, track in enumerate(tracks):
+        lead = position < lead_tracks
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, ?, ?)", (track, artist, "primary" if lead else "featured",
+                                            0 if lead else 1))
+    return artist
+
+
 def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
-    """the index lists release artists: the album's primary artist, and a
-    primary album artist on a joint album too. Only featured guests drop out."""
-    views = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
-    partner = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Future')").lastrowid
-    imported_conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
-                          (views, partner))
+    """the index lists release artists: the album's primary artist, and the
+    lead on more than half a joint album's tracks. the artist page files that
+    album as their own too."""
+    partner = _views_with(imported_conn, "Future", album_role="featured", lead_tracks=2)
     names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
     assert {"Drake", "Future"} <= names and "Wizkid" not in names
+    assert [a["title"] for a in Q.get_artist(imported_conn, partner)["albums"]] == ["Views"]
+
+
+def test_a_guest_with_a_primary_album_credit_is_not_a_library_artist(imported_conn):
+    """#2142: a 2pac library listed nate dogg, outlawz and dr. dre beside him.
+    an album credit marked primary on someone else's album, with the guest
+    leading none (or only half) of its tracks, is not a release of their own:
+    their page files it under Appears On, and the index agrees."""
+    guest = _views_with(imported_conn, "Nate Dogg", album_role="primary", lead_tracks=0)
+    half = _views_with(imported_conn, "Outlawz", album_role="primary", lead_tracks=1)
+
+    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
+
+    assert "Drake" in names
+    assert "Nate Dogg" not in names and "Outlawz" not in names
+    for artist in (guest, half):
+        page = Q.get_artist(imported_conn, artist)
+        assert page["albums"] == [] and [a["title"] for a in page["appears_on"]] == ["Views"]
 
 
 def test_library_index_membership_searches_each_ownership_branch_by_index(imported_conn):
@@ -1353,8 +1387,10 @@ def test_library_index_membership_searches_each_ownership_branch_by_index(import
         )
     )
     assert "SCAN owned_al" not in plan, plan
+    assert "SCAN owned_ta" not in plan and "SCAN owned_la" not in plan, plan
     assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
-    assert "INDEX idx_lib2_album_artists_artist (artist_id=?)" in plan, plan
+    # #2142: the lead-credit branch starts from the artist's own credits
+    assert "INDEX idx_lib2_track_artists_artist (artist_id=?)" in plan, plan
 
 
 def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):
@@ -1387,7 +1423,11 @@ def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):
     conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE id=?", (file_id,))
     conn.commit()
     after = {a["name"]: a for a in Q.list_artists(conn)[0]}["Drake"]
-    assert after["track_count"] == before["track_count"] - 1
+    # the guest verse on someone else's album he holds nothing of never counts
+    assert before["track_count"] == before["tracks_present"] + 1
+    # nothing of that release is left, so it no longer counts at all (the
+    # albums you have, #2106 follow-up), and nothing reads as missing
+    assert after["track_count"] < before["track_count"]
     assert after["tracks_missing"] == 0
 
 

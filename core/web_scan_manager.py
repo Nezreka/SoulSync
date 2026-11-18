@@ -43,6 +43,7 @@ class WebScanManager:
         self._max_scan_time = 1800  # 30 minutes maximum
         self._current_server_type = None
         self._scan_progress = {}
+        self._last_scan_result = None
         self._completion_check_timer = None
         self._shutting_down = False
         # exact completion (#1899): a client that reports its own scan state
@@ -193,7 +194,8 @@ class WebScanManager:
                 return {
                     "status": "idle",
                     "server_type": None,
-                    "progress": {}
+                    "progress": {},
+                    "last_result": self._last_scan_result,
                 }
 
     def _execute_scan(self):
@@ -214,6 +216,7 @@ class WebScanManager:
             self._timer = None
             self._scan_start_time = time.time()
             self._scan_progress = {"status": "starting", "message": "Initializing scan"}
+            self._last_scan_result = None
 
         # Get the active media client
         media_client, server_type = self._get_active_media_client()
@@ -244,6 +247,17 @@ class WebScanManager:
                 except Exception as e:
                     logger.debug(f"Web scan: could not read the scan state before triggering ({e})")
                     self._scan_baseline = None
+            if server_type == "music_assistant" and (
+                not isinstance(self._scan_baseline, dict)
+                or not self._scan_baseline.get("task_monitor")
+            ):
+                # Never send Music Assistant through generic success heuristics
+                # when its pre-trigger task snapshot is unreadable.
+                self._scan_baseline = {
+                    "task_monitor": True,
+                    "outcome": None,
+                    "state_readable": False,
+                }
             folders = (self._folder_scan_plan(media_client, server_type, since)
                        if downloads_only and since else None)
             self._last_trigger_utc = self._utc_now(margin_seconds=120)
@@ -378,6 +392,26 @@ class WebScanManager:
         return self.EXACT_POLL_SECONDS if (
             self._scan_baseline is not None and self._state_client()) else 30
 
+    def _read_task_monitor_state(self):
+        if not (self._scan_baseline and self._scan_baseline.get("task_monitor")):
+            return None
+        client = self._state_client()
+        if client is None:
+            return None
+        try:
+            return client.get_scan_state()
+        except Exception as e:
+            logger.debug(f"Web scan: task monitor state unreadable ({e})")
+            return None
+
+    def _schedule_completion_poll(self, callback):
+        if self._shutting_down:
+            return
+        timer = threading.Timer(self._poll_seconds(), callback)
+        timer.daemon = True
+        self._completion_check_timer = timer
+        timer.start()
+
     def _exact_scan_done(self) -> bool:
         if self._scan_baseline is None:
             return False
@@ -400,7 +434,62 @@ class WebScanManager:
                 if self._shutting_down:
                     logger.debug("Web scan completion check aborted during shutdown")
                     return
-                # Check for timeout
+                # Music Assistant returns the exact task objects started by
+                # music/sync. Their terminal states are authoritative; never
+                # infer success from elapsed time, missing tasks, or API errors.
+                if self._scan_baseline and self._scan_baseline.get("task_monitor"):
+                    state = self._read_task_monitor_state()
+                    outcome = state.get("outcome") if isinstance(state, dict) else None
+                    if outcome == "success":
+                        with self._lock:
+                            self._scan_progress = {
+                                "status": "completed",
+                                "message": "Music Assistant scan completed successfully",
+                            }
+                        self._handle_scan_completion(outcome="success")
+                        return
+                    if outcome == "partial_success":
+                        # the sync ran to the end with a few bad files, so the
+                        # library did change: the database update still runs
+                        with self._lock:
+                            self._scan_progress = {
+                                "status": "completed",
+                                "message": "Music Assistant scan completed with some issues",
+                            }
+                        self._handle_scan_completion(outcome="partial_success")
+                        return
+                    if outcome in {"failed", "cancelled", "already_running", "unknown"}:
+                        with self._lock:
+                            self._scan_progress = {
+                                "status": outcome,
+                                "message": f"Music Assistant scan outcome: {outcome}",
+                            }
+                        self._handle_scan_completion(outcome=outcome)
+                        return
+                    elapsed_time = (
+                        time.time() - self._scan_start_time
+                        if self._scan_start_time else 0
+                    )
+                    if elapsed_time > self._max_scan_time:
+                        logger.warning(
+                            "Music Assistant scan monitoring timed out after %.0f seconds; "
+                            "the outcome is unverified",
+                            elapsed_time,
+                        )
+                        with self._lock:
+                            self._scan_progress = {
+                                "status": "timeout",
+                                "message": "Music Assistant scan outcome could not be verified before timeout",
+                            }
+                        self._handle_scan_completion(outcome="timeout")
+                        return
+                    # pending/running and temporarily unreadable states keep
+                    # polling, but the timeout is a failure state, never success.
+                    self._schedule_completion_poll(check_completion)
+                    return
+
+                # Check for timeout. plex, jellyfin and navidrome have no
+                # outcome to read, so the update after a long scan still runs
                 if self._scan_start_time and (time.time() - self._scan_start_time) > self._max_scan_time:
                     logger.warning(f"Web scan timed out after {self._max_scan_time} seconds")
                     with self._lock:
@@ -465,13 +554,17 @@ class WebScanManager:
         self._completion_check_timer = timer
         timer.start()
 
-    def _handle_scan_completion(self):
-        """Handle scan completion and trigger callbacks"""
+    def _handle_scan_completion(self, outcome="success"):
+        """Finish a scan. completion callbacks (the database update) run only
+        when the library changed: success, or music assistant's partial success."""
         with self._lock:
             if self._shutting_down:
                 return
             server_type = self._current_server_type
-            callbacks_to_call = self._scan_completion_callbacks.copy()
+            callbacks_to_call = (
+                self._scan_completion_callbacks.copy()
+                if outcome in ("success", "partial_success") else []
+            )
             downloads_during_scan = self._downloads_during_scan
 
         if not server_type:
@@ -479,7 +572,22 @@ class WebScanManager:
             self._reset_scan_state()
             return
 
-        logger.info(f"Web {server_type.upper()} library scan completed")
+        messages = {
+            "success": f"Web {server_type.upper()} library scan completed",
+            "partial_success": f"Web {server_type.upper()} library scan partially completed",
+            "failed": f"Web {server_type.upper()} library scan failed",
+            "cancelled": f"Web {server_type.upper()} library scan was cancelled",
+            "already_running": (f"Web {server_type.upper()} scan was already running before this "
+                                "request, scanning again now that it finished"),
+            "unknown": f"Web {server_type.upper()} library scan outcome is unknown",
+            "timeout": f"Web {server_type.upper()} library scan timed out without a verified result",
+        }
+        logger.info(messages.get(outcome, f"Web {server_type.upper()} library scan ended: {outcome}"))
+        self._last_scan_result = {
+            "status": "completed" if outcome in ("success", "partial_success") else outcome,
+            "outcome": outcome,
+            "server_type": server_type,
+        }
 
         for callback in callbacks_to_call:
             try:
@@ -488,16 +596,19 @@ class WebScanManager:
             except Exception as e:
                 logger.error(f"Error in web scan completion callback {callback.__name__}: {e}")
 
-        # Reset scan state
         self._reset_scan_state()
 
-        # Check if we need another scan due to downloads during this scan
+        # downloads that landed during the scan still need one, whatever this
+        # scan's outcome. a sync that was already running swallowed our
+        # request, so ask again now that it's done
         if downloads_during_scan:
             logger.info("Web scan follow-up needed for downloads during scan")
             queued_downloads_only = self._queued_downloads_only
             self._queued_downloads_only = True
             self.request_scan("Follow-up scan for downloads during previous scan",
                               scope="downloads" if queued_downloads_only else "full")
+        elif outcome == "already_running":
+            self.request_scan("Follow-up scan, the server was already scanning", scope="full")
 
     def _reset_scan_state(self):
         """Reset internal scan state"""

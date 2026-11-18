@@ -91,3 +91,33 @@ def test_drawer_offers_delete_file_with_destructive_confirm():
     assert "delete_file: !!del" in _JS
     assert "destructive: true" in _JS               # SoulSync confirm modal, red button
     assert ".vimp-btn--danger" in _CSS
+
+
+# ── the import folder (#2129) ────────────────────────────────────────────────
+
+def test_import_is_back_in_the_video_nav_where_music_keeps_it():
+    """#2129: the nav entry was commented out, so the video side had no Import.
+    It sits right after Downloads, like Music's Import after its downloads."""
+    nav = _INDEX[_INDEX.index('aria-label="Video navigation"'):]
+    nav = nav[:nav.index('data-section="video-system"')]
+    assert '<!-- <a class="nav-button" data-video-page="video-import"' not in _INDEX
+    assert nav.index('data-video-page="video-downloads"') < nav.index('data-video-page="video-import"')
+
+
+def test_the_page_lists_the_folder_and_imports_through_the_folder_routes():
+    assert "data-vimp-folder-list" in _INDEX and "data-vimp-auto" in _INDEX
+    assert "/api/video/import/folder'" in _JS
+    assert "/api/video/import/folder/import'" in _JS
+    assert "/api/video/import/folder/settings'" in _JS
+    # Change... reuses the place picker; a show folder needs no season/episode
+    assert "function openResolveFolder(" in _JS and "r.series" in _JS
+
+
+def test_the_folder_is_a_setting_with_its_automatic_switch():
+    # the Settings page is React (SETTINGS_PORT.md step V4c): the field is
+    # library-video-folders.tsx, saved to its own endpoint
+    settings = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
+                "library-video-folders.tsx").read_text(encoding="utf-8")
+    assert 'id="video-import-folder-path"' in settings and 'id="video-import-folder-auto"' in settings
+    assert "'/api/video/import/folder/settings'" in settings
+    assert "<ImportFolder />" in settings

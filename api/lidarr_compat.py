@@ -132,6 +132,8 @@ def lidarr_route(f):
         except Exception as e:  # noqa: BLE001
             logger.exception("lidarr api %s %s failed", request.method, request.path)
             return jsonify({"message": str(e)}), 500
+    # the route inventory reads this: an admin api key, nothing else
+    wrapped._soulsync_access = ("api_key", None)
     return wrapped
 
 

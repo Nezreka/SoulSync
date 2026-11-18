@@ -680,6 +680,11 @@ _ADDED_COLUMNS = (
     # Not secondary_types, which path templates read: see release_group_types.
     ("lib2_albums", "release_group_types",
      "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
+    # The MusicBrainz statuses (official, bootleg, ...) of the group's
+    # releases, with the group they were read from (#2175). Read by the
+    # watchlist's release status filter. See core/release_statuses.py.
+    ("lib2_albums", "release_statuses",
+     "ALTER TABLE lib2_albums ADD COLUMN release_statuses TEXT"),
     # The last automatic upgrade attempt for a track (#2060): when, how many
     # in a row found nothing, and against which file. See upgrade_attempts.
     ("lib2_tracks", "upgrade_attempt",
@@ -1781,6 +1786,21 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
                 _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("download provenance link failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # a count guess typed 5 tracks over 44 minutes an ep (wish you were
+        # here). once: the guess is gone from every writer now
+        try:
+            if not _done_once(cursor, "release_kind_by_runtime_v1"):
+                from core.library2.release_kind import retype_long_short_releases
+                stats["release_kind_by_runtime"] = retype_long_short_releases(cursor)
+                if stats["release_kind_by_runtime"]:
+                    logger.info("Retyped %d long singles/EPs as albums",
+                                stats["release_kind_by_runtime"])
+                _mark_done(cursor, "release_kind_by_runtime_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("release kind by runtime repair failed (will retry next start): %s", e)
 
     if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the

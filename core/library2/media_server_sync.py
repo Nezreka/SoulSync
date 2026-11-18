@@ -479,6 +479,12 @@ def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
         track_info = {"name": tags.get("title"), "artist": artist, "album": tags.get("album"),
                       "track_number": tags.get("track_number"),
                       "disc_number": tags.get("disc_number")} if artist and tags.get("title") else {}
+        if track_info:
+            # the release the tags name, so same-named albums stay apart
+            # (#1299 by release id, #2110 by year and folder)
+            from core.library.release_identity import read_release_identity
+            track_info["year"] = tags.get("year")
+            track_info["release_mbid"] = read_release_identity(path)[0] or None
     elif (server_info and server_info.get("name") and server_info.get("artist")
           and not _library_folders_visible(roots, path)):
         # the media server is on another machine: SoulSync can't open its

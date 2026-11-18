@@ -219,7 +219,9 @@ def test_web_server_delegates_to_the_shared_helper():
     source = Path("web_server.py").read_text(encoding="utf-8")
     assert ("from core.library.path_resolver import "
             "resolve_via_last_resort_fallbacks") in source
-    assert "resolve_via_last_resort_fallbacks(clean_rel, abs_bases)" in source
+    # the path as stored: the helper asks whether another record holds the file
+    # it finds, and looks this one up by its stored path
+    assert "resolve_via_last_resort_fallbacks(file_path, abs_bases)" in source
 
 
 # ── #1298: "Artist - Album - NN - Title" filenames ───────────────────────────

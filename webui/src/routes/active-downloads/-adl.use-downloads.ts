@@ -13,6 +13,7 @@ import {
   ADL_REVIEW_STATUSES,
   BATCH_FADE_SECONDS,
 } from './-adl.types';
+import { musicDownloadsFeed } from './-dl.feed';
 
 export interface AdlDownloadsState {
   downloads: AdlDownload[];
@@ -104,6 +105,8 @@ export function useAdlDownloads({
 
   const refresh = useCallback(async () => {
     const data = await fetchDownloads();
+    // the help sheet's Downloads answers read this poll instead of their own
+    if (data.downloads) musicDownloadsFeed.publish(data);
     setState((prev) => ({
       ...prev,
       // A failed poll returns {} — keep what is on screen rather than blanking
@@ -120,6 +123,7 @@ export function useAdlDownloads({
   }, []);
 
   useEffect(() => {
+    const detach = musicDownloadsFeed.attach(() => void refresh());
     void refresh();
     void refreshHistory();
 
@@ -143,6 +147,7 @@ export function useAdlDownloads({
     }, ADL_BATCH_HISTORY_POLL_MS);
 
     return () => {
+      detach();
       clearInterval(downloadsTimer);
       clearInterval(historyTimer);
     };

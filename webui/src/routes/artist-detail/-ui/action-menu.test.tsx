@@ -96,4 +96,42 @@ describe('ActionMenu', () => {
     expect(item.dataset.albumId).toBe('7');
     expect(item.getAttribute('role')).toBe('menuitem');
   });
+
+  it('scrolls inside instead of running off screen when it fits on neither side (#2124)', () => {
+    // a 600px menu from a button in the middle of a 500px window: it used to
+    // open down and lose its bottom items past the window edge.
+    const sh = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 600,
+    });
+    const ih = window.innerHeight;
+    window.innerHeight = 500;
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 150,
+      bottom: 180,
+      left: 20,
+      right: 80,
+      width: 60,
+      height: 30,
+      x: 20,
+      y: 150,
+      toJSON: () => ({}),
+    });
+    try {
+      renderMenu();
+      fireEvent.click(screen.getByText('More'));
+      const menu = document.querySelector('[role="menu"]') as HTMLElement;
+      const top = parseFloat(menu.style.top);
+      const max = parseFloat(menu.style.maxHeight);
+      expect(menu.style.overflowY).toBe('auto');
+      expect(top).toBeGreaterThanOrEqual(8);
+      expect(top + max).toBeLessThanOrEqual(500 - 8);
+      expect(menu.classList.contains('up')).toBe(false);
+    } finally {
+      rect.mockRestore();
+      window.innerHeight = ih;
+      if (sh) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', sh);
+    }
+  });
 });

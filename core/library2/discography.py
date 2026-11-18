@@ -68,6 +68,49 @@ def _stamp_release_types(cursor: Any, album_id: Any, release_group_id: Any, rele
     stamp(cursor, album_id, release_group_id, kinds)
 
 
+def _release_status_lookup(conn: Any, artist: Any, artist_id: int, profile_id: int,
+                           source: Any, provider_result: Any,
+                           source_artist_ids: Dict[str, Any]) -> tuple:
+    """#2175: the MusicBrainz statuses this artist lets through, and each
+    release group's statuses when they keep anything out. Only a
+    MusicBrainz catalogue has them: any other source gets (allowed, None)
+    and nothing is kept out by status."""
+    from core.release_statuses import fetch_group_statuses, is_restrictive
+
+    allowed = _artist_content_filters(conn, artist_id, profile_id).get("release_statuses")
+    if source != "musicbrainz" or not is_restrictive(allowed):
+        return allowed, None
+    keys = artist.keys() if hasattr(artist, "keys") else ()
+    mbid = (getattr(provider_result, "provider_entity_id", None)
+            or source_artist_ids.get("musicbrainz")
+            or (artist["musicbrainz_id"] if "musicbrainz_id" in keys else None))
+    if not mbid:
+        return allowed, None
+    return allowed, fetch_group_statuses(str(mbid))
+
+
+def _group_statuses_for(group_statuses: Any, release_group_id: Any) -> Any:
+    """A release group's statuses from the lookup, None when not known."""
+    if not group_statuses or not release_group_id:
+        return None
+    return group_statuses.get(str(release_group_id).strip().lower())
+
+
+def _statuses_allowed(statuses: Any, allowed: Any) -> bool:
+    from core.release_statuses import statuses_pass
+    return statuses_pass(statuses, allowed)
+
+
+def _stamp_release_statuses(cursor: Any, album_id: Any, release_group_id: Any,
+                            statuses: Any) -> None:
+    """Keep what MusicBrainz said, so the Discography Refresh findings can
+    go by it without asking again (#2175)."""
+    if statuses is None:
+        return
+    from core.release_statuses import stamp
+    stamp(cursor, album_id, release_group_id, statuses)
+
+
 def _normalize_type(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in {"album", "single", "ep", "compilation", "live"}:
@@ -301,20 +344,22 @@ _CONTENT_FILTER_DEFAULTS = {
 }
 
 
-def _release_type_included(track_count: Any, filters: Dict[str, bool]) -> bool:
-    """3.6.1's rule by track count: 1-3 a single, 4-6 an EP, 7+ an album. A
-    release whose count isn't known yet is let through, as 3.6.1 did on error."""
+def _release_type_included(track_count: Any, filters: Dict[str, bool],
+                           total_ms: Any = None) -> bool:
+    """3.6.1's release types by the store rule: 1-3 tracks under 30 min a
+    single, 4-6 an EP, else an album (count alone when the runtime isn't
+    known). A release whose count isn't known yet is let through, as 3.6.1
+    did on error."""
+    from core.metadata.release_type import release_type_from_shape
     try:
         count = int(track_count or 0)
     except (TypeError, ValueError):
         return True
     if count <= 0:
         return True
-    if count >= 7:
-        return filters.get("include_albums", True)
-    if count >= 4:
-        return filters.get("include_eps", True)
-    return filters.get("include_singles", True)
+    kind = release_type_from_shape(count, total_ms)
+    return filters.get({"album": "include_albums", "ep": "include_eps"}.get(
+        kind, "include_singles"), True)
 
 
 def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[str, bool]:
@@ -343,8 +388,20 @@ def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[s
         live_tracks = settings.get("include_live_tracks")
         filters["include_live_tracks"] = (
             filters["include_live"] if live_tracks is None else bool(live_tracks))
+        # #2175: the MusicBrainz statuses this artist lets through
+        filters["release_statuses"] = tuple(
+            settings.get("effective_release_statuses") or _library_release_statuses())
         return filters
-    return dict(_CONTENT_FILTER_DEFAULTS)
+    return {**_CONTENT_FILTER_DEFAULTS, "release_statuses": _library_release_statuses()}
+
+
+def _library_release_statuses() -> tuple:
+    from core.release_statuses import library_statuses
+    try:
+        from core.settings import config_manager
+    except Exception:  # noqa: BLE001 - no config reads as every status
+        config_manager = None
+    return library_statuses(config_manager)
 
 
 def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
@@ -526,7 +583,7 @@ def _expand_artist_discography(
     with closing(database._get_connection()) as conn:
         artist = conn.execute(
             "SELECT id, name, spotify_id, external_ids, quality_profile_id, monitored, monitor_new_items, "
-            "discography_synced_at FROM lib2_artists WHERE id=?",
+            "discography_synced_at, musicbrainz_id FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
         if not artist:
@@ -576,6 +633,11 @@ def _expand_artist_discography(
         stats["source"] = source
         stats["total"] = len(provider_result.releases)
         stats["is_complete"] = provider_result.is_complete
+
+        # #2175: asked before any write, so no transaction waits on MusicBrainz
+        allowed_statuses, group_statuses = _release_status_lookup(
+            conn, artist, artist_id, filter_profile_id, source, provider_result,
+            source_artist_ids)
 
         from core.library2.provider_snapshots import record_provider_snapshot
         snapshot_write = record_provider_snapshot(
@@ -662,6 +724,10 @@ def _expand_artist_discography(
             if (auto_monitor_release and content_filters is not None
                     and not _release_type_included(track_count, content_filters)):
                 auto_monitor_release = False
+            release_statuses = _group_statuses_for(group_statuses, release_group_id)
+            if (auto_monitor_release and content_filters is not None
+                    and not _statuses_allowed(release_statuses, allowed_statuses)):
+                auto_monitor_release = False
             if (
                 auto_monitor_release
                 and content_filters is not None
@@ -671,6 +737,11 @@ def _expand_artist_discography(
 
                 if is_compilation_album(title):
                     auto_monitor_release = False
+            # a live album with Live albums off is not a new release to want,
+            # the same release rule the discography refresh job reads (#2117)
+            if (auto_monitor_release and content_filters is not None
+                    and _track_content_excluded(title or "", title or "", content_filters)):
+                auto_monitor_release = False
 
             existing = _match_existing(index, title=title, album_type=album_type,
                                        provider_id=provider_id, source=source,
@@ -706,6 +777,8 @@ def _expand_artist_discography(
                 if release_group_id and str(
                         existing["musicbrainz_release_group_id"]).lower() == str(release_group_id).lower():
                     _stamp_release_types(cursor, existing["id"], release_group_id, release)
+                    _stamp_release_statuses(cursor, existing["id"], release_group_id,
+                                            release_statuses)
                 if id_conflict:
                     from core.library2.editions import record_alternative_edition
                     record_alternative_edition(
@@ -742,6 +815,7 @@ def _expand_artist_discography(
             confirm_release_kind(cursor, new_id, album_type)
             if release_group_id:
                 _stamp_release_types(cursor, new_id, release_group_id, release)
+                _stamp_release_statuses(cursor, new_id, release_group_id, release_statuses)
             seen_ids.add(new_id)
             if auto_monitor_release:
                 if not defer_auto_monitor:
@@ -1062,6 +1136,28 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                         f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
                         auto_monitor_ids,
                     )
+                # #2117: skipping the flip was not enough. the tracks were born
+                # monitored off the album, and the album's new_release rule
+                # made every one of them wanted, so a live album came down
+                # with Live albums off. what the filters leave out gets a rule
+                # saying so, unless the user picked or wished that track
+                left_out = [t for t in album_track_ids
+                            if t not in set(auto_monitor_ids)]
+                if left_out:
+                    marks = ",".join("?" for _ in left_out)
+                    user_set = {r[0] for r in conn.execute(
+                        f"SELECT entity_id FROM lib2_monitor_rules WHERE entity_type='track' "
+                        f"AND profile_id=? AND provenance IN ('user_explicit','wishlist_import') "
+                        f"AND entity_id IN ({marks})",
+                        (ADMIN_PROFILE_ID, *left_out))}
+                    left_out = [t for t in left_out if t not in user_set]
+                if left_out:
+                    marks = ",".join("?" for _ in left_out)
+                    conn.execute(
+                        f"UPDATE lib2_tracks SET monitored=0 WHERE id IN ({marks})", left_out)
+                    for track_id in left_out:
+                        record_rule(conn, "track", track_id, False, PROVENANCE_NEW_RELEASE,
+                                    profile_id=ADMIN_PROFILE_ID)
             else:
                 # P2D-6: lib2_tracks.monitored is the shared library's. another
                 # profile's want is its own track rules, and what its filters
@@ -1134,6 +1230,21 @@ def repair_track_number_collisions(database, config_manager, artist_id: int) -> 
                 ORDER BY al.id""",
             (artist_id,),
         ).fetchall()]
+        if album_ids:
+            # a row a moved file left behind shares its position with the row
+            # that has the file now. that is not a numbering fault, it folds
+            # (#2094), and only what still collides gets the tracklist pass
+            from core.library2.dedup_repair import fold_leftover_rows
+            if fold_leftover_rows(conn, album_ids)["leftover_tracks_folded"]:
+                conn.commit()
+                marks = ",".join("?" for _ in album_ids)
+                album_ids = [row["id"] for row in conn.execute(
+                    f"""SELECT al.id FROM lib2_albums al
+                         WHERE al.id IN ({marks}) AND EXISTS (
+                             SELECT 1 FROM lib2_tracks t WHERE t.album_id = al.id
+                              GROUP BY COALESCE(t.disc_number, 1), t.track_number
+                             HAVING COUNT(*) > 1)
+                         ORDER BY al.id""", album_ids).fetchall()]
         for album_id in album_ids:
             try:
                 if resolve_tracklist(config_manager, conn, album_id):

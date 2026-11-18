@@ -60,13 +60,26 @@ export function Padlock({ locked, size = 16 }: { locked: boolean; size?: number 
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      data-locked={locked ? '' : undefined}
     >
-      {/* the shackle swings shut when it locks */}
-      <path className={styles.shackle} d="M8 11V7.5a4 4 0 0 1 8 0V11" />
-      <rect x="5" y="11" width="14" height="10" rx="2.5" />
-      <path d="M12 15v2.5" />
+      {/* #2119: two drawn shapes, not a css turn of one. the turn alone read
+          the same both ways at row size (and safari skipped it) */}
+      {locked ? <path d="M8 11V7.5a4 4 0 0 1 8 0V11" /> : <path d="M8 11V7.5a4 4 0 0 1 7.7-1.5" />}
+      <rect x="5" y="11" width="14" height="10" rx="2.5" fill={locked ? 'currentColor' : 'none'} />
+      <path className={styles.keyhole} d="M12 15v2.5" />
     </svg>
   );
+}
+
+/** #2119: a locked album reads as finished, the way a complete one does: what
+ *  is on disk is the whole of it. the real total stays in the tooltip. */
+export function lockedPresence(
+  present: number,
+  total: number,
+  locked: boolean,
+): { present: number; total: number; locked: boolean } {
+  if (!locked || present <= 0) return { present, total, locked: false };
+  return { present, total: present, locked: true };
 }
 
 function useInvalidateLocks() {
@@ -157,14 +170,19 @@ export function ReviewLockButton({
         ) : null}
       </button>
       {open ? (
-        <ReviewLockSheet
-          entity={entity}
-          id={id}
-          name={name}
-          artistId={artistId}
-          onOpenAlbum={onOpenAlbum}
-          onClose={() => setOpen(false)}
-        />
+        // #2143: the sheet is portaled to the body, but its clicks still bubble
+        // up the react tree to whatever holds the padlock. on an album row that
+        // toggled the row, and two quick presses opened the album page.
+        <span className={styles.sheetHost} onClick={(event) => event.stopPropagation()}>
+          <ReviewLockSheet
+            entity={entity}
+            id={id}
+            name={name}
+            artistId={artistId}
+            onOpenAlbum={onOpenAlbum}
+            onClose={() => setOpen(false)}
+          />
+        </span>
       ) : null}
     </>
   );

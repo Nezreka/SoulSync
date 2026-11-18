@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'getting-started',
+    needs: 'admin',
     title: 'Getting Started',
     icon: '🚀',
     pages: [
         {
             id: 'gs-overview',
+            needs: 'everyone',
             title: 'Overview',
             lede: 'SoulSync is a self-hosted platform that downloads, syncs, and manages your music and video libraries — all from one app.',
             body: `
@@ -12,7 +14,7 @@ registerDocsSection({
 
 SoulSync connects to **Spotify**, **Apple Music/iTunes**, **Deezer**, **Discogs**, **Tidal**, **Qobuz**, **YouTube**, and **Beatport** for metadata, and downloads from **Soulseek**, **YouTube**, **Tidal**, **Qobuz**, **HiFi**, and **Deezer**. Your library is served through **Plex**, **Jellyfin/Emby**, or **Navidrome**. It also manages **movies, TV shows, and YouTube channels** on its dedicated video side.
 
-![SoulSync dashboard overview](gs-overview.jpg)
+![The dashboard home: the greeting hero with the worker orbs, a disconnected-Plex alert, the Finish setting up checklist, and Playlist Sync at 98%](gs-overview.jpg)
 
 ::: cards
 ### 🎵 Download Music
@@ -72,7 +74,7 @@ The first time you open SoulSync, setup takes over the screen. While the welcome
 
 To see setup again without touching your install, open **Settings → System → Developer → Setup preview**. It runs the real flow, saves nothing, and keeps a Preview tag in the corner.
 
-![Settings page first-time setup](gs-first-setup.jpg)
+![The Finish setting up checklist on the dashboard, with the five first-run steps](gs-first-setup.jpg)
 
 ## The four things SoulSync needs
 
@@ -122,7 +124,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
 | **AcoustID** | Audio fingerprint verification of downloads | API Key |
 | **ListenBrainz** | Listening history and recommendations | Token |
 
-![Service credentials connected](gs-connecting.jpg)
+![The Services panel in Settings: a card for every integration, each showing whether it is configured, not set up, or needs no key](gs-connecting.jpg)
 
 > [!NOTE]
 > Enrichment workers run automatically in the background once services are connected. Hover the worker orbs in the dashboard header to see what each one is doing — see [Enrichment Workers](#dash-workers).
@@ -138,6 +140,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
         },
         {
             id: 'gs-interface',
+            needs: 'everyone',
             title: 'Understanding the Interface',
             lede: 'How SoulSync is laid out and where everything lives.',
             body: `
@@ -145,7 +148,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
 
 SoulSync uses a **sidebar navigation** layout. The left sidebar holds links to every page, a media player at the bottom, and service status indicators. The main content area changes with the selected page. A **music/video toggle** in the sidebar switches between the two sides of the app.
 
-![SoulSync interface layout](gs-interface.jpg)
+![App layout with the sidebar navigation, media player, and main content area](gs-interface.jpg)
 
 ## Music side pages
 
@@ -167,7 +170,7 @@ SoulSync uses a **sidebar navigation** layout. The left sidebar holds links to e
 
 ## Show only what you use
 
-That's a lot of pages, and most people use a few. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours**. Pick **Simple** (music, Discover, playlists and import) or **Everything**, then switch single parts on or off. A part you switch off leaves the sidebar, the dashboard and the tabs that lead to it. It keeps working in the background, and it comes back with the same switch. Each profile picks its own. See [Show Only What You Use](#prof-features).
+That's a lot of pages, and most people use a few. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours**. Pick **Simple** (music, Discover, playlists and import) or **Everything**, then switch single parts on or off. A part you switch off leaves the sidebar, the dashboard and the tabs that lead to it. It keeps working in the background, and it comes back with the same switch. Each profile picks its own, and an admin can set it for someone and lock it. See [Show Only What You Use](#prof-features).
 
 ## Video side pages
 
@@ -182,7 +185,7 @@ That's a lot of pages, and most people use a few. **Customize**, at the bottom o
 Click the **version number** in the sidebar footer to open the **What's New** modal with release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit — the version button glows when an update is available (green for routine, yellow for major, red for critical). Docker users are notified when a new image is available.
 
 > [!TIP]
-> Press \`?\` anywhere to open the interactive helper menu, and \`Ctrl+K\` for helper search. The floating **?** button toggles click-anything help overlays.
+> Press \`?\` or \`F1\` anywhere, or click the **?** at the bottom right, to open help beside the page you are on. \`Ctrl K\` searches help, settings, pages and actions from anywhere. See [The Help Button](#ts-help).
 `
         },
         {
@@ -208,7 +211,7 @@ SoulSync uses **three folders** to manage your music files. **Most setup issues 
 | **Music Library Folder (output)** | \`/app/Transfer\` | Where post-processed files are moved after tagging and renaming. This **must** be the folder your media server monitors. |
 | **Import Folder** | \`/app/Staging\` | For the Import feature only. Drop audio files here to import them via the Import page. |
 
-![Download settings folder configuration](gs-folders.jpg)
+![Settings folder paths for downloads, library output, and import](gs-folders.jpg)
 
 ## How files flow
 
@@ -227,7 +230,7 @@ SoulSync uses **three folders** to manage your music files. **Most setup issues 
 
 ## Docker: the full picture
 
-![Docker folder mapping](gs-folder-docker.jpg)
+![Docker volume mapping note inside the folder settings](gs-folder-docker.jpg)
 
 In Docker, every app runs in its own isolated container with its own filesystem. **Volume mounts** in docker-compose create "bridges" between your host folders and the container — but SoulSync doesn't automatically know where those bridges go. You tell it via the Settings page.
 
@@ -325,8 +328,6 @@ services:
 # Download Folder (input): /app/downloads
 # Music Library Folder (output): /app/Transfer
 \`\`\`
-
-![Docker compose configuration](gs-docker.jpg)
 
 ## Setup checklist
 

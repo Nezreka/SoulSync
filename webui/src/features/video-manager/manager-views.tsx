@@ -3,6 +3,7 @@
 import clsx from 'clsx';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { cardGridStyle } from '@/components/card-size';
 import { cardFadeIn } from '@/routes/library/-ui/card-fade';
 
 import type { Facets, FileRow, Side, Sort, TitleRow } from './types';
@@ -116,6 +117,7 @@ export function PosterGrid({
   selected,
   selecting,
   loading,
+  cardSize = null,
   onToggle,
   onEdit,
 }: {
@@ -124,11 +126,17 @@ export function PosterGrid({
   selected: Set<number>;
   selecting: boolean;
   loading: boolean;
+  /** #2108: the chosen poster width, or null for the grid's own */
+  cardSize?: number | null;
   onToggle: (id: number, on?: boolean) => void;
   onEdit: (row: TitleRow) => void;
 }) {
   return (
-    <div className={clsx(s.grid, loading && s.dim)} data-selecting={selecting || undefined}>
+    <div
+      className={clsx(s.grid, loading && s.dim)}
+      style={cardGridStyle(cardSize)}
+      data-selecting={selecting || undefined}
+    >
       {rows.map((row, index) => {
         const picked = selected.has(row.id);
         const owned = row.episodes_owned ?? 0;
@@ -244,6 +252,8 @@ interface Column {
   sort?: string;
   align?: 'right';
   sides?: Side[];
+  /** a list that gives way when the table runs out of room: cut short, in full on hover */
+  clip?: (row: TitleRow) => string;
   render: (row: TitleRow, facets: Facets | null) => ReactNode;
 }
 
@@ -316,6 +326,13 @@ const COLUMNS: Column[] = [
   {
     id: 'audio',
     label: 'Audio',
+    clip: (r) =>
+      [
+        r.audio_languages.map((c) => c.toUpperCase()).join(', '),
+        r.atmos ? 'Atmos' : channelsLabel(r.audio_channels),
+      ]
+        .filter(Boolean)
+        .join(' · '),
     render: (r) =>
       [languageCodes(r.audio_languages), r.atmos ? 'Atmos' : channelsLabel(r.audio_channels)]
         .filter(Boolean)
@@ -324,6 +341,7 @@ const COLUMNS: Column[] = [
   {
     id: 'subtitles',
     label: 'Subtitles',
+    clip: (r) => r.subtitle_languages.map((c) => c.toUpperCase()).join(', '),
     render: (r) =>
       r.subtitle_languages.length ? (
         languageCodes(r.subtitle_languages, 4)
@@ -570,14 +588,25 @@ export function TitleTable({
                   >
                     <Poster row={row} small />
                     <span className={s.titleText}>
-                      <span className={s.titleName}>{row.title}</span>
+                      <span className={s.titleName} title={row.title}>
+                        {row.title}
+                      </span>
                       <Flags row={row} />
                     </span>
                   </a>
                 </td>
                 {shown.map((c) => (
-                  <td key={c.id} className={clsx(c.align === 'right' && s.right)}>
-                    {c.render(row, facets)}
+                  <td
+                    key={c.id}
+                    className={clsx(c.align === 'right' && s.right, c.clip && s.clipCell)}
+                  >
+                    {c.clip ? (
+                      <span className={s.clip} title={c.clip(row) || undefined}>
+                        {c.render(row, facets)}
+                      </span>
+                    ) : (
+                      c.render(row, facets)
+                    )}
                   </td>
                 ))}
                 <td className={s.endCell}>
@@ -684,7 +713,9 @@ export function FilesTable({
                       openTitle(row.kind, row.title_id);
                     }}
                   >
-                    <span className={s.titleName}>{row.title}</span>
+                    <span className={s.titleName} title={row.title}>
+                      {row.title}
+                    </span>
                     <span className={s.muted}>
                       {episode
                         ? [episode, row.episode_title].filter(Boolean).join(' · ')

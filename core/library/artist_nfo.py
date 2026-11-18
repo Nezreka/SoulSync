@@ -11,14 +11,14 @@ matches what the media server links tracks to. An existing ``artist.nfo``
 carrying a *different* MBID is never overwritten (the user may have fixed
 it by hand).
 
-Note on compilation layouts (``Compilations/<Album>/track.mp3``): the
-derived "artist folder" is the album folder, so the nfo lands there with
-the first track's album-artist. Jellyfin/Kodi/Emby ignore nfo files in
-album folders, so this is harmless clutter, not a misidentification — and
-the backfill job only targets real artist folders via the tracks table.
+The artist folder comes from the naming template (#2138): the folder at
+the level the album/single template names after the artist, counted from
+the library root, when it carries the artist's name. A layout with no
+artist folder (``Compilations/<Album>/track.mp3``) gets no nfo.
 """
 
 import os
+import threading
 import xml.etree.ElementTree as ET
 from typing import Tuple
 
@@ -110,6 +110,22 @@ def write_artist_nfo(
     return True, target
 
 
+def _library_roots(cfg) -> list:
+    """the configured music library folders and the transfer folder."""
+    roots = []
+    try:
+        music_paths = cfg.get("library.music_paths", []) if cfg else []
+        if isinstance(music_paths, str):
+            music_paths = [music_paths]
+        roots.extend(p for p in (music_paths or []) if isinstance(p, str) and p.strip())
+        transfer = cfg.get("soulseek.transfer_path", "") if cfg else ""
+        if isinstance(transfer, str) and transfer.strip():
+            roots.append(transfer)
+    except Exception as exc:  # noqa: BLE001 - config read must not break the writer
+        logger.debug("artist.nfo: library roots unreadable: %s", exc)
+    return roots
+
+
 def _is_library_root(folder: str, cfg) -> bool:
     """True when ``folder`` is a configured music library root or the
     transfer folder (#1449: never plant artist.nfo at the library root)."""
@@ -117,18 +133,7 @@ def _is_library_root(folder: str, cfg) -> bool:
         folder_norm = os.path.normcase(os.path.normpath(os.path.abspath(folder)))
     except (OSError, ValueError):
         return False
-    roots = []
-    try:
-        music_paths = cfg.get("library.music_paths", []) if cfg else []
-        if isinstance(music_paths, str):
-            music_paths = [music_paths]
-        roots.extend(music_paths or [])
-        transfer = cfg.get("soulseek.transfer_path", "") if cfg else ""
-        if transfer:
-            roots.append(transfer)
-    except Exception:  # noqa: BLE001 — config read must not break the writer
-        return False
-    for root in roots:
+    for root in _library_roots(cfg):
         try:
             if folder_norm == os.path.normcase(os.path.normpath(os.path.abspath(root))):
                 return True
@@ -137,9 +142,54 @@ def _is_library_root(folder: str, cfg) -> bool:
     return False
 
 
+def artist_folder_for_track(track_path: str, artist_name: str, cfg) -> str:
+    """the artist's folder for a library track, by the naming template (#2138)."""
+    from core.library.artist_image import locate_artist_folder
+
+    try:
+        templates = cfg.get("file_organization.templates", {}) if cfg else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("artist.nfo: templates unreadable: %s", exc)
+        templates = {}
+    return locate_artist_folder(track_path, artist_name, _library_roots(cfg), templates)
+
+
+_artwork_lock = threading.Lock()
+# artist folders this process already looked up artwork for: a folder whose
+# artist has none online is asked once per run, not once per imported track
+_artwork_tried: set = set()
+
+
+def schedule_artist_artwork(folder: str, artist_name: str, mbid: str) -> bool:
+    """poster.jpg / background.jpg for this folder, off the import thread (#2138).
+    once per folder per run. True when a lookup was started."""
+    from core.library.artist_image import write_artist_artwork
+
+    key = os.path.normcase(os.path.abspath(folder))
+    with _artwork_lock:
+        if key in _artwork_tried:
+            return False
+        _artwork_tried.add(key)
+
+    def run():
+        try:
+            results = write_artist_artwork(folder, artist_name, mbid)
+            for kind, (ok, detail) in results.items():
+                if ok:
+                    logger.info("artist %s written: %s", kind, detail)
+                else:
+                    logger.debug("artist %s skipped for %s: %s", kind, folder, detail)
+        except Exception as exc:  # noqa: BLE001 - artwork is a bonus
+            logger.debug("artist artwork failed for %s: %s", folder, exc)
+
+    threading.Thread(target=run, name="artist-artwork", daemon=True).start()
+    return True
+
+
 def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
                                fallback_mbid: str = "",
-                               fallback_name: str = "") -> Tuple[bool, str]:
+                               fallback_name: str = "",
+                               artwork=None) -> Tuple[bool, str]:
     """Write ``artist.nfo`` for a track's artist folder when enabled (#1449).
 
     Reads ALBUMARTIST and the MusicBrainz album-artist ID from the file's
@@ -159,6 +209,10 @@ def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
     never paired with a stale file-tag name. ``<name>`` still always comes
     from the file's ALBUMARTIST tag, per the issue's exact-match
     requirement.
+
+    ``artwork(folder, name, mbid)``, when given, is called for the artist
+    folder once it is known, nfo written or not: the poster.jpg /
+    background.jpg writer (#2138).
     """
     try:
         if not force and (cfg is None or not cfg.get(SETTING_PATH, False)):
@@ -166,26 +220,25 @@ def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
         if not track_path or not os.path.isfile(track_path):
             return False, "track file not found"
 
-        from core.library.artist_image import derive_artist_folder
-
-        artist_folder = derive_artist_folder(os.path.dirname(track_path))
-        if not artist_folder or not os.path.isdir(artist_folder):
-            return False, "could not derive artist folder"
-        # #1449 safety: with a flat path template the track can sit directly
-        # in the artist folder, so derive_artist_folder returns the library
-        # ROOT — writing artist.nfo there would plant one arbitrary artist's
-        # name/MBID at the top of the whole library. Never write to a
-        # configured library root or the transfer folder.
-        if _is_library_root(artist_folder, cfg):
-            return False, "derived folder is a library root; not writing artist.nfo"
-        if os.path.exists(os.path.join(artist_folder, ARTIST_NFO_FILENAME)):
-            return False, "artist.nfo already exists"
-
         from core.library.file_tags import read_embedded_tags
 
         result = read_embedded_tags(track_path) or {}
         tags = result.get("tags") or {}
         album_artist = str(tags.get("album_artist") or "").strip()
+        if not album_artist:
+            return False, "no ALBUMARTIST in file tags"
+
+        # #2138: the folder the naming template gives the artist, not "one up
+        # from the album folder" (Artist/Album/Artist - Album/track put the nfo
+        # in "Album").
+        artist_folder = artist_folder_for_track(track_path, album_artist, cfg)
+        if not artist_folder or not os.path.isdir(artist_folder):
+            return False, "could not derive artist folder"
+        # #1449 safety: never write to a configured library root or the
+        # transfer folder (one artist's name/MBID at the top of the library).
+        if _is_library_root(artist_folder, cfg):
+            return False, "derived folder is a library root; not writing artist.nfo"
+
         # Key shape differs by container (see file_tags.py): ID3/Vorbis use
         # musicbrainz_albumartistid, MP4 freeform atoms surface underscored.
         # The backfill job passes the DB-known MBID as a fallback for files
@@ -206,8 +259,15 @@ def ensure_artist_nfo_for_track(track_path: str, cfg, *, force: bool = False,
                 logger.debug(
                     "artist.nfo: DB artist %r != file ALBUMARTIST %r; "
                     "not using DB MBID fallback", fallback_name, album_artist)
-        if not album_artist:
-            return False, "no ALBUMARTIST in file tags"
+
+        if artwork is not None:
+            try:
+                artwork(artist_folder, album_artist, mbid)
+            except Exception as exc:  # noqa: BLE001 - artwork is a bonus
+                logger.debug("artist artwork skipped for %s: %s", artist_folder, exc)
+
+        if os.path.exists(os.path.join(artist_folder, ARTIST_NFO_FILENAME)):
+            return False, "artist.nfo already exists"
         if not mbid:
             return False, "no MusicBrainz album-artist ID in file tags"
         return write_artist_nfo(artist_folder, album_artist, mbid)
@@ -222,5 +282,7 @@ __all__ = [
     "build_artist_nfo",
     "read_artist_nfo_mbid",
     "write_artist_nfo",
+    "artist_folder_for_track",
+    "schedule_artist_artwork",
     "ensure_artist_nfo_for_track",
 ]

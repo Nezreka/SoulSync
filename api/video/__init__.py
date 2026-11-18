@@ -108,132 +108,76 @@ def create_video_blueprint() -> Blueprint:
     """Build the isolated /api/video blueprint with all video sub-routes."""
     bp = Blueprint("video_api", __name__)
 
-    # Profile permission guards behind the frontend gating. Uses flask.g (set
-    # app-wide by web_server's before_request: profile_id — 1==admin — and
-    # can_download) so this stays isolated from the music DB. Parity with the
-    # music side's @admin_only on Settings-class endpoints:
-    #   • Overlay Studio / Import / Collections / Repair (management) → admin
-    #   • Settings that EXPOSE or MUTATE tokens, API keys, server / slskd /
-    #     download config → admin for BOTH reads and writes (a GET here returns
-    #     raw keys — e.g. /enrichment/config, /downloads/slskd)
-    #   • Config the Settings page WRITES but content views legitimately READ
-    #     (library paths, quality tiers, server presence) → admin for WRITES only
-    #   • download-triggering actions → require can_download (mirrors music)
+    # Profile permission guards behind the frontend gating (#2166). What each
+    # path needs lives in one table, access.route_access, which the route
+    # inventory reads too; this gate enforces it off the request's effective
+    # permissions (g.perms, put there by web_server's before_request):
+    #   • management surfaces + settings that expose or mutate tokens, keys,
+    #     server / slskd / download config → admin (reads too where they leak)
+    #   • config the Settings page writes but content views read → admin writes
+    #   • everything else → movies or tv access; a path that names its kind
+    #     (/detail/movie/…, /tmdb/show/…) needs that kind's own access
+    #   • actions that fetch something → "download right away" for the kind
+    #     the body names (movies.get / tv.get); youtube follows also need
+    #     video.youtube
     @bp.before_request
     def _video_perm_gate():
-        from flask import request, g, jsonify
+        from flask import request, jsonify
+        from . import access
         path = request.path or ""
-        writing = request.method in ("POST", "PUT", "PATCH", "DELETE")
+        method = request.method
 
-        # the iCal feed is fetched by calendar apps with no session at all. its
-        # token is the credential, and the route checks that token's profile
-        # (video access, kids rating cap) itself.
-        from core.video.calendar_feed import is_feed_path
-        if is_feed_path(path, request.method):
+        need = access.route_access(path, method)
+        if need[0] == "public":
+            # the iCal feed is fetched by calendar apps with no session at all.
+            # its token is the credential, and the route checks that token's
+            # profile (video access, rating caps) itself.
             return None
 
-        def _p(*prefixes):
-            return any(path.startswith(x) for x in prefixes)
+        if access.is_admin():
+            # a request web_server didn't stamp with permissions reads the old
+            # g stamps as they were: a can_download of False holds even here
+            from flask import g
+            if (not hasattr(g, "perms") and getattr(g, "can_download", True) is False
+                    and access.is_get_action(path, method)):
+                return jsonify({"error": "Downloads are disabled for this profile."}), 403
+            return None
 
-        # Admin = the profile's REAL is_admin flag (web_server stashes g.is_admin;
-        # music supports secondary admins, and the frontend gates on the same
-        # flag — a profile-1-only check here split-brained against it). Fallback
-        # keeps the old convention when g wasn't populated (tests, edge callers).
-        is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
+        def _no(error, perm, status=403):
+            body = dict(access.P.refusal_body(perm))
+            body["error"] = error
+            return jsonify(body), status
 
         # Per-profile side access: a music-only profile gets NOTHING from the
-        # video blueprint (its whole UI is hidden for them — any request here is
-        # a deep link or a probe). Admins always have both sides.
-        if not is_admin and getattr(g, "allowed_sides", "both") not in ("video", "both"):
-            return jsonify({"error": "Video access is disabled for this profile."}), 403
+        # video blueprint (its whole UI is hidden for them, any request here is
+        # a deep link or a probe).
+        if not access.any_side():
+            return _no("Video access is disabled for this profile.", "movies.access")
 
-        # Management surfaces + credential/settings-only endpoints — admin for ANY
-        # method (their GETs leak raw tokens/keys or expose server config, and are
-        # only ever hit by the admin-only Settings page).
-        admin = _p("/api/video/overlays", "/api/video/import", "/api/video/collections",
-                   "/api/video/repair",
-                   "/api/video/server-config", "/api/video/jellyfin", "/api/video/libraries",
-                   "/api/video/organization", "/api/video/downloads/slskd",
-                   "/api/video/enrichment/config", "/api/video/enrichment/priority",
-                   "/api/video/notifications",   # P11: GETs return webhook URLs/bot tokens
-                   "/api/video/backups",         # P10: restore/download the whole database
-                   # delete a whole title; its preview GET lists file paths
-                   "/api/video/title-delete",
-                   # the library manager: its rows carry file paths
-                   "/api/video/manager")
-        # Config the Settings page WRITES but content views (download modal / grab)
-        # legitimately READ — gate the writes, leave the GETs open.
-        if writing:
-            admin = admin or _p("/api/video/server", "/api/video/downloads/config",
-                                 "/api/video/downloads/quality",
-                                 "/api/video/downloads/youtube-quality",
-                                 "/api/video/enrichment")   # all enrichment mutations
-            # Library / metadata MANAGEMENT — parity with music's @admin_only library edits
-            # (delete/sync/clear-match/delete-batch) + the download blocklist config. Content
-            # views only READ metadata (the detail GET stays open); these MUTATE the library.
-            admin = admin or _p("/api/video/bulk", "/api/video/monitor",
-                                 # single-episode monitor flip from the calendar
-                                 "/api/video/episode/monitor",
-                                 "/api/video/poster/set", "/api/video/downloads/blocklist",
-                                 # manual "I have this" links — library matching
-                                 # management, same as the overrides below. The
-                                 # GETs (search/status) stay open.
-                                 "/api/video/manual-match",
-                                 # the library tab's file actions: rename to the
-                                 # template, delete to the recycle bin
-                                 "/api/video/files",
-                                 # per-movie/per-show subtitle language overrides
-                                 # (Phase 3) — per-title management, same as the
-                                 # acquisition overrides. The GET stays open.
-                                 "/api/video/subtitles/overrides",
-                                 # whisper model download (Phase 4): writes to
-                                 # server disk + pulls ~500MB from the net —
-                                 # admin-only. The status GET stays open.
-                                 "/api/video/subtitles/whisper/download") \
-                or path.endswith(("/metadata", "/lock", "/refresh-art",
-                                  # season-wide monitor flip — same library
-                                  # management as /api/video/monitor above
-                                  "/monitor",
-                                  # per-title acquisition settings (P2/P8) — management,
-                                  # same as the metadata edits above
-                                  "/quality-profile", "/series-type",
-                                  # per-title acquisition overrides (sources,
-                                  # release groups, season packs)
-                                  "/overrides",
-                                  # per-show Synchronize — mutates library rows
-                                  "/sync",
-                                  # fix match + its undo — library identity
-                                  "/identify", "/identify/release",
-                                  # the padlock on one title, from its own page
-                                  "/padlock"))
-        if admin and not is_admin:
+        if need[0] == "admin":
             return jsonify({"error": "Admin only."}), 403
 
-        if writing and not getattr(g, "can_download", True) and _p(
-                "/api/video/downloads/grab", "/api/video/downloads/retry",
-                # clients-tab match & import: following a download is a grab
-                "/api/video/downloads/adopt",
-                "/api/video/youtube/download",
-                # manual subtitle download (Phase 3): an explicit user download
-                # action, same permission as a grab
-                "/api/video/subtitles/manual-download",
-                # the tab's bulk action — spends the same disk and bandwidth as
-                # the per-row grab above, so it takes the same permission
-                "/api/video/wishlist/youtube/download-all",
-                "/api/video/wishlist/add",
-                # the calendar's "wishlist the missing ones" is a bulk add
-                "/api/video/calendar/wishlist-missing",
-                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
-                "/api/video/watch/grab",
-                # the wishlist and watchlist are shared by the household: a
-                # profile that can't add to them can't empty them either (it
-                # used to, and that dropped every approved request with it),
-                # and searching/retrying spends the same indexer budget as a grab
-                "/api/video/wishlist/remove", "/api/video/wishlist/clear",
-                "/api/video/wishlist/search", "/api/video/wishlist/retry",
-                "/api/video/watchlist/remove", "/api/video/watchlist/person",
-                "/api/video/watchlist/studio", "/api/video/youtube/wishlist/remove"):
-            return jsonify({"error": "Downloads are disabled for this profile."}), 403
+        # a path that names its kind: a tv-only profile never reaches a movie
+        kind = access.kind_in_path(path)
+        if kind and not access.has_kind(kind):
+            return access.kind_refusal(kind)
+
+        if access.is_get_action(path, method):
+            body = request.get_json(silent=True)
+            youtube = path.startswith(access.YOUTUBE_PREFIXES)
+            if youtube:
+                if not access.can("video.youtube"):
+                    return access.refusal("video.youtube")
+                if not access.may_get(None):
+                    return _no("Downloads are disabled for this profile.", "movies.get")
+                return None
+            k = access.path_kind(path, body)
+            if k and not access.has_kind(k):
+                return access.kind_refusal(k)
+            if not access.may_get(k):
+                row = access.row_for(k) or "movies"
+                return _no("Downloads are disabled for this profile.", "%s.get" % row)
+        return None
 
     # the library manager keeps each title summed up in memory. a write to
     # one title, from any page, refreshes that title's row right away; the
@@ -277,6 +221,7 @@ def create_video_blueprint() -> Blueprint:
     from .subtitles import register_routes as reg_subtitles
     from .library_manage import register_routes as reg_library_manage
     from .manager import register_routes as reg_manager
+    from .title_status import register_routes as reg_title_status
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -306,5 +251,41 @@ def create_video_blueprint() -> Blueprint:
     reg_subtitles(bp)
     reg_library_manage(bp)
     reg_manager(bp)
+    reg_title_status(bp)
+
+    # the route inventory (#2166): every video view declares what it needs,
+    # read from the same table the gate enforces, once the routes are on the app
+    bp.record_once(_declare_access)
 
     return bp
+
+
+_ORDER = {"public": 0, "perm": 1, "admin": 2}
+
+
+def _declare_access(state) -> None:
+    """mark each video view with route_access for its rule(s). a view whose
+    methods differ (a GET any member may read, a POST that's the admin's)
+    declares the least it needs to be called at all, plus every method's own
+    answer on ``_soulsync_access_by_method``."""
+    from core.permissions import ACCESS_ATTR
+    from .access import route_access
+    app = state.app
+    prefix = "%s." % state.name
+    by_endpoint: dict = {}
+    for rule in app.url_map.iter_rules():
+        if not rule.endpoint.startswith(prefix):
+            continue
+        for method in sorted((rule.methods or set()) - {"HEAD", "OPTIONS"}):
+            by_endpoint.setdefault(rule.endpoint, {})["%s %s" % (method, rule.rule)] = \
+                route_access(rule.rule, method)
+    for endpoint, answers in by_endpoint.items():
+        fn = app.view_functions.get(endpoint)
+        if fn is None:
+            continue
+        least = min(answers.values(), key=lambda a: _ORDER.get(a[0], 1))
+        try:
+            setattr(fn, ACCESS_ATTR, least)
+            fn._soulsync_access_by_method = answers
+        except (AttributeError, TypeError):  # pragma: no cover - builtins
+            pass

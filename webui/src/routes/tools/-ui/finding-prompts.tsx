@@ -29,6 +29,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog';
 
+import type { KeepBestTally, RecordingPair } from '../-tools.keep-best-bulk';
 import type {
   AcoustidFixAction,
   BackfillFixAction,
@@ -38,6 +39,7 @@ import type {
   RetagFixAction,
 } from '../-tools.types';
 
+import { needsYouList } from '../-tools.keep-best-bulk';
 import styles from './finding-prompts.module.css';
 
 // ── Transcribed inline styles ────────────────────────────────────────────────
@@ -614,6 +616,143 @@ function WitnessMeDialog({
   );
 }
 
+/** Keep Best over many duplicates (#2179): what goes through, what needs you
+ *  and why, before anything runs. Moving playlist entries is offered for the
+ *  run (off until ticked), and differently named pairs in a selection are
+ *  listed so confirming them is a look, not a blind yes. */
+export interface KeepBestBulkChoice {
+  move: boolean;
+  confirm: boolean;
+}
+
+function KeepBestBulkPrompt({
+  tally,
+  pairs,
+  resolve,
+}: {
+  tally: (move: boolean, confirm: boolean) => KeepBestTally;
+  pairs: RecordingPair[];
+  resolve: (value: KeepBestBulkChoice | null) => void;
+}) {
+  const [move, setMove] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const now = tally(move, confirm);
+  const plain = tally(false, confirm);
+  const moved = tally(true, confirm);
+  // moving is worth offering when a playlist is what holds a finding back
+  const offerMove = (plain.needs.playlist || 0) > 0;
+  const unblocked = moved.ready - plain.ready;
+  const reasons = needsYouList(now.needs);
+  const title = `Keep Best on ${now.total.toLocaleString()} duplicate${now.total === 1 ? '' : 's'}`;
+  return (
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) resolve(null);
+      }}
+      viewportClassName={clsx('modal-overlay', styles.overlay)}
+      className={clsx(styles.box, styles.keepBest)}
+      aria-label={title}
+    >
+      <div style={TITLE}>{title}</div>
+      <p className={styles.keepLead}>
+        Keeps the recommended copy of each and moves the rest to recoverable quarantine. Protected
+        copies stay.
+      </p>
+      <div className={styles.keepTally} data-testid="keep-best-tally">
+        <span className={styles.keepCount}>
+          <b>{now.ready.toLocaleString()}</b> go through
+        </span>
+        {now.held ? (
+          <span className={clsx(styles.keepCount, styles.keepHeld)}>
+            <b>{now.held.toLocaleString()}</b> need you
+          </span>
+        ) : null}
+      </div>
+      {reasons.length ? (
+        <ul className={styles.keepReasons}>
+          {reasons.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
+      {offerMove ? (
+        <label className={styles.keepOption}>
+          <input
+            type="checkbox"
+            id="_keep-best-move"
+            checked={move}
+            onChange={(event) => setMove(event.target.checked)}
+          />
+          <span>
+            Move playlist entries to the kept copy
+            <span className={styles.keepNote}>
+              {unblocked > 0 ? `Lets ${unblocked.toLocaleString()} more go through. ` : ''}
+              A removed copy&apos;s entry in a playlist the kept copy is not in points at the kept
+              copy instead, in the same place. Smart playlists are never changed.
+            </span>
+          </span>
+        </label>
+      ) : null}
+      {pairs.length ? (
+        <div className={styles.keepPairs}>
+          <div className={styles.keepPairsHead}>
+            Named differently ({pairs.length.toLocaleString()})
+          </div>
+          <ul className={styles.keepPairList} aria-label="Copies named differently">
+            {pairs.map((pair) => (
+              <li key={pair.id} className={styles.keepPair}>
+                {pair.copies.map((one, index) => (
+                  <span className={styles.keepPairCopy} key={`${pair.id}-${index}`}>
+                    <span className={styles.keepPairTitle}>{one.title}</span>
+                    <span className={styles.keepNote}>
+                      {[one.artist, one.detail].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <label className={styles.keepOption}>
+            <input
+              type="checkbox"
+              id="_keep-best-confirm"
+              checked={confirm}
+              onChange={(event) => setConfirm(event.target.checked)}
+            />
+            <span>
+              I checked these: each pair is the same recording
+              <span className={styles.keepNote}>
+                Leave it off and they stay open for you to look at one by one.
+              </span>
+            </span>
+          </label>
+        </div>
+      ) : null}
+      {now.held ? (
+        <p className={styles.keepNote}>
+          The ones that need you stay open, marked Needs you. Sort the list by Needs you first to
+          find them.
+        </p>
+      ) : null}
+      <div className={styles.keepActions}>
+        <button id="_keep-best-cancel" type="button" style={GREY} onClick={() => resolve(null)}>
+          Cancel
+        </button>
+        <button
+          id="_keep-best-go"
+          type="button"
+          style={RED}
+          disabled={now.ready === 0}
+          onClick={() => resolve({ move, confirm })}
+        >
+          {now.ready ? `Keep Best on ${now.ready.toLocaleString()}` : 'Nothing can go through'}
+        </button>
+      </div>
+    </DialogFrame>
+  );
+}
+
 // ── The hook ─────────────────────────────────────────────────────────────────
 
 type PendingPrompt =
@@ -634,7 +773,13 @@ type PendingPrompt =
       manualCount: number;
       resolve: (value: RetagFixAction | null) => void;
     }
-  | { kind: 'witness'; count: number; resolve: (value: boolean) => void };
+  | { kind: 'witness'; count: number; resolve: (value: boolean) => void }
+  | {
+      kind: 'keepBest';
+      tally: (move: boolean, confirm: boolean) => KeepBestTally;
+      pairs: RecordingPair[];
+      resolve: (value: KeepBestBulkChoice | null) => void;
+    };
 
 export interface FindingPrompts {
   promptOrphan: () => Promise<OrphanFixAction | null>;
@@ -648,6 +793,12 @@ export interface FindingPrompts {
     bulk?: boolean,
   ) => Promise<RetagFixAction | null>;
   promptWitnessMe: (count: number) => Promise<boolean>;
+  /** #2179: Keep Best over many duplicates. `pairs` only for a selection,
+   *  whose rows are loaded: a whole type is never confirmed blind */
+  promptKeepBest: (
+    tally: (move: boolean, confirm: boolean) => KeepBestTally,
+    pairs?: RecordingPair[],
+  ) => Promise<KeepBestBulkChoice | null>;
   /** Render this somewhere inside the findings tab. */
   promptNode: React.ReactNode;
 }
@@ -711,6 +862,14 @@ export function useFindingPrompts(): FindingPrompts {
     [],
   );
 
+  const promptKeepBest = useCallback(
+    (tally: (move: boolean, confirm: boolean) => KeepBestTally, pairs: RecordingPair[] = []) =>
+      new Promise<KeepBestBulkChoice | null>((resolve) => {
+        setPending({ kind: 'keepBest', tally, pairs, resolve });
+      }),
+    [],
+  );
+
   let promptNode: React.ReactNode = null;
   if (pending?.kind === 'orphan') {
     promptNode = <OrphanPrompt resolve={(v) => settle(pending.resolve as never, v)} />;
@@ -739,6 +898,14 @@ export function useFindingPrompts(): FindingPrompts {
         resolve={(v) => settle(pending.resolve as never, v)}
       />
     );
+  } else if (pending?.kind === 'keepBest') {
+    promptNode = (
+      <KeepBestBulkPrompt
+        tally={pending.tally}
+        pairs={pending.pairs}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
   } else if (pending?.kind === 'witness') {
     promptNode = (
       <WitnessMeDialog
@@ -756,6 +923,7 @@ export function useFindingPrompts(): FindingPrompts {
     promptBackfill,
     promptRetag,
     promptWitnessMe,
+    promptKeepBest,
     promptNode,
   };
 }

@@ -2,6 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
+import {
+  describeStatuses,
+  normalizeOverride,
+  normalizeStatuses,
+  RELEASE_STATUS_COPY,
+  RELEASE_STATUSES,
+  toggleStatus,
+} from '@/components/release-statuses';
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { playTrackByMetadata } from '@/features/playback/play-track';
 import { getShellBridge } from '@/platform/shell/bridge';
@@ -202,7 +210,17 @@ function updateFromDraft(draft: WatchlistArtistConfig): WatchlistArtistConfigUpd
     preferred_metadata_source: draft.preferred_metadata_source,
     // always said, so the server knows which rules a save means (#1822)
     follow_defaults: Boolean(draft.follow_defaults),
+    // #2175: null follows the library-wide statuses
+    release_statuses: normalizeOverride(draft.release_statuses),
   };
+}
+
+/** #2175: does this artist go by anything but the defaults? Its own release
+ *  rules, or its own release statuses. */
+export function artistHasOwnRules(
+  config: Pick<WatchlistArtistConfig, 'follow_defaults' | 'release_statuses'>,
+): boolean {
+  return !config.follow_defaults || normalizeOverride(config.release_statuses) !== null;
 }
 
 interface Props {
@@ -310,9 +328,10 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
     setDraft((previous) => {
       if (!previous) return previous;
       if (!follow) return { ...previous, follow_defaults: false };
-      // show the rules it will get
+      // show the rules it will get. its own release statuses go back to the
+      // library's too, like Reset all to defaults (#2175)
       const defaults = payload?.config?.defaults ?? {};
-      const next = { ...previous, follow_defaults: true };
+      const next = { ...previous, follow_defaults: true, release_statuses: null };
       for (const key of [...RELEASE_TYPE_KEYS, ...CONTENT_FILTER_KEYS]) {
         const value = defaults[key];
         if (typeof value === 'boolean') next[key] = value;
@@ -320,6 +339,10 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
       return next;
     });
   const following = Boolean(draft?.follow_defaults);
+  const libraryStatuses = normalizeStatuses(payload?.config?.library_release_statuses);
+  const ownStatuses = draft ? normalizeOverride(draft.release_statuses) : null;
+  const setOwnStatuses = (statuses: WatchlistArtistConfig['release_statuses']) =>
+    setDraft((previous) => (previous ? { ...previous, release_statuses: statuses } : previous));
 
   const discography = payload ? pickDiscographySource(payload) : null;
   const releases = payload?.recent_releases ?? [];
@@ -395,8 +418,8 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
       </h2>
       <span className="wap-sub">
         {config ? (
-          <span className={`wap-pill${config.follow_defaults ? '' : ' wap-pill--custom'}`}>
-            {config.follow_defaults ? 'Defaults' : 'Custom rules'}
+          <span className={`wap-pill${artistHasOwnRules(config) ? ' wap-pill--custom' : ''}`}>
+            {artistHasOwnRules(config) ? 'Custom rules' : 'Defaults'}
           </span>
         ) : null}
         {scanText}
@@ -730,6 +753,50 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
               </div>
             </section>
 
+            {/* #2175: inherit or its own, like auto-download below. The chips
+                only show for its own: the default is said in the option. */}
+            <section className="config-section wap-section">
+              <label className="wap-label" htmlFor="watchlist-config-release-status">
+                Release status
+              </label>
+              <select
+                id="watchlist-config-release-status"
+                className="form-select"
+                value={ownStatuses ? 'custom' : 'inherit'}
+                onChange={(event) =>
+                  setOwnStatuses(event.target.value === 'custom' ? [...libraryStatuses] : null)
+                }
+              >
+                <option value="inherit">
+                  Use the default ({describeStatuses(libraryStatuses)})
+                </option>
+                <option value="custom">Pick for this artist</option>
+              </select>
+              {ownStatuses ? (
+                <div className="wap-chips" role="group" aria-label="Release statuses">
+                  {RELEASE_STATUSES.map((status) => {
+                    const on = ownStatuses.includes(status);
+                    return (
+                      <ToggleChip
+                        key={status}
+                        checked={on}
+                        disabled={on && ownStatuses.length === 1}
+                        onChange={(value) =>
+                          setOwnStatuses(toggleStatus(ownStatuses, status, value))
+                        }
+                        title={RELEASE_STATUS_COPY[status].label}
+                        description={RELEASE_STATUS_COPY[status].hint}
+                      />
+                    );
+                  })}
+                </div>
+              ) : null}
+              <small className="wap-hint">
+                Statuses come from MusicBrainz. A release from another source, or with no status,
+                always gets through.
+              </small>
+            </section>
+
             <section className="config-section wap-section">
               <label className="wap-label" htmlFor="watchlist-config-auto-download">
                 New releases from this artist
@@ -929,11 +996,13 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
 
 function ToggleChip({
   checked,
+  disabled,
   onChange,
   title,
   description,
 }: {
   checked: boolean;
+  disabled?: boolean;
   onChange: (value: boolean) => void;
   title: string;
   description: string;
@@ -943,6 +1012,7 @@ function ToggleChip({
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       {title}

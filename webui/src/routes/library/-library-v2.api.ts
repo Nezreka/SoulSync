@@ -57,6 +57,10 @@ interface EnabledResponse extends Ok {
   can_write?: boolean;
   /** E-13: whether it may monitor and search in the library it looks at. */
   can_wish?: boolean;
+  /** a wish that downloads right away (Automatic Search, Enhance) is allowed */
+  can_download?: boolean;
+  /** an Interactive Search pick may name a library row */
+  can_grab?: boolean;
 }
 
 export interface LibraryV2Availability {
@@ -65,6 +69,11 @@ export interface LibraryV2Availability {
   canWrite: boolean;
   /** True for the admin, and for a profile in a library of its own (#1199). */
   canWish: boolean;
+  /** #2173: Automatic Search, Enhance Quality and Upgrade start a download.
+   *  false for a profile that asks first or can't get music. */
+  canDownload: boolean;
+  /** #2173: Interactive Search may grab into a library row. */
+  canGrab: boolean;
 }
 interface ArtistsResponse extends Ok {
   artists: LibraryV2ArtistSummary[];
@@ -90,6 +99,9 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
     // Missing capability data is not permission to mutate.
     canWrite: payload.can_write === true,
     canWish: payload.can_wish === true || payload.can_write === true,
+    // missing data is not permission to download either
+    canDownload: payload.can_download === true || payload.can_write === true,
+    canGrab: payload.can_grab === true || payload.can_write === true,
   };
 }
 
@@ -103,6 +115,14 @@ export interface LibraryV2ListFilters {
   review?: string;
   /** ask for each artist card's "could be better" count */
   includeUpgradable?: boolean;
+  /** #2107: sort direction, collection filters, featured-only artists */
+  dir?: string;
+  completion?: string;
+  missingMin?: number;
+  missingMax?: number;
+  pctMin?: number;
+  pctMax?: number;
+  credit?: string;
 }
 
 function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) {
@@ -112,6 +132,13 @@ function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) 
   if (filters.review === 'reviewed' || filters.review === 'unreviewed') {
     params.set('review', filters.review);
   }
+  if (filters.dir) params.set('dir', filters.dir);
+  if (filters.completion) params.set('completion', filters.completion);
+  if (filters.missingMin != null) params.set('missing_min', String(filters.missingMin));
+  if (filters.missingMax != null) params.set('missing_max', String(filters.missingMax));
+  if (filters.pctMin != null) params.set('pct_min', String(filters.pctMin));
+  if (filters.pctMax != null) params.set('pct_max', String(filters.pctMax));
+  if (filters.credit) params.set('credit', filters.credit);
 }
 
 export async function fetchLibraryV2Artists(
@@ -138,6 +165,22 @@ export async function fetchLibraryV2Artists(
     apiClient.get('library/v2/artists', { searchParams: params }),
     'Failed to load library',
   );
+}
+
+/** #2109: every artist id the list's filters match, for "select all" */
+export async function fetchLibraryV2ArtistIds(
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'monitored'> & LibraryV2ListFilters,
+): Promise<number[]> {
+  const params = new URLSearchParams();
+  if (search.q) params.set('search', search.q);
+  params.set('sort', search.sort);
+  params.set('monitored', search.monitored);
+  setListFilters(params, search);
+  const payload = await lib2Json<Ok & { ids: number[] }>(
+    apiClient.get('library/v2/artists/ids', { searchParams: params }),
+    'Could not select every artist',
+  );
+  return payload.ids ?? [];
 }
 
 interface AlbumsResponse extends Ok {
@@ -170,11 +213,12 @@ interface WantedResponse extends Ok {
 
 /** §64 I2: library-wide Missing / Cutoff Unmet lists. */
 export async function fetchLibraryV2Wanted(
-  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'> & { wantedArtist?: number },
 ): Promise<WantedResponse> {
   const params = new URLSearchParams();
   params.set('kind', search.wantedKind);
   if (search.q) params.set('search', search.q);
+  if (search.wantedArtist) params.set('artist', String(search.wantedArtist));
   params.set('page', String(search.page));
   return lib2Json<WantedResponse>(
     apiClient.get('library/v2/wanted', { searchParams: params }),
@@ -183,10 +227,17 @@ export async function fetchLibraryV2Wanted(
 }
 
 export function libraryV2WantedQueryOptions(
-  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'>,
+  search: Pick<LibraryV2Search, 'q' | 'page' | 'wantedKind'> & { wantedArtist?: number },
 ) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'wanted', search.wantedKind, search.q, search.page],
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'wanted',
+      search.wantedKind,
+      search.q,
+      search.page,
+      search.wantedArtist ?? 0,
+    ],
     queryFn: () => fetchLibraryV2Wanted(search),
   });
 }
@@ -382,6 +433,136 @@ export async function manualMatchLibraryV2Entity(input: {
     watchlistUpdated: payload.watchlist_updated ?? [],
     watchlistSkipped: payload.watchlist_skipped ?? [],
   };
+}
+
+/** #2145: one release of an album, as the Other versions picker lists it. */
+export interface LibraryV2AlbumVersion {
+  source: string;
+  id: string;
+  title: string;
+  date: string | null;
+  year: number | null;
+  track_count: number | null;
+  label: string | null;
+  country: string | null;
+  format: string | null;
+  disambiguation: string | null;
+  status: string | null;
+  album_type: string | null;
+  image_url: string | null;
+  current: boolean;
+}
+
+export interface LibraryV2AlbumVersionGroup {
+  source: string;
+  label: string;
+  versions: LibraryV2AlbumVersion[];
+  error?: string;
+  note?: string;
+}
+
+export interface LibraryV2AlbumVersions {
+  album?: {
+    id: number;
+    title: string;
+    artist_name: string;
+    track_count: number | null;
+    release_ids: Record<string, string>;
+    pinned: { source: string; id: string } | null;
+  };
+  groups: LibraryV2AlbumVersionGroup[];
+}
+
+export interface LibraryV2AlbumVersionPreview {
+  source: string;
+  release_id: string;
+  track_count_before: number | null;
+  track_count_after: number;
+  owned_count: number;
+  mapped_count: number;
+  unmapped_count: number;
+  pairings: {
+    local_title: string;
+    local_track_number: number | null;
+    target_title: string | null;
+    target_track_number: number | null;
+    matched_by: string;
+    mapped: boolean;
+  }[];
+  tracks: { title: string | null; track_number: number | null; disc_number: number | null }[];
+  held_by: { id: number; title: string } | null;
+  /** #2178: the album already points at this version */
+  already_current?: boolean;
+  /** #2178: albums of this artist that are this version too. `holds`: that
+   *  one already is it and stays, this one folds into it */
+  merge_with?: LibraryV2AlbumMergeCandidate[];
+}
+
+export interface LibraryV2AlbumMergeCandidate {
+  id: number;
+  title: string;
+  holds: boolean;
+  owned_count: number;
+  track_count: number | null;
+  locked: boolean;
+}
+
+export interface LibraryV2AlbumVersionApplied {
+  /** the album left standing */
+  album_id: number;
+  merged_album_id: number | null;
+}
+
+/** #2145: the album's other versions; `query` searches this artist instead. */
+export async function fetchLibraryV2AlbumVersions(
+  albumId: number,
+  query?: string,
+): Promise<LibraryV2AlbumVersions> {
+  return lib2Json<Ok & LibraryV2AlbumVersions>(
+    apiClient.get(`library/v2/albums/${albumId}/versions`, {
+      ...(query !== undefined ? { searchParams: { q: query } } : {}),
+      timeout: 60_000,
+    }),
+    'Could not load other versions',
+  );
+}
+
+export async function previewLibraryV2AlbumVersion(
+  albumId: number,
+  version: { source: string; id: string; title?: string },
+): Promise<LibraryV2AlbumVersionPreview> {
+  return lib2Json<Ok & LibraryV2AlbumVersionPreview>(
+    apiClient.post(`library/v2/albums/${albumId}/versions/preview`, {
+      json: { source: version.source, release_id: version.id, title: version.title },
+      timeout: 60_000,
+    }),
+    'Could not read that version',
+  );
+}
+
+/** #2178: `version` carries the picked row's title, date, type and track
+ *  count onto the album; `mergeAlbumId` merges an album that is it too. */
+export async function applyLibraryV2AlbumVersion(
+  albumId: number,
+  version: LibraryV2AlbumVersion,
+  mergeAlbumId?: number,
+): Promise<LibraryV2AlbumVersionApplied> {
+  return lib2Json<Ok & LibraryV2AlbumVersionApplied>(
+    apiClient.post(`library/v2/albums/${albumId}/versions/apply`, {
+      json: {
+        source: version.source,
+        release_id: version.id,
+        version: {
+          title: version.title,
+          date: version.date,
+          album_type: version.album_type,
+          track_count: version.track_count,
+        },
+        ...(mergeAlbumId !== undefined ? { merge_album_id: mergeAlbumId } : {}),
+      },
+    }),
+    mergeAlbumId !== undefined ? 'Merging the albums failed' : 'Switching version failed',
+  );
 }
 
 /** Clear a wrong provider identity, optionally with the linked Watchlist row
@@ -878,6 +1059,40 @@ export async function fetchLibraryV2ArtistSettings(
   };
 }
 
+/** #2165: what new downloads of an artist are filed and tagged as. */
+export interface LibraryV2ArtistNaming {
+  artist_id: number;
+  /** the name the library uses: a pinned name, else the scanned one */
+  library_name: string;
+  scanned_name: string;
+  pinned: boolean;
+  /** what the download source calls them, when it could say */
+  source: { provider: string; label: string; id: string; name: string } | null;
+  /** the source spells them differently and downloads take the library's name */
+  renamed: boolean;
+  /** the source spells them differently and downloads keep the source's name */
+  kept_source_name: boolean;
+  /** the folder a new album goes to, null when file organization is off */
+  folder: string | null;
+}
+
+export async function fetchLibraryV2ArtistNaming(artistId: number): Promise<LibraryV2ArtistNaming> {
+  const payload = await lib2Json<Ok & Partial<LibraryV2ArtistNaming>>(
+    apiClient.get(`library/v2/artists/${artistId}/naming`),
+    'The artist name could not be loaded',
+  );
+  return {
+    artist_id: payload.artist_id ?? artistId,
+    library_name: payload.library_name ?? '',
+    scanned_name: payload.scanned_name ?? '',
+    pinned: payload.pinned === true,
+    source: payload.source ?? null,
+    renamed: payload.renamed === true,
+    kept_source_name: payload.kept_source_name === true,
+    folder: payload.folder ?? null,
+  };
+}
+
 export async function updateLibraryV2ArtistSettings(
   artistId: number,
   settings: Pick<
@@ -893,6 +1108,7 @@ export async function updateLibraryV2ArtistSettings(
     | 'include_compilations'
     | 'include_instrumentals'
     | 'include_other_artists'
+    | 'release_statuses'
     | 'auto_download'
     | 'lookback_days'
     | 'preferred_metadata_source'
@@ -918,6 +1134,8 @@ export async function updateLibraryV2ArtistSettings(
         include_compilations: settings.include_compilations,
         include_instrumentals: settings.include_instrumentals,
         include_other_artists: settings.include_other_artists,
+        // #2175: null follows the library-wide statuses
+        release_statuses: settings.release_statuses ?? null,
         auto_download: settings.auto_download,
         lookback_days: settings.lookback_days,
         preferred_metadata_source: settings.preferred_metadata_source,
@@ -1709,6 +1927,60 @@ export async function previewLibraryV2AlbumReorganize(
   );
 }
 
+/** #2141: how many files of each album Preview rename would move. */
+export interface LibraryV2RenameCheck {
+  /** false while organizing is off, the template doesn't render, or for a non-admin */
+  enabled: boolean;
+  /** album id: files there that aren't where the template puts them */
+  albums: Record<string, number>;
+  /** the tracks those files belong to */
+  tracks: number[];
+}
+
+interface RenameCheckSlice extends Ok, LibraryV2RenameCheck {
+  next: number | null;
+}
+
+/** kept apart from LIBRARY_V2_QUERY_KEY: every library write invalidates that,
+ *  and this plans every album of the artist. a reorganize refreshes it. */
+export const RENAME_CHECK_QUERY_KEY = ['library-v2-rename-check'] as const;
+
+/** the server plans in time-bounded slices; walk them all */
+export async function fetchLibraryV2ArtistRenameCheck(
+  artistId: number,
+  signal?: AbortSignal,
+): Promise<LibraryV2RenameCheck> {
+  const out: LibraryV2RenameCheck = { enabled: true, albums: {}, tracks: [] };
+  let start: number | null = 0;
+  // a slice plans at least one album, so this ends; the cap is a backstop
+  for (let slice = 0; start !== null && slice < 1000; slice += 1) {
+    const page: RenameCheckSlice = await lib2Json<RenameCheckSlice>(
+      apiClient.get(`library/v2/artists/${artistId}/rename-check`, {
+        searchParams: { start },
+        signal,
+        timeout: 60_000,
+      }),
+      'Rename check failed',
+    );
+    if (!page.enabled) return { enabled: false, albums: {}, tracks: [] };
+    Object.assign(out.albums, page.albums);
+    out.tracks.push(...page.tracks);
+    start = page.next;
+  }
+  return out;
+}
+
+export function libraryV2ArtistRenameCheckQueryOptions(artistId: number) {
+  return queryOptions({
+    queryKey: [...RENAME_CHECK_QUERY_KEY, artistId],
+    queryFn: ({ signal }) => fetchLibraryV2ArtistRenameCheck(artistId, signal),
+    enabled: artistId > 0,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
 /** Enqueue one lib2 album for reorganize — returns immediately, the queue
  *  worker processes items FIFO (docs §50). */
 export async function applyLibraryV2AlbumReorganize(
@@ -2102,6 +2374,13 @@ export function libraryV2ArtistsQueryOptions(
     search.quality === 'upgradable' ? 'upgradable' : '',
     Boolean(search.includeUpgradable),
     search.review ?? '',
+    search.dir ?? '',
+    search.completion ?? '',
+    search.missingMin ?? '',
+    search.missingMax ?? '',
+    search.pctMin ?? '',
+    search.pctMax ?? '',
+    search.credit ?? '',
   ];
   return queryOptions({
     queryKey,
@@ -2816,4 +3095,42 @@ export async function fetchLibraryV2ArtworkStatus(
     }),
   );
   return payload.states ?? {};
+}
+
+/** #2107: the library at a glance, over the artist list */
+export interface LibraryV2Overview {
+  artists: number;
+  owned_tracks: number;
+  missing_tracks: number;
+  complete_artists: number;
+  incomplete_artists: number;
+  unchecked_artists: number;
+  watchlist_artists: number;
+}
+
+export function libraryV2OverviewQueryOptions(enabled = true) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'overview'],
+    queryFn: () =>
+      lib2Json<LibraryV2Overview & Ok>(
+        apiClient.get('library/v2/artists/overview'),
+        'Could not load the overview',
+      ),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** the could-be-better part on its own: the first count can take a while */
+export function libraryV2OverviewUpgradesQueryOptions(enabled = true) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'overview', 'upgrades'],
+    queryFn: () =>
+      lib2Json<{ upgrade_artists: number; upgrade_tracks: number } & Ok>(
+        apiClient.get('library/v2/artists/overview', { searchParams: { part: 'upgrades' } }),
+        'Could not count upgrades',
+      ),
+    enabled,
+    staleTime: 60_000,
+  });
 }

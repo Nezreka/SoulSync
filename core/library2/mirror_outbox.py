@@ -330,14 +330,32 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
 # ---------------------------------------------------------------------------
 
 
+def music_asks_first(db, profile) -> bool:
+    """Does this profile row only ask for music (its wishlist rows are
+    requests an admin approves)? The answer is music.get from its effective
+    permissions under the global policy (core.permission_store.music_rights),
+    so a policy cap holds even for a member whose cached can_download column
+    still says yes (#2166). Admins and profile 1 never ask. A map that can't
+    be built asks (music_rights fails closed). A database without the
+    permission tables (an old test double) answers from the column."""
+    from core.permissions import is_admin_row, profile_can_download
+    if not profile:
+        return False
+    if is_admin_row(profile):
+        return False
+    if not hasattr(db, "get_permission_inputs"):
+        return not profile_can_download(profile)
+    from core.permission_store import music_rights
+    return music_rights(db, profile)["mode"] != "download"
+
+
 def profile_asks_first(db, profile_id) -> bool:
     """Is this a profile whose wishlist rows are requests (no download rights,
     upstream core/requests/music.py)? Profile 1 never is."""
-    from core.permissions import profile_can_download
     try:
         if not profile_id or int(profile_id) == 1:
             return False
-        return not profile_can_download(db.get_profile(int(profile_id)))
+        return music_asks_first(db, db.get_profile(int(profile_id)))
     except Exception:  # noqa: BLE001 - unreadable: treat the row as an ordinary add
         return False
 

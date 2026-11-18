@@ -266,7 +266,7 @@ function fileMenu(f: LibraryFile, a: FileActions): ActionMenuItem[] {
   if (a.onUpgrade) {
     items.push({
       key: 'upgrade',
-      label: f.below_cutoff ? 'Find an upgrade' : 'Search releases',
+      label: f.below_cutoff ? 'Find an upgrade' : 'Manual search',
       onSelect: () => a.onUpgrade?.(f),
     });
   }
@@ -816,7 +816,7 @@ function MovieView({
       title: stuck === 1 ? 'A download for this movie is stuck' : `${stuck} downloads are stuck`,
       detail: 'The last tries failed. Search again to pick another release.',
       action: b.manualSearch
-        ? { label: 'Search releases', onClick: () => b.manualSearch?.('movie') }
+        ? { label: 'Manual search', onClick: () => b.manualSearch?.('movie') }
         : undefined,
     });
   } else if (moving) {
@@ -968,7 +968,7 @@ function MovieView({
                 className={q.meets === false ? s.btnPrimary : s.btn}
                 onClick={() => b.manualSearch?.('movie')}
               >
-                {q.meets === false ? 'Find an upgrade' : 'Search releases'}
+                {q.meets === false ? 'Find an upgrade' : 'Manual search'}
               </button>
             ) : null}
           </span>
@@ -1048,7 +1048,8 @@ function ShowView({
   const [job, setJob] = useState<ConsolidateState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const sm = data.summary;
-  const aired = sm.owned + sm.missing;
+  // every aired episode, hunted or not: the unmonitored gaps are still gaps
+  const aired = sm.owned + sm.missing + (sm.missing_unmonitored ?? 0);
   const q = data.quality;
   const tmdb = data.identity.tmdb_id;
 
@@ -1086,17 +1087,26 @@ function ShowView({
       ),
     [data],
   );
-  const missing = useMemo(
-    () =>
-      data.seasons
-        .filter((season) => season.season_number !== 0)
-        .flatMap((season) =>
-          season.episodes
-            .filter((ep) => !ep.has_file && ep.aired)
-            .map((ep) => wishOf(data.id, season, ep)),
-        ),
-    [data],
-  );
+  // #2177: missing is what SoulSync hunts, like sonarr's: aired, no file and
+  // monitored. a gap in a season you turned off is still said, quieter, and
+  // Get missing never grabs it
+  const { missing, unmonitored } = useMemo(() => {
+    const want: WishEpisode[] = [];
+    const off = { count: 0, inOffSeasons: true };
+    for (const season of data.seasons) {
+      if (season.season_number === 0) continue;
+      for (const ep of season.episodes) {
+        if (ep.has_file || !ep.aired) continue;
+        if (ep.monitored) {
+          want.push(wishOf(data.id, season, ep));
+        } else {
+          off.count += 1;
+          if (season.monitored) off.inOffSeasons = false;
+        }
+      }
+    }
+    return { missing: want, unmonitored: off };
+  }, [data]);
 
   const run = async (key: string, episodes: WishEpisode[], what: string) => {
     setBusy(key);
@@ -1172,7 +1182,13 @@ function ShowView({
       key: 'missing',
       tone: 'warn',
       title: `${plural(missing.length, 'aired episode')} missing`,
-      detail: 'Getting them puts each on the wishlist and searches now.',
+      detail: `Getting them puts each on the wishlist and searches now.${
+        unmonitored.count
+          ? unmonitored.inOffSeasons
+            ? ` ${unmonitored.count} more in unmonitored seasons are left alone.`
+            : ` ${unmonitored.count} more aren’t monitored, so they’re left alone.`
+          : ''
+      }`,
       action: tmdb
         ? {
             label: 'Get missing',
@@ -1286,6 +1302,12 @@ function ShowView({
       <span className={s.libCount}>
         <b>{sm.owned}</b> of {aired || sm.total} aired episodes
       </span>
+      {unmonitored.count ? (
+        <span className={s.libDim} data-part="unmonitored">
+          {unmonitored.count}{' '}
+          {unmonitored.inOffSeasons ? 'in unmonitored seasons' : 'not monitored'}
+        </span>
+      ) : null}
       <span className={s.libFact}>{formatBytes(sm.size_bytes) || 'no files'}</span>
       {sm.res_mix.length ? (
         <span className={s.libMix}>

@@ -31,9 +31,15 @@ def auto_video_import_lists(config: Dict[str, Any], deps: AutomationDeps) -> Dic
         return {"status": "completed", "added": 0, "skipped": res.get("reason"),
                 "_manages_own_progress": True}
     total = res.get("added_movies", 0) + res.get("added_shows", 0)
+    line = ("%d list(s) synced: %d movie(s) wishlisted, %d show(s) followed"
+            % (res.get("lists", 0), res.get("added_movies", 0), res.get("added_shows", 0)))
+    if res.get("requested"):
+        line += ", %d sent for approval" % res["requested"]
+    if res.get("refused"):
+        # the owner's profile can't have them (#2166); they come once it can
+        line += ", %d left out by the owner's permissions" % res["refused"]
     deps.update_progress(
         automation_id, status="finished", progress=100, phase="Complete",
-        log_line="%d list(s) synced: %d movie(s) wishlisted, %d show(s) followed"
-                 % (res.get("lists", 0), res.get("added_movies", 0), res.get("added_shows", 0)),
-        log_type="success" if total else "info")
-    return {"status": "completed", "added": total, "_manages_own_progress": True}
+        log_line=line, log_type="success" if total or res.get("requested") else "info")
+    return {"status": "completed", "added": total, "requested": res.get("requested", 0),
+            "_manages_own_progress": True}

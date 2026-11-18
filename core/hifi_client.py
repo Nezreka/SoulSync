@@ -930,7 +930,7 @@ class HiFiClient(DownloadSourcePlugin):
         try:
             proc = subprocess.run(
                 [ff, '-hide_banner', '-nostdin', '-i', str(path), '-map', '0:a:0', '-f', 'null', '-'],
-                capture_output=True, text=True, timeout=180)
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
             return parse_ffmpeg_time(proc.stderr)
         except Exception:
             return 0.0
@@ -964,7 +964,7 @@ class HiFiClient(DownloadSourcePlugin):
                 ],
                 check=True,
                 capture_output=True,
-                text=True,
+                text=True, encoding='utf-8', errors='replace',
             )
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(

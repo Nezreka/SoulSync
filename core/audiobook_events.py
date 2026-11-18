@@ -23,12 +23,17 @@ from utils.logging_config import get_logger
 logger = get_logger("audiobook_events")
 
 
-def announce(event_type: str, **data: Any) -> None:
-    """Publish ``event_type`` with ``data`` (best-effort, never raises)."""
+def announce(event_type: str, *, owner: Any = None, **data: Any) -> None:
+    """Publish ``event_type`` with ``data`` (best-effort, never raises).
+
+    ``owner`` is whose event it is (a profile id, or ids for a book several
+    profiles wanted); it rides as the engine's owner, not as a string."""
     try:
         from core.app_events import publish
+        from core.automation.owners import owned
 
-        publish(event_type, {key: "" if value is None else str(value) for key, value in data.items()})
+        publish(event_type, owned({key: "" if value is None else str(value) for key, value in data.items()},
+                                  owner))
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not announce %s: %s", event_type, exc)
 

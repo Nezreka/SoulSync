@@ -66,6 +66,28 @@ function list(rows: VdlDownload[], over: Record<string, unknown> = {}) {
 }
 
 describe('the row', () => {
+  it('hides cancel on a grab this viewer may not stop', () => {
+    // a member's queue: the server marks someone else's grab can_cancel false
+    const { container } = list([dl({ can_cancel: false })]);
+    expect(container.querySelector('.dlc-cancel')).toBeNull();
+    const mine = list([dl({ id: 2, can_cancel: true })]);
+    expect(mine.container.querySelector('.dlc-cancel')).not.toBeNull();
+  });
+
+  it('puts the release languages under the quality tag (#2120)', () => {
+    const { container } = list([
+      dl({ release_langs: { audio: [], multi: true, subs: ['fr'], subbed: true } }),
+    ]);
+    const tags = container.querySelector('.dlc-meta .dlc-tags');
+    expect(tags?.querySelector('.dlc-tag')?.textContent).toBe('2160p WEB-DL');
+    expect(tags?.querySelector('.dlc-tag-lang')?.textContent).toBe('MULTi · FR subs');
+  });
+
+  it('shows no language tag when the name tags none', () => {
+    const { container } = list([dl()]);
+    expect(container.querySelector('.dlc-tag-lang')).toBeNull();
+  });
+
   it('shows progress, speed and time left while downloading, cancel on the side', () => {
     const { container, cardActions } = list([dl()]);
     expect(container.querySelector('.dlc-meta')?.textContent).toContain('42%');

@@ -19,6 +19,10 @@ from urllib.parse import parse_qs, urlparse
 
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{16,32}$")
 
+# sources whose source_playlist_id is a hash of the link, with the link itself
+# kept in description. a refresh needs the link, not the hash (#2147).
+URL_BACKED_SOURCES = frozenset({"spotify_public", "youtube", "itunes_link"})
+
 
 def stable_source_track_id(track: Mapping, existing: Optional[str] = None) -> str:
     """A stable per-track id for a mirrored-playlist track.
@@ -150,6 +154,14 @@ def normalize_mirrored_source_ref(
         canonical_url = _canonical_youtube_url(source_ref)
         return MirroredSourceRef(_short_hash(canonical_url), canonical_url)
 
+    if source == "itunes_link":
+        from core.playlists.itunes_link import _parse_itunes_link_url, itunes_link_url_hash
+
+        parsed = _parse_itunes_link_url(source_ref)
+        if not parsed:
+            raise ValueError("Use a valid Apple Music or iTunes album, track or playlist link")
+        return MirroredSourceRef(itunes_link_url_hash(parsed), source_ref)
+
     if source == "deezer" and source_ref.startswith(("http://", "https://")):
         from core.deezer_client import DeezerClient
 
@@ -165,7 +177,7 @@ def require_refresh_url(source: str, description: str, playlist_name: str = "") 
     """Return a URL required by hash-backed refresh sources, or raise clearly."""
     source = (source or "").strip().lower()
     description = (description or "").strip()
-    if source in {"spotify_public", "youtube"}:
+    if source in URL_BACKED_SOURCES:
         if not description.startswith(("http://", "https://")):
             label = f" '{playlist_name}'" if playlist_name else ""
             raise ValueError(f"{source} mirror{label} is missing its original source URL")
@@ -179,7 +191,7 @@ def describe_mirrored_source_ref(playlist: Mapping[str, object]) -> MirroredSour
     description = str(playlist.get("description") or "").strip()
     name = str(playlist.get("name") or "")
 
-    if source in {"spotify_public", "youtube"}:
+    if source in URL_BACKED_SOURCES:
         if description.startswith(("http://", "https://")):
             return MirroredSourceRefView(description, "url", "ok")
         try:

@@ -133,6 +133,22 @@
     /* wanted: on a wishlist, being searched (the video calendar's state colour) */
     --wanted-rgb: 139, 147, 255;
     --wanted: rgb(var(--wanted-rgb));
+    /* lossless above cd quality: the one tinted badge in server activity */
+    --hires-rgb: 163, 230, 53;
+    --hires: #d9f99d;
+
+    /* ── Server Activity drawer (the approved mockup's surfaces) ────── */
+    --sa-panel: #101017;
+    --sa-panel-deep: #0b0b10;
+    --sa-card: #15151d;
+    --sa-card-raised: #191922;
+    --sa-sheet: #0e0e14;
+    --sa-well: #07070b;
+    --sa-text: #eef1f7;
+
+    /* ── Help sheet (scrap/help/mockup.html) ── */
+    --help-sheet: #13131a;
+    --help-on-accent: #04140a;
 
     /* ── Radius ─────────────────────────────────────────────────────── */
     --radius-xs: 4px;
@@ -174,6 +190,10 @@
     --z-menu: 11050;
     --z-toast: 99999;
     --z-tooltip: 100000;
+    /* the top layer: the floating buttons (activity, bell, help) and what
+       must cover them, like the server activity drawer, which is added after
+       them so the same layer puts it on top (#2090) */
+    --z-float: 999999;
 
     /* ── Fonts ──────────────────────────────────────────────────────── */
     --font-sans: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;

@@ -1,6 +1,8 @@
 import { Outlet } from '@tanstack/react-router';
 
 import { MediaPlayerBar } from '@/components/media-player-bar/media-player-bar';
+import { NotPartOfProfile } from '@/components/not-part-of-profile/not-part-of-profile';
+import { useHasAccess } from '@/platform/shell/my-permissions';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { usePodcastContext } from './podcast-context';
@@ -16,6 +18,7 @@ import styles from './podcasts-page.module.css';
 export function PodcastsLayout() {
   useReactPageShell('podcasts');
   const { activePlayback, handleTogglePlay, closePlayer, updateProgress } = usePodcastContext();
+  const podcastsOn = useHasAccess('podcasts');
 
   return (
     <div
@@ -39,7 +42,8 @@ export function PodcastsLayout() {
       )}
 
       <div className="pgf-page">
-        <Outlet />
+        {/* reached by a link after an admin turned podcasts off (#2166) */}
+        {podcastsOn ? <Outlet /> : <NotPartOfProfile media="podcasts" />}
       </div>
     </div>
   );

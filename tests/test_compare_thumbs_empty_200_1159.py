@@ -58,9 +58,10 @@ def _fetch(monkeypatch, status=200, content=b'', api_key='k'):
                         lambda db=None: {'base_url': 'http://jf:8096', 'api_key': api_key})
     seen = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, headers=None, timeout=None):
         seen['url'] = url
         seen['params'] = params or {}
+        seen['headers'] = headers or {}
         return SimpleNamespace(status_code=status, content=content,
                                headers={'Content-Type': 'image/jpeg'})
 
@@ -83,9 +84,11 @@ def test_a_real_image_passes_through(monkeypatch):
 
 def test_the_proxy_authenticates_server_side(monkeypatch):
     """The whole point: the api_key rides on the SERVER's request and never
-    appears in anything the browser sees."""
+    appears in anything the browser sees. It goes in the auth header like
+    every other jellyfin call (#1250), not as ?api_key on the url."""
     _, seen = _fetch(monkeypatch, content=b'x')
-    assert seen['params'].get('api_key') == 'k'
+    assert seen['headers'].get('X-Emby-Token') == 'k'
+    assert 'api_key' not in seen['params']
 
 
 def test_no_api_key_means_no_fetch_rather_than_an_unauthenticated_one(monkeypatch):

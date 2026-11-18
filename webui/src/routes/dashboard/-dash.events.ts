@@ -31,7 +31,7 @@ export const WATCHLIST_COUNT_EVENT = 'ss:watchlist-count';
 export const SERVICE_STATUS_EVENT = 'ss:service-status';
 export const RATE_MONITOR_EVENT = 'ss:rate-monitor';
 export const SYNC_PROGRESS_EVENT = 'ss:sync-progress';
-/** settings.js syncJiosaavnEnrichmentBubble — the JioSaavn orb's live
+/** the Settings Experimental switch (connections-metadata.tsx) — the JioSaavn orb's live
  *  show/hide when the experimental opt-in is toggled. */
 export const JIOSAAVN_EXPERIMENTAL_EVENT = 'ss:jiosaavn-experimental';
 /** settings.js dev-mode writers (initial check, activate, hydra disconnect) —

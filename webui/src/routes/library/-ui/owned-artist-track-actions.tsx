@@ -32,16 +32,41 @@ export function ownedTrackQueueRow(
   )[0];
 }
 
+/** #2094: each row with no file whose position is held by exactly one row
+ *  that has the file. that row is a leftover (a retag or re-identify moved
+ *  its file over) and can be folded into the one that kept it. */
+export function leftoverSlotKeepers(
+  tracks: LibraryV2Track[],
+): Map<number, { id: number; title: string }> {
+  const slot = (t: LibraryV2Track) => `${t.disc_number ?? 1}:${t.track_number}`;
+  const filed = new Map<string, LibraryV2Track[]>();
+  for (const t of tracks) {
+    if (t.id == null || t.track_number == null) continue;
+    if (t.file_status === 'missing' || !t.file?.path) continue;
+    filed.set(slot(t), [...(filed.get(slot(t)) ?? []), t]);
+  }
+  const keepers = new Map<number, { id: number; title: string }>();
+  for (const t of tracks) {
+    if (t.id == null || t.track_number == null || t.file_status !== 'missing') continue;
+    const there = filed.get(slot(t)) ?? [];
+    if (there.length === 1)
+      keepers.set(t.id, { id: there[0].id as number, title: there[0].title ?? '' });
+  }
+  return keepers;
+}
+
 export function OwnedTrackMoreMenu({
   track,
   albumId,
   albumTitle,
   artistName,
+  slotKeeper,
 }: {
   track: LibraryV2Track;
   albumId: number | undefined;
   albumTitle: string;
   artistName: string;
+  slotKeeper?: { id: number; title: string };
 }) {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<'reidentify' | 'have' | null>(null);
@@ -71,6 +96,15 @@ export function OwnedTrackMoreMenu({
       title: 'Use a file already in your library for this missing track',
       onSelect: () => setDialog('have'),
     });
+    if (slotKeeper && track.id != null) {
+      const trackId = track.id;
+      items.push({
+        key: 'remove-leftover',
+        label: 'Remove This Row…',
+        title: `Fold this row into "${slotKeeper.title}", which has the file at this position`,
+        onSelect: () => void removeLeftover(trackId, label, slotKeeper.title, refresh),
+      });
+    }
   }
   if (!items.length) return null;
 
@@ -130,6 +164,31 @@ export function OwnedTrackMoreMenu({
       ) : null}
     </>
   );
+}
+
+async function removeLeftover(
+  trackId: number,
+  label: string,
+  keptTitle: string,
+  refresh: () => void,
+): Promise<void> {
+  if (typeof window.showConfirmDialog !== 'function') return;
+  const ok = await window.showConfirmDialog({
+    title: 'Remove this row',
+    message:
+      `"${label}" has no file, and "${keptTitle}" has the file at the same position. ` +
+      `The row is removed and its plays and history move to "${keptTitle}". No files are touched.`,
+    confirmText: 'Remove',
+    destructive: true,
+  });
+  if (!ok) return;
+  try {
+    await readJson(apiClient.post(`library/v2/tracks/${trackId}/remove-leftover`));
+    window.showToast?.(`Removed "${label}"`, 'success');
+    refresh();
+  } catch (error) {
+    window.showToast?.((error as Error).message || 'Could not remove the row', 'error');
+  }
 }
 
 /** "unlock hand-tagged details" for the album menu. renders only for an

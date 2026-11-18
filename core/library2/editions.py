@@ -503,18 +503,23 @@ def sync_edition_facts(cursor: Any, album_ids: Optional[Any] = None) -> int:
 
 
 def pin_album_release(cursor: Any, album_id: int, source: str,
-                      provider_id: Optional[str]) -> None:
+                      provider_id: Optional[str], *, before: Any = None) -> None:
     """A manual album match pins (and locks) that release as canonical (#758).
 
     ``provider_id=None`` lifts a pin naming ``source`` -- the user cleared the
     match it came from. The default edition follows either way. Does not
     commit.
+
+    ``before`` is the album row from before the match wrote its id. read here
+    after the id is written, the album already "only had" the new release, so
+    the old release's cached tracklist was kept (#2145).
     """
     if hasattr(cursor, 'cursor') and not hasattr(cursor, 'lastrowid'):
         cursor = cursor.cursor()
     source = str(source or "").strip().lower()
-    before = cursor.execute('SELECT * FROM lib2_albums WHERE id=?',
-                            (int(album_id),)).fetchone()
+    if before is None:
+        before = cursor.execute('SELECT * FROM lib2_albums WHERE id=?',
+                                (int(album_id),)).fetchone()
     if provider_id:
         cursor.execute(
             "UPDATE lib2_albums SET canonical_source=?, canonical_album_id=?,"

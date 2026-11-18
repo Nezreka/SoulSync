@@ -1,0 +1,1231 @@
+{
+  "ok": true,
+  "at": 1794901347.352861,
+  "server": {
+    "name": "Basement",
+    "version": "1.41.2",
+    "platform": "plex+jellyfin"
+  },
+  "servers": [
+    {
+      "server": "plex",
+      "name": "Basement",
+      "version": "1.41.2",
+      "reachable": true,
+      "plex_pass": true
+    },
+    {
+      "server": "jellyfin",
+      "name": "Jellyfin",
+      "version": null,
+      "reachable": true,
+      "plex_pass": null
+    }
+  ],
+  "summary": {
+    "streams": 7,
+    "watching": 4,
+    "listening": 3,
+    "playing": 4,
+    "paused": 2,
+    "direct_play": 3,
+    "direct_stream": 1,
+    "transcodes": 3,
+    "transcoders": {
+      "running": 3,
+      "hw": 2,
+      "sw": 1
+    },
+    "total_bandwidth_kbps": 35674,
+    "remote_bandwidth_kbps": 15070,
+    "local_bandwidth_kbps": 20604,
+    "upload_cap_kbps": 40000,
+    "lan": 4,
+    "wan": 3,
+    "cpu": {
+      "host_pct": 14.0,
+      "process_pct": 6.1,
+      "at": 1794901345
+    }
+  },
+  "bandwidth": {
+    "window_s": 600,
+    "points": [
+      {
+        "t": 1794901347.4,
+        "total_kbps": 35674,
+        "remote_kbps": 15070,
+        "streams": 7
+      }
+    ],
+    "peak_kbps": 35674,
+    "peak_remote_kbps": 15070
+  },
+  "sessions": [
+    {
+      "id": "jellyfin:8f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "session_key": "jellyfin:8f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
+      "kind": "episode",
+      "activity": "watching",
+      "state": "playing",
+      "title": "Cold Harbor",
+      "subtitle": "Severance · S2 E10",
+      "year": 2025,
+      "show": {
+        "title": "Severance",
+        "season": 2,
+        "episode": 10,
+        "season_title": "Season 2"
+      },
+      "music": null,
+      "book": null,
+      "thumb": "jf:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "art": "jf:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "duration_ms": 4540000,
+      "offset_ms": 3271000,
+      "progress_pct": 72,
+      "user": "dan",
+      "user_id": "0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+      "user_avatar": "/api/server-activity/avatar?user=jellyfin:0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+      "player": {
+        "product": "Jellyfin Android TV",
+        "version": "0.18.1",
+        "platform": null,
+        "platform_version": null,
+        "device": "Tv",
+        "model": null,
+        "name": "Shield TV"
+      },
+      "connection": {
+        "ip": "192.168.1.44",
+        "public_ip": null,
+        "remote": false,
+        "secure": null,
+        "relayed": null,
+        "location": null
+      },
+      "bandwidth_kbps": 9640,
+      "playback": {
+        "method": "direct_play",
+        "method_label": "Direct Play",
+        "video": {
+          "source": {
+            "codec": "HEVC",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": "Main 10",
+            "bit_depth": 10,
+            "hdr": null,
+            "bitrate_kbps": 9000,
+            "frame_rate": "23.976",
+            "label": "1080p HEVC Main 10 · SDR"
+          },
+          "stream": {
+            "codec": "HEVC",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": "Main 10",
+            "bit_depth": 10,
+            "hdr": null,
+            "bitrate_kbps": 9000,
+            "frame_rate": "23.976",
+            "label": "1080p HEVC Main 10 · SDR"
+          },
+          "decision": "direct",
+          "changed": false
+        },
+        "audio": {
+          "source": {
+            "codec": "EAC3",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "language": "eng",
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 640,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "EAC3 640 kbps",
+            "label": "EAC3 5.1 · eng"
+          },
+          "stream": {
+            "codec": "EAC3",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "language": "eng",
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 640,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "EAC3 640 kbps",
+            "label": "EAC3 5.1 · eng"
+          },
+          "decision": "direct",
+          "changed": false
+        },
+        "subtitles": null,
+        "container": {
+          "source": "MKV",
+          "stream": "MKV",
+          "changed": false
+        },
+        "bitrate_kbps": {
+          "source": 9640,
+          "stream": 9640
+        },
+        "summary": {
+          "quality": "1080p HEVC",
+          "change": null
+        }
+      },
+      "reason": null,
+      "transcoder": null,
+      "controls": {
+        "stop": true,
+        "message": true,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+        "parent_key": null,
+        "grandparent_key": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+      },
+      "link": null,
+      "started_at": 1794898345.9604685,
+      "paused_ms": 0,
+      "pause_count": 0,
+      "buffering_ms": 0,
+      "play_key": "92e3ec89907b4918bfd70df4c74b43cc",
+      "group_key": "92e3ec89907b4918bfd70df4c74b43cc",
+      "media_type": "episode",
+      "grandparent": "Severance",
+      "location": "lan",
+      "stream": {
+        "method": "Direct Play",
+        "video": "HEVC",
+        "audio": "EAC3",
+        "resolution": "1080p",
+        "bitrate_kbps": 9640,
+        "transcode_progress": 0,
+        "throttled": false,
+        "hw": false,
+        "container": "MKV"
+      }
+    },
+    {
+      "id": "plex:27",
+      "server": "plex",
+      "server_name": "Basement",
+      "session_key": "27",
+      "kind": "movie",
+      "activity": "watching",
+      "state": "playing",
+      "title": "Dune: Part Two",
+      "subtitle": "2024",
+      "year": 2024,
+      "show": null,
+      "music": null,
+      "book": null,
+      "thumb": "/library/metadata/5101/thumb/1710000001",
+      "art": "/library/metadata/5101/art/1710000001",
+      "duration_ms": 9960000,
+      "offset_ms": 4092000,
+      "progress_pct": 41,
+      "user": "maya",
+      "user_id": "7341",
+      "user_avatar": "/api/server-activity/avatar?user=plex:7341",
+      "player": {
+        "product": "Plex for Apple TV",
+        "version": "8.41",
+        "platform": "tvOS",
+        "platform_version": "18.1",
+        "device": "Apple TV",
+        "model": "J305AP",
+        "name": "Living room"
+      },
+      "connection": {
+        "ip": "73.41.208.17",
+        "public_ip": "73.41.208.17",
+        "remote": true,
+        "secure": true,
+        "relayed": false,
+        "location": null
+      },
+      "bandwidth_kbps": 11800,
+      "playback": {
+        "method": "transcode",
+        "method_label": "Transcode",
+        "video": {
+          "source": {
+            "codec": "HEVC",
+            "resolution": "4K",
+            "width": 3840,
+            "height": 2160,
+            "profile": "Main 10",
+            "bit_depth": 10,
+            "hdr": "HDR10",
+            "bitrate_kbps": 58000,
+            "frame_rate": "23.976",
+            "label": "4K HEVC Main 10 · HDR10"
+          },
+          "stream": {
+            "codec": "H.264",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": null,
+            "bit_depth": null,
+            "hdr": null,
+            "bitrate_kbps": 11000,
+            "frame_rate": null,
+            "label": "1080p H.264 · SDR"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "audio": {
+          "source": {
+            "codec": "TrueHD",
+            "channels": 8,
+            "channel_layout": "7.1",
+            "language": "English",
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": null,
+            "atmos": true,
+            "lossless": true,
+            "hires": false,
+            "quality": "TrueHD",
+            "label": "TrueHD Atmos 7.1 · English"
+          },
+          "stream": {
+            "codec": "AAC",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 384,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 384 kbps",
+            "label": "AAC 5.1"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "subtitles": {
+          "source": {
+            "codec": "SRT",
+            "language": "English",
+            "kind": "text",
+            "label": "English (SRT)"
+          },
+          "stream": {
+            "label": "Sent as text"
+          },
+          "decision": "copy",
+          "changed": false
+        },
+        "container": {
+          "source": "MKV",
+          "stream": "HLS",
+          "changed": true
+        },
+        "bitrate_kbps": {
+          "source": 62400,
+          "stream": 11800
+        },
+        "summary": {
+          "quality": "4K HEVC",
+          "change": "4K → 1080p"
+        }
+      },
+      "reason": {
+        "codes": ["over_remote_limit", "hdr", "audio_codec"],
+        "items": [
+          {
+            "code": "over_remote_limit",
+            "label": "Over the player's remote quality"
+          },
+          {
+            "code": "hdr",
+            "label": "HDR on a screen without HDR"
+          },
+          {
+            "code": "audio_codec",
+            "label": "Audio format the player can't play"
+          }
+        ],
+        "inferred": true,
+        "text": "Converting because the file is bigger than the player's remote quality setting, the player can't show HDR, so the picture is mapped to SDR and the player can't play this audio format. The source runs at 62.4 Mbps and 11.8 Mbps is sent."
+      },
+      "transcoder": {
+        "hw": true,
+        "hw_decode": "Intel Quick Sync",
+        "hw_encode": "Intel Quick Sync",
+        "hw_full_pipeline": true,
+        "speed": 2.4,
+        "buffered_s": 220.0,
+        "throttled": true,
+        "progress_pct": 41,
+        "video": "transcode",
+        "audio": "transcode"
+      },
+      "controls": {
+        "stop": true,
+        "message": false,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "5101",
+        "parent_key": null,
+        "grandparent_key": null
+      },
+      "link": {
+        "kind": "movie",
+        "id": "693134",
+        "source": "tmdb"
+      },
+      "started_at": 1794898345.9604685,
+      "paused_ms": 0,
+      "pause_count": 0,
+      "buffering_ms": 0,
+      "play_key": "b348193aa18f4d52b39f0f2b49493481",
+      "group_key": "b348193aa18f4d52b39f0f2b49493481",
+      "media_type": "movie",
+      "grandparent": "",
+      "location": "wan",
+      "stream": {
+        "method": "Transcode",
+        "video": "HEVC → H.264",
+        "audio": "TrueHD → AAC",
+        "resolution": "4K",
+        "bitrate_kbps": 62400,
+        "transcode_progress": 41,
+        "throttled": true,
+        "hw": true,
+        "container": "HLS"
+      }
+    },
+    {
+      "id": "jellyfin:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "session_key": "jellyfin:7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+      "kind": "movie",
+      "activity": "watching",
+      "state": "playing",
+      "title": "The Wild Robot",
+      "subtitle": "2024",
+      "year": 2024,
+      "show": null,
+      "music": null,
+      "book": null,
+      "thumb": "jf:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "art": "jf:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "duration_ms": 6120000,
+      "offset_ms": 2820000,
+      "progress_pct": 46,
+      "user": "maya",
+      "user_id": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+      "user_avatar": null,
+      "player": {
+        "product": "Jellyfin iOS",
+        "version": "1.6.4",
+        "platform": null,
+        "platform_version": null,
+        "device": null,
+        "model": null,
+        "name": "iPad"
+      },
+      "connection": {
+        "ip": "73.41.208.17",
+        "public_ip": null,
+        "remote": true,
+        "secure": null,
+        "relayed": null,
+        "location": null
+      },
+      "bandwidth_kbps": 3200,
+      "playback": {
+        "method": "transcode",
+        "method_label": "Transcode",
+        "video": {
+          "source": {
+            "codec": "H.264",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": "High",
+            "bit_depth": null,
+            "hdr": null,
+            "bitrate_kbps": 14000,
+            "frame_rate": "24",
+            "label": "1080p H.264 High · SDR"
+          },
+          "stream": {
+            "codec": "H.264",
+            "resolution": "720p",
+            "width": 1280,
+            "height": 720,
+            "profile": null,
+            "bit_depth": null,
+            "hdr": null,
+            "bitrate_kbps": 3200,
+            "frame_rate": null,
+            "label": "720p H.264 · SDR"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "audio": {
+          "source": {
+            "codec": "DTS-HD MA",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "language": "eng",
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 3000,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "DTS-HD MA 3.0 Mbps",
+            "label": "DTS-HD MA 5.1 · eng"
+          },
+          "stream": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": null,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC",
+            "label": "AAC Stereo"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "subtitles": null,
+        "container": {
+          "source": "MKV",
+          "stream": "MPEG-TS",
+          "changed": true
+        },
+        "bitrate_kbps": {
+          "source": 17000,
+          "stream": 3200
+        },
+        "summary": {
+          "quality": "1080p H.264",
+          "change": "1080p → 720p"
+        }
+      },
+      "reason": {
+        "codes": ["over_remote_limit", "audio_codec"],
+        "items": [
+          {
+            "code": "over_remote_limit",
+            "label": "Over the player's remote quality"
+          },
+          {
+            "code": "audio_codec",
+            "label": "Audio format the player can't play"
+          }
+        ],
+        "inferred": false,
+        "text": "Converting because the file is bigger than the player's remote quality setting and the player can't play this audio format. The source runs at 17.0 Mbps and 3.2 Mbps is sent."
+      },
+      "transcoder": {
+        "hw": true,
+        "hw_decode": "NVIDIA NVENC",
+        "hw_encode": "NVIDIA NVENC",
+        "hw_full_pipeline": false,
+        "speed": 2.4,
+        "buffered_s": null,
+        "throttled": null,
+        "progress_pct": 52,
+        "video": "transcode",
+        "audio": "transcode"
+      },
+      "controls": {
+        "stop": true,
+        "message": true,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "parent_key": null,
+        "grandparent_key": null
+      },
+      "link": {
+        "kind": "movie",
+        "id": "1184918",
+        "source": "tmdb"
+      },
+      "started_at": 1794898345.9604685,
+      "paused_ms": 0,
+      "pause_count": 0,
+      "buffering_ms": 0,
+      "play_key": "3a496b04f87c49a6ace2be6f94be869c",
+      "group_key": "3a496b04f87c49a6ace2be6f94be869c",
+      "media_type": "movie",
+      "grandparent": "",
+      "location": "wan",
+      "stream": {
+        "method": "Transcode",
+        "video": "H.264 → H.264",
+        "audio": "DTS-HD MA → AAC",
+        "resolution": "1080p",
+        "bitrate_kbps": 17000,
+        "transcode_progress": 52,
+        "throttled": false,
+        "hw": true,
+        "container": "MPEG-TS"
+      }
+    },
+    {
+      "id": "plex:31",
+      "server": "plex",
+      "server_name": "Basement",
+      "session_key": "31",
+      "kind": "track",
+      "activity": "listening",
+      "state": "playing",
+      "title": "Everything In Its Right Place",
+      "subtitle": "Radiohead · Kid A",
+      "year": null,
+      "show": null,
+      "music": {
+        "artist": "Radiohead",
+        "album_artist": "Radiohead",
+        "album": "Kid A",
+        "track": 1,
+        "disc": 1
+      },
+      "book": null,
+      "thumb": "/library/metadata/701/thumb/1700000002",
+      "art": "/library/metadata/701/thumb/1700000002",
+      "duration_ms": 251000,
+      "offset_ms": 95000,
+      "progress_pct": 38,
+      "user": "sam",
+      "user_id": "1",
+      "user_avatar": "/api/server-activity/avatar?user=plex:1",
+      "player": {
+        "product": "Plexamp",
+        "version": "4.11.2",
+        "platform": "iOS",
+        "platform_version": "18.0",
+        "device": "iPhone",
+        "model": "iPhone15,2",
+        "name": "sam's iPhone"
+      },
+      "connection": {
+        "ip": "192.168.1.61",
+        "public_ip": null,
+        "remote": false,
+        "secure": true,
+        "relayed": false,
+        "location": null
+      },
+      "bandwidth_kbps": 2900,
+      "playback": {
+        "method": "direct_play",
+        "method_label": "Direct Play",
+        "video": null,
+        "audio": {
+          "source": {
+            "codec": "FLAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": 24,
+            "sample_rate_hz": 96000,
+            "bitrate_kbps": 2900,
+            "atmos": false,
+            "lossless": true,
+            "hires": true,
+            "quality": "FLAC 24-bit · 96 kHz",
+            "label": "FLAC Stereo"
+          },
+          "stream": {
+            "codec": "FLAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": 24,
+            "sample_rate_hz": 96000,
+            "bitrate_kbps": 2900,
+            "atmos": false,
+            "lossless": true,
+            "hires": true,
+            "quality": "FLAC 24-bit · 96 kHz",
+            "label": "FLAC Stereo"
+          },
+          "decision": "direct",
+          "changed": false
+        },
+        "subtitles": null,
+        "container": {
+          "source": "FLAC",
+          "stream": "FLAC",
+          "changed": false
+        },
+        "bitrate_kbps": {
+          "source": 2900,
+          "stream": 2900
+        },
+        "summary": {
+          "quality": "FLAC 24-bit · 96 kHz",
+          "change": null
+        }
+      },
+      "reason": null,
+      "transcoder": null,
+      "controls": {
+        "stop": true,
+        "message": false,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "702",
+        "parent_key": "701",
+        "grandparent_key": "700"
+      },
+      "link": null,
+      "started_at": 1794898345.9604685,
+      "paused_ms": 0,
+      "pause_count": 0,
+      "buffering_ms": 0,
+      "play_key": "254019ac9f2a4876ab195b79987facc8",
+      "group_key": "254019ac9f2a4876ab195b79987facc8",
+      "media_type": "track",
+      "grandparent": "Radiohead",
+      "location": "lan",
+      "stream": {
+        "method": "Direct Play",
+        "video": "",
+        "audio": "FLAC",
+        "resolution": "",
+        "bitrate_kbps": 2900,
+        "transcode_progress": 0,
+        "throttled": false,
+        "hw": false,
+        "container": "FLAC"
+      }
+    },
+    {
+      "id": "plex:35",
+      "server": "plex",
+      "server_name": "Basement",
+      "session_key": "35",
+      "kind": "episode",
+      "activity": "watching",
+      "state": "buffering",
+      "title": "Crimson Sky",
+      "subtitle": "Shōgun · S1 E9",
+      "year": 2024,
+      "show": {
+        "title": "Shōgun",
+        "season": 1,
+        "episode": 9,
+        "season_title": "Season 1"
+      },
+      "music": null,
+      "book": null,
+      "thumb": "/library/metadata/900/thumb/1",
+      "art": "",
+      "duration_ms": 3600000,
+      "offset_ms": 600000,
+      "progress_pct": 17,
+      "user": "maya",
+      "user_id": "7341",
+      "user_avatar": "/api/server-activity/avatar?user=plex:7341",
+      "player": {
+        "product": "Plex for iOS",
+        "version": "2024.1",
+        "platform": "iOS",
+        "platform_version": null,
+        "device": "iPad",
+        "model": null,
+        "name": "iPad"
+      },
+      "connection": {
+        "ip": "192.168.1.20",
+        "public_ip": null,
+        "remote": false,
+        "secure": true,
+        "relayed": false,
+        "location": null
+      },
+      "bandwidth_kbps": 8000,
+      "playback": {
+        "method": "transcode",
+        "method_label": "Transcode",
+        "video": {
+          "source": {
+            "codec": "H.264",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": "High",
+            "bit_depth": null,
+            "hdr": null,
+            "bitrate_kbps": 9000,
+            "frame_rate": null,
+            "label": "1080p H.264 High · SDR"
+          },
+          "stream": {
+            "codec": "H.264",
+            "resolution": "1080p",
+            "width": 1920,
+            "height": 1080,
+            "profile": null,
+            "bit_depth": null,
+            "hdr": null,
+            "bitrate_kbps": 7700,
+            "frame_rate": null,
+            "label": "1080p H.264 · SDR"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "audio": {
+          "source": {
+            "codec": "EAC3",
+            "channels": 6,
+            "channel_layout": "5.1",
+            "language": "English",
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": null,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "EAC3",
+            "label": "EAC3 5.1 · English"
+          },
+          "stream": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 256,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 256 kbps",
+            "label": "AAC Stereo"
+          },
+          "decision": "transcode",
+          "changed": true
+        },
+        "subtitles": {
+          "source": {
+            "codec": "PGS",
+            "language": "English",
+            "kind": "image",
+            "label": "English (PGS)"
+          },
+          "stream": {
+            "label": "Burned in"
+          },
+          "decision": "burn",
+          "changed": true
+        },
+        "container": {
+          "source": "MKV",
+          "stream": "HLS",
+          "changed": true
+        },
+        "bitrate_kbps": {
+          "source": 9800,
+          "stream": 8000
+        },
+        "summary": {
+          "quality": "1080p H.264",
+          "change": "Subtitles burned in"
+        }
+      },
+      "reason": {
+        "codes": ["subtitle_burn_image", "audio_codec"],
+        "items": [
+          {
+            "code": "subtitle_burn_image",
+            "label": "Image subtitles burned in"
+          },
+          {
+            "code": "audio_codec",
+            "label": "Audio format the player can't play"
+          }
+        ],
+        "inferred": true,
+        "text": "Converting because the subtitles are pictures the player can't draw, so they are burned into the video and the player can't play this audio format."
+      },
+      "transcoder": {
+        "hw": false,
+        "hw_decode": null,
+        "hw_encode": null,
+        "hw_full_pipeline": false,
+        "speed": 1.1,
+        "buffered_s": 60.0,
+        "throttled": false,
+        "progress_pct": 12,
+        "video": "transcode",
+        "audio": "transcode"
+      },
+      "controls": {
+        "stop": true,
+        "message": false,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "909",
+        "parent_key": "901",
+        "grandparent_key": "900"
+      },
+      "link": null,
+      "started_at": 1794898345.9604685,
+      "paused_ms": 0,
+      "pause_count": 0,
+      "buffering_ms": 50000,
+      "play_key": "90d7fd1e74d34a10968f4316c5608aa2",
+      "group_key": "90d7fd1e74d34a10968f4316c5608aa2",
+      "media_type": "episode",
+      "grandparent": "Shōgun",
+      "location": "lan",
+      "stream": {
+        "method": "Transcode",
+        "video": "H.264 → H.264",
+        "audio": "EAC3 → AAC",
+        "resolution": "1080p",
+        "bitrate_kbps": 9800,
+        "transcode_progress": 12,
+        "throttled": false,
+        "hw": false,
+        "container": "HLS"
+      }
+    },
+    {
+      "id": "jellyfin:3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+      "server": "jellyfin",
+      "server_name": "Jellyfin",
+      "session_key": "jellyfin:3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+      "kind": "audiobook",
+      "activity": "listening",
+      "state": "paused",
+      "title": "The Selfish Gene",
+      "subtitle": "Richard Dawkins · Chapter 3 of 4",
+      "year": null,
+      "show": null,
+      "music": null,
+      "book": {
+        "author": "Richard Dawkins",
+        "narrator": null,
+        "title": "The Selfish Gene",
+        "progress": {
+          "chapter": {
+            "index": 3,
+            "count": 4,
+            "title": "The replicators",
+            "position_ms": 500000,
+            "duration_ms": 3600000
+          },
+          "position_ms": 5900000,
+          "duration_ms": 60000000,
+          "percent": 10,
+          "left_ms": 54100000
+        }
+      },
+      "thumb": "jf:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "art": "jf:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "duration_ms": 60000000,
+      "offset_ms": 5900000,
+      "progress_pct": 10,
+      "user": "jo",
+      "user_id": "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e",
+      "user_avatar": null,
+      "player": {
+        "product": "Jellyfin Web",
+        "version": "10.11.2",
+        "platform": null,
+        "platform_version": null,
+        "device": null,
+        "model": null,
+        "name": "Firefox"
+      },
+      "connection": {
+        "ip": "192.168.1.70",
+        "public_ip": null,
+        "remote": false,
+        "secure": null,
+        "relayed": null,
+        "location": null
+      },
+      "bandwidth_kbps": 64,
+      "playback": {
+        "method": "direct_play",
+        "method_label": "Direct Play",
+        "video": null,
+        "audio": {
+          "source": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": 44100,
+            "bitrate_kbps": 64,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 64 kbps",
+            "label": "AAC Stereo"
+          },
+          "stream": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": 44100,
+            "bitrate_kbps": 64,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 64 kbps",
+            "label": "AAC Stereo"
+          },
+          "decision": "direct",
+          "changed": false
+        },
+        "subtitles": null,
+        "container": {
+          "source": "M4B",
+          "stream": "M4B",
+          "changed": false
+        },
+        "bitrate_kbps": {
+          "source": 64,
+          "stream": 64
+        },
+        "summary": {
+          "quality": "AAC 64 kbps",
+          "change": null
+        }
+      },
+      "reason": null,
+      "transcoder": null,
+      "controls": {
+        "stop": true,
+        "message": false,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+        "parent_key": "d5d5",
+        "grandparent_key": null
+      },
+      "link": null,
+      "started_at": 1794898345.9604685,
+      "paused_ms": 50000,
+      "pause_count": 1,
+      "buffering_ms": 0,
+      "play_key": "832ca18f5a5b45628c5d6adddfbcf586",
+      "group_key": "832ca18f5a5b45628c5d6adddfbcf586",
+      "media_type": "track",
+      "grandparent": "Richard Dawkins",
+      "location": "lan",
+      "stream": {
+        "method": "Direct Play",
+        "video": "",
+        "audio": "AAC",
+        "resolution": "",
+        "bitrate_kbps": 64,
+        "transcode_progress": 0,
+        "throttled": false,
+        "hw": false,
+        "container": "M4B"
+      }
+    },
+    {
+      "id": "plex:33",
+      "server": "plex",
+      "server_name": "Basement",
+      "session_key": "33",
+      "kind": "audiobook",
+      "activity": "listening",
+      "state": "paused",
+      "title": "Project Hail Mary",
+      "subtitle": "Andy Weir · Chapter 14 of 32",
+      "year": null,
+      "show": null,
+      "music": null,
+      "book": {
+        "author": "Andy Weir",
+        "narrator": null,
+        "title": "Project Hail Mary",
+        "progress": {
+          "chapter": {
+            "index": 14,
+            "count": 32,
+            "title": "Chapter 14",
+            "position_ms": 1100000,
+            "duration_ms": 1890000
+          },
+          "position_ms": 25670000,
+          "duration_ms": 60480000,
+          "percent": 42,
+          "left_ms": 34810000
+        }
+      },
+      "thumb": "/library/metadata/801/thumb/1700000003",
+      "art": "/library/metadata/801/thumb/1700000003",
+      "duration_ms": 1890000,
+      "offset_ms": 1100000,
+      "progress_pct": 58,
+      "user": "ruth",
+      "user_id": "9182",
+      "user_avatar": "/api/server-activity/avatar?user=plex:9182",
+      "player": {
+        "product": "Plex for Android (Mobile)",
+        "version": "10.20.0",
+        "platform": "Android",
+        "platform_version": "15",
+        "device": "Pixel 8",
+        "model": null,
+        "name": "Pixel 8"
+      },
+      "connection": {
+        "ip": "81.2.69.160",
+        "public_ip": null,
+        "remote": true,
+        "secure": true,
+        "relayed": true,
+        "location": null
+      },
+      "bandwidth_kbps": 70,
+      "playback": {
+        "method": "direct_stream",
+        "method_label": "Direct Stream",
+        "video": null,
+        "audio": {
+          "source": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 64,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 64 kbps",
+            "label": "AAC Stereo"
+          },
+          "stream": {
+            "codec": "AAC",
+            "channels": 2,
+            "channel_layout": "Stereo",
+            "language": null,
+            "bit_depth": null,
+            "sample_rate_hz": null,
+            "bitrate_kbps": 64,
+            "atmos": false,
+            "lossless": false,
+            "hires": false,
+            "quality": "AAC 64 kbps",
+            "label": "AAC Stereo"
+          },
+          "decision": "copy",
+          "changed": false
+        },
+        "subtitles": null,
+        "container": {
+          "source": "M4B",
+          "stream": "MP4",
+          "changed": true
+        },
+        "bitrate_kbps": {
+          "source": 64,
+          "stream": 64
+        },
+        "summary": {
+          "quality": "AAC 64 kbps",
+          "change": "M4B → MP4"
+        }
+      },
+      "reason": {
+        "codes": ["container"],
+        "items": [
+          {
+            "code": "container",
+            "label": "File type the player can't open"
+          }
+        ],
+        "inferred": true,
+        "text": "Repackaging because the player can't open this file type."
+      },
+      "transcoder": {
+        "hw": false,
+        "hw_decode": null,
+        "hw_encode": null,
+        "hw_full_pipeline": false,
+        "speed": 0.0,
+        "buffered_s": 790.0,
+        "throttled": false,
+        "progress_pct": 100,
+        "video": null,
+        "audio": "copy"
+      },
+      "controls": {
+        "stop": true,
+        "message": false,
+        "stop_note": null
+      },
+      "keys": {
+        "rating_key": "814",
+        "parent_key": "801",
+        "grandparent_key": "800"
+      },
+      "link": null,
+      "started_at": 1794898345.9604685,
+      "paused_ms": 50000,
+      "pause_count": 1,
+      "buffering_ms": 0,
+      "play_key": "d1898c118831467c8fe94b11849961b3",
+      "group_key": "d1898c118831467c8fe94b11849961b3",
+      "media_type": "track",
+      "grandparent": "Andy Weir",
+      "location": "wan",
+      "stream": {
+        "method": "Direct Stream",
+        "video": "",
+        "audio": "AAC",
+        "resolution": "",
+        "bitrate_kbps": 64,
+        "transcode_progress": 100,
+        "throttled": false,
+        "hw": false,
+        "container": "MP4"
+      }
+    }
+  ]
+}

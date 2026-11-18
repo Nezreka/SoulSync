@@ -765,7 +765,8 @@ describe('filters', () => {
     const options = [
       ...(document.getElementById('repair-findings-job-filter') as HTMLSelectElement).options,
     ].map((option) => option.textContent);
-    expect(options).toEqual(['All Jobs', 'Orphan File Detector', 'Dead File Cleaner']);
+    // A to Z (#2113)
+    expect(options).toEqual(['All findings', 'Dead File Cleaner', 'Orphan File Detector']);
   });
 
   it('filters the inbox by job, counted by the server for that job', async () => {
@@ -2730,7 +2731,7 @@ describe('the detail renderer', () => {
     expect(detail.textContent).toContain('3:30');
   });
 
-  it('missing_cover_art offers a separate apply per image', async () => {
+  it('missing_cover_art applies the cover and a suggested artist photo separately', async () => {
     routes({
       [FINDINGS]: page([
         finding({
@@ -2739,8 +2740,8 @@ describe('the detail renderer', () => {
           details: {
             artist: 'Band',
             found_artwork_url: 'http://x/album.jpg',
+            // #2169: only an artist with no photo gets one suggested
             found_artist_url: 'http://x/artist.jpg',
-            artist_thumb_url: 'http://x/current.jpg',
           },
         }),
       ]),
@@ -2753,8 +2754,8 @@ describe('the detail renderer', () => {
     fireEvent.click(screen.getByText('Use for artist'));
     await flush();
     expect(bodyOf('/1/fix')).toEqual({ fix_action: 'artist' });
-    // The current artist image is context only — it gets no apply button.
-    expect(screen.getAllByRole('button', { name: /Use for/ })).toHaveLength(2);
+    // the cover goes through Apply Art, never through the artist button
+    expect(screen.getAllByRole('button', { name: /Use for/ })).toHaveLength(1);
   });
 
   it('library_retag shows an old → new diff with ∅ for a blank tag', async () => {
@@ -3116,6 +3117,24 @@ describe('a finding row shows what it is about', () => {
     expect(card.querySelector('.repair-art.empty')).not.toBeNull();
     expect(card.querySelector('.repair-art img')).toBeNull();
   });
+
+  it("a cover finding with no cover never shows the artist's photo in its place (#2169)", async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          finding_type: 'missing_cover_art',
+          entity_type: 'album',
+          artist_thumb_url: '/art/artist.jpg',
+          details: { album_title: 'Punkrocker', db_missing: true },
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art img')).toBeNull();
+    expect(card.querySelector('.repair-art.empty')).not.toBeNull();
+  });
 });
 
 describe('one type open is the whole view', () => {
@@ -3181,5 +3200,168 @@ describe('a fix that failed says so once', () => {
     // the row's own fix button is the way to try again
     expect(card.querySelectorAll('.repair-finding-btn.fix').length).toBe(1);
     expect(within(card).queryByText(/Retry/)).toBeNull();
+  });
+});
+
+// ── #2179: Keep Best over many duplicates ───────────────────────────────────
+
+describe('Keep Best over many duplicates (#2179)', () => {
+  const DUPES = typeInfo({
+    type: 'native_duplicate_tracks',
+    label: 'Duplicate Tracks',
+    verb: 'Keep Best',
+    destructive: true,
+  });
+
+  const dupe = (id: number, reasons: string[], withMove: string[] = reasons) =>
+    finding({
+      id,
+      job_id: 'native_duplicate_detector',
+      finding_type: 'native_duplicate_tracks',
+      severity: 'info',
+      title: `See You Space Cowboy ${id}`,
+      needs_you: reasons.length ? { reasons, with_move: withMove } : null,
+      details: {
+        tracks: [
+          { title: 'See You Space Cowboy', artist: 'The Seatbelts', format: 'ogg' },
+          { title: 'SEE YOU SPACE COWBOYS', artist: 'The Seatbelts', format: 'flac' },
+        ],
+      },
+    });
+
+  it('the collapsed row says how many need you, and Keep Best all asks with the counts first', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [group({ finding_type: 'native_duplicate_tracks', pending: 5, needs_you: 3 })],
+      },
+      [TYPES]: { types: [DUPES] },
+      '/findings/keep-best-summary': {
+        success: true,
+        total: 5,
+        ready: 2,
+        ready_with_move: 4,
+        needs_you: { same_recording: 1, playlist: 2 },
+        needs_you_with_move: { same_recording: 1 },
+      },
+      '/bulk-fix-start': { started: true, total: 5 },
+    });
+    renderSurface();
+    await flush();
+    expect(screen.getByText('3 need you')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep Best all (5)' }));
+    await flush();
+    // its own box, not the generic yes/no
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('keep-best-tally').textContent).toContain('2 go through');
+    expect(screen.getByTestId('keep-best-tally').textContent).toContain('3 need you');
+    expect(screen.getByText(/2 with a copy in a playlist the kept copy is not in/)).toBeTruthy();
+    // no pairs to look at from here, so no confirming the whole type
+    expect(document.getElementById('_keep-best-confirm')).toBeNull();
+    const move = document.getElementById('_keep-best-move') as HTMLInputElement;
+    expect(move.checked).toBe(false);
+    expect(screen.getByText(/Lets 2 more go through/)).toBeTruthy();
+
+    fireEvent.click(move);
+    await flush();
+    expect(document.getElementById('_keep-best-go')?.textContent).toBe('Keep Best on 4');
+    clickPrompt('_keep-best-go');
+    await flush();
+    expect(bodyOf('/bulk-fix-start')).toEqual({
+      finding_type: 'native_duplicate_tracks',
+      fix_action: 'keep_best:move',
+    });
+  });
+
+  it('with moving left off, the run follows the job setting', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'native_duplicate_tracks', pending: 2 })] },
+      [TYPES]: { types: [DUPES] },
+      '/findings/keep-best-summary': {
+        success: true,
+        total: 2,
+        ready: 1,
+        ready_with_move: 2,
+        needs_you: { playlist: 1 },
+        needs_you_with_move: {},
+      },
+      '/bulk-fix-start': { started: true, total: 2 },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep Best all (2)' }));
+    await flush();
+    clickPrompt('_keep-best-go');
+    await flush();
+    expect(bodyOf('/bulk-fix-start')).toEqual({
+      finding_type: 'native_duplicate_tracks',
+      fix_action: 'keep_best',
+    });
+  });
+
+  it('marks a row that needs you, with the reason in words', async () => {
+    routes({ [FINDINGS]: page([dupe(1, ['playlist'], []), dupe(2, [])]) });
+    await renderList();
+    await flush();
+    const cards = document.querySelectorAll('.repair-finding-card');
+    expect(cards[0].querySelector('.repair-finding-status-badge.needs-you')?.textContent).toBe(
+      'Needs you',
+    );
+    expect(cards[0].querySelector('.repair-finding-needs')?.textContent).toBe(
+      'Needs you: a copy is in a playlist the kept copy is not in',
+    );
+    expect(cards[1].querySelector('.needs-you')).toBeNull();
+  });
+
+  it('a selection lists the differently named pairs and never confirms them unticked', async () => {
+    routes({
+      [FINDINGS]: page([dupe(1, ['same_recording']), dupe(2, [])]),
+      '/api/repair/findings/1/fix': {
+        success: false,
+        skipped_by_design: true,
+        needs_you: 'same_recording',
+        error: 'Needs you',
+      },
+      '/api/repair/findings/2/fix': { success: true },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+
+    const list = screen.getByRole('list', { name: 'Copies named differently' });
+    expect(within(list).getByText('SEE YOU SPACE COWBOYS')).toBeTruthy();
+    expect((document.getElementById('_keep-best-confirm') as HTMLInputElement).checked).toBe(false);
+    expect(document.getElementById('_keep-best-go')?.textContent).toBe('Keep Best on 1');
+    clickPrompt('_keep-best-go');
+    await flush();
+
+    expect(bodyOf('/1/fix')).toMatchObject({ fix_action: 'keep_best', bulk: true });
+    expect(bodyOf('/2/fix')).toMatchObject({ fix_action: 'keep_best', bulk: true });
+    expect(toastSpy).toHaveBeenCalledWith(
+      'Kept best on 1, 1 needs you and stays open (1 named differently, so you confirm it is the same recording)',
+      'success',
+    );
+  });
+
+  it('ticking "I checked these" confirms the listed pairs', async () => {
+    routes({
+      [FINDINGS]: page([dupe(1, ['same_recording'])]),
+      '/api/repair/findings/1/fix': { success: true },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    expect((document.getElementById('_keep-best-go') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(document.getElementById('_keep-best-confirm') as HTMLElement);
+    await flush();
+    clickPrompt('_keep-best-go');
+    await flush();
+    expect(bodyOf('/1/fix')).toMatchObject({ fix_action: 'keep_best:confirmed' });
   });
 });

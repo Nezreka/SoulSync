@@ -40,6 +40,30 @@ def normalize_client_url(raw: str) -> str:
     return url.rstrip('/')
 
 
+def tracker_host(announce) -> Optional[str]:
+    """The host of a tracker announce url, for display: 'tracker.example.org'.
+
+    Never the url itself: a private tracker puts the passkey in the path, and
+    the clients tab must not show (or log, or send to the browser) it (#2123).
+    Accepts a url, a bare host (deluge's tracker_host) or a list of either,
+    first usable one wins. None when there is nothing to show."""
+    from urllib.parse import urlsplit
+    items = announce if isinstance(announce, (list, tuple)) else [announce]
+    for raw in items:
+        if isinstance(raw, dict):
+            raw = raw.get('announce') or raw.get('url')
+        text = str(raw or '').strip()
+        if not text:
+            continue
+        try:
+            host = urlsplit(text if '://' in text else '//' + text).hostname
+        except ValueError:
+            continue
+        if host:
+            return host[4:] if host.startswith('www.') else host
+    return None
+
+
 @dataclass
 class TorrentStatus:
     """Adapter-uniform view of one torrent's live state.
@@ -88,6 +112,19 @@ class TorrentStatus:
     # in the client, soulsync's or not, so the clients tab can filter by it.
     # None when the client has none (aria2) or the torrent has none.
     category: Optional[str] = None
+    # the tracker's host (never the announce url, which carries a private
+    # tracker's passkey). None when the client doesn't say (aria2) (#2123).
+    tracker: Optional[str] = None
+    # the client has it stopped. separate from ``state`` because a finished
+    # torrent you pause still reads ``completed`` (the monitor imports on it),
+    # and without this the clients tab offered Pause again on a torrent that
+    # was already paused, so the button did nothing (#2125).
+    paused: bool = False
+    # the client is moving the finished files (qbittorrent's 'moving': out of
+    # its incomplete / temp folder into the final one, or a category's own
+    # path). content_path / save_path still name the old place until it is
+    # done, so nothing should be read from them yet (#2176).
+    moving: bool = False
 
 
 class AdoptedRef(str):

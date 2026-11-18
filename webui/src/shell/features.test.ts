@@ -18,10 +18,13 @@ import {
   getFeatures,
   installFeatures,
   isFeatureOn,
+  LOCKED_ATTR,
   renderOffer,
   loadFeatures,
+  resetSideMemory,
   saveFeatures,
 } from './features';
+import { NOTE_ID } from './hidden-page-note';
 
 const SIDEBAR = `
   <div class="side-toggle"></div>
@@ -59,12 +62,14 @@ function payload(off: string[], pages: string[]) {
 beforeEach(() => {
   document.body.innerHTML = SIDEBAR;
   localStorage.clear();
+  resetSideMemory();
 });
 
 afterEach(() => {
   server.resetHandlers();
   document.body.innerHTML = '';
   document.documentElement.removeAttribute('data-features-off');
+  document.documentElement.removeAttribute(LOCKED_ATTR);
 });
 
 describe('the sidebar filter', () => {
@@ -178,6 +183,7 @@ describe('load and save', () => {
     expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!)).toEqual({
       off: ['chat'],
       pages: ['chat', 'video-chat'],
+      locked: false,
     });
   });
 
@@ -260,5 +266,152 @@ describe('the one-time offer above Customize', () => {
     (box().querySelector('.sidebar-customize-keep') as HTMLButtonElement).click();
     await expect.poll(() => box().querySelector('.sidebar-customize-offer')).toBeNull();
     expect(body).toEqual({ preset: 'full' });
+  });
+});
+
+describe('#2157: switching a part back on brings the sidebar back', () => {
+  type W = { _switchAppSide?: unknown; profileAllowedSides?: unknown };
+  let calls: unknown[][] = [];
+  beforeEach(() => {
+    calls = [];
+    (window as W)._switchAppSide = (side: string, o: unknown) => {
+      calls.push([side, o]);
+      document.body.setAttribute('data-side', side);
+    };
+  });
+  afterEach(() => {
+    delete (window as W)._switchAppSide;
+    delete (window as W).profileAllowedSides;
+    document.body.removeAttribute('data-side');
+  });
+
+  it('puts someone moved off the video side back on it', () => {
+    document.body.setAttribute('data-side', 'video');
+    applyFeatures(['video'], ['video-dashboard']);
+    expect(document.body.getAttribute('data-side')).toBe('music');
+    applyFeatures([], []);
+    expect(calls).toEqual([
+      ['music', { force: true }],
+      ['video', { force: true }],
+    ]);
+    expect(hidden('.side-toggle')).toBe(false);
+  });
+
+  it('leaves someone who chose music on music', () => {
+    document.body.setAttribute('data-side', 'music');
+    applyFeatures(['video'], ['video-dashboard']);
+    applyFeatures([], []);
+    expect(calls).toEqual([]);
+  });
+
+  it('never moves a video-only profile off its only side', () => {
+    // the reporter: a profile that can only open the video side hid it and
+    // landed on an empty music sidebar with no switch back
+    (window as W).profileAllowedSides = () => 'video';
+    document.body.setAttribute('data-side', 'video');
+    applyFeatures(['video'], []);
+    expect(calls).toEqual([]);
+    expect(hidden('.side-toggle')).toBe(false);
+    // and one already stranded on music goes home
+    document.body.setAttribute('data-side', 'music');
+    applyFeatures([], []);
+    expect(calls).toEqual([['video', { force: true }]]);
+  });
+
+  it('comes back after a refresh too', async () => {
+    // the save cached the answer; the next load replays it, not the old one
+    server.use(http.post('*/api/profiles/me/features', () => HttpResponse.json(payload([], []))));
+    localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off: ['chat'], pages: ['chat'] }));
+    await saveFeatures({ off: [] });
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!)).toEqual({
+      off: [],
+      pages: [],
+      locked: false,
+    });
+  });
+});
+
+describe('#2157: a profile an admin locked', () => {
+  const locked = (off: string[], pages: string[]) => ({
+    ...payload(off, pages),
+    features: [{ id: 'podcasts', label: 'Podcasts', desc: '', group: 'more', pages: ['podcasts'] }],
+    chosen: true,
+    locked: true,
+  });
+  beforeEach(() => {
+    document.body.innerHTML = `${SIDEBAR}
+      <div class="sidebar-customize"><button class="sidebar-customize-btn"></button></div>`;
+  });
+
+  it('#2164: Customize goes away, no offer either, and comes back on unlock', async () => {
+    server.use(http.get('*/api/profiles/me/features', () => HttpResponse.json(locked([], []))));
+    await loadFeatures();
+    const box = document.querySelector<HTMLElement>('.sidebar-customize')!;
+    expect(box.hidden).toBe(true);
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(true);
+    expect(document.querySelector('.sidebar-customize-offer')).toBeNull();
+    // the next page load hides it before paint too
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!).locked).toBe(true);
+
+    server.use(http.get('*/api/profiles/me/features', () => HttpResponse.json(payload([], []))));
+    await loadFeatures();
+    expect(box.hidden).toBe(false);
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(false);
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!).locked).toBe(false);
+  });
+
+  it('#2164: the pre-paint replay hides Customize from the cache', () => {
+    const html = readFileSync(resolve(__dirname, '../../index.html'), 'utf8');
+    const start = html.indexOf("JSON.parse(localStorage.getItem('ss_features')");
+    const source = html.slice(
+      html.lastIndexOf('<script>', start) + '<script>'.length,
+      html.indexOf('</script>', start),
+    );
+    localStorage.setItem('ss_features', JSON.stringify({ off: [], pages: [], locked: true }));
+    new Function(source)();
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(true);
+    document.documentElement.removeAttribute(LOCKED_ATTR);
+    localStorage.setItem('ss_features', JSON.stringify({ off: [], pages: [] }));
+    new Function(source)();
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(false);
+  });
+
+  it('#2164: the stylesheet hides Customize while the attribute is on', () => {
+    const css = readFileSync(resolve(__dirname, '../../static/style.css'), 'utf8');
+    expect(css).toMatch(
+      new RegExp(`html\\[${LOCKED_ATTR}\\] \\.sidebar-customize \\{ display: none; \\}`),
+    );
+  });
+
+  it("the hidden page note has no 'show it' button", async () => {
+    document.querySelector('[data-page="podcasts"]')!.classList.add('active');
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json(locked(['podcasts'], ['podcasts'])),
+      ),
+    );
+    await loadFeatures();
+    const note = document.getElementById(NOTE_ID)!;
+    expect(note.textContent).toContain('by an admin');
+    expect(note.querySelector('.hidden-page-note-show')).toBeNull();
+  });
+
+  it('a refused save reloads, so the picker turns read only', async () => {
+    let reads = 0;
+    server.use(
+      http.get('*/api/profiles/me/features', () => {
+        reads++;
+        return HttpResponse.json(locked([], []));
+      }),
+      http.post('*/api/profiles/me/features', () =>
+        HttpResponse.json(
+          { success: false, error: 'An admin set it', locked: true },
+          { status: 403 },
+        ),
+      ),
+    );
+    await expect(saveFeatures({ off: ['chat'] })).rejects.toThrow('An admin set it');
+    await expect.poll(() => reads).toBe(1);
+    await expect.poll(() => getFeatures().payload?.locked).toBe(true);
   });
 });

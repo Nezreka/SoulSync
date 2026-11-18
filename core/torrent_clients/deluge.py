@@ -20,7 +20,7 @@ import requests as http_requests
 
 from core.settings import config_manager
 from core.async_utils import run_control
-from core.torrent_clients.base import TorrentStatus, normalize_client_url
+from core.torrent_clients.base import TorrentStatus, normalize_client_url, tracker_host
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.deluge")
@@ -61,6 +61,8 @@ class DelugeAdapter:
         # the label plugin's key. deluge leaves out keys it doesn't know, so
         # this is harmless with the plugin off
         'label',
+        # the tracker's host name (deluge already drops the announce path)
+        'tracker_host',
     ]
 
     def __init__(self) -> None:
@@ -280,6 +282,8 @@ class DelugeAdapter:
             save_path=item.get('save_path'),
             error=item.get('tracker_status') if 'Error' in (item.get('state') or '') else None,
             category=str(item.get('label') or '') or None,
+            tracker=tracker_host(item.get('tracker_host')),
+            paused=(item.get('state') or '') == 'Paused',
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

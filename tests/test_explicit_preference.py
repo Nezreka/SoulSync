@@ -137,13 +137,16 @@ def test_settings_ui_wires_the_sub_toggle():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
-    settings_js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
-    assert 'id="prefer-explicit"' in index
-    assert 'syncPreferExplicitState' in index               # parent onchange hook
-    assert 'function syncPreferExplicitState' in settings_js
-    assert "prefer_explicit: document.getElementById('prefer-explicit').checked" in settings_js
-    assert "settings.content_filter?.prefer_explicit === true" in settings_js
+    # Filtering is React now (SETTINGS_PORT.md step 5)
+    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')
+    values = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads.ts').read_text(encoding='utf-8')
+    assert 'id="prefer-explicit"' in tab
+    assert "disabled={blocked}" in tab                    # greyed out with the parent
+    assert "store.set('content_filter', 'prefer_explicit', v)" in tab
+    assert "prefer_explicit === true" in values
+    assert 'prefer-explicit' not in index and 'prefer-explicit' not in settings_js
 
 
 # ── slskd reality: full remote paths, markers on FOLDER names ────────────────
@@ -231,9 +234,14 @@ def test_settings_ui_wires_never_download_clean():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
-    settings_js = (root / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
+    settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
-    assert 'id="exclude-clean"' in index
-    assert "exclude_clean: document.getElementById('exclude-clean').checked" in settings_js
-    assert "settings.content_filter?.exclude_clean === true" in settings_js
-    assert "'prefer-explicit', 'exclude-clean'" in settings_js   # greyed out with the parent
+    # Filtering is React now (SETTINGS_PORT.md step 5)
+    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')
+    values = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads.ts').read_text(encoding='utf-8')
+    assert 'id="exclude-clean"' in tab
+    block = tab[tab.index('id="exclude-clean"'):tab.index('id="exclude-clean"') + 300]
+    assert "disabled={blocked}" in block                  # greyed out with the parent
+    assert "store.set('content_filter', 'exclude_clean', v)" in tab
+    assert "exclude_clean === true" in values
+    assert 'exclude-clean' not in index and 'exclude-clean' not in settings_js

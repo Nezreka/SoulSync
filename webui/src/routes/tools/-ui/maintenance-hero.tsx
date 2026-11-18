@@ -419,7 +419,7 @@ export function MaintenanceHero({
         ? createPortal(
             <label
               className="repair-master-toggle"
-              title="Lets enabled jobs run on their schedules. Off, a job only runs when you start it."
+              title="Lets enabled jobs run on their schedules. Off, a job only runs when you start it. The same switch as Music automations on the Automations page, so off pauses those too."
             >
               <span className="repair-master-name">Scheduled jobs</span>
               <span className="repair-toggle-label" id="repair-master-label">

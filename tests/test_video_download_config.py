@@ -108,6 +108,7 @@ def test_the_config_module_stays_cheap_to_import():
     assert pulled < 120, "download_config now drags in %d modules" % pulled
 
 
+from tests.support.settings_page import index_with_settings_page
 _WEBUI = Path(__file__).resolve().parents[1] / "webui"
 
 
@@ -125,32 +126,26 @@ def test_saving_seed_settings_cannot_clobber_the_download_chain():
     persists keys that are present (core/video/download_config.save), so the fix
     is for this saver to stop sending them and let the widget own them.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    body = js.split("function saveDownloads(", 1)[1].split("})", 1)[0]
-    assert "download_mode:" not in body, "saveDownloads still posts a possibly-stale download_mode"
-    assert "hybrid_order:" not in body, "saveDownloads still posts a possibly-stale hybrid_order"
+    # the saver is React (video-downloads.ts downloadsBody, SETTINGS_PORT.md video pass V2a)
+    js = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-downloads.ts").read_text(encoding="utf-8")
+    body = js.split("export function downloadsBody(", 1)[1].split("\n}\n", 1)[0]
+    assert "download_mode" not in body, "the saver still posts a possibly-stale download_mode"
+    assert "hybrid_order" not in body, "the saver still posts a possibly-stale hybrid_order"
     # it must still save what it is actually for
     assert "seed_ratio_goal" in body and "download_path" in body
 
 
-def test_the_retired_video_source_picker_stays_hidden():
+def test_the_retired_video_source_picker_is_gone():
     """Two editors for the video chain lived on one tab. The old select and its
-    arrow list stay in the DOM - video-settings.js reads them on load - but they
-    must never render, or they drift against the widget again.
-
-    The rule needs !important twice over: updateVideoSourceUI() writes
-    style.display on the hybrid container, and .form-group sets display:flex,
-    which alone beats the [hidden] attribute.
+    arrow list stayed in the DOM, hidden, while video-settings.js read them on
+    load; nothing reads them now, so they went (SETTINGS_PORT.md video pass V3c)
+    and the chain widget is the one editor. They must not come back.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
-    assert index.count("data-video-legacy-source") == 3, "the legacy markers moved"
-    for m in re.finditer(r"<[^>]*data-video-legacy-source[^>]*>", index):
-        assert "hidden" in m.group(0), "a legacy source control lost its hidden attribute"
-
+    assert "data-video-legacy-source" not in index, "the retired source picker is back"
+    assert 'id="video-download-mode"' not in index and 'id="video-hybrid-rows"' not in index
     css = (_WEBUI / "static" / "style.css").read_text(encoding="utf-8")
-    rule = re.search(r"#settings-page \[data-video-legacy-source\]\s*{([^}]*)}", css)
-    assert rule, "no rule hiding the retired picker"
-    assert "display: none" in rule.group(1) and "!important" in rule.group(1)
+    assert "[data-video-legacy-source]" not in css
 
 
 def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
@@ -171,63 +166,57 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     can still find every field it touches.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    for pid, tab in (("video-download-path", "library"),
-                     ("video-seeding-goals", "sources"),
-                     # #1822: import lists add to what you discover
-                     ("video-import-lists", "discovery"),
-                     # what to hunt is a library choice, not a usenet one
-                     ("video-monitor-specials", "library")):
-        at = index.index(f'id="{pid}"')
-        stg = index.rfind('data-stg=', 0, at)
-        found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
-        assert found == tab, f"{pid} is on the {found} tab, expected {tab}"
+    # the download folders and the seeding are React (SETTINGS_PORT.md video
+    # pass V2a): the folders in the Folders card's Video panel, on Library
+    folders = (tabs / "library-video-folders.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'library';" in folders and 'id="video-download-path"' in folders
+    # what to hunt is a library choice, not a usenet one (Video Preferences,
+    # React: SETTINGS_PORT.md video pass V2c)
+    prefs = (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'library';" in prefs and 'id="video-monitor-specials"' in prefs
+    # #1822: import lists add to what you discover (React, video pass V3c)
+    lists = (tabs / "video-row-lists.tsx").read_text(encoding="utf-8")
+    section = lists.split("export function ImportListsSection(", 1)[1]
+    assert 'tab="discovery"' in section.split("</Section>", 1)[0]
+    assert 'id="video-import-lists"' in section
 
     # seeding has to be INSIDE the torrent panel, not merely on the same tab
-    assert index.index('id="video-seeding-goals"') > index.index('id="torrent-client-settings-container"')
+    panels = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
+    torrent = panels.split("export function TorrentPanel(", 1)[1].split("\nexport function", 1)[0]
+    assert "<VideoSeedingGoals />" in torrent
+    assert 'id="video-seeding-goals"' in (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
 
-    # nothing the video saver reads may have been left behind by a move
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    touched = {a or b for a, b in re.findall(r"getElementById\('([^']+)'\)|val\('([^']+)'\)", js)}
-    orphans = [i for i in sorted(touched) if i.startswith(("video-", "vq-")) and f'id="{i}"' not in index]
-    assert not orphans, f"the move orphaned these fields: {orphans}"
+    # the vanilla video saver that read fields by id is gone (SETTINGS_PORT.md
+    # step V4c): each React section reads its own state, no id can be orphaned
+    assert not (_WEBUI / "static" / "video" / "video-settings.js").exists()
 
 
-def test_the_video_slskd_form_is_a_retired_duplicate():
+def test_the_video_slskd_form_is_gone():
     """Nine fields on the video Downloads tab wrote the SAME nine config keys as
     the music Soulseek panel - soulseek.slskd_url, api_key, search_timeout and
     the rest - via /api/video/downloads/slskd. One slskd instance, two forms, on
-    two different tabs, in two different styles.
+    two different tabs, and the clobber this page has been bitten by twice:
+    saveSlskd() posted EVERY field whenever any one changed.
 
-    It also carried the clobber this page has been bitten by twice now:
-    saveSlskd() posts EVERY field whenever any one changes, so changing a search
-    timeout on the video side re-posted whatever URL that form happened to be
-    holding - undoing a change made from the music side.
-
-    The Sources tab is shared and renders on the video side, so the Soulseek card
-    there is the single editor. The fields stay in the DOM (video-settings.js
-    reads them) but must never render. This also pins the 1:1 mapping, so the day
-    a field exists on one side only, this fails instead of quietly hiding it.
+    The Sources tab's Soulseek card is the single editor. The duplicate stayed
+    hidden while video-settings.js read it; nothing does now, so it went
+    (SETTINGS_PORT.md video pass V3c). It must not come back.
     """
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
-    at = index.index('id="video-slskd-container"')
-    tag = index[index.rfind("<div", 0, at):index.index(">", at) + 1]
-    assert 'data-dupe-of="soulseek-settings-container"' in tag
-    assert "hidden" in tag
-
+    assert 'id="video-slskd-container"' not in index and "video-slskd-" not in index
+    assert "data-dupe-of" not in index
     css = (_WEBUI / "static" / "style.css").read_text(encoding="utf-8")
-    rule = re.search(r"#settings-page \[data-dupe-of\]\s*{([^}]*)}", css)
-    assert rule and "display: none" in rule.group(1) and "!important" in rule.group(1)
-
-    # every video field must still have a music counterpart, or hiding it loses a setting
-    vjs = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    mjs = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
-    video = {i for i in re.findall(r"'(video-slskd-[a-z-]+)'", vjs) if not i.endswith("container")}
-    alias = {"search-min-delay": "search-min-delay-seconds", "auto-clear": "auto-clear-searches"}
-    for vid in sorted(video):
-        stem = vid[len("video-slskd-"):]
-        music = "soulseek-" + alias.get(stem, stem)
-        assert f"'{music}'" in mjs, f"{vid} has no music counterpart ({music}) - hiding it loses that setting"
+    assert "[data-dupe-of]" not in css
+    tabs_dir = _WEBUI / "src" / "features" / "settings" / "tabs"
+    vjs = "".join(p.read_text(encoding="utf-8") for p in sorted(tabs_dir.glob("video-*.ts*"))
+                  if not p.name.endswith((".test.ts", ".test.tsx")))
+    assert "saveSlskd" not in vjs and "/api/video/downloads/slskd" not in vjs
+    # the music Soulseek panel (React, SETTINGS_PORT.md step 7f) is the editor
+    panel = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels.tsx").read_text(encoding="utf-8")
+    for music in ("soulseek-url", "soulseek-api-key", "soulseek-search-timeout"):
+        assert f'id="{music}"' in panel, music
 
 
 def test_the_downloads_tab_holds_only_download_settings():
@@ -240,7 +229,8 @@ def test_the_downloads_tab_holds_only_download_settings():
     download setting, it is background machinery, so it sits in Advanced with
     import lists and logging.
     """
-    index = (_WEBUI / "index.html").read_text(encoding="utf-8")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     titles = []
@@ -248,6 +238,16 @@ def test_the_downloads_tab_holds_only_download_settings():
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
         if t:
             titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    # Download Behaviour, Retry Logic, Album Publishing and Filtering are React
+    # now (SETTINGS_PORT.md step 5): their cards are rendered from the tab, in
+    # this order, into slots after Source Settings
+    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
+    # Source Settings (the download chain) is React too (step 7a), rendered
+    # into the first slot, ahead of the others
+    chain = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
+    assert markup.index('data-stg-part="chain"') < markup.index('data-stg-part="behaviour"')
+    titles += re.findall(r'settings-section-static" data-stg="downloads">\s*<h3>([^<]+)</h3>', chain)
+    titles += re.findall(r'title="([^"]+)"', tab[tab.index("function Behaviour("):])
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards
     assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing",
@@ -256,11 +256,14 @@ def test_the_downloads_tab_holds_only_download_settings():
     # the two that moved must not have crept back
     # #1822: notifications sit with the other connected services, import lists
     # on Discovery; neither belongs on Downloads
-    for stray, home in (("video-notifications", "connections"), ("video-import-lists", "discovery")):
-        at = markup.index(f'id="{stray}"')
-        stg = markup.rfind('data-stg="', 0, at)
-        tab = re.search(r'data-stg="([a-z]+)"', markup[stg:stg + 32]).group(1)
-        assert tab == home, f"{stray} is on the {tab} tab, expected {home}"
+    # (both React: video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
+    lists = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
+    for stray, section, home in (("video-notifications", "NotificationsSection", "connections"),
+                                 ("video-import-lists", "ImportListsSection", "discovery")):
+        body = lists.split(f"export function {section}(", 1)[1].split("\nexport function", 1)[0]
+        assert f'id="{stray}"' in body
+        assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
+        assert f'data-stg-react="{home}" data-stg-part=' in markup
 
 
 def test_the_video_save_button_cannot_write_a_retired_form():
@@ -283,19 +286,36 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     gone for the same reason: hidden fields can only change from code, and any
     write from there races the music panel's own save.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    save_handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
-    chain = save_handler.split("Promise.all([", 1)[1].split("])", 1)[0]
-    assert "saveSlskd" not in chain, (
-        "the video save button posts the retired slskd form again"
-    )
+    # every video section is React (SETTINGS_PORT.md video pass): the save
+    # button's capture listener is video-shown.ts, and each section adds its
+    # saver there. video-settings.js is gone, and nothing posts slskd
+    assert not (_WEBUI / "static" / "video" / "video-settings.js").exists()
+    savers = [p for p in tabs.glob("*.ts*") if "onVideoSave(" in p.read_text(encoding="utf-8")
+              and not p.name.endswith((".test.tsx", ".test.ts")) and p.name != "video-shown.ts"]
+    for p in savers:
+        assert "/api/video/downloads/slskd" not in p.read_text(encoding="utf-8"), (
+            f"{p.name} posts the retired slskd form from the video save button"
+        )
     # the savers that legitimately belong to the video side stay
-    for keep in ("saveConn", "saveDownloads", "saveQuality", "saveYtQuality"):
-        assert keep in chain, f"{keep} was dropped from the video save chain"
+    server = (tabs / "video-server.ts").read_text(encoding="utf-8")
+    assert "onVideoSave(() => Promise.all([videoServer.saveConn(true), videoServer.saveLibs(true)]));" in server
+    # the downloads config is React and saves from the same click (video-downloads.ts)
+    downloads = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-downloads.ts").read_text(encoding="utf-8")
+    assert "onVideoSave(() => videoDownloads.save());" in downloads
+    # Video Quality and YouTube Quality are React and add their own savers to
+    # the same capture-phase click (SETTINGS_PORT.md, video pass V1)
+    shown = (tabs / "video-shown.ts").read_text(encoding="utf-8")
+    assert "if (!(event.target as Element | null)?.closest?.('#save-settings')) return;" in shown
+    assert "true,\n  );" in shown  # capture phase
+    quality = (tabs / "video-quality.tsx").read_text(encoding="utf-8")
+    assert quality.count("useEffect(() => onVideoSave(() => save()), [])") == 2
 
-    wiring = js.split("function wireSlskd", 1)[-1][:1200] if "function wireSlskd" in js else js
-    assert "addEventListener('change', function () { saveSlskd(true); })" not in js, (
+    # and no video section saves the retired form's endpoint from a field
+    sections = "".join(p.read_text(encoding="utf-8") for p in sorted(tabs.glob("video-*.ts*"))
+                       if not p.name.endswith((".test.ts", ".test.tsx")))
+    assert "saveSlskd" not in sections and "/api/video/downloads/slskd" not in sections, (
         "a retired hidden field can still trigger a save"
     )
 
@@ -313,9 +333,10 @@ def test_the_video_save_button_saves_the_whole_page():
     The capture listener must flush the video savers and let the click through
     to the button's own handler, and it must not claim a save of its own.
     """
-    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
-    handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
-    handler = handler.split("}, true);", 1)[0]
+    # the capture listener is video-shown.ts (SETTINGS_PORT.md video pass)
+    shown = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-shown.ts").read_text(encoding="utf-8")
+    handler = shown.split("?.closest?.('#save-settings')) return;", 1)[1]
+    handler = handler.split("true,\n  );", 1)[0]
     for blocker in ("stopImmediatePropagation", "stopPropagation", "preventDefault"):
         assert blocker not in handler, f"the video save button still calls {blocker}"
     assert "'Settings saved'" not in handler, (
@@ -329,15 +350,15 @@ def test_the_music_autosave_runs_on_the_video_side_for_shared_fields():
     never auto-saved either. Only a field the video side saves itself (inside a
     data-video-only block or wired by a data-video-* hook) may skip it - that
     one already saves through /api/video/*."""
-    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
-    body = js.split("function debouncedAutoSaveSettings(", 1)[1].split("\nfunction ", 1)[0]
-    blanket = re.search(r"getAttribute\('data-side'\)\s*===\s*'video'\)\s*return;", body)
-    assert not blanket, "the music auto-save still stands down for every field on the video side"
-    assert "_isVideoOwnedField(event?.target)" in body
-
-    helper = js.split("function _isVideoOwnedField(", 1)[1].split("\nfunction ", 1)[0]
-    assert "[data-video-only]" in helper
-    assert "data-video-" in helper
+    # every control is React and saves through the settings store, which has
+    # no side in it; the page's own autosave went with settings.js
+    # (SETTINGS_PORT.md step V4b). video-side-settings-save.test.ts runs it:
+    # a Security and a Sources field save on the video side, and no video
+    # section saves through it (each posts to /api/video/* itself)
+    store = (_WEBUI / "src" / "features" / "settings" / "settings-store.ts").read_text(encoding="utf-8")
+    assert "data-side" not in store, "the store stands down on one side"
+    shell = (_WEBUI / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
+    assert "debouncedAutoSaveSettings" not in shell
 
 
 def test_the_ytdlp_card_loads_where_it_actually_lives():
@@ -347,16 +368,19 @@ def test_the_ytdlp_card_loads_where_it_actually_lives():
     does to read a version number.
 
     Predates this session; found while checking nothing else had come unhooked.
+
+    The tile is React now, inside the YouTube panel (SETTINGS_PORT.md step 7g):
+    the settings.js tab hook and the modal's call are gone, and the panel loads
+    the version itself on arriving at Sources and on opening YouTube. Advanced
+    loads nothing.
     """
-    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
-    trigger = re.search(r"if \(\(?tab === [^)]*\)? && typeof loadYtdlpStatus", js)
-    assert trigger, "the yt-dlp loader is no longer wired to a tab"
-    assert "'sources'" in trigger.group(0), (
-        "the loader still only fires on Advanced, where the tile no longer is"
-    )
+    panels = (_WEBUI / "src" / "features" / "settings" / "tabs" / "source-panels-more.tsx").read_text(encoding="utf-8")
+    youtube = panels.split("export function YoutubePanel(", 1)[1].split("\nexport function", 1)[0]
+    assert "if (active && opened) void loadYtdlp();" in youtube, "the loader is no longer wired to the Sources tab"
     # and opening the YouTube card refreshes it
-    opener = js.split("function openSourceModal(", 1)[1].split("\n}", 1)[0]
-    assert "loadYtdlpStatus" in opener
+    assert "useOnOpen(model, 'youtube', () => void loadYtdlp());" in youtube
+    js = (_WEBUI / "src" / "features" / "settings" / "shell.ts").read_text(encoding="utf-8")
+    assert "loadYtdlpStatus" not in js, "settings.js still wires a loader for a tile it no longer has"
 
 
 

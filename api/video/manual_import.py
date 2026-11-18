@@ -72,11 +72,37 @@ def _failed_view(row):
     }
 
 
+def _current_file(db, row):
+    """The unplaced file's path, or None when it is gone. A torrent/usenet
+    row's stored path can go stale: the client moved the file after we read
+    it (out of its incomplete folder, #2176). Then the client is asked where
+    it is now, and the row is pointed there."""
+    path = row.get("dest_path")
+    if path and os.path.exists(path):
+        return path
+    try:
+        from core.video.client_download import current_job_file
+        found = current_job_file(row)
+    except Exception:   # noqa: BLE001 - a client hiccup leaves the old answer
+        logger.debug("re-asking the client for download %s failed", row.get("id"), exc_info=True)
+        found = None
+    if found:
+        try:
+            db.update_video_download(row["id"], dest_path=found)
+        except Exception:   # noqa: BLE001 - the found path still works for this request
+            logger.debug("could not store the new path for %s", row.get("id"), exc_info=True)
+        row["dest_path"] = found
+    return found
+
+
 def register_routes(bp):
     @bp.route("/import/failed", methods=["GET"])
     def video_import_failed():
         from . import get_video_db
-        rows = get_video_db().get_import_failed_video_downloads()
+        db = get_video_db()
+        rows = db.get_import_failed_video_downloads()
+        for r in rows:
+            _current_file(db, r)     # a stale client path points at where the file went
         return jsonify({"success": True, "items": [_failed_view(r) for r in rows]})
 
     @bp.route("/import/<int:dl_id>/place", methods=["POST"])
@@ -92,8 +118,8 @@ def register_routes(bp):
         row = db.get_video_download(dl_id)
         if not row or row.get("status") != "import_failed":
             return jsonify({"success": False, "error": "Not an unplaced import."}), 404
-        src = row.get("dest_path")
-        if not src or not os.path.exists(src):
+        src = _current_file(db, row)
+        if not src:
             return jsonify({"success": False, "error": "The file is no longer on disk."}), 410
 
         body = request.get_json(silent=True) or {}
@@ -233,3 +259,46 @@ def register_routes(bp):
         db.update_video_download(dl_id, status="cancelled",
                                  error="Dismissed from manual import")
         return jsonify({"success": True})
+
+    # ── the import folder (#2129): drop files in, review what was found, import.
+    #    the import itself is the download importer's (core.video.import_folder).
+    @bp.route("/import/folder", methods=["GET"])
+    def video_import_folder_list():
+        from . import get_video_db
+        from core.video import import_folder
+        return jsonify({"success": True, **import_folder.listing(get_video_db())})
+
+    @bp.route("/import/folder/settings", methods=["GET"])
+    def video_import_folder_settings():
+        from . import get_video_db
+        from core.video import import_folder
+        return jsonify({"success": True, **import_folder.load_settings(get_video_db())})
+
+    @bp.route("/import/folder/settings", methods=["POST"])
+    def video_import_folder_settings_save():
+        from . import get_video_db
+        from core.video import import_folder
+        body = request.get_json(silent=True) or {}
+        return jsonify({"success": True, **import_folder.save_settings(get_video_db(), body)})
+
+    @bp.route("/import/folder/import", methods=["POST"])
+    def video_import_folder_import():
+        """Import one entry of the folder. Body {key, tmdb_id?, kind?, title?,
+        year?, season?, episode?, poster_url?}: without a tmdb_id it goes in as
+        what was found, with one as what the user picked."""
+        from . import get_video_db
+        from core.video import import_folder
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        try:
+            entry = import_folder.find_entry(db, str(body.get("key") or ""))
+        except OSError:
+            return jsonify({"success": False, "error": "Can't read the import folder."}), 500
+        if entry is None:
+            return jsonify({"success": False, "error": "That's not in the import folder any more."}), 404
+        override = {k: body.get(k) for k in ("tmdb_id", "kind", "title", "year", "season",
+                                              "episode", "poster_url") if k in body}
+        why = import_folder.start_import(db, entry, override or None)
+        if why:
+            return jsonify({"success": False, "error": why}), 409
+        return jsonify({"success": True, "status": "importing"})

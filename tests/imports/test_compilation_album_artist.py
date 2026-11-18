@@ -114,21 +114,25 @@ def _repo_root():
     return Path(__file__).resolve().parents[2]
 
 
+def _card():
+    return (_repo_root() / 'webui' / 'src' / 'features' / 'settings' / 'tabs'
+            / 'library-organization.tsx').read_text(encoding='utf-8')
+
+
 def test_the_toggle_exists_in_the_settings_page():
     """It was config-only: the backend read it, both halves obeyed it, and
     there was no way for a user to see or change it (sassmastawillis went
     looking for it and there was nothing to find)."""
-    html = (_repo_root() / 'webui' / 'index.html').read_text(encoding='utf-8')
-    assert 'id="detect-multi-artist-compilations"' in html
+    # the Organization card is React (SETTINGS_PORT.md step 8b)
+    assert "'detect-multi-artist-compilations'," in _card()
 
 
 def test_the_toggle_saves_and_loads_under_the_key_the_backend_reads():
-    js = (_repo_root() / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
-    assert ("detect_multi_artist_compilations: "
-            "document.getElementById('detect-multi-artist-compilations').checked") in js
+    card = _card()
+    assert "store.set('file_organization', 'detect_multi_artist_compilations', v)" in card
     # `!== false` and not `=== true`: the backend default is ON, so a config
     # that has never stored the key must still render the box ticked.
-    assert "settings.file_organization?.detect_multi_artist_compilations !== false" in js
+    assert "org.detect_multi_artist_compilations !== false," in card
 
 
 def test_the_backend_default_and_the_checkbox_default_agree():
@@ -139,6 +143,6 @@ def test_the_backend_default_and_the_checkbox_default_agree():
     defaults_src = inspect.getsource(type(config_manager))
     assert '"detect_multi_artist_compilations": True' in defaults_src or \
            "'detect_multi_artist_compilations': True" in defaults_src
-    html = (_repo_root() / 'webui' / 'index.html').read_text(encoding='utf-8')
-    block = html.split('id="detect-multi-artist-compilations"')[1][:60]
-    assert 'checked' in block, 'markup default must match the backend default'
+    # the card ticks it unless the key is saved off (see above)
+    assert "org.detect_multi_artist_compilations !== false," in _card(), \
+        'markup default must match the backend default'

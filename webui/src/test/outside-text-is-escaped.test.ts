@@ -48,13 +48,10 @@ const SITES: Array<[string, string[]]> = [
       'Error: ${escapeHtml(e.message)}',
     ],
   ],
-  [
-    'settings.js',
-    [
-      "${escapeHtml(data.error || 'Prowlarr not configured.')}",
-      'Failed to load indexers: ${escapeHtml(e.message)}',
-    ],
-  ],
+  // the Prowlarr indexer list that escaped these is React now (JSX escapes
+  // text itself, source-panels-more.tsx), and settings.js is gone
+  // (SETTINGS_PORT.md step V4b): what it held that builds html, the Hydrabase
+  // page, is pages-extra.js's, checked above
   ['enrichment.js', ['Search error: ${escapeHtml(err.message)}']],
 ];
 

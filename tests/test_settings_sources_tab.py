@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.settings_page import index_with_settings_page
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 _SOURCE_CONTAINERS = (
@@ -53,17 +55,84 @@ def _read(rel: str) -> str:
 
 @pytest.fixture(scope="module")
 def index():
-    return _read("webui/index.html")
+    # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
+    return index_with_settings_page()
 
 
 @pytest.fixture(scope="module")
 def js():
-    return _read("webui/static/settings.js")
+    return _read("webui/src/features/settings/shell.ts")
+
+
+# the tiles, the dots and Test all are React since step 7a (SETTINGS_PORT.md):
+# sources-tab.tsx renders the tiles from sources-model.ts. the source modal and
+# its panels are still vanilla, and reach the model through window.SoulSyncSources
+_TABS = "webui/src/features/settings/tabs/"
+
+
+@pytest.fixture(scope="module")
+def model():
+    return _read(_TABS + "sources-model.ts")
+
+
+@pytest.fixture(scope="module")
+def tab():
+    return _read(_TABS + "sources-tab.tsx")
+
+
+def _react_panels() -> str:
+    """the panels ported to React (step 7c on), one component per panel: the
+    first seven in source-panels.tsx, the last four in source-panels-more.tsx"""
+    return _read(_TABS + "source-panels.tsx") + "\n" + _read(_TABS + "source-panels-more.tsx")
+
+
+def _react_dispatch(react: str) -> str:
+    """the two components that pick a slot's panels by part"""
+    return "\n".join(react.split(f"export function {name}(", 1)[1].split("\nexport ", 1)[0]
+                     for name in ("SourcePanels", "MoreSourcePanels"))
+
+
+def _panel_text(index: str, container_id: str) -> str:
+    """One panel's content, wherever it lives: its vanilla markup in index.html,
+    or, once ported, the React component that renders that container."""
+    if f'id="{container_id}"' in index:
+        return _panel_span(index, container_id)
+    react = _react_panels()
+    at = react.index(f'id="{container_id}"')
+    start = react.rindex("export function ", 0, at)
+    end = react.find("\nexport ", at)
+    return react[start:end if end != -1 else len(react)]
+
+
+def _react_slots(index: str, region: str) -> list[str]:
+    """the parts of the React panel slots inside a stretch of index.html"""
+    return re.findall(r'data-stg-react="sources" data-stg-part="([a-z-]+)"', region)
+
+
+def _modal(tab: str) -> str:
+    """the React source modal (step 7b)"""
+    return tab.split("export function SourceModal(", 1)[1].split("\nexport function", 1)[0]
+
+
+def _tiles(tab: str) -> str:
+    """the SourceTiles component"""
+    return tab.split("export function SourceTiles(", 1)[1].split("export function SourcesTab(", 1)[0]
+
+
+def _tile(tab: str) -> str:
+    """one tile's markup"""
+    return _tiles(tab).split("const tile = (src: SourceMeta) =>", 1)[1].split("const section =", 1)[0]
+
+
+def _test_all(model: str) -> str:
+    return model.split("async function testAll(", 1)[1].split("\n  return {", 1)[0]
 
 
 def test_the_tab_exists(index):
     assert 'data-tab="sources"' in index
-    assert "switchSettingsTab('sources')" in index
+    # the tab buttons are React (settings-page.tsx, SETTINGS_PORT.md step V4c)
+    page = _read("webui/src/features/settings/settings-page.tsx")
+    assert "onClick={() => switchSettingsTab(key)}" in page
 
 
 def test_the_tab_is_available_on_both_sides(index):
@@ -78,7 +147,7 @@ def test_the_tab_is_available_on_both_sides(index):
     assert "data-music-only" not in group
 
 
-def test_the_sources_tab_shows_every_tile_on_both_sides(js):
+def test_the_sources_tab_shows_every_tile_on_both_sides(tab, js):
     """REVERSED. This used to assert the opposite: the video side saw only a
     SHARED_SOURCES subset - 4 tiles out of 13 - on the theory that Tidal and
     Soulseek mean nothing to video.
@@ -89,10 +158,10 @@ def test_the_sources_tab_shows_every_tile_on_both_sides(js):
     is not a reason to be unable to see a setting. The tab is shared, so it
     renders the same thing on both sides - same tiles, same grouping.
 
-    buildSourceTiles must therefore not branch on the side at all: not to filter
+    The tiles must therefore not branch on the side at all: not to filter
     the list, and not to group it differently either."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "data-side" not in fn, "buildSourceTiles still branches on the side"
+    fn = _tiles(tab)
+    assert "data-side" not in fn, "the tiles branch on the side"
     assert "SHARED_SOURCES" not in fn
     assert "SHARED_SOURCES = new Set" not in js, "the dead subset is still declared"
 
@@ -132,109 +201,160 @@ def test_the_shared_tabs_carry_no_side_gating(index):
 
 def test_every_source_config_lives_on_the_sources_tab(index):
     """A group nested under another tab's body would stay hidden no matter what
-    its own data-stg said — the parent is display:none."""
+    its own data-stg said — the parent is display:none. A panel ported to React
+    sits in a slot in the same place (step 7c on)."""
     body = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
+    react = _react_panels()
+    slots = _react_slots(index, body)
     for cid in _SOURCE_CONTAINERS:
-        assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
+        if f'id="{cid}"' in react:
+            assert slots, f"{cid} is React but no panel slot is on the Sources tab"
+        else:
+            assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
 
 
 def test_no_source_config_is_left_behind_on_downloads(index):
     # Exactly one home each; a duplicated id would break getElementById too.
+    react = _react_panels()
     for cid in _SOURCE_CONTAINERS:
-        assert index.count(f'id="{cid}"') == 1, f"{cid} appears more than once"
+        count = index.count(f'id="{cid}"') + react.count(f'id="{cid}"')
+        assert count == 1, f"{cid} appears {count} times"
 
 
-def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js):
-    """The regression that matters. If updateDownloadSourceUI goes back to
-    driving these containers off the active-source set, configuring a source
-    you have not switched on becomes impossible again."""
-    fn = js.split("function updateDownloadSourceUI(", 1)[1].split("\n}", 1)[0]
-    assert "showCfg" not in fn, "per-source config is gated on the source being active again"
+def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab, model):
+    """The regression that matters. If anything goes back to driving these
+    containers off the active-source set, configuring a source you have not
+    switched on becomes impossible again. updateDownloadSourceUI, which once
+    did, is gone (step 7a): a tile opens any source's panel, chain or not."""
+    assert "function updateDownloadSourceUI" not in js
+    assert "showCfg" not in js, "per-source config is gated on the source being active again"
     for cid in _SOURCE_CONTAINERS:
-        assert f"getElementById('{cid}')" not in fn or "style.display" not in fn.split(cid, 1)[1][:120], \
-            f"updateDownloadSourceUI still sets display on {cid}"
+        for m in re.finditer(re.escape(f"getElementById('{cid}')"), js):
+            assert "style.display" not in js[m.end():m.end() + 120], \
+                f"something sets display on {cid} again"
+    # opening asks only whether the source has a panel (step 7b)
+    opener = model.split("    openModal(id) {", 1)[1].split("\n    },", 1)[0]
+    for gate in ("music", "order", "hybrid_order", "unready"):
+        assert gate not in opener, f"opening a source depends on the chain ({gate})"
+    assert "SOURCE_CONFIG_ID_BY_SRC[id]" in opener
+    # every configurable source gets a tile, in a chain or not
+    assert "onClick={() => model.openModal(src.id)}" in _tile(tab)
 
 
-def test_the_chain_widget_stayed_on_downloads(index):
+def test_the_chain_widget_stayed_on_downloads(index, tab):
     """Only the config moved. The order lives with the rest of the download
-    behaviour, and is the thing being redesigned separately."""
-    assert 'id="hybrid-settings-container"' in index
-    before = index.split('id="hybrid-settings-container"', 1)[0]
-    # the nearest preceding tab marker is the Downloads one
-    tags = re.findall(r'data-stg="([a-z]+)"', before)
-    assert tags[-1] == "downloads", f"chain widget ended up under {tags[-1]}"
+    behaviour, and is the thing being redesigned separately. the chain is a
+    React slot now (step 7a): it is the Downloads tab's, and it renders its
+    blocks as Downloads blocks."""
+    assert 'data-stg-react="downloads" data-stg-part="chain"' in index
+    assert 'data-stg-react="sources" data-stg-part="chain"' not in index
+    chain = tab.split("export function ChainWidget(", 1)[1].split("// ── the Sources tab's tiles", 1)[0]
+    tags = set(re.findall(r'data-stg="([a-z]+)"', chain))
+    assert tags == {"downloads"}, f"chain widget ended up under {tags}"
 
 
 def test_the_cog_crosses_to_the_tab(js):
-    fn = js.split("function toggleHybridSourceConfig(", 1)[1].split("\n}", 1)[0]
-    assert "switchSettingsTab('sources')" in fn
-    assert "openSourceModal(" in fn
+    # the chain is React since step 7a and its rows have no cog: a source's
+    # settings open from its tile, in the modal (sources-model.ts openModal).
+    # the cog's crossing went with settings.js (step V4b): nothing called it
+    model = _read("webui/src/features/settings/tabs/sources-model.ts")
+    assert "/** open a source's settings in the modal (a tile, a chain cog) */" in model
+    assert "toggleHybridSourceConfig" not in js
 
 
-def test_the_tiles_refresh_with_the_chain(js):
+def test_the_tiles_refresh_with_the_chain(model, tab):
     # Same state drives both; a stale tile is a tile that lies about status.
-    fn = js.split("function buildHybridSourceList(", 1)[1].split("\n}", 1)[0]
-    assert "buildSourceTiles()" in fn
+    # the tiles subscribe to the model, and a chain edit writes the model
+    assert "useSyncExternalStore(model.subscribe, model.getState)" in tab
+    assert "const state = useModel(model);" in _tiles(tab)
+    music = model.split("function writeMusic(", 1)[1].split("\n  }", 1)[0]
+    assert "set({ music:" in music
+    video = model.split("async function writeVideo(", 1)[1].split("\n  }", 1)[0]
+    assert "set({ video:" in video
 
 
-def test_every_source_has_a_tile(js):
+def test_every_source_has_a_tile(tab):
     """Tiles are rendered, not hand-written, so the check is that the renderer
     covers every source that owns a config panel."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     assert "HYBRID_SOURCES" in fn
     assert "EXTRA_SOURCE_TILES" in fn      # Prowlarr is not a chain link
     assert "SOURCE_CONFIG_ID_BY_SRC" in fn
-    markup = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    markup = _tile(tab)
     assert "src-tile-name" in markup and "src-tile-art" in markup
 
 
-def test_the_panel_is_moved_not_cloned(js):
+def test_the_panel_is_moved_not_cloned(tab):
     """Cloning would put a second element with the same id in the document, and
     every getElementById in saveSettings would then read whichever one the
     browser returned first — silently saving the copy nobody typed into."""
-    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "appendChild(panel)" in fn
+    fn = _modal(tab)
+    assert "body.current.appendChild(panel)" in fn
     assert "cloneNode" not in fn
 
 
-def test_closing_puts_the_panel_back(js):
+def test_closing_puts_the_panel_back(tab):
     """It has to go home before the overlay hides, or the next open would move
-    a node that is already inside the hidden modal."""
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "home.appendChild(panel)" in fn
-    assert fn.index("home.appendChild(panel)") < fn.index("overlay.hidden = true")
+    a node that is already inside the hidden modal. The effect's cleanup runs
+    when `open` changes, before the hidden modal renders."""
+    fn = _modal(tab)
+    cleanup = fn.split("return () => {", 1)[1].split("};", 1)[0]
+    assert "getElementById('source-config-home')?.appendChild(panel)" in cleanup
 
 
-def test_closing_lands_a_pending_autosave(js):
+def test_closing_lands_a_pending_autosave(js, tab):
     """The page auto-saves 2s after a change. Edit a field, close the modal, and
     the timer would otherwise still be counting with nothing on screen to say
-    anything was pending."""
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "settingsAutoSaveTimer" in fn and "saveSettings(" in fn
+    anything was pending. The vanilla timer is landed through a bridge, a React
+    tab's pending change through the store."""
+    close = _modal(tab).split("function close() {", 1)[1].split("\n  }", 1)[0]
+    assert "landPendingSettingsSave?.()" in close
+    assert "settingsStore.flush()" in close and "_settingsAutosaveOff !== true" in close
+    # the page-wide autosave timer the bridge landed went with settings.js
+    # (step V4b): every control is React, and the store is flushed right here
+    bridge = js.split("export function landPendingSettingsSave() {", 1)[1].split("\n}", 1)[0]
+    assert "saveSettings" not in bridge
 
 
-def test_escape_closes_it(js):
-    assert "e.key === 'Escape'" in js and "closeSourceModal()" in js
+def test_escape_closes_it(tab):
+    fn = _modal(tab)
+    assert "event.key === 'Escape'" in fn and "close()" in fn
 
 
-def test_the_modal_is_a_dialog(index):
-    block = index.split('id="source-config-modal"', 1)[1].split("</div>", 6)[0]
-    assert 'role="dialog"' in block and 'aria-modal="true"' in block
+def test_the_modal_is_a_dialog(tab):
+    fn = _modal(tab)
+    assert 'role="dialog"' in fn and 'aria-modal="true"' in fn
 
 
 def test_the_panels_park_in_a_hidden_home(index):
     """They are real page markup, not templates — they need somewhere to live
-    that is not on screen when no modal is open."""
+    that is not on screen when no modal is open. A React panel renders into a
+    slot in the same hidden home, and only portals into the modal while open."""
     assert 'id="source-config-home" hidden' in index
     home = index.split('id="source-config-home"', 1)[1].split("end source-config-home", 1)[0]
+    react = _react_panels()
+    slots = _react_slots(index, home)
     for cid in _SOURCE_CONTAINERS:
-        assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
+        if f'id="{cid}"' in react:
+            # the component that renders it is dispatched from a slot in the home
+            comp = react[:react.index(f'id="{cid}"')].rsplit("export function ", 1)[1].split("(", 1)[0]
+            dispatch = _react_dispatch(react)
+            parts = [part for part in slots if f"part === '{part}'" in dispatch
+                     and f"<{comp}" in dispatch.split(f"part === '{part}'", 1)[1].split("return null", 1)[0]]
+            assert parts, f"{cid} ({comp}) has no slot in the home div"
+        else:
+            assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
+    panel = react.split("function Panel(", 1)[1].split("\n/** a status line", 1)[0]
+    assert "createPortal(node, body)" in panel and "data-react-panel" in panel
 
 
-def test_the_tiles_refresh_when_the_modal_closes(js):
-    # Changing a setting can change "needs setup" or the chain chip.
-    fn = js.split("function closeSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "buildSourceTiles()" in fn
+def test_the_tiles_refresh_when_the_modal_closes(js, tab):
+    # Changing a setting can change "needs setup" or the chain chip. the tiles
+    # redraw themselves from the model, so the close does not need to, and
+    # the removed vanilla renderer is not called from anywhere
+    assert "buildSourceTiles" not in js
+    assert "buildSourceTiles" not in _modal(tab)
+    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_the_styling_reuses_the_pages_own_vocabulary():
@@ -312,10 +432,11 @@ def test_the_cookie_problem_is_named_on_both_paths():
     assert branch.count("_problem") >= 3
 
 
-def test_the_client_records_a_warning_state(js):
-    assert "_ssLastTestWarned" in js
-    fn = js.split("function _ssTestConn(", 1)[1].split("\n}", 1)[0]
+def test_the_client_records_a_warning_state(model):
+    assert "warned:" in model
+    fn = model.split("async function testConnection(", 1)[1].split("\n  }", 1)[0]
     assert "startsWith" in fn
+    assert "warned: { ...s.warned, [service]:" in fn
 
 
 def test_a_warning_gets_its_own_dot_colour():
@@ -352,7 +473,7 @@ def test_a_broken_source_is_visible_at_the_tile_not_just_the_dot():
 def test_usenet_has_a_tile(js):
     """It is its own link in the chain and shares the Prowlarr panel with
     torrent. It had no entry at all, so a usenet user saw nothing to click."""
-    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
     assert "usenet:" in m
     assert "torrent:" in m
 
@@ -398,19 +519,19 @@ def test_sources_gets_the_full_width_like_logs():
 # Layout and the per-source test
 # ---------------------------------------------------------------------------
 
-def test_the_tiles_are_grouped_not_one_ragged_wrap(js):
+def test_the_tiles_are_grouped_not_one_ragged_wrap(tab):
     """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
     accident. Two labelled groups make the same wrap look deliberate."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     # "in use" now, not "in your chain": it covers the video and audiobook chains too (#2026)
-    assert "In use" in fn and "Available" in fn
+    assert "section('In use'" in fn and "section('Available'" in fn
     assert "src-group" in fn
 
 
-def test_the_chain_group_is_in_chain_order(js):
+def test_the_chain_group_is_in_chain_order(tab):
     """Registry order put #4 before #2, which makes the numbers on the chips
     look wrong even though they are right."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     # ranked by chain then position, since a tile can be in more than one chain (#2026)
     assert "rank(a) - rank(b)" in fn
     assert "* 1000 + u.pos" in fn
@@ -424,42 +545,48 @@ def test_a_small_group_does_not_stretch_across_the_page():
     assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
 
 
-def test_there_is_a_per_source_test_button(index, js):
+def test_there_is_a_per_source_test_button(tab):
     """The summary toast gave a count and the dot gave a colour. Neither told
     you WHAT was wrong with a source you could see was unhappy."""
-    assert 'id="src-modal-test"' in index
-    assert 'id="src-modal-result"' in index
-    assert "function testOneSource(" in js
+    fn = _modal(tab)
+    assert 'id="src-modal-test"' in fn
+    assert 'id="src-modal-result"' in fn
+    assert "async function test() {" in fn
 
 
-def test_the_test_shows_what_the_server_said(js):
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_ssLastTestMessage[srcId]" in fn
-    assert "out.textContent" in fn
+def test_the_test_shows_what_the_server_said(tab):
+    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
+    assert "model.getState().said[id]" in fn
+    assert "text: said ||" in fn
 
 
-def test_the_test_updates_the_dot_and_the_tiles(js):
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_hybridSourceStatus[srcId] = state" in fn
-    assert "buildSourceTiles()" in fn
+def test_the_test_updates_the_dot_and_the_tiles(tab, model):
+    # the modal's test runs through the model, which sets the dot the tiles read
+    fn = _modal(tab)
+    assert "await model.testOne(id)" in fn
+    assert "hss-${dot}" in fn
+    one = model.split("async function testOne(", 1)[1].split("\n  }", 1)[0]
+    assert "setStatus(id, state)" in one
 
 
-def test_a_source_with_no_probe_says_so_rather_than_failing(js):
+def test_a_source_with_no_probe_says_so_rather_than_failing(tab):
     """YouTube used to be `() => Promise.resolve(true)`; a source with nothing
     to test must not read as a source that failed a test."""
-    fn = js.split("async function testOneSource(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
     assert "no connection test" in fn.lower()
 
 
-def test_opening_a_source_carries_its_last_result_in(js):
+def test_opening_a_source_carries_its_last_result_in(tab):
     # An amber tile should still explain itself once you are inside.
-    fn = js.split("function openSourceModal(", 1)[1].split("\nwindow.", 1)[0]
-    assert "src-modal-result" in fn
+    fn = _modal(tab)
+    opening = fn.split("useEffect(() => {", 1)[1].split("return () => {", 1)[0]
+    assert "said && dot !== 'unknown'" in opening and "src-modal-result is-${dot}" in opening
 
 
-def test_the_result_line_is_announced(index):
-    block = index.split('id="src-modal-result"', 1)[0][-160:]
-    assert 'role="status"' in index.split('id="src-modal-result"', 1)[1][:120] or 'role="status"' in block
+def test_the_result_line_is_announced(tab):
+    fn = _modal(tab)
+    line = fn.split('id="src-modal-result"', 1)[1][:80]
+    assert 'role="status"' in line and 'aria-live="polite"' in line
 
 
 # ---------------------------------------------------------------------------
@@ -504,9 +631,9 @@ def test_the_scattered_config_moved_into_its_panel(index, container, marker):
     """Indexers, the torrent client and the usenet client each had their own
     collapsible section on the Downloads tab, while the Sources tab showed a
     tile that just said "configure it over there". The config is in the tile
-    now."""
-    assert f'id="{container}"' in index
-    assert marker in _panel_span(index, container), f"{marker} did not move into {container}"
+    now (a React panel since SETTINGS_PORT.md step 7g)."""
+    assert f'id="{container}"' in index or f'id="{container}"' in _react_panels()
+    assert marker in _panel_text(index, container), f"{marker} did not move into {container}"
 
 
 def test_the_old_downloads_tab_section_is_gone(index):
@@ -530,29 +657,33 @@ def test_the_status_dots_survived_the_move(index):
     for dot, container in (("prowlarr-status-dot", "prowlarr-settings-container"),
                            ("torrent-client-status-dot", "torrent-client-settings-container"),
                            ("usenet-client-status-dot", "usenet-client-settings-container")):
-        assert f'id="{dot}"' in _panel_span(index, container), dot
+        assert f'id="{dot}"' in _panel_text(index, container), dot
 
 
-def test_prowlarr_gets_a_tile_and_a_test(js):
+def test_prowlarr_gets_a_tile_and_a_test(model):
     """It is not a link in the download chain, so it is not in HYBRID_SOURCES —
     but it is very much something you configure in order to download."""
-    extra = js.split("const EXTRA_SOURCE_TILES = [", 1)[1].split("]", 1)[0]
+    extra = model.split("export const EXTRA_SOURCE_TILES", 1)[1].split("];", 1)[0]
     assert "'prowlarr'" in extra
-    probes = js.split("const HYBRID_SOURCE_PROBE = {", 1)[1].split("};", 1)[0]
+    hybrid = model.split("export const HYBRID_SOURCES", 1)[1].split("];", 1)[0]
+    assert "'prowlarr'" not in hybrid
+    probes = model.split("const probes: Record<string, () => Promise<boolean>> = {", 1)[1].split("};", 1)[0]
     assert "prowlarr:" in probes
 
 
-def test_prowlarr_does_not_claim_a_chain_position(js):
+def test_prowlarr_does_not_claim_a_chain_position(tab):
     """order.indexOf('prowlarr') is always -1, so the generic chip would label
     the indexer "not in chain" — which reads as something being wrong."""
-    fn = js.split("function _srcTileMarkup(", 1)[1].split("\n}", 1)[0]
+    fn = _tile(tab)
     assert "src.id === 'prowlarr'" in fn
     assert "torrent &amp; usenet" in fn
+    # and it is decided before the chain chips are
+    assert fn.index("src.id === 'prowlarr'") < fn.index("not in a chain")
 
 
 def test_torrent_and_usenet_open_their_own_config(js):
     """Both used to open the same redirect panel that pointed elsewhere."""
-    m = js.split("const SOURCE_CONFIG_ID_BY_SRC = {", 1)[1].split("};", 1)[0]
+    m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
     assert "torrent: 'torrent-client-settings-container'" in m
     assert "usenet: 'usenet-client-settings-container'" in m
     assert "prowlarr-source-redirect" not in m
@@ -562,15 +693,19 @@ def test_ytdlp_moved_in_with_youtube(index):
     """It was under Advanced. yt-dlp going stale is the single most common cause
     of YouTube downloads failing, so it belongs where somebody debugging YouTube
     will look."""
-    panel = _panel_span(index, "youtube-settings-container")
+    panel = _panel_text(index, "youtube-settings-container")
     assert "ytdlp-update-btn" in panel
     assert "ytdlp-installed" in panel
     assert 'id="ytdlp-hint-badge"' in panel      # the badge lived in the old header
 
 
 def test_the_moved_ytdlp_block_left_the_advanced_tab(index):
-    block = index.split('id="ytdlp-update-btn"', 1)[0][-2500:]
-    assert 'data-stg="advanced"' not in block
+    # the tile is in the React YouTube panel now (step 7g): it is not in the
+    # page markup at all, and the panel's slot sits in the Sources home
+    assert 'id="ytdlp-update-btn"' not in index
+    assert 'id="ytdlp-update-btn"' in _panel_text(index, "youtube-settings-container")
+    slot = index.index('data-stg-part="youtube"')
+    assert 'data-stg="advanced"' not in index[slot - 2500:slot]
 
 
 def test_the_filesystem_note_is_still_reachable(index):
@@ -582,23 +717,23 @@ def test_the_filesystem_note_is_still_reachable(index):
     assert "ind-hero-warning" in sources
 
 
-def test_indexers_are_their_own_group(js):
+def test_indexers_are_their_own_group(tab):
     """Not a source you pick — the catalogue the torrent and usenet links
     search. Left in "Available" it read as something you could add to the
     chain, which is not a thing Prowlarr can be."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
+    fn = _tiles(tab)
     assert "section('Indexers'" in fn
-    # one code path now, not two. this used to require 2 because the video side
+    # one code path, not two. this used to require 2 because the video side
     # rendered its own grouping; the tab is shared and renders once for both.
     assert fn.count("section('Indexers'") == 1, "the side branch is back"
 
 
-def test_an_indexer_cannot_land_in_the_chain_groups(js):
+def test_an_indexer_cannot_land_in_the_chain_groups(tab):
     """The chain groups partition on order.includes(), and Prowlarr is never in
     the order — so without splitting it out first it falls into Available every
     time."""
-    fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "const sources = configurable.filter(src => !isIndexer(src))" in fn
+    fn = _tiles(tab)
+    assert "const sources = configurable.filter((src) => !isIndexer(src))" in fn
     for group in ("const inChain = sources", "const available = sources"):
         assert group in fn, group
 
@@ -614,7 +749,7 @@ def test_a_moved_panel_carries_no_stale_tab_attribute(index, container):
     The modal owns visibility now. A tab attribute inside a panel can only
     hide it.
     """
-    panel = _panel_span(index, container)
+    panel = _panel_text(index, container)
     assert 'data-stg="downloads"' not in panel
     assert 'data-stg=' not in panel, "a tab attribute inside a panel can only hide it"
 
@@ -622,42 +757,44 @@ def test_a_moved_panel_carries_no_stale_tab_attribute(index, container):
 @pytest.mark.parametrize("container,marker", sorted(_MOVED_IN.items()))
 def test_a_moved_panel_still_has_its_content(index, container, marker):
     # The empty-modal bug looked identical to the content not having moved.
-    panel = _panel_span(index, container)
+    panel = _panel_text(index, container)
     assert len(panel) > 1000, f"{container} looks empty"
     assert marker in panel
 
 
-def test_the_indexers_tile_can_actually_light_up(js):
+def test_the_indexers_tile_can_actually_light_up(model):
     """It stayed grey however healthy Prowlarr was.
 
-    The tile colour reads _hybridSourceStatus. testAllSources walks the download
-    CHAIN, and Prowlarr is not a link in it — it is what the torrent and usenet
+    The tile colour reads the status in the model. Test all walks the download
+    CHAINS, and Prowlarr is not a link in one — it is what the torrent and usenet
     links search through — so the loop never reached it. It was already being
     probed as a prerequisite for those two, and the result was thrown away.
     """
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    probe = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("}", 1)[0]
-    assert "_ssTestConn('prowlarr')" in probe
-    assert "_hybridSourceStatus.prowlarr = good" in probe
+    fn = _test_all(model)
+    probe = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
+    assert "testConnection('prowlarr')" in probe
+    assert "setStatus('prowlarr', result('prowlarr'," in probe
 
 
-def test_the_indexer_probe_reaches_the_video_side(js):
-    """`sources` is built from the MUSIC chain dropdown, so on the video side it
+def test_the_indexer_probe_reaches_the_video_side(model):
+    """`sources` is built from the MUSIC chain's mode, so on the video side it
     says nothing about whether Prowlarr matters — and there it is the main path,
     not an extra."""
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    assert "_onVideoSide" in fn
+    fn = _test_all(model)
+    assert "const videoSide = document.body.getAttribute('data-side') === 'video'" in fn
     cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
-    assert "_onVideoSide" in cond
+    assert "videoSide" in cond
 
 
-def test_the_indexer_result_redraws_its_tile(js):
+def test_the_indexer_result_redraws_its_tile(model, tab):
     """The per-source loop redraws while walking the chain, which Prowlarr is
     not part of — so without this the dot would only appear on the next redraw
-    triggered by something else."""
-    fn = js.split("async function testAllSources(", 1)[1].split("\nwindow.", 1)[0]
-    block = fn.split("_hybridSourceStatus.prowlarr = 'testing'", 1)[1].split("for (const id of sources)", 1)[0]
-    assert "buildSourceTiles()" in block
+    triggered by something else. the result goes into the model straight away,
+    and the tiles redraw on every model change."""
+    fn = _test_all(model)
+    block = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
+    assert "setStatus('prowlarr'," in block
+    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_an_inverted_mark_is_not_then_dimmed_into_grey():
@@ -691,6 +828,45 @@ def test_an_inverted_mark_is_not_then_dimmed_into_grey():
     assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
 
 
+def _library_cards(markup):
+    """the Library tab's card titles and group labels in page order. the
+    Folders and Organization cards are React (SETTINGS_PORT.md steps 8a, 8b):
+    each slot stands in for its card, and the components are checked to
+    render them (the Files & folders group label comes with Folders)."""
+    tabs = "webui/src/features/settings/tabs/"
+    shell = _read(tabs + "library-card.tsx")
+    assert "export const LIBRARY_TAB = 'library';" in shell
+    assert re.search(r'className="settings-section-header collapsed"\s+data-stg=\{LIBRARY_TAB\}', shell)
+    assert "<h3>{title}</h3>" in shell
+    folders = _read(tabs + "library-folders.tsx")
+    assert '<LibrarySection title="Folders"' in folders
+    assert re.search(r'className="stg-cardgroup" data-stg=\{TAB\}>\s*'
+                     r'<span className="stg-cardgroup-label">Files &amp; folders</span>', folders)
+    assert '<LibrarySection title="Organization"' in _read(tabs + "library-organization.tsx")
+    slot = markup.index('<div data-stg-react="library" data-stg-part="folders"')
+    org = markup.index('<div data-stg-react="library" data-stg-part="organization"')
+    processing = _read(tabs + "library-processing.tsx")
+    assert 'title="Post-Processing"' in processing and 'title="Import"' in processing
+    assert processing.index('title="Post-Processing"') < processing.index('title="Import"')
+    assert '<span className="stg-cardgroup-label">Processing</span>' in processing
+    proc = markup.index('<div data-stg-react="library" data-stg-part="processing"')
+    prefs = _read(tabs + "library-video-prefs.tsx")
+    assert re.search(r'tab=\{TAB\}\s+title="Video Preferences"', prefs)
+    assert '<span className="stg-cardgroup-label">Video</span>' in prefs
+    vp = markup.index('<div data-stg-react="library" data-stg-part="video-prefs"')
+    titles = [(slot, "Folders"), (org, "Organization"),
+              (proc, "Post-Processing"), (proc + 1, "Import"), (vp, "Video Preferences")]
+    groups = [(slot, "Files &amp; folders"), (proc, "Processing"), (vp, "Video")]
+    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
+        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
+        if t:
+            titles.append((m.start(), re.sub(r"<[^>]+>", "", t.group(1)).strip()))
+    for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup):
+        groups.append((m.start(), re.search(r'<span class="stg-cardgroup-label">(.*?)</span>',
+                                            markup[m.end():m.end() + 300]).group(1)))
+    return [t for _, t in sorted(titles)], [g for _, g in sorted(groups)]
+
+
 def test_the_library_tab_speaks_one_card_language():
     """It used to be three loose blocks of video settings followed by seven
     music cards - and the music half was hidden on the video side entirely, so
@@ -702,14 +878,10 @@ def test_the_library_tab_speaks_one_card_language():
     Grouping by which side a setting came from is an implementation detail
     leaking into the layout.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    titles, groups = _library_cards(markup)
 
     assert titles == [
         # files & folders
@@ -728,10 +900,6 @@ def test_the_library_tab_speaks_one_card_language():
     # you scan by skipping two of them.
     # scoped to THIS tab: the same group markup is used on Connections now, and
     # a global sweep would pick its heading up too
-    groups = [
-        re.search(r'<span class="stg-cardgroup-label">(.*?)</span>', markup[m.end():m.end() + 300]).group(1)
-        for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup)
-    ]
     assert groups == ["Files &amp; folders", "Processing", "Video"], groups
 
     # no bare settings-group left stranded outside a card on this tab
@@ -846,7 +1014,15 @@ def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
     just opened. So the handler has to write it back.
     """
     headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
-    assert headers, "no section headers found"
+    # every collapsible section is React now (SETTINGS_PORT.md): its header
+    # is parts.tsx Section or the Library cards' LibrarySection, with the
+    # same three attributes
+    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
+    for f in ("parts.tsx", "library-card.tsx"):
+        src = (tabs / f).read_text(encoding="utf-8")
+        head = src.split('className="settings-section-header collapsed"', 1)[1]
+        head = head.split('<span className="settings-section-arrow"', 1)[0]
+        assert 'role="button"' in head and "tabIndex={0}" in head and 'aria-expanded="false"' in head, f
 
     for h in headers:
         if 'settings-section-static' in h:
@@ -888,7 +1064,30 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
         kind of drift twice (the download-mode select, the slskd form).
     """
     slots = re.findall(r'<span[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
-    assert len(slots) >= 8, f"only {len(slots)} headers report live values"
+    # the tabs ported to React render their headers themselves, from the same
+    # state their controls render from, so the two cannot disagree either
+    # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
+    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
+    react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
+    # and Video Preferences, its own Section (SETTINGS_PORT.md video pass V2c)
+    react += "\n" + (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
+    react_slots = re.findall(r'summaryKey="([^"]+)"', react)
+    # the Library tab's media cards (steps 8a, 8b) render their summary span
+    # themselves, with the same fallback attribute the markup had
+    cards = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("library-*.tsx")
+                      if not p.name.endswith(".test.tsx"))
+    card_slots = re.findall(r'data-stg-summary="([^"]+)"', cards)
+    for key in card_slots:
+        block = cards.split(f'data-stg-summary="{key}"', 1)[1][:120]
+        assert "data-stg-fallback={fallback}" in block, f"React summary {key} has no fallback"
+    react_slots += card_slots
+    assert len(slots) + len(react_slots) >= 8, f"only {len(slots) + len(react_slots)} headers report live values"
+    assert not set(slots) & set(react_slots), "a summary is on the page twice"
+    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
+    assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
+    for key in set(react_slots) - set(card_slots):
+        block = react.split(f'summaryKey="{key}"', 1)[1][:200]
+        assert "summary={" in block, f"React header {key} has no summary"
 
     for m in re.finditer(r'<span[^>]*data-stg-summary="[^"]+"[^>]*>', index):
         assert 'data-stg-fallback="' in m.group(0), (
@@ -901,51 +1100,48 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     assert computed <= set(slots), f"computed but never shown: {computed - set(slots)}"
 
     # and they read the real inputs rather than a cached copy of the settings
-    engine = js.split('const LIBRARY_SUMMARIES', 1)[1].split('function refreshLibrarySummaries', 1)[0]
-    assert 'getElementById' in engine
-    assert 'settings.' not in engine, "reading a settings object instead of the live fields"
+    # (every Library summary is React since SETTINGS_PORT.md video pass V2c,
+    # checked above; the vanilla map is empty until settings.js goes)
+    # (the vanilla map went with settings.js, step V4b)
+    assert "LIBRARY_SUMMARIES" not in js and not computed
 
 
 def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     """If the fetch fails the form is blank, and a blank form summarised reads as
     "nothing enabled" - which is a confident lie about the user's config at the
-    exact moment they should be told to reload. The refresh therefore sits INSIDE
-    the try, alongside the other population, not in a finally."""
-    fn = js.split('async function loadSettingsData()', 1)[1]
-    # the loader has several NESTED try/catch blocks, so splitting on the first
-    # 'catch' stops long before the end of the success path. the OUTER catch -
-    # the last one - is the boundary that matters here.
-    body = fn.rsplit("} catch (error) {", 1)
-    assert len(body) > 1, "loader shape changed"
-    assert 'refreshLibrarySummaries()' in body[0], (
-        "summaries are refreshed outside the success path - a failed load would "
-        "report an empty form as real settings"
-    )
-    tail = body[1][:400]
-    assert 'refreshLibrarySummaries()' not in tail, (
-        "refreshed in the failure path too, which is the thing this prevents"
-    )
+    exact moment they should be told to reload.
+
+    Every summary is React (parts.tsx Section, the Library cards): it shows
+    only once the store has loaded settings, and the store is given them only
+    on a good load, after the #879 guard (shell.ts, SETTINGS_PORT.md step V4b).
+    """
+    fn = js.split("export async function loadSettingsData()", 1)[1]
+    good = fn.split("} catch (error) {", 1)[0]
+    assert good.index("throw new Error(") < good.index("SoulSyncSettings?.hydrate(settings)")
+    assert "hydrate" not in fn.split("} catch (error) {")[-1][:400]
+    # a React header shows its summary only after a load
+    folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
+    assert "const summary = loads" in folders
 
 
 def test_the_two_sides_name_their_sections_the_same_way():
     """Folders and Organization are shared cards, each retaining both media
     contexts so neither music nor video settings disappear in consolidation.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 400], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
+    titles, _ = _library_cards(markup)
 
     for noun in ("Folders", "Organization"):
         assert titles.count(noun) == 1, f"expected one shared {noun} card"
-        card = re.split(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"',
-                        markup.split(f'<h3>{noun}</h3>', 1)[1], maxsplit=1)[0]
-        for media in ("Music", "Video"):
-            assert f'<strong>{media} {noun.lower()}</strong>' in card
+        # React cards (steps 8a, 8b): music in the component, video in its
+        # own (SETTINGS_PORT.md video pass V2a, V2b), mounted by the card
+        card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
+        assert f"<strong>Music {noun.lower()}</strong>" in card
+        assert f"<Video{noun}Panel" in card
+        video = _read(f"webui/src/features/settings/tabs/library-video-{noun.lower()}.tsx")
+        assert f"<strong>Video {noun.lower()}</strong>" in video
 
     # Folder locations and naming rules remain separate subjects.
     assert "Paths &amp; Organization" not in titles
@@ -1003,7 +1199,7 @@ def test_no_two_cards_share_a_name():
     Video Folders. A duplicate title anywhere on the settings page means two
     sections are claiming the same subject.
     """
-    index = _read("webui/index.html")
+    index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
     from collections import Counter
@@ -1013,6 +1209,20 @@ def test_no_two_cards_share_a_name():
         if t:
             titles.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", t.group(1))).strip())
 
+    # the tabs ported to React render their cards themselves (SETTINGS_PORT.md):
+    # a Section's title, or a header written out by hand (Music Quality)
+    tabs = Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
+    # (and the video pass's sections, video-*.tsx)
+    for tsx in sorted([*tabs.glob("*-tab.tsx"), *tabs.glob("video-*.tsx")]):
+        if tsx.name.endswith(".test.tsx"):
+            continue
+        text = tsx.read_text(encoding="utf-8")
+        titles += re.findall(r'<Section\b[^<]*?\btitle="([^"]+)"', text, re.S)
+        for m in re.finditer(r'className="settings-section-header[^"]*"', text):
+            t = re.search(r"<h3>([^<{]+)</h3>", text[m.end():m.end() + 900])
+            if t:
+                titles.append(re.sub(r"\s+", " ", t.group(1)).strip())
+
     dupes = [t for t, n in Counter(titles).items() if n > 1]
     assert not dupes, f"more than one card claims this title: {dupes}"
 
@@ -1021,6 +1231,35 @@ def test_no_two_cards_share_a_name():
 
 
 # ── Connections: services as tiles ─────────────────────────────────────────
+#
+# the tiles, the Music / Video tabs and the modal are React since step 10a
+# (SETTINGS_PORT.md): connections-services.tsx. the Metadata service cards are
+# React too (connections-metadata.tsx), each a <ServiceCard service="...">
+
+
+@pytest.fixture(scope="module")
+def tiles():
+    return _read(_TABS + "connections-services.tsx")
+
+
+def _react_cards():
+    """the service ids of the cards React renders (steps 10a and 10b)"""
+    src = _read(_TABS + "connections-metadata.tsx") + _read(_TABS + "connections-extras.tsx")
+    return re.findall(r'<ServiceCard\s+service="([a-z-]+)"', src)
+
+
+def _fn(src, name):
+    """a top-level function's text in a ts module"""
+    start = src.index(f"function {name}(")
+    return src[start:src.index("\n}\n", start)]
+
+
+def _video_cards():
+    """the React video cards' ids (SETTINGS_PORT.md video pass V3a), each a
+    <Card service="..."> whose frame carries data-video-service={service}"""
+    cards = _read(_TABS + "connections-video-api.tsx")
+    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    return re.findall(r'<Card\s+service="([^"]+)"', cards)
 
 
 def test_every_service_has_a_handle_a_tile_can_use(index):
@@ -1034,7 +1273,10 @@ def test_every_service_has_a_handle_a_tile_can_use(index):
     service belongs to without a second registry to keep in step.
     """
     music = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-service="([^"]+)"', index)
+    music += _react_cards()
     video = re.findall(r'<div class="[^"]*api-service-frame[^"]*"[^>]*\bdata-video-service="([^"]+)"', index)
+    # the video cards are React (connections-video-api.tsx, video pass V3a)
+    video += _video_cards()
     assert len(music) >= 12, f"only {len(music)} music services carry a handle"
     assert len(video) >= 10, f"only {len(video)} video services carry a handle"
     assert not (set(music) & set(video)), "a service id is claimed by both sides"
@@ -1047,7 +1289,7 @@ def test_every_service_has_a_handle_a_tile_can_use(index):
         )
 
 
-def test_opening_a_service_moves_the_panel_and_never_clones_it(js):
+def test_opening_a_service_moves_the_panel_and_never_clones_it(tiles):
     """The forms are not rebuilt for the modal - the real panel is MOVED into it.
 
     That is not a style preference. Cloning would duplicate every field id in
@@ -1058,32 +1300,32 @@ def test_opening_a_service_moves_the_panel_and_never_clones_it(js):
     The panel also has to go home to the EXACT slot it came from, or the
     accordion groups silently reorder themselves as services get opened.
     """
-    open_fn = js.split('function openServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'appendChild(frame)' in open_fn, "the panel is not moved into the modal"
-    assert 'cloneNode' not in open_fn, "cloning would duplicate every id in the panel"
-    assert 'parent: frame.parentNode' in open_fn and 'next: frame.nextSibling' in open_fn, (
+    part = _fn(tiles, "ServicesPart")
+    assert 'body.appendChild(frame)' in part, "the panel is not moved into the modal"
+    assert 'cloneNode' not in tiles, "cloning would duplicate every id in the panel"
+    assert 'parent: frame.parentNode' in part and 'next: frame.nextSibling' in part, (
         "the panel's original slot is not recorded - it cannot go back where it was"
     )
-
-    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'insertBefore(frame' in close_fn, "the panel is not restored to its slot"
-    # order matters: home first, hide second
-    assert close_fn.index('insertBefore') < close_fn.index('overlay.hidden = true'), (
-        "the panel is put back after the modal is hidden, so its ids sit inside a "
-        "hidden modal in between"
-    )
+    # home in the effect's cleanup: it runs before the closed modal is drawn
+    cleanup = part[part.index('return () => {', part.index('body.appendChild(frame)')):]
+    assert 'insertBefore(frame, lifted.next)' in cleanup, "the panel is not restored to its slot"
+    # a React card is never moved itself: its wrapper is (React keeps hearing it)
+    place = _fn(tiles, "useServicePlace")
+    assert 'body.appendChild(wrap)' in place and 'placeHome(home, wrap)' in place
 
 
-def test_closing_a_service_lands_a_pending_key(js):
+def test_closing_a_service_lands_a_pending_key(tiles):
     """An API key typed seconds before closing sits on the 2s autosave timer. If
     the modal just closes, the field it belongs to has been moved out of view and
     nothing on screen says a save is still pending - and a reload loses it."""
-    close_fn = js.split('function closeServiceModal(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'clearTimeout(settingsAutoSaveTimer)' in close_fn
-    assert 'saveSettings(true)' in close_fn
+    part = _fn(tiles, "ServicesPart")
+    close_fn = part[part.index('function close()'):]
+    # the page's own timer (window.landPendingSettingsSave) and the React store
+    assert 'landPendingSettingsSave?.()' in close_fn
+    assert 'settingsStore.flush()' in close_fn
 
 
-def test_a_service_tile_reports_the_live_field_not_a_cached_setting(js):
+def test_a_service_tile_reports_the_live_field_not_a_cached_setting(tiles):
     """Same rule as the library summaries: judge by the inputs on the page. A
     tile that reads a cached settings object can disagree with the field behind
     it, and "configured" is not a claim worth getting wrong about a credential.
@@ -1092,8 +1334,8 @@ def test_a_service_tile_reports_the_live_field_not_a_cached_setting(js):
     claiming a service is unconfigured because you cannot see its fields is worse
     than staying quiet.
     """
-    fn = js.split('function _svcConfigured(', 1)[1].split('\n}', 1)[0]
-    assert 'querySelectorAll' in fn and 'settings.' not in fn
+    fn = _fn(tiles, "serviceConfigured")
+    assert 'querySelectorAll' in fn and 'settings' not in fn
     assert 'return null' in fn, "no 'cannot tell' state - it will guess instead"
 
 
@@ -1108,7 +1350,12 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
     back. They are hidden on the GROUP, so a panel moved into the modal is no
     longer a descendant and renders normally.
     """
-    assert index.count('data-svc-legacy') == 2, "the legacy groups moved or multiplied"
+    # the music group is React (connections-extras.tsx, step 10b)
+    # and so is the video group (connections-video-api.tsx, video pass V3a)
+    extras = _read(_TABS + "connections-extras.tsx") + _read(_TABS + "connections-video-api.tsx")
+    assert index.count('data-svc-legacy') + extras.count('data-svc-legacy=""') == 2, (
+        "the legacy groups moved or multiplied"
+    )
 
     css = _read("webui/static/style.css")
     rule = re.search(r'#settings-page \.settings-group\[data-svc-legacy\]\s*\{([^}]*)\}', css)
@@ -1120,42 +1367,39 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
     assert 'api-service-frame[data-svc-legacy]' not in css
 
 
-def test_the_required_keys_note_survived_hiding_its_group(index):
+def test_the_required_keys_note_survived_hiding_its_group(index, tiles):
     """TMDB and TVDB are required, and the note saying so - crucially including
     "both are free" - lived inside the group that is now hidden. The tiles show a
     "required" chip, but a chip cannot say why, and someone who assumes it is a
     paid feature just skips it and wonders why matching never works."""
-    at = index.index('stg-required-note')
+    # the note is the Services part's (React), drawn into its slot
+    assert 'className="svc-required-note"' in tiles and 'both keys are set. Both are free.' in tiles
+    at = index.index('data-stg-react="connections" data-stg-part="services"')
     enclosing = index.rfind('data-svc-legacy', 0, at)
-    # if the note were still inside the hidden group there would be no closing
-    # </div> between that group's tag and the note
+    # if the slot were inside the hidden group there would be no closing
+    # </div> between that group's tag and the slot
     assert enclosing == -1 or index.count('</div>', enclosing, at) > 0, (
         "the required-keys note is inside the hidden group and will never be seen"
     )
-    assert 'svc-required-note' in index
 
 
-def test_the_service_tabs_open_on_the_side_you_are_on(js):
+def test_the_service_tabs_open_on_the_side_you_are_on(tiles):
     """Defaulting to music meant a video user landed on a grid of Spotify and
     Tidal tiles with their own TMDB key nowhere in sight. Same fix, and same
     reasoning, as the download chain's media tabs."""
-    assert '_svcSyncKindToSide' in js
-    fn = js.split('function _svcSyncKindToSide(', 1)[1].split('\n}', 1)[0]
-    assert 'data-side' in fn and 'video' in fn
-
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert '_svcSyncKindToSide()' in build, "the side default is never applied"
-
-    switch = js.split('function switchServiceKind(', 1)[1].split('\nwindow.', 1)[0]
-    assert '_svcKindChosen = true' in switch, "a manual pick would be overridden"
+    model = _fn(tiles, "createServicesModel")
+    side = model[model.index('const sideKind'):model.index('return {')]
+    assert 'data-side' in side and 'video' in side and 'state.chosen' in side
+    assert "rebuild: () => set({ kind: sideKind()" in model, "the side default is never applied"
+    assert "set({ kind, chosen: true" in model, "a manual pick would be overridden"
 
 
-def test_every_mapped_service_logo_actually_exists(js):
+def test_every_mapped_service_logo_actually_exists(tiles):
     """A wrong path fails silently: the <img> 404s, onerror swaps in the
     monogram, and the card looks deliberate while quietly having lost its
     artwork. Nobody would ever notice from the page."""
     import os
-    block = js.split('const SERVICE_LOGOS = {', 1)[1].split('};', 1)[0]
+    block = tiles.split('const SERVICE_LOGOS: Record<string, string> = {', 1)[1].split('};', 1)[0]
     pairs = re.findall(r"(\w+):\s*'([^']+)'", block)
     assert len(pairs) >= 13, f"only {len(pairs)} services mapped to artwork"
     missing = [(svc, path) for svc, path in pairs
@@ -1163,7 +1407,7 @@ def test_every_mapped_service_logo_actually_exists(js):
     assert not missing, f"logo paths that do not exist: {missing}"
 
 
-def test_a_service_without_artwork_still_looks_deliberate(js):
+def test_a_service_without_artwork_still_looks_deliberate(tiles):
     """Nine services have no brand art in the repo. A grey blob for each would
     make the grid a list you have to read anyway, which defeats the point of a
     grid. They get a monogram on their own brand colour instead.
@@ -1171,14 +1415,14 @@ def test_a_service_without_artwork_still_looks_deliberate(js):
     The colour comes off the element as --svc-brand rather than out of a
     stylesheet map, so a service added later picks its hue up with no CSS change.
     """
-    meta = js.split('function _svcMeta(', 1)[1].split('\n}', 1)[0]
+    meta = _fn(tiles, "serviceMeta")
     assert 'monogram' in meta, "no monogram fallback"
     assert "replace(/[^A-Za-z0-9]/g, '')" in meta, (
         "a name starting with punctuation would yield an empty monogram"
     )
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert '--svc-brand' in build, "the brand colour never reaches the card"
-    assert 'svc-monogram' in build
+    build = _fn(tiles, "ServicesPart")
+    assert "'--svc-brand'" in build, "the brand colour never reaches the card"
+    assert 'svc-monogram' in _fn(tiles, "Fallback")
 
     css = _read("webui/static/style.css")
     # the tinted well lives on the shared container, not on the fallback: a card
@@ -1194,7 +1438,7 @@ def test_a_service_without_artwork_still_looks_deliberate(js):
     )
 
 
-def test_the_service_grid_only_shows_actual_services(js):
+def test_the_service_grid_only_shows_actual_services(tiles):
     """"Detail Pages" is a video-preferences panel on the LIBRARY tab that
     happens to use the same accordion component. An unscoped query pulled it into
     the Connections grid, where it appeared as a connection you could configure -
@@ -1203,13 +1447,13 @@ def test_the_service_grid_only_shows_actual_services(js):
     The grid is scoped to the connections tab, so a panel reusing this component
     elsewhere cannot wander in.
     """
-    fn = js.split('function _svcFrames(', 1)[1].split('\n}', 1)[0]
+    fn = _fn(tiles, "frames")
     assert 'closest(' in fn and 'data-stg="connections"' in fn, (
         "the service query is not scoped to the connections tab"
     )
 
 
-def test_the_media_tab_owns_the_whole_connections_tab(index, js):
+def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     """The Services tabs moved only the tile grid. The server sections below kept
     following body[data-side], so a music user clicking "Video" got video service
     tiles sitting directly above their own MUSIC server settings - the tab said
@@ -1220,10 +1464,16 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, js):
     describes whose settings these ARE, which is a different question from which
     one is currently shown.
     """
-    assert index.count('data-svc-side=') == 2, "the two server sections are not both marked"
-    assert 'data-svc-side="music"' in index and 'data-svc-side="video"' in index
+    # the music section is React (connections-servers.tsx, step 10c)
+    # and the video section too (connections-video-server.tsx, video pass V3b)
+    servers = _read(_TABS + "connections-servers.tsx")
+    video = _read(_TABS + "connections-video-server.tsx")
+    assert index.count('data-svc-side=') + servers.count('data-svc-side=') + video.count('data-svc-side=') == 2, (
+        "the two server sections are not both marked"
+    )
+    assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in video
 
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    build = _fn(tiles, "ServicesPart")
     assert 'data-svc-side' in build and 'svc-side-active' in build, (
         "switching tab does not move the server section with it"
     )
@@ -1266,20 +1516,13 @@ def test_both_server_sections_use_the_same_copy_style(index):
     reads as a warning rather than as an explanation; this one had been missed
     because the two sections could never be seen at the same time.
     """
-    at = index.index('data-svc-side="video"')
-    d, seg = 0, None
-    for m in re.finditer(r"<(/?)div\b[^>]*?(/?)>", index[index.rfind("<div", 0, at):]):
-        if m.group(2) == "/":
-            continue
-        d += -1 if m.group(1) else 1
-        if d == 0:
-            start = index.rfind("<div", 0, at)
-            seg = index[start:start + m.end()]
-            break
-    assert seg, "could not read the video server section"
-    assert 'class="callback-help"' not in seg, (
+    # the video section is React (connections-video-server.tsx, video pass V3b)
+    seg = _read(_TABS + "connections-video-server.tsx")
+    assert 'data-svc-side="video"' in seg, "could not read the video server section"
+    assert 'className="callback-help"' not in seg, (
         "the video server copy is back on the off-scale italic class"
     )
+    assert '<p className="setting-help-text"' in seg
 
 
 def test_the_server_toggles_are_one_control_on_both_sides():
@@ -1332,27 +1575,19 @@ def test_a_server_row_is_one_setting_per_row(index):
 
     One setting per row, same as everywhere else on the page.
     """
-    at = index.index('video-library-selectors')
-    start = index.rfind('<div', 0, at)
-    window = index[start:start + 1400]
-    selects = re.findall(r'data-video-lib-select="(\w+)"', window)
-    assert set(selects) == {'movies', 'tv'}, selects
-
-    # each select must sit in its OWN form-group
-    for lib in ('movies', 'tv'):
-        pos = index.index(f'data-video-lib-select="{lib}"')
-        owner = index.rfind('<div class="form-group', 0, pos)
-        # no second select between that form-group opening and this one
-        between = index[owner:pos]
-        assert between.count('data-video-lib-select') == 0, (
-            f"the {lib} selector shares a row with another control"
-        )
+    # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
+    src = _read(_TABS + "connections-video-server.tsx")
+    rows = re.findall(r'<div className="form-group video-library-selectors">(.*?)</div>', src, re.S)
+    assert len(rows) == 2, rows
+    # each select sits in its OWN form-group
+    assert [re.findall(r'<LibrarySelect kind="(\w+)"', r) for r in rows] == [["movies"], ["tv"]]
+    assert 'data-video-lib-select={kind}' in src
 
     # the caption is help text, not a row
-    assert 'setting-help-text video-library-note' in index
+    assert 'className="setting-help-text video-library-note"' in src
 
 
-def test_services_without_art_reuse_the_app_s_own_glyphs(js):
+def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
     """Six video services have no brand art anywhere in the repo - OMDb,
     fanart.tv, OpenSubtitles, Trakt, MDBList, Community Data - and a grid of
     letter monograms among real logos reads as placeholders, not as icons.
@@ -1369,17 +1604,18 @@ def test_services_without_art_reuse_the_app_s_own_glyphs(js):
     dash = set(re.findall(r"logo: \{ glyph: '([^']+)' \}", hero))
     assert dash, "the dashboard glyphs this borrows from are gone"
 
-    block = js.split('const SERVICE_GLYPHS = {', 1)[1].split('};', 1)[0]
-    mapped = re.findall(r'^\s*(\w+):', block, re.M)
+    block = tiles.split('const SERVICE_GLYPHS: Record<string, string> = {', 1)[1].split('};', 1)[0]
+    mapped = re.findall(r"^\s*'?([\w-]+)'?:", block, re.M)
     assert len(mapped) >= 5, f"only {len(mapped)} services reuse a dashboard glyph"
     for svc in ('omdb', 'fanart', 'opensubtitles', 'trakt'):
         assert svc in mapped, f"{svc} still falls back to a letter"
 
     # order of preference: artwork, then the app's glyph, then a monogram
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert 'm.glyph' in build and 'svc-monogram' in build
-    assert build.index('const fallback') < build.index('const art'), (
-        "the fallback is built after the art that depends on it"
+    fallback = _fn(tiles, "Fallback")
+    assert 'meta.glyph' in fallback and 'svc-monogram' in fallback
+    art = _fn(tiles, "Art")
+    assert '<Fallback meta={meta} />' in art and 'onError' in art, (
+        "a logo that does not load is not replaced by the glyph or monogram"
     )
 
     css = _read("webui/static/style.css")
@@ -1530,17 +1766,18 @@ def test_the_connections_tab_survives_a_phone():
 
 
 
-def test_every_connections_service_sits_in_a_named_group(index, js):
+def test_every_connections_service_sits_in_a_named_group(index, tiles):
     """The grid groups services by what they do (metadata, scrobbling, subtitles
     and so on). Anything unlisted falls into "Other" so it never vanishes, but a
     new service landing there means nobody decided where it belongs."""
-    block = js.split('const SERVICE_GROUPS = {', 1)[1].split('\n};', 1)[0]
+    block = tiles.split('const SERVICE_GROUPS', 1)[1].split('\n};', 1)[0]
     lists = ' '.join(re.findall(r'ids:\s*\[([^\]]*)\]', block))
     grouped = set(re.findall(r"'([a-z]+)'", lists))
     connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
-    ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections))
+    ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections)) | {
+        i for i in _react_cards() + _video_cards() if re.fullmatch(r'[a-z]+', i)
+    }
     assert len(ids) >= 20, f"only found {len(ids)} services, the page split is off"
     assert ids - grouped == set(), f"services with no group: {sorted(ids - grouped)}"
 
-    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
-    assert "'Other'" in build, "an unlisted service would vanish from the grid"
+    assert "label: 'Other'" in _fn(tiles, "readGroups"), "an unlisted service would vanish from the grid"

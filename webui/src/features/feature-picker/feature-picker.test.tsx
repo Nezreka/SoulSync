@@ -68,6 +68,8 @@ beforeEach(() => {
     }),
   );
   installFeatures();
+  // a locked case below leaves the shell locked; every case starts unlocked
+  return window.SoulSyncFeatures?.load().then(() => undefined);
 });
 
 afterEach(() => {
@@ -150,6 +152,77 @@ describe('the feature picker', () => {
   });
 });
 
+describe('#2157: locked by an admin', () => {
+  it('#2164: a stray open does nothing once the shell knows it is locked', async () => {
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json({ ...payload([]), locked: true, chosen: true }),
+      ),
+    );
+    await window.SoulSyncFeatures?.load();
+    render(<FeaturePicker />);
+    await act(async () => window.openFeaturePicker?.());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText('Make SoulSync yours')).toBeNull();
+  });
+
+  it('shows the choice read only and saves nothing', async () => {
+    stored = ['podcasts'];
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json({ ...payload(stored), locked: true, chosen: true }),
+      ),
+    );
+    await openPicker();
+    await screen.findByText(/An admin set what this profile shows/);
+    expect(switchFor('Podcasts')).toHaveAttribute('aria-checked', 'false');
+    for (const f of FEATURES) expect(switchFor(f.label)).toHaveAttribute('data-disabled');
+    expect(screen.getByRole('radio', { name: /Simple/ })).toBeDisabled();
+    fireEvent.click(switchFor('Tools'));
+    fireEvent.click(screen.getByRole('radio', { name: /Simple/ }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts).toEqual([]);
+    expect(screen.queryByRole('button', { name: 'Reset to default' })).toBeNull();
+    expect(screen.getByText(/Set by an admin/)).toBeInTheDocument();
+  });
+
+  it('reset goes back to the default, and hides once it follows it', async () => {
+    stored = ['tools'];
+    let following = false;
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json({ ...payload(stored), follows_default: following }),
+      ),
+      http.post('*/api/profiles/me/features', async ({ request }) => {
+        posts.push(await request.json());
+        stored = ['podcasts'];
+        following = true;
+        return HttpResponse.json({ ...payload(stored), follows_default: true });
+      }),
+    );
+    await openPicker();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset to default' }));
+    await waitFor(() => expect(posts).toEqual([{ reset: true }]));
+    await waitFor(() => expect(switchFor('Podcasts')).toHaveAttribute('aria-checked', 'false'));
+    expect(switchFor('Tools')).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Reset to default' })).toBeNull(),
+    );
+  });
+
+  it("the server's list of switches wins", async () => {
+    server.use(
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json({ ...payload([]), offered: ['podcasts', 'tools'] }),
+      ),
+    );
+    await openPicker();
+    expect(switchFor('Tools')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Movies & TV' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Discover' })).toBeNull();
+  });
+});
+
 describe('reachable', () => {
   const f = (pages: string[], id = 'x') => ({ id, label: '', desc: '', group: '', pages });
   it('needs one page the profile may open', () => {
@@ -164,6 +237,11 @@ describe('reachable', () => {
     );
     expect(reachable(f(['video-dashboard'], 'video'), { profileAllowedSides: () => 'both' })).toBe(
       true,
+    );
+  });
+  it('never offers a video-only profile its only side (#2157)', () => {
+    expect(reachable(f(['video-dashboard'], 'video'), { profileAllowedSides: () => 'video' })).toBe(
+      false,
     );
   });
 });

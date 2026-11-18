@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
+import { normalizeStatuses, type ReleaseStatus } from '@/components/release-statuses';
 
 import type {
   WatchlistFoundRelease,
@@ -175,6 +176,10 @@ export function withEditionDefaults(config: WatchlistGlobalConfig): WatchlistGlo
     // #2082: an older server has one Live rule for albums and tracks
     include_live_tracks:
       (config as { include_live_tracks?: boolean }).include_live_tracks ?? config.include_live,
+    // #2175: an older server has no statuses, which is every one
+    release_statuses: normalizeStatuses(
+      (config as { release_statuses?: unknown }).release_statuses,
+    ),
   };
 }
 
@@ -374,6 +379,8 @@ export interface WatchlistArtistConfigUpdate {
   preferred_metadata_source: string | null;
   /** #1822: always sent by the panel, so a save says which rules it means. */
   follow_defaults: boolean;
+  /** #2175: the artist's own release statuses, null = the library's. */
+  release_statuses: ReleaseStatus[] | null;
 }
 
 export async function saveWatchlistArtistConfig(

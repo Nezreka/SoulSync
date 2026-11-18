@@ -322,3 +322,150 @@ def test_scanner_aborts_mid_scan_on_invalid_api_key(tmp_path, monkeypatch):
     assert scan_file_calls == ["1"]
     assert result.errors == 1
 
+
+
+# ── an unfingerprintable file is not a dead key ────────────────────────────
+#
+# AcoustID answers a fingerprint it cannot decode (a file with headers but no
+# usable audio) with code 3 "invalid fingerprint". The client key is checked
+# first, so that answer means the key was ACCEPTED. Reading "invalid" in the
+# message as a key failure aborted the whole library scan at that one file,
+# every run.
+
+@pytest.mark.parametrize("code, message, expected", [
+    # real responses, acoustid-server acoustid/api/errors.py
+    (3, "invalid fingerprint", False),
+    (4, "invalid API key", True),
+    (2, 'missing required parameter "fingerprint"', False),
+    (8, 'parameter "duration" must be a positive integer', False),
+    (14, "rate limit (3.000000 requests per second) exceeded, try again later", False),
+    # the code decides over the wording
+    (4, "invalid client key", True),
+    # no code: only the message is left to go on
+    (0, "invalid API key", True),
+    (None, "invalid fingerprint", False),
+    (None, "HTTP request failed: connection reset", False),
+])
+def test_is_invalid_key_error(code, message, expected):
+    assert acc.is_invalid_key_error(code, message) is expected
+
+
+def test_lookup_status_invalid_fingerprint_is_not_an_invalid_key(tmp_path, monkeypatch):
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"not audio")
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    fake.parse_lookup_result = MagicMock()
+    fake.match = MagicMock(return_value={
+        "status": "error", "error": {"code": 3, "message": "invalid fingerprint"}})
+
+    res = c.lookup_with_status(str(f))
+    assert res["status"] == "error"
+    assert res["invalid_key"] is False
+    assert "code 3" in res["error"]
+
+
+def test_lookup_status_bare_status_error_on_current_pyacoustid_is_not_an_invalid_key(tmp_path, monkeypatch):
+    """With parse_lookup_result available the bare "status: error" only shows up
+    when the raw lookup failed and the parse=True retry hit a server error —
+    which may just as well be the file's fingerprint as the key."""
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"not audio")
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    fake.parse_lookup_result = MagicMock()
+
+    def _match(api_key, audio_file, parse=True):
+        if not parse:
+            raise fake.WebServiceError("HTTP request failed: connection reset")
+        raise fake.WebServiceError("status: error")
+    fake.match = _match
+
+    res = c.lookup_with_status(str(f))
+    assert res["status"] == "error"
+    assert res["invalid_key"] is False
+
+
+def test_lookup_status_webservice_error_code_decides(tmp_path, monkeypatch):
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"not audio")
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    fake.parse_lookup_result = MagicMock()
+
+    def _raise(code, message):
+        def _match(*a, **k):
+            e = fake.WebServiceError(message)
+            e.code = code
+            raise e
+        return _match
+
+    fake.match = _raise(4, "invalid API key")
+    assert c.lookup_with_status(str(f))["invalid_key"] is True
+    fake.match = _raise(3, "invalid fingerprint")
+    assert c.lookup_with_status(str(f))["invalid_key"] is False
+
+
+def _scanner_over(tmp_path, monkeypatch, responses):
+    """The real scan loop, _scan_file, verifier and lookup_with_status over one
+    file per entry in ``responses`` — only pyacoustid is faked."""
+    from types import SimpleNamespace
+    from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+    files = {}
+    for i, response in enumerate(responses, start=1):
+        f = tmp_path / f"track{i}.flac"
+        f.write_bytes(b"headers, no audio")
+        files[str(f)] = response
+
+    client, fake = _client_with_fake_acoustid(monkeypatch)
+    fake.parse_lookup_result = MagicMock()
+    fingerprinted = []
+
+    def _match(api_key, audio_file, parse=True):
+        fingerprinted.append(audio_file)
+        return files[audio_file]
+    fake.match = _match
+    client._enabled = True
+    monkeypatch.setattr(client, "is_available", lambda: (True, "ready"))
+    monkeypatch.setattr(client, "test_api_key", lambda: (True, "valid"))
+
+    job = AcoustIDScannerJob()
+    monkeypatch.setattr("core.repair_jobs.acoustid_scanner.hand_tagged_path_keys", lambda db: set())
+    monkeypatch.setattr("core.repair_jobs.base.whole_library_run", lambda ctx: True)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _p: {})
+    monkeypatch.setattr(job, "_load_db_tracks", lambda ctx: {
+        str(i): {"file_path": path, "title": f"Track {i}", "artist": "Artist"}
+        for i, path in enumerate(files, start=1)
+    })
+    monkeypatch.setattr(job, "_resolve_path", lambda path, ctx: path)
+
+    cfg = {}
+    context = SimpleNamespace(
+        db=SimpleNamespace(),
+        transfer_folder=str(tmp_path),
+        config_manager=SimpleNamespace(get=lambda k, d=None: cfg.get(k, d), set=cfg.__setitem__),
+        acoustid_client=client,
+        report_progress=MagicMock(),
+        update_progress=MagicMock(),
+        check_stop=lambda: False,
+        wait_if_paused=lambda: False,
+        sleep_or_stop=lambda *a, **k: False,
+    )
+    return job.scan(context), fingerprinted, list(files), cfg
+
+
+def test_scanner_keeps_going_past_an_unfingerprintable_file(tmp_path, monkeypatch):
+    bad = {"status": "error", "error": {"code": 3, "message": "invalid fingerprint"}}
+    result, fingerprinted, paths, cfg = _scanner_over(tmp_path, monkeypatch, [bad, bad, bad])
+
+    assert fingerprinted == paths, "the scan stopped at the unfingerprintable file"
+    assert result.errors == 3
+    # reached the end of the list: the checkpoint is cleared, not left on file 1
+    assert "repair.jobs.acoustid_scanner.checkpoint_id" in cfg
+    assert cfg["repair.jobs.acoustid_scanner.checkpoint_id"] is None
+
+
+def test_scanner_still_aborts_on_a_rejected_key(tmp_path, monkeypatch):
+    dead = {"status": "error", "error": {"code": 4, "message": "invalid API key"}}
+    result, fingerprinted, paths, _cfg = _scanner_over(tmp_path, monkeypatch, [dead, dead, dead])
+
+    assert fingerprinted == paths[:1]
+    assert result.errors == 1

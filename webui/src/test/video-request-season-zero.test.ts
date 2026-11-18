@@ -10,13 +10,24 @@ import { extractFunction } from './vanilla-extract';
  * rows rendered no request button at all for profiles without download
  * rights (and the backend 400'd the POST for the same reason). This pins
  * that season 0 renders a button while a genuinely missing season does not.
+ *
+ * #2166: the button also follows the profile's mode for that kind of title
+ * (VideoRequests.mayAsk); a kind it can't request gets no button at all.
  */
 
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-requests.js'), 'utf8');
 
-function cardButton(o: Record<string, unknown>): string {
+function cardButton(o: Record<string, unknown>, modes: Record<string, string> = {}): string {
+  // mayAsk is the module's (modes per movie/show/youtube from
+  // /api/video/requests/options, an episode follows its show); here it
+  // answers from the table, 'ask' when a kind isn't listed
   const preamble = `
     function esc(s) { return String(s == null ? '' : s); }
+    var MODES = ${JSON.stringify(modes)};
+    function mayAsk(kind) {
+      var k = kind === 'movie' ? 'movie' : kind === 'youtube' ? 'youtube' : 'show';
+      return (MODES[k] || 'ask') !== 'none';
+    }
     window = {};
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -51,5 +62,17 @@ describe('episode request button and the specials season', () => {
   it('renders nothing without an episode or title id', () => {
     expect(cardButton({ ...EP, season: 0 })).toBe('');
     expect(cardButton({ kind: 'episode', season: 0, episode: 2, title: 'x' })).toBe('');
+  });
+
+  it('renders nothing for a kind the profile can not request', () => {
+    expect(cardButton({ ...EP, season: 0, episode: 2 }, { show: 'none' })).toBe('');
+    expect(cardButton({ kind: 'movie', tmdbId: 9, title: 'Heat' }, { movie: 'none' })).toBe('');
+    // the other kind keeps its button
+    expect(cardButton({ kind: 'movie', tmdbId: 9, title: 'Heat' }, { show: 'none' })).toContain(
+      'data-vreq-card',
+    );
+    expect(cardButton({ kind: 'show', tmdbId: 5, title: 'X' }, { movie: 'none' })).toContain(
+      'data-vreq-card',
+    );
   });
 });

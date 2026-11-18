@@ -29,6 +29,7 @@ from .importer import (
     release_title_key,
 )
 from .path_drift import split_track_numbering
+from .release_split import is_other_release_by_year, tag_year
 from .tag_cache import read_tag_snapshot
 
 logger = get_logger("library2.autolink")
@@ -324,12 +325,19 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                           album_type: str, spotify_album_id: Optional[str] = None,
                           source: Optional[str] = None,
                           monitored: Optional[int] = None,
-                          release_mbid: Optional[str] = None) -> int:
+                          release_mbid: Optional[str] = None,
+                          release_year: Any = None,
+                          file_folder: Optional[str] = None) -> int:
     """``release_mbid``: the MusicBrainz release the file's own tags name
     (MUSICBRAINZ_ALBUMID). Two releases of one name (a standard and a "baby
     punk version") stay two albums, as 3.6.1's standalone scan kept them
-    (#1299); a same-titled row with no release id yet takes this one."""
+    (#1299); a same-titled row with no release id yet takes this one.
+
+    ``release_year`` / ``file_folder``: the tagged year and folder of a file
+    known only by its tags. A same-titled row whose files all sit in other
+    folders under another year is another release (#2110)."""
     release_mbid = str(release_mbid or "").strip() or None
+    release_year = tag_year(release_year)
     provider_id = _clean_provider_id(spotify_album_id)
     namespace = _provider_namespace(provider_id, source)
     key = release_title_key(title)
@@ -375,6 +383,8 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                 continue  # Same title does not make two provider editions identical.
             if release_mbid and _row_release_mbid(row) not in ("", release_mbid):
                 continue  # another MusicBrainz release of the same name (#1299)
+            if is_other_release_by_year(conn, row["id"], release_year, file_folder):
+                continue  # same name, another year, another folder (#2110)
             if release_mbid:
                 _adopt_release_mbid(conn, row["id"], release_mbid)
             if namespace is not None and namespace != "spotify" and provider_id:
@@ -393,11 +403,12 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                      if namespace not in (None, "spotify") else "{}")
     cur = conn.execute(
         """INSERT INTO lib2_albums(primary_artist_id, title, album_type, spotify_id,
-               external_ids, quality_profile_id, monitored)
-           VALUES(?,?,?,?,?,?, COALESCE(?, 1))""",
+               external_ids, quality_profile_id, monitored, year)
+           VALUES(?,?,?,?,?,?, COALESCE(?, 1), ?)""",
         (artist_id, title, album_type,
          provider_id if namespace == "spotify" else None,
-         external_json, profile_id, monitored),
+         external_json, profile_id, monitored,
+         int(release_year) if release_year else None),
     )
     album_id = cur.lastrowid
     if release_mbid:
@@ -688,6 +699,7 @@ def _fallback_identity(context: Dict[str, Any],
         "album_artist": album_artist or None,
         "album": album or None,
         "release_mbid": release_mbid or None,
+        "year": tags.get("year"),
         "track_number": tags.get("track_number"),
         "disc_number": tags.get("disc_number"),
         "isrc": tags.get("isrc"),
@@ -972,11 +984,17 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     release_artist_id = _find_or_create_artist(
                         conn, album_artist_name, spotify_id=None,
                         source=identity_source) or artist_id
+                # a file known only by its tags (a scan, a simple download)
+                # brings its year and folder: weezer's three self-titled
+                # albums share a name and nothing else (#2110)
+                tag_identity = fallback or (ti if context.get("_scan_discovered") else {})
                 album_id = _find_or_create_album(
                     conn, release_artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
                     source=identity_source, monitored=derived_monitored,
-                    release_mbid=fallback.get("release_mbid"))
+                    release_mbid=tag_identity.get("release_mbid"),
+                    release_year=tag_identity.get("year"),
+                    file_folder=os.path.dirname(str(file_path)))
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,
