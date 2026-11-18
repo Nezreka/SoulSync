@@ -68,7 +68,7 @@ describe('#2173: actions that start a download', () => {
                 requiresDownload="grab"
                 onClick={() => {}}
               />
-              <ActionButton icon="heart" label="Add to Wishlist" requiresWish onClick={() => {}} />
+              <ActionButton icon="star" label="Add to Wishlist" requiresWish onClick={() => {}} />
             </LibraryV2CanGrabContext.Provider>
           </LibraryV2CanDownloadContext.Provider>
         </LibraryV2CanWishContext.Provider>
