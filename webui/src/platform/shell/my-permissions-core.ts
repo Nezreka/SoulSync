@@ -157,11 +157,9 @@ export function modeFor(perms: MyPermissions | null | undefined, media: PermMedi
   if (perms.isAdmin) return 'download';
   const eff = perms.effective;
   if (eff[ACCESS_ROW[media]] === false) return 'none';
-  const mode = asMode(eff[`${media}.get`]);
-  // books and podcasts have no Ask first (decision 7): anything that isn't a
-  // download is none, so no page ever offers a dead Ask for it
-  if ((media === 'books' || media === 'podcasts') && mode === 'ask') return 'none';
-  return mode ?? 'none';
+  // books and podcasts ask first too now (#2188): an ask there files a
+  // request on the Requests page, like music
+  return asMode(eff[`${media}.get`]) ?? 'none';
 }
 
 /** one yes/no row. admins have everything; an unknown row is a no. */
@@ -478,13 +476,27 @@ export function describePermissions(
     const bits: string[] = [];
     if (books) {
       const m = modeFor(perms, 'books');
-      bits.push(m === 'download' ? 'audiobooks right away' : 'audiobooks to browse');
+      bits.push(
+        m === 'download'
+          ? 'audiobooks right away'
+          : m === 'ask'
+            ? 'audiobooks on request'
+            : 'audiobooks to browse',
+      );
       if (m === 'download') gets.push('audiobooks');
+      else if (m === 'ask') asks.push('audiobooks');
     }
     if (pods) {
       const m = modeFor(perms, 'podcasts');
-      bits.push(m === 'download' ? 'podcasts download' : 'podcasts to follow and play');
+      bits.push(
+        m === 'download'
+          ? 'podcasts download'
+          : m === 'ask'
+            ? 'podcast episodes on request'
+            : 'podcasts to follow and play',
+      );
       if (m === 'download') gets.push('podcast episodes');
+      else if (m === 'ask') asks.push('podcast episodes');
     }
     const detail: string[] = [];
     if (!books) detail.push('no audiobooks');

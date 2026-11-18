@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { myPermissions, offTitle, permMode } from '@/platform/shell/my-permissions';
+import { loadAdminName, myPermissions, offTitle, permMode } from '@/platform/shell/my-permissions';
 
 import type {
   AudiobookItem,
@@ -17,7 +17,7 @@ import type {
   AudiobookWishlistCounts,
 } from '../-audiobooks.types';
 
-import { addToWishlist, fetchWishlist, removeFromWishlist } from '../-audiobooks.api';
+import { addToWishlist, fetchWishlist, removeFromWishlist, requestBook } from '../-audiobooks.api';
 
 /**
  * Sample playback, shared by every /audiobooks/* route.
@@ -43,6 +43,8 @@ export interface AudiobookContextValue {
   isWishlisted: (asin: string) => boolean;
   /** True while a toggle for this ASIN is in flight. */
   isWishlistBusy: (asin: string) => boolean;
+  /** True when this profile asked an admin for the book and is waiting (#2188). */
+  isRequested: (asin: string) => boolean;
   /**
    * Add or remove; returns the state it ended up in. The narrator mode only
    * applies when adding — removing needs no question.
@@ -80,12 +82,14 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
    */
   const [wishlisted, setWishlisted] = useState<Set<string>>(() => new Set());
   const [wishlistCounts, setWishlistCounts] = useState<AudiobookWishlistCounts>(EMPTY_COUNTS);
+  const [requested, setRequested] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
 
   const refreshWishlist = useCallback(async () => {
     const view = await fetchWishlist();
     setWishlisted(new Set(view.items.map((item) => item.asin)));
     setWishlistCounts(view.counts);
+    setRequested(new Set(view.requested));
   }, []);
 
   useEffect(() => {
@@ -94,6 +98,36 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
 
   const isWishlisted = useCallback((asin: string) => wishlisted.has(asin), [wishlisted]);
   const isWishlistBusy = useCallback((asin: string) => busy.has(asin), [busy]);
+  const isRequested = useCallback((asin: string) => requested.has(asin), [requested]);
+
+  /** Ask first (#2188): the heart files a request for an admin instead */
+  const askForBook = useCallback(
+    async (book: AudiobookItem, mode: AudiobookNarratorMode): Promise<boolean> => {
+      const asin = book.asin;
+      if (requested.has(asin)) return false;
+      setBusy((current) => new Set(current).add(asin));
+      const res = await requestBook(asin, mode);
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(asin);
+        return next;
+      });
+      if (res.ok) {
+        setRequested((current) => new Set(current).add(asin));
+        const admin = await loadAdminName();
+        window.showToast?.(
+          res.already
+            ? `You already asked for "${book.title}"`
+            : `Asked ${admin || 'your admin'} for "${book.title}". You'll hear when it's approved`,
+          'success',
+        );
+      } else {
+        window.showToast?.(res.error || 'Could not send that request', 'error');
+      }
+      return false;
+    },
+    [requested],
+  );
 
   const toggleWishlist = useCallback(
     async (book: AudiobookItem, mode: AudiobookNarratorMode = 'exact'): Promise<boolean> => {
@@ -101,13 +135,16 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       if (!asin || busy.has(asin)) return wishlisted.has(asin);
 
       const wanted = !wishlisted.has(asin);
+      if (wanted && permMode('books') === 'ask') return askForBook(book, mode);
       // the add button is hidden for a profile that can't get books (#2166);
       // a stray click (a stale page after an admin's change) says why calmly
-      // instead of 403ing
+      // instead of 403ing, and the refusal isn't kept as a notification
       if (wanted && permMode('books') !== 'download') {
         window.showToast?.(
           `${offTitle(myPermissions(), 'books')}. Ask your admin if you'd like it.`,
           'info',
+          null,
+          { history: false },
         );
         return false;
       }
@@ -141,7 +178,7 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       });
       return ok ? wanted : !wanted;
     },
-    [busy, wishlisted, refreshWishlist],
+    [busy, wishlisted, refreshWishlist, askForBook],
   );
 
   const playSample = useCallback((book: AudiobookItem) => {
@@ -190,6 +227,7 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       isLoaded,
       isWishlisted,
       isWishlistBusy,
+      isRequested,
       toggleWishlist,
       wishlistCounts,
       refreshWishlist,
@@ -203,6 +241,7 @@ export function AudiobookProvider({ children }: { children: ReactNode }) {
       isLoaded,
       isWishlisted,
       isWishlistBusy,
+      isRequested,
       toggleWishlist,
       wishlistCounts,
       refreshWishlist,

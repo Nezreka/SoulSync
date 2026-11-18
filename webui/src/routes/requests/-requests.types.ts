@@ -71,6 +71,30 @@ export interface MusicVideoRequest {
   created_at?: string | null;
 }
 
+export type MediaRequestKind = 'audiobook' | 'podcast';
+
+/**
+ * An audiobook or podcast episode ask (#2188), from a profile that asks
+ * first for books or episodes. Stored like a video ask: the row is the queue
+ * and the history.
+ */
+export interface MediaRequest {
+  id: number;
+  profile_id: number;
+  requester_name?: string | null;
+  kind: MediaRequestKind;
+  item_key: string;
+  title: string;
+  /** the author, or the show an episode is from */
+  subtitle?: string | null;
+  image_url?: string | null;
+  status: MusicVideoRequestStatus;
+  admin_response?: string | null;
+  resolved_at?: string | null;
+  created_at?: string | null;
+  seen_at?: string | null;
+}
+
 export interface MusicRequestCounts {
   pending: number;
   approved: number;
@@ -94,6 +118,8 @@ export interface MusicRequestListResponse {
   history: MusicRequestRow[];
   pending_videos: MusicVideoRequest[];
   video_history: MusicVideoRequest[];
+  pending_media?: MediaRequest[];
+  media_history?: MediaRequest[];
   counts: Partial<MusicRequestCounts>;
   asks_first: boolean;
   quota?: Partial<RequestQuota> | null;
@@ -104,6 +130,8 @@ export interface MusicRequestList {
   history: MusicRequestRow[];
   pendingVideos: MusicVideoRequest[];
   videoHistory: MusicVideoRequest[];
+  pendingMedia?: MediaRequest[];
+  mediaHistory?: MediaRequest[];
   counts: MusicRequestCounts;
   asksFirst: boolean;
   quota: RequestQuota | null;
@@ -138,4 +166,6 @@ export type RequestItem =
       source: 'video-history';
       status: MusicRequestHistoryStatus;
       video: MusicVideoRequest;
-    };
+    }
+  | { source: 'media-pending'; status: 'pending'; media: MediaRequest }
+  | { source: 'media-history'; status: MusicRequestHistoryStatus; media: MediaRequest };

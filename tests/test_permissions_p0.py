@@ -114,7 +114,7 @@ def test_catalogue_payload_is_plain_json():
     rows = {r["id"]: r for r in body["rows"]}
     assert rows["ui.sidebar"]["presentation"] is True and rows["ui.sidebar"]["stored"] is False
     assert rows["movies.get"]["values"] == ["none", "ask", "download"]
-    assert rows["movies.get"]["value_labels"]["ask"] == "Ask first"
+    assert rows["movies.get"]["value_labels"]["ask"] == "Require approval"
     assert rows["tv.max_rating"]["value_labels"]["PG-13"] == "TV-14"
 
 
@@ -122,7 +122,7 @@ def test_catalogue_payload_is_plain_json():
 
 
 @pytest.mark.parametrize("pid,bad", [
-    ("music.access", "yes"), ("music.get", "maybe"), ("books.get", "ask"), ("movies.max_rating", "NC-17"),
+    ("music.access", "yes"), ("music.get", "maybe"), ("books.get", "sometimes"), ("movies.max_rating", "NC-17"),
     ("movies.max_rating", "follow"), ("movies.request_limit", {"n": -1}), ("movies.request_limit", {"n": 2, "days": 0}),
     ("movies.request_limit", {"n": 2000}), ("movies.request_limit", 5), ("movies.quality", "everything"),
     ("movies.quality", ["x"]), ("movies.quality_default", "x"), ("movies.quality_ask", ["8k"]),

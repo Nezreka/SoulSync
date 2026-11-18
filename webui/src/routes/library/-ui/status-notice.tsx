@@ -10,11 +10,15 @@ export function StatusNotice({
   text,
   children,
   onDismiss,
+  transient,
 }: {
   tone: 'busy' | 'ok' | 'err';
   text: string;
   children?: ReactNode;
   onDismiss?: () => void;
+  /** said, never kept in the notification panel (#2191): background upkeep
+   *  the viewer didn't ask for, like a member's discography refresh */
+  transient?: boolean;
 }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -24,9 +28,15 @@ export function StatusNotice({
   // controls is a live status (the wishlist sync's Retry) and stays a card.
   const toast = !children && typeof window !== 'undefined' ? window.showToast : undefined;
 
+  // a progress line ("Fetching full discography…") passes: the outcome is
+  // what gets kept (#2191)
+  const keep = tone !== 'busy' && !transient;
+
   useEffect(() => {
     if (!toast) return;
-    toast(text, tone === 'ok' ? 'success' : tone === 'err' ? 'error' : 'info');
+    const type = tone === 'ok' ? 'success' : tone === 'err' ? 'error' : 'info';
+    if (keep) toast(text, type);
+    else toast(text, type, null, { history: false });
   }, [identity, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {

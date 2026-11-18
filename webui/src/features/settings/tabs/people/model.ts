@@ -118,11 +118,12 @@ export function qualityFor(row: CatalogueRow, quality: QualityOptions | null): Q
 
 // ── values in words ──
 
-export function modeLabel(row: CatalogueRow | undefined, mode: string, layer: 'P' | 'T' = 'T') {
-  if (layer === 'P' && mode === 'none') return 'Admins only';
+/** one word for each mode, the same in the policy, templates and people
+ *  (#2192); a podcast's none is Follow only, from its own value labels */
+export function modeLabel(row: CatalogueRow | undefined, mode: string, _layer: 'P' | 'T' = 'T') {
   return (
     row?.value_labels?.[mode] ||
-    { download: 'Download right away', ask: 'Ask first', none: "Can't request" }[mode] ||
+    { download: 'Auto-approve', ask: 'Require approval', none: 'Requests off' }[mode] ||
     mode
   );
 }
@@ -198,16 +199,49 @@ export function aboveCeiling(row: CatalogueRow, value: PermValue, ceiling: PermV
   }
 }
 
+/** what the policy lets a value be: the value, or the ceiling it's held at
+ *  (core.permissions.clamp for the kinds a row shows). the control shows
+ *  this, the value the server enforces, never the stored one (#2189) */
+export function heldAt(
+  row: CatalogueRow,
+  value: PermValue,
+  ceiling: PermValue | undefined,
+): PermValue {
+  if (ceiling === undefined || !aboveCeiling(row, value, ceiling)) return value;
+  switch (row.kind) {
+    case 'bool':
+      return false;
+    case 'mode':
+    case 'rating':
+    case 'count':
+      return ceiling;
+    default:
+      return value;
+  }
+}
+
 /** a quality id the policy doesn't allow */
 export function idOutside(ceiling: PermValue, id: number): boolean {
   return ceiling !== '*' && Array.isArray(ceiling) && !ceiling.includes(id);
 }
 
-/** the lock line under a template row the policy holds down */
-export function capLine(row: CatalogueRow, ceiling: PermValue, quality: QualityOptions | null) {
+/** the lock line under a template row the policy holds down. ``stored``
+ *  is what the template itself says: when the policy holds it lower, the
+ *  line says so in its own sentence, apart from the value in force (#2189) */
+export function capLine(
+  row: CatalogueRow,
+  ceiling: PermValue,
+  quality: QualityOptions | null,
+  stored?: PermValue,
+) {
   if (row.kind === 'bool') return 'Global policy: admins only. Change it there.';
   if (row.kind === 'restrict') return 'Global policy keeps this on for everyone.';
-  return `Global policy keeps this at ${valueText(row, ceiling, quality, 'P')}. Change it there.`;
+  const held = `Global policy keeps this at ${valueText(row, ceiling, quality, 'T')}.`;
+  const kept =
+    stored !== undefined && aboveCeiling(row, stored, ceiling)
+      ? ` The template is set to ${valueText(row, stored, quality, 'T')}, which comes back if the policy allows it.`
+      : '';
+  return `${held}${kept} Change it there.`;
 }
 
 // ── dependent rows ──

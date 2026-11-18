@@ -512,14 +512,16 @@ const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? win
                         if (Date.now() - restrictedToastAt < 4000) return;
                         restrictedToastAt = Date.now();
                         if (typeof showToast === 'function') {
-                            showToast(body.message || "That isn't part of your profile. Ask an admin if you'd like it.", 'info');
+                            // said once, never kept in the panel (#2191)
+                            showToast(body.message || "That isn't part of your profile. Ask an admin if you'd like it.", 'info',
+                                null, { history: false });
                         }
                         return;
                     }
                     if (!body || body.restricted !== true) return;
                     if (Date.now() - restrictedToastAt < 4000) return;
                     restrictedToastAt = Date.now();
-                    if (typeof showToast === 'function') showToast('Not available on this profile', 'info');
+                    if (typeof showToast === 'function') showToast('Not available on this profile', 'info', null, { history: false });
                 }).catch(() => { /* not json, not ours */ });
             }
             if (res && res.status === 401 && currentProfile && !reloading) {

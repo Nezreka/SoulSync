@@ -972,10 +972,10 @@
     "category": "movies",
     "default": "download",
     "group": "",
-    "help": "Download right away, Ask first, or Can't request.",
+    "help": "Auto-approve, Require approval or Requests off.",
     "id": "movies.get",
     "kind": "mode",
-    "label": "Getting movies",
+    "label": "Movie requests",
     "legacy": "can_download",
     "media": null,
     "needs": [
@@ -987,9 +987,9 @@
     "set_row": null,
     "stored": true,
     "value_labels": {
-     "ask": "Ask first",
-     "download": "Download right away",
-     "none": "Can't request"
+     "ask": "Require approval",
+     "download": "Auto-approve",
+     "none": "Requests off"
     },
     "values": [
      "none",
@@ -1005,7 +1005,7 @@
     "help": "Titles above it, or with no rating, stay out of sight.",
     "id": "movies.max_rating",
     "kind": "rating",
-    "label": "Up to",
+    "label": "Maximum content rating",
     "legacy": "max_rating",
     "media": null,
     "needs": [
@@ -1020,29 +1020,29 @@
     "values": []
    },
    {
+    "also_in": [],
+    "category": "movies",
+    "default": {
+     "days": 7,
+     "n": 0
+    },
+    "group": "",
+    "help": "Movie asks. Movies they get right away are never capped.",
     "id": "movies.request_limit",
     "kind": "count",
-    "category": "movies",
     "label": "Request limit",
-    "help": "Movie asks. Movies they get right away are never capped.",
-    "default": {
-     "n": 0,
-     "days": 7
-    },
-    "values": [],
-    "pages": [],
-    "scope": "PTO",
-    "group": "",
-    "also_in": [],
+    "legacy": "request_limit",
+    "media": null,
     "needs": [
      "movies.access"
     ],
-    "set_row": null,
-    "media": null,
+    "pages": [],
     "presentation": false,
+    "scope": "PTO",
+    "set_row": null,
     "stored": true,
-    "legacy": "request_limit",
-    "value_labels": {}
+    "value_labels": {},
+    "values": []
    },
    {
     "also_in": [],
@@ -1052,7 +1052,7 @@
     "help": "Only profiles for movies.",
     "id": "movies.quality",
     "kind": "set",
-    "label": "Quality they can ask for",
+    "label": "Allowed quality profiles",
     "legacy": null,
     "media": "movie",
     "needs": [
@@ -1074,7 +1074,7 @@
     "help": "What a request gets when they don't pick.",
     "id": "movies.quality_default",
     "kind": "choice",
-    "label": "Starts on",
+    "label": "Default quality profile",
     "legacy": null,
     "media": "movie",
     "needs": [
@@ -1117,10 +1117,10 @@
     "category": "movies",
     "default": true,
     "group": "Movies & TV pages",
-    "help": "The video side's dashboard.",
+    "help": "The movies & TV home page.",
     "id": "video.dashboard",
     "kind": "bool",
-    "label": "Movies & TV home",
+    "label": "Dashboard",
     "legacy": "allowed_pages",
     "media": null,
     "needs": [
@@ -1376,10 +1376,10 @@
     "category": "tv",
     "default": "download",
     "group": "",
-    "help": "A season or a whole series is one ask.",
+    "help": "Auto-approve, Require approval or Requests off. A season or a whole series is one request.",
     "id": "tv.get",
     "kind": "mode",
-    "label": "Getting shows",
+    "label": "TV show requests",
     "legacy": "can_download",
     "media": null,
     "needs": [
@@ -1391,9 +1391,9 @@
     "set_row": null,
     "stored": true,
     "value_labels": {
-     "ask": "Ask first",
-     "download": "Download right away",
-     "none": "Can't request"
+     "ask": "Require approval",
+     "download": "Auto-approve",
+     "none": "Requests off"
     },
     "values": [
      "none",
@@ -1409,7 +1409,7 @@
     "help": "TV ratings follow the movie one unless you set their own: PG-13 allows up to TV-14.",
     "id": "tv.max_rating",
     "kind": "rating",
-    "label": "Up to",
+    "label": "Maximum content rating",
     "legacy": "max_rating",
     "media": null,
     "needs": [
@@ -1430,29 +1430,29 @@
     "values": []
    },
    {
+    "also_in": [],
+    "category": "tv",
+    "default": {
+     "days": 7,
+     "n": 0
+    },
+    "group": "",
+    "help": "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
     "id": "tv.request_limit",
     "kind": "count",
-    "category": "tv",
     "label": "Request limit",
-    "help": "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
-    "default": {
-     "n": 0,
-     "days": 7
-    },
-    "values": [],
-    "pages": [],
-    "scope": "PTO",
-    "group": "",
-    "also_in": [],
+    "legacy": "request_limit",
+    "media": null,
     "needs": [
      "tv.access"
     ],
-    "set_row": null,
-    "media": null,
+    "pages": [],
     "presentation": false,
+    "scope": "PTO",
+    "set_row": null,
     "stored": true,
-    "legacy": "request_limit",
-    "value_labels": {}
+    "value_labels": {},
+    "values": []
    },
    {
     "also_in": [],
@@ -1462,7 +1462,7 @@
     "help": "Only profiles for shows.",
     "id": "tv.quality",
     "kind": "set",
-    "label": "Quality they can ask for",
+    "label": "Allowed quality profiles",
     "legacy": null,
     "media": "tv",
     "needs": [
@@ -1484,7 +1484,7 @@
     "help": "What a request gets when they don't pick.",
     "id": "tv.quality_default",
     "kind": "choice",
-    "label": "Starts on",
+    "label": "Default quality profile",
     "legacy": null,
     "media": "tv",
     "needs": [
@@ -1545,10 +1545,10 @@
     "category": "music",
     "default": "download",
     "group": "",
-    "help": "Download right away, Ask first, or Can't request.",
+    "help": "Auto-approve, Require approval or Requests off.",
     "id": "music.get",
     "kind": "mode",
-    "label": "Getting music",
+    "label": "Music requests",
     "legacy": "can_download",
     "media": null,
     "needs": [
@@ -1560,9 +1560,9 @@
     "set_row": null,
     "stored": true,
     "value_labels": {
-     "ask": "Ask first",
-     "download": "Download right away",
-     "none": "Can't request"
+     "ask": "Require approval",
+     "download": "Auto-approve",
+     "none": "Requests off"
     },
     "values": [
      "none",
@@ -1593,29 +1593,29 @@
     "values": []
    },
    {
+    "also_in": [],
+    "category": "music",
+    "default": {
+     "days": 7,
+     "n": 0
+    },
+    "group": "",
+    "help": "Album, track and music video asks. Music they get right away is never capped.",
     "id": "music.request_limit",
     "kind": "count",
-    "category": "music",
     "label": "Request limit",
-    "help": "Album, track and music video asks. Music they get right away is never capped.",
-    "default": {
-     "n": 0,
-     "days": 7
-    },
-    "values": [],
-    "pages": [],
-    "scope": "PTO",
-    "group": "",
-    "also_in": [],
+    "legacy": "request_limit",
+    "media": null,
     "needs": [
      "music.access"
     ],
-    "set_row": null,
-    "media": null,
+    "pages": [],
     "presentation": false,
+    "scope": "PTO",
+    "set_row": null,
     "stored": true,
-    "legacy": "request_limit",
-    "value_labels": {}
+    "value_labels": {},
+    "values": []
    },
    {
     "also_in": [],
@@ -1625,7 +1625,7 @@
     "help": "Music quality profiles.",
     "id": "music.quality",
     "kind": "set",
-    "label": "Quality they can ask for",
+    "label": "Allowed quality profiles",
     "legacy": null,
     "media": "music",
     "needs": [
@@ -1647,7 +1647,7 @@
     "help": "What an add gets when they don't pick.",
     "id": "music.quality_default",
     "kind": "choice",
-    "label": "Starts on",
+    "label": "Default quality profile",
     "legacy": null,
     "media": "music",
     "needs": [
@@ -1998,10 +1998,10 @@
     "category": "books",
     "default": "download",
     "group": "",
-    "help": "Download right away or Can't request.",
+    "help": "Auto-approve, Require approval or Requests off.",
     "id": "books.get",
     "kind": "mode",
-    "label": "Getting books",
+    "label": "Audiobook requests",
     "legacy": "can_download",
     "media": null,
     "needs": [
@@ -2013,12 +2013,13 @@
     "set_row": null,
     "stored": true,
     "value_labels": {
-     "ask": "Ask first",
-     "download": "Download right away",
-     "none": "Can't request"
+     "ask": "Require approval",
+     "download": "Auto-approve",
+     "none": "Requests off"
     },
     "values": [
      "none",
+     "ask",
      "download"
     ]
    },
@@ -2049,10 +2050,10 @@
     "category": "books",
     "default": "download",
     "group": "",
-    "help": "Download right away or follow only.",
+    "help": "Auto-approve, Require approval or Follow only. Subscribing to shows is always allowed.",
     "id": "podcasts.get",
     "kind": "mode",
-    "label": "Getting episodes",
+    "label": "Podcast episode requests",
     "legacy": "can_download",
     "media": null,
     "needs": [
@@ -2064,12 +2065,13 @@
     "set_row": null,
     "stored": true,
     "value_labels": {
-     "ask": "Ask first",
-     "download": "Download right away",
-     "none": "Can't request"
+     "ask": "Require approval",
+     "download": "Auto-approve",
+     "none": "Follow only"
     },
     "values": [
      "none",
+     "ask",
      "download"
     ]
    },
@@ -3012,7 +3014,6 @@
   ],
   "success": true,
   "summary": {
-   "sentence": "Odd uses music, movies and TV shows.",
    "lines": [
     {
      "category": "movies",
@@ -3035,7 +3036,8 @@
      "text": "Podcasts: they follow shows, episodes don't download."
     }
    ],
-   "never": []
+   "never": [],
+   "sentence": "Odd uses music, movies and TV shows."
   },
   "template": null
  },
@@ -3778,7 +3780,6 @@
   ],
   "success": true,
   "summary": {
-   "sentence": "Maya uses music, movies and TV shows.",
    "lines": [
     {
      "category": "movies",
@@ -3801,7 +3802,8 @@
      "text": "Podcasts: they follow shows, episodes don't download."
     }
    ],
-   "never": []
+   "never": [],
+   "sentence": "Maya uses music, movies and TV shows."
   },
   "template": {
    "id": 2,

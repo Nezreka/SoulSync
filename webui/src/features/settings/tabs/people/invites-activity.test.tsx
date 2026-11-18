@@ -59,9 +59,9 @@ describe('activity', () => {
       .getAllByRole('listitem')
       .map((li) => li.textContent);
     expect(items[0]).toContain(
-      "Boulder changed Maya's access: Getting music and Hide explicit music",
+      "Boulder changed Maya's access: Music requests and Hide explicit music",
     );
-    expect(items[1]).toContain('Boulder changed the global policy: Quality they can ask for');
+    expect(items[1]).toContain('Boulder changed the global policy: Allowed quality profiles');
     expect(items[3]).toContain('Liam joined with an invite link');
     fireEvent.click(screen.getByRole('button', { name: 'Access changes' }));
     expect(

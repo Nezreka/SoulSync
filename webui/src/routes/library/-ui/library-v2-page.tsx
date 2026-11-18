@@ -6646,6 +6646,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             <StatusNotice
               tone={grabBanner.tone}
               text={grabBanner.text}
+              transient={grabBanner.transient}
               onDismiss={() => setGrabBanner(null)}
             />
           ) : null}
@@ -8986,6 +8987,9 @@ function ProviderArtistActions({
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
+  // a member's discography refresh is upkeep the page does for them, not
+  // something they asked for: said, never kept in their notifications (#2191)
+  const upkeepIsTransient = !useLibraryV2CanWrite();
   const canSearch = useLibraryV2CanSearch();
   const canGrab = useLibraryV2CanGrab();
   const search = Route.useSearch();
@@ -9151,11 +9155,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         publishBanner(sequence, {
           tone: 'ok',
           text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added ?? 0} new, ${stats.enriched ?? 0} matched.`,
+          transient: upkeepIsTransient,
         });
       } catch (e) {
         publishBanner(sequence, {
           tone: 'err',
           text: e instanceof Error ? e.message : 'Discography refresh failed',
+          transient: upkeepIsTransient,
         });
       }
     });
@@ -9528,6 +9534,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <StatusNotice
               tone={grabBanner.tone}
               text={grabBanner.text}
+              transient={grabBanner.transient}
               onDismiss={() => setGrabBanner(null)}
             />
           ) : null}
@@ -9952,7 +9959,12 @@ async function runScopedSearch(
   }
 }
 
-type ScopedSearchBanner = { tone: 'busy' | 'ok' | 'err'; text: string } | null;
+type ScopedSearchBanner = {
+  tone: 'busy' | 'ok' | 'err';
+  text: string;
+  /** not kept in the notification panel (#2191) */
+  transient?: boolean;
+} | null;
 
 /** Shared owner of the scoped-search banner (dd28-16).
  *

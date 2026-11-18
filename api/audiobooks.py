@@ -182,6 +182,45 @@ def _download_denied():
     return media_download_error("books.get")
 
 
+def _asks_first() -> bool:
+    """this profile asks before getting books (#2188): a wish becomes a
+    request for an admin instead of a download."""
+    from .helpers import media_asks_first
+
+    return media_asks_first("books.get")
+
+
+def _requested_asins(profile_id: int) -> List[str]:
+    """the books this profile asked for and is still waiting on, so their
+    buttons say Requested. best effort: an unreadable list costs the label."""
+    try:
+        from core.requests.media import requested_books
+
+        return requested_books(profile_id)
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the requested audiobooks: %s", exc)
+        return []
+
+
+def _request_book(book: Dict[str, Any], narrator_mode: str):
+    """file an Ask first profile's wish as a book request (#2188)."""
+    from core.profile_context import get_current_profile_id
+    from core.requests.media import file_book_request
+
+    pid = get_current_profile_id()
+    asin = str(book.get("asin") or "")
+    if get_audiobook_db().is_owned(asin):
+        return jsonify({"success": False, "in_library": True,
+                        "error": "That book is already in the library."}), 409
+    rid, why = file_book_request(pid, book, narrator_mode)
+    if not rid:
+        if why == "already":
+            return jsonify({"success": True, "requested": True, "already": True, "wishlisted": False})
+        return jsonify({"success": False, "error": "Couldn't save the request"}), 500
+    logger.info("audiobook request %s filed by profile %s: %s", rid, pid, asin)
+    return jsonify({"success": True, "requested": True, "id": rid, "wishlisted": False})
+
+
 def _owned_asins() -> set:
     """Every asin already on disk, in one read.
 
@@ -585,6 +624,10 @@ def create_audiobooks_blueprint() -> Blueprint:
             "items": db.get_wishlist(_profile()),
             "counts": db.wishlist_counts(_profile()),
         }
+        # books this profile asked an admin for (#2188), so they read Requested
+        if _asks_first():
+            from core.profile_context import get_current_profile_id
+            payload["requested"] = _requested_asins(get_current_profile_id())
         try:
             from core.audiobook_wishlist_worker import schedule_status
             payload["worker"] = schedule_status()
@@ -608,9 +651,10 @@ def create_audiobooks_blueprint() -> Blueprint:
         is never a list — a book is always exactly one narrator.
         """
         # a wanted book is grabbed by the wishlist pass, so wanting one is a
-        # download. audiobooks have no request flow yet, so a profile with
-        # downloads off can't add one (music turns these into requests)
-        denied = _download_denied()
+        # download. a profile that asks first files a request instead
+        # (#2188); one that can't request books can't add one
+        asks = _asks_first()
+        denied = None if asks else _download_denied()
         if denied is not None:
             return denied
 
@@ -626,6 +670,8 @@ def create_audiobooks_blueprint() -> Blueprint:
         book = get_audiobook_client().get_book(asin, marketplace=_marketplace())
         if book is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
+        if asks:
+            return _request_book(book.to_dict(), narrator_mode)
 
         added = get_audiobook_db().add_to_wishlist(
             book.to_dict(), narrator_mode=narrator_mode, profile_id=_profile(),

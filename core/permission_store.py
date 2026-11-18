@@ -287,8 +287,14 @@ def profile_payload(db, profile: Mapping[str, Any]) -> Dict[str, Any]:
     """GET /api/profiles/<id>/permissions."""
     lay = layers_for(db, profile)
     tpl_row = db.get_permission_template(lay["template_id"]) if lay["template_id"] is not None else None
-    rows = P.explain(lay["policy"], lay["template"], lay["overrides"] if lay["source"] == "template" else {},
-                     profile, base_source=lay["source"])
+    # a personal change that says what the template says isn't a change: a
+    # template edited to match one left it stored, and the editor counted it
+    # ("1 change from Teen" over identical values, #2190). the next save
+    # drops it (change_profile diffs); until then it isn't shown as one.
+    # the effective map is the same either way
+    ov = (P.diff_overrides(lay["template"], dict(lay["template"], **lay["overrides"]))
+          if lay["source"] == "template" else {})
+    rows = P.explain(lay["policy"], lay["template"], ov, profile, base_source=lay["source"])
     eff = {r["id"]: r["value"] for r in rows}
     changed_categories = sorted({P.CATALOGUE[r["id"]].category for r in rows if r["override"]})
     nl = needs_look(db).get(str(profile.get("id")))
@@ -299,7 +305,7 @@ def profile_payload(db, profile: Mapping[str, Any]) -> Dict[str, Any]:
         "mode": lay["source"],                       # admin | template | legacy
         "template": ({"id": tpl_row["id"], "name": tpl_row["name"], "slug": tpl_row.get("slug")}
                      if tpl_row else None),
-        "overrides": lay["overrides"] if lay["source"] == "template" else {},
+        "overrides": ov,
         "effective": eff,
         "rows": rows,
         "changed_categories": changed_categories,

@@ -1651,6 +1651,8 @@ class MusicDatabase:
             # people and permissions (#2166): templates, policy, personal
             # changes. after every profile column above it reads
             self._add_permission_layers(cursor)
+            # audiobook and podcast episode asks (#2188)
+            self._ensure_media_request_schema(cursor)
             self._revoke_stale_device_rows(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -29435,6 +29437,176 @@ class MusicDatabase:
             (int(profile_id), window, int(profile_id), window))
         row = cursor.fetchone()
         return int(row[0]) if row else 0
+
+    # ── audiobook and podcast episode requests (#2188) ──────────────────
+    # a profile on Ask first for books or episodes files one of these; an
+    # admin's approval puts the book on their wishlist (or starts the
+    # episode). the row is both the queue and the history, like videos.
+
+    def _ensure_media_request_schema(self, cursor) -> None:
+        """idempotent: create media_requests if it isn't there yet."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS media_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                kind TEXT NOT NULL,
+                item_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                image_url TEXT,
+                payload TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_profile ON media_requests(profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_status ON media_requests(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_item ON media_requests(kind, item_key)")
+
+    @staticmethod
+    def _media_request_row(row) -> Dict[str, Any]:
+        out = dict(row)
+        try:
+            out["payload"] = json.loads(out.get("payload") or "{}")
+        except (TypeError, ValueError):
+            out["payload"] = {}
+        return out
+
+    def add_media_request(self, *, profile_id: int, requester_name: str, kind: str, item_key: str,
+                          title: str, subtitle: Optional[str] = None, image_url: Optional[str] = None,
+                          payload: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        """a new pending request, or None when one for the same thing is
+        already waiting for this profile (or the insert failed)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("SELECT 1 FROM media_requests WHERE profile_id = ? AND kind = ? "
+                               "AND item_key = ? AND status = 'pending' LIMIT 1",
+                               (int(profile_id), kind, item_key))
+                if cursor.fetchone():
+                    return None
+                cursor.execute(
+                    "INSERT INTO media_requests (profile_id, requester_name, kind, item_key, title, "
+                    "subtitle, image_url, payload, status) VALUES (?,?,?,?,?,?,?,?, 'pending')",
+                    (int(profile_id), requester_name, kind, item_key, title, subtitle, image_url,
+                     json.dumps(payload or {}, sort_keys=True)))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording a %s request: %s", kind, e)
+            return None
+
+    def list_media_requests(self, profile_id: Optional[int] = None, status: Optional[str] = None,
+                            kind: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
+        """requests, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        if kind:
+            where.append("kind = ?")
+            args.append(kind)
+        sql = ("SELECT * FROM media_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY created_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                return [self._media_request_row(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error listing media requests: %s", e)
+            return []
+
+    def get_media_request(self, request_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("SELECT * FROM media_requests WHERE id = ?", (int(request_id),))
+                row = cursor.fetchone()
+                return self._media_request_row(row) if row else None
+        except Exception as e:
+            logger.error("Error getting media request %s: %s", request_id, e)
+            return None
+
+    def set_media_request_status(self, request_id: int, status: str, resolved_by: Optional[int] = None,
+                                 admin_response: Optional[str] = None) -> bool:
+        """answer a request; only a pending one moves (two admins can't both)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE media_requests SET status = ?, resolved_by = ?, admin_response = ?, "
+                    "resolved_at = CURRENT_TIMESTAMP, seen_at = NULL WHERE id = ? AND status = 'pending'",
+                    (status, resolved_by, admin_response, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error answering media request %s: %s", request_id, e)
+            return False
+
+    def mark_media_request_available(self, request_id: int) -> bool:
+        """approved -> available, and the requester's badge lights up."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("UPDATE media_requests SET status = 'available', seen_at = NULL "
+                               "WHERE id = ? AND status = 'approved'", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error marking media request %s available: %s", request_id, e)
+            return False
+
+    def mark_media_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("UPDATE media_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL AND status != 'pending'",
+                               (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_media_requests_seen failed: %s", e)
+            return 0
+
+    def delete_media_request(self, request_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("DELETE FROM media_requests WHERE id = ?", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting media request %s: %s", request_id, e)
+            return False
+
+    def media_request_approved(self, profile_id: int, kind: str, item_key: str) -> bool:
+        """has an admin approved this profile's ask for this item? (the
+        audiobook pass grabs an approved book for an Ask first owner.)
+        raises on a db error: the caller fails closed."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            self._ensure_media_request_schema(cursor)
+            cursor.execute("SELECT 1 FROM media_requests WHERE profile_id = ? AND kind = ? "
+                           "AND item_key = ? AND status IN ('approved', 'available') LIMIT 1",
+                           (int(profile_id), kind, str(item_key)))
+            return cursor.fetchone() is not None
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

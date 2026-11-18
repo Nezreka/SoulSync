@@ -28,7 +28,7 @@ export interface EditorSummary {
 const MODE_SHORT: Record<string, string> = {
   download: 'Downloads',
   ask: 'Asks first',
-  none: "Can't request",
+  none: 'Requests off',
 };
 
 function qualityWords(opts: QualityOption[], allowed: unknown): string {

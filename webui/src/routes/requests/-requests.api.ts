@@ -58,6 +58,8 @@ export async function fetchMusicRequests(profileId: number): Promise<MusicReques
     history: payload.history ?? [],
     pendingVideos: payload.pending_videos ?? [],
     videoHistory: payload.video_history ?? [],
+    pendingMedia: payload.pending_media ?? [],
+    mediaHistory: payload.media_history ?? [],
     counts: normalizeCounts(payload.counts),
     asksFirst: payload.asks_first === true,
     quota: normalizeQuota(payload.quota),
@@ -206,6 +208,43 @@ export async function withdrawMusicVideoRequest(
     }),
   );
   assertOk(payload, 'Could not withdraw that request');
+}
+
+/** an audiobook or episode ask (#2188): approving puts the book on their
+ *  wishlist, or starts the episode. */
+export async function approveMediaRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/approve`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not approve that request');
+}
+
+export async function declineMediaRequest(
+  profileId: number,
+  requestId: number,
+  response?: string,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/decline`, {
+      headers: headersFor(profileId),
+      json: response ? { response } : {},
+    }),
+  );
+  assertOk(payload, 'Could not decline that request');
+}
+
+export async function withdrawMediaRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/withdraw`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not withdraw that request');
+}
+
+export async function deleteMediaRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.delete(`requests/media/${requestId}`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not remove that request');
 }
 
 export function musicRequestsQueryOptions(profileId: number) {

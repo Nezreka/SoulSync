@@ -454,11 +454,12 @@ function PersonEditor({ request }: { request: EditorRequest }) {
                 </option>
               ))}
             </select>
-            {legacy ? null : (
+            {/* only with personal changes to undo: following the template
+                exactly has nothing to go back to (#2190) */}
+            {legacy || !n ? null : (
               <button
                 type="button"
                 className={styles.link}
-                disabled={!n}
                 onClick={() => {
                   setDraft(resetAll(draft));
                   setStatus(null);

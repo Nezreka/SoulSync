@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { myPermissions, offTitle, permMode } from '@/platform/shell/my-permissions';
+import { loadAdminName, myPermissions, offTitle, permMode } from '@/platform/shell/my-permissions';
 
 import type {
   ActivePlaybackState,
@@ -40,6 +40,7 @@ export interface PodcastContextValue {
     ep: PodcastEpisodeItem,
     showTitle: string,
     showArtwork?: string | null,
+    feedUrl?: string | null,
   ) => void;
   downloadsCount: number;
 
@@ -239,14 +240,34 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
     ep: PodcastEpisodeItem,
     showTitle: string,
     showArtwork?: string | null,
+    feedUrl?: string | null,
   ) => {
     if (!ep.enclosure_url) return;
+    // Ask first (#2188): the episode goes to the admin's Requests instead
+    if (permMode('podcasts') === 'ask') {
+      const res = await downloadPodcastEpisode(ep, showTitle, feedUrl);
+      if (res.success && res.requested) {
+        const admin = await loadAdminName();
+        window.showToast?.(
+          res.already
+            ? `You already asked for "${ep.title}"`
+            : `Asked ${admin || 'your admin'} for "${ep.title}". You'll hear when it's approved`,
+          'success',
+        );
+      } else {
+        window.showToast?.(res.error || 'Could not send that request', 'error');
+      }
+      return;
+    }
     // the button is hidden for a profile that can't get episodes; a stale
-    // page after an admin's change says why instead of 403ing
+    // page after an admin's change says why instead of 403ing, and the
+    // refusal isn't kept as a notification
     if (permMode('podcasts') !== 'download') {
       window.showToast?.(
         `${offTitle(myPermissions(), 'podcasts')}. Ask your admin if you'd like it.`,
         'info',
+        null,
+        { history: false },
       );
       return;
     }

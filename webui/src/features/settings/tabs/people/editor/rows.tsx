@@ -329,6 +329,14 @@ export function PermRow({
               <span className={styles.inert}>
                 The policy holds this change back for now. Lifting it brings it back.
               </span>
+            ) : capped ? (
+              // the control shows what's in force; what the template says is
+              // its own line, so the two never read as one (#2189)
+              <span className={styles.inert}>
+                {ctx.legacy ? 'Their own setting' : ctx.tplName} says{' '}
+                {valueWords(ctx.model, row, ctx.resolved.base[row.id])}. The policy holds it back
+                for now.
+              </span>
             ) : null}
           </div>
         )}
@@ -424,14 +432,14 @@ export function QualityBlock({ ctx, media }: { ctx: EditorCtx; media: 'movie' | 
       >
         <div className={styles.rowText}>
           <div className={styles.rowTitle} id={headId}>
-            Allowed profiles
+            Allowed quality profiles
           </div>
           <div className={styles.rowDesc}>
             {dep || `${setRow.help} With one left, ${ctx.name} won't see a quality menu at all.`}
           </div>
           {dep ? null : (
             <div className={styles.prov}>
-              <Provenance ctx={ctx} ids={ids} label="Allowed profiles" />
+              <Provenance ctx={ctx} ids={ids} label="Allowed quality profiles" />
               {raw[setRow.id] !== ALL ? (
                 <button
                   type="button"

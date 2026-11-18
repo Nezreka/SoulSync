@@ -69,12 +69,37 @@ describe('background activity notices', () => {
         <StatusNotice tone="ok" text="Discography updated from deezer: 29 new, 13 matched." />,
       );
       view.rerender(<StatusNotice tone="err" text="Discography refresh failed" />);
+      // the progress line passes; outcomes are kept (#2191)
       expect(toast.mock.calls).toEqual([
-        ['Fetching full discography…', 'info'],
+        ['Fetching full discography…', 'info', null, { history: false }],
         ['Discography updated from deezer: 29 new, 13 matched.', 'success'],
         ['Discography refresh failed', 'error'],
       ]);
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    } finally {
+      delete window.showToast;
+    }
+  });
+
+  it('keeps background upkeep the viewer did not ask for out of the panel (#2191)', () => {
+    const toast = vi.fn();
+    window.showToast = toast;
+    try {
+      render(
+        <StatusNotice
+          tone="ok"
+          text="Discography updated from deezer: 79 new, 33 matched."
+          transient
+        />,
+      );
+      expect(toast.mock.calls).toEqual([
+        [
+          'Discography updated from deezer: 79 new, 33 matched.',
+          'success',
+          null,
+          { history: false },
+        ],
+      ]);
     } finally {
       delete window.showToast;
     }

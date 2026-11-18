@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { Spinner } from '@/components/primitives';
+import { usePermMode } from '@/platform/shell/my-permissions';
 
 import type { PodcastDownloadItem, PodcastEpisodeItem } from '../-podcasts.types';
 
@@ -25,6 +26,8 @@ export function PodcastShowNotesModal({
   onPlayEpisode,
   onDownloadEpisode,
 }: PodcastShowNotesModalProps) {
+  // Ask first for episodes (#2188): the button asks an admin instead
+  const asks = usePermMode('podcasts') === 'ask';
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -140,6 +143,7 @@ export function PodcastShowNotesModal({
                 type="button"
                 className={styles.showNotesDownloadBtn}
                 data-podcasts-action=""
+                data-podcasts-asks=""
                 onClick={() => onDownloadEpisode(episode)}
                 disabled={isDownloading || isDownloaded}
               >
@@ -165,7 +169,7 @@ export function PodcastShowNotesModal({
                       <polyline points="7 10 12 15 17 10" />
                       <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
-                    <span>Download</span>
+                    <span>{asks ? 'Request' : 'Download'}</span>
                   </>
                 )}
               </button>

@@ -40934,7 +40934,12 @@ body.downloads-disabled [data-download-action],
 body[data-music-get="none"] [data-request-action],
 /* books and podcasts follow their own permission, not the music one */
 body[data-books-get="none"] [data-books-action],
-body[data-podcasts-get="none"] [data-podcasts-action] {
+body[data-podcasts-get="none"] [data-podcasts-action],
+/* asking first for them (#2188) keeps only the controls that ask
+   (data-*-asks: the wishlist heart, an episode's download); grabbing a
+   release or following an author stays a download */
+body[data-books-get="ask"] [data-books-action]:not([data-books-asks]),
+body[data-podcasts-get="ask"] [data-podcasts-action]:not([data-podcasts-asks]) {
     display: none !important;
 }
 

@@ -72,6 +72,8 @@ describe('music requests api', () => {
       history: [row],
       pendingVideos: [],
       videoHistory: [],
+      pendingMedia: [],
+      mediaHistory: [],
       counts: { pending: 1, approved: 1, available: 0, declined: 0, removed: 0 },
       asksFirst: true,
       quota: null,

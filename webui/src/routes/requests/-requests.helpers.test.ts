@@ -76,7 +76,13 @@ describe('requests helpers', () => {
     const items = buildRequestItems(list);
     expect(
       items.map((i) =>
-        i.source === 'pending' ? i.group.key : i.source === 'history' ? i.row.id : i.video.id,
+        i.source === 'pending'
+          ? i.group.key
+          : i.source === 'history'
+            ? i.row.id
+            : 'video' in i
+              ? i.video.id
+              : i.media.id,
       ),
     ).toEqual(['album:blue', 2, 3, 1, 4]);
   });
