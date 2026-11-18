@@ -490,10 +490,13 @@ def plex_history_rows(elements: List[Any], *, machine: str, accounts: Dict[str, 
     return rows
 
 
-def _page(srv, path: str, params: Dict[str, Any], size: int = 500, cap: int = 20000) -> List[Any]:
+def _page(srv, path: str, params: Dict[str, Any], size: int = 500, cap: int = 20000,
+          pause: float = 0.0) -> List[Any]:
     out: List[Any] = []
     start = 0
     while start < cap:
+        if start and pause:
+            time.sleep(pause)       # a gentle pace for a background re-read
         p = dict(params, **{"X-Plex-Container-Start": start, "X-Plex-Container-Size": size})
         root = srv.query(path, params=p)
         items = list(root) if root is not None else []
@@ -502,6 +505,29 @@ def _page(srv, path: str, params: Dict[str, Any], size: int = 500, cap: int = 20
             break
         start += size
     return out
+
+
+def _read_plex_history(srv, *, viewed_after: int, until: float, pause: float = 0.0
+                       ) -> Optional[List[Dict[str, Any]]]:
+    """plex's history as play rows (binge-grouped), or None when plex didn't answer."""
+    machine = str(sa._g(srv, "machineIdentifier", "") or "plex")
+    accounts: Dict[str, str] = {}
+    devices: Dict[str, Dict[str, str]] = {}
+    sections: Dict[str, str] = {}
+    try:
+        for a in _kids(srv.query("/accounts")):
+            accounts[a.get("id", "")] = a.get("name") or a.get("title") or ""
+        for d in _kids(srv.query("/devices")):
+            devices[d.get("id", "")] = {"name": d.get("name") or "", "platform": d.get("platform") or ""}
+        for s in _kids(srv.query("/library/sections")):
+            sections[s.get("key", "")] = s.get("title") or ""
+        els = _page(srv, "/status/sessions/history/all",
+                    {"sort": "viewedAt:desc", "viewedAt>": viewed_after}, pause=pause)
+    except Exception:   # noqa: BLE001 - try again at the next maintenance round
+        logger.debug("plex history read failed", exc_info=True)
+        return None
+    return plex_history_rows(els, machine=machine, accounts=accounts, devices=devices, sections=sections,
+                             until=until, server_name=str(sa._g(srv, "friendlyName", "") or "Plex"))
 
 
 def backfill_plex_history(now: Optional[float] = None, days: int = 365) -> int:
@@ -519,25 +545,81 @@ def backfill_plex_history(now: Optional[float] = None, days: int = 365) -> int:
     first = store.query("SELECT MIN(started_at) AS t FROM server_plays WHERE server = 'plex' "
                         "AND source = 'live'")[0]["t"]
     until = float(first or now)
-    accounts: Dict[str, str] = {}
-    devices: Dict[str, Dict[str, str]] = {}
-    sections: Dict[str, str] = {}
-    try:
-        for a in _kids(srv.query("/accounts")):
-            accounts[a.get("id", "")] = a.get("name") or a.get("title") or ""
-        for d in _kids(srv.query("/devices")):
-            devices[d.get("id", "")] = {"name": d.get("name") or "", "platform": d.get("platform") or ""}
-        for s in _kids(srv.query("/library/sections")):
-            sections[s.get("key", "")] = s.get("title") or ""
-        els = _page(srv, "/status/sessions/history/all",
-                    {"sort": "viewedAt:desc", "viewedAt>": int(now - days * 86400)})
-    except Exception:   # noqa: BLE001 - try again at the next maintenance round
-        logger.debug("plex history import failed", exc_info=True)
+    rows = _read_plex_history(srv, viewed_after=int(now - days * 86400), until=until)
+    if rows is None:
         return 0
-    rows = plex_history_rows(els, machine=machine, accounts=accounts, devices=devices, sections=sections,
-                             until=until, server_name=str(sa._g(srv, "friendlyName", "") or "Plex"))
     for i in range(0, len(rows), 500):
         store.apply_ops([("play", r) for r in rows[i:i + 500]])
-    store.meta_set(marker, json.dumps({"rows": len(rows), "at": now, "until": until}))
+    info = json.dumps({"rows": len(rows), "at": now, "until": until})
+    store.meta_set(marker, info)
+    # imported with the family keys already: nothing for the repair to do
+    store.meta_set(f"{REPAIR_MARKER}:{machine}", info)
     logger.info("server activity: imported %d plays from plex history", len(rows))
     return len(rows)
+
+
+# ── the one-time repair of an older import ──────────────────────────────────
+#
+# imports before this read parentRatingKey / grandparentRatingKey, which plex's
+# history doesn't send (it names parentKey / grandparentKey as paths). those
+# rows have no family keys: episodes never fold into runs and a missing poster
+# has nothing to fall back on. the cheapest fix is the import itself again:
+# about 40 paged calls for 20k plays, where asking plex per show or per item
+# would be hundreds to thousands of calls and still miss items plex has since
+# dropped (history keeps their keys; the library doesn't).
+#
+# the new rows are staged in a side table at a gentle pace, then swapped in
+# with the marker in one short transaction: history is never half empty, an
+# interrupted run leaves the old rows as they were and simply starts over, and
+# plex being down leaves everything for the next maintenance round. only
+# plex_history rows that the re-read finds again are replaced; live rows and
+# any imported row plex no longer lists are left alone.
+
+REPAIR_MARKER = "plex_history_import_v2"
+REPAIR_PAGE_PAUSE = 0.5
+REPAIR_BATCH = 500
+REPAIR_BATCH_PAUSE = 0.05
+
+
+def repair_plex_history(now: Optional[float] = None) -> int:
+    """re-read plex's history with the family keys and swap it in. once per
+    plex server; returns the plays replaced (0 when there is nothing to do or
+    plex didn't answer)."""
+    now = time.time() if now is None else now
+    srv = sa._plex_server()
+    if srv is None:
+        return 0
+    machine = str(sa._g(srv, "machineIdentifier", "") or "plex")
+    marker = f"{REPAIR_MARKER}:{machine}"
+    if store.meta_get(marker):
+        return 0
+    old = store.query("SELECT COUNT(*) AS n, MIN(started_at) AS lo FROM server_plays "
+                      "WHERE source = 'plex_history' AND server = 'plex'")[0]
+    if not old["n"]:
+        # nothing imported (or the log was cleared): nothing to repair, ever
+        store.meta_set(marker, json.dumps({"rows": 0, "at": now}))
+        return 0
+    try:
+        v1 = json.loads(store.meta_get(f"plex_history_import:{machine}") or "{}")
+    except ValueError:
+        v1 = {}
+    until = v1.get("until")
+    if until is None:
+        first = store.query("SELECT MIN(started_at) AS t FROM server_plays WHERE server = 'plex' "
+                            "AND source = 'live'")[0]["t"]
+        until = first or now
+    # the same span the old import covered (retention may have trimmed its start)
+    rows = _read_plex_history(srv, viewed_after=int(old["lo"]) - 1, until=float(until),
+                              pause=REPAIR_PAGE_PAUSE)
+    if rows is None:
+        return 0
+    store.stage_reset()
+    for i in range(0, len(rows), REPAIR_BATCH):
+        store.stage_rows(rows[i:i + REPAIR_BATCH])
+        time.sleep(REPAIR_BATCH_PAUSE)
+    n = store.swap_staged(marker, json.dumps({"rows": len(rows), "at": now, "until": until}))
+    invalidate()
+    from core.server_activity import stats
+    stats.invalidate()
+    logger.info("server activity: repaired %d imported plex plays (family keys, runs)", n)
+    return n

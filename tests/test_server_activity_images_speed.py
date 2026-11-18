@@ -548,3 +548,165 @@ def test_a_jellyfin_poll_that_blows_up_leaves_plex_on_screen(sa_env, monkeypatch
     assert out["ok"] and all(s["server"] == "plex" for s in out["sessions"])
     jf = next(i for i in out["servers"] if i["server"] == "jellyfin")
     assert jf["reachable"] is False
+
+
+# ── the one-time repair of an older plex history import ─────────────────────
+
+def _old_import(sa_env, n_shows=2, eps=3, base=1_780_000_000):
+    """plex history as plex sends it (parentKey / grandparentKey paths), and
+    the rows an older import made of it: no family keys, every play its own run."""
+    from xml.etree import ElementTree as ET
+    els, rows = [], []
+    for s_ in range(n_shows):
+        for e in range(eps):
+            rk = str(1000 + s_ * 100 + e)
+            viewed = base + s_ * 86400 + e * 1500
+            els.append(ET.Element("Video", type="episode", ratingKey=rk, parentKey=f"/library/metadata/{50 + s_}",
+                                  grandparentKey=f"/library/metadata/{40 + s_}", grandparentTitle=f"Show {s_}",
+                                  title=f"E{e}", index=str(e + 1), parentIndex="1", viewedAt=str(viewed),
+                                  duration="1200000", accountID="1", historyKey=f"/h/{rk}",
+                                  grandparentThumb=f"/library/metadata/{40 + s_}/thumb/1"))
+            key = f"plexh:machine-1:/h/{rk}"
+            rows.append(_play(key, viewed - 1200, source="plex_history", group=key, grandparent_title=f"Show {s_}",
+                              rating_key=rk, thumb=f"/library/metadata/{40 + s_}/thumb/1", played_ms=0,
+                              duration_ms=1_200_000))
+    els.sort(key=lambda el: -int(el.get("viewedAt")))
+    plex = sa_env.use_plex()
+    plex.accounts = [{"id": "1", "name": "maya"}]
+    plex.history = els
+    store.apply_ops([("play", r) for r in rows])
+    store.meta_set("plex_history_import:machine-1", '{"until": %d}' % (base + 10 * 86400))
+    return plex
+
+
+@pytest.fixture()
+def quick_repair(monkeypatch):
+    monkeypatch.setattr(history, "REPAIR_PAGE_PAUSE", 0)
+    monkeypatch.setattr(history, "REPAIR_BATCH_PAUSE", 0)
+    monkeypatch.setattr(history, "REPAIR_BATCH", 2)      # several batches, like 20k rows would be
+
+
+def test_the_repair_gives_old_imported_rows_their_keys_and_runs(sa_env, quick_repair):
+    _old_import(sa_env)
+    live_row = _play("live-1", 1_790_000_000, kind="movie", title="Dune")
+    store.apply_ops([("play", live_row)])
+    before = store.query("SELECT play_key FROM server_plays ORDER BY play_key")
+    assert history.repair_plex_history() == 6
+    rows = store.query("SELECT * FROM server_plays WHERE source = 'plex_history' ORDER BY started_at")
+    assert {r["grandparent_key"] for r in rows} == {"40", "41"} and {r["parent_key"] for r in rows} == {"50", "51"}
+    assert len({r["group_key"] for r in rows}) == 2                      # one run per show
+    # nothing doubled, nothing lost, the live row as it was
+    assert store.query("SELECT play_key FROM server_plays ORDER BY play_key") == before
+    live_after = store.query("SELECT * FROM server_plays WHERE play_key = 'live-1'")[0]
+    assert live_after["group_key"] == "live-1" and live_after["title"] == "Dune"
+    assert store.query(f"SELECT name FROM sqlite_master WHERE name = '{store.STAGE}'") == []
+
+
+def test_the_repair_runs_once_per_server(sa_env, quick_repair):
+    plex = _old_import(sa_env)
+    history.repair_plex_history()
+    plex.calls.clear()
+    assert history.repair_plex_history() == 0
+    assert plex.calls == []
+    assert store.meta_get("plex_history_import_v2:machine-1")
+
+
+def test_a_fresh_import_needs_no_repair(sa_env):
+    plex = _old_import(sa_env)
+    # start over with nothing, and let today's import run
+    with store.connect() as c:
+        c.execute("DELETE FROM server_activity_meta")
+        c.execute("DELETE FROM server_plays")
+        c.commit()
+    history.backfill_plex_history(now=1_781_000_000)
+    plex.calls.clear()
+    assert history.repair_plex_history() == 0 and plex.calls == []
+
+
+def test_an_interrupted_repair_leaves_the_old_rows_and_starts_over(sa_env, quick_repair, monkeypatch):
+    _old_import(sa_env)
+    before = store.query("SELECT * FROM server_plays ORDER BY play_key")
+    real = store.stage_rows
+    calls = {"n": 0}
+
+    def dies_midway(rows):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("restart")
+        real(rows)
+    monkeypatch.setattr(store, "stage_rows", dies_midway)
+    with pytest.raises(OSError):
+        history.repair_plex_history()
+    assert store.query("SELECT * FROM server_plays ORDER BY play_key") == before
+    assert not store.meta_get("plex_history_import_v2:machine-1")
+    monkeypatch.setattr(store, "stage_rows", real)
+    assert history.repair_plex_history() == 6
+
+
+def test_a_swap_that_fails_rolls_back_whole(sa_env, quick_repair, monkeypatch):
+    _old_import(sa_env)
+    before = store.query("SELECT * FROM server_plays ORDER BY play_key")
+    real = store.swap_staged
+    # a marker sqlite can't store: the swap fails after its delete and insert ran
+    monkeypatch.setattr(store, "swap_staged", lambda key, value: real(key, object()))
+    with pytest.raises(Exception):
+        history.repair_plex_history()
+    assert store.query("SELECT * FROM server_plays ORDER BY play_key") == before
+    assert not store.meta_get("plex_history_import_v2:machine-1")
+
+
+def test_plex_down_leaves_the_rows_and_tries_again_later(sa_env, quick_repair):
+    plex = _old_import(sa_env)
+    before = store.query("SELECT * FROM server_plays ORDER BY play_key")
+    plex.fail = True
+    assert history.repair_plex_history() == 0
+    assert store.query("SELECT * FROM server_plays ORDER BY play_key") == before
+    assert not store.meta_get("plex_history_import_v2:machine-1")
+    plex.fail = False
+    assert history.repair_plex_history() == 6
+
+
+def test_the_repair_clears_the_cached_answers(sa_env, quick_repair):
+    _old_import(sa_env)
+    now = 1_780_000_000 + 3 * 86400
+    stats.get_stats(days=7, tz="UTC", now=now)
+    history.get_history(tz="UTC")
+    history.repair_plex_history()
+    assert stats._cache == {} and history._cache == {}
+
+
+def test_maintenance_runs_the_repair_in_the_background(sa_env, monkeypatch):
+    seen = []
+    monkeypatch.setattr(history, "backfill_plex_history", lambda: seen.append("import"))
+    monkeypatch.setattr(history, "repair_plex_history", lambda: seen.append("repair"))
+    live._maint["running"] = True
+    live._maintenance()
+    assert seen == ["import", "repair"]
+
+
+def test_a_live_row_is_never_replaced_even_on_a_key_clash(sa_env, quick_repair):
+    _old_import(sa_env)
+    clash = "plexh:machine-1:/h/1000"
+    with store.connect() as c:
+        c.execute("UPDATE server_plays SET source = 'live', title = 'mine' WHERE play_key = ?", (clash,))
+        c.commit()
+    history.repair_plex_history()
+    row = store.query("SELECT * FROM server_plays WHERE play_key = ?", (clash,))[0]
+    assert row["source"] == "live" and row["title"] == "mine" and row["grandparent_key"] is None
+
+
+def test_the_swap_is_one_transaction_on_an_autocommit_connection_too(sa_env, quick_repair, monkeypatch):
+    import sqlite3
+
+    def autocommit():
+        c = sqlite3.connect(str(sa_env.db), isolation_level=None)
+        c.row_factory = sqlite3.Row
+        return c
+    _old_import(sa_env)
+    store.use_connection_factory(autocommit)
+    before = store.query("SELECT * FROM server_plays ORDER BY play_key")
+    real = store.swap_staged
+    monkeypatch.setattr(store, "swap_staged", lambda key, value: real(key, object()))
+    with pytest.raises(Exception):
+        history.repair_plex_history()
+    assert store.query("SELECT * FROM server_plays ORDER BY play_key") == before

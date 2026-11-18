@@ -467,6 +467,7 @@ def _maintenance() -> None:
                 logger.info("server activity: pruned %d plays older than %d days", n, days)
         from core.server_activity import history
         history.backfill_plex_history()
+        history.repair_plex_history()
     except Exception:   # noqa: BLE001
         logger.debug("server activity maintenance failed", exc_info=True)
     finally:

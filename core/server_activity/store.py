@@ -234,6 +234,59 @@ def apply_ops(ops: List[tuple]) -> None:
         bump_generation()
 
 
+# ── the staged swap (plex history repair) ───────────────────────────────────
+#
+# a plain side table, not a temp one (the connection pool drops temp tables
+# between connections). a leftover from an interrupted run is thrown away.
+
+STAGE = "server_plays_import"
+
+
+def stage_reset() -> None:
+    cols = ", ".join(PLAY_COLUMNS)
+    with closing(connect()) as conn:
+        conn.execute(f"DROP TABLE IF EXISTS {STAGE}")
+        conn.execute(f"CREATE TABLE {STAGE} AS SELECT {cols} FROM server_plays WHERE 0")
+        conn.commit()
+
+
+def stage_rows(rows: List[Dict[str, Any]]) -> None:
+    """one batch into the side table; history doesn't see it yet."""
+    if not rows:
+        return
+    cols = ", ".join(PLAY_COLUMNS)
+    marks = ", ".join("?" for _ in PLAY_COLUMNS)
+    with closing(connect()) as conn:
+        conn.executemany(f"INSERT INTO {STAGE} ({cols}) VALUES ({marks})",
+                         [tuple(_jsonish(r.get(c)) for c in PLAY_COLUMNS) for r in rows])
+        conn.commit()
+
+
+def swap_staged(marker_key: str, marker_value: str) -> int:
+    """the staged plays replace the imported ones they match, and the marker
+    is written, in one transaction. live rows are never touched; play_key is
+    unique, so nothing doubles. returns the plays now in from the stage."""
+    cols = ", ".join(PLAY_COLUMNS)
+    with closing(connect()) as conn:
+        try:
+            # explicit, so an autocommit connection is atomic here too
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            conn.execute(f"DELETE FROM server_plays WHERE source = 'plex_history' "
+                         f"AND play_key IN (SELECT play_key FROM {STAGE})")
+            n = conn.execute(f"INSERT OR IGNORE INTO server_plays ({cols}) "
+                             f"SELECT {cols} FROM {STAGE} WHERE source = 'plex_history'").rowcount
+            conn.execute("INSERT INTO server_activity_meta (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (marker_key, marker_value))
+            conn.execute(f"DROP TABLE {STAGE}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    bump_generation()
+    return n or 0
+
+
 def load_open_plays() -> List[Dict[str, Any]]:
     return query("SELECT * FROM server_plays WHERE stopped_at IS NULL")
 
