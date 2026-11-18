@@ -213,7 +213,7 @@ SOULSYNC = ServerDescriptor(
     # folder from the soulseek section.
     config_section='soulseek',
     fields=(
-        ConfigField('transfer_path', 'path', required=False, label='Transfer folder', default='./Transfer'),
+        ConfigField('transfer_path', 'path', required=False, label='Music library folder', default='./Transfer'),
     ),
     brand=Brand(color='#7c5cff', logo='/static/trans2.png', dark=True),
     is_external=False,

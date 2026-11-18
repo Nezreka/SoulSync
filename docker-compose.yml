@@ -41,12 +41,12 @@ services:
       # the music and video sides read from it (Settings → Downloads uses one path).
       - ./downloads:/app/downloads
       # ─── Music library (OUTPUT) — REQUIRED: uncomment + set your path ────
-      # The app needs a Transfer folder — where finished, organised music is moved
-      # to for Plex / Jellyfin / Navidrome to read. UNCOMMENT the line below, point
-      # the host side (left of the colon) at your music library, then set
-      # Settings → Downloads → Transfer to /app/Transfer (matches the in-app
-      
-      # ./Transfer placeholder). Left commented so it never clashes with a Transfer
+      # The app needs a music library folder — where finished, organised music is
+      # moved to for Plex / Jellyfin / Navidrome to read. Inside the container it is
+      # mounted at /app/Transfer. UNCOMMENT the line below, point the host side (left
+      # of the colon) at your music library, then set Settings → Library → Folders →
+      # Music Library Folder to /app/Transfer (matches the in-app ./Transfer
+      # placeholder). Left commented so it never clashes with an /app/Transfer
       # mount you already added in a previous setup — if you have one, keep it.
 
       # - ./Transfer:/app/Transfer

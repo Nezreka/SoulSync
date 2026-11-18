@@ -21,7 +21,7 @@ const A = {
   },
   folders: {
     id: 'gs-folders',
-    title: 'Folder Setup (Downloads & Transfer)',
+    title: 'Folder Setup (Downloads & Music Library)',
     lede: 'The three folders, and the Docker pitfalls',
   },
   docker: { id: 'gs-docker', title: 'Docker & Deployment', lede: 'Volumes, PUID and PGID, ports' },

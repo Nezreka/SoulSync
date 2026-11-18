@@ -8274,7 +8274,7 @@ def _find_completed_file_robust_legacy(download_dir, api_filename, transfer_dir=
         if transfer_similarity > 0.85:
             location = 'transfer'
             if transfer_similarity < 1.0:
-                logger.info(f"Found fuzzy match in transfer ({transfer_similarity:.2f}): {best_transfer_path}")
+                logger.info(f"Found fuzzy match in music library folder ({transfer_similarity:.2f}): {best_transfer_path}")
             return (best_transfer_path, location)
 
     # Don't spam logs - file not found is common for completed/processed downloads
@@ -10196,7 +10196,7 @@ def reidentify_apply():
                 _plex = None
             _, attempt = resolve_library_file_path_with_diagnostic(
                 stored_path, config_manager=config_manager, plex_client=_plex)
-            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library or download folders configured)"
             logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
                            library_track_id, stored_path, attempt.raw_path_existed, searched)
             return jsonify({"success": False, "error": (
@@ -15626,7 +15626,7 @@ def start_duplicate_cleaner():
         # Submit worker
         duplicate_cleaner_executor.submit(_run_duplicate_cleaner)
 
-        add_activity_item("", "Duplicate Cleaner Started", "Scanning Transfer folder", "Now")
+        add_activity_item("", "Duplicate Cleaner Started", "Scanning music library folder", "Now")
 
         return jsonify({"success": True, "message": "Duplicate cleaner started"})
 

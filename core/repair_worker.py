@@ -7696,8 +7696,8 @@ class RepairWorker:
             src = os.path.normpath(os.path.join(transfer, rel_from))
             dst = os.path.normpath(os.path.join(transfer, rel_to))
             if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
-                logger.warning("Path mismatch fix: legacy finding escapes transfer folder — re-scan to refresh. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
-                return {'success': False, 'error': 'Path escapes transfer folder (legacy finding — re-scan the library to refresh)'}
+                logger.warning("Path mismatch fix: legacy finding escapes the music library folder — re-scan to refresh. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
+                return {'success': False, 'error': 'Path escapes the music library folder (legacy finding — re-scan the library to refresh)'}
 
         logger.info("Path mismatch fix: src=%s dst=%s", src, dst)
 

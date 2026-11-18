@@ -820,11 +820,11 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'download folder input slskd downloads path docker',
   },
   {
-    label: 'Transfer path',
+    label: 'Music library folder',
     tab: 'library',
     anchor: id('transfer-path'),
     file: 'library-folders.tsx',
-    hint: 'your music library folder (output)',
+    hint: 'where finished music is filed (output)',
     keywords: 'transfer library folder output music path destination',
   },
   {

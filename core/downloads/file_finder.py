@@ -328,7 +328,7 @@ def find_completed_audio_file(
         if tx_sim > _FUZZY_THRESHOLD:
             if tx_sim < 1.0:
                 logger.info(
-                    "Found fuzzy match in transfer (%.2f): %s",
+                    "Found fuzzy match in music library folder (%.2f): %s",
                     tx_sim, best_tx_path,
                 )
             return (best_tx_path, 'transfer')

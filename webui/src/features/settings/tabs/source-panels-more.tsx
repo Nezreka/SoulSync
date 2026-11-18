@@ -512,7 +512,7 @@ export function TorrentPanel({ store }: { store: SettingsStore }) {
                 path. Set this when your client saves to a category folder (e.g. a "Music" category
                 at <code>/data/downloads/music</code>) that's mounted here at a different path.
                 SoulSync finds the release by name under this folder. Blank = use the Soulseek
-                download/transfer folders.
+                download and music library folders.
               </>
             }
           >
@@ -779,8 +779,8 @@ export function UsenetPanel({ store }: { store: SettingsStore }) {
                 Where <strong>SoulSync</strong> can read finished NZB downloads — its own
                 in-container path. Set this when SABnzbd/NZBGet writes that category to a folder
                 (e.g. <code>/data/downloads/music</code>) mounted here at a different path. SoulSync
-                finds the release by name under this folder. Blank = use the Soulseek
-                download/transfer folders.
+                finds the release by name under this folder. Blank = use the Soulseek download and
+                music library folders.
               </>
             }
           >

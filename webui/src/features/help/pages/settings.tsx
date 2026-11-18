@@ -65,13 +65,13 @@ export function settingsAnswers(
   if (media === 'music' && here === 'downloads') {
     out.push({
       id: 'two-folders',
-      title: 'Download folder or transfer folder?',
+      title: 'Download folder or music library folder?',
       body: (
         <>
           <p>
-            The download folder is where files arrive while they download. The transfer folder is
-            where finished, tagged music is filed for your media server. Keep them as two different
-            folders.
+            The download folder is where files arrive while they download. The music library folder
+            is where finished, tagged music is filed for your media server. Keep them as two
+            different folders.
           </p>
           <Acts>
             <Act kind="ghost" onClick={() => readArticle('gs-folders')}>

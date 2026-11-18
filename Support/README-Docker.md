@@ -63,7 +63,7 @@ SoulSync requires persistent storage for:
 - **`./data`** → `/app/data` - SQLite database files  
 - **`./logs`** → `/app/logs` - Application logs
 - **`./downloads`** → `/app/downloads` - Downloaded music files
-- **`./Transfer`** → `/app/Transfer` - Processed/matched music files
+- **`./Transfer`** → `/app/Transfer` - Your music library folder (processed/matched music files)
 
 ## 🔧 Configuration Options
 

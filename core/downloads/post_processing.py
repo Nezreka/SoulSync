@@ -109,7 +109,7 @@ def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Opti
         shutil.copy2(src, dest)
         return str(dest)
     except Exception as exc:
-        logger.warning("[Post-Processing] Could not copy release audio to transfer: %s", exc)
+        logger.warning("[Post-Processing] Could not copy release audio to the music library folder: %s", exc)
         return None
 
 
@@ -496,7 +496,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         # Handle file found in transfer folder - already completed by stream processor
         if file_location == 'transfer':
-            logger.info(f"[Post-Processing] File found in transfer folder - already completed by stream processor: {found_file}")
+            logger.info(f"[Post-Processing] File found in music library folder - already completed by stream processor: {found_file}")
 
             # Check if metadata enhancement was completed
             metadata_enhanced = False
@@ -505,7 +505,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     metadata_enhanced = download_tasks[task_id].get('metadata_enhanced', False)
 
             if not metadata_enhanced:
-                logger.warning("[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
+                logger.warning("[Post-Processing] File in music library folder missing metadata enhancement - completing now")
                 # Attempt to complete metadata enhancement using context
                 if context and expected_final_path:
                     try:

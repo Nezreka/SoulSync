@@ -270,7 +270,7 @@ def part_paths(info: dict) -> List[str]:
 
     rows = [
         ("Download", f"{paths.get('download_path')}  {state(paths.get('download_path_exists'), paths.get('download_path_writable'))}"),
-        ("Transfer", f"{paths.get('transfer_folder')}  {state(paths.get('transfer_folder_exists'), paths.get('transfer_folder_writable'))}"),
+        ("Music library", f"{paths.get('transfer_folder')}  {state(paths.get('transfer_folder_exists'), paths.get('transfer_folder_writable'))}"),
     ]
     if paths.get("staging_folder"):
         rows.append(("Import", f"{paths.get('staging_folder')}  {state(paths.get('staging_folder_exists'))}"))

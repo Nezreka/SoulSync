@@ -61,7 +61,7 @@ export function OrganizeToggle({ playlistRef, source }: OrganizeToggleProps) {
     <div className="modal-footer-organize">
       <label
         className="playlist-modal-organize-toggle"
-        title="Download into a playlist-named folder (Artist - Track) under your transfer path"
+        title="Download into a playlist-named folder (Artist - Track) in your music library folder"
       >
         <input
           type="checkbox"
