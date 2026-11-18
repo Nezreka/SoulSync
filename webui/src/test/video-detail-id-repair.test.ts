@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { extractFunction, extractVar } from './vanilla-extract';
 
 /**
  * A missing id is a job, not a headline.
@@ -130,6 +130,7 @@ describe('the manage panel honours a focused service', () => {
 describe('a youtube episode row links out cleanly', () => {
   function row(ep: Record<string, unknown>): HTMLElement {
     const preamble = `
+      ${extractVar('DL_IC', DETAIL)}
       var selectedSeason = 1;
       var data = { source: 'youtube' };
       function esc(s) { return String(s == null ? '' : s); }

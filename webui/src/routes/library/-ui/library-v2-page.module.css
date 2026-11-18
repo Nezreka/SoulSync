@@ -3938,6 +3938,15 @@ button.statusWarn:disabled {
   left: auto;
 }
 
+/* no room on the left for Enrich to fly out (a phone), or the menu scrolls and
+   would clip it: the provider list opens in place under Enrich (#2183) */
+.overflowMenuInlineSub .enrichDropdownSubmenu {
+  position: static;
+  min-width: 0;
+  margin: 0 8px 6px;
+  box-shadow: none;
+}
+
 .overflowMenuItem {
   display: flex;
   align-items: center;

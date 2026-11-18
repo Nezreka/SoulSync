@@ -23,6 +23,17 @@ export const VANILLA_DISCOVER = readFileSync(
 );
 
 /**
+ * A top-level `var NAME = ...;` of a vanilla file, for an extracted function
+ * that reads a constant of its IIFE (video-detail.js's DL_IC). The statement
+ * runs to the first `;` that ends a line.
+ */
+export function extractVar(name: string, source: string): string {
+  const m = new RegExp(`^[ \\t]*var ${name} = [\\s\\S]*?;\\n`, 'm').exec(source);
+  if (!m) throw new Error(`vanilla var ${name} not found`);
+  return m[0];
+}
+
+/**
  * Lift one function out by brace-matching, string- and regex-literal aware.
  *
  * A regex cannot do this — the bodies contain nested braces, template literals

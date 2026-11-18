@@ -12,6 +12,11 @@
   padding: 28px;
   width: 90%;
   text-align: center;
+  /* never taller than the screen: a long prompt scrolls inside its box instead
+     of running its buttons off a phone (#2186) */
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .box380 {
@@ -173,11 +178,17 @@
   color: var(--text-1);
 }
 
+/* the box scrolls on a phone (reasons, pairs, both options): the buttons stay
+   pinned to its bottom edge, over the box's own padding (#2186) */
 .keepActions {
+  position: sticky;
+  bottom: -28px;
   display: flex;
   gap: 10px;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin: 8px -28px -28px;
+  padding: 12px 28px 28px;
+  background: var(--bg-secondary);
 }
 
 @media (max-width: 560px) {
