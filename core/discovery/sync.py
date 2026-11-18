@@ -973,13 +973,15 @@ def _run_sync_task(
         # Emit playlist_synced event for automation engine
         try:
             if deps.automation_engine:
-                deps.automation_engine.emit('playlist_synced', {
+                from core.automation.owners import owned
+                # the playlist's owner, whoever's thread ran the sync
+                deps.automation_engine.emit('playlist_synced', owned({
                     'playlist_name': playlist_name,
                     'total_tracks': str(getattr(result, 'total_tracks', 0)),
                     'matched_tracks': str(getattr(result, 'matched_tracks', 0)),
                     'synced_tracks': str(getattr(result, 'synced_tracks', 0)),
                     'failed_tracks': str(getattr(result, 'failed_tracks', 0)),
-                })
+                }, profile_id))
         except Exception as e:
             logger.debug("playlist_synced emit failed: %s", e)
 

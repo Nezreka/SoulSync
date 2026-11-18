@@ -34,7 +34,9 @@ def app_db(tmp_path, monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
 
-    persona = {"profile_id": 1, "is_admin": True, "can_download": True, "profile_name": "Admin"}
+    # request_limit: web_server stamps it for every member (0 = no limit)
+    persona = {"profile_id": 1, "is_admin": True, "can_download": True, "profile_name": "Admin",
+               "request_limit": 0, "request_limit_days": 7}
 
     @app.before_request
     def _persona():
@@ -427,14 +429,24 @@ def test_podcast_follow_keeps_auto_download_with_permission(tmp_path):
     assert db.add_watchlist_podcast.call_args.kwargs["auto_download"] is True
 
 
-def test_automation_wont_queue_for_profile_without_download_rights():
+def test_automation_wont_queue_for_profile_without_download_rights(monkeypatch):
+    # getting episodes is podcasts.get from the owner's permissions (#2166),
+    # read through core.permissions.owner_may_get; its own rules are tested
+    # in tests/test_permissions_followups.py
+    import core.permissions as perms
     from core import podcast_automation as pa
     db = MagicMock()
-    db.get_profile.return_value = {"id": 5, "can_download": False}
+    asked = []
+    allowed = {"value": False}
+
+    def fake(pid, permission, db=None):
+        asked.append((pid, permission))
+        return allowed["value"]
+    monkeypatch.setattr(perms, "owner_may_get", fake)
     assert pa._profile_may_download(db, 5) is False
-    db.get_profile.return_value = {"id": 5, "can_download": True}
+    allowed["value"] = True
     assert pa._profile_may_download(db, 5) is True
-    assert pa._profile_may_download(db, 1) is True  # profile 1 always may
+    assert asked == [(5, "podcasts.get"), (5, "podcasts.get")]
 
 
 def test_automation_skips_queue_when_downloads_off(tmp_path, monkeypatch):

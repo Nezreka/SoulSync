@@ -246,8 +246,10 @@ def test_a_completed_download_announces_the_import(db):
          patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
         tick(db=db)
 
+    # profile 1 wished for it, so the import is theirs (#2166 follow-up 25)
     assert events == [("import_completed", {
         "track_count": "1", "album_name": "The Final Empire", "artist": "Brandon Sanderson",
+        "_event_owner": 1,
     })]
 
 

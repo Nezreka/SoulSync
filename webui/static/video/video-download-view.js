@@ -52,13 +52,19 @@
         // different refusals arrived at the user as one bare "Grab failed" with
         // nothing to act on. Callers already read res.error; they were just
         // never given one.
+        // a member's quality pick rides on the searches and grabs (#2168)
+        if (/\/downloads\/(search\/start|grab|grab-pack)$/.test(url)) body = withPick(body);
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(body) }).then(function (r) {
                 return r.json().then(function (d) {
                     if (r.ok) return d;
                     // keep whatever the server said; only invent a message when
                     // it sent none, so the user still learns something happened
-                    return Object.assign({ ok: false, error: 'Request failed (HTTP ' + r.status + ')' }, d || {});
+                    // a permission refusal carries its plain words in message
+                    // and its code in error (#2166): show the words
+                    var out = Object.assign({ ok: false, error: 'Request failed (HTTP ' + r.status + ')' }, d || {});
+                    if (d && d.message) { out.code = d.error; out.error = d.message; }
+                    return out;
                 }).catch(function () {
                     // not JSON at all (a proxy error page, an empty 502)
                     return r.ok ? null : { ok: false, error: 'Request failed (HTTP ' + r.status + ')' };
@@ -287,9 +293,20 @@
     // judged it by the Default with no way to pick "Movie 4K". The pick becomes
     // the title's own profile: this search and grab, its wishlist rows, and its
     // library row when it lands (POST /downloads/quality/choose).
+    // a member's pick in this modal (#2168): only the qualities they may
+    // have for this kind; the search is judged by it and the grab carries it,
+    // but it is never saved on the title (that stays the household's).
+    var memberPick = null;
+    function withPick(body) {
+        if (memberPick !== null && body && (body.quality_profile_id === undefined || body.quality_profile_id === null)) {
+            body.quality_profile_id = memberPick;
+        }
+        return body;
+    }
     function titleQS(o, kind) {
         o = o || {};
         var q = ['kind=' + encodeURIComponent(kind || 'movie')];
+        if (memberPick !== null) q.push('quality_profile_id=' + encodeURIComponent(memberPick));
         var id = o.id || o.mediaId, src = o.source || o.mediaSource, tmdb = o.tmdbId || o.tvId;
         if (id != null && id !== '') q.push('media_id=' + encodeURIComponent(id));
         if (src) q.push('media_source=' + encodeURIComponent(src));
@@ -306,11 +323,12 @@
         if (!info || !info.profiles || info.profiles.length < 2) return '';
         var kindDefault = null;
         info.profiles.forEach(function (p) { if (p.id === info.kind_default_id) kindDefault = p; });
-        var cur = info.assigned ? info.profile_id : 0;
+        var cur = info.member ? info.profile_id : (info.assigned ? info.profile_id : 0);
         var opts = info.profiles.map(function (p) {
-            var label = p.id === 0
+            var label = p.id === 0 && !info.member
                 ? (kindDefault && kindDefault.id !== 0 ? 'Default (' + kindDefault.name + ')' : 'Default')
                 : p.name;
+            if (p.asks) label += ' (asks first)';
             return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
         }).join('');
         return '<label class="vdl-prof" title="The quality profile this title is searched, grabbed and upgraded by">' +
@@ -358,9 +376,11 @@
     // fetch the title's profile, render it, and keep the picker's change wired.
     // onChanged runs after a pick is saved (the overlay re-runs its searches)
     function loadTitleProfile(host, getIdent, kind, render, onChanged) {
+        if (!host._vdlProfWired) memberPick = null;      // a new modal starts on the usual one
         var url = '/api/video/downloads/quality/for?' + titleQS(getIdent(), kind);
         getJSON(url).then(function (info) {
             if (!host.isConnected) return;
+            host._vdlInfo = info;
             if (info && info.profile) { render(info.profile, info); return; }
             // an older server without /quality/for: the classic Default, no picker
             getJSON('/api/video/downloads/quality').then(function (p) { if (host.isConnected && p) render(p, null); });
@@ -418,6 +438,17 @@
             var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
             if (!sel) return;
             var pid = parseInt(sel.value, 10) || 0;
+            if (host._vdlInfo && host._vdlInfo.member) {
+                // a member's pick lives in this modal only (see memberPick)
+                memberPick = pid;
+                var picked = (host._vdlInfo.profiles || []).filter(function (p) { return p.id === pid; })[0];
+                if (picked && picked.asks) {
+                    toast('That quality needs an OK first. Use Request on the title to ask for it', 'info');
+                }
+                loadTitleProfile(host, getIdent, kind, render, onChanged);
+                if (onChanged) onChanged();
+                return;
+            }
             sel.disabled = true;
             postJSON('/api/video/downloads/quality/choose', titleBody(getIdent(), kind, pid)).then(function (res) {
                 sel.disabled = false;

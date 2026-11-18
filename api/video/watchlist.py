@@ -101,9 +101,39 @@ def register_routes(bp):
         title = (body.get("title") or "").strip()
         if kind not in _KINDS or not tmdb_id or not title:
             return jsonify({"success": False, "error": "kind, tmdb_id and title are required"}), 400
+        if kind == "show":
+            # a kids profile follows only a show its rating cap allows
+            from .kids import restricted_response, tmdb_title_allowed, video_cap
+            cap = video_cap()
+            try:
+                allowed = cap is None or tmdb_title_allowed(get_video_db(), "show", int(tmdb_id), cap)
+            except (TypeError, ValueError):
+                allowed = False
+            if not allowed:
+                return restricted_response("show")
+        quality = None
+        if kind == "show":
+            # the quality (#2168): what this profile may pick for shows; a
+            # quality that needs an OK first makes the follow a request
+            from . import access
+            if not access.is_admin():
+                d = access.resolve(get_video_db(), "show", body.get("quality_profile_id"))
+                if d.refused:
+                    return access.quality_refusal(d)
+                if d.needs_approval:
+                    from .requests import file_request
+                    return file_request({"kind": "show", "tmdb_id": tmdb_id, "title": title,
+                                         "poster_url": body.get("poster_url"),
+                                         "monitor": body.get("monitor") or "future",
+                                         "quality_profile_id": d.profile_id})
+                quality = d.profile_id
+            elif str(body.get("quality_profile_id") or "").isdigit():
+                quality = int(body["quality_profile_id"]) or None
         try:
             db = get_video_db()
             server = _server()
+            unassigned_before = quality is not None and not db.quality_profile_id_for(
+                "show", tmdb_id=int(tmdb_id))
             library_id = body.get("library_id") or None
             ok = db.add_to_watchlist(
                 kind, int(tmdb_id), title,
@@ -135,6 +165,15 @@ def register_routes(bp):
                             library_id=library_id, profile_id=_profile())
                 except Exception:   # noqa: BLE001 - policy expansion must never sink the follow
                     logger.exception("monitor policy expansion failed for %s", tmdb_id)
+            if quality is not None:
+                # this profile's rows, and the series when the household
+                # hasn't picked one for it (later episodes keep it)
+                try:
+                    if unassigned_before:
+                        db.set_title_profile_choice("show", int(tmdb_id), quality)
+                except Exception:  # noqa: BLE001 - the wishlist rows carry it below
+                    logger.debug("show %s: couldn't keep the quality on the series", tmdb_id)
+                db.set_wishlist_quality_for_tmdb(int(tmdb_id), quality, profile_id=_profile())
             return jsonify({"success": True, "watched": True, "wished": wished})
         except Exception:
             logger.exception("Failed to add to video watchlist")

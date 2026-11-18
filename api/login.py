@@ -19,6 +19,7 @@ from flask import Blueprint, jsonify, redirect, request, session
 
 from core.security.rate_limit import TargetedLimiter
 from utils.logging_config import get_logger
+from core.permissions import public
 
 logger = get_logger("api.login")
 
@@ -71,6 +72,7 @@ bp = Blueprint('login', __name__)
 
 
 @bp.route('/api/auth/login', methods=['POST'])
+@public
 def auth_login():
     """Username/password login (opt-in login mode). Username = profile name.
     Brute-force limited per IP; a profile with no password set can't log in."""
@@ -122,12 +124,14 @@ def _plex_signin_enabled():
 
 
 @bp.route('/api/auth/plex/available', methods=['GET'])
+@public
 def plex_signin_available():
     """whether the login screen offers sign in with plex"""
     return jsonify({'success': True, 'enabled': _plex_signin_enabled()})
 
 
 @bp.route('/api/auth/plex/start', methods=['POST'])
+@public
 def plex_signin_start():
     """a plex pin for this browser, and plex's page to approve it. the pin
     is remembered in this session only, so nobody else can claim it"""
@@ -156,6 +160,7 @@ def plex_signin_start():
 
 
 @bp.route('/api/auth/plex/check', methods=['POST'])
+@public
 def plex_signin_check():
     """poll the session's pin. pending until the user approves it on plex,
     then signed in (or told why not)"""
@@ -198,6 +203,10 @@ def plex_signin_check():
             return jsonify({'success': False, 'error': "SoulSync isn't connected to a Plex server"}), 503
         account = plex_signin.resolve_account(account_token, machine)
         database = get_database()
+        # new people start as the sign-up template (#2166); the old sign-up
+        # settings move there the first time
+        from core.permission_store import move_signup_settings
+        move_signup_settings(database, config_manager.get)
         result = plex_signin.sign_in(
             database, account,
             allow_create=bool(config_manager.get('security.plex_signin_auto_create', True)),
@@ -333,6 +342,7 @@ class _PinnedOnly:
 
 
 @bp.route('/api/auth/oidc/available', methods=['GET'])
+@public
 def oidc_signin_available():
     """whether the login screen offers sign in with oidc, the button's label,
     and (once) why the last attempt in this browser didn't work"""
@@ -350,12 +360,14 @@ def oidc_signin_available():
 
 
 @bp.route('/api/auth/oidc/start', methods=['GET'])
+@public
 def oidc_signin_start():
     """send this browser to the provider to sign in"""
     return oidc_begin('signin')
 
 
 @bp.route(OIDC_CALLBACK_PATH, methods=['GET'])
+@public
 def oidc_signin_callback():
     """the provider sends the browser back here with a one-time code. only
     the browser that started the flow can finish it (state and nonce live in
@@ -381,6 +393,8 @@ def oidc_signin_callback():
         result = oidc_signin.connect_profile(database, flow.profile_id, account)
         return _oidc_done(result.error, mode)
 
+    from core.permission_store import move_signup_settings
+    move_signup_settings(database, config_manager.get)
     result = oidc_signin.sign_in(
         database, account, settings,
         allow_create=bool(config_manager.get('security.oidc_signin_auto_create', True)),
@@ -473,6 +487,7 @@ def _finish_invite(flow, pending):
 
 
 @bp.route('/api/auth/logout', methods=['POST'])
+@public
 def auth_logout():
     """Log out — clears the authenticated session."""
     try:
@@ -496,6 +511,7 @@ def auth_logout():
 
 
 @bp.route('/api/auth/recovery-question', methods=['GET'])
+@public
 def auth_recovery_question():
     """Return the recovery security-question for a username (forgot-password flow).
     Generic when the user/question is absent — don't confirm which names exist."""
@@ -515,6 +531,7 @@ def auth_recovery_question():
 
 
 @bp.route('/api/auth/recovery-reset', methods=['POST'])
+@public
 def auth_recovery_reset():
     """Reset a login password by answering the recovery question. Brute-force
     limited; a correct answer sets the new password and authenticates the session."""

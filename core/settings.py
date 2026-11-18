@@ -700,10 +700,13 @@ class ConfigManager:
                 "profile_id": 1,
             },
             # soulsync answering as seerr for video request apps (#2151). off
-            # by default. requests from jellyfin users with no profile go to profile_id
+            # by default. a missing or unknown X-Api-User is refused on a new
+            # install (#2166); an install from before has no refuse_unknown
+            # key and keeps acting as profile_id until the admin switches it
             "seerr_compat": {
                 "enabled": False,
                 "profile_id": 1,
+                "refuse_unknown": True,
             },
             # ai clients over /mcp, with an api key. off by default
             "mcp": {

@@ -62,6 +62,8 @@ Catalogue tracks and their physical files are managed separately. **File version
 
 **Preview Rename / Organize** shows where each file would go under your naming template before anything moves. You don't have to open it to find out: on the artist page an album row shows **N to rename** when some of its files are not where the template puts them, the artist's toolbar shows the total, and the album's track table marks those files in the **File path** column. Click the count to open the preview. The check runs after the page loads and only while file organization is on and the template is valid.
 
+**Folder and tag name** (Artist Settings) shows what new downloads of an artist are filed and tagged as. A download goes under the name your library uses for that artist, found by its Deezer, Spotify or MusicBrainz id, even when the download source spells it another way: if your library calls Machine Gun Kelly **mgk** and Deezer still says Machine Gun Kelly, new releases land in \`mgk/\` and are tagged mgk. A featured artist keeps its own name. Type a name there to set it yourself (it is also the name SoulSync shows, the same one Edit Metadata sets). Files you already have stay where they are: **Preview rename** and **Preview retag** bring them in line. A name a different artist in your library already uses is refused, so two different artists never share a folder.
+
 On an album's track list, a small **flame** next to a title marks the album's most played tracks on Last.fm: up to three that clearly stand out from the rest. It needs the Last.fm worker to have enriched the album's tracks, and an album where the plays are close together, or where Last.fm knows too few of the tracks, shows none.
 `
         },

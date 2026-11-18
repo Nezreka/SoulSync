@@ -3,10 +3,12 @@ import { createRoot } from 'react-dom/client';
 
 import { mountCandidateInspectorHost } from '@/features/downloads/inspector-modal';
 import { mountFeaturePickerHost } from '@/features/feature-picker/host';
+import { mountHelpHost } from '@/features/help/host';
 import { mountOnboardingHost } from '@/features/onboarding/host';
 import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountServerActivityHost } from '@/features/server-activity/host';
 import { mountSettingsHost } from '@/features/settings/host';
+import { mountPersonEditorHost } from '@/features/settings/tabs/people/editor';
 import { mountVideoLibraryTabHost } from '@/features/video-library/host';
 import { mountVideoLibraryManagerHost } from '@/features/video-manager/host';
 import { bindWindowWebRouter, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
@@ -80,8 +82,12 @@ mountVideoLibraryTabHost();
 mountVideoLibraryManagerHost();
 // make soulsync yours (#1909): window.openFeaturePicker
 mountFeaturePickerHost();
+// the people & permissions sheet (#2166): window.openPersonEditor
+mountPersonEditorHost();
 // the Settings tabs ported to React (SETTINGS_PORT.md): window.SoulSyncSettings
 mountSettingsHost();
 // the server activity drawer (#2155: the shell opens it for admins only)
 mountServerActivityHost();
+// the help sheet the ? button opens (scrap/help/PLAN.md): window.SoulSyncHelp
+mountHelpHost();
 void bootstrapApp();

@@ -154,15 +154,44 @@ export function subLine(item: RequestItem): string {
   return bits.join(' · ');
 }
 
-/** "Kim asked · 2 days ago" (admins), "You asked · 2 days ago" (members). */
-export function whoAsked(item: RequestItem, isAdmin: boolean, now = Date.now()): string {
+/** whose request this is */
+export function itemOwner(item: RequestItem): number {
+  if (item.source === 'pending') return Number(item.group.profile_id);
+  if (item.source === 'history') return Number(item.row.profile_id);
+  return Number(item.video.profile_id);
+}
+
+/** may this viewer approve or decline it (#2166): admins any, moderators
+ *  anyone's but their own, everyone else none */
+export function canAnswer(
+  item: RequestItem,
+  rights: { isAdmin: boolean; moderate: boolean },
+  viewerId: number,
+): boolean {
+  if (item.status !== 'pending') return false;
+  if (rights.isAdmin) return true;
+  return rights.moderate && itemOwner(item) !== viewerId;
+}
+
+/**
+ * "Kim asked · 2 days ago" for someone who sees everyone's (admins, and
+ * members with see-everyone's-requests), "You asked · 2 days ago" for your
+ * own. viewerId turns the viewer's own rows back into "You".
+ */
+export function whoAsked(
+  item: RequestItem,
+  showNames: boolean,
+  now = Date.now(),
+  viewerId?: number,
+): string {
   const name =
     item.source === 'pending'
       ? item.group.requester_name
       : item.source === 'history'
         ? item.row.requester_name
         : item.video.requester_name;
-  const who = isAdmin ? name || 'Someone' : 'You';
+  const mine = viewerId != null && itemOwner(item) === viewerId;
+  const who = showNames && !mine ? name || 'Someone' : 'You';
   const when =
     item.source === 'pending'
       ? item.group.created_at
@@ -224,15 +253,16 @@ function quotaSpan(days: number): string {
   return `in the last ${days} days`;
 }
 
-/** "2 of 3 requests left this week", or that they're used up. '' with no limit. */
+/** "2 of 3 music requests left this week", or that they're used up. '' with
+ *  no limit. this page's limit is music's (movies and TV have their own). */
 export function quotaLine(quota: RequestQuota | null | undefined): string {
   if (!quota || quota.limit <= 0) return '';
-  const noun = quota.limit === 1 ? 'request' : 'requests';
+  const noun = quota.limit === 1 ? 'music request' : 'music requests';
   const span = quotaSpan(quota.days);
   if (quota.remaining <= 0) {
     return quota.limit === 1
-      ? `You’ve used your request ${span}`
-      : `You’ve used all ${quota.limit} requests ${span}`;
+      ? `You’ve used your music request ${span}`
+      : `You’ve used all ${quota.limit} music requests ${span}`;
   }
   return `${quota.remaining} of ${quota.limit} ${noun} left ${span}`;
 }

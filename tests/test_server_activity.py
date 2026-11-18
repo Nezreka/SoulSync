@@ -184,7 +184,7 @@ def test_ui_is_wired():
     assert "drawer()?.push(raw)" in shell and ".activity-live" in css
     # every route the drawer reads, through the api module
     api = src["api.ts"]
-    for route in ("/history", "/stats", "/stop", "/message", "/settings", "/plays/clear", "/image?path="):
+    for route in ("/history", "/stats", "/stop", "/message", "/settings", "/plays/clear", "/image?"):
         assert route in api, route
     # live: socket first, a 3 s poll when not, a glide between polls
     live = src["live.ts"]

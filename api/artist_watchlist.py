@@ -35,6 +35,7 @@ from core.library2.provider_ids import ARTIST_IDS_SQL as _ARTIST_IDS_SQL
 from core.metadata.registry import get_spotify_client
 from core.watchlist import scan_state as _scan_state
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("api.artist_watchlist")
 
@@ -116,6 +117,7 @@ def create_blueprint():
 # --- Watchlist API Endpoints ---
 
 @bp.route('/api/watchlist/count', methods=['GET'])
+@requires("music.access")
 def get_watchlist_count():
     """Get the number of artists in the watchlist"""
     try:
@@ -136,6 +138,7 @@ def get_watchlist_count():
 
 
 @bp.route('/api/dashboard/tile-pictures', methods=['GET'])
+@requires("music.dashboard")
 def get_dashboard_tile_pictures():
     """A few of what the dashboard's two count tiles count: the newest watched
     artists' pictures and the sleeves of the newest wishes. Its own request
@@ -160,6 +163,7 @@ def get_dashboard_tile_pictures():
         return jsonify({"success": False, "faces": [], "sleeves": []}), 500
 
 @bp.route('/api/watchlist/recent-releases', methods=['GET'])
+@requires("music.access")
 def get_watchlist_recent_releases():
     """Newest releases across the whole watchlist, flat (the dashboard rail).
 
@@ -179,6 +183,7 @@ def get_watchlist_recent_releases():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/artists', methods=['GET'])
+@requires("music.access")
 def get_watchlist_artists():
     """Get all artists in the watchlist with cached images"""
     try:
@@ -243,6 +248,7 @@ def get_watchlist_artists():
 
 
 @bp.route('/api/watchlist/export', methods=['GET'])
+@requires("music.access")
 def export_watchlist():
     """Export the watchlist roster (name + source IDs, optionally external links)
     as json / csv / txt. Returns the content for the export modal to preview +
@@ -416,6 +422,7 @@ def _run_playlist_export(job_id, playlist_id, title, mode):
 
 
 @bp.route('/api/playlists/<playlist_id>/export/listenbrainz', methods=['POST'])
+@requires("music.access")
 def start_playlist_export_listenbrainz(playlist_id):
     """Start a background export of a mirrored playlist to ListenBrainz/JSPF.
 
@@ -446,6 +453,7 @@ def start_playlist_export_listenbrainz(playlist_id):
 
 
 @bp.route('/api/playlists/<playlist_id>/export/service/<service>', methods=['POST'])
+@requires("music.access")
 def start_playlist_export_service(playlist_id, service):
     """Export a mirrored playlist back to a streaming service (#945).
 
@@ -491,6 +499,7 @@ def start_playlist_export_service(playlist_id, service):
 
 
 @bp.route('/api/playlists/export/status/<job_id>', methods=['GET'])
+@requires("music.access")
 def playlist_export_status(job_id):
     """Live status for an export job (polled by the mirrored-playlist card)."""
     job = _playlist_export_jobs.get(job_id)
@@ -503,6 +512,7 @@ def playlist_export_status(job_id):
 
 
 @bp.route('/api/playlists/export/download/<job_id>', methods=['GET'])
+@requires("music.access")
 def playlist_export_download(job_id):
     """Download a completed export's JSPF file."""
     job = _playlist_export_jobs.get(job_id)
@@ -518,6 +528,7 @@ def playlist_export_download(job_id):
 
 
 @bp.route('/api/library/artists/export', methods=['GET'])
+@requires("music.access")
 def export_library_artists():
     """Export the WHOLE library artist roster (name + every source id/url we have,
     optional external links, optional owned album/track counts) as json/csv/txt."""
@@ -613,6 +624,7 @@ def export_library_artists():
 
 
 @bp.route('/api/watchlist/add', methods=['POST'])
+@requires("music.access")
 def add_to_watchlist():
     """Add an artist to the watchlist"""
     try:
@@ -822,6 +834,7 @@ def add_to_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/remove', methods=['POST'])
+@requires("music.access")
 def remove_from_watchlist():
     """Remove an artist from the watchlist"""
     try:
@@ -873,6 +886,7 @@ def remove_from_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/add-batch', methods=['POST'])
+@requires("music.access")
 def add_batch_to_watchlist():
     """Add multiple artists to the watchlist at once"""
     try:
@@ -979,6 +993,7 @@ def add_batch_to_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/library/watchlist-all-unwatched', methods=['POST'])
+@requires("music.access")
 def watchlist_all_unwatched_library_artists():
     """Add all unwatched library artists (that have valid external IDs) to the watchlist"""
     try:
@@ -1061,6 +1076,7 @@ def watchlist_all_unwatched_library_artists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/remove-batch', methods=['POST'])
+@requires("music.watchlist")
 def remove_batch_from_watchlist():
     """Remove multiple artists from the watchlist"""
     try:
@@ -1101,6 +1117,7 @@ def remove_batch_from_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/check', methods=['POST'])
+@requires("music.access")
 def check_watchlist_status():
     """Check if an artist is in the watchlist"""
     try:
@@ -1122,6 +1139,7 @@ def check_watchlist_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/check-batch', methods=['POST'])
+@requires("music.access")
 def check_watchlist_status_batch():
     """Check watchlist status for multiple artists in one request"""
     try:
@@ -1143,6 +1161,7 @@ def check_watchlist_status_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/scan', methods=['POST'])
+@requires("music.watchlist")
 def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
@@ -1439,6 +1458,7 @@ def start_watchlist_scan():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/scan/status', methods=['GET'])
+@requires("music.watchlist")
 def get_watchlist_scan_status():
     """Get the current status of watchlist scanning"""
     try:
@@ -1461,6 +1481,7 @@ def get_watchlist_scan_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/scan/history', methods=['GET'])
+@requires("music.access")
 def get_watchlist_scan_history():
     """Recent watchlist scan runs (counts only — ledgers fetched per run)."""
     try:
@@ -1473,6 +1494,7 @@ def get_watchlist_scan_history():
 
 
 @bp.route('/api/watchlist/found', methods=['GET'])
+@requires("music.watchlist")
 def get_watchlist_found():
     """What recent scans added to the wishlist, grouped by release (the page shelf)."""
     try:
@@ -1486,6 +1508,7 @@ def get_watchlist_found():
 
 
 @bp.route('/api/watchlist/scan/history/<run_id>/tracks', methods=['GET'])
+@requires("music.access")
 def get_watchlist_scan_history_tracks(run_id):
     """The track ledger (added/skipped) for one past scan run."""
     try:
@@ -1497,6 +1520,7 @@ def get_watchlist_scan_history_tracks(run_id):
 
 
 @bp.route('/api/watchlist/scan/cancel', methods=['POST'])
+@requires("music.watchlist")
 def cancel_watchlist_scan():
     """Cancel a running watchlist scan"""
     try:
@@ -1522,6 +1546,7 @@ similar_artists_update_state = {
 similar_artists_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SimilarArtistsUpdate")
 
 @bp.route('/api/watchlist/update-similar-artists', methods=['POST'])
+@requires("music.watchlist")
 def update_similar_artists_endpoint():
     """Update similar artists for all watchlist artists (for discovery feature)"""
     try:
@@ -1552,6 +1577,7 @@ def update_similar_artists_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/similar-artists-status', methods=['GET'])
+@requires("music.watchlist")
 def get_similar_artists_update_status():
     """Get status of similar artists update"""
     try:
@@ -1596,6 +1622,7 @@ def _watchlist_spotify_artist_info(artist_data, fallback_id):
 
 
 @bp.route('/api/watchlist/artist/<artist_id>/config', methods=['GET', 'POST'])
+@requires("music.access")
 def watchlist_artist_config(artist_id):
     """Get or update watchlist artist configuration"""
     try:
@@ -2077,6 +2104,7 @@ def watchlist_artist_config(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/artist/<artist_id>/link-provider', methods=['POST'])
+@requires("music.access")
 def watchlist_artist_link_provider(artist_id):
     """Manually link a watchlist artist to a different Spotify/iTunes artist."""
     try:
@@ -2170,6 +2198,7 @@ def _custom_artist_count(database, profile_id) -> int:
 
 
 @bp.route('/api/watchlist/reset-to-defaults', methods=['POST'])
+@requires("music.watchlist")
 def watchlist_reset_to_defaults():
     """Every artist with its own release rules goes back to the defaults (#1822)."""
     try:
@@ -2183,6 +2212,7 @@ def watchlist_reset_to_defaults():
 
 
 @bp.route('/api/watchlist/global-config', methods=['GET', 'POST'])
+@requires("music.watchlist")
 def watchlist_global_config():
     """Get or update global watchlist configuration (overrides per-artist settings)"""
     try:

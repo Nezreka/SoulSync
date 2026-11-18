@@ -157,13 +157,15 @@ def move_to_quarantine(file_path: str, context: dict, reason: str, automation_en
             if artists:
                 first = artists[0]
                 artist_name = first.get("name", str(first)) if isinstance(first, dict) else str(first)
+            from core.automation.owners import owned
+            from core.imports.paths import import_profile_id
             automation_engine.emit(
                 "download_quarantined",
-                {
+                owned({
                     "artist": artist_name,
                     "title": ti.get("name", ""),
                     "reason": reason or "Unknown",
-                },
+                }, import_profile_id(context)),
             )
         except Exception as e:
             logger.debug("emit download_quarantined failed: %s", e)

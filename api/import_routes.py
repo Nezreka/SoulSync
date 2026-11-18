@@ -32,6 +32,7 @@ from core.imports.routes import staging_suggestions as _import_staging_suggestio
 from core.profile_context import admin_only, get_current_profile_id
 from core.runtime_state import add_activity_item
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -91,12 +92,14 @@ def _request_profile_id():
 
 
 @bp.route('/api/import/staging/files', methods=['GET'])
+@requires("music.import")
 def import_staging_files():
     payload, status = _import_staging_files(_build_import_route_runtime())
     return jsonify(payload), status
 
 
 @bp.route('/api/import/inbox', methods=['GET'])
+@requires("music.import")
 def import_inbox():
     payload, status = _import_inbox(_build_import_route_runtime(), auto_import_worker)
     return jsonify(payload), status
@@ -118,6 +121,7 @@ def import_upload():
 
 
 @bp.route('/api/import/fingerprint', methods=['POST'])
+@requires("music.import")
 def import_fingerprint():
     data = request.get_json() or {}
     payload, status = _import_fingerprint_files(_build_import_route_runtime(), data.get('file_paths') or [])
@@ -143,18 +147,21 @@ def import_upload_chunk():
 
 
 @bp.route('/api/import/album/preview', methods=['POST'])
+@requires("music.import")
 def import_album_preview():
     payload, status = _import_album_preview(_build_import_route_runtime(), request.get_json() or {})
     return jsonify(payload), status
 
 
 @bp.route('/api/import/staging/groups', methods=['GET'])
+@requires("music.import")
 def import_staging_groups():
     payload, status = _import_staging_groups(_build_import_route_runtime())
     return jsonify(payload), status
 
 
 @bp.route('/api/import/staging/scan-status', methods=['GET'])
+@requires("music.import")
 def import_staging_scan_status():
     payload, status = _import_staging_scan_status(_build_import_route_runtime())
     return jsonify(payload), status
@@ -252,12 +259,14 @@ def reassign_apply():
 
 
 @bp.route('/api/import/staging/hints', methods=['GET'])
+@requires("music.import")
 def import_staging_hints():
     payload, status = _import_staging_hints(_build_import_route_runtime())
     return jsonify(payload), status
 
 
 @bp.route('/api/import/search/albums', methods=['GET'])
+@requires("music.import")
 def import_search_albums():
     payload, status = _import_search_albums(
         _build_import_route_runtime(),
@@ -269,12 +278,14 @@ def import_search_albums():
 
 
 @bp.route('/api/import/search/sources', methods=['GET'])
+@requires("music.import")
 def import_search_sources_route():
     payload, status = _import_search_sources()
     return jsonify(payload), status
 
 
 @bp.route('/api/import/album/match', methods=['POST'])
+@requires("music.import")
 def import_album_match():
     payload, status = _import_album_match(_build_import_route_runtime(), request.get_json() or {})
     return jsonify(payload), status
@@ -302,6 +313,7 @@ def _process_import(kind, data):
 
 
 @bp.route('/api/import/jobs/<job_id>', methods=['GET'])
+@requires("music.import")
 def import_job_status(job_id):
     from core.imports.jobs import import_jobs
     payload, status = import_jobs.get(get_current_profile_id(), job_id)
@@ -313,11 +325,13 @@ def import_job_status(job_id):
 
 
 @bp.route('/api/import/album/process', methods=['POST'])
+@requires("music.import")
 def import_album_process():
     return _process_import('album', request.get_json() or {})
 
 
 @bp.route('/api/import/search/tracks', methods=['GET'])
+@requires("music.import")
 def import_search_tracks():
     payload, status = _import_search_tracks(
         _build_import_route_runtime(),
@@ -335,6 +349,7 @@ def _process_single_import_file(file_info, profile_id=None):
 
 
 @bp.route('/api/import/singles/process', methods=['POST'])
+@requires("music.import")
 def import_singles_process():
     data = request.get_json() or {}
     return _process_import('singles', data)
@@ -379,6 +394,7 @@ def _boot_auto_import_worker():
 
 # /api/auto-import* endpoints: lifted to api/auto_import.py.
 @bp.route('/api/import/staging/suggestions', methods=['GET'])
+@requires("music.import")
 def import_staging_suggestions():
     payload, status = _import_staging_suggestions()
     return jsonify(payload), status

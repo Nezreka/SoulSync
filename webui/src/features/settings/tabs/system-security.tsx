@@ -19,8 +19,9 @@ import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } fro
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { int, useLoadedDraft } from './library-card';
+import { useLoadedDraft } from './library-card';
 import { Section, SecretInput } from './parts';
+import { openPeopleSettings } from './people/people-tab';
 import { text } from './source-panels';
 
 const TAB = 'advanced';
@@ -133,6 +134,28 @@ export function SecuritySection({ store }: SettingsTabProps) {
   const sec = (settings.security || {}) as Section_;
   const on = (key: string) => loads > 0 && sec[key] === true;
   const set = (key: string, value: unknown) => store.set('security', key, value);
+
+  // ── who new sign-ups start as (#2166): a template under People ──
+  const [signupTemplate, setSignupTemplate] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loads) return;
+    fetch('/api/permissions/templates')
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (
+          d: {
+            signup_template_id?: number | null;
+            templates?: Array<{ id: number; name: string }>;
+          } | null,
+        ) => {
+          const t = (d?.templates || []).find((x) => x.id === d?.signup_template_id);
+          setSignupTemplate(t ? t.name : null);
+        },
+      )
+      .catch(() => {
+        // the line still points at People without the name
+      });
+  }, [loads]);
 
   // ── the admin profile: PIN, password, recovery question ──
   const [admin, setAdmin] = useState<AdminProfile | null>(null);
@@ -277,12 +300,6 @@ export function SecuritySection({ store }: SettingsTabProps) {
   const scopes = useTrimmedField(store, 'oidc_scopes');
   const redirect = useTrimmedField(store, 'oidc_redirect_uri');
   const authHeader = useTrimmedField(store, 'auth_proxy_header');
-  const limit = useLoadedDraft(store, text(sec.signup_request_limit ?? 0), (raw) =>
-    set('signup_request_limit', int(raw, 0)),
-  );
-  const days = useLoadedDraft(store, text(sec.signup_request_limit_days ?? 7), (raw) =>
-    set('signup_request_limit_days', int(raw, 7)),
-  );
 
   // cors: saved trimmed; a malformed entry gets saveSettings' warning once the
   // typing stops, as it did on the save that followed
@@ -561,7 +578,7 @@ export function SecuritySection({ store }: SettingsTabProps) {
               'Sign in with Plex',
             )}
             {help(
-              'Adds a "Sign in with Plex" button to the sign-in screen. Anyone with access to your Plex server signs in with their Plex account (SoulSync never sees their password), and their playlists sync to their own Plex account. The server\'s owner signs in as the admin. New Plex profiles start with what New sign-ups below sets; widen them per person under Profiles. Needs Plex as a media server and internet access to plex.tv.',
+              'Adds a "Sign in with Plex" button to the sign-in screen. Anyone with access to your Plex server signs in with their Plex account (SoulSync never sees their password), and their playlists sync to their own Plex account. The server\'s owner signs in as the admin. New Plex profiles start as the template New people start as names, below. Needs Plex as a media server and internet access to plex.tv.',
             )}
             {toggle(
               'security-plex-signin-auto-create',
@@ -569,12 +586,6 @@ export function SecuritySection({ store }: SettingsTabProps) {
               (v) => set('plex_signin_auto_create', v),
               'Let new Plex users sign up (off: only people who already have a Plex profile here can sign in)',
               { style: { marginTop: '8px' } },
-            )}
-            {toggle(
-              'security-plex-signin-can-download',
-              on('plex_signin_default_can_download'),
-              (v) => set('plex_signin_default_can_download', v),
-              'New Plex profiles can download (off: request-only)',
             )}
           </div>
 
@@ -736,12 +747,6 @@ export function SecuritySection({ store }: SettingsTabProps) {
                   (v) => set('oidc_signin_auto_create', v),
                   'Let new OIDC users sign up (off: only accounts already connected to a profile can sign in)',
                 )}
-                {toggle(
-                  'security-oidc-signin-can-download',
-                  on('oidc_signin_default_can_download'),
-                  (v) => set('oidc_signin_default_can_download', v),
-                  'New OIDC profiles can download (off: request-only)',
-                )}
               </div>
               {/* the admin's own connection: the shell draws it (oidc-signin.ts) */}
               <div
@@ -778,53 +783,18 @@ export function SecuritySection({ store }: SettingsTabProps) {
               </div>
             </div>
           </div>
-          <div className="form-group" id="security-signup-defaults">
-            <label htmlFor="security-signup-sides">New sign-ups start on</label>
-            <select
-              id="security-signup-sides"
-              className="form-select"
-              value={
-                loads && ['music', 'video', 'both'].includes(text(sec.signup_sides))
-                  ? text(sec.signup_sides)
-                  : 'music'
-              }
-              onChange={(event) => set('signup_sides', event.target.value)}
+          <div className="form-group" id="security-signup-template">
+            <label htmlFor="security-signup-template-open">New people start as</label>
+            <button
+              type="button"
+              id="security-signup-template-open"
+              className="auth-button"
+              onClick={() => openPeopleSettings('templates')}
             >
-              <option value="music">Music</option>
-              <option value="video">Movies &amp; TV</option>
-              <option value="both">Music and Movies &amp; TV</option>
-            </select>
+              {signupTemplate ?? 'Templates'}: change in People
+            </button>
             {help(
-              'What a profile made by sign-in can open. Music: Discover, Search, Library, Wishlist and Stats. Movies & TV: Discover, Search and Library on the video side. Request-only profiles also get Requests. Help and Issues are always there; widen anyone further under Profiles.',
-            )}
-          </div>
-
-          <div className="form-group" id="security-signup-request-limit-row">
-            <label htmlFor="security-signup-request-limit">Request limit for new sign-ups</label>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input
-                type="number"
-                id="security-signup-request-limit"
-                min="0"
-                max="1000"
-                style={{ width: '6em' }}
-                value={loads ? limit.value : '0'}
-                onChange={(event) => limit.onChange(event.target.value)}
-              />
-              <span className="settings-unit">requests every</span>
-              <input
-                type="number"
-                id="security-signup-request-limit-days"
-                min="1"
-                max="365"
-                style={{ width: '5em' }}
-                value={loads ? days.value : '7'}
-                onChange={(event) => days.onChange(event.target.value)}
-              />
-              <span className="settings-unit">days</span>
-            </div>
-            {help(
-              '0 means no limit. A request is one movie, show, album or track. Applies to profiles made after you save; change existing ones under Profiles.',
+              'Everyone who signs in with Plex or OIDC for the first time follows this template: the sides, pages and downloads they get and any request limit. Pick it, or change what it allows, under Settings > People > Templates.',
             )}
           </div>
         </div>

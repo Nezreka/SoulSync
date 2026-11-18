@@ -50,8 +50,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> 
 
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
 
-export function imageUrl(path: string | null | undefined): string {
-  return path ? appURL(`${BASE}/image?path=${encodeURIComponent(path)}`) : '';
+/**
+ * A picture at the width it is drawn. `image` is the query the server built
+ * for the row (its own picture plus the family to fall back on); a bare
+ * thumb path still works. The server rounds the width up to a few sizes.
+ */
+export function imageSrc(
+  image: string | null | undefined,
+  thumb: string | null | undefined,
+  width: number,
+): string {
+  const query = image || (thumb ? `path=${encodeURIComponent(thumb)}` : '');
+  return query ? appURL(`${BASE}/image?${query}&w=${Math.round(width)}`) : '';
 }
 
 /** avatars come as ready-made urls; only the url base is ours to add */

@@ -16,6 +16,7 @@ import type { SettingsTabProps } from './host';
 import { SETTINGS_TABS } from './host';
 import { pageTabs, usePageTabs } from './page-tabs';
 import { type SettingsStore, settingsStore } from './settings-store';
+import { useViewer } from './tabs/people/data';
 
 /** the shell's functions, as the shell bundle put them on window (shell.ts
  *  in src/shell/index.ts): one copy of its state (the pending tab, the save
@@ -57,6 +58,11 @@ const TABS: Array<[key: string, label: string, path: string]> = [
     'discovery',
     'Discovery',
     'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.24 5.76-2.12 6.36-6.36 2.12 2.12-6.36zM12 13a1 1 0 1 0-1-1 1 1 0 0 0 1 1z',
+  ],
+  [
+    'people',
+    'People',
+    'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   ],
   [
     'appearance',
@@ -148,6 +154,8 @@ export function SettingsPage({
       if (frame) cancelAnimationFrame(frame);
     };
   }, []);
+  // People is for admins only (the page is too, but a member never sees it)
+  const viewer = useViewer();
   const slot = (tab: string, part?: string) => (
     <Slot key={`${tab}/${part ?? ''}`} tab={tab} part={part} store={store} tabs={tabs} />
   );
@@ -178,7 +186,7 @@ export function SettingsPage({
                 <input
                   type="text"
                   id="stg-search-input"
-                  placeholder="Search settings  (Ctrl K)"
+                  placeholder="Search settings  (/)"
                   aria-label="Search settings"
                   autoComplete="off"
                   aria-controls="stg-search-results"
@@ -200,6 +208,7 @@ export function SettingsPage({
                   type="button"
                   className={key === 'connections' ? 'stg-tab active' : 'stg-tab'}
                   data-tab={key}
+                  hidden={key === 'people' && !viewer.admin}
                   onClick={() => switchSettingsTab(key)}
                 >
                   <span className={`stg-tab-badge badge-${key}`}>
@@ -347,6 +356,7 @@ export function SettingsPage({
                 {slot('advanced', 'experimental')}
               </div>
             </div>
+            {slot('people')}
             {slot('logs')}
           </div>
         </div>

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button, FormField, TextArea } from '@/components/form';
+import { refusalMessage, useRequestRights } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { RequestItem, RequestTab } from '../-requests.types';
@@ -27,12 +28,14 @@ import {
 import {
   REQUEST_TABS,
   buildRequestItems,
+  canAnswer,
   countForTab,
   emptyText,
   filterRequestItems,
   itemImage,
   itemKey,
   itemKind,
+  itemOwner,
   itemTitle,
   itemTracks,
   quotaLine,
@@ -50,13 +53,32 @@ function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' =
   window.showToast?.(message, type);
 }
 
+/** a failed action: the server's refusal in its own calm words (#2166, the
+ *  shell shows the same words, so the toast dedupes), anything else as an
+ *  error */
+function failToast(error: unknown, fallback: string) {
+  const refused = refusalMessage((error as { data?: unknown } | null)?.data);
+  if (refused) {
+    toast(refused, 'info');
+    return;
+  }
+  toast(error instanceof Error ? error.message : fallback, 'error');
+}
+
 function refreshBadge() {
   window.refreshMusicRequestsBadge?.();
 }
 
 export function RequestsPage() {
   useReactPageShell('requests');
-  const { isAdmin, profileId } = useProfile();
+  const { isAdmin: shellAdmin, profileId } = useProfile();
+  // who answers and who sees whose (#2166): admins everything; a moderator
+  // answers other people's asks, never their own; see-everyone's shows the
+  // household's asks with names
+  const rights = useRequestRights();
+  const isAdmin = shellAdmin || rights.isAdmin;
+  const answerRights = { isAdmin, moderate: rights.moderate };
+  const showNames = isAdmin || rights.seeAll;
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: Route.fullPath });
   const { tab } = Route.useSearch();
@@ -115,7 +137,7 @@ export function RequestsPage() {
       afterChange();
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not approve that request', 'error');
+      failToast(error, 'Could not approve that request');
       afterChange();
     },
   });
@@ -138,7 +160,7 @@ export function RequestsPage() {
       afterChange();
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not decline that request', 'error');
+      failToast(error, 'Could not decline that request');
     },
   });
 
@@ -155,7 +177,7 @@ export function RequestsPage() {
       afterChange();
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not withdraw that request', 'error');
+      failToast(error, 'Could not withdraw that request');
     },
   });
 
@@ -169,7 +191,7 @@ export function RequestsPage() {
     },
     onSuccess: afterChange,
     onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not remove that request', 'error');
+      failToast(error, 'Could not remove that request');
     },
   });
 
@@ -184,7 +206,7 @@ export function RequestsPage() {
       afterChange();
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not approve those requests', 'error');
+      failToast(error, 'Could not approve those requests');
       afterChange();
     },
   });
@@ -236,7 +258,11 @@ export function RequestsPage() {
             <p className="pgf-status">
               {isAdmin
                 ? 'What your household asked for. Approve once, everyone who asked hears about it.'
-                : 'What you asked for, and where it’s at.'}
+                : rights.moderate
+                  ? 'What your household asked for. You answer everyone’s asks but your own.'
+                  : rights.seeAll
+                    ? 'What your household asked for, and where it’s at.'
+                    : 'What you asked for, and where it’s at.'}
             </p>
             {quotaText ? <p className={styles.quota}>{quotaText}</p> : null}
           </div>
@@ -290,7 +316,9 @@ export function RequestsPage() {
               <RequestRow
                 key={itemKey(item)}
                 busy={busy}
-                isAdmin={isAdmin}
+                answer={canAnswer(item, answerRights, profileId)}
+                showNames={showNames}
+                viewerId={profileId}
                 item={item}
                 onApprove={() => approve.mutate(item)}
                 onDecline={() => setDeclining(item)}
@@ -316,7 +344,9 @@ export function RequestsPage() {
 
 function RequestRow({
   busy,
-  isAdmin,
+  answer,
+  showNames,
+  viewerId,
   item,
   onApprove,
   onDecline,
@@ -324,7 +354,10 @@ function RequestRow({
   onWithdraw,
 }: {
   busy: boolean;
-  isAdmin: boolean;
+  /** may approve or decline this one (an admin, or a moderator and not theirs) */
+  answer: boolean;
+  showNames: boolean;
+  viewerId: number;
   item: RequestItem;
   onApprove: () => void;
   onDecline: () => void;
@@ -337,6 +370,8 @@ function RequestRow({
   const image = itemImage(item);
   const tracks = itemTracks(item);
   const pending = item.status === 'pending';
+  // withdraw is yours alone, whoever else can see it
+  const mine = itemOwner(item) === viewerId;
   const reason =
     item.source === 'history'
       ? item.row.admin_response
@@ -364,7 +399,7 @@ function RequestRow({
           </span>
         </div>
         {subLine(item) ? <div className={styles.sub}>{subLine(item)}</div> : null}
-        <div className={styles.who}>{whoAsked(item, isAdmin)}</div>
+        <div className={styles.who}>{whoAsked(item, showNames, Date.now(), viewerId)}</div>
         {reason ? <div className={styles.reason}>“{reason}”</div> : null}
         {showTracks && tracks.length > 0 ? (
           <ol className={styles.tracks}>
@@ -379,7 +414,7 @@ function RequestRow({
         <span className={styles.status} data-status={item.status}>
           {statusText(item)}
         </span>
-        {isAdmin && pending ? (
+        {answer ? (
           <Button variant="primary" size="sm" disabled={busy} onClick={onApprove}>
             Approve
           </Button>
@@ -396,7 +431,7 @@ function RequestRow({
                     {showTracks ? 'Hide tracks' : `Show ${tracks.length} tracks`}
                   </Menu.Item>
                 ) : null}
-                {pending && isAdmin ? (
+                {answer ? (
                   <Menu.Item
                     className={clsx(styles.menuItem, styles.menuDanger)}
                     onClick={onDecline}
@@ -404,7 +439,7 @@ function RequestRow({
                     Decline…
                   </Menu.Item>
                 ) : null}
-                {pending && !isAdmin ? (
+                {pending && mine ? (
                   <Menu.Item
                     className={clsx(styles.menuItem, styles.menuDanger)}
                     onClick={onWithdraw}

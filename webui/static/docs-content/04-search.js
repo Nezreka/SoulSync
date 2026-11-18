@@ -289,7 +289,7 @@ Worker controls (\`GET /api/hydrabase-worker/status\`, \`POST /api/hydrabase-wor
 - **Connect** button — saves settings first, then toggles the connection. Connecting adds a **"Hydrabase (P2P)"** option to the **Primary metadata source** dropdown; disconnecting removes it (resetting the dropdown to iTunes if it was selected).
 - Status line: **"URL and API Key required"**, **Disconnected**, **Connected** (green), or the error text.
 
-The connection test reports **"Hydrabase connected"** or **"Hydrabase not connected. Configure URL + API key and click Connect."**, and debug info includes a \`hydrabase_connected\` flag.
+The connection test reports **"Hydrabase connected"** or **"Hydrabase not connected. Configure URL + API key and click Connect."**, and the diagnostics from [Report a problem](#ts-debug) include a \`hydrabase_connected\` flag.
 
 > [!NOTE]
 > There are no bandwidth caps, sharing toggles, or privacy switches anywhere in the Hydrabase UI or settings — the only knobs are connect/disconnect, auto-connect, the raw API sender, and worker pause/resume.

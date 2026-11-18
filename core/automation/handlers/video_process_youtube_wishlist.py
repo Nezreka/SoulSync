@@ -228,7 +228,10 @@ def _default_youtube_root() -> str:
 
 def _default_fetch_wanted() -> List[Dict[str, Any]]:
     from api.video import get_video_db
-    return get_video_db().youtube_wishlist_to_download()
+    from core.permissions import owner_may_download
+    # what a follow wished on its own downloads only while its owner may
+    # download, asked now, at grab time (the switch may have changed since)
+    return get_video_db().youtube_wishlist_to_download(owner_may_download=owner_may_download)
 
 
 def _default_clear_completed_wishlist() -> int:

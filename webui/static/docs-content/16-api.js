@@ -176,7 +176,7 @@ curl -X DELETE http://localhost:8008/api/v1/api-keys/123e4567-e89b-12d3-a456-426
 
 ### \`POST /api/v1/api-keys/bootstrap\`
 
-Mint the **first** API key on a fresh install. This is the only public endpoint that works without authentication — and it only works while **zero** keys exist.
+Mint the **first** API key on a fresh install. It needs no key, only while **zero** keys exist, and only for the admin: a signed-in admin session, or any request on a single-profile install with no login or launch PIN. Everyone else gets \`403\`.
 
 **Request body** (\`application/json\`):
 
@@ -2662,8 +2662,6 @@ curl -H "Authorization: Bearer sk_..." \\
 > (none are paginated). Rate limit: 600 requests/minute per valid API key; 60/minute per IP when
 > the key is missing or invalid (\`429\`, code \`RATE_LIMITED\`).
 
-![The Profiles manager: the profiles the profiles endpoints create, update and delete](profiles-overview.jpg)
-
 ## Endpoint reference
 
 ### The profile object
@@ -4936,6 +4934,8 @@ Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin us
 - A profile that can download gets it straight away: a movie goes on its video wishlist, and for a show every aired episode of the seasons asked for that isn't in the library yet. Asking for the newest season also follows the show, so its next episodes come too.
 - A profile that can't download files a video request that waits on the **Requests** page. SoulSync requests pick a whole-show policy, so when the seasons asked for aren't all, the first or the newest, the request asks for every season and the note says which ones were picked. The admin can change it when approving.
 - Request limits apply like they do in SoulSync.
+- A kids profile's rating cap applies everywhere: discover, search, similar, credits and recently added keep only what the library rates under it, and an over-cap title reads as not found.
+- The request list shows the acting user's own requests. An admin sees everyone's.
 - Cards show **Available** when it's in your library, **Partially available** for a show with episodes missing, **Processing** when it's on a wishlist or followed, and **Pending** while a request waits.
 - Downloads use your normal quality profiles. There are no Radarr or Sonarr servers to pick and no separate 4K request.
 
@@ -4951,8 +4951,6 @@ All under \`/seerr/api/v1\`: \`status\`, \`auth/me\`, \`user\`, \`discover/trend
             body: `
 > [!NOTE]
 > Like the automation endpoints, these live **outside** \`/api/v1\` and use your logged-in browser session, not API keys. The basic profile CRUD is documented under [Profiles](#api-profiles); this page covers everything around it.
-
-![The Profiles manager with its People, Invites and Activity tabs — the admin surface behind these endpoints](profiles-overview.jpg)
 
 ## Music requests
 

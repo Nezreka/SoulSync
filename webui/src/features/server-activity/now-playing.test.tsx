@@ -4,15 +4,19 @@
  */
 
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ActivityPayload, Session } from '@/shell/server-activity-types';
 
 import { HttpResponse, http, server } from '@/test/msw';
 
 import activity from './__fixtures__/activity.json';
+import { clearCache } from './cache';
 import { usePresence } from './live';
 import { NowPlaying, presetChip, sparkPaths } from './now-playing';
+
+// every test starts with nothing read ahead or remembered
+beforeEach(() => clearCache());
 
 const DATA = activity as unknown as ActivityPayload;
 const PRESETS = ['Server maintenance, back soon.', 'Please watch at home tonight.'];

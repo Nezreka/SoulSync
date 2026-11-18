@@ -147,6 +147,8 @@ from core.server_activity.images import (  # noqa: E402
     fetch_avatar,
     fetch_image,
     is_image_path,
+    serve_image,
+    spec_from_args,
 )
 from core.server_activity.live import (  # noqa: E402
     get_activity,
@@ -163,5 +165,5 @@ __all__ = [
     "any_server_configured", "clear_play_log", "fetch_avatar", "fetch_image",
     "get_activity", "get_history", "get_history_group", "get_settings", "get_stats",
     "invalidate_plex_server_cache", "is_image_path", "message_session",
-    "run_sampler_forever", "save_settings", "stop_session",
+    "run_sampler_forever", "save_settings", "serve_image", "spec_from_args", "stop_session",
 ]

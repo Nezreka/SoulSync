@@ -775,11 +775,21 @@
     //   airing show     → eye + get   (follow new episodes AND grab the back catalog)
     //   ended show      → get
     // Returns a positioned wrapper holding 0–2 buttons.
+    // may this profile get this kind right away? per kind (#2166): movies and
+    // shows each have their own mode, which VideoRequests loads at start.
+    // until it's in, the old one switch answers
+    function canGetKind(kind) {
+        var vr = window.VideoRequests;
+        if (vr && typeof vr.canGet === 'function') return vr.canGet(kind);
+        return (typeof canDownload !== 'function') || canDownload();
+    }
+
     function cardButton(o) {
         if (!o || !o.kind) return '';
-        // a profile without download rights asks instead: the get modal and the
+        // a profile that can't get this kind right away asks instead (or gets
+        // nothing, when it can't request it at all): the get modal and the
         // watchlist are gated for it. owned titles have nothing left to ask for.
-        if ((o.kind === 'movie' || o.kind === 'show') && typeof canDownload === 'function' && !canDownload()) {
+        if ((o.kind === 'movie' || o.kind === 'show') && !canGetKind(o.kind)) {
             var ask = (o.source !== 'library' && window.VideoRequests) ? VideoRequests.cardButton(o) : '';
             return ask ? '<span class="vcard-ctrls">' + ask + '</span>' : '';
         }
@@ -801,5 +811,6 @@
         return parts.length ? '<span class="vcard-ctrls">' + parts.join('') + '</span>' : '';
     }
 
-    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, close: closeModal, cardButton: cardButton };
+    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, close: closeModal, cardButton: cardButton,
+        canGetKind: canGetKind };
 })();

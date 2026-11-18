@@ -9,8 +9,9 @@
 // Integration contract (do not break):
 //   - initializeDocsPage()   — called by init.js when #help-page shows
 //   - navigateToDocsSection(id) — global; used by downloads.js "Learn more →"
+//   - window.SoulSyncDocs.sections() — the registry, for the help sheet
 //   - DOM: #docs-nav, #docs-content, .docs-nav-section[-title|-child|-children]
-//     with data-target / data-parent attrs — used by helper.js tours
+//     with data-target / data-parent attrs
 // ═══════════════════════════════════════════════════════════════════
 
 (function () {
@@ -33,6 +34,16 @@
     }
     // Expose globally for docs-content/*.js
     window.registerDocsSection = registerDocsSection;
+
+    // The help sheet reads the same registry (features/help/search/docs.ts):
+    // every section in page order, as copies so a reader can't reorder ours.
+    window.SoulSyncDocs = {
+        sections: function () {
+            return _sections.map(function (s) {
+                return { id: s.id, title: s.title, pages: s.pages.slice() };
+            });
+        },
+    };
 
     function findEntry(id) {
         if (_pageIndex.has(id)) return _pageIndex.get(id);
@@ -719,203 +730,11 @@
         });
     }
 
-    /* ── Debug info panel ─────────────────────────────────────────── */
-    // Restores the "Copy Debug Info" button dropped by the docs rebuild. It lives
-    // in the docs sidebar header, under the search trigger: picks the log-line
-    // count and log source, hits GET /api/debug-info (admin-only), formats the
-    // JSON into a plain-text snapshot and copies it to the clipboard for bug
-    // reports. navigator.clipboard needs a secure context, so over plain HTTP on
-    // the LAN it falls back to execCommand, then to a select-all modal.
-    const _DD_LOG_LINES_OPTIONS = ['20', '50', '100', '200', '500'];
-    const _DD_LOG_SOURCES = [
-        ['app', 'app.log'],
-        ['post_processing', 'post_processing.log'],
-        ['acoustid', 'acoustid.log'],
-        ['source_reuse', 'source_reuse.log'],
-    ];
-
-    function ddFormatDebugInfo(data) {
-        const ck = '✓';
-        const ex = '✗';
-        const out = [];
-        out.push('SoulSync Debug Info');
-        out.push('═══════════════════════════════════');
-        out.push('');
-
-        out.push('── System ──');
-        out.push(`Version:   ${data.version || 'unknown'}`);
-        out.push(`OS:        ${data.os || 'unknown'}${data.docker ? ' (Docker)' : ''}`);
-        out.push(`Python:    ${data.python || 'unknown'}`);
-        out.push(`ffmpeg:    ${data.ffmpeg || 'unknown'}`);
-        out.push(`Runner:    ${data.runner || 'unknown'}`);
-        out.push(`Uptime:    ${data.uptime || 'unknown'}`);
-        out.push(`Memory:    ${data.memory_usage || '?'} (system: ${data.system_memory || '?'})`);
-        out.push(`CPU:       ${data.cpu_percent || '?'}`);
-        out.push(`Threads:   ${data.thread_count != null ? data.thread_count : '?'}`);
-        out.push('');
-
-        out.push('── Services ──');
-        const svc = data.services || {};
-        out.push(`Music Source:  ${svc.music_source || 'unknown'}`);
-        out.push(`Spotify:       ${svc.spotify_connected ? ck + ' Connected' : ex + ' Disconnected'}${svc.spotify_rate_limited ? ' (RATE LIMITED)' : ''}`);
-        out.push(`Media Server:  ${svc.media_server_type || 'none'} ${svc.media_server_connected ? ck + ' Connected' : ex + ' Disconnected'}`);
-        out.push(`Soulseek:      ${svc.soulseek_connected ? ck + ' Connected' : ex + ' Disconnected'}`);
-        out.push(`Tidal:         ${svc.tidal_connected ? ck + ' Connected' : ex + ' Disconnected'}`);
-        out.push(`Qobuz:         ${svc.qobuz_connected ? ck + ' Connected' : ex + ' Disconnected'}`);
-        out.push(`Discogs:       ${svc.discogs_connected ? ck + ' Token set' : ex + ' No token'}`);
-        out.push(`Download Mode: ${svc.download_source || 'unknown'}`);
-        out.push('');
-
-        out.push('── Library ──');
-        const lib = data.library || {};
-        out.push(`Artists:     ${lib.artists != null ? lib.artists.toLocaleString() : '0'}`);
-        out.push(`Albums:      ${lib.albums != null ? lib.albums.toLocaleString() : '0'}`);
-        out.push(`Tracks:      ${lib.tracks != null ? lib.tracks.toLocaleString() : '0'}`);
-        out.push(`Database:    ${data.database_size || 'unknown'}`);
-        out.push(`Watchlist:   ${data.watchlist_count || 0} artists`);
-        out.push(`Wishlist:    ${data.wishlist_count || 0} pending`);
-        const am = data.automations || {};
-        out.push(`Automations: ${am.enabled || 0} enabled / ${am.total || 0} total`);
-        out.push('');
-
-        out.push('── Active ──');
-        out.push(`Downloads: ${data.active_downloads || 0}`);
-        out.push(`Syncs:     ${data.active_syncs || 0}`);
-        out.push('');
-
-        out.push('── Paths ──');
-        const p = data.paths || {};
-        const pathStatus = (exists, writable) => exists
-            ? (writable ? ck + ' ok' : ck + ' exists ' + ex + ' not writable')
-            : ex + ' missing';
-        out.push(`Input:    ${p.download_path || '(not set)'} [${pathStatus(p.download_path_exists, p.download_path_writable)}]`);
-        out.push(`Transfer: ${p.transfer_folder || '(not set)'} [${pathStatus(p.transfer_folder_exists, p.transfer_folder_writable)}]`);
-        out.push(`Import:   ${p.staging_folder ? p.staging_folder + ' [' + (p.staging_folder_exists ? ck + ' ok' : ex + ' missing') + ']' : '(not configured — optional)'}`);
-        if (p.music_videos_path) {
-            out.push(`Videos:   ${p.music_videos_path} [${p.music_videos_path_exists ? ck + ' ok' : ex + ' missing'}]`);
-        }
-        (p.music_library_paths || []).forEach(lp => {
-            out.push(`Library:  ${lp.path} [${lp.exists ? ck + ' ok' : ex + ' missing'}]`);
-        });
-        out.push('');
-
-        out.push('── Config ──');
-        const cfg = data.config || {};
-        out.push(`Log Level:        ${cfg.log_level || 'INFO'}`);
-        out.push(`Source Mode:      ${cfg.source_mode || 'unknown'}`);
-        if (cfg.source_mode === 'hybrid' && cfg.hybrid_sources && cfg.hybrid_sources.length) {
-            out.push(`Hybrid Priority:  ${cfg.hybrid_sources.join(' → ')}`);
-        }
-        out.push(`Metadata Source:  ${cfg.primary_metadata_source || 'deezer'}`);
-        out.push(`Quality Profile:  ${cfg.quality_profile || 'default'}`);
-        out.push(`Folder Template:  ${cfg.organization_template || '(default)'}`);
-        out.push(`Post-Processing:  ${cfg.post_processing_enabled ? 'enabled' : 'disabled'}`);
-        if (cfg.lossy_copy_enabled) {
-            out.push(`Lossy Copy:       ${(cfg.lossy_copy_format || '').toUpperCase()} @ ${cfg.lossy_copy_bitrate || '?'}kbps`);
-        }
-        out.push(`AcoustID:         ${cfg.acoustid_enabled ? 'enabled' : 'disabled'}`);
-        out.push(`Auto Scan:        ${cfg.auto_scan_enabled ? 'enabled' : 'disabled'}`);
-        out.push(`Auto Import:      ${cfg.auto_import_enabled ? 'enabled' : 'disabled'}`);
-        out.push(`Duplicate Tracks: ${cfg.allow_duplicate_tracks ? 'allowed' : 'rejected'}`);
-        out.push(`Replace Quality:  ${cfg.replace_lower_quality ? 'enabled' : 'disabled'}`);
-        out.push(`M3U Export:       ${cfg.m3u_export_enabled ? 'enabled' : 'disabled'}`);
-        out.push('');
-
-        out.push('── Enrichment Workers ──');
-        const active = [];
-        const paused = [];
-        Object.entries(data.enrichment_workers || {}).forEach(([name, status]) => {
-            (status === 'active' ? active : paused).push(name);
-        });
-        out.push(`Active:  ${active.length ? active.join(', ') : 'none'}`);
-        out.push(`Paused:  ${paused.length ? paused.join(', ') : 'none'}`);
-        out.push('');
-
-        if (data.download_client_failures && data.download_client_failures.length) {
-            out.push('── Download Client Failures ──');
-            data.download_client_failures.forEach(f => out.push(`  ❌ ${f}`));
-            out.push('');
-        }
-
-        out.push('── API Rates (calls/min) ──');
-        Object.entries(data.api_rates || {}).forEach(([svcName, info]) => {
-            const cpm = (info && info.cpm) || 0;
-            const limit = (info && info.limit) || '?';
-            out.push(`${svcName.padEnd(14)} ${String(cpm).padStart(5)}/min  (limit: ${limit})`);
-        });
-        if (data.spotify_rate_limit && data.spotify_rate_limit.active) {
-            const rl = data.spotify_rate_limit;
-            out.push('');
-            out.push('*** SPOTIFY RATE LIMITED ***');
-            out.push(`Triggered by: ${rl.endpoint || 'unknown'}`);
-            out.push(`Remaining:    ${Math.ceil((rl.remaining_seconds || 0) / 60)} minutes`);
-            out.push(`Retry-After:  ${rl.retry_after || '?'}s`);
-        }
-        out.push('');
-
-        if (data.available_logs && data.available_logs.length) {
-            out.push('── Log Files ──');
-            data.available_logs.forEach(log => {
-                out.push(`  ${log.file.padEnd(24)} ${log.size || ''}`);
-            });
-            out.push('');
-        }
-
-        const logLines = data.recent_logs || [];
-        out.push(`── Logs: ${data.log_source || 'app'}.log (last ${logLines.length} lines) ──`);
-        if (logLines.length) logLines.forEach(line => out.push(line));
-        else out.push('(no log lines)');
-        out.push('');
-        out.push('---');
-        out.push('Paste this output into your GitHub issue at https://github.com/Nezreka/SoulSync/issues');
-        return out.join('\n');
-    }
-
-    async function ddCopyText(text) {
-        if (navigator.clipboard && window.isSecureContext) {
-            try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
-        }
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
-        document.body.appendChild(ta);
-        ta.select();
-        let ok = false;
-        try { ok = document.execCommand('copy'); } catch (_) {}
-        document.body.removeChild(ta);
-        return ok;
-    }
-
-    // Select-all modal shown only when no clipboard API could write (e.g. HTTP
-    // over LAN). Styled on the new search-palette pieces.
-    function ddShowDebugModal(text) {
-        const existing = document.getElementById('dd-debug-modal');
-        if (existing) existing.remove();
-        const overlay = document.createElement('div');
-        overlay.className = 'dd-palette-overlay';
-        overlay.id = 'dd-debug-modal';
-        overlay.innerHTML =
-            `<div class="dd-palette" role="dialog" aria-label="Debug info">` +
-            `<div class="dd-palette-input-row">` +
-            `<span style="font-weight:600;font-size:13px;color:#fff;">Debug Info — select all &amp; copy</span>` +
-            `<button type="button" data-dd-debug-close style="margin-left:auto;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">Close</button>` +
-            `</div>` +
-            `<div style="padding:12px;"><textarea readonly style="width:100%;height:40vh;box-sizing:border-box;background:#0d1117;color:#e0e0e0;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;resize:none;outline:none;"></textarea></div>` +
-            `</div>`;
-        overlay.querySelector('[data-dd-debug-close]').addEventListener('click', () => overlay.remove());
-        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
-        document.body.appendChild(overlay);
-        requestAnimationFrame(() => overlay.classList.add('open'));
-        const ta = overlay.querySelector('textarea');
-        ta.value = text;
-        ta.focus();
-        ta.select();
-    }
-
-    function ddToast(message, type) {
-        if (typeof showToast === 'function') showToast(message, type || 'info');
-    }
-
+    /* ── Report a problem ─────────────────────────────────────────── */
+    // was Copy Debug Info. it opens the help sheet's Report a problem view
+    // instead: the same diagnostics with secrets removed, every line visible
+    // before it goes anywhere, then GitHub, Discord or a file. a member gets
+    // the sheet's home, which says where their reports go.
     function initDebugPanel() {
         const header = document.querySelector('.docs-sidebar-header');
         if (!header || header.querySelector('.dd-debug-wrap')) return;
@@ -923,63 +742,19 @@
         const wrap = document.createElement('div');
         wrap.className = 'dd-debug-wrap';
         wrap.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);';
-
-        const selStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.85);border-radius:6px;padding:4px 6px;font-size:12px;font-family:inherit;max-width:150px;';
-        const rowStyle = 'display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:rgba(255,255,255,0.55);';
-
         wrap.innerHTML =
-            `<button class="docs-search-trigger" id="dd-debug-btn" type="button">` +
-            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>` +
-            `<span data-dd-debug-label>Copy Debug Info</span></button>` +
-            `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">` +
-            `<label style="${rowStyle}"><span>Log lines</span>` +
-            `<select id="dd-debug-lines" style="${selStyle}">` +
-            _DD_LOG_LINES_OPTIONS.map(v => `<option value="${v}"${v === '100' ? ' selected' : ''}>${v}</option>`).join('') +
-            `</select></label>` +
-            `<label style="${rowStyle}"><span>Log source</span>` +
-            `<select id="dd-debug-source" style="${selStyle}">` +
-            _DD_LOG_SOURCES.map(([v, label]) => `<option value="${v}">${label}</option>`).join('') +
-            `</select></label>` +
-            `</div>`;
+            `<button class="docs-search-trigger" id="dd-debug-btn" type="button" aria-haspopup="dialog">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 6a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0v-6a4 4 0 0 1 4-4zM19 7l-3 2M5 7l3 2M19 19l-3-2M5 19l3-2M20 13h-4M4 13h4"/></svg>` +
+            `<span>Report a problem</span></button>`;
         header.appendChild(wrap);
 
-        const btn = wrap.querySelector('#dd-debug-btn');
-        const labelEl = wrap.querySelector('[data-dd-debug-label]');
-        const DEFAULT_LABEL = 'Copy Debug Info';
-        const revert = () => setTimeout(() => { labelEl.textContent = DEFAULT_LABEL; }, 2200);
-
-        btn.addEventListener('click', async () => {
-            const lines = wrap.querySelector('#dd-debug-lines').value;
-            const source = wrap.querySelector('#dd-debug-source').value;
-            labelEl.textContent = 'Collecting…';
-            btn.disabled = true;
-            try {
-                const resp = await fetch(`/api/debug-info?lines=${encodeURIComponent(lines)}&log=${encodeURIComponent(source)}`);
-                if (resp.status === 403) {
-                    labelEl.textContent = 'Admin only';
-                    ddToast('Debug info is admin-only', 'error');
-                    revert();
-                    return;
-                }
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const data = await resp.json();
-                const text = ddFormatDebugInfo(data);
-                if (await ddCopyText(text)) {
-                    labelEl.textContent = '✅ Copied!';
-                    ddToast('Debug info copied to clipboard', 'success');
-                } else {
-                    ddShowDebugModal(text);
-                    labelEl.textContent = DEFAULT_LABEL;
-                    ddToast('Clipboard unavailable — copy from the dialog', 'warning');
-                }
-            } catch (err) {
-                console.error('Debug info error:', err);
-                labelEl.textContent = '❌ Failed';
-                ddToast('Failed to collect debug info', 'error');
-            } finally {
-                btn.disabled = false;
-                if (labelEl.textContent !== DEFAULT_LABEL) revert();
+        wrap.querySelector('#dd-debug-btn').addEventListener('click', () => {
+            if (window.SoulSyncHelp) {
+                window.SoulSyncHelp.open('report');
+                return;
             }
+            // the sheet's bundle hasn't run yet: open once it's ready
+            window.addEventListener('ss:help-ready', () => window.SoulSyncHelp?.open('report'), { once: true });
         });
     }
 
@@ -1212,7 +987,7 @@
                 ['label', 'string', 0, 'Descriptive label for the key'],
             ], bx: '{\n  "label": "My Integration"\n}' }),
             _ddE('DELETE', '/api-keys/{key_id}', 'Revoke a key', { note: 'Takes effect immediately — rotate first, then revoke.' }),
-            _ddE('POST', '/api-keys/bootstrap', 'Mint the first key when none exist (NO AUTH REQUIRED)', { na: true, b: [
+            _ddE('POST', '/api-keys/bootstrap', 'Mint the first key when none exist (admin only, no key needed)', { na: true, b: [
                 ['label', 'string', 0, 'Label for the key'],
             ], bx: '{\n  "label": "My First Key"\n}', note: 'Works without an API key only while zero keys exist — afterwards it answers 403.' }),
         ] },

@@ -300,6 +300,18 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
                     new_tracks = payload.get('new_tracks_found', 0)
                     added = payload.get('tracks_added_to_wishlist', 0)
                     if new_tracks > 0:
+                        # "New Release Found", for the profile watching this
+                        # artist (one event per watch row)
+                        try:
+                            if deps.automation_engine:
+                                from core.automation.owners import owned
+                                deps.automation_engine.emit('watchlist_new_release', owned({
+                                    'artist': artist_name,
+                                    'new_tracks': str(new_tracks),
+                                    'added_to_wishlist': str(added),
+                                }, payload.get('owner_profile_id') or payload.get('profile_id')))
+                        except Exception as e:
+                            logger.debug("watchlist_new_release emit failed: %s", e)
                         deps.update_automation_progress(
                             automation_id,
                             log_line=f'{artist_name} — {new_tracks} new, {added} added',
@@ -549,11 +561,14 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
 
                 try:
                     if deps.automation_engine:
-                        deps.automation_engine.emit('watchlist_scan_completed', {
+                        from core.automation.owners import owned
+                        # one profile's scan is theirs; an all-profiles scan
+                        # is the admin's (stamped as the system run's owner)
+                        deps.automation_engine.emit('watchlist_scan_completed', owned({
                             'artists_scanned': str(len(scan_results)),
                             'new_tracks_found': str(total_new_tracks),
                             'tracks_added': str(total_added_to_wishlist),
-                        })
+                        }, profile_id))
                 except Exception as e:
                     logger.debug("watchlist_scan_completed emit failed: %s", e)
 

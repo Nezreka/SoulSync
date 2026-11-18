@@ -297,6 +297,39 @@ def load_default(db) -> Dict[str, Any]:
     return {"off": normalize_off(data.get("off")), "locked": bool(data.get("locked")), "set": True}
 
 
+def template_default(db, profile: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """the Sidebar & look of the template this member follows (#2166):
+    {off, locked, set, template_id, template}, or None when it follows none
+    (an admin, a member on its own old settings) or the template has no
+    sidebar saved. a database without templates (old test doubles) has none."""
+    if not admin_sets(profile):
+        return None
+    inputs = getattr(db, "get_permission_inputs", None)
+    getter = getattr(db, "get_permission_template", None)
+    if inputs is None or getter is None:
+        return None
+    try:
+        tid = inputs(int(profile["id"])).get("template_id")
+        if tid is None:
+            return None
+        row = getter(int(tid))
+        raw = row.get("sidebar") if row else None
+        data = json.loads(raw) if raw else None
+    except Exception as e:  # noqa: BLE001 - unreadable: the install's default stands
+        logger.debug("features: template sidebar for %s unreadable: %s", profile.get("id"), e)
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {"off": normalize_off(data.get("off")), "locked": bool(data.get("locked")), "set": True,
+            "template_id": int(tid), "template": row.get("name") or ""}
+
+
+def default_for(db, profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """what this profile shows when nobody set its own: its template's
+    Sidebar & look (#2166 follow-ups 2 and 8), else what new profiles see."""
+    return template_default(db, profile) or load_default(db)
+
+
 def save_default(db, off: Iterable[str], locked: bool) -> Dict[str, Any]:
     clean = {"off": normalize_off(list(off)), "locked": bool(locked)}
     db.set_metadata(_DEFAULT_KEY, json.dumps(clean))
@@ -327,14 +360,15 @@ def _admin_off(db, profile_id: int) -> Optional[List[str]]:
 
 def admin_set_off(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> List[str]:
     """what the admin wants this profile to see: the set they saved for it,
-    or what new profiles see when they never did. this is what a lock shows."""
+    or its template's Sidebar & look (else what new profiles see) when they
+    never did. this is what a lock shows."""
     if profile_id is None:
         return []
     profile = profile if profile is not None else _profile(db, profile_id)
     if not admin_sets(profile):
         return []
     mine = _admin_off(db, profile_id)
-    return load_default(db)["off"] if mine is None else mine
+    return default_for(db, profile)["off"] if mine is None else mine
 
 
 def load_off(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -388,7 +422,7 @@ def is_locked(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] =
         logger.debug("features: lock for %s unreadable: %s", profile_id, e)
         raw = None
     if raw is None:
-        return load_default(db)["locked"]
+        return default_for(db, profile)["locked"]
     return raw == "1"
 
 
@@ -486,7 +520,7 @@ def has_chosen(db, profile_id: Optional[int], profile: Optional[Dict[str, Any]] 
             return False
         if db.get_metadata(_admin_key(profile_id)) is not None:
             return True
-        return is_locked(db, profile_id, profile) or load_default(db)["set"]
+        return is_locked(db, profile_id, profile) or default_for(db, profile)["set"]
     except Exception:  # noqa: BLE001 - can't tell, don't nag
         return True
 
@@ -519,7 +553,9 @@ def admin_payload(db, profile_id: int) -> Dict[str, Any]:
         body["lock_set"] = admin_sets(profile) and db.get_metadata(_lock_key(profile_id)) is not None
     except Exception:  # noqa: BLE001 - can't tell, offer the reset
         body["lock_set"] = True
-    body["default"] = load_default(db)
+    # what they follow when nobody set theirs: the template's Sidebar & look
+    # (default.template names it, "From Teen"), else what new profiles see
+    body["default"] = default_for(db, profile)
     return body
 
 
@@ -637,6 +673,7 @@ def payload(off: Iterable[str], chosen: bool = True, *, locked: bool = False,
 __all__ = ["FEATURES", "FEATURE_IDS", "GROUPS", "PRESETS", "normalize_off", "preset_for",
            "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear", "has_chosen",
            "admin_sets", "fixed_on", "offered", "load_default", "save_default", "follows_default",
+           "template_default", "default_for",
            "is_locked", "set_locked", "reset", "profile_payload", "default_payload",
            "admin_set_off", "own_off", "carry_over_2157", "save_admin_off", "admin_lock", "reset_own", "admin_payload",
            "BACKGROUND_FEATURES", "feature_for_automation", "everyone_hid", "load_paused",

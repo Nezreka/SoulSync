@@ -15,6 +15,7 @@ from core.issues.lifecycle import visible_to
 from core.metadata import normalize_image_url as fix_artist_image_url
 from core.profile_context import get_current_profile_id, is_admin_request
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -45,10 +46,18 @@ CATEGORIES = ('wrong_track', 'wrong_metadata', 'wrong_cover', 'duplicate_tracks'
               'incomplete_album', 'other')
 
 def _caller():
-    """(profile_id, is_admin) from the session. never a header: the old
+    """(profile_id, manages) from the session. never a header: the old
     X-Profile-Id read let any profile claim to be the admin (or anyone), and
-    no header at all meant profile 1."""
-    return get_current_profile_id(), is_admin_request()
+    no header at all meant profile 1.
+
+    manages: an admin, or a moderator (requests.moderate, #2166), who answers
+    and tidies everyone's issues the way an admin does. never settings,
+    people or tools: those routes ask for an admin themselves."""
+    pid = get_current_profile_id()
+    if is_admin_request():
+        return pid, True
+    from core.permissions import can, enforcing
+    return pid, bool(enforcing() and can(None, "requests.moderate"))
 
 
 def _actor_name():
@@ -88,6 +97,7 @@ def _fix_snapshot_thumbs(issue):
 
 
 @bp.route('/api/issues', methods=['GET'])
+@requires("issues.report")
 def list_issues():
     """List issues. Admin sees all; non-admin sees own only."""
     try:
@@ -126,6 +136,7 @@ def list_issues():
 
 
 @bp.route('/api/issues', methods=['POST'])
+@requires("issues.report")
 def create_issue():
     """Create a new library issue."""
     try:
@@ -161,6 +172,7 @@ def create_issue():
 
 
 @bp.route('/api/issues/<int:issue_id>', methods=['GET'])
+@requires("issues.report")
 def get_issue(issue_id):
     """Get a single issue. someone else's reads as not found."""
     try:
@@ -175,6 +187,7 @@ def get_issue(issue_id):
 
 
 @bp.route('/api/issues/<int:issue_id>', methods=['PUT'])
+@requires("issues.report")
 def update_issue(issue_id):
     """Update an issue (admin: respond/resolve; user: edit own title/description)."""
     try:
@@ -191,6 +204,7 @@ def update_issue(issue_id):
 
 
 @bp.route('/api/issues/<int:issue_id>', methods=['DELETE'])
+@requires("issues.report")
 def delete_issue(issue_id):
     """Delete an issue (admin or issue owner)."""
     try:
@@ -207,6 +221,7 @@ def delete_issue(issue_id):
 
 
 @bp.route('/api/issues/counts', methods=['GET'])
+@requires("issues.report")
 def get_issue_counts():
     """Get issue counts by status for badge display."""
     try:
@@ -223,6 +238,7 @@ def get_issue_counts():
 
 
 @bp.route('/api/issues/bulk', methods=['POST'])
+@requires("issues.report")
 def bulk_issues():
     """admin: {ids, status?|priority?} or {ids, delete: true} in one go."""
     try:
@@ -237,6 +253,7 @@ def bulk_issues():
 
 
 @bp.route('/api/issues/<int:issue_id>/comments', methods=['POST'])
+@requires("issues.report")
 def add_issue_comment(issue_id):
     """reply on an issue: its reporter, a follower, or an admin."""
     try:

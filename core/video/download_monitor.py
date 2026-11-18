@@ -510,14 +510,14 @@ def _record_pack_episode(db, ep_dl, patch):
             k: ep_dl.get(k) for k in
             ("kind", "title", "release_title", "source", "username", "filename",
              "size_bytes", "quality_label", "target_dir", "media_id", "media_source",
-             "year", "poster_url", "search_ctx", "quality_profile_id")
+             "year", "poster_url", "search_ctx", "quality_profile_id", "profile_id")
         } | {"status": "completed", "attempts": 0})
         db.update_video_download(child, dest_path=patch.get("dest_path"),
                                  progress=100.0, completed_at=_now(),
                                  quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
         row = {**ep_dl, "id": child}
         _archive_history(db, row, patch)
-        _publish_terminal(row, patch)
+        _publish_terminal(row, patch, _owners(db, row))
         return child
     except Exception:
         logger.exception("pack: failed to record the row for %s", ep_dl.get("filename"))
@@ -1633,6 +1633,11 @@ def _blocklist_release(db, dl, reason) -> None:
         logger.exception("video download %s: blocklist write failed", dl.get("id"))
 
 
+def _owners(db, dl) -> list:
+    from core.video.download_events import download_owners
+    return download_owners(db, dl)
+
+
 def _event_payload(dl, upd=None) -> dict:
     """The event-bus variables for one download — shared by every terminal
     outcome so trigger conditions/templates see one consistent shape."""
@@ -1649,7 +1654,7 @@ def _event_payload(dl, upd=None) -> dict:
             "source": dl.get("source") or "", "dest_path": upd.get("dest_path") or ""}
 
 
-def _publish_terminal(dl, upd) -> None:
+def _publish_terminal(dl, upd, owners=None) -> None:
     """Relay a terminal outcome to the automation event bus (best-effort).
     completed → 'video_download_completed' (+ 'video_upgrade_completed' when the
     import REPLACED a library copy); import_failed → 'video_import_failed'."""
@@ -1660,15 +1665,16 @@ def _publish_terminal(dl, upd) -> None:
     if (upd or {}).get("_pack_imported"):
         return
     try:
-        from core.video.download_events import publish
+        from core.video.download_events import owned, publish
         st = upd.get("status")
+        # the download's people: who grabbed it, else who wished for it
         if st == "completed":
-            publish("video_download_completed", _event_payload(dl, upd))
+            publish("video_download_completed", owned(_event_payload(dl, upd), owners))
             if upd.get("_upgraded"):
-                publish("video_upgrade_completed", _event_payload(dl, upd))
+                publish("video_upgrade_completed", owned(_event_payload(dl, upd), owners))
         elif st == "import_failed":
             publish("video_import_failed",
-                    {**_event_payload(dl, upd), "error": upd.get("error") or ""})
+                    owned({**_event_payload(dl, upd), "error": upd.get("error") or ""}, owners))
     except Exception:
         logger.exception("video download %s: event publish failed", dl.get("id"))
 
@@ -1743,13 +1749,13 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
         # isn't something to come and fix
         _spawn_next_release(db, dl, err)
         return
-    _publish_failed(dl, err)
+    _publish_failed(dl, err, _owners(db, dl))
 
 
-def _publish_failed(dl, err) -> None:
+def _publish_failed(dl, err, owners=None) -> None:
     try:
-        from core.video.download_events import publish
-        publish("video_download_failed", {**_event_payload(dl), "error": err})
+        from core.video.download_events import owned, publish
+        publish("video_download_failed", owned({**_event_payload(dl), "error": err}, owners))
     except Exception:
         logger.exception("video download %s: failed-event publish failed", dl.get("id"))
 
@@ -1845,7 +1851,7 @@ def _next_release_now(db, dl, err) -> bool:
         db.update_video_download(dl["id"], error=final)
     except Exception:  # noqa: BLE001
         logger.debug("video download %s: final error not saved", dl.get("id"), exc_info=True)
-    _publish_failed(dl, final)
+    _publish_failed(dl, final, _owners(db, dl))
     return False
 
 
@@ -2026,13 +2032,15 @@ def settle_outcome(db, dl, upd) -> None:
     db.update_video_download(dl["id"], **upd)
     # A wished item that just landed: remove its row when it MEETS the
     # quality cutoff, keep it when below (upgrade-until semantics).
+    # whose it is, read before the wishlist lets go of it
+    owners = _owners(db, dl) if upd.get("status") in _TERMINAL else []
     if upd.get("status") == "completed":
         _wishlist_obtained(db, dl, upd)
     # Snapshot terminal outcomes into the permanent history (survives the
     # queue cleanup; powers the History modal + smart post-download scan).
     if upd.get("status") in _TERMINAL:
         _archive_history(db, dl, upd)
-        _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
+        _publish_terminal(dl, upd, owners)     # event triggers (completed/upgrade/import-failed)
 
 
 def _tick(db) -> bool:

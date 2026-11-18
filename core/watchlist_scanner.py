@@ -2141,6 +2141,9 @@ class WatchlistScanner:
                     artist_index=absolute_index,
                     total_artists=total_artists_override if total_artists_override is not None else len(watchlist_artists),
                     profile_id=profile_id,
+                    # whose watch row this artist is (an all-profiles scan
+                    # walks everyone's)
+                    owner_profile_id=getattr(artist, 'profile_id', None) or profile_id,
                     albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
@@ -3224,6 +3227,17 @@ class WatchlistScanner:
                 'is_local': False
             }
             
+            # the artist's owner may still have this (#2166): music on, not
+            # Can't request, the watchlist part on, explicit hidden when it
+            # hides explicit, and a quality they may use. an ask-first owner's
+            # row is a request (the scheduled run only takes approved ones).
+            owner_id = getattr(watchlist_artist, 'profile_id', 1)
+            want = self._owner_gate(owner_id).want(
+                'music', explicit=track_explicit, part='music.watchlist', title=track_name,
+                quality_id=getattr(watchlist_artist, 'quality_profile_id', None))
+            if want.skip:
+                return False
+
             # Add to wishlist with watchlist context (scoped to artist's profile)
             success = self.database.add_to_wishlist(
                 spotify_track_data=spotify_track_data,
@@ -3237,13 +3251,12 @@ class WatchlistScanner:
                     # #831: groups wishlist rows by the scan run that added them.
                     'scan_run_id': scan_run_id or '',
                 },
-                profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                profile_id=owner_id,
                 # SYNC-01: the watchlist artist's quality profile, not the
                 # global default. The user profile above says WHOSE intent this
                 # is; this says which quality bar the download has to clear.
-                quality_profile_id=getattr(
-                    watchlist_artist, 'quality_profile_id', None
-                ),
+                # resolved for the owner: one they may not use is their default
+                quality_profile_id=want.quality_profile_id,
             )
             
             if success:
@@ -3258,6 +3271,22 @@ class WatchlistScanner:
             logger.error(f"Error adding track to wishlist: {track_name}: {e}")
             return False
     
+    def _owner_gate(self, owner_id):
+        """one OwnerGate per owner for this scanner (it re-reads the owner's
+        rights every minute), over the scanner's own database."""
+        from core.owner_gate import OwnerGate
+        gates = self.__dict__.setdefault('_owner_gates', {})
+        key = owner_id if owner_id is not None else 1
+        gate = gates.get(key)
+        if gate is None:
+            def _ctx(pid):
+                from core.permission_store import context_for
+                return context_for(self.database, pid)
+            gate = gates[key] = OwnerGate(key, load_context=_ctx,
+                                          load_profile=lambda pid: self.database.get_profile(pid),
+                                          label='watchlist scan')
+        return gate
+
     def update_artist_scan_timestamp(self, artist) -> bool:
         """Update the last scan timestamp for an artist.
 

@@ -557,7 +557,10 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
         try:
             if deps.automation_engine and total_discovered > 0:
                 _disc_pl_id = str(playlists[0]['id']) if len(playlists) == 1 else ''
-                deps.automation_engine.emit('discovery_completed', {
+                from core.automation.owners import owned
+                # the playlists' owners (one event can cover several)
+                _disc_owners = {p.get('profile_id') or 1 for p in playlists if isinstance(p, dict)}
+                deps.automation_engine.emit('discovery_completed', owned({
                     'playlist_name': last_playlist_name if len(playlists) == 1 else f'{len(playlists)} playlists',
                     'playlist_id': _disc_pl_id,
                     'total_tracks': str(total_tracks),
@@ -569,7 +572,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     'wing_it_count': str(total_wing_it),
                     'failed_count': str(total_failed),
                     'skipped_count': str(total_skipped),
-                })
+                }, _disc_owners))
         except Exception as e:
             logger.debug("discovery_completed emit failed: %s", e)
 

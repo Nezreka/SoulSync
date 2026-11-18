@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayMethod, ShelfItem, StatsPayload } from '@/shell/server-activity-types';
 
 import { getStats } from './api';
+import { load, peek } from './cache';
 import {
   METHOD_LABEL,
   RANGE_WORDS,
@@ -40,42 +41,61 @@ export const RANGES = [
   { value: 365, label: 'Year' },
 ];
 
-const cache = new Map<string, { at: number; data: StatsPayload }>();
-const CACHE_MS = 60000;
+/** a cached sheet younger than this is shown without asking again */
+const FRESH_MS = 30000;
+const statsKey = (days: number, tz: string | undefined) => `stats|${days}|${tz ?? ''}`;
+
+/** the sheet Stats will open on, read ahead when the drawer opens */
+export function prefetchStats(days: number, tz: string | undefined): void {
+  const key = statsKey(days, tz);
+  const hit = peek<StatsPayload>(key);
+  if (hit && Date.now() - hit.at < FRESH_MS) return;
+  void load(key, () => getStats(days, tz)).catch(() => {
+    // a nicety; the tab asks again when it opens
+  });
+}
 
 function useStats(days: number) {
   const tz = useMemo(() => browserZone(), []);
-  const key = `${days}|${tz}`;
-  const [data, setData] = useState<StatsPayload | null>(() => cache.get(key)?.data ?? null);
+  const key = statsKey(days, tz);
+  const [data, setData] = useState<StatsPayload | null>(
+    () => peek<StatsPayload>(key)?.data ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!cache.has(key));
+  const [loading, setLoading] = useState(!peek(key));
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
-    const hit = cache.get(key);
-    if (hit) setData(hit.data);
-    if (hit && Date.now() - hit.at < CACHE_MS && nonce === 0) {
-      setLoading(false);
-      return;
+    let live = true;
+    const hit = peek<StatsPayload>(key);
+    // a range seen before paints at once; the server is asked behind it
+    if (hit) {
+      setData(hit.data);
+      setError(null);
+      if (Date.now() - hit.at < FRESH_MS && nonce === 0) {
+        setLoading(false);
+        return;
+      }
     }
-    const ctrl = new AbortController();
     setLoading(true);
-    setError(null);
-    getStats(days, tz, ctrl.signal)
+    if (!hit) setError(null);
+    load(key, () => getStats(days, tz))
       .then((result) => {
-        if (ctrl.signal.aborted) return;
+        if (!live) return;
         setLoading(false);
         if (!result.ok || !result.data.ok) {
           setError(result.ok ? 'The play log could not be read.' : result.error);
           return;
         }
-        cache.set(key, { at: Date.now(), data: result.data });
+        setError(null);
         setData(result.data);
       })
       .catch(() => {
         // a newer range took over
       });
-    return () => ctrl.abort();
+    return () => {
+      live = false;
+    };
   }, [key, days, tz, nonce]);
 
   return { data, error, loading, retry: () => setNonce((x) => x + 1) };
@@ -574,6 +594,7 @@ function Shelves({ stats, onNavigate }: { stats: StatsPayload; onNavigate: () =>
                       <span className={st.rank}>{i + 1}</span>
                       <Poster
                         thumb={item.thumb}
+                        image={item.image}
                         kind={
                           shelf.key === 'books' && item.kind === 'podcast' ? 'podcast' : shelf.kind
                         }
@@ -698,7 +719,7 @@ export function Stats({ days, onNavigate }: { days: number; onNavigate: () => vo
   }
 
   return (
-    <div className={st.view} data-stale={loading || undefined}>
+    <div className={st.view} data-stale={(loading && data.days !== days) || undefined}>
       <Hero stats={data} />
       <Tiles stats={data} />
       <div className={st.grid2}>

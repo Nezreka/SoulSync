@@ -104,8 +104,7 @@ def register_routes(bp):
     @bp.route("/detail/<kind>/<int:item_id>/library", methods=["GET"])
     def video_title_library(kind, item_id):
         from . import get_video_db
-        from .kids import restricted_response, video_cap
-        from core.content_filter import title_allowed
+        from .kids import rating_allowed, restricted_response, video_cap
         from core.video import library_manage
         if kind not in _KINDS:
             return jsonify({"error": "kind must be movie|show"}), 400
@@ -114,8 +113,8 @@ def register_routes(bp):
         if cap is not None:
             # kids profiles: over the cap (or unrated) is a hard no, as on the detail page
             ident = db.title_identity(kind, item_id) or {}
-            if not title_allowed(ident.get("content_rating"), cap):
-                return restricted_response()
+            if not rating_allowed(cap, kind, ident.get("content_rating")):
+                return restricted_response(kind)
         season = request.args.get("season")
         try:
             season = int(season) if season not in (None, "") else None

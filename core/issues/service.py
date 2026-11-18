@@ -29,11 +29,14 @@ class IssueSide:
     side: str = "music"
 
 
-def _event(side: IssueSide, event_type: str, data: Dict[str, Any]) -> None:
-    """issue_created / issue_status_changed / issue_commented for automations."""
+def _event(side: IssueSide, event_type: str, data: Dict[str, Any], owners: Any = None) -> None:
+    """issue_created / issue_status_changed / issue_commented for automations.
+    the issue's people (its reporter and followers) own them, not the admin
+    who answered."""
     try:
         from core.app_events import publish
-        publish(event_type, {"side": side.side, **data})
+        from core.automation.owners import owned
+        publish(event_type, owned({"side": side.side, **data}, owners))
     except Exception:  # noqa: BLE001, S110 - an automation hook never fails the issue
         pass
 
@@ -67,7 +70,7 @@ def report(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, enti
     if not new_id:
         return {"success": False, "error": "Could not file the report"}, 500
     _event(side, "issue_created", {"issue_id": new_id, "category": category, "title": fields["title"],
-                                   "entity_type": entity_type, "reporter": actor_name or ""})
+                                   "entity_type": entity_type, "reporter": actor_name or ""}, actor)
     return {"success": True, "id": new_id}, 201
 
 
@@ -101,7 +104,8 @@ def triage(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, issu
     if updates.get("status") and updates["status"] != issue.get("status"):
         _event(side, "issue_status_changed", {
             "issue_id": issue_id, "status": updates["status"], "category": issue.get("category") or "",
-            "title": issue.get("title") or "", "reporter": issue.get("reporter_name") or ""})
+            "title": issue.get("title") or "", "reporter": issue.get("reporter_name") or ""},
+            [issue.get("profile_id"), *followers])
     if is_admin:
         events = timeline_events(issue, updates)
         for line in events:
@@ -132,7 +136,8 @@ def comment(side: IssueSide, *, actor: int, actor_name: str, is_admin: bool, iss
         return {"success": False, "error": "Write something first"}, 400
     cid = side.store.add_comment(issue_id, actor, actor_name, text)
     _event(side, "issue_commented", {"issue_id": issue_id, "title": issue.get("title") or "",
-                                     "author": actor_name or "", "body": text[:500]})
+                                     "author": actor_name or "", "body": text[:500]},
+           [issue.get("profile_id"), *followers])
     if is_admin:
         people = recipients(issue, followers, actor)
         if people:

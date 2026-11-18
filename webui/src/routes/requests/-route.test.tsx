@@ -155,7 +155,7 @@ describe('requests route', () => {
     };
     renderRequests(false);
 
-    expect(await screen.findByText('2 of 3 requests left this week')).toBeInTheDocument();
+    expect(await screen.findByText('2 of 3 music requests left this week')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve all' })).not.toBeInTheDocument();
   });
 

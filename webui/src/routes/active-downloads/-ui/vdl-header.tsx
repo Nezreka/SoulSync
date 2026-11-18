@@ -33,6 +33,9 @@ export interface VdlHeaderProps {
   /** completed, failed and cancelled rows; import failures stay for Manual import. */
   onClearEverything: () => void;
   retryAllPending: boolean;
+  /** an admin: clearing the list, cancel all and the Review pane (recycle
+   * bin + blocklist) are theirs. a member sees their own grabs only. */
+  canManage?: boolean;
 }
 
 const REVIEW_TITLE = 'Recycle bin + release blocklist';
@@ -59,6 +62,7 @@ export function VdlHeader({
   onClearFailed,
   onClearEverything,
   retryAllPending,
+  canManage = true,
 }: VdlHeaderProps) {
   const chipCounts = videoChipCounts(downloads);
   // Clear finished takes completed rows only; failed rows go through Clear
@@ -83,7 +87,7 @@ export function VdlHeader({
       onSelect: onBlockRetryAll,
     });
   }
-  if (counts.removable > 0) {
+  if (counts.removable > 0 && canManage) {
     menu.push({
       key: 'clear-failed',
       label: `Clear failed (${counts.removable})`,
@@ -91,11 +95,11 @@ export function VdlHeader({
       onSelect: onClearFailed,
     });
   }
-  if (finished > 0) {
+  if (finished > 0 && canManage) {
     menu.push({ key: 'clear', label: `Clear finished (${finished})`, onSelect: onClearFinished });
   }
   const everything = counts.completed + counts.removable;
-  if (everything > 0) {
+  if (everything > 0 && canManage) {
     menu.push({
       key: 'clear-all',
       label: `Clear everything (${everything})`,
@@ -105,7 +109,7 @@ export function VdlHeader({
       onSelect: onClearEverything,
     });
   }
-  if (hasRunningWork) {
+  if (hasRunningWork && canManage) {
     menu.push({
       key: 'cancel',
       label: `Cancel all (${counts.active})`,
@@ -118,7 +122,9 @@ export function VdlHeader({
     <DlHeader
       tabs={[
         { value: 'downloads', label: 'Downloads' },
-        { value: 'review', label: 'Review', title: REVIEW_TITLE, badge: reviewCount },
+        ...(canManage
+          ? [{ value: 'review', label: 'Review', title: REVIEW_TITLE, badge: reviewCount }]
+          : []),
         { value: 'clients', label: 'Clients', title: CLIENTS_TITLE },
       ]}
       view={view}

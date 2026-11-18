@@ -184,6 +184,26 @@ describe('Video Quality', () => {
     await waitFor(() => expect(q<HTMLSelectElement>('[data-vq-profile-select]').value).toBe('0'));
   });
 
+  it('a named profile says what it is for; the Default is always both (#2168)', async () => {
+    answers[`PUT ${Q}/profiles/3/media-type`] = { success: true, id: 3, media_type: 'tv' };
+    render(<VideoQualitySections />);
+    await shown();
+    expect(q('[data-vq-used-for]')).toBeNull();
+    fireEvent.change(q('[data-vq-profile-select]'), { target: { value: '3' } });
+    expect(q('[data-vq-used-for-pick="both"]').className).toBe('active');
+    fireEvent.click(q('[data-vq-used-for-pick="tv"]'));
+    await waitFor(() =>
+      expect(shell.showToast).toHaveBeenCalledWith('Offered only for TV', 'success'),
+    );
+    expect(sent('PUT', `${Q}/profiles/3/media-type`)[0]).toEqual({ media_type: 'tv' });
+    expect(q('[data-vq-used-for-pick="tv"]').className).toBe('active');
+    answers[`PUT ${Q}/profiles/3/media-type`] = { success: true, id: 3, media_type: null };
+    fireEvent.click(q('[data-vq-used-for-pick="both"]'));
+    await waitFor(() =>
+      expect(sent('PUT', `${Q}/profiles/3/media-type`)[1]).toEqual({ media_type: null }),
+    );
+  });
+
   it("a kind's default saves on its own and says so", async () => {
     answers[`POST ${Q}/defaults`] = { movie: 3, show: 3 };
     render(<VideoQualitySections />);

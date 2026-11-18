@@ -595,12 +595,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                         </label>`}
                         ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. You can still see what's here and what you already have. Ask your admin if you'd like it.</p>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
-                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                    <button class="download-control-btn" data-request-action id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
                         ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
+                    <span class="music-asks-left" data-asks-left aria-live="polite"></span>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
                     </button>
@@ -618,6 +620,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     // Quality Profile selector for this acquisition (P1-01).
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
+    // a profile that asks first sees what's left of its limit (#2166)
+    if (typeof window.fillMusicAsksLeft === 'function') window.fillMusicAsksLeft(modal);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -6669,134 +6673,9 @@ const _gsState = {
 // Shared source-picker controller — built on DOM-ready in `_doInit`.
 let _gsController = null;
 
-(function initGlobalSearch() {
-    // Defer init until DOM is ready
-    const _doInit = () => {
-        const bar = document.getElementById('gsearch-bar');
-        const input = document.getElementById('gsearch-input');
-        const results = document.getElementById('gsearch-results');
-        if (!input || !bar || !results) return;
-
-        // Build the stable results-panel structure up front so the controller
-        // has a sourceRow element to render into on its first _notify().
-        results.innerHTML = `
-            <div class="gsearch-source-row" id="gsearch-source-row"></div>
-            <div class="gsearch-fallback-banner hidden" id="gsearch-fallback-banner"></div>
-            <div id="gsearch-body"></div>
-        `;
-
-        _gsController = createSearchController({
-            sourceRowElement: document.getElementById('gsearch-source-row'),
-            iconClassPrefix: 'gsearch',
-            onStateChange: _gsRenderFromState,
-            onSoulseekSelected: (query) => _gsNavigateToSearchPage(query, 'soulseek'),
-            onUnconfiguredClick: (src) => {
-                _gsDeactivate();
-                openSettingsForSource(src);
-            },
-        });
-
-        bar.addEventListener('click', () => input.focus());
-
-        input.addEventListener('focus', () => {
-            bar.classList.add('active');
-            const aura = document.getElementById('gsearch-aura');
-            if (aura) aura.classList.add('active');
-            _gsState.active = true;
-            const shortcut = document.getElementById('gsearch-shortcut');
-            if (shortcut) shortcut.style.display = 'none';
-            // Always redraw on focus so the source icon row is current
-            // (cache dots, active state, etc.). init() is a no-op after the
-            // first call — safe to invoke on every focus.
-            _gsController.init().then(() => _gsRenderFromState(_gsController.state));
-        });
-
-        // No blur handler — closing is handled by click-outside and Escape only
-        // This prevents tab switching and result clicks from closing the panel
-
-        const clearBtn = document.getElementById('gsearch-clear');
-
-        input.addEventListener('input', () => {
-            const q = input.value.trim();
-            if (clearBtn) clearBtn.style.display = q.length > 0 ? '' : 'none';
-            if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
-            if (q.length < 2) { _gsHideResults(); return; }
-            // 600ms (was 300) — coalesce a name being typed into one search
-            // instead of one external-API search per letter (#751). Enter still
-            // fires immediately via the keydown handler.
-            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 600);
-        });
-
-        if (clearBtn) {
-            clearBtn.addEventListener('click', e => {
-                e.stopPropagation();
-                input.value = '';
-                clearBtn.style.display = 'none';
-                // Drop cache so the next search starts clean, but don't
-                // auto-fire a fetch for an empty query.
-                if (_gsController) {
-                    _gsController.state.query = '';
-                    _gsController.state.sources = {};
-                    _gsController.state.fallbacks = {};
-                    _gsController.state.loadingSources = new Set();
-                    _gsController.renderSourceRow();
-                }
-                _gsHideResults();
-                input.focus();
-            });
-        }
-
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
-                const q = input.value.trim();
-                if (q.length >= 2) _gsController.submitQuery(q);
-            } else if (e.key === 'Escape') {
-                _gsDeactivate();
-                input.blur();
-            }
-        });
-
-        // Keyboard shortcuts — never summon the (music-only) global search on the video side.
-        document.addEventListener('keydown', e => {
-            if (document.body.getAttribute('data-side') === 'video') return;
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
-            if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
-        });
-
-        // Click outside to close — uses delayed check because tab clicks replace DOM
-        document.addEventListener('click', e => {
-            if (!_gsState.active) return;
-            // Skip if click was recent interaction with search system (within 100ms of a switch)
-            if (_gsState._lastInteraction && Date.now() - _gsState._lastInteraction < 200) return;
-            setTimeout(() => {
-                if (!_gsState.active) return;
-                const freshBar = document.getElementById('gsearch-bar');
-                const freshResults = document.getElementById('gsearch-results');
-                const target = e.target;
-                if (freshBar?.contains(target) || freshResults?.contains(target)) return;
-                // The media player (mini bar + expanded now-playing modal)
-                // floats above the page. Clicking it — e.g. opening the full
-                // modal from the mini player, or anything inside that modal —
-                // must NOT tear down the global search results (#732).
-                if (target.closest && target.closest('#media-player, #np-modal-overlay')) return;
-                _gsDeactivate();
-            }, 100);
-        });
-
-        // Collapse on sidebar navigation + hide on downloads page
-        document.addEventListener('click', e => {
-            if (e.target.closest('.sidebar-link, .nav-item, .back-btn')) {
-                if (_gsState.active) _gsDeactivate();
-                // Check after navigation which page we're on
-                setTimeout(_gsUpdateVisibility, 200);
-            }
-        });
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { _doInit(); _gsUpdateVisibility(); });
-    else { _doInit(); setTimeout(_gsUpdateVisibility, 500); }
-})();
+// initGlobalSearch went with the floating search bar's markup. it bound
+// Ctrl/Cmd K and / on every page; Ctrl/Cmd K is the help palette's now
+// (features/help/host.tsx), which also hands a name to the Search page.
 
 // On load, seed the overlay-apply + collection-sync tasks so the bell reflects a
 // job that was already running before this page connected (the socket keeps them
@@ -7429,31 +7308,28 @@ async function showVersionInfo() {
         } catch (e) { /* ignore */ }
     }
 
-    // Build version data straight from helper.js — single source of truth.
-    // No backend round-trip; the changelog content is shipped in the same
-    // bundle the browser already loaded.
-    const version = (typeof _getCurrentVersion === 'function')
-        ? _getCurrentVersion()
-        : (btn ? btn.textContent.trim().replace('v', '') : '');
-    const sections = (typeof VERSION_MODAL_SECTIONS !== 'undefined')
-        ? VERSION_MODAL_SECTIONS
-        : [];
+    // The notes come from the one release notes file
+    // (webui/src/features/help/release-notes.ts), which the React bundle
+    // publishes as window.SoulSyncReleaseNotes. The help sheet's What's new
+    // reads the same file, so a release is written once.
+    const version = btn ? btn.textContent.trim().replace(/^v/, '') : '';
+    const notes = window.SoulSyncReleaseNotes;
+    let sections = [];
+    try {
+        sections = notes ? notes.modalSections(version || undefined) : [];
+    } catch (e) { /* no notes: the modal still opens with its header */ }
     const versionData = {
         version,
         title: "What's New in SoulSync",
-        subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
+        subtitle: version ? `Version ${version}: latest changes` : 'Latest changes',
         sections,
     };
 
-    // The version modal shows the same What's New content the helper's badge
-    // points at — mark it seen here too, or the helper button's red dot never
-    // clears for users who read release notes this way (Kazimir's stuck dot).
+    // Reading the notes here counts as having seen them: What's new's chip in
+    // the help sheet keys off the same version (Kazimir's stuck dot).
     try {
-        if (typeof _getLatestWhatsNewVersion === 'function') {
-            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
-            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
-        }
-    } catch (e) { /* badge sync is cosmetic */ }
+        if (version) localStorage.setItem('soulsync_helper_version_seen', version);
+    } catch (e) { /* storage blocked */ }
 
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);

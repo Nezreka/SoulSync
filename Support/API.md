@@ -8,7 +8,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
 
-Alternatively, if no keys exist yet, use the bootstrap endpoint:
+Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
 ```bash
 curl -X POST http://localhost:8008/api/v1/api-keys/bootstrap \
@@ -1709,7 +1709,7 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 
 Session route (#2031). For the signed-in profile: `own_library` (the admin gave it a library of its own), `supported` (the active server can: Plex, Jellyfin, or Navidrome 0.58+), `message` (why not, or what is missing, e.g. no Navidrome login yet), `selected` (the picked library id) and `folders`: the Navidrome libraries the profile's own login sees (`getMusicFolders` as that user), each `{id, name, shared}`. `folders` is empty unless the profile has an own library on a supported server.
 
-The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type": "navidrome", "library_id": "2"}`. The id must be one the profile's own login sees and not the shared library's folder; otherwise `400`.
+The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type": "navidrome", "library_id": "2"}`. The id must be one the profile's own login sees and not the shared library's folder; otherwise `400`. For Jellyfin, `{"server_type": "jellyfin", "user_id": "..."}` must name a user the Jellyfin server lists (`400` otherwise, `503` when it can't be checked) that no other profile already is (`409`). `POST /api/profiles/me/plex-home-user` likewise answers `409` for a Plex home user another profile is linked to.
 
 `GET /api/profiles` also returns `own_library_unsupported_reason` (null when own libraries work on the active server). Turning a profile to `library_mode: "own"` on Navidrome needs Navidrome 0.58+ and the shared library's music folder picked in Settings.
 
@@ -2455,6 +2455,15 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 #### `GET /api/v1/video/downloads/history`
 
+#### Who may do what on the video downloads (web UI session API)
+
+- `GET /api/video/downloads/active`, `/downloads/history` and `/downloads/status?id=`: a member gets the grabs they started, an admin everyone's. Queue rows carry `can_cancel`.
+- `POST /api/video/downloads/cancel`: an admin any download, a member only one they started (`403` otherwise). An automatic grab has no owner, so it's the admin's.
+- `POST /downloads/clear`, `/downloads/remove`, `/downloads/recycle/restore`, `/downloads/recycle/purge`, `/downloads/history/clear`, `DELETE /downloads/history/{id}`, `POST /scan/request`, `/scan/stop`, `/scan/server`, and writes to `/discover/languages` and `/discover/providers-pref`: admin only.
+- `POST /youtube/follow`, `/youtube/playlist/follow`, `/youtube/subscriptions/import` and `/youtube/channel/{id}/settings`: need download rights.
+- A kids profile's rating cap holds on requests, wishlist and watchlist adds, manual search and grab, and the title reads (acquisition, history, title status, posters).
+- The video request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back.
+
 #### Release ranking (web UI session API)
 
 The video search the web UI runs (`POST /api/video/downloads/search`, `/downloads/search/start` and `GET /downloads/search/poll`) returns each result with:
@@ -2585,7 +2594,7 @@ Revoke an API key by its UUID.
 
 #### `POST /api/v1/api-keys/bootstrap`
 
-Generate the first API key when none exist. **No authentication required.** Returns `403` if keys already exist.
+Generate the first API key when none exist. No API key needed, but the caller must be the admin: a signed-in admin session, or any request on a single-profile install with no login or launch PIN. Returns `403` if keys already exist or the caller isn't the admin.
 
 ```json
 {
@@ -2877,4 +2886,4 @@ curl -H "Authorization: Bearer sk_..." \
 | GET | `/api-keys` | List API keys |
 | POST | `/api-keys` | Generate new key |
 | DELETE | `/api-keys/<id>` | Revoke key |
-| POST | `/api-keys/bootstrap` | Bootstrap first key (no auth) |
+| POST | `/api-keys/bootstrap` | Bootstrap first key (no key, admin only) |

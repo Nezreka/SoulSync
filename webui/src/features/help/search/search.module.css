@@ -1,0 +1,324 @@
+/* help search: the Ctrl K palette and the inline results' extras
+   (scrap/help/mockup.html, "Ctrl K search"). tokens only, like the sheet:
+   the css budget test counts literals. */
+
+/* ── matched text ── */
+
+.mark {
+  padding: 0 1px;
+  border-radius: var(--radius-xs);
+  background: rgba(var(--accent-rgb), 0.22);
+  color: var(--text-bright);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── the palette ── */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  /* the floating buttons sit at --z-float; later in the page, this covers them */
+  z-index: var(--z-float);
+  background: var(--black-a60);
+  backdrop-filter: blur(3px);
+  transition: opacity var(--dur-base) var(--ease-standard);
+}
+
+.scrim[data-starting-style],
+.scrim[data-ending-style] {
+  opacity: 0;
+}
+
+.viewport {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-float);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+  pointer-events: none;
+}
+
+.pal {
+  display: flex;
+  flex-direction: column;
+  width: min(660px, 100%);
+  max-height: min(680px, 80vh);
+  overflow: hidden;
+  border-radius: var(--radius-sheet);
+  outline: none;
+  background: var(--help-sheet);
+  box-shadow:
+    0 30px 80px var(--black-a60),
+    0 0 0 1px var(--white-a07);
+  color: var(--text-bright);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: auto;
+  transition:
+    opacity var(--dur-moderate) var(--ease-emphasized),
+    transform var(--dur-slow) var(--ease-emphasized);
+}
+
+.pal[data-starting-style],
+.pal[data-ending-style] {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.985);
+}
+
+.palIn {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 58px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--white-a06);
+  color: var(--white-a55);
+}
+
+.palInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text-bright);
+  font-family: inherit;
+  font-size: 17px;
+}
+
+.esc {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.esc:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.7);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.palInput::placeholder {
+  color: var(--white-a40);
+}
+
+.palInput::-webkit-search-cancel-button {
+  display: none;
+}
+
+.palList {
+  flex: 1;
+  min-height: 0;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.pg {
+  padding: 14px 10px 5px;
+  color: var(--white-a55);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pr {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.pr[data-active] {
+  background: var(--white-a08);
+}
+
+.prIcon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
+  color: var(--white-a70);
+}
+
+.pr[data-active] .prIcon {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent);
+}
+
+.prT {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.prSub {
+  margin-left: 8px;
+  color: var(--white-a55);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.prR {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--white-a40);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.palFoot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--white-a06);
+  color: var(--white-a55);
+  font-size: 11.5px;
+}
+
+.footKeys {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.footNote {
+  margin-left: auto;
+}
+
+.empty {
+  padding: 26px 12px 18px;
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.emptyText {
+  margin: 4px 0 0;
+  color: var(--white-a55);
+  font-size: 12.5px;
+}
+
+.reading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--white-a55);
+  font-size: 12px;
+}
+
+.reading::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  animation: helpSearchPulse 1.2s var(--ease-standard) infinite;
+}
+
+@keyframes helpSearchPulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ── inline results in the sheet ── */
+
+.inlineGroup {
+  margin-bottom: 4px;
+}
+
+.inlineEmpty {
+  margin: 4px 4px 12px;
+  color: var(--white-a70);
+  font-size: 13px;
+}
+
+/* ── phone ── */
+
+@media (max-width: 768px) {
+  .viewport {
+    padding: 12px 12px 0;
+  }
+
+  .pal {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .palIn {
+    height: 56px;
+  }
+
+  .palInput {
+    /* 16px keeps ios from zooming into the field */
+    font-size: 16px;
+  }
+
+  .pr {
+    height: 52px;
+  }
+
+  .palFoot {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .pal {
+    transition: none;
+  }
+
+  .pal[data-starting-style],
+  .pal[data-ending-style] {
+    transform: none;
+  }
+
+  .reading::before {
+    animation: none;
+  }
+}

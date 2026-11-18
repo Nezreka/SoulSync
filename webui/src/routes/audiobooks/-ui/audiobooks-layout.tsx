@@ -1,6 +1,8 @@
 import { Outlet } from '@tanstack/react-router';
 
 import { MediaPlayerBar } from '@/components/media-player-bar/media-player-bar';
+import { NotPartOfProfile } from '@/components/not-part-of-profile/not-part-of-profile';
+import { useHasAccess } from '@/platform/shell/my-permissions';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { sampleStreamUrl } from '../-audiobooks.api';
@@ -17,6 +19,7 @@ import styles from './audiobooks-page.module.css';
 export function AudiobooksLayout() {
   useReactPageShell('audiobooks');
   const { playback, togglePlay, closePlayer } = useAudiobookContext();
+  const booksOn = useHasAccess('books');
 
   return (
     <div
@@ -39,7 +42,9 @@ export function AudiobooksLayout() {
         />
       )}
       <div className="pgf-page">
-        <Outlet />
+        {/* reached by a link after an admin turned books off (#2166): a calm
+            card, not a page of controls the server refuses */}
+        {booksOn ? <Outlet /> : <NotPartOfProfile media="books" />}
       </div>
     </div>
   );

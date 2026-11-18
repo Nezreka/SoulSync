@@ -571,11 +571,11 @@ def _ensure_channel_assets(final_video: str, fields: Dict[str, Any], settings: D
 
 
 def _publish_event(event_type: str, dl: Dict[str, Any], error: Any = None,
-                   dest_path: Any = None) -> None:
+                   dest_path: Any = None, owners: Any = None) -> None:
     """Relay a terminal YouTube outcome to the automation event bus — same
     variable shape as the movie/TV monitor's payload (best-effort)."""
     try:
-        from core.video.download_events import publish
+        from core.video.download_events import owned, publish
         f = youtube_fields_from_download(dl)
         data = {"kind": "youtube", "title": f.get("title") or dl.get("title") or "",
                 "year": str(f.get("published_at") or "")[:4],
@@ -585,7 +585,8 @@ def _publish_event(event_type: str, dl: Dict[str, Any], error: Any = None,
                 "source": "youtube", "dest_path": dest_path or ""}
         if error is not None:
             data["error"] = str(error)
-        publish(event_type, data)
+        # who grabbed it, else whose wishlist wanted it
+        publish(event_type, owned(data, owners))
     except Exception:   # noqa: BLE001 - events must never disturb the pipeline
         logger.exception("youtube download %s: event publish failed", dl.get("id"))
 
@@ -607,8 +608,10 @@ def process_youtube_download(
     postprocess_hook: Optional[Callable] = None,
     cookie_opts: Optional[dict] = None,
     now: Optional[Callable[[], str]] = None,
+    owners: Any = None,
 ) -> Dict[str, Any]:
     """Fulfil one queued YouTube download. PURE — all I/O injected.
+    ``owners``: whose download it is, for the events (read by the caller).
 
     Pipeline (same shape as the movie/TV lane): download into ``stage_dir`` (the shared
     download folder) → flip to 'importing' → MOVE into the organised library path → completed.
@@ -648,7 +651,7 @@ def process_youtube_download(
         completed = now()
         update_row(dl.get("id"), status="failed", error=err, completed_at=completed)
         archive(dl, {"status": "failed", "error": raw, "completed_at": completed})
-        _publish_event("video_download_failed", dl, error=err)
+        _publish_event("video_download_failed", dl, error=err, owners=owners)
         return {"status": "failed", "error": err}
 
     # The extractor's metadata is authoritative: a titleless row re-plans its
@@ -694,7 +697,7 @@ def process_youtube_download(
             completed = now()
             update_row(dl.get("id"), status="import_failed", error=err, completed_at=completed)
             archive(dl, {"status": "import_failed", "error": err, "completed_at": completed})
-            _publish_event("video_import_failed", dl, error=err, dest_path=staged_path)
+            _publish_event("video_import_failed", dl, error=err, dest_path=staged_path, owners=owners)
             logger.exception("youtube download %s: import move failed", dl.get("id"))
             return {"status": "import_failed", "error": err}
         dest_path = final_path
@@ -710,7 +713,7 @@ def process_youtube_download(
                dest_path=dest_path, completed_at=completed,
                filename=dest.get("filename"), title=dl.get("title"))
     archive(dl, {"status": "completed", "dest_path": dest_path, "completed_at": completed})
-    _publish_event("video_download_completed", dl, dest_path=dest_path)
+    _publish_event("video_download_completed", dl, dest_path=dest_path, owners=owners)
     try:
         clear_wishlist(dl.get("media_id"))
     except Exception:   # noqa: BLE001 - unwish is best-effort; the file is already in place
@@ -870,8 +873,9 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         dl_root = str(config_manager.get("soulseek.download_path", "") or "").strip()
         stage_dir = os.path.join(dl_root, "youtube") if dl_root else None
 
+        from core.video.download_events import download_owners
         process_youtube_download(
-            dl, profile=profile, settings=settings,
+            dl, profile=profile, settings=settings, owners=download_owners(db, dl),
             update_row=db.update_video_download, archive=_archive,
             clear_wishlist=lambda vid: db.remove_youtube_from_wishlist(
                 "video", vid, profile_id=None),  # landed file satisfies every profile

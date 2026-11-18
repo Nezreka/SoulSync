@@ -424,6 +424,9 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
               <button
                 type="button"
                 className={styles.emptyAction}
+                // a wished book is grabbed by the wishlist pass: hidden for a
+                // profile that can't get books, like the grab buttons here
+                data-books-action
                 onClick={() => void wishlist()}
                 disabled={wishlisting}
               >
@@ -629,7 +632,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                       <button
                         type="button"
                         className={styles.releaseGrab}
-                        data-download-action=""
+                        data-books-action=""
                         onClick={() => void grab(release)}
                         disabled={Boolean(grabbing)}
                       >

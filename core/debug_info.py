@@ -122,15 +122,22 @@ def _safe_check(fn, default=False):
 
 
 def get_debug_info():
-    """Collect system diagnostics for troubleshooting support requests."""
+    """GET /api/debug-info: the diagnostics as JSON (Copy Debug Info)."""
+    log_lines = request.args.get('lines', 20, type=int)
+    log_lines = max(10, min(log_lines, 500))
+    log_source = request.args.get('log', 'app')
+    return jsonify(collect_debug_info(log_lines=log_lines, log_source=log_source))
+
+
+def collect_debug_info(log_lines=20, log_source='app'):
+    """Collect system diagnostics for troubleshooting support requests.
+
+    One source for /api/debug-info and the help sheet's Report a problem
+    bundle (core/help/bundle.py). Log lines are redacted on the way out."""
     import sys
     import psutil
     import time
     from datetime import timedelta
-
-    log_lines = request.args.get('lines', 20, type=int)
-    log_lines = max(10, min(log_lines, 500))
-    log_source = request.args.get('log', 'app')
 
     info = {}
 
@@ -377,12 +384,17 @@ def get_debug_info():
         info['cpu_percent'] = 'unknown'
     info['thread_count'] = process.num_threads()
 
-    # Log lines
+    # Log lines. read as a tail (never the whole 10 MB file) and each line
+    # goes through the same redaction the log formatter uses: these are pasted
+    # into public issues, and lines written before the formatter redacted
+    # (or by a handler that doesn't) carried api keys in their urls.
+    from core.help.logs import list_logs, tail_lines
+    log_dir = Path(_log_dir) if _log_dir is not None else Path(_log_path).parent
     log_map = {
         'app': Path(_log_path),
-        'acoustid': _log_dir / 'acoustid.log',
-        'post_processing': _log_dir / 'post_processing.log',
-        'source_reuse': _log_dir / 'source_reuse.log',
+        'acoustid': log_dir / 'acoustid.log',
+        'post_processing': log_dir / 'post_processing.log',
+        'source_reuse': log_dir / 'source_reuse.log',
     }
     log_path = log_map.get(log_source, log_map['app'])
     info['log_source'] = log_source
@@ -390,24 +402,23 @@ def get_debug_info():
     info['recent_logs'] = []
     if os.path.exists(log_path):
         try:
-            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                lines = f.readlines()
-                info['recent_logs'] = [line.rstrip() for line in lines[-log_lines:]]
+            info['recent_logs'] = tail_lines(log_path, log_lines)
         except Exception:
             info['recent_logs'] = ['(could not read log file)']
 
-    # Available log files
+    # Available log files (the configured log folder, not ./logs)
     info['available_logs'] = []
-    logs_dir = 'logs'
-    if os.path.isdir(logs_dir):
-        for fname in sorted(os.listdir(logs_dir)):
-            if fname.endswith('.log'):
-                fpath = os.path.join(logs_dir, fname)
-                size_kb = os.path.getsize(fpath) / 1024
-                info['available_logs'].append({
-                    'name': fname.replace('.log', ''),
-                    'file': fname,
-                    'size': f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB",
-                })
+    try:
+        for group in list_logs(log_dir, Path(_log_path)):
+            current = next((f for f in group['files'] if not f['backup']), None)
+            if current is None:
+                continue
+            info['available_logs'].append({
+                'name': group['name'],
+                'file': current['name'],
+                'size': current['size'],
+            })
+    except Exception as e:
+        logger.debug("listing log files failed: %s", e)
 
-    return jsonify(info)
+    return info

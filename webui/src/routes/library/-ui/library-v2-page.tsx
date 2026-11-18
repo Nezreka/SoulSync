@@ -37,7 +37,7 @@ import {
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -210,6 +210,7 @@ import { WatchlistAddModal } from '../../artist-detail/-ui/watchlist-add-modal';
 import { AlbumVersionsModal } from './album-versions-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { ArtistHeroVideo } from './artist-hero-video';
+import { ArtistNamingSetting } from './artist-naming-setting';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
@@ -2171,9 +2172,14 @@ function LinkArtistAliasModal({
 export function ArtistSettingsModal({
   artist,
   onClose,
+  onPreviewRename,
+  onPreviewRetag,
 }: {
   artist: LibraryV2ArtistDetail;
   onClose: () => void;
+  /** #2165: the naming setting's way to bring existing files in line */
+  onPreviewRename?: () => void;
+  onPreviewRetag?: () => void;
 }) {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
@@ -2493,6 +2499,12 @@ export function ArtistSettingsModal({
           </div>
 
           <aside className={ls.stack}>
+            <ArtistNamingSetting
+              artistId={artist.id}
+              canWrite={canWrite}
+              onPreviewRename={onPreviewRename}
+              onPreviewRetag={onPreviewRetag}
+            />
             <ArtistSettingsIdentity artist={artist} watchlist={watchlist} />
             <AudiobookRouteSetting name={artist.name} />
           </aside>
@@ -8688,6 +8700,8 @@ function ProviderArtistActions({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // ask first says Request; can't request (#2166) has no button at all
+  const musicGet = useMusicGet();
   const watchlistId = watchlist?.id ?? null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
@@ -8736,14 +8750,14 @@ function ProviderArtistActions({
           {busy ? 'Loading…' : watching ? 'Watching' : 'Add to Watchlist'}
         </button>
       ) : null}
-      {payload.discography ? (
+      {payload.discography && !musicGet.cantRequest ? (
         <button
           type="button"
           className={`library-artist-download-btn ${styles.heroSecondary}`}
           onClick={() => setDownloading(true)}
         >
           <SvgIcon name="download" />
-          {profileAsksFirst() ? 'Request Discography' : 'Download Discography'}
+          {musicGet.asksFirst ? 'Request Discography' : 'Download Discography'}
         </button>
       ) : null}
       {downloading && payload.discography ? (
@@ -9253,7 +9267,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                       <ActionButton
                         icon="settings"
                         label="Artist Settings"
-                        title="Quality profile, Watchlist, new releases and audiobook filing"
+                        title="Folder and tag name, quality profile, Watchlist, new releases and audiobook filing"
                         requiresWrite={false}
                         onClick={() => setShowArtistSettings(true)}
                       />,
@@ -9585,7 +9599,18 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
           {showArtistSettings ? (
-            <ArtistSettingsModal artist={artist} onClose={() => setShowArtistSettings(false)} />
+            <ArtistSettingsModal
+              artist={artist}
+              onClose={() => setShowArtistSettings(false)}
+              onPreviewRename={() => {
+                setShowArtistSettings(false);
+                setShowReorganizeAll(true);
+              }}
+              onPreviewRetag={() => {
+                setShowArtistSettings(false);
+                setRetagTarget({ entity: 'artists', id: artistId, title: artist.name });
+              }}
+            />
           ) : null}
           {showViewSettings ? (
             <ViewSettingsDialog onClose={() => setShowViewSettings(false)} />
@@ -14650,7 +14675,9 @@ export function TrackInfoPanel({
   });
 
   const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
-  const canBlacklist = Boolean(dl?.source_username && dl?.source_filename);
+  // the download blacklist is install-wide, so it's the admin's to change
+  const canWrite = useLibraryV2CanWrite();
+  const canBlacklist = canWrite && Boolean(dl?.source_username && dl?.source_filename);
   const actionRow =
     canBlacklist || actions ? (
       <div className={styles.modalActions}>

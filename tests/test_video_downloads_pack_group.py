@@ -109,12 +109,14 @@ def test_cancelling_a_batch_still_cancels_the_pack():
     """The cancel handler harvests ids from the group BODY. Moving the pack to the
     head took it out of the body — so a batch whose episodes don't exist yet (the
     pack is still downloading) would have cancelled nothing at all."""
-    assert "if (pack && packActive && !ids.includes(pack.id)) ids.push(pack.id);" in _LIST
+    # and only one the viewer may cancel (a member: their own grab, nov 17 S8)
+    assert "if (pack && packActive && mayCancel(pack) && !ids.includes(pack.id)) ids.push(pack.id);" in _LIST
 
 
 def test_the_cancel_button_appears_while_only_the_pack_is_running():
     # the cancel lives in the group menu now
-    assert "...(act || packActive" in _LIST
+    assert "...((act || packActive) && cancellable" in _LIST
+    assert "Boolean(pack && packActive && mayCancel(pack))" in _LIST
 
 
 def test_the_head_alone_keeps_the_group_visible():

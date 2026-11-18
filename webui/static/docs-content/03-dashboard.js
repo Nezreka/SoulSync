@@ -66,7 +66,7 @@ The floating **"Search everything…"** bar that used to sit above the media pla
 
 - **Search page** — the full search experience: Enhanced Search with categorized results (artists, albums, tracks), download modals, and candidate selection. See [Music Downloads](#search).
 - **Docs search** — press \`/\` on this Help page to search all documentation.
-- **Helper search** — press \`Ctrl+K\` anywhere to search help topics and jump straight to the right docs page.
+- **Ctrl K** anywhere opens one search for help articles, settings, pages and actions. Type a name and its last row offers **Search music for** it. See [Search and Ctrl K](#ts-search).
 
 > [!TIP]
 > Downloads started from the Search page behave exactly like downloads started anywhere else — they appear in Active Downloads with full progress and retry controls.

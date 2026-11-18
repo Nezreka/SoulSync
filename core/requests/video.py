@@ -112,17 +112,19 @@ def sweep_arrivals(db, notify: Callable[[int, str, str], Any]) -> int:
         return 0
     marked = db.mark_video_requests_available([r["id"] for r in arrived])
     try:      # 'Request Arrived' automation trigger, once per title
-        from core.video.download_events import publish
+        from core.video.download_events import owned, publish
         seen = set()
         for r in arrived:
             key = (r.get("kind"), r.get("tmdb_id"))
             if key in seen:
                 continue
             seen.add(key)
-            publish("video_request_available", {
+            askers = [x for x in arrived if (x.get("kind"), x.get("tmdb_id")) == key]
+            # everyone who asked for it, whoever's request happened to notice
+            publish("video_request_available", owned({
                 "kind": r.get("kind") or "", "title": r.get("title") or "",
-                "requester": ", ".join(sorted({x.get("requester_name") or "" for x in arrived
-                                               if (x.get("kind"), x.get("tmdb_id")) == key} - {""}))})
+                "requester": ", ".join(sorted({x.get("requester_name") or "" for x in askers} - {""}))},
+                [x.get("profile_id") for x in askers]))
     except Exception:  # noqa: BLE001, S110 - events never undo the stamp
         pass
     for r in arrived:

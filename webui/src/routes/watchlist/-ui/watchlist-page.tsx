@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useFeatureOn } from '@/platform/features';
+import { useHasAccess } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
@@ -204,11 +205,14 @@ export function WatchlistPage() {
   );
 
   const isLabelsTab = search.tab === 'labels';
-  // podcasts / audiobooks switched off (#1909) drop their tab
-  const podcastsOn = useFeatureOn('podcasts');
-  const audiobooksOn = useFeatureOn('audiobooks');
-  const isPodcastsTab = search.tab === 'podcasts';
-  const isAudiobooksTab = search.tab === 'audiobooks';
+  // podcasts / audiobooks switched off (#1909) drop their tab. one this
+  // profile can't use at all (#2166) is gone even by link: the artists show
+  const podcastsAllowed = useHasAccess('podcasts');
+  const audiobooksAllowed = useHasAccess('books');
+  const podcastsOn = useFeatureOn('podcasts') && podcastsAllowed;
+  const audiobooksOn = useFeatureOn('audiobooks') && audiobooksAllowed;
+  const isPodcastsTab = search.tab === 'podcasts' && podcastsAllowed;
+  const isAudiobooksTab = search.tab === 'audiobooks' && audiobooksAllowed;
 
   // The header chip counts labels or podcasts while their tab is open.
   // `enabled` keeps inactive tabs from paying for unnecessary round trips.
