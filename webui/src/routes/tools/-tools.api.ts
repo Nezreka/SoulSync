@@ -17,6 +17,7 @@
  */
 
 import type { FindingGroup, FindingTypeInfo } from './-tools.groups';
+import type { KeepBestSummary } from './-tools.keep-best-bulk';
 import type {
   BackupListResponse,
   BulkFixStatus,
@@ -424,6 +425,9 @@ export interface FixResult {
   /** an orphan delete stopped because a library track shares its filename. */
   needs_confirm?: boolean;
   library_paths?: string[];
+  /** #2179: a bulk Keep Best left this duplicate open for a person, and why
+   *  (same_recording, playlist, protected) */
+  needs_you?: string;
 }
 
 /**
@@ -521,6 +525,36 @@ export async function fetchKeepBestPreview(
     );
     if (response.status >= 500) return null;
     return (await response.json()) as KeepBestPreview;
+  } catch {
+    return null;
+  }
+}
+
+/** what a Keep Best all over the open duplicate findings in this view would
+ *  do before it runs: how many go through and how many need you, with moving
+ *  playlist entries off and on (#2179). null when the call failed */
+export async function fetchKeepBestSummary(filters?: {
+  jobId?: string;
+  severity?: string;
+}): Promise<KeepBestSummary | null> {
+  const params = new URLSearchParams();
+  if (filters?.jobId) params.set('job_id', filters.jobId);
+  if (filters?.severity) params.set('severity', filters.severity);
+  const query = params.toString();
+  try {
+    const response = await fetch(
+      repairUrl(`/findings/keep-best-summary${query ? `?${query}` : ''}`),
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as Partial<KeepBestSummary> & { success?: boolean };
+    if (data.success !== true) return null;
+    return {
+      total: data.total || 0,
+      ready: data.ready || 0,
+      ready_with_move: data.ready_with_move || 0,
+      needs_you: data.needs_you || {},
+      needs_you_with_move: data.needs_you_with_move || {},
+    };
   } catch {
     return null;
   }

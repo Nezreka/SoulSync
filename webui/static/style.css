@@ -72511,6 +72511,16 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-status-badge.resolved { color: var(--accent-light); }
 /* #2046 the album or artist is reviewed and locked: a bulk fix passes it over */
 #tools-page .repair-finding-status-badge.locked { color: var(--accent-light); }
+/* #2179 a duplicate Keep Best all can't act on by itself, and why */
+#tools-page .repair-finding-status-badge.needs-you { background: rgba(var(--warning-rgb), 0.12); color: var(--warning); }
+#tools-page .repair-finding-needs {
+    font-size: 13px;
+    color: var(--warning);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#tools-page .repair-finding-card.expanded .repair-finding-needs { white-space: normal; }
 #tools-page .repair-finding-sub {
     font-size: 14px;
     color: var(--text-2);

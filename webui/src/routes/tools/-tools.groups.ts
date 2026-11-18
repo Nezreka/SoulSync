@@ -36,6 +36,8 @@ export interface FindingGroup {
    *  edits" are two different requests, and the choice has to be made before
    *  the click — not after walking every finding's diff. */
   manual_conflicts?: number;
+  /** #2179: open duplicates a Keep Best all leaves for a person */
+  needs_you?: number;
   /** rows per status per severity, e.g. {pending: {warning: 3, error: 1}}.
    *  what the severity filter reads: severity_max is the worst pending row
    *  only, so it hid resolved errors and pending warnings (review 5 R5-L-3) */
