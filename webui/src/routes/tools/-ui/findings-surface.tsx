@@ -1738,6 +1738,7 @@ export function FindingsSurface({
                   onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
+                  onChanged={refreshAll}
                 />
               ))
             )}
@@ -2198,6 +2199,7 @@ function FindingCard({
   onUndo,
   onReidentify,
   onInspectRedownload,
+  onChanged,
 }: {
   finding: RepairFinding;
   video?: boolean;
@@ -2221,6 +2223,8 @@ function FindingCard({
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
+  /** something changed the finding outside a fix (a cover picked for it) */
+  onChanged?: () => void;
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
@@ -2249,7 +2253,9 @@ function FindingCard({
         </div>
         <FindingArt
           album={finding.album_thumb_url}
-          artist={finding.artist_thumb_url}
+          // #2169: a cover finding with no cover shows an empty tile, never
+          // the artist's photo standing in for one
+          artist={finding.finding_type === 'missing_cover_art' ? null : finding.artist_thumb_url}
           file={finding.entity_type === 'file' || finding.entity_type === 'folder'}
         />
         <div className="repair-finding-content">
@@ -2440,6 +2446,7 @@ function FindingCard({
                 onApplyCoverArt={onApplyCoverArt}
                 onUndo={onUndo}
                 onFixAction={(target, action) => void onFix(target, action)}
+                onChanged={onChanged}
               />
             )
           ) : null}

@@ -3117,6 +3117,24 @@ describe('a finding row shows what it is about', () => {
     expect(card.querySelector('.repair-art.empty')).not.toBeNull();
     expect(card.querySelector('.repair-art img')).toBeNull();
   });
+
+  it("a cover finding with no cover never shows the artist's photo in its place (#2169)", async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          finding_type: 'missing_cover_art',
+          entity_type: 'album',
+          artist_thumb_url: '/art/artist.jpg',
+          details: { album_title: 'Punkrocker', db_missing: true },
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art img')).toBeNull();
+    expect(card.querySelector('.repair-art.empty')).not.toBeNull();
+  });
 });
 
 describe('one type open is the whole view', () => {

@@ -5985,6 +5985,61 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_artist_art',
                 'message': 'Applied artist image'}
 
+    def _finding_details(self, finding_id: int, finding_type: str) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT details_json FROM repair_findings WHERE id = ? AND finding_type = ?",
+                (int(finding_id), finding_type)).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0] or '{}') or {}
+        except (TypeError, ValueError):
+            return {}
+
+    def cover_finding_state(self, finding_id: int) -> Optional[dict]:
+        """#2169: a cover finding's three places as they are now, the found
+        cover, and what Apply Art would do in each"""
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_state
+        return cover_state(self.db, self._config_manager, finding_id, details)
+
+    def cover_finding_image(self, finding_id: int, place: str) -> Optional[bytes]:
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_image
+        return cover_image(self.db, self._config_manager, details, place)
+
+    def _cover_bytes_for_apply(self, album_id, found_url, library_has):
+        """the exact cover apply writes into files and folders: what the
+        library shows when it has a saved cover, else the found image. None
+        leaves the older lookup in charge"""
+        try:
+            if library_has:
+                from contextlib import closing
+                from core.library2.artwork import build_artwork
+                with closing(self.db._get_connection()) as conn:
+                    conn.row_factory = sqlite3.Row
+                    path = build_artwork(self.db, conn, self._config_manager, 'album', int(album_id))
+                if path and os.path.isfile(path):
+                    with open(path, 'rb') as handle:
+                        return handle.read() or None
+                return None
+            if found_url:
+                from core.library2.artwork import _download_remote_artwork
+                return _download_remote_artwork(found_url)
+        except Exception as e:  # noqa: BLE001 - the older lookup still runs
+            logger.debug("cover bytes for album %s not read: %s", album_id, e)
+        return None
+
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
         """Apply found artwork. ``_fix_action`` selects the target (Pache711):
         'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
@@ -6038,7 +6093,8 @@ class RepairWorker:
             if existing is None:
                 return {'success': False, 'error': 'Album not found in database'}
 
-            locked = bool(existing[1]) and bool((existing[0] or '').strip())
+            library_has = bool((existing[0] or '').strip())
+            locked = bool(existing[1]) and library_has
             if locked:
                 # A manual pick outranks a repair/provider candidate. Use the
                 # chosen URL for the sidecar/embed work below as well.
@@ -6048,10 +6104,11 @@ class RepairWorker:
                     "[repair] album %s art is locked — keeping the chosen cover",
                     native_album_id,
                 )
-            elif artwork_url and (details.get('db_missing', True) or not (existing[0] or '').strip()):
+            elif artwork_url and not library_has:
                 # only when the library has no cover: a finding for a file
                 # with no embedded art replaced the album's cover with the
-                # provider's (a 360px discogs image over a good one)
+                # provider's (a 360px discogs image over a good one). judged
+                # now, not at scan time: a cover saved since then is kept
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
@@ -6123,6 +6180,12 @@ class RepairWorker:
                 msg += ' + applied artist image'
             return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
+        # #2169: the files and the folder get one cover, the one the finding
+        # showed: the library's own when it has one (a pick included), else
+        # the found one. a lookup by the art order here could embed another
+        cover_bytes = self._cover_bytes_for_apply(
+            native_album_id, artwork_url if not library_has else None, library_has)
+
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
             'artist': artist_name, 'album_artist': artist_name,
@@ -6152,7 +6215,7 @@ class RepairWorker:
         art_result = {}
         for folder, folder_files in sorted(by_folder.items()):
             folder_result = apply_art_to_album_files(
-                folder_files, metadata, album_info, folder=folder,
+                folder_files, metadata, album_info, folder=folder, image_bytes=cover_bytes,
             )
             if not art_result:
                 art_result = dict(folder_result)

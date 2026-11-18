@@ -451,6 +451,40 @@ export async function fixFinding(
   return (await response.json()) as FixResult;
 }
 
+/** one place a cover can live, and what Apply Art does there (#2169) */
+export interface CoverPlanStep {
+  place: 'library' | 'files' | 'folder';
+  action: 'write' | 'keep' | 'skip';
+  why: string;
+  count?: number;
+  file?: string;
+}
+
+/** a cover finding as it is now: the library, the files and the folder,
+ *  the found cover and its source, and what Apply Art does in each (#2169) */
+export interface CoverFindingState {
+  album_id: number;
+  library: { has: boolean; locked: boolean; url: string | null };
+  files: { with: number; without: number; unknown: number; url: string | null };
+  folder: { file: string | null; exists: boolean; url: string | null };
+  found: { url: string | null; source: string | null };
+  settings: { embed: boolean; sidecar: boolean };
+  plan: CoverPlanStep[];
+}
+
+/** null when the album left the library or the call failed: the finding
+ *  still shows what the scan saw */
+export async function fetchCoverFindingState(id: number): Promise<CoverFindingState | null> {
+  try {
+    const response = await fetch(repairUrl(`/findings/${id}/cover`));
+    if (!response.ok) return null;
+    const data = (await response.json()) as CoverFindingState & { success?: boolean };
+    return data.success === false ? null : data;
+  } catch {
+    return null;
+  }
+}
+
 /** `resolveRepairFinding`. Response ignored by the vanilla. */
 export async function resolveFinding(id: number): Promise<void> {
   await postJson(repairUrl(`/findings/${id}/resolve`));

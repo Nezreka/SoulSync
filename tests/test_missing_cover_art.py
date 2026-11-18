@@ -337,8 +337,11 @@ def test_cover_art_download_off_stops_the_sidecar_flag(monkeypatch):
 
 def test_an_artist_no_provider_id_reaches_is_found_by_name(monkeypatch):
     """3.6.1 searched artist photos by name. v2 asked by provider id only, so
-    an artist with no ids never got a photo offered."""
+    an artist with no ids never got a photo offered. #2169: only an artist
+    with no photo at all gets one suggested"""
     conn = _make_db(file_path='/music/Album/01.flac')
+    conn.execute("UPDATE lib2_artists SET image_url=''")
+    conn.commit()
     context = _make_context(conn)
     _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
     _patch_artwork(monkeypatch, album=_found(), artist=None)

@@ -57,6 +57,7 @@ import {
 // The artist-detail `enhanced` family is gone on this branch (Library v2
 // replaced it); the same helper still lives beside the sync server view.
 import { formatDurationMs } from '../../sync/-sync.server';
+import { CoverArtFinding } from './cover-art-finding';
 import { TagChangeTable } from './tag-changes';
 
 type Details = Record<string, unknown>;
@@ -426,6 +427,8 @@ export interface FindingDetailProps {
   /** fix this finding with an answer of the user's own (#2150: a split
    *  artist edited by hand, or "it's one artist") */
   onFixAction?: (finding: RepairFinding, action: string) => void;
+  /** the finding changed outside a fix (#2169: a cover picked for it) */
+  onChanged?: () => void;
 }
 
 const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
@@ -738,6 +741,7 @@ function FindingDetailBody({
   onApplyCoverArt,
   onUndo,
   onFixAction,
+  onChanged,
 }: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
@@ -1424,84 +1428,16 @@ function FindingDetailBody({
       );
     }
 
-    case 'missing_cover_art': {
-      for (const [key, label] of [
-        ['db_missing', 'In the library'],
-        ['embed_missing', 'In the audio files'],
-        ['sidecar_missing', 'In the album folder'],
-      ]) {
-        if (typeof d[key] === 'boolean')
-          rows.push([label, d[key] ? 'No cover' : 'Has a cover', d[key] ? 'warning' : undefined]);
-      }
-      pushIf(rows, d.artist, 'Artist');
-      pushIf(rows, d.album_title, 'Album');
-      pushIf(rows, d.spotify_album_id, 'Spotify ID');
-      const foundArtwork = text(d.found_artwork_url);
-      const currentArtist = text(d.artist_thumb_url);
-      const foundArtist = text(d.found_artist_url);
-      // Each found image is independently applyable (Pache711: "fix one, dismiss
-      // the other") — the right album art can be taken while a wrong artist image
-      // is skipped, or the reverse.
+    case 'missing_cover_art':
+      // #2169: the library, the files, the folder and the found cover side
+      // by side, and what Apply Art does in each
       return (
-        <>
-          {currentArtist || foundArtwork || foundArtist ? (
-            <div className="repair-finding-media">
-              {foundArtwork ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img"
-                    src={foundArtwork}
-                    alt="Found album art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">Found Album Art</span>
-                  <button
-                    className="repair-art-apply-btn"
-                    type="button"
-                    onClick={() => onApplyCoverArt(finding.id, 'album')}
-                  >
-                    Use for album
-                  </button>
-                </div>
-              ) : null}
-              {/* Current artist image — context only, no apply: it's what's there now. */}
-              {currentArtist ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img artist"
-                    src={currentArtist}
-                    alt="Current artist art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">
-                    {text(d.artist) || 'Artist'} (current)
-                  </span>
-                </div>
-              ) : null}
-              {foundArtist ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img artist"
-                    src={foundArtist}
-                    alt="Found artist art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">Found Artist Art</span>
-                  <button
-                    className="repair-art-apply-btn"
-                    type="button"
-                    onClick={() => onApplyCoverArt(finding.id, 'artist')}
-                  >
-                    Use for artist
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <DetailGrid rows={rows} />
-        </>
+        <CoverArtFinding
+          finding={finding}
+          onApplyCoverArt={onApplyCoverArt}
+          onChanged={onChanged}
+        />
       );
-    }
 
     case 'missing_lyrics':
       pushIf(rows, d.track_title, 'Track');

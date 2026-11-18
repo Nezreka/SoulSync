@@ -209,6 +209,9 @@ const provider = (id: unknown): string => {
   return PROVIDER_NAMES[key] || str(id);
 };
 
+/** a source id as people know it: 'caa' is Cover Art Archive */
+export const providerName = provider;
+
 /** the stored title without the type it repeats: "Missing lyrics: X" -> "X" */
 function withoutPrefix(title: string): string {
   const at = title.indexOf(': ');
@@ -330,13 +333,46 @@ const WRITERS: Record<string, Writer> = {
       d.sidecar_missing === true ? 'the album folder' : '',
     ].filter(Boolean);
     const source = provider(d.artwork_source);
+    // #2169: say which cover apply uses and where it goes, the same choice
+    // the fix makes: the library's own cover first, then the found one
+    const fromLibrary = d.db_missing === false;
+    const found = !fromLibrary && Boolean(d.found_artwork_url);
+    const has = fromLibrary
+      ? ' The library has a cover to copy.'
+      : found
+        ? ` ${source || 'A source'} has one.`
+        : d.sidecar_from_embedded === true
+          ? ' The audio files have one to copy.'
+          : '';
+    const embed = d.embed_missing === true;
+    const sidecar = d.sidecar_missing === true;
+    // a missing cover.jpg is written from the cover inside the files when
+    // they have one, so it says so instead of naming the source
+    const fromFiles = `writes a cover.jpg into the album folder from the cover inside the audio files`;
+    let fix: string;
+    if (fromLibrary && !embed && sidecar) {
+      fix = `${verb} ${fromFiles}.`;
+    } else if (fromLibrary) {
+      fix = `${verb} copies the library's cover into the audio files without one${
+        sidecar ? ' and a cover.jpg in the album folder' : ''
+      }.`;
+    } else if (found) {
+      const into = embed
+        ? ` and puts it in the audio files without one${sidecar ? ' and a cover.jpg in the album folder' : ''}`
+        : '';
+      fix = `${verb} saves the ${source || 'found'} cover to the library${into}.${
+        sidecar && !embed ? ` It also ${fromFiles}.` : ''
+      }`;
+    } else if (d.sidecar_from_embedded === true) {
+      fix = `${verb} ${fromFiles}.`;
+    } else {
+      fix = `${verb} fills in the cover where it is missing.`;
+    }
     return {
       title: s.album || withoutPrefix(finding.title),
       sub: s.artist,
-      problem: `${places.length ? `No cover in ${listWords(places)}.` : 'This album is missing artwork.'}${
-        d.found_artwork_url ? ` ${source || 'A source'} has one.` : ''
-      }`,
-      fix: `${verb} puts the found cover where it is missing. A cover you already have is kept.`,
+      problem: `${places.length ? `No cover in ${listWords(places)}.` : 'This album is missing artwork.'}${has}`,
+      fix: `${fix} A cover you already have is kept.`,
     };
   },
 
