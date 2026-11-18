@@ -276,6 +276,12 @@ def fresh_signup():
     keys = (PS.SIGNUP_MOVED_KEY, 'perm_signup_template')
     saved = {k: db.get_metadata(k) for k in keys}
     guest = next(t['id'] for t in db.list_permission_templates() if t['slug'] == 'guest')
+    # start clean: an earlier test's sign-in can leave a "New sign-ups" template
+    for t in db.list_permission_templates():
+        if t['name'] == PS.SIGNUP_TEMPLATE_NAME:
+            db.delete_permission_template(int(t['id']), reassign_to=guest)
+    if saved.get('perm_signup_template') and not db.get_permission_template(int(saved['perm_signup_template'])):
+        saved['perm_signup_template'] = str(guest)
     db.set_metadata('perm_signup_template', str(guest))
     db.delete_metadata(PS.SIGNUP_MOVED_KEY)
     yield db, guest

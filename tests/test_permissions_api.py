@@ -54,13 +54,24 @@ def _signup_settings_moved(db):
     """the old sign-up settings already moved (#2166): templates stay the
     four built-ins whatever sign-in settings earlier tests saved"""
     from core import permission_store as PS
-    saved = db.get_metadata(PS.SIGNUP_MOVED_KEY)
+    keys = (PS.SIGNUP_MOVED_KEY, "perm_signup_template")
+    saved = {k: db.get_metadata(k) for k in keys}
+    guest = next(t["id"] for t in db.list_permission_templates() if t.get("slug") == "guest")
+    # an earlier test's sign-in can leave a "New sign-ups" template and
+    # point sign-up at it: back to the four built-ins, sign-up on Guest
+    for t in db.list_permission_templates():
+        if (t.get("name") or "").lower() == PS.SIGNUP_TEMPLATE_NAME.lower():
+            db.delete_permission_template(int(t["id"]), reassign_to=guest)
+    if saved.get("perm_signup_template") and not db.get_permission_template(int(saved["perm_signup_template"])):
+        saved["perm_signup_template"] = str(guest)
+    db.set_metadata("perm_signup_template", str(guest))
     db.set_metadata(PS.SIGNUP_MOVED_KEY, "1")
     yield
-    if saved is None:
-        db.delete_metadata(PS.SIGNUP_MOVED_KEY)
-    else:
-        db.set_metadata(PS.SIGNUP_MOVED_KEY, saved)
+    for k, v in saved.items():
+        if v is None:
+            db.delete_metadata(k)
+        else:
+            db.set_metadata(k, v)
 
 
 @pytest.fixture(autouse=True)
