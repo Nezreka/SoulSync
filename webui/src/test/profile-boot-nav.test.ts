@@ -95,6 +95,17 @@ const shown = (sel: string) => {
   return el.style.display !== 'none' && !el.classList.contains('nav-feature-hidden');
 };
 
+// what the head script does with the profile the server rendered in
+function runHead(boot: Profile | null) {
+  const start = HTML.indexOf('window.SOULSYNC_BOOT_PROFILE =');
+  const head = HTML.slice(start, HTML.indexOf('</script>', start));
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  new Function(head.replace('{{ boot_profile | tojson }}', JSON.stringify(boot)))();
+}
+
+const PENDING_RULE =
+  /html\.nav-pending \.sidebar-nav \.nav-button,\nhtml\.nav-pending \.sidebar-nav \.nav-section-label,\nhtml\.nav-pending \.side-toggle \{ visibility: hidden; \}/;
+
 function loadNav(boot: Profile | null) {
   g.SOULSYNC_BOOT_PROFILE = boot;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -169,23 +180,44 @@ describe('#2156 the nav before first paint', () => {
     loadNav(null);
     // nothing applied, nothing revealed
     expect(document.documentElement.classList.contains('nav-pending')).toBe(true);
-    expect(CSS).toMatch(
-      /html\.nav-pending \.sidebar-nav \.nav-button,\nhtml\.nav-pending \.sidebar-nav \.nav-section-label \{ visibility: hidden; \}/,
-    );
+    expect(CSS).toMatch(PENDING_RULE);
     window.SoulSyncProfileNav!.apply(MUSIC_MEMBER);
     expect(document.documentElement.classList.contains('nav-pending')).toBe(false);
     expect(shown('[data-page="discover"]')).toBe(true);
     expect(shown('[data-page="settings"]')).toBe(false);
   });
 
-  it('a signed-in profile skips the wait', () => {
-    const head = HTML.slice(
-      HTML.indexOf('window.SOULSYNC_BOOT_PROFILE ='),
-      HTML.indexOf('</script>', HTML.indexOf('window.SOULSYNC_BOOT_PROFILE =')),
-    );
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    new Function(head.replace('{{ boot_profile | tojson }}', JSON.stringify(ADMIN)))();
+  it('a signed-in admin skips the wait', () => {
+    runHead(ADMIN);
     expect(document.documentElement.classList.contains('nav-pending')).toBe(false);
+  });
+
+  // the follow-up: signed out, refresh, sign back in. the page reloads with
+  // the member rendered in, but profile-nav.js is its own file under the nav,
+  // and chrome paints the half-loaded page while it fetches: the whole admin
+  // nav showed for a frame. a member's nav now starts hidden in <head> and
+  // only the real profile shows it again.
+  it('a signed-in member starts hidden too, until their profile has cut the nav down', () => {
+    runHead(MUSIC_MEMBER);
+    // the frame chrome can paint before profile-nav.js has run
+    expect(document.documentElement.classList.contains('nav-pending')).toBe(true);
+    expect(CSS).toMatch(PENDING_RULE);
+    loadNav(MUSIC_MEMBER);
+    expect(document.documentElement.classList.contains('nav-pending')).toBe(false);
+    expect(shown('[data-page="discover"]')).toBe(true);
+    expect(shown('[data-page="dashboard"]')).toBe(false);
+    expect(shown('[data-page="settings"]')).toBe(false);
+  });
+
+  it('a member that is admin by flag, not id 1, skips the wait like any admin', () => {
+    runHead({ id: 7, is_admin: true, allowed_pages: null });
+    expect(document.documentElement.classList.contains('nav-pending')).toBe(false);
+  });
+
+  it('the side switch waits with the nav, a one-side member never gets it', () => {
+    runHead(null);
+    expect(CSS).toMatch(/html\.nav-pending \.side-toggle \{ visibility: hidden; \}/);
+    expect(document.documentElement.classList.contains('nav-pending')).toBe(true);
   });
 
   it('init.js runs the same rule on every profile apply, and starts the nav on failure', () => {

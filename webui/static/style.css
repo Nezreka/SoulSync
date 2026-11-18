@@ -62346,10 +62346,13 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
    rule on nav items and the side toggle without another !important. */
 html[data-features-off] .nav-feature-hidden.nav-feature-hidden { display: none; }
 
-/* no profile known yet (#2156, profile-nav.js): the nav keeps its space but
-   shows nothing until init.js knows whose pages these are */
+/* a member's nav before their profile has cut it down, or nobody known yet
+   (#2156, profile-nav.js): the nav keeps its space but shows nothing until a
+   real profile says whose pages these are. the side switch too, a one-side
+   member never gets it. */
 html.nav-pending .sidebar-nav .nav-button,
-html.nav-pending .sidebar-nav .nav-section-label { visibility: hidden; }
+html.nav-pending .sidebar-nav .nav-section-label,
+html.nav-pending .side-toggle { visibility: hidden; }
 
 /* the way into the picker. quiet on purpose, it's not a page. */
 .sidebar-customize {

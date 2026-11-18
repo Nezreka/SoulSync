@@ -144,9 +144,14 @@
         window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
         // the signed-in profile, so the sidebar shows only their pages from
         // the first frame (#2156). null when the server knows nobody yet
-        // (picker, sign-in): the nav items wait hidden until init.js has one.
+        // (picker, sign-in). anyone but an admin starts with the nav hidden:
+        // profile-nav.js is a separate file under the nav, and chrome paints
+        // the half-loaded page while it fetches, so the full nav showed for a
+        // frame. it shows again only once a real profile has cut it down.
         window.SOULSYNC_BOOT_PROFILE = {{ boot_profile | tojson }};
-        if (!window.SOULSYNC_BOOT_PROFILE) document.documentElement.classList.add('nav-pending');
+        (function (p) {
+            if (!p || !(p.is_admin || String(p.id) === '1')) document.documentElement.classList.add('nav-pending');
+        })(window.SOULSYNC_BOOT_PROFILE);
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
