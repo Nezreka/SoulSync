@@ -15,7 +15,8 @@
  * them through window.SoulSyncSettings, as settings.js did.
  */
 
-type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+// rest: nothing changed or saved yet this visit (#2187)
+type SaveState = 'rest' | 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 interface Shell {
   _settingsPayload?: unknown;
@@ -49,8 +50,11 @@ const toast = (message: string, type: string, tag?: string) =>
 // settings save themselves. the old Save Settings button and an "auto-saved"
 // toast after every keystroke told two stories; the button is now the one
 // quiet status, and still saves right away when clicked (the video side
-// hangs its own saves on that click)
+// hangs its own saves on that click). at rest, before anything changed or
+// saved, the music side shows nothing: "all changes saved" on a page that
+// was only opened read as a notice from nowhere (#2187)
 export const SETTINGS_SAVE_LABELS: Record<SaveState, string> = {
+  rest: 'All changes saved',
   idle: 'All changes saved',
   pending: 'Save now',
   saving: 'Saving…',
@@ -75,7 +79,7 @@ export function setSettingsSaveState(state: SaveState) {
   if (manual) btn.title = state === 'pending' ? 'Autosave is off. Click to save your changes.' : '';
   else
     btn.title =
-      state === 'idle' || state === 'saved'
+      state === 'rest' || state === 'idle' || state === 'saved'
         ? 'Settings save as you go. Click to save again now.'
         : '';
   if (state === 'saved') savedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
@@ -233,11 +237,12 @@ export async function loadSettingsData(): Promise<void> {
     shell().SoulSyncSettings?.hydrate(settings);
 
     // autosave, on unless switched off. the form was just reloaded, so an
-    // unsaved mark left over from a manual-save visit is stale
+    // unsaved mark left over from a manual-save visit is stale, and nothing
+    // was saved in it
     const appearance = settings.ui_appearance as { settings_autosave?: boolean } | undefined;
     shell()._settingsAutosaveOff = !(appearance?.settings_autosave !== false);
     if (document.getElementById('save-settings')?.dataset.state === 'pending')
-      setSettingsSaveState('idle');
+      setSettingsSaveState('rest');
 
     // dev mode: the Hydrabase page's link, and the dashboard's orb and the
     // System tab follow the event
