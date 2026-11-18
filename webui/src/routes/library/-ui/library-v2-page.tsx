@@ -3225,10 +3225,13 @@ function useFloatingMenuPosition(
 export function AlbumOverflowMenu({
   album,
   onDeleted,
+  onMerged,
   onOpenPage,
 }: {
   album: AlbumDetailTarget;
   onDeleted?: () => void;
+  /** #2178: Other versions merged this album into `keptId` */
+  onMerged?: (keptId: number) => void;
   /** the album's own page; left out on that page itself */
   onOpenPage?: () => void;
 }) {
@@ -3579,6 +3582,7 @@ export function AlbumOverflowMenu({
           albumTitle={album.title}
           artistName={String(album.artist_name || '')}
           onClose={() => setShowVersions(false)}
+          onMerged={onMerged}
         />
       ) : null}
       {showArtPicker ? (
@@ -6614,6 +6618,9 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     owns_files: album.tracks_present > 0,
                   }}
                   onDeleted={goBack}
+                  onMerged={(kept) =>
+                    void navigate({ search: (previous) => ({ ...previous, album: kept }) })
+                  }
                 />
               </div>
               <p className={styles.subtitle}>
