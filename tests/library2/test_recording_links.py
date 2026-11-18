@@ -207,6 +207,42 @@ def test_the_artist_page_counts_a_borrowed_position_as_owned(catalogue):
     assert ost["tracks_missing"] == 0
 
 
+def test_a_borrowed_position_is_not_a_file_preview_rename_can_move(catalogue):
+    """#2194: a removed release stays listed (#2012), and a song of it held
+    under another release still counts as present. Preview rename scoped by
+    that count, so it asked the planner for a release with no files of its own
+    and the whole all-releases preview failed on "No tracks found"."""
+    from core.library2.queries import get_artist
+
+    conn, ids = catalogue
+    artist_id = conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (ids["ost"],)
+    ).fetchone()[0]
+
+    artist = get_artist(conn, artist_id)
+    every = {a["id"]: a for a in (*artist["albums"], *artist["singles"])}
+
+    assert every[ids["ost"]]["tracks_present"] == 1
+    assert every[ids["ost"]]["own_files_present"] == 0
+    assert every[ids["single"]]["own_files_present"] == 1
+
+
+def test_a_deleted_file_is_not_one_of_the_releases_own(catalogue):
+    from core.library2.queries import get_artist
+
+    conn, ids = catalogue
+    conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?",
+                 (ids["single_track"],))
+    conn.commit()
+    artist_id = conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (ids["single"],)
+    ).fetchone()[0]
+
+    single = next(a for a in get_artist(conn, artist_id)["singles"] if a["id"] == ids["single"])
+
+    assert single["own_files_present"] == 0
+
+
 def test_the_album_position_becomes_the_home_of_a_singles_file(catalogue):
     """User decision: a song that is on an album belongs to the album.
 

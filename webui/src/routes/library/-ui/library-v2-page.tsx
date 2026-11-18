@@ -91,6 +91,7 @@ import {
   fetchLibraryV2TrackVersions,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
+  RENAME_CHECK_QUERY_KEY,
   libraryScopesQueryOptions,
   libraryV2EnhanceQueryOptions,
   invalidateLibraryV2,
@@ -4661,6 +4662,9 @@ export function UnifiedFileRemovalDialog({
         }
       }
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      // #2194: kept apart from the key above, so a removal has to say so: the
+      // "to rename" count still held the removed files
+      void queryClient.invalidateQueries({ queryKey: RENAME_CHECK_QUERY_KEY });
       onDone();
     } catch (caught) {
       setError(mutationErrorMessage(caught, 'File removal failed'));

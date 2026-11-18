@@ -339,6 +339,9 @@ export interface LibraryV2AlbumSummary {
   mood: string | null;
   track_count: number;
   tracks_present: number;
+  /** #2194: tracks with a file on this release itself. tracks_present also
+   *  counts audio held under another release, which a rename here can't move. */
+  own_files_present?: number;
   tracks_missing: number;
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;

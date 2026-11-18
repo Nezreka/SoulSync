@@ -377,4 +377,62 @@ describe('artist rename preview scope', () => {
     expect(await screen.findByText('Preview unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Rename \/ Organize \(/ })).toBeDisabled();
   });
+  it('passes over a release that is gone instead of failing every other one (#2194)', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/42/reorganize/preview', () =>
+        HttpResponse.json(PREVIEW_RESPONSE),
+      ),
+      http.post('/api/library/v2/albums/43/reorganize/preview', () =>
+        HttpResponse.json(
+          { success: false, error: 'No tracks found for this album' },
+          { status: 404 },
+        ),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ArtistRenamePreviewModal
+          artistId={7}
+          artistName="Britney Spears"
+          albums={[
+            { id: 42, title: 'Album release', tracks_present: 1 },
+            { id: 43, title: 'Removed release', tracks_present: 1 },
+          ]}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('One Dance')).toBeInTheDocument();
+    expect(screen.queryByText('No tracks found for this album')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Skipped a release with no files left to rename: Removed release'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rename / Organize (1)' })).toBeEnabled();
+  });
+  it('leaves out a release whose tracks are only held under another release (#2194)', async () => {
+    const asked: number[] = [];
+    server.use(
+      http.post('/api/library/v2/albums/:id/reorganize/preview', ({ params }) => {
+        asked.push(Number(params.id));
+        return HttpResponse.json(PREVIEW_RESPONSE);
+      }),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ArtistRenamePreviewModal
+          artistId={7}
+          artistName="Britney Spears"
+          albums={[
+            { id: 42, title: 'Album release', tracks_present: 2, own_files_present: 2 },
+            { id: 43, title: 'Removed deluxe', tracks_present: 3, own_files_present: 0 },
+          ]}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('One Dance')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'All releases · 1 releases' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Removed deluxe/ })).not.toBeInTheDocument();
+    expect(asked).toEqual([42]);
+  });
 });
