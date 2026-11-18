@@ -6560,8 +6560,21 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     transform: scale(1.1);
 }
 
+/* the box is capped at 80dvh with overflow hidden, so a long message (fix all
+   safe findings lists every type) pushed the buttons out of the box on a phone
+   with nothing to scroll (#2186). the message scrolls, the header and buttons
+   always stay */
+.confirm-modal-header,
+.confirm-modal-actions {
+    flex-shrink: 0;
+}
+
 .confirm-modal-content {
     padding: 20px 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 #confirm-modal-message {
