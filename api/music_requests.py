@@ -36,13 +36,17 @@ def create_blueprint():
     return bp
 
 
-def _event(event_type, group, **extra):
-    """music_request_approved / _declined / _available for automations."""
+def _event(event_type, group, owner=None, **extra):
+    """music_request_approved / _declined / _available for automations. the
+    requester's event, never the approver's (an admin or moderator answers
+    in their own request)."""
     try:
         from core.app_events import publish
-        publish(event_type, {"kind": group.get("kind") or "", "title": group.get("title") or "",
-                             "artist": group.get("artist") or "",
-                             "requester": group.get("requester_name") or "", **extra})
+        from core.automation.owners import owned
+        publish(event_type, owned({"kind": group.get("kind") or "", "title": group.get("title") or "",
+                                   "artist": group.get("artist") or "",
+                                   "requester": group.get("requester_name") or "", **extra},
+                                  owner if owner is not None else group.get("profile_id")))
     except Exception:  # noqa: BLE001 - an automation hook never fails the request
         logger.debug("music request event failed", exc_info=True)
 
@@ -165,7 +169,8 @@ def sweep_fulfillment(db, only_pid=None) -> int:
 def _video_group(req):
     """the shape _event wants for a video request: kind/title/artist/requester."""
     return {"kind": "video", "title": req.get("title") or "",
-            "artist": req.get("artist") or "", "requester_name": req.get("requester_name") or ""}
+            "artist": req.get("artist") or "", "requester_name": req.get("requester_name") or "",
+            "profile_id": req.get("profile_id")}
 
 
 def _find_group(db, profile_id, key):
@@ -323,7 +328,7 @@ def approve_music_request():
                          tracks=group["tracks"], status="approved", resolved_by=get_current_profile_id(),
                          admin_response=(str(body.get("response") or "").strip()[:500] or None))
     _notify(owner, f"{describe(group)} was approved, it's on the way", "success")
-    _event("music_request_approved", group)
+    _event("music_request_approved", group, owner=owner)
     return jsonify({"success": True, "approved": flipped})
 
 
@@ -388,7 +393,7 @@ def decline_music_request():
                          tracks=group["tracks"], status="declined", resolved_by=get_current_profile_id(),
                          admin_response=reason)
     _notify(owner, f"{describe(group)} was declined" + (f": {reason}" if reason else ""), "warning")
-    _event("music_request_declined", group, reason=reason or "")
+    _event("music_request_declined", group, owner=owner, reason=reason or "")
     return jsonify({"success": True})
 
 

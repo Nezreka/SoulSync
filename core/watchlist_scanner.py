@@ -2141,6 +2141,9 @@ class WatchlistScanner:
                     artist_index=absolute_index,
                     total_artists=total_artists_override if total_artists_override is not None else len(watchlist_artists),
                     profile_id=profile_id,
+                    # whose watch row this artist is (an all-profiles scan
+                    # walks everyone's)
+                    owner_profile_id=getattr(artist, 'profile_id', None) or profile_id,
                     albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,

@@ -998,10 +998,17 @@ def finalize_auto_wishlist_completion(
     with tasks_lock:
         run_id = ''
         toggle_cycle = True
+        run_owners = set()
         if batch_id in download_batches:
             completing_batch = download_batches[batch_id]
             run_id = completing_batch.get('wishlist_run_id') or ''
             toggle_cycle = completing_batch.get('toggle_wishlist_cycle', True) is not False
+            # whose wishlists this run worked through: each sibling batch is
+            # one profile's
+            run_owners.add(completing_batch.get('profile_id'))
+            if run_id:
+                run_owners.update(b.get('profile_id') for b in download_batches.values()
+                                  if isinstance(b, dict) and b.get('wishlist_run_id') == run_id)
         siblings_active = bool(run_id) and _wishlist_run_has_siblings_still_active(
             download_batches, run_id, batch_id,
         )
@@ -1044,11 +1051,12 @@ def finalize_auto_wishlist_completion(
 
     try:
         if automation_engine:
-            automation_engine.emit('wishlist_processing_completed', {
+            from core.automation.owners import owned
+            automation_engine.emit('wishlist_processing_completed', owned({
                 'tracks_processed': str(total_failed),
                 'tracks_found': str(tracks_added),
                 'tracks_failed': str(total_failed - tracks_added),
-            })
+            }, run_owners))
     except Exception as e:
         logger.debug("emit wishlist_processing_completed failed: %s", e)
 
