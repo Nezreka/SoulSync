@@ -234,11 +234,13 @@ export function SettingsPage({
               </div>
               <div className="header-actions">
                 {/* settings save as you go; this is their status and a
-                    save-now (shell.ts setSettingsSaveState, #1909) */}
+                    save-now (shell.ts setSettingsSaveState, #1909). it
+                    opens at rest, hidden on the music side until something
+                    changes (#2187) */}
                 <button
                   className="save-button"
                   id="save-settings"
-                  data-state="idle"
+                  data-state="rest"
                   aria-live="polite"
                   title="Settings save as you go. Click to save again now."
                   onClick={() => void saveSettings(false)}

@@ -21,11 +21,11 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { HeaderPill, HeaderPillId } from '../-dash.header';
 
-import { useDashboardHeader } from '../-dash.header';
+import { orbSheetAction, useDashboardHeader } from '../-dash.header';
 import { countBusyWorkers, greetingForHour, heroNumbers } from '../-dash.hello';
 import { lastDbStats, subscribeDbStats } from '../-dash.library';
 import {
@@ -35,6 +35,7 @@ import {
   useTileFacts,
   useTilePictures,
 } from '../-dash.room';
+import { useWorkerSheet, WorkerSheet } from './worker-sheet';
 
 interface OrbChrome {
   id: HeaderPillId;
@@ -601,12 +602,15 @@ function HeroIntro({ library }: { library?: ReactNode }) {
 
 /** The orbs' own stage. worker-orbs.js anchors its canvas here, orbits the
  * nucleus at the stage centre, and opens the worker grid on hover of the
- * stage only, so reading the greeting or pressing Scan never pops it. */
+ * stage only, so reading the greeting or pressing Scan never pops it. On a
+ * phone, where there is no hover, a tap opens the worker's sheet (#2180). */
 function OrbStage({ header }: { header: DashboardHeaderState }) {
   const { pills, repairBadge, onOrbClick, jiosaavnVisible, hydrabaseVisible } = header;
   const busy = countBusyWorkers(pills);
+  const stage = useRef<HTMLDivElement | null>(null);
+  const sheet = useWorkerSheet(stage);
   return (
-    <div className="orb-stage">
+    <div className="orb-stage" ref={stage}>
       <div className="header-actions">
         {ORBS.map((chrome) => (
           <Orb
@@ -642,6 +646,15 @@ function OrbStage({ header }: { header: DashboardHeaderState }) {
         <span className={busy > 0 ? 'orb-stage-dot orb-stage-dot--busy' : 'orb-stage-dot'}></span>
         {busy === 0 ? 'Workers resting' : busy === 1 ? '1 worker busy' : `${busy} workers busy`}
       </div>
+      <WorkerSheet
+        button={sheet.button}
+        describe={(button) => {
+          const chrome = ORBS.find((orb) => orb.buttonId === button.id);
+          return chrome ? orbSheetAction(chrome.id, pills[chrome.id]?.stateClass ?? null) : null;
+        }}
+        onClose={sheet.close}
+        onManage={() => window.openEnrichmentManager?.()}
+      />
     </div>
   );
 }

@@ -222,6 +222,31 @@ const TOGGLE_LABELS: Partial<Record<EnrichEventId, string>> = {
   similar_artists: 'Similar Artists',
 };
 
+/**
+ * What a tap on an orb does, as the label of the button that does it in the
+ * phone's worker sheet (#2180): onOrbClick below, read for the pill's state
+ * now. null where the tap does nothing worth a button: SoulID is display
+ * only, Bandcamp waits on Settings, and an idle or unknown worker would only
+ * be "resumed" into the same idle.
+ */
+export function orbSheetAction(
+  id: HeaderPillId,
+  stateClass: HeaderPill['stateClass'],
+): { label: string; closes?: boolean } | null {
+  if (id === 'repair') return { label: 'Open Library Maintenance', closes: true };
+  if (id === 'soulid') return null;
+  if (id === 'hydrabase') return { label: stateClass === 'active' ? 'Stop' : 'Start' };
+  if (id === 'discogs') {
+    // the inverted read: paused or complete resumes, anything else pauses
+    if (stateClass === 'paused' || stateClass === 'complete') return { label: 'Resume' };
+    return stateClass === 'active' ? { label: 'Pause' } : null;
+  }
+  if (id !== 'spotify' && id !== 'bandcamp' && !TOGGLE_LABELS[id]) return null;
+  if (stateClass === 'active') return { label: 'Pause' };
+  if (stateClass === 'paused') return { label: 'Resume' };
+  return null;
+}
+
 function materialize(previous: HeaderPill, view: PillView): HeaderPill {
   const next: HeaderPill = {
     stateClass: view.stateClass,
