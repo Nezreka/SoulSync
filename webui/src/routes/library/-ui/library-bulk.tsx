@@ -254,6 +254,7 @@ export function ArtistBulkBar({
   filters,
   canWrite,
   canWish,
+  canSearch = canWish,
 }: {
   selection: ArtistSelection;
   pageArtists: LibraryV2ArtistSummary[];
@@ -263,6 +264,8 @@ export function ArtistBulkBar({
   filters: Parameters<typeof fetchLibraryV2ArtistIds>[0];
   canWrite: boolean;
   canWish: boolean;
+  /** #2173: Search missing starts downloads; hidden for a profile that asks first */
+  canSearch?: boolean;
 }) {
   const queryClient = useQueryClient();
   const run = useBulkRun();
@@ -518,15 +521,17 @@ export function ArtistBulkBar({
           >
             Remove from Watchlist
           </button>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={busy || !canWish}
-            title="Search for missing tracks and upgrades, one artist at a time"
-            onClick={() => void search()}
-          >
-            Search missing
-          </button>
+          {canSearch ? (
+            <button
+              type="button"
+              className={styles.btnGhost}
+              disabled={busy || !canWish}
+              title="Search for missing tracks and upgrades, one artist at a time"
+              onClick={() => void search()}
+            >
+              Search missing
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.btnGhost}

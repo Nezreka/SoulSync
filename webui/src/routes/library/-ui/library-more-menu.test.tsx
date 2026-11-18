@@ -44,20 +44,26 @@ describe('the library More menu', () => {
 
   it('a profile that cannot change the library cannot start the library-wide writes', () => {
     const items = renderMenu(false);
+    // #2173: the library-wide search is the admin's, so it isn't offered at all
+    expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).toEqual([
+      'Watch All',
+      'Export artists',
+      'Release file tag values',
+    ]);
     expect(items[0]).toBeDisabled();
-    expect(items[1]).toBeDisabled();
     // export only reads
-    expect(items[2]).toBeEnabled();
+    expect(items[1]).toBeEnabled();
     // #2084: releasing what Use File Tags saved changes the library
-    expect(items[3]).toBeDisabled();
+    expect(items[2]).toBeDisabled();
   });
 
   it('a household member watches all on their own watchlist, without the admin-only search', () => {
     // X1: Watch All adds to the caller's own watchlist; it was gated on the
     // admin flag, so a member in the shared library could not use it
     const items = renderMenu(false, true);
-    expect(items[0]).toBeDisabled();
-    expect(items[1]).toBeEnabled();
+    expect(items[0].querySelector('.sync-more-name')?.textContent).toBe('Watch All');
+    expect(items[0]).toBeEnabled();
+    expect(screen.queryByText('Automatic Search')).toBeNull();
   });
 
   it('Export opens its window', () => {

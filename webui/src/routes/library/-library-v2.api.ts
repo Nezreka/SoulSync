@@ -57,6 +57,10 @@ interface EnabledResponse extends Ok {
   can_write?: boolean;
   /** E-13: whether it may monitor and search in the library it looks at. */
   can_wish?: boolean;
+  /** a wish that downloads right away (Automatic Search, Enhance) is allowed */
+  can_download?: boolean;
+  /** an Interactive Search pick may name a library row */
+  can_grab?: boolean;
 }
 
 export interface LibraryV2Availability {
@@ -65,6 +69,11 @@ export interface LibraryV2Availability {
   canWrite: boolean;
   /** True for the admin, and for a profile in a library of its own (#1199). */
   canWish: boolean;
+  /** #2173: Automatic Search, Enhance Quality and Upgrade start a download.
+   *  false for a profile that asks first or can't get music. */
+  canDownload: boolean;
+  /** #2173: Interactive Search may grab into a library row. */
+  canGrab: boolean;
 }
 interface ArtistsResponse extends Ok {
   artists: LibraryV2ArtistSummary[];
@@ -90,6 +99,9 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
     // Missing capability data is not permission to mutate.
     canWrite: payload.can_write === true,
     canWish: payload.can_wish === true || payload.can_write === true,
+    // missing data is not permission to download either
+    canDownload: payload.can_download === true || payload.can_write === true,
+    canGrab: payload.can_grab === true || payload.can_write === true,
   };
 }
 
