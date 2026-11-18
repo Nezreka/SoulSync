@@ -17,20 +17,33 @@ from typing import Any, Dict, List, Optional
 import core.server_activity as sa
 from core.server_activity import store
 from core.server_activity.history import tzinfo
+from core.server_activity.images import row_image
 from core.server_activity.reasons import label as reason_label
 
 logger = sa.logger
 
 RANGES = (7, 30, 90, 365)
 _KIND_GROUP = {"episode": "tv", "movie": "films", "track": "music", "audiobook": "books", "podcast": "books"}
+# a sheet is kept while the play log stands still (store.generation). once a
+# play lands it is still served, up to STALE_TTL old, while a fresh one is
+# worked out behind it; the four ranges are worked out together so switching
+# range is instant. MAX_AGE bounds even an unchanged log (the range's edge
+# moves on).
 _cache: Dict[tuple, tuple] = {}
 _cache_lock = threading.Lock()
-CACHE_TTL = 60
+CACHE_TTL = 60          # kept for callers that read it; MAX_AGE is the bound now
+MAX_AGE = 15 * 60
+STALE_TTL = 10 * 60
+_building: set = set()
 
 
 def invalidate() -> None:
     with _cache_lock:
         _cache.clear()
+
+
+def _spawn(fn) -> None:
+    threading.Thread(target=fn, name="server-activity-stats", daemon=True).start()
 
 
 def _ms(p: Dict[str, Any]) -> int:
@@ -197,6 +210,7 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
     spark_start = datetime.fromtimestamp(end, tz).replace(hour=0, minute=0, second=0, microsecond=0) \
         - timedelta(days=13)
     spark_keys = [(spark_start + timedelta(days=i, hours=2)).date().isoformat() for i in range(14)]
+    spark_floor = spark_start.timestamp() - 86400
     people: Dict[str, Dict[str, Any]] = {}
     for p in plays:
         u = p.get("user") or "Someone"
@@ -227,7 +241,9 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
             k = dt.date().isoformat()
             if k in e["spark"]:
                 e["spark"][k] += secs * 1000
-        _spread(p["started_at"], ms, tz, spark)
+        # the sparkline is the last 14 days: older plays can't land in it
+        if p["started_at"] + ms / 1000.0 >= spark_floor:
+            _spread(p["started_at"], ms, tz, spark)
     people_out = []
     for e in sorted(people.values(), key=lambda e: (-e["ms"], -e["plays"], e["user"])):
         top = max(e["titles"].items(), key=lambda kv: kv[1])[0] if e["titles"] else None
@@ -243,7 +259,7 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
         })
 
     # shelves
-    def shelf(kinds, key_fn, extra):
+    def shelf(kinds, key_fn, extra, role=None):
         acc: Dict[Any, Dict[str, Any]] = {}
         for p in plays:
             if p.get("kind") not in kinds:
@@ -261,8 +277,8 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
         for k, e in sorted(acc.items(), key=lambda kv: (-kv[1]["ms"], -kv[1]["plays"], str(kv[0]))):
             last = max(e["rows"], key=lambda r: r["started_at"])
             link = next((_loads(r.get("link"), None) for r in e["rows"] if r.get("link")), None)
-            item = {"title": k[0], "thumb": last.get("thumb"), "hours": _hours(e["ms"]), "plays": e["plays"],
-                    "people": len(e["users"]), "link": link}
+            item = {"title": k[0], "thumb": last.get("thumb"), "image": row_image(last, role),
+                    "hours": _hours(e["ms"]), "plays": e["plays"], "people": len(e["users"]), "link": link}
             item.update(extra(k, e, last))
             out.append(item)
         return out[:8]
@@ -271,7 +287,7 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
     shows = shelf({"episode"}, lambda p: (p.get("grandparent_title"),),
                   lambda k, e, last: {"episodes": len(e["items"])})
     artists = shelf({"track"}, lambda p: (p.get("grandparent_title"),),
-                    lambda k, e, last: {"tracks": e["plays"]})
+                    lambda k, e, last: {"tracks": e["plays"]}, role="artist")
 
     def book_extra(k, e, last):
         top_user = max(e["users"], key=e["users"].get) if e["users"] else None
@@ -330,7 +346,8 @@ def compute(plays: List[Dict[str, Any]], *, start: float, end: float, days: int,
 
 _COLS = ("started_at, stopped_at, last_seen, played_ms, duration_ms, kind, user, user_avatar, method, reasons, hw, "
          "player_product, player_name, location, remote, ip, sent_kb, title, parent_title, grandparent_title, "
-         "rating_key, thumb, lossless, book_percent, percent, source, server, link, year")
+         "rating_key, parent_key, grandparent_key, thumb, lossless, book_percent, percent, source, server, link, "
+         "year")
 
 
 def get_stats(days: int = 30, tz: Optional[str] = None, now: Optional[float] = None) -> Dict[str, Any]:
@@ -339,12 +356,54 @@ def get_stats(days: int = 30, tz: Optional[str] = None, now: Optional[float] = N
     except (TypeError, ValueError):
         days = 30
     days = min(RANGES, key=lambda r: abs(r - days))
+    fixed = now is not None
     now = time.time() if now is None else now
     key = (days, tz or "")
+    gen = store.generation()
     with _cache_lock:
         hit = _cache.get(key)
-        if hit and now - hit[0] < CACHE_TTL:
-            return hit[1]
+    if hit:
+        at, data, hit_gen = hit
+        age = now - at
+        if hit_gen == gen and 0 <= age < MAX_AGE:
+            return data
+        if 0 <= age < STALE_TTL:
+            _refresh([days], tz, None if not fixed else now)
+            return data
+    data = _build(days, tz, now, gen)
+    if data.get("ok") and not fixed:
+        # the other ranges next, so the range buttons answer at once
+        _refresh([r for r in RANGES if r != days], tz, None, only_missing=True)
+    return data
+
+
+def _refresh(ranges: List[int], tz: Optional[str], now: Optional[float], only_missing: bool = False) -> None:
+    todo = []
+    with _cache_lock:
+        for d in ranges:
+            k = (d, tz or "")
+            if k in _building or (only_missing and k in _cache):
+                continue
+            _building.add(k)
+            todo.append(d)
+    if not todo:
+        return
+
+    def run():
+        try:
+            for d in todo:
+                try:
+                    _build(d, tz, time.time() if now is None else now, store.generation())
+                except Exception:   # noqa: BLE001
+                    logger.debug("stats refresh failed", exc_info=True)
+        finally:
+            with _cache_lock:
+                for d in todo:
+                    _building.discard((d, tz or ""))
+    _spawn(run)
+
+
+def _build(days: int, tz: Optional[str], now: float, gen: int) -> Dict[str, Any]:
     zone = tzinfo(tz)
     start = now - days * 86400
     try:
@@ -362,5 +421,5 @@ def get_stats(days: int = 30, tz: Optional[str] = None, now: Optional[float] = N
                    live_users=[r["user"] for r in live])
     data["tz"] = str(tz or "")
     with _cache_lock:
-        _cache[key] = (now, data)
+        _cache[(days, tz or "")] = (now, data, gen)
     return data

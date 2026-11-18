@@ -132,6 +132,8 @@ def sa_env(monkeypatch, tmp_path):
         return c
 
     store.use_connection_factory(factory)
+    from core.server_activity import images
+    images.use_cache_dir(str(tmp_path / "sa_images"))
     live.reset_for_tests()
     px.reset_caches()
     links.reset()
@@ -140,7 +142,7 @@ def sa_env(monkeypatch, tmp_path):
     env = SimpleNamespace(plex=None, jf_cfg={"base_url": "", "api_key": ""},
                           plex_cfg={"base_url": "", "token": ""},
                           settings=dict(st.DEFAULTS, stop_presets=list(st.DEFAULT_STOP_PRESETS)),
-                          geo_scheduled=[], db=db, factory=factory, requests=[])
+                          geo_scheduled=[], db=db, factory=factory, requests=[], spawned=[])
     monkeypatch.setattr(sa, "_plex_config", lambda db=None: env.plex_cfg)
     monkeypatch.setattr(sa, "_jellyfin_config", lambda db=None: env.jf_cfg)
     monkeypatch.setattr(sa, "_plex_server", lambda db=None: env.plex)
@@ -150,6 +152,9 @@ def sa_env(monkeypatch, tmp_path):
     monkeypatch.setattr(links, "_root_names", lambda: {"audiobook": "audiobooks", "podcast": "podcasts"})
     monkeypatch.setattr(links, "_book_index", lambda: {})
     monkeypatch.setattr(live, "_maybe_maintain", lambda now: None)
+    # background work is collected, not started: a test runs it when it wants
+    monkeypatch.setattr(live, "_spawn", lambda fn: env.spawned.append(fn))
+    monkeypatch.setattr(stats, "_spawn", lambda fn: env.spawned.append(fn))
 
     class _NoVideo:
         def items_by_server_ids(self, ids, server_source=None):
@@ -195,4 +200,5 @@ def sa_env(monkeypatch, tmp_path):
     env.use_jellyfin = use_jellyfin
     yield env
     store.use_connection_factory(None)
+    images.use_cache_dir(None)
     live.reset_for_tests()

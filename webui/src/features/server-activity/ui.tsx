@@ -6,7 +6,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 import type { MediaKind, PlayMethod } from '@/shell/server-activity-types';
 
-import { avatarUrl, imageUrl } from './api';
+import { avatarUrl, imageSrc } from './api';
 import { METHOD_LABEL, type QualityBadge, avatarTone, initials, isAudioKind } from './format';
 import { ChevronDown, KindIcon, RetryIcon } from './icons';
 import s from './shared.module.css';
@@ -61,25 +61,49 @@ export function Avatar({
   );
 }
 
+/** the width each poster size asks for: twice its css width, for sharp screens */
+export const POSTER_WIDTH: Record<'card' | 'row' | 'shelf', number> = {
+  card: 160,
+  row: 96,
+  shelf: 96,
+};
+const RETRY_MS = 1500;
+
+/**
+ * Artwork through the proxy, at the size drawn. The kind's glyph holds the
+ * place until the picture lands and stays when there is none. The server
+ * already walks the item's family (episode, season, show; track, album,
+ * artist) before it gives up; a failure here is asked once more after a
+ * moment (a busy server answers "try again"), then the glyph stays.
+ */
 export function Poster({
   thumb,
+  image,
   kind,
   size = 'card',
 }: {
   thumb: string | null | undefined;
+  image?: string | null;
   kind: MediaKind;
   size?: 'card' | 'row' | 'shelf';
 }) {
-  const [state, setState] = useState<'loading' | 'ok' | 'failed'>('loading');
-  const src = imageUrl(thumb);
+  // loading -> ok, or loading -> waiting -> retry -> ok | failed
+  const [state, setState] = useState<'loading' | 'ok' | 'waiting' | 'retry' | 'failed'>('loading');
+  const base = imageSrc(image, thumb, POSTER_WIDTH[size]);
+  const src = state === 'retry' ? `${base}&retry=1` : base;
   const square = isAudioKind(kind);
-  useEffect(() => setState('loading'), [src]);
+  useEffect(() => setState('loading'), [base]);
+  useEffect(() => {
+    if (state !== 'waiting') return;
+    const timer = setTimeout(() => setState('retry'), RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [state]);
   return (
     <span className={s.poster} data-size={size} data-square={square || undefined}>
       <span className={s.posterGlyph}>
         <KindIcon kind={kind} size={size === 'card' ? 20 : 14} />
       </span>
-      {src && state !== 'failed' ? (
+      {base && state !== 'failed' && state !== 'waiting' ? (
         <img
           className={s.posterImg}
           data-loaded={state === 'ok' || undefined}
@@ -88,7 +112,7 @@ export function Poster({
           loading="lazy"
           decoding="async"
           onLoad={() => setState('ok')}
-          onError={() => setState('failed')}
+          onError={() => setState((now) => (now === 'loading' ? 'waiting' : 'failed'))}
         />
       ) : null}
     </span>

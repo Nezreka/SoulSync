@@ -5,7 +5,7 @@
  */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HistoryGroup, HistoryPayload } from '@/shell/server-activity-types';
 
@@ -13,8 +13,12 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import history from './__fixtures__/history.json';
 import group from './__fixtures__/history_group.json';
+import { clearCache } from './cache';
 import { browserZone, isoDay } from './format';
 import { History, byDay, formatKb, timelineBands, toQuery, NO_FILTERS } from './history';
+
+// every test starts with nothing read ahead or remembered
+beforeEach(() => clearCache());
 
 const DATA = history as unknown as HistoryPayload;
 

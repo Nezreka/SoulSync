@@ -5,14 +5,18 @@
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
 
 import activity from './__fixtures__/activity.json';
 import history from './__fixtures__/history.json';
 import stats from './__fixtures__/stats.json';
+import { clearCache } from './cache';
 import { ServerActivityHost, installDrawerApi } from './host';
+
+// every test starts with nothing read ahead or remembered
+beforeEach(() => clearCache());
 
 function serve() {
   const hits: string[] = [];

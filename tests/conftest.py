@@ -47,6 +47,8 @@ if _XDIST_WORKER and 'soulsync-testdb-' in _os.environ.get('DATABASE_PATH', ''):
         _os.environ.pop(_var, None)
 if _XDIST_WORKER and 'soulsync-test-imagecache-' in _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR', ''):
     _os.environ.pop('SOULSYNC_IMAGE_CACHE_DIR', None)
+if _XDIST_WORKER and 'soulsync-test-saimages-' in _os.environ.get('SOULSYNC_SA_IMAGE_DIR', ''):
+    _os.environ.pop('SOULSYNC_SA_IMAGE_DIR', None)
 if _XDIST_WORKER and 'soulsync-test-audiobooks-' in _os.environ.get('AUDIOBOOK_DATABASE_PATH', ''):
     _os.environ.pop('AUDIOBOOK_DATABASE_PATH', None)
 for _var, _mark in (('SOULSYNC_PLAYLIST_COVER_DIR', 'soulsync-test-covers-'),
@@ -80,6 +82,13 @@ if not _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR'):
     _TEST_IMAGE_CACHE_DIR = _tempfile.mkdtemp(prefix='soulsync-test-imagecache-')
     _os.environ['SOULSYNC_IMAGE_CACHE_DIR'] = _TEST_IMAGE_CACHE_DIR
     _atexit.register(lambda: _shutil.rmtree(_TEST_IMAGE_CACHE_DIR, ignore_errors=True))
+
+# the server activity poster cache (core/server_activity/images.py) the same
+# way: without this a test reaching the proxy would write into storage/.
+if not _os.environ.get('SOULSYNC_SA_IMAGE_DIR'):
+    _TEST_SA_IMAGE_DIR = _tempfile.mkdtemp(prefix='soulsync-test-saimages-')
+    _os.environ['SOULSYNC_SA_IMAGE_DIR'] = _TEST_SA_IMAGE_DIR
+    _atexit.register(lambda: _shutil.rmtree(_TEST_SA_IMAGE_DIR, ignore_errors=True))
 
 # the logs too: web_server and acoustid_client log to logging.path, which the
 # test config leaves at the default logs/app.log in the checkout. every run

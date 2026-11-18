@@ -60,7 +60,9 @@ export function useLiveActivity(open: boolean, fast: boolean) {
 
   const accept = useCallback((payload: ActivityPayload) => {
     tellShell(payload);
-    setState({ data: payload, receivedAt: Date.now(), error: null, loading: false });
+    // a shared snapshot says how old it is; the playheads start from when it was taken
+    const age = Math.max(0, Math.min(payload.age_ms ?? 0, 60000));
+    setState({ data: payload, receivedAt: Date.now() - age, error: null, loading: false });
   }, []);
 
   const refresh = useCallback(async () => {
