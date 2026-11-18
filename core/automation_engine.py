@@ -1276,6 +1276,38 @@ class AutomationEngine:
             return any(results)
         return all(results)
 
+    def personal_refusal(self, auto):
+        """why a member's own automation may not run, or None (S4, decision 4).
+
+        a system automation or one an admin owns runs as before. one a member
+        owns runs only while that member keeps "Their own automations" and
+        only a personal action (core.permissions.PERSONAL_AUTOMATION_ACTIONS)
+        with notes for steps: rows saved before the rule (search and
+        download, library cleanup, ...) are skipped, not run. an owner whose
+        rights can't be read is skipped too."""
+        if not auto or auto.get('is_system'):
+            return None
+        owner = auto.get('profile_id')
+        try:
+            if owner is None or int(owner) == 1:
+                return None
+        except (TypeError, ValueError):
+            return 'its owner is unknown'
+        try:
+            from core.automation.access import personal_refusal
+            from core.permission_store import context_for
+            from core.permissions import can
+            ctx = context_for(self.db, owner)
+            if ctx.get('is_admin'):
+                return None
+            if not can(ctx, 'automations.personal'):
+                return "its owner's profile doesn't include their own automations"
+            reason = personal_refusal(auto)
+            return "it isn't a personal automation" if reason else None
+        except Exception as e:  # noqa: BLE001 - can't tell, so it doesn't run
+            logger.warning("automation %s: owner rights unreadable: %s", auto.get('id'), e)
+            return "its owner's rights couldn't be read"
+
     def _run_event_automation(self, auto, automation_id, event_data):
         """Execute action for an event-triggered automation."""
         # Global per-side pause — event triggers are simply dropped while the
@@ -1288,6 +1320,11 @@ class AutomationEngine:
         paused = self.feature_paused(auto)
         if paused:
             logger.info(f"Event automation '{auto.get('name')}' skipped — {paused}")
+            return
+
+        refused = self.personal_refusal(auto)
+        if refused:
+            logger.info(f"Event automation '{auto.get('name')}' skipped — {refused}")
             return
 
         action_type = auto.get('action_type')
@@ -1461,6 +1498,12 @@ class AutomationEngine:
                                  error=None)
                 return
 
+        refused = self.personal_refusal(auto)
+        if refused:
+            logger.info(f"Automation '{auto.get('name')}' skipped — {refused}")
+            self._finish_run(auto, automation_id, {'status': 'skipped', 'reason': refused}, error=None)
+            return
+
         action_type = auto.get('action_type')
 
         # notify_only for scheduled automations
@@ -1501,6 +1544,16 @@ class AutomationEngine:
         # profile 1, so this is a no-op for them — only non-admin-owned
         # automations gain their correct identity in the background.
         _effective_profile_id = profile_id if profile_id is not None else (auto.get('profile_id') or 1)
+        # a member's own automation acts for that member only: its watchlist
+        # scan reads their artists, not every profile's (a scheduled run used
+        # to pass no profile, which scan_watchlist reads as "all profiles")
+        if not auto.get('is_system') and _effective_profile_id != 1 and '_profile_id' not in action_config:
+            try:
+                _owner_is_admin = bool((self.db.get_profile(int(_effective_profile_id)) or {}).get('is_admin'))
+            except Exception:  # noqa: BLE001 - unknown owner: keep it to its own
+                _owner_is_admin = False
+            if not _owner_is_admin:
+                action_config['_profile_id'] = _effective_profile_id
 
         # Action delay (skipped for manual run_now)
         delay_minutes = action_config.get('delay', 0)
