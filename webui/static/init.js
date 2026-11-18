@@ -2091,7 +2091,21 @@ function _pfSummary(p, loginMode) {
     return { text: bits.join(' · '), warn };
 }
 
+// Settings > People (#2166) is where people and access live now. the old
+// Profiles modal below stays only for when the settings bundle isn't there
+function pfOpenPeople(pill) {
+    if (typeof window.openPeopleSettings !== 'function') return false;
+    pfCloseMenus(false);
+    const picker = document.getElementById('profile-picker-overlay');
+    if (currentProfile && picker && picker.style.display !== 'none') hideProfilePicker();
+    const manage = document.getElementById('profile-manage-panel');
+    if (manage && manage.childElementCount) pfCloseLayer(manage);
+    window.openPeopleSettings(pill);
+    return true;
+}
+
 async function openProfileManager() {
+    if (pfOpenPeople()) return;
     pfCloseMenus(false);
     const layer = document.getElementById('profile-manage-panel');
     layer.innerHTML = '';
@@ -2219,8 +2233,19 @@ async function loadProfileManageList() {
         }
     }
 
-    // what new profiles see (#2157), the admin's one say for everyone
-    if (me && me.is_admin) {
+    // what new people see is each template's Sidebar & look now (#2166)
+    if (me && me.is_admin && typeof window.openPeopleSettings === 'function') {
+        const open = pfEl('button', { type: 'button', class: 'pf-btn', id: 'pf-feature-defaults-btn', text: 'Open templates' });
+        open.addEventListener('click', () => pfOpenPeople('templates'));
+        list.append(pfEl('div', { class: 'pf-nudge', id: 'pf-feature-defaults' }, [
+            pfEl('div', {}, [
+                pfEl('strong', { text: 'What new people see' }),
+                pfEl('span', { text: 'Each template has its own Sidebar & look, and People > Templates sets the one new people start as.' }),
+            ]),
+            open,
+        ]));
+    } else if (me && me.is_admin) {
+        // no settings bundle: the old global default, as before (#2157)
         const line = pfEl('span', { text: 'Everything SoulSync has.' });
         const change = pfEl('button', { type: 'button', class: 'pf-btn', id: 'pf-feature-defaults-btn', text: 'Change' });
         const fill = (d) => { line.textContent = `${pfFeaturesLine(d, d.off, d.locked)}. Profiles that never picked their own follow it.`; };
@@ -2401,44 +2426,13 @@ async function revokeInvite(inv) {
 function openInviteCreator() {
     const modal = pfModal({
         title: 'Create an invite link',
-        subtitle: 'Whoever opens it picks a name and joins with the access you choose here.',
+        subtitle: 'Whoever opens it picks a name and joins following the template you choose here.',
         size: 'small', layerClass: 'pf-layer--small',
     });
-    let preset = PROFILE_PRESETS[0];
     let hours = 72;
 
-    const presets = pfEl('div', { class: 'pf-presets pf-presets--2', role: 'radiogroup', 'aria-label': 'Access' });
-    const presetButtons = PROFILE_PRESETS.map(pr => {
-        const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio' }, [
-            pfEl('span', { class: 'pf-preset-name', text: pr.name }),
-            pfEl('span', { class: 'pf-preset-desc', text: pr.desc }),
-        ]);
-        btn.addEventListener('click', () => {
-            preset = pr;
-            // a preset with other sides redraws the page list for them
-            const sidesChanged = more.sides !== pr.sides;
-            more.sides = pr.sides;
-            more.can_download = pr.can_download;
-            if (sidesChanged) pages.render();
-            limit.sync();
-            sync();
-        });
-        presets.append(btn);
-        return [btn, pr];
-    });
-    // "more": the same page list and request limit the editor has
-    const more = {
-        sides: preset.sides, can_download: preset.can_download, allowed_pages: null,
-        request_limit: 0, request_limit_days: 7,
-    };
-    const pages = pfPagePicker(more);
-    const limit = pfLimitRow(more);
-    const moreBox = pfEl('details', { class: 'pf-details pf-invite-more' }, [
-        pfEl('summary', { text: 'More' }),
-        pfEl('div', { class: 'pf-section-title', text: 'Pages' }), pages.box,
-        pfEl('div', { class: 'pf-section-title', text: 'Limits' }),
-        pfEl('div', { class: 'pf-group' }, limit.row),
-    ]);
+    // what they start as (#2166): a template, fine-tuned per person later
+    const templatePick = pfTemplatePicker({ label: 'They start as' });
     const noteId = 'pf-invite-note-' + (++_pfUid);
     const note = pfEl('input', { type: 'text', id: noteId, class: 'pf-input', maxlength: '200', autocomplete: 'off', placeholder: 'For Kim' });
     const expiry = pfEl('div', { class: 'pf-seg', role: 'group', 'aria-label': 'Runs out after' });
@@ -2450,7 +2444,8 @@ function openInviteCreator() {
     });
     const error = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
     const form = pfEl('div', {}, [
-        pfEl('div', { class: 'pf-section-title', text: 'Access' }), presets, moreBox,
+        pfEl('div', { class: 'pf-section-title', text: 'They start as' }), templatePick.box,
+        pfEl('p', { class: 'pf-help', text: 'Fine-tune anything in their permissions once they join.' }),
         pfEl('div', { class: 'pf-field', style: 'margin-top:18px' }, [
             pfEl('label', { class: 'pf-label', for: noteId, text: 'Note (optional)' }), note,
             pfEl('p', { class: 'pf-help', text: 'Only you see it, to tell your links apart.' }),
@@ -2461,7 +2456,6 @@ function openInviteCreator() {
     modal.body.append(form);
 
     function sync() {
-        presetButtons.forEach(([btn, pr]) => btn.setAttribute('aria-checked', String(pr === preset)));
         expiryButtons.forEach(([btn, h]) => btn.setAttribute('aria-pressed', String(h === hours)));
     }
     sync();
@@ -2470,16 +2464,17 @@ function openInviteCreator() {
     const create = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Create link' });
     create.addEventListener('click', async () => {
         error.textContent = '';
+        const template = templatePick.value();
+        if (!template) {
+            error.textContent = 'Pick the template they start as.';
+            return;
+        }
         create.disabled = true;
         try {
             const res = await fetch('/api/profiles/invites', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    preset: {
-                        allowed_sides: preset.sides, can_download: preset.can_download, allowed_pages: more.allowed_pages,
-                        hide_explicit: preset.hide_explicit, max_rating: preset.max_rating || null,
-                        request_limit: more.request_limit, request_limit_days: more.request_limit_days,
-                    },
+                    preset: { template_id: template.id },
                     note: note.value.trim() || undefined,
                     expires_hours: hours,
                 }),
@@ -2533,7 +2528,8 @@ function openInviteCreator() {
         setTimeout(() => copy.focus(), 0);
     }
 
-    modal.open(() => presetButtons[0][0]);
+    modal.open(() => note);
+    templatePick.ready.then(() => templatePick.focus());
 }
 
 // ── Activity: the admin log ────────────────────────────────────────────
@@ -2919,6 +2915,62 @@ const PROFILE_PRESETS = [
     { id: 'guest', name: 'Guest', desc: 'Listens to music, nothing else', sides: 'music', can_download: false, hide_explicit: false, max_rating: '' },
 ];
 
+// templates (#2166): what a new person starts from. one radio card per
+// template, the sign-up template picked first. `ready` settles once the list
+// is in (or failed: then value() is null and the box says so)
+function pfTemplatePicker({ label = 'Start from' } = {}) {
+    const box = pfEl('div', { class: 'pf-presets', role: 'radiogroup', 'aria-label': label });
+    box.append(pfEl('p', { class: 'pf-help', text: 'Loading templates…' }));
+    let picked = null;
+    let list = [];
+    const buttons = [];
+    function sync() {
+        buttons.forEach(([btn, t]) => {
+            const on = picked != null && t.id === picked.id;
+            btn.setAttribute('aria-checked', String(on));
+            btn.tabIndex = on ? 0 : -1;
+        });
+    }
+    const ready = fetch('/api/permissions/templates', { headers: { Accept: 'application/json' } })
+        .then(pfReadJson)
+        .then((d) => {
+            if (!d || !d.success || !Array.isArray(d.templates) || !d.templates.length) throw new Error('none');
+            list = d.templates;
+            box.innerHTML = '';
+            list.forEach((t) => {
+                const n = Array.isArray(t.followers) ? t.followers.length : 0;
+                const desc = t.description || (n ? `${n} ${n === 1 ? 'person follows' : 'people follow'} it` : '');
+                const btn = pfEl('button', { type: 'button', class: 'pf-preset', role: 'radio', 'data-template-id': String(t.id) }, [
+                    pfEl('span', { class: 'pf-preset-name', text: t.name }),
+                    desc ? pfEl('span', { class: 'pf-preset-desc', text: desc }) : null,
+                ]);
+                btn.addEventListener('click', () => { picked = t; sync(); });
+                btn.addEventListener('keydown', (e) => {
+                    const i = buttons.findIndex(([b]) => b === btn);
+                    let next = -1;
+                    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % buttons.length;
+                    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + buttons.length) % buttons.length;
+                    if (next < 0) return;
+                    e.preventDefault();
+                    picked = buttons[next][1];
+                    sync();
+                    buttons[next][0].focus();
+                });
+                box.append(btn);
+                buttons.push([btn, t]);
+            });
+            picked = list.find((t) => t.id === d.signup_template_id) || list[0];
+            sync();
+            return true;
+        })
+        .catch(() => {
+            box.innerHTML = '';
+            box.append(pfEl('p', { class: 'pf-form-error', text: "Couldn't load the templates. Close this and try again." }));
+            return false;
+        });
+    return { box, ready, value: () => picked, focus: () => { const on = buttons.find(([, t]) => picked && t.id === picked.id); if (on) on[0].focus(); } };
+}
+
 // which preset a profile's settings line up with, if any
 function pfPresetOf(p) {
     if (!p || p.is_admin) return null;
@@ -3189,6 +3241,8 @@ async function openProfileEditor({ mode = 'create', profile = null, identityOnly
 
     // what shows for them (#2157), filled once it loads
     let featureState = null;
+    // add: the template they start from (#2166)
+    let templatePick = null;
     let featureChooser = null;
 
     const title = isCreate ? 'Add a profile' : isSelf ? 'Your profile' : `Edit ${p.name}`;
@@ -3198,7 +3252,7 @@ async function openProfileEditor({ mode = 'create', profile = null, identityOnly
         onClose: permsElsewhere ? () => setTimeout(() => window.openPersonEditor(p.id), 0) : null,
     });
     const stepIds = ['identity', 'access'];
-    const stepNames = isSelf ? ['Profile', 'Sign-in'] : permsElsewhere ? ['Who', 'PIN & library'] : ['Who', 'Access'];
+    const stepNames = isSelf ? ['Profile', 'Sign-in'] : permsElsewhere ? ['Who', 'PIN & library'] : isCreate ? ['Who', 'Start from'] : ['Who', 'Access'];
     let step = 0;
     let furthest = isCreate ? 0 : 1;
 
@@ -3449,6 +3503,20 @@ async function openProfileEditor({ mode = 'create', profile = null, identityOnly
             pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
             pfEl('div', { class: 'pf-section-title', text: 'Library' }), ownLibraryGroup(),
         );
+    } else if (isCreate) {
+        // a new person follows a template (#2166): pick one here, fine-tune
+        // anything in their permissions once they exist
+        templatePick = pfTemplatePicker();
+        pane2.append(
+            pfEl('div', { class: 'pf-section-title', text: 'Start from' }), templatePick.box,
+            pfEl('p', { class: 'pf-help', text: "Fine-tune anything in their permissions once they're added." }),
+            pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
+        );
+        if (loginMode) {
+            pane2.append(pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
+                pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
+                    pfEl('p', { class: 'pf-help', text: 'Login mode is on, so they need one to sign in.' })]));
+        }
     } else {
         // admin switch (editing someone else only)
         const accessBox = pfEl('div');
@@ -3755,8 +3823,16 @@ async function openProfileEditor({ mode = 'create', profile = null, identityOnly
     }
 
     async function submitCreate() {
+        const template = templatePick && templatePick.value();
+        if (!template) {
+            formError.textContent = "Pick a template they start from. If none showed, close this and try again.";
+            goTo(1);
+            return;
+        }
+        // made small (music only, asks first) and then put on the template,
+        // so a failure in between never leaves them with more than that
         const body = {
-            ...identityPayload(), ...accessPayload(),
+            ...identityPayload(), can_download: false,
             pin: st.pinOn ? st.pin : undefined,
             password: st.password || undefined,
         };
@@ -3774,21 +3850,41 @@ async function openProfileEditor({ mode = 'create', profile = null, identityOnly
             }
             return;
         }
-        if (st.avatarFile && created.profile_id) {
+        const newId = created.profile_id;
+        const problems = [];
+        try {
+            await send(`/api/profiles/${newId}/permissions`, 'PUT', { template_id: template.id, reset: 'all' });
+        } catch (e) {
+            // the profile exists; it just isn't on the template yet
+            problems.push(`they don't follow ${template.name} yet (${e.message || 'connection error'}), set it in their permissions`);
+        }
+        if (st.avatarFile && newId) {
             try {
-                await uploadAvatar(created.profile_id);
+                await uploadAvatar(newId);
             } catch (e) {
-                // the profile is made; say so, and don't pretend the picture is too
-                modal.close();
-                showToast(`${body.name} is ready, but the picture didn't upload: ${e.message}`, 'warning');
-                _pfAfterSave();
-                return;
+                problems.push(`the picture didn't upload: ${e.message}`);
             }
         }
         clearPicked();
         modal.close();
-        showToast(`${body.name} is ready`, 'success');
         _pfAfterSave();
+        if (problems.length) {
+            showToast(`${body.name} is ready, but ${problems.join('; ')}`, 'warning');
+        } else {
+            showToast(`${body.name} is ready and follows ${template.name}`, 'success');
+        }
+        // the template is a start: offer the sheet to fine-tune it
+        if (newId && typeof window.openPersonEditor === 'function' && typeof showConfirmDialog === 'function') {
+            const go = await showConfirmDialog({
+                title: `${body.name} is ready`,
+                message: problems.length
+                    ? `Open their permissions to finish setting them up.`
+                    : `They follow ${template.name}. Fine-tune anything for them now, or later from People.`,
+                confirmText: 'Open permissions',
+                cancelText: 'Done',
+            });
+            if (go) window.openPersonEditor(newId);
+        }
     }
 
     // one PUT for what changed, then the picture, the pin and the password on

@@ -152,8 +152,23 @@ def _now_sql(delta_hours: float = 0) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=delta_hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 
+class _BadPreset(ValueError):
+    pass
+
+
 def _clean_preset(raw):
+    """an invite's access. new invites name a template ({"template_id": n},
+    #2166): the person joins following it. old ones carry the profile columns
+    and keep working (the boot mapping turns them into template + changes)."""
     raw = raw if isinstance(raw, dict) else {}
+    if raw.get("template_id") is not None:
+        try:
+            tid = int(raw["template_id"])
+        except (TypeError, ValueError):
+            raise _BadPreset("Pick a template") from None
+        if not get_database().get_permission_template(tid):
+            raise _BadPreset("That template is gone. Pick another one.")
+        return {"template_id": tid}
     out = {}
     for k in _PRESET_KEYS:
         if k in raw:
@@ -186,10 +201,14 @@ def create_invite():
         hours = max(1, min(720, int(body.get("expires_hours") or 72)))
     except (TypeError, ValueError):
         hours = 72
+    try:
+        preset = _clean_preset(body.get("preset"))
+    except _BadPreset as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     token = secrets.token_urlsafe(24)
     pid, name, is_admin = _actor()
     iid = get_database().create_profile_invite(
-        token_hash=_hash(token), created_by=pid, preset=_clean_preset(body.get("preset")),
+        token_hash=_hash(token), created_by=pid, preset=preset,
         note=(str(body.get("note") or "").strip()[:200] or None), expires_at=_now_sql(hours))
     if not iid:
         return jsonify({"success": False, "error": "Could not create the invite"}), 500
@@ -250,10 +269,10 @@ def read_invite(token):
     if err:
         return err
     preset = inv.get("preset") or {}
+    sides, can_download = _invite_access(preset)
     oidc = _oidc_only_on()
     out = {"success": True, "note": inv.get("note"), "expires_at": inv.get("expires_at"),
-           "sides": preset.get("allowed_sides") or "music",
-           "can_download": bool(preset.get("can_download", True)),
+           "sides": sides, "can_download": can_download,
            "password_required": bool(_require_login_enabled()) and not oidc,
            "oidc": oidc}
     if oidc:
@@ -262,6 +281,51 @@ def read_invite(token):
         out["oidc_label"] = settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL
         out["error"] = session.pop("oidc_invite_error", None)
     return jsonify(out)
+
+
+def _template_perms(db, template_id):
+    """a template's full map, or None when it's gone or unreadable."""
+    import json
+
+    from core import permissions as P
+    try:
+        row = db.get_permission_template(int(template_id))
+        if not row:
+            return None
+        return P.clean_layer(json.loads(row.get("perms") or "{}"), fill=P.TEMPLATE_DEFAULTS)
+    except Exception:  # noqa: BLE001 - gone or unreadable reads the same
+        logger.warning("invite template %s unreadable", template_id, exc_info=True)
+        return None
+
+
+def _invite_access(preset):
+    """(sides, can_download) for the invite page's one line."""
+    if preset.get("template_id") is not None:
+        perms = _template_perms(get_database(), preset["template_id"]) or {}
+        music = bool(perms.get("music.access"))
+        video = bool(perms.get("movies.access") or perms.get("tv.access"))
+        sides = "both" if music and video else "video" if video else "music"
+        return sides, perms.get("music.get") == "download"
+    return preset.get("allowed_sides") or "music", bool(preset.get("can_download", True))
+
+
+def _join_template(db, new_id, template_id):
+    """put a profile made from an invite on its template, no personal
+    changes, and write its columns from the template. a template deleted
+    since the link was made falls back to the one new people start as.
+    False when neither is there: the profile keeps the small start it was
+    made with (music only, asks first)."""
+    from core import permission_store as store
+    tid = template_id if _template_perms(db, template_id) is not None else store.signup_template_id(db)
+    if tid is None or _template_perms(db, tid) is None:
+        logger.warning("invite: no template for profile %s, it keeps the small start", new_id)
+        return False
+    if tid != template_id:
+        logger.info("invite: template %s is gone, profile %s starts as %s", template_id, new_id, tid)
+    if not db.set_profile_permission_layers(int(new_id), int(tid), "{}"):
+        return False
+    store.recompute(db, [int(new_id)])
+    return True
 
 
 def create_from_invite(db, inv, *, name, color, pin_hash, password=None):
@@ -273,6 +337,14 @@ def create_from_invite(db, inv, *, name, color, pin_hash, password=None):
     if not db.claim_profile_invite(inv["id"], 0):
         return None, "This invite link isn't valid any more"
     preset = inv.get("preset") or {}
+    if preset.get("template_id") is not None:
+        # made small (music only, asks first) and only then widened to the
+        # template, so a failure in between never leaves it wide open
+        new_id = db.create_profile(name, color, pin_hash, is_admin=False, can_download=False)
+        if not new_id:
+            return None, "Could not create the profile"
+        _join_template(db, new_id, preset["template_id"])
+        return _finish_invite_profile(db, inv, new_id, name, password)
     new_id = db.create_profile(name, color, pin_hash, is_admin=False,
                                allowed_pages=preset.get("allowed_pages"),
                                can_download=bool(preset.get("can_download", True)),
@@ -283,6 +355,10 @@ def create_from_invite(db, inv, *, name, color, pin_hash, password=None):
              if k in preset}
     if extra:
         db.update_profile(new_id, **extra)
+    return _finish_invite_profile(db, inv, new_id, name, password)
+
+
+def _finish_invite_profile(db, inv, new_id, name, password):
     if password:
         db.set_profile_password(new_id, password)
     # record who used it (claimed with 0 first so the spend came before the create)
