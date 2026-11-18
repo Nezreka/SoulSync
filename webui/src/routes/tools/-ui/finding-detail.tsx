@@ -864,7 +864,7 @@ function FindingDetailBody({
       if (d.needs_confirmation) {
         rows.push([
           'Confirmed by',
-          'Nobody yet: Spotify and Deezer don\'t list these artists on its tracks. Fix all leaves it alone',
+          'Nobody yet: no provider lists these artists on its tracks. Fix all leaves it alone',
         ]);
       } else if (checked.length) {
         rows.push(['Confirmed by', checked.join(', ')]);
@@ -872,7 +872,7 @@ function FindingDetailBody({
       if (d.track_count != null) rows.push(['Tracks affected', text(d.track_count)]);
       // the split changes the library; the files follow through Re-tag and
       // Reorganize (docs/library-v2-data-flow.md)
-      if (d.library_v2_native) rows.push(['Files', 'Re-tag and Reorganize check them after the split']);
+      if (d.library_v2_native) rows.push(['Files', 'Re-tag and Reorganize check them after the split, if they are switched on']);
 
       const chips = commaSplitChips(d);
       const tracks = list<{ title?: string; album?: string; file_path?: string }>(d.tracks);

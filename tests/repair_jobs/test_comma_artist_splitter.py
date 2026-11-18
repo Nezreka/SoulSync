@@ -539,6 +539,10 @@ def test_a_request_checks_exactly_the_artists_asked_for_files_or_not(db, no_fetc
     names = sorted(f['details']['combined_name'] for f in findings)
     assert 'Nova, Mat Zo' not in names                  # not asked for
     assert 'Camellia, Toby Fox' in names
+    # the fileless ghost was checked too: nothing proposes a split (both
+    # parts unknown), so it stands, untouched
+    assert _result.scanned == 2
+    assert _artist_id(db, 'Nelly & Florida Georgia Line') == ghost
 
 
 def test_2136_the_job_never_cuts_a_band_into_its_words(db, no_fetch):
@@ -711,3 +715,79 @@ def test_split_artists_never_splits_a_name_the_old_list_held(db, no_fetch, band)
     result, findings = _scan(db)
     assert result.auto_fixed == 0 and findings == []
     assert _artist_id(db, band) is not None
+
+
+def test_an_old_finding_on_an_alias_never_splits_the_lead(db, no_fetch):
+    """Nezreka's review, 4: after a legacy-backed heal the combined row stays
+    as an alias of the lead. A pending finding on it must not heal the lead"""
+    tracks = _album_by(db, 'Alpha', 'One', **{'spotify_id': 'sp-alpha'})
+    alpha = _artist_id(db, 'Alpha')
+    with db._get_connection() as conn:
+        alias = conn.execute("INSERT INTO lib2_artists(name, sort_name, canonical_artist_id) "
+                             "VALUES('Alpha & Beta', 'x', ?)", (alpha,)).lastrowid
+        conn.commit()
+    details = {'combined_name': 'Alpha & Beta', 'split_artists': ['Alpha', 'Beta'],
+               'primary_artist': 'Alpha', 'db_artist_id': alias, 'library_v2_native': True,
+               'confirmed': True, 'needs_confirmation': False,
+               'library_v2': {'artist_ids': [alias], 'track_ids': tracks}}
+    out = _worker(db)._fix_comma_artist_split('artist', f'lib2:{alias}', None, details)
+    assert out['success'] is True and out['action'] == 'catalogue_already_split'
+    with db._get_connection() as conn:
+        row = conn.execute("SELECT spotify_id FROM lib2_artists WHERE id=?", (alpha,)).fetchone()
+    assert row is not None and row[0] == 'sp-alpha'
+    assert _artist_id(db, 'Beta') is None
+
+
+def test_a_dismissed_split_never_heals_on_its_own(db, no_fetch):
+    """Nezreka's review, 6: dry run, the user dismissed it, the ghost stays"""
+    track, ghost = _ghost_on(db, 'Camellia', 'Camellia, Toby Fox')
+    _credits(db, track, ['Camellia', 'Toby Fox'])
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO repair_findings(job_id, finding_type, severity, status, "
+                     "entity_type, entity_id, title, description, details_json) "
+                     "VALUES('comma_artist_splitter', 'comma_artist_split', 'warning', "
+                     "'dismissed', 'artist', ?, 't', 'd', '{}')", (f'lib2:{ghost}',))
+        conn.commit()
+    for settings in (_settings(), _settings(dry_run=False)):
+        result, _findings = _scan(db, settings)
+        assert result.auto_fixed == 0
+    assert _artist_id(db, 'Camellia, Toby Fox') == ghost
+
+
+def test_a_combined_artist_on_a_profile_watchlist_is_no_ghost(db, no_fetch):
+    track, _ghost = _ghost_on(db, 'Camellia', 'Camellia, Toby Fox')
+    _credits(db, track, ['Camellia', 'Toby Fox'])
+    with db._get_connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS watchlist_artists(id INTEGER PRIMARY KEY, "
+                     "artist_name TEXT NOT NULL, spotify_artist_id TEXT)")
+        conn.execute("INSERT INTO watchlist_artists(artist_name) VALUES('Camellia, Toby Fox')")
+        conn.commit()
+    result, findings = _scan(db)
+    assert result.auto_fixed == 0 and len(findings) == 1
+
+
+# ── bulk-fix: fixable set derived from the handler map ───────────────────────
+
+def test_bulk_fixable_set_matches_fix_handlers(db):
+    """The old hardcoded tuple silently skipped genre_cleanup /
+    replaygain_retag / comma_artist_split in Fix All. Derivation pins them in."""
+    handlers = _worker(db)._fix_handlers()
+    # duplicate_tracks belongs to a deliberately retired legacy job; native
+    # catalogue construction prevents that duplicate-row class.
+    for ft in ('genre_cleanup', 'replaygain_retag', 'comma_artist_split', 'dead_file'):
+        assert ft in handlers
+
+
+def test_a_run_asks_the_providers_for_a_bounded_number_of_artists(db, no_fetch, monkeypatch):
+    """Nezreka's review: no burst of provider calls over a big backlog"""
+    import core.repair_jobs.comma_artist_splitter as cas
+    import core.repair_worker as rw
+    monkeypatch.setattr(cas, 'FETCH_ARTIST_BUDGET', 1)
+    asked = []
+    monkeypatch.setattr(rw, 'request_artist_split', lambda ids, reason='': asked.extend(ids) or True)
+    _album_by(db, 'Nova, Mat Zo', 'One', album='A')
+    _album_by(db, 'Camellia, Toby Fox', 'Two', album='B')
+    ids = sorted([_artist_id(db, 'Nova, Mat Zo'), _artist_id(db, 'Camellia, Toby Fox')])
+    result, _findings = _scan(db, scope={'artist_ids': ids})
+    assert len(no_fetch) == 1 and result.scanned == 1
+    assert asked == [ids[1]]           # the rest is asked for again, for the next run

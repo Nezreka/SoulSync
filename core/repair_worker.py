@@ -863,10 +863,17 @@ def split_projection(config_manager: Any) -> Dict[str, bool]:
 
 def _projection_note(projected: dict) -> str:
     """what a heal's projection request did, for the fix's message"""
-    queued = " and ".join(_PROJECTION_NAMES[k] for k in projected.get("queued") or ())
-    if not queued or not projected.get("files"):
+    files = projected.get("files") or 0
+    if not files:
         return ""
-    return f"; {queued} will check {projected['files']} file(s)"
+    queued = " and ".join(_PROJECTION_NAMES[k] for k in projected.get("queued") or ())
+    off = " and ".join(_PROJECTION_NAMES[k] for k in projected.get("off") or ())
+    note = f"; {queued} will check {files} file(s)" if queued else ""
+    if off:
+        one = " and " not in off
+        note += (f"; {off} {'is' if one else 'are'} switched off, the files follow once "
+                 f"{'it runs' if one else 'they run'}")
+    return note
 
 
 def _merge_scope(existing: Optional[dict], new: Optional[dict], queued: bool) -> Optional[dict]:
@@ -881,8 +888,14 @@ def _merge_scope(existing: Optional[dict], new: Optional[dict], queued: bool) ->
     lists = ("file_paths", "artist_ids")
 
     def only_lists(scope: dict) -> bool:
-        return bool(scope) and set(scope) - {"library"} <= set(lists)
+        keys = set(scope or ()) - {"library"}
+        return bool(keys) and keys <= set(lists)
 
+    if queued and existing and not only_lists(existing) and only_lists(new):
+        # a run already waiting over a whole library, or one a user scoped to
+        # an artist, is not narrowed by a request: it keeps its own scope
+        # (a whole-library run covers the request's files anyway)
+        return existing
     if (queued and existing and only_lists(existing) and only_lists(new)
             and existing.get("library") == new.get("library")):
         # files and artists asked for before it starts: one run over all of
@@ -903,10 +916,8 @@ class RepairWorker:
     """
 
     def __init__(self, database, transfer_folder: str = None):
-        global _ACTIVE_WORKER
         self.db = database
         self.transfer_folder = transfer_folder or './Transfer'
-        _ACTIVE_WORKER = self
 
         # Worker state
         self.running = False
@@ -950,6 +961,10 @@ class RepairWorker:
         # Optional per-run scope for user-triggered runs (job_id -> scope dict,
         # e.g. {'artist_name': ...}); consumed by _run_job, never persisted.
         self._force_run_scopes: Dict[str, dict] = {}
+        # queued runs another job asked for (request_projection /
+        # request_split): they wait out the maintenance pause and are no
+        # manual runs. A Run Now click on the same job makes it one again.
+        self._background_runs: set = set()
 
         # Automation-engine emit hook (set by web_server to engine.emit).
         # Fire-and-forget: repair events power the 'Maintenance Finding
@@ -1476,9 +1491,13 @@ class RepairWorker:
     # Lifecycle
     # ------------------------------------------------------------------
     def start(self):
+        global _ACTIVE_WORKER
         if self.running:
             logger.warning("Repair worker already running")
             return
+        # the app's worker is the one that runs; one a job or a test builds
+        # for a fix never takes requests from the rest of the process
+        _ACTIVE_WORKER = self
         self._prune_retired_job_findings()
         self._prune_stale_legacy_findings()
         self.running = True
@@ -1719,12 +1738,21 @@ class RepairWorker:
 
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
+                background = False
                 with self._force_run_lock:
-                    if self._force_run_queue:
-                        forced_job = self._force_run_queue.pop(0)
+                    # a run another job asked for waits while maintenance
+                    # is paused; a Run Now click does not
+                    for queued_job in list(self._force_run_queue):
+                        is_background = queued_job in self._background_runs
+                        if is_background and not self.enabled:
+                            continue
+                        self._force_run_queue.remove(queued_job)
+                        self._background_runs.discard(queued_job)
+                        forced_job, background = queued_job, is_background
+                        break
 
                 if forced_job:
-                    self._run_job(forced_job, forced=True)
+                    self._run_job(forced_job, forced=True, background=background)
                     if self._sleep_or_stop(2):
                         break
                     continue
@@ -1746,7 +1774,7 @@ class RepairWorker:
 
         logger.info("Repair worker thread finished")
 
-    def _run_job(self, job_id: str, forced: bool = False):
+    def _run_job(self, job_id: str, forced: bool = False, background: bool = False):
         """Execute a single job and record the run.
 
         When forced=True, the user explicitly triggered this via "Run Now" —
@@ -1881,7 +1909,7 @@ class RepairWorker:
             transfer_folder=self.transfer_folder,
             config_manager=self._config_manager,
             scope=run_scope,
-            manual=bool(forced),
+            manual=bool(forced) and not background,
             spotify_client=self.spotify_client,
             itunes_client=self.itunes_client,
             mb_client=self.mb_client,
@@ -1890,7 +1918,8 @@ class RepairWorker:
             create_finding=self._create_finding,
             should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
-            is_paused=(lambda: self._held) if forced else (lambda: not self.enabled or self._held),
+            is_paused=((lambda: self._held) if forced and not background
+                       else (lambda: not self.enabled or self._held)),
             # update_progress feeds the Tools page; report_progress feeds
             # the notification centre's card. They were two separate calls a
             # job had to remember to make BOTH of, and three jobs only ever
@@ -2032,7 +2061,7 @@ class RepairWorker:
         return self._stop_event.is_set()
 
     def run_job_now(self, job_id: str, scope: Optional[dict] = None,
-                    respect_enabled: bool = False) -> bool:
+                    respect_enabled: bool = False, background: bool = False) -> bool:
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
@@ -2100,6 +2129,10 @@ class RepairWorker:
                 self._force_run_scopes[job_id] = merged
             else:
                 self._force_run_scopes.pop(job_id, None)
+            if not background:
+                self._background_runs.discard(job_id)
+            elif not queued:
+                self._background_runs.add(job_id)
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
                 logger.info("Job %s queued for immediate run%s", job_id,
@@ -2114,14 +2147,13 @@ class RepairWorker:
         ``track_ids``. Each runs in its own mode: by default it files
         findings for the files that no longer match the catalogue, and
         writes only when the user switched its automatic mode on; manual
-        tags, locks and history are its business, not the healer's. The
-        jobs' own switch is their library-wide schedule (both ship off);
-        whether a heal asks is the healer's setting (``retag`` /
-        ``reorganize``), so a request runs a job that has no schedule.
+        tags, locks and history are its business, not the healer's. A job
+        the user switched off is not run (#1207), and a request waits out
+        the maintenance pause; ``off`` names the jobs that were not asked.
         Returns what was queued.
         Never raises: the catalogue change stands either way, and the
         jobs' own schedules catch up later."""
-        out: Dict[str, Any] = {"files": 0, "queued": []}
+        out: Dict[str, Any] = {"files": 0, "queued": [], "off": []}
         ids = sorted({int(t) for t in track_ids or ()})
         if not ids or not (retag or reorganize):
             return out
@@ -2146,8 +2178,11 @@ class RepairWorker:
             if not wanted:
                 continue
             try:
-                if self.run_job_now(PROJECTION_JOBS[kind], scope={"file_paths": paths}):
+                if self.run_job_now(PROJECTION_JOBS[kind], scope={"file_paths": paths},
+                                    respect_enabled=True, background=True):
                     out["queued"].append(kind)
+                else:
+                    out["off"].append(kind)
             except Exception as exc:  # noqa: BLE001 - see docstring
                 logger.debug("%s not requested: %s", kind, exc)
         if out["queued"]:
@@ -2160,14 +2195,15 @@ class RepairWorker:
         splits an artist: it decides with the credit kernel, asks the credit
         fetcher for evidence, confirms, heals and requests Re-tag /
         Reorganize, all by its own settings (dry run: findings). No other
-        job splits; one that meets a name reading as a list asks here. Like
-        a projection request, its switch is its schedule, not a veto.
-        Returns whether a run was queued. Never raises."""
+        job splits; one that meets a name reading as a list asks here.
+        Switched off, it is not run (#1207); the request waits out the
+        maintenance pause. Returns whether a run was queued. Never raises."""
         ids = sorted({int(a) for a in artist_ids or () if str(a).strip().lstrip("-").isdigit()})
         if not ids:
             return False
         try:
-            queued = self.run_job_now(SPLIT_JOB, scope={"artist_ids": ids})
+            queued = self.run_job_now(SPLIT_JOB, scope={"artist_ids": ids},
+                                      respect_enabled=True, background=True)
         except Exception as exc:  # noqa: BLE001 - see docstring
             logger.debug("split not requested: %s", exc)
             return False
@@ -4278,8 +4314,11 @@ class RepairWorker:
                 pass
         want = name_key(combined)
         for artist_id in candidates:
+            # the row itself, never its canonical artist: a combined row a
+            # heal left as an alias of the lead must not point the split at
+            # the lead (Alpha healed as "Alpha & Beta")
             row = conn.execute(
-                "SELECT COALESCE(canonical_artist_id, id), name FROM lib2_artists WHERE id=?",
+                "SELECT id, name FROM lib2_artists WHERE id=? AND canonical_artist_id IS NULL",
                 (artist_id,)).fetchone()
             if row and name_key(row[1]) == want:
                 return int(row[0])

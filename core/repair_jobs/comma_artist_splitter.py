@@ -44,6 +44,14 @@ logger = get_logger("repair_job.comma_artist_splitter")
 
 # Cap on combined artists examined per run (each may ask the credit fetcher).
 SCAN_ARTIST_LIMIT = 300
+# artists per run that may ask the credit fetcher (a few tracks each, every
+# configured source): a big library's backlog goes over many runs, never as
+# one burst of tens of thousands of provider calls
+FETCH_ARTIST_BUDGET = 60
+
+
+class _FetchBudgetSpent(Exception):
+    """this run asked the providers enough; the artist waits for the next"""
 # artists read per query while walking the catalogue
 _ARTIST_PAGE = 500
 # where the last run that hit SCAN_ARTIST_LIMIT stopped (a lib2 artist id)
@@ -137,7 +145,7 @@ def _separator_switch(kind: str, raw: str) -> str:
     text = raw.strip()
     if kind == 'comma':
         return ','
-    if kind == 'amp':
+    if kind in ('amp', 'link'):
         return '&'
     if kind == 'slash':
         return '/'
@@ -199,7 +207,8 @@ class CommaArtistSplitterJob(RepairJob):
         '2. The album\'s own artist inside the name, the artists the library already '
         'identified, and your Keep Whole Names.\n'
         'A name nothing explains is left as it is.\n\n'
-        'A split is confirmed when Spotify or Deezer credit every part on one of the '
+        'A split is confirmed when a provider (Spotify, Deezer, MusicBrainz, Tidal, Discogs, '
+        'JioSaavn) credits every part on one of the '
         'artist\'s tracks. A split only the names suggest is filed for you to check: '
         'Fix all and live mode leave it alone, the finding\'s own button applies it.\n\n'
         'In dry run mode (default), each finding shows how the artist would be split. '
@@ -217,9 +226,9 @@ class CommaArtistSplitterJob(RepairJob):
         '- Heal Ghosts: a combined artist that only stands in credits (owns no album, nobody '
         'watches it) is split on its own as soon as the providers confirm it, dry run or not. '
         'One they do not confirm stays a finding to check\n'
-        '- Request Re-tag / Request Reorganize: after every split (a finding applied here, or '
-        'a new download\'s artist split after the import), run those jobs for exactly the '
-        'affected files, also when their own schedule is off'
+        '- Request Re-tag / Request Reorganize: after every split, ask those jobs to check '
+        'exactly the affected files. A job you switched off is not run; the files follow '
+        'once it runs'
     )
     icon = 'repair-icon-artist'
     default_enabled = False
@@ -286,6 +295,8 @@ class CommaArtistSplitterJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
+        self._identified = None      # read once per scan, not per candidate
+        self._fetch_budget = FETCH_ARTIST_BUDGET
         settings = self._get_settings(context)
         dry_run = bool(settings.get('dry_run', True))
         symbols: list = self._get_symbols(settings)
@@ -325,6 +336,7 @@ class CommaArtistSplitterJob(RepairJob):
             if len(found) >= SCAN_ARTIST_LIMIT:
                 capped = True
                 break
+            previous_last = walk['last']
             seen_ids.add(int(artist_id))
             walk['last'] = int(artist_id)
             result.scanned += 1
@@ -338,6 +350,14 @@ class CommaArtistSplitterJob(RepairJob):
                 by_id = asked_for is not None and int(artist_id) in asked_for
                 info = self._decide(context, int(artist_id), name, symbols, services,
                                     None if by_id else allowed, asked=by_id)
+            except _FetchBudgetSpent:
+                # this artist and the rest wait for the next run (the walk's
+                # cursor, or a request for the rest)
+                seen_ids.discard(int(artist_id))
+                walk['last'] = previous_last
+                result.scanned -= 1
+                capped = True
+                break
             except Exception as e:  # noqa: BLE001 - one artist never ends the scan
                 logger.debug("Split check failed for %r: %s", name, e)
                 result.errors += 1
@@ -358,8 +378,9 @@ class CommaArtistSplitterJob(RepairJob):
             if capped and rest:
                 from core.repair_worker import request_artist_split
                 request_artist_split(rest, reason='Split Artists, the rest of a request')
-        elif capped and walk['last'] is not None:
-            _gap_cursor(context, _CURSOR_KEY, walk['last'])
+        elif capped:
+            if walk['last'] is not None:    # else: stopped at its first artist, stays put
+                _gap_cursor(context, _CURSOR_KEY, walk['last'])
         else:
             _gap_cursor(context, _CURSOR_KEY, 0)
 
@@ -393,6 +414,10 @@ class CommaArtistSplitterJob(RepairJob):
             # or for a ghost whenever ghosts heal. A split names alone
             # propose waits for the user either way
             auto = not unconfirmed and (not dry_run or (heal_ghosts and details.get('ghost')))
+            if auto and self._dismissed(context, entity_id):
+                # the user said no to this split: nothing applies it on its own
+                result.skipped += 1
+                continue
             if not auto:
                 self._file_finding(context, result, details, entity_id, unconfirmed)
             else:
@@ -464,10 +489,13 @@ class CommaArtistSplitterJob(RepairJob):
         try:
             conn = context.db._get_connection()
             ids = sorted(artist_ids)
-            marks = ','.join('?' for _ in ids)
-            rows = conn.execute(
-                f"SELECT id, name FROM lib2_artists WHERE canonical_artist_id IS NULL "
-                f"AND id IN ({marks}) ORDER BY id", ids).fetchall()
+            rows = []
+            for start in range(0, len(ids), 500):     # SQLite's variable limit
+                chunk = ids[start:start + 500]
+                marks = ','.join('?' for _ in chunk)
+                rows += conn.execute(
+                    f"SELECT id, name FROM lib2_artists WHERE canonical_artist_id IS NULL "
+                    f"AND id IN ({marks}) ORDER BY id", chunk).fetchall()
         except Exception as e:  # noqa: BLE001
             logger.error("Error reading requested artists: %s", e, exc_info=True)
             walk['error'] = e
@@ -525,7 +553,7 @@ class CommaArtistSplitterJob(RepairJob):
                 services: set, allowed, *, asked: bool = False) -> Optional[dict]:
         """the finding for one combined artist, None to leave it alone.
 
-        Reads the catalogue only. A split is confirmed when Spotify / Deezer
+        Reads the catalogue only. A split is confirmed when the providers
         credit every part on one of its tracks (``split_confirmed``). When the
         stored lists neither confirm a split nor keep the name whole, the
         credit fetcher is asked for a few of the tracks, looking them up under
@@ -553,12 +581,20 @@ class CommaArtistSplitterJob(RepairJob):
                 "JOIN lib2_albums al ON al.id = t.album_id "
                 "JOIN lib2_artists pa ON pa.id = al.primary_artist_id "
                 "WHERE ta.artist_id = ? AND pa.id <> ?", (artist_id, artist_id)) if r[0]]
-            identified = _identified_name_keys(conn, exclude_id=artist_id)
+            identified = self._identified_holders(conn, _identified_name_keys)
             # a ghost: a credit no album belongs to and nobody watches
             watched = conn.execute(
                 "SELECT 1 FROM lib2_artists WHERE id=? AND COALESCE(monitored,0)=1 UNION ALL "
                 "SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=? "
                 "AND COALESCE(monitored,0)=1 LIMIT 1", (artist_id, artist_id)).fetchone()
+            if watched is None:
+                # a profile's watchlist names it (the watch row would point at nothing)
+                try:
+                    watched = conn.execute(
+                        "SELECT 1 FROM watchlist_artists WHERE LOWER(TRIM(artist_name))="
+                        "LOWER(TRIM(?)) LIMIT 1", (name,)).fetchone()
+                except Exception:  # noqa: BLE001 - no watchlist table: nobody watches
+                    watched = None
             ghost = not scope['primary_album_ids'] and watched is None
             # the artist's own provider identity says the whole name is one
             # act: "Lo & Leduc" stays whole next to identified "Lo" / "Leduc"
@@ -571,7 +607,12 @@ class CommaArtistSplitterJob(RepairJob):
         whole = normalize_name(name)
 
         def known(n):
-            return normalize_name(n) in identified
+            # identified by a row other than this artist's own, or a name the
+            # user keeps whole (no row: an empty set)
+            holders = identified.get(normalize_name(n))
+            if holders is None:
+                return False
+            return not holders or bool(holders - {artist_id})
 
         def act(n):
             return known(n) or (self_identified and normalize_name(n) == whole)
@@ -605,6 +646,10 @@ class CommaArtistSplitterJob(RepairJob):
             # the providers asked about the proposed artists: a track the
             # combined name finds nowhere is looked up under each of them
             hints = list(decision.names) if decision.split else names
+            if services and scope['track_ids']:
+                if getattr(self, '_fetch_budget', FETCH_ARTIST_BUDGET) <= 0:
+                    raise _FetchBudgetSpent()
+                self._fetch_budget = getattr(self, '_fetch_budget', FETCH_ARTIST_BUDGET) - 1
             if self._fetch_credits(context, scope['track_ids'], services, hints):
                 decision = decide()
         if not decision.split or not _splits_only_at(name, list(decision.names), symbols):
@@ -691,6 +736,40 @@ class CommaArtistSplitterJob(RepairJob):
             "SELECT id FROM lib2_artists WHERE canonical_artist_id IS NULL "
             "AND LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", (name,)).fetchone()
         return int(row[0]) if row else None
+
+    def _identified_holders(self, conn, name_keys) -> dict:
+        """normalized name -> ids of the identified artists holding it (an
+        empty set for a keep-whole name), read once per scan"""
+        if getattr(self, '_identified', None) is None:
+            from core.library2.importer import normalize_name
+            from core.library2.native_enrich import _IDENTIFIED_SQL
+            index: dict = {}
+            for aid, name in conn.execute(
+                    f"SELECT a.id, a.name FROM lib2_artists a WHERE a.canonical_artist_id IS NULL "
+                    f"AND {_IDENTIFIED_SQL}"):
+                key = normalize_name(name or "")
+                if key:
+                    index.setdefault(key, set()).add(int(aid))
+            for key in name_keys(conn) - set(index):
+                index[key] = set()          # a keep-whole name (#2150)
+            self._identified = index
+        return self._identified
+
+    def _dismissed(self, context: JobContext, entity_id: str) -> bool:
+        """whether the user dismissed a split finding of this artist"""
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            return conn.execute(
+                "SELECT 1 FROM repair_findings WHERE job_id=? AND finding_type='comma_artist_split' "
+                "AND entity_type='artist' AND entity_id=? AND status='dismissed' LIMIT 1",
+                (self.job_id, entity_id)).fetchone() is not None
+        except Exception as e:  # noqa: BLE001 - unreadable: do not apply on our own
+            logger.debug("dismissed check for %s failed: %s", entity_id, e)
+            return True
+        finally:
+            if conn is not None:
+                conn.close()
 
     def _record_resolved_finding(self, context: JobContext, details: dict, fixed_count: int,
                                  entity_id: str) -> None:

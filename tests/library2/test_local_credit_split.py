@@ -38,6 +38,7 @@ def _proposes(credit, *, album_artist=None, library=()):
 def test_the_import_keeps_a_credit_as_written():
     # who an artist is, is Split Artists' to say; the import records
     assert _credit_names_for_import("1788-L, Deathpact") == ["1788-L, Deathpact"]
+    assert _credit_names_for_import("1788-L feat. Deathpact") == ["1788-L", "Deathpact"]
     assert _credit_names_for_import("  ") == []
 
 
@@ -213,3 +214,16 @@ def test_an_identified_band_a_frontman_leads_keeps_its_watch(conn, asked):
     assert _credits(conn, track) == ["Bob Marley", "Bob Marley & The Wailers"]
     assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_id=?",
                         (band,)).fetchone()[0] == 1
+
+
+def test_a_ghost_split_artists_already_decided_is_not_asked_about_again(conn, asked):
+    from core.library2.schema import ensure_library_v2_schema  # noqa: F401
+    host = _artist(conn, "Various Artists", spotify="sp-va", legacy=11)
+    ghost = _artist(conn, "Crosby, Stills & Nash")
+    _credited_track(conn, host, ghost)
+    conn.execute("CREATE TABLE IF NOT EXISTS repair_findings(id INTEGER PRIMARY KEY, job_id TEXT, "
+                 "entity_type TEXT, entity_id TEXT, status TEXT)")
+    conn.execute("INSERT INTO repair_findings(job_id, entity_type, entity_id, status) "
+                 "VALUES('comma_artist_splitter', 'artist', ?, 'pending')", (f"lib2:{ghost}",))
+    split_combined_credits_locally(conn)
+    assert asked == []

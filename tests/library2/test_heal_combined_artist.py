@@ -143,7 +143,7 @@ def test_request_projection_queues_both_writers_scoped_to_the_files(db):
     tracks = _album(db, 'Camellia', 'One', 'Two')
     worker = _bare_worker(db)
     out = worker.request_projection(tracks)
-    assert out == {'files': 2, 'queued': ['retag', 'reorganize']}
+    assert out == {'files': 2, 'queued': ['retag', 'reorganize'], 'off': []}
     assert worker._force_run_queue == ['library_retag', 'library_reorganize']
     assert len(worker._force_run_scopes['library_retag']['file_paths']) == 2
     more = _album(db, 'Toby Fox', 'Three')
@@ -152,15 +152,37 @@ def test_request_projection_queues_both_writers_scoped_to_the_files(db):
     assert len(worker._force_run_scopes['library_reorganize']['file_paths']) == 2
 
 
-def test_a_heal_asks_the_writers_even_without_their_schedule(db):
-    # both jobs ship switched off: that switch is their library-wide
-    # schedule. Whether a heal asks is the healer's own setting
+def test_a_request_never_runs_a_job_the_user_switched_off(db):
+    """Nezreka's review, 5 (#1207): a request is a background trigger"""
     tracks = _album(db, 'Camellia', 'One')
     worker = _bare_worker(db, enabled=False)
-    assert worker.request_projection(tracks)['queued'] == ['retag', 'reorganize']
-    assert worker._force_run_queue == ['library_retag', 'library_reorganize']
+    out = worker.request_projection(tracks)
+    assert out['queued'] == [] and out['off'] == ['retag', 'reorganize']
+    assert worker._force_run_queue == []
     assert worker.request_projection(_album(db, 'Toby Fox', 'Two'),
                                      retag=False, reorganize=False)['queued'] == []
+
+
+def test_a_request_waits_out_the_pause_and_is_no_manual_run(db):
+    tracks = _album(db, 'Camellia', 'One')
+    worker = _bare_worker(db)
+    worker.enabled = False                      # maintenance paused
+    worker.request_projection(tracks, reorganize=False)
+    assert worker._background_runs == {'library_retag'}
+    ran = []
+    worker._run_job = lambda job_id, forced=False, background=False: ran.append(
+        (job_id, background)) or worker._stop_event.set()
+    worker._sleep_or_stop = lambda seconds: (ran.append('slept'), True)[1]
+    worker._run()
+    assert ran == ['slept']                     # held while paused
+    worker._stop_event.clear()
+    worker.enabled = True
+    worker._run()
+    assert ('library_retag', True) in ran
+    # Run Now on a job a request queued makes it a manual run
+    worker.request_projection(tracks, reorganize=False)
+    worker.run_job_now('library_retag')
+    assert 'library_retag' not in worker._background_runs
 
 
 def test_split_artists_settings_decide_for_every_split_heal():
@@ -180,14 +202,14 @@ def test_split_artists_settings_decide_for_every_split_heal():
 
 def test_request_projection_with_nothing_to_project(db):
     worker = _bare_worker(db)
-    assert worker.request_projection([]) == {'files': 0, 'queued': []}
-    assert worker.request_projection([999]) == {'files': 0, 'queued': []}
+    assert worker.request_projection([]) == {'files': 0, 'queued': [], 'off': []}
+    assert worker.request_projection([999]) == {'files': 0, 'queued': [], 'off': []}
 
 
 # ── only Split Artists splits: everything else asks it ───────────────────────
 
 def test_a_split_request_queues_split_artists_for_those_artists(db):
-    worker = _bare_worker(db, enabled=False)
+    worker = _bare_worker(db)
     worker._jobs['comma_artist_splitter'] = type('J', (), {
         'supports_artist_id_scope': True, 'supports_file_scope': True,
         'display_name': 'Split Artists'})()
@@ -222,3 +244,22 @@ def test_a_file_scope_and_an_artist_request_add_up():
                                                          'file_paths': ['/m/a.flac']}
     # another library's request is another run, as before
     assert _merge_scope({**files, 'library': 2}, artists, queued=True) == artists
+
+
+def test_a_split_request_never_runs_split_artists_switched_off(db):
+    worker = _bare_worker(db, enabled=False)
+    worker._jobs['comma_artist_splitter'] = type('J', (), {
+        'supports_artist_id_scope': True, 'supports_file_scope': True,
+        'display_name': 'Split Artists'})()
+    assert worker.request_split([7]) is False and worker._force_run_queue == []
+
+
+def test_a_request_never_narrows_a_run_already_waiting():
+    """Nezreka's review: a whole-library run or a user's artist run stays"""
+    files = {'file_paths': ['/m/a.flac']}
+    whole = {'library': 'shared'}
+    assert _merge_scope(whole, files, queued=True) == whole
+    artist = {'artist_name': 'Drake'}
+    assert _merge_scope(artist, {'artist_ids': [3]}, queued=True) == artist
+    # a whole-library run asked for after a request covers it
+    assert _merge_scope(files, whole, queued=True) == whole

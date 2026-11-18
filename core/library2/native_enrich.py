@@ -862,6 +862,7 @@ def enrich_native_entity_for_service(
                 "success": False, "attempted": True,
                 "entity_type": canonical, "entity_id": int(entity_id),
                 "reason": "ambiguous", "source": service,
+                "candidates": len(candidates),
             }
         hit = ranked[0][1]
         provider_id = str(hit["id"]).strip()
@@ -1409,7 +1410,7 @@ def _ghost_credit_evidence(conn, artist_id: int, limit: int = 25):
 def split_confirmed(conn, artist_id: int, parts: Iterable[str]) -> bool:
     """Whether the providers confirm splitting a combined artist into
     ``parts``: every part is credited on one of its tracks by a stored
-    Spotify / Deezer list, so the track exists under each of them there.
+    provider list, so the track exists under each of them there.
 
     Names alone (a ";", the album's artist inside the name, parts the
     library knows) only propose a split. Nothing splits a combined artist on
@@ -2097,6 +2098,17 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     conn.commit()
     if progress is not None:
         progress(total, total)
+    if candidates:
+        # what Split Artists already decided waits for the user, or was
+        # dismissed: asked about once, not on every reconcile
+        decided = {int(r[0]) for r in conn.execute(
+            "SELECT CAST(SUBSTR(entity_id, 6) AS INTEGER) FROM repair_findings "
+            "WHERE job_id='comma_artist_splitter' AND entity_type='artist' "
+            "AND entity_id LIKE 'lib2:%' AND status IN ('pending', 'dismissed')")} \
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='repair_findings'").fetchone() \
+            else set()
+        stats["left"] += len([c for c in candidates if c in decided])
+        candidates = [c for c in candidates if c not in decided]
     if candidates:
         from core.repair_worker import request_artist_split
         if request_artist_split(candidates, reason="Credit ghosts"):
