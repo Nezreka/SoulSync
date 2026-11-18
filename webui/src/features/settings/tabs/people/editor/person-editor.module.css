@@ -8,17 +8,31 @@
   z-index: var(--z-dialog);
   display: grid;
   place-items: start center;
-  padding: 34px 20px;
+  /* no bottom padding: a sticky footer stops short of the scrollport's
+     padding, and the rows scrolled up under it would show in that gap.
+     the sheet's own bottom margin keeps the space at the end instead */
+  padding: 34px 20px 0;
   overflow-y: auto;
   overflow-anchor: none;
   background: var(--black-a70);
   backdrop-filter: blur(6px);
 }
 
+/* the floating buttons (activity, notifications, help) sit above every
+   dialog; while the sheet is open they would cover its footer (Done, Save
+   on a phone). the library's framed modal defers to them the same way */
+:global(body):has(.viewport) :global(#activity-float-btn),
+:global(body):has(.viewport) :global(#notif-bell-btn),
+:global(body):has(.viewport) :global(#helper-float-btn) {
+  /* visibility, not display: the shell sets their display inline */
+  visibility: hidden;
+}
+
 .sheet {
   display: flex;
   flex-direction: column;
   width: min(1120px, 100%);
+  margin-bottom: 34px;
   /* clip, not hidden: the footer and the rail stay sticky in the viewport */
   overflow: clip;
   border: 1px solid var(--white-a08);
@@ -937,6 +951,7 @@
   }
   .sheet {
     min-height: 100%;
+    margin-bottom: 0;
     border: 0;
     border-radius: 0;
   }
