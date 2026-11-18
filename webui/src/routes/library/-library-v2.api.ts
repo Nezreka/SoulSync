@@ -491,6 +491,26 @@ export interface LibraryV2AlbumVersionPreview {
   }[];
   tracks: { title: string | null; track_number: number | null; disc_number: number | null }[];
   held_by: { id: number; title: string } | null;
+  /** #2178: the album already points at this version */
+  already_current?: boolean;
+  /** #2178: albums of this artist that are this version too. `holds`: that
+   *  one already is it and stays, this one folds into it */
+  merge_with?: LibraryV2AlbumMergeCandidate[];
+}
+
+export interface LibraryV2AlbumMergeCandidate {
+  id: number;
+  title: string;
+  holds: boolean;
+  owned_count: number;
+  track_count: number | null;
+  locked: boolean;
+}
+
+export interface LibraryV2AlbumVersionApplied {
+  /** the album left standing */
+  album_id: number;
+  merged_album_id: number | null;
 }
 
 /** #2145: the album's other versions; `query` searches this artist instead. */
@@ -509,26 +529,39 @@ export async function fetchLibraryV2AlbumVersions(
 
 export async function previewLibraryV2AlbumVersion(
   albumId: number,
-  version: { source: string; id: string },
+  version: { source: string; id: string; title?: string },
 ): Promise<LibraryV2AlbumVersionPreview> {
   return lib2Json<Ok & LibraryV2AlbumVersionPreview>(
     apiClient.post(`library/v2/albums/${albumId}/versions/preview`, {
-      json: { source: version.source, release_id: version.id },
+      json: { source: version.source, release_id: version.id, title: version.title },
       timeout: 60_000,
     }),
     'Could not read that version',
   );
 }
 
+/** #2178: `version` carries the picked row's title, date, type and track
+ *  count onto the album; `mergeAlbumId` merges an album that is it too. */
 export async function applyLibraryV2AlbumVersion(
   albumId: number,
-  version: { source: string; id: string },
-): Promise<void> {
-  await lib2Json(
+  version: LibraryV2AlbumVersion,
+  mergeAlbumId?: number,
+): Promise<LibraryV2AlbumVersionApplied> {
+  return lib2Json<Ok & LibraryV2AlbumVersionApplied>(
     apiClient.post(`library/v2/albums/${albumId}/versions/apply`, {
-      json: { source: version.source, release_id: version.id },
+      json: {
+        source: version.source,
+        release_id: version.id,
+        version: {
+          title: version.title,
+          date: version.date,
+          album_type: version.album_type,
+          track_count: version.track_count,
+        },
+        ...(mergeAlbumId !== undefined ? { merge_album_id: mergeAlbumId } : {}),
+      },
     }),
-    'Switching version failed',
+    mergeAlbumId !== undefined ? 'Merging the albums failed' : 'Switching version failed',
   );
 }
 

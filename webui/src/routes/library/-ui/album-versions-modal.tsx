@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import type {
+  LibraryV2AlbumMergeCandidate,
   LibraryV2AlbumVersion,
   LibraryV2AlbumVersionGroup,
   LibraryV2AlbumVersionPreview,
@@ -80,21 +81,31 @@ function VersionGroup({
             </span>
             <span className={styles.matchResultExtra}>{versionFacts(v)}</span>
           </div>
-          {v.current ? null : (
-            <button
-              type="button"
-              className={styles.btnGhost}
-              data-requires-write=""
-              disabled={busy}
-              onClick={() => onPick(v)}
-            >
-              Preview
-            </button>
-          )}
+          {/* #2178: the current one previews too. applying it puts its title,
+              type and date on the album, and merges an album split in two */}
+          <button
+            type="button"
+            className={styles.btnGhost}
+            data-requires-write=""
+            disabled={busy}
+            onClick={() => onPick(v)}
+          >
+            Preview
+          </button>
         </div>
       ))}
     </section>
   );
+}
+
+/** #2178: what a merge with one album does, in one line. */
+export function describeMerge(albumTitle: string, c: LibraryV2AlbumMergeCandidate): string {
+  const files = `${c.owned_count} ${c.owned_count === 1 ? 'file' : 'files'}`;
+  if (c.locked)
+    return `${c.title} is this version too (${files}). It's locked, unlock it to merge.`;
+  return c.holds
+    ? `${c.title} already is this version (${files}). Merging moves this album's tracks into it.`
+    : `${c.title} is this version too (${files}). Merging moves its tracks into ${albumTitle}.`;
 }
 
 export function AlbumVersionsModal({
@@ -102,11 +113,14 @@ export function AlbumVersionsModal({
   albumTitle,
   artistName,
   onClose,
+  onMerged,
 }: {
   albumId: number;
   albumTitle: string;
   artistName: string;
   onClose: () => void;
+  /** #2178: this album was merged into `keptId` and is gone */
+  onMerged?: (keptId: number) => void;
 }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
@@ -128,17 +142,36 @@ export function AlbumVersionsModal({
     retry: false,
   });
   const apply = useMutation({
-    mutationFn: () => applyLibraryV2AlbumVersion(albumId, picked as LibraryV2AlbumVersion),
-    onSuccess: async () => {
+    mutationFn: (merge?: LibraryV2AlbumMergeCandidate) =>
+      applyLibraryV2AlbumVersion(albumId, picked as LibraryV2AlbumVersion, merge?.id),
+    onSuccess: async (result, merge) => {
       window.showToast?.(
-        `${albumTitle} now follows that version. Preview Retag writes it into your files.`,
+        merge
+          ? `${albumTitle} and ${merge.title} are one album now. Rename / Organize puts the files in one folder.`
+          : `${albumTitle} now follows that version. Preview Retag writes it into your files.`,
         'success',
       );
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       await queryClient.invalidateQueries({ queryKey: ['library-v2-album-versions', albumId] });
+      if (result.merged_album_id === albumId) onMerged?.(result.album_id);
       onClose();
     },
   });
+
+  const confirmMerge = async (c: LibraryV2AlbumMergeCandidate) => {
+    if (!picked || c.locked) return;
+    const message = [
+      `Make ${albumTitle} and ${c.title} one album, as ${picked.title} (${versionFacts(picked)})?`,
+      c.holds
+        ? `This album's tracks move into ${c.title}.`
+        : `${c.title}'s tracks move into this album.`,
+      'A song both have becomes one track with both files. Your files stay where they are.',
+    ].join(' ');
+    const ok = window.showConfirmDialog
+      ? await window.showConfirmDialog({ title: 'Merge albums', message, confirmText: 'Merge' })
+      : false;
+    if (ok) apply.mutate(c);
+  };
 
   const confirmSwitch = async () => {
     if (!picked || !preview.data) return;
@@ -158,7 +191,7 @@ export function AlbumVersionsModal({
           destructive: Boolean(held),
         })
       : false;
-    if (ok) apply.mutate();
+    if (ok) apply.mutate(undefined);
   };
 
   const groups = versions.data?.groups ?? [];
@@ -169,6 +202,7 @@ export function AlbumVersionsModal({
         current?.track_count ? `, ${current.track_count} tracks now` : ''
       }. Pick the edition your files are.`;
 
+  const mergeWith = preview.data?.merge_with ?? [];
   const footer = picked ? (
     <div className={styles.modalActions}>
       <button
@@ -181,13 +215,29 @@ export function AlbumVersionsModal({
       </button>
       <button
         type="button"
-        className={styles.btnPrimary}
+        className={mergeWith.length ? styles.btnGhost : styles.btnPrimary}
         data-requires-write=""
         disabled={!preview.data || apply.isPending}
         onClick={() => void confirmSwitch()}
       >
-        {apply.isPending ? 'Switching…' : 'Switch to this version'}
+        {apply.isPending
+          ? 'Switching…'
+          : preview.data?.already_current
+            ? "Use this version's details"
+            : 'Switch to this version'}
       </button>
+      {mergeWith.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className={styles.btnPrimary}
+          data-requires-write=""
+          disabled={c.locked || apply.isPending}
+          onClick={() => void confirmMerge(c)}
+        >
+          Merge with {c.title}
+        </button>
+      ))}
     </div>
   ) : null;
 
@@ -212,7 +262,13 @@ export function AlbumVersionsModal({
           {preview.data ? (
             <>
               <div className={styles.matchResultExtra}>{describeVersionPreview(preview.data)}</div>
-              {preview.data.held_by ? (
+              {mergeWith.map((c) => (
+                <div key={c.id} className={styles.matchResultExtra}>
+                  {describeMerge(albumTitle, c)}
+                </div>
+              ))}
+              {preview.data.held_by &&
+              !mergeWith.some((c) => c.id === preview.data?.held_by?.id) ? (
                 <div className={styles.searchError}>
                   This version is the match of {preview.data.held_by.title || 'another album'} in
                   your library. Switching moves it here.

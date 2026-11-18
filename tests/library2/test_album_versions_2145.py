@@ -153,10 +153,12 @@ def test_preview_names_the_album_that_already_holds_the_version(imported_conn, l
     assert out["held_by"] == {"id": other, "title": "One Dance"}
 
 
-def test_preview_refuses_the_version_already_in_place_and_unpinnable_sources(imported_conn, legacy_db):
+def test_preview_marks_the_version_already_in_place_and_refuses_unpinnable_sources(imported_conn, legacy_db):
     album = _views(imported_conn, spotify_id="sp-views")
+    # #2178: the current version previews too (applying it fixes the row's
+    # title and type, and merges a split), it is only marked
     same = album_versions.preview_version(legacy_db, album, "spotify", "sp-views", tracklist=_tracklist)
-    assert not same["success"] and same["already_current"]
+    assert same["success"] and same["already_current"] and same["merge_with"] == []
     lastfm = album_versions.preview_version(legacy_db, album, "lastfm", "x", tracklist=_tracklist)
     assert not lastfm["success"]
 
@@ -165,7 +167,8 @@ def test_switching_pins_the_picked_version(imported_conn, legacy_db):
     """#2145: the album points at the picked edition and stays there."""
     album = _views(imported_conn, spotify_id="sp-views", tracklist_json=json.dumps([{"title": "x"}] * 34),
                    tracklist_status="ready")
-    out = album_versions.apply_version(legacy_db, album, "spotify", "sp-deluxe", actor="profile:1")
+    out = album_versions.apply_version(legacy_db, album, "spotify", "sp-deluxe", actor="profile:1",
+                                       release_facts=lambda *_a: None)
     assert out["success"]
     imported_conn.rollback()
     row = imported_conn.execute(
@@ -185,6 +188,7 @@ def test_routes_list_preview_and_apply(api, monkeypatch):  # noqa: F811
     monkeypatch.setattr(album_versions, "primary_source", lambda: "spotify")
     monkeypatch.setattr(album_versions, "fetch_artist_albums", lambda *_a: SPOTIFY)
     monkeypatch.setattr(album_versions, "fetch_release_group_id", lambda _r: None)
+    monkeypatch.setattr(album_versions, "fetch_release_facts", lambda *_a: None)
     monkeypatch.setattr("core.imports.reassign_service.target_tracks", _tracklist)
     monkeypatch.setattr("core.library2.provider_credits.schedule_match_credits", lambda *a, **k: None)
 

@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { AlbumVersionsModal, describeVersionPreview, versionFacts } from './album-versions-modal';
+import {
+  AlbumVersionsModal,
+  describeMerge,
+  describeVersionPreview,
+  versionFacts,
+} from './album-versions-modal';
 
 const VERSION = {
   source: 'musicbrainz',
@@ -105,16 +110,20 @@ describe('#2145 other versions', () => {
 
     expect(await screen.findByText(/34 tracks · 2008-03-04/)).toBeInTheDocument();
     expect(screen.getByText('Current')).toBeInTheDocument();
-    // the current version has nothing to switch to
-    expect(screen.getAllByRole('button', { name: 'Preview' })).toHaveLength(1);
+    // #2178: the current version previews too
+    expect(screen.getAllByRole('button', { name: 'Preview' })).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[1]);
     expect(await screen.findByText(/34 tracks now, 17 on this version/)).toBeInTheDocument();
     expect(applied).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to this version' }));
     await waitFor(() =>
-      expect(applied).toHaveBeenCalledWith({ source: 'musicbrainz', release_id: 'mb-17' }),
+      expect(applied).toHaveBeenCalledWith({
+        source: 'musicbrainz',
+        release_id: 'mb-17',
+        version: { title: 'Good Time', date: '2008-03-04', album_type: 'album', track_count: 17 },
+      }),
     );
     expect(confirm).toHaveBeenCalledOnce();
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -141,10 +150,75 @@ describe('#2145 other versions', () => {
         />
       </QueryClientProvider>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[1]);
     await screen.findByText(/17 on this version/);
     fireEvent.click(screen.getByRole('button', { name: 'Switch to this version' }));
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(applied).not.toHaveBeenCalled();
+  });
+
+  it('#2178: merges the album that already is the version instead of only moving the match', async () => {
+    const applied = vi.fn();
+    const holder = {
+      id: 9,
+      title: 'Good Time',
+      holds: true,
+      owned_count: 12,
+      track_count: 17,
+      locked: false,
+    };
+    server.use(
+      http.get('/api/library/v2/albums/7/versions', () => HttpResponse.json(LIST)),
+      http.post('/api/library/v2/albums/7/versions/preview', () =>
+        HttpResponse.json({
+          ...PREVIEW,
+          held_by: { id: 9, title: 'Good Time' },
+          merge_with: [holder],
+        }),
+      ),
+      http.post('/api/library/v2/albums/7/versions/apply', async ({ request }) => {
+        applied(await request.json());
+        return HttpResponse.json({ success: true, album_id: 9, merged_album_id: 7 });
+      }),
+    );
+    window.showConfirmDialog = vi.fn().mockResolvedValue(true);
+    const onMerged = vi.fn();
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumVersionsModal
+          albumId={7}
+          albumTitle="(Hot) Good Time"
+          artistName="Alan Jackson"
+          onClose={vi.fn()}
+          onMerged={onMerged}
+        />
+      </QueryClientProvider>,
+    );
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[1]);
+    expect(
+      await screen.findByText(
+        "Good Time already is this version (12 files). Merging moves this album's tracks into it.",
+      ),
+    ).toBeInTheDocument();
+    // the merge says it, not "switching moves it here"
+    expect(screen.queryByText(/Switching moves it here/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Merge with Good Time' }));
+    await waitFor(() =>
+      expect(applied).toHaveBeenCalledWith(expect.objectContaining({ merge_album_id: 9 })),
+    );
+    await waitFor(() => expect(onMerged).toHaveBeenCalledWith(9));
+  });
+
+  it('#2178: a locked album is named but not merged', () => {
+    expect(
+      describeMerge('X', {
+        id: 1,
+        title: 'Y',
+        holds: false,
+        owned_count: 1,
+        track_count: null,
+        locked: true,
+      }),
+    ).toBe("Y is this version too (1 file). It's locked, unlock it to merge.");
   });
 });

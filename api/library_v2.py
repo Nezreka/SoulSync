@@ -2650,23 +2650,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.album_versions import preview_version
         body = request.get_json(silent=True) or {}
         payload = preview_version(get_database(), album_id, body.get("source"),
-                                  body.get("release_id"))
+                                  body.get("release_id"), title=body.get("title"))
         return jsonify(payload), (200 if payload.get("success") else 400)
 
     @_route("/api/library/v2/albums/<int:album_id>/versions/apply", methods=["POST"])
     def lib2_album_version_apply(album_id):
-        """Point the album at the picked version: the manual album match (#758)."""
+        """Point the album at the picked version: the manual album match (#758).
+        #2178: ``version`` (the picked row) puts its title, type and date on
+        the album; ``merge_album_id`` merges an album that is the same edition."""
         from core.library2.album_versions import apply_version
         body = request.get_json(silent=True) or {}
+        version = body.get("version") if isinstance(body.get("version"), dict) else None
         payload = apply_version(get_database(), album_id, body.get("source"),
-                                body.get("release_id"), actor=f"profile:{_profile()}")
+                                body.get("release_id"), actor=f"profile:{_profile()}",
+                                version=version, merge_album_id=body.get("merge_album_id"))
         if not payload.get("success"):
             return jsonify(payload), 400
         from core.enrichment.unmatched import invalidate_unmatched_snapshots
         invalidate_unmatched_snapshots()
         # the new release's guests, same as a manual match
         from core.library2.provider_credits import schedule_match_credits
-        schedule_match_credits(get_database(), "album", album_id, payload["source"],
+        schedule_match_credits(get_database(), "album", payload["album_id"], payload["source"],
                                payload["release_id"])
         return jsonify(payload)
 
