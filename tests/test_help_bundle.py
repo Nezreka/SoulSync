@@ -5,6 +5,7 @@ log lines raw."""
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -216,10 +217,9 @@ def test_github_url_stays_under_the_cap():
 
 
 def test_issue_form_has_the_fields_the_url_fills():
-    import yaml
-    form = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/ISSUE_TEMPLATE/bug_report.yml")
-                          .read_text(encoding="utf-8"))
-    ids = {item.get("id") for item in form["body"]}
+    # read the ids by hand: pyyaml isn't a dependency
+    text = (Path(__file__).resolve().parents[1] / ".github/ISSUE_TEMPLATE/bug_report.yml").read_text(encoding="utf-8")
+    ids = set(re.findall(r"^\s*id:\s*['\"]?([\w-]+)", text, re.M))
     url = bundle.build(note="n", where="w", now=NOW)["github"]["url"]
     for field in ("what-happened", "where", "version", "platform", "diagnostics"):
         assert field in ids

@@ -42,6 +42,14 @@ def invalidate() -> None:
         _cache.clear()
 
 
+def reset_for_tests() -> None:
+    """drop the sheets and any refresh marked as running (a test that
+    collects background work without running it leaves its marks behind)."""
+    with _cache_lock:
+        _cache.clear()
+        _building.clear()
+
+
 def _spawn(fn) -> None:
     threading.Thread(target=fn, name="server-activity-stats", daemon=True).start()
 

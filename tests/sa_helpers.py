@@ -138,7 +138,7 @@ def sa_env(monkeypatch, tmp_path):
     px.reset_caches()
     links.reset()
     geo.reset()
-    stats.invalidate()
+    stats.reset_for_tests()
     env = SimpleNamespace(plex=None, jf_cfg={"base_url": "", "api_key": ""},
                           plex_cfg={"base_url": "", "token": ""},
                           settings=dict(st.DEFAULTS, stop_presets=list(st.DEFAULT_STOP_PRESETS)),
