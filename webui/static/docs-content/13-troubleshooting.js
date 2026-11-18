@@ -113,6 +113,8 @@ Disk space warns under 2 GB free, or under the minimum free space you set for vi
             body: `
 Logs live in the \`logs/\` directory (in Docker: \`/app/logs/\`):
 
+![The log viewer in Settings: pick a log file, filter by level and watch entries stream live](ts-logs.jpg)
+
 | File | Contents |
 |------|----------|
 | \`app.log\` | Main application log — requests, workers, errors |
@@ -198,6 +200,8 @@ Secrets show as \`***\` so you can see the redaction happened. API keys, tokens,
             title: 'Common Issues',
             lede: 'Quick fixes for the problems people hit most often.',
             body: `
+![Status indicators on the dashboard: a media server shown as disconnected, with Soulseek disconnected too](ts-common.jpg)
+
 ## Downloads stuck or failing
 
 1. Check the download queue for error messages on individual tracks.

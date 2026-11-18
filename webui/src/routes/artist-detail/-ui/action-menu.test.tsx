@@ -107,19 +107,17 @@ describe('ActionMenu', () => {
     });
     const ih = window.innerHeight;
     window.innerHeight = 500;
-    const rect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockReturnValue({
-        top: 150,
-        bottom: 180,
-        left: 20,
-        right: 80,
-        width: 60,
-        height: 30,
-        x: 20,
-        y: 150,
-        toJSON: () => ({}),
-      });
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 150,
+      bottom: 180,
+      left: 20,
+      right: 80,
+      width: 60,
+      height: 30,
+      x: 20,
+      y: 150,
+      toJSON: () => ({}),
+    });
     try {
       renderMenu();
       fireEvent.click(screen.getByText('More'));
