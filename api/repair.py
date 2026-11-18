@@ -15,6 +15,8 @@ import time
 from flask import Blueprint, jsonify, request
 
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only
 
 logger = get_logger("api.repair")
 
@@ -80,6 +82,7 @@ def _view_filters(data) -> dict:
 # --- Repair Worker API Endpoints ---
 
 @bp.route('/api/repair/status', methods=['GET'])
+@requires("music.access")
 def repair_status():
     """Get repair worker status"""
     try:
@@ -103,6 +106,7 @@ def repair_status():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/toggle', methods=['POST'])
+@admin_only
 def repair_toggle():
     """Toggle master enable/disable"""
     try:
@@ -118,6 +122,7 @@ def repair_toggle():
 
 # Backward compat aliases
 @bp.route('/api/repair/pause', methods=['POST'])
+@admin_only
 def repair_pause():
     try:
         if _repair_worker() is None:
@@ -128,6 +133,7 @@ def repair_pause():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/resume', methods=['POST'])
+@admin_only
 def repair_resume():
     try:
         if _repair_worker() is None:
@@ -138,6 +144,7 @@ def repair_resume():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/jobs', methods=['GET'])
+@requires("music.access")
 def repair_jobs_list():
     """Get all jobs with config and last run info"""
     try:
@@ -150,6 +157,7 @@ def repair_jobs_list():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/jobs/<job_id>/toggle', methods=['POST'])
+@admin_only
 def repair_job_toggle(job_id):
     """Enable/disable a specific job"""
     try:
@@ -172,6 +180,7 @@ def repair_job_toggle(job_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/jobs/<job_id>/settings', methods=['PUT'])
+@admin_only
 def repair_job_settings(job_id):
     """Update job interval and/or settings"""
     try:
@@ -190,6 +199,7 @@ def repair_job_settings(job_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/jobs/<job_id>/run', methods=['POST'])
+@admin_only
 def repair_job_run(job_id):
     """Trigger immediate run of a specific job.
 
@@ -233,6 +243,7 @@ def repair_job_run(job_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/jobs/<job_id>/stop', methods=['POST'])
+@admin_only
 def repair_job_stop(job_id):
     """Stop a running (or queued) job — signals its scan loop to unwind (#970)."""
     try:
@@ -247,6 +258,7 @@ def repair_job_stop(job_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings', methods=['GET'])
+@requires("admin.tools")
 def repair_findings_list():
     """Get paginated findings with filters"""
     try:
@@ -294,6 +306,7 @@ def repair_findings_list():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/counts', methods=['GET'])
+@requires("admin.tools")
 def repair_findings_counts():
     """Get findings counts by status"""
     try:
@@ -307,6 +320,7 @@ def repair_findings_counts():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/groups', methods=['GET'])
+@requires("admin.tools")
 def repair_findings_groups():
     """Findings folded to one row per TYPE — what the inbox renders.
 
@@ -330,6 +344,7 @@ def repair_findings_groups():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/albums', methods=['GET'])
+@requires("admin.tools")
 def repair_findings_albums():
     """Findings folded to one row per album (or artist), worst audio first.
 
@@ -364,6 +379,7 @@ def repair_findings_albums():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/album-action', methods=['POST'])
+@admin_only
 def repair_findings_album_action():
     """Resolve Album / Dismiss All for one album (or artist) group.
 
@@ -399,6 +415,7 @@ def repair_findings_album_action():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/undo', methods=['POST'])
+@admin_only
 def repair_finding_undo(finding_id):
     """Put back the tags a fix changed, from the before values kept on the
     finding, and reopen it."""
@@ -412,6 +429,7 @@ def repair_finding_undo(finding_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
+@admin_only
 def repair_finding_reopen(finding_id):
     """Put a resolved/dismissed finding back to pending — the undo half of
     dismiss, which is otherwise permanent by design."""
@@ -428,6 +446,7 @@ def repair_finding_reopen(finding_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/reopen-all', methods=['POST'])
+@admin_only
 def repair_findings_reopen_all():
     """Bulk reopen dismissed findings, optionally filtered by
     job_id and/or finding_type. The bulk undo for dismiss. Only
@@ -447,6 +466,7 @@ def repair_findings_reopen_all():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/finding-types', methods=['GET'])
+@requires("admin.tools")
 def repair_finding_types():
     """The finding-type catalog: label, verb, fixable, destructive, job_ids.
 
@@ -463,6 +483,7 @@ def repair_finding_types():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/cache-health', methods=['GET'])
+@requires("music.access")
 def repair_cache_health():
     """Get metadata cache health stats for the repair dashboard"""
     try:
@@ -473,6 +494,7 @@ def repair_cache_health():
         return jsonify({}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/fix', methods=['POST'])
+@admin_only
 def repair_finding_fix(finding_id):
     """Execute the actual fix action for a finding"""
     try:
@@ -502,6 +524,7 @@ def repair_finding_fix(finding_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/resolve', methods=['POST'])
+@admin_only
 def repair_finding_resolve(finding_id):
     """Resolve a finding with optional action"""
     try:
@@ -517,6 +540,7 @@ def repair_finding_resolve(finding_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/dismiss', methods=['POST'])
+@admin_only
 def repair_finding_dismiss(finding_id):
     """Dismiss a finding"""
     try:
@@ -530,6 +554,7 @@ def repair_finding_dismiss(finding_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/bulk-fix', methods=['POST'])
+@admin_only
 def repair_findings_bulk_fix():
     """Bulk fix all pending fixable findings matching filters"""
     try:
@@ -560,6 +585,7 @@ def repair_findings_bulk_fix():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/bulk-fix-start', methods=['POST'])
+@admin_only
 def repair_findings_bulk_fix_start():
     """Start a background bulk-fix run (Fix All at library scale).
 
@@ -590,6 +616,7 @@ def repair_findings_bulk_fix_start():
         return jsonify({'started': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/bulk-fix/status', methods=['GET'])
+@requires("admin.tools")
 def repair_bulk_fix_status():
     """Progress of the current (or most recent) background bulk fix."""
     try:
@@ -601,6 +628,7 @@ def repair_bulk_fix_status():
         return jsonify({'running': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/bulk-fix/stop', methods=['POST'])
+@admin_only
 def repair_bulk_fix_stop():
     """Stop a running background bulk fix after its current item."""
     try:
@@ -613,6 +641,7 @@ def repair_bulk_fix_stop():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/bulk', methods=['POST'])
+@admin_only
 def repair_findings_bulk():
     """Bulk resolve or dismiss findings"""
     try:
@@ -653,6 +682,7 @@ def repair_findings_bulk():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/clear', methods=['POST'])
+@admin_only
 def repair_findings_clear():
     """Clear (delete) findings, optionally filtered by job_id and/or status"""
     try:
@@ -684,6 +714,7 @@ def repair_findings_clear():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/history', methods=['GET'])
+@requires("admin.tools")
 def repair_history():
     """Get job run history"""
     try:
@@ -699,6 +730,7 @@ def repair_history():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/progress', methods=['GET'])
+@requires("music.access")
 def repair_job_progress():
     """Get current repair job progress states (for initial page load)"""
     try:

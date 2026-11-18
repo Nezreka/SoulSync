@@ -567,8 +567,76 @@ def set_signup_template(db, template_id) -> Dict[str, Any]:
     return {"success": True, "signup_template_id": tid}
 
 
+# ── music, for the routes and the wishlist (piece A) ─────────────────────
+
+_MUSIC_CLOSED = {"mode": "none", "quota": None, "hide_explicit": True}
+
+
+def music_rights(db, profile: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """what a profile row may do with music, from its effective map:
+    {"mode": "download" | "ask" | "none", "quota": {limit, days} | None,
+    "hide_explicit": bool}. the mode is music.get under music.access (a
+    video-only member gets none), the quota is requests.limit (asks only).
+    admins: download, no quota, nothing hidden. a map that can't be built is
+    no music and everything hidden: the caller fails closed."""
+    if not profile:
+        return dict(_MUSIC_CLOSED)
+    if P.is_admin_row(profile):
+        return {"mode": "download", "quota": None, "hide_explicit": False}
+    try:
+        eff, _source = effective_for(db, profile)
+    except Exception as exc:  # noqa: BLE001 - PermissionsUnavailable or a db that can't answer
+        logger.warning("permissions: no music rights for profile %s (%s), refusing", profile.get("id"), exc)
+        return dict(_MUSIC_CLOSED)
+    ctx = P.make_context(profile.get("id"), perms=eff)
+    mode = "download" if P.can(ctx, "music.get", "download") else "ask" if P.can(ctx, "music.get", "ask") else "none"
+    limit = eff.get("requests.limit") or {}
+    try:
+        n, days = int(limit.get("n") or 0), int(limit.get("days") or 7)
+    except (TypeError, ValueError):
+        n, days = 1, P.DAYS_MAX
+    quota = {"limit": n, "days": max(1, days)} if n > 0 and mode == "ask" else None
+    return {"mode": mode, "quota": quota, "hide_explicit": P.can(ctx, "music.hide_explicit")}
+
+
+WISH_NOT_ALLOWED = "Getting music isn't part of your profile. Ask an admin if you'd like it."
+WISH_EXPLICIT = "explicit music is hidden for this profile"
+
+
+def wish_refusal(db, profile_id, track: Optional[Mapping[str, Any]] = None) -> Optional[str]:
+    """why a music wishlist add for this profile is refused, or None.
+
+    every add funnels through the database's add_to_wishlist_detailed, so this
+    is the one place a member who can't request music (music.get none, or no
+    music side at all) or whose explicit music is hidden is held to it,
+    whichever page, job or scan made the add. a profile that isn't there is
+    nobody's to refuse (the add's own checks answer for it)."""
+    try:
+        pid = int(profile_id)
+    except (TypeError, ValueError):
+        return None
+    if pid == 1:
+        return None
+    try:
+        profile = db.get_profile(pid)
+    except Exception:  # noqa: BLE001 - unreadable is not "allowed"
+        return WISH_NOT_ALLOWED
+    if not profile or P.is_admin_row(profile):
+        return None
+    rights = music_rights(db, profile)
+    if rights["mode"] == "none":
+        return WISH_NOT_ALLOWED
+    if rights["hide_explicit"] and isinstance(track, Mapping):
+        from core.content_filter import is_explicit
+        album = track.get("album") if isinstance(track.get("album"), Mapping) else {}
+        if is_explicit(track.get("explicit")) or is_explicit(album.get("explicit")):
+            return WISH_EXPLICIT
+    return None
+
+
 __all__ = ["PermissionsUnavailable", "PermissionRequestError", "load_policy", "layers_for", "effective_for",
            "context_for", "needs_look", "signup_template_id", "write_cache", "effective_all", "recompute",
            "resync_after_legacy_update", "templates_payload", "profile_payload", "me_payload",
            "change_profile", "change_policy", "policy_payload", "create_template", "change_template",
-           "delete_template", "set_signup_template"]
+           "delete_template", "set_signup_template", "music_rights", "wish_refusal",
+           "WISH_NOT_ALLOWED", "WISH_EXPLICIT"]

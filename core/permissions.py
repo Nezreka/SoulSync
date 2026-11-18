@@ -1195,6 +1195,12 @@ def can(profile_ctx: Optional[Mapping[str, Any]], permission: str, context: Any 
         return False if row.kind != RESTRICT else True
     value = perms[permission]
     k = row.kind
+    # a row that needs a side ("turn on X first") does nothing while that
+    # side is off: a video-only member with music.get "download" left over
+    # from its old columns still can't get music. restrictions and ratings
+    # keep their own answer (a restriction never loosens with its side).
+    if k in (BOOL, MODE, SET, CHOICE) and row.needs and not any(perms.get(n) is True for n in row.needs):
+        return False
     try:
         if k == BOOL:
             return bool(value)
@@ -1309,11 +1315,59 @@ def requires(permission: str, value: Any = None):
     def deco(view_fn):
         @functools.wraps(view_fn)
         def wrapper(*args, **kwargs):
-            if not can(None, permission, value):
+            if enforcing() and not can(None, permission, value):
                 return refusal(permission)
             return view_fn(*args, **kwargs)
         return _mark(wrapper, ("perm", permission))
     return deco
+
+
+# web_server sets this on its app next to the profile gate
+# (_set_profile_context). a request in that app is always held to the
+# declarations, and one with no profile context there is no one, so it is
+# refused. a bare Flask app that mounts a blueprint (unit tests) has no
+# profiles at all: there the declarations are only read by the inventory,
+# unless the request carries a permission map (g.perms) of its own.
+GATE_FLAG = "SOULSYNC_PROFILE_GATE"
+
+
+def enforcing() -> bool:
+    """are permission checks live for this request? always in the real app
+    (it runs the profile gate); in an app without one, only when the request
+    carries a permission map. outside a request: yes."""
+    try:
+        from flask import current_app, g, has_request_context
+        if not has_request_context():
+            return True
+        if current_app.config.get(GATE_FLAG):
+            return True
+        return "perms" in g
+    except Exception:  # noqa: BLE001 - can't tell, so check
+        return True
+
+
+def restricted(permission: str) -> bool:
+    """a restriction row (music.hide_explicit) for the current request, with
+    the same rule as requires(): an app without the profile gate and no map
+    on the request has no profiles, so nothing is restricted there."""
+    if not enforcing():
+        return False
+    return can(None, permission)
+
+
+def map_refuses(permission: str, value: Any = None) -> bool:
+    """True when the current request carries a permission map (g.perms, set
+    by the profile gate for every signed-in profile) and that map says no.
+    no map, no opinion: the caller's own checks answer (an api key acts as
+    the admin; a helper unit-tested without the gate keeps its old rule). a
+    map that couldn't be built (None) says no."""
+    try:
+        from flask import g, has_request_context
+        if not has_request_context() or "perms" not in g:
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return not can(None, permission, value)
 
 
 def public(view_fn):
@@ -1326,6 +1380,27 @@ def self_only(view_fn):
     """declares a route that only ever reads or writes the caller's own
     profile (/api/profiles/me/*). marks only; the route still checks."""
     return _mark(view_fn, ("self", None))
+
+
+def own_or_admin(view_fn):
+    """declares a route about one profile that the profile itself or an
+    admin may call (pin, password, recovery, its own row). marks only; the
+    route still checks (may_manage_profile)."""
+    return _mark(view_fn, ("own_or_admin", None))
+
+
+def signed_in(view_fn):
+    """declares a route any signed-in profile may call whatever its
+    permissions: the shell around every page (weather, toasts, the image
+    cache). marks only; the session gates decide who is signed in, and the
+    route keeps to the caller's own data."""
+    return _mark(view_fn, ("signed_in", None))
+
+
+def api_key_only(view_fn):
+    """declares a route only an api key reaches (/api/v1, the lidarr shim,
+    mcp). marks only; the key check is the route's (api.auth.require_api_key)."""
+    return _mark(view_fn, ("api_key", None))
 
 
 def declared_access(view_fn) -> Optional[Tuple[str, Any]]:

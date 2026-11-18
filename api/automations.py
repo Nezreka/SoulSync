@@ -23,6 +23,7 @@ from core.automation import signals as _auto_signals
 from core.automation import progress as _auto_progress
 from core.automation import access as _auto_access
 from core.profile_context import admin_only, get_current_profile_id, is_admin_request
+from core.permissions import requires
 from utils.logging_config import get_logger
 
 logger = get_logger("api.automations")
@@ -69,7 +70,32 @@ def _script_refused(data):
     return None
 
 
+# the fields that decide what an automation does (and whose it is): a member
+# changing any of them must end up with a personal automation (S4)
+_DOING_FIELDS = ("action_type", "then_actions", "notify_type", "owned_by")
+
+
+def _not_personal(message):
+    return jsonify({"success": False, "error": "not_allowed", "permission": "automations.personal",
+                    "message": message}), 403
+
+
+def _personal_refused(row):
+    """a member's automation is personal (core.permissions
+    PERSONAL_AUTOMATION_ACTIONS, notes only); an admin's is anything."""
+    if is_admin_request():
+        return None
+    reason = _auto_access.personal_refusal(row)
+    return _not_personal(reason) if reason else None
+
+
+def _owner_refused(data):
+    reason = _auto_access.owner_refusal(data, is_admin_request())
+    return _not_personal(reason) if reason else None
+
+
 @bp.route('/api/automations', methods=['GET'])
+@requires("automations.personal")
 def list_automations():
     """List all automations for the current profile."""
     try:
@@ -81,6 +107,7 @@ def list_automations():
 
 
 @bp.route('/api/automations/master', methods=['GET'])
+@requires("automations.personal")
 def get_automations_master():
     """The per-side global pause state ({music: bool, video: bool}).
     It gates whether ANY automation runs on that side — individual enabled
@@ -116,11 +143,13 @@ def set_automations_master():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/automations', methods=['POST'])
+@requires("automations.personal")
 def create_automation():
     """Create a new automation."""
     try:
         profile_id = session.get('profile_id', 1)
-        refused = _script_refused(request.get_json(silent=True))
+        data = request.get_json(silent=True)
+        refused = _script_refused(data) or _owner_refused(data) or _personal_refused(data)
         if refused:
             return refused
         body, status = _auto_api.create_automation(get_database(), automation_engine, profile_id, request.get_json())
@@ -131,6 +160,7 @@ def create_automation():
 
 
 @bp.route('/api/automations/<int:automation_id>', methods=['GET'])
+@requires("automations.personal")
 def get_automation(automation_id):
     """Get a single automation."""
     try:
@@ -146,11 +176,15 @@ def get_automation(automation_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/automations/<int:automation_id>', methods=['PUT'])
+@requires("automations.personal")
 def update_automation_endpoint(automation_id):
     """Update an automation."""
     try:
+        data = request.get_json(silent=True)
         refused = (_refused([automation_id], _auto_access.may_change)
-                   or _script_refused(request.get_json(silent=True)))
+                   or _script_refused(data) or _owner_refused(data))
+        if not refused and isinstance(data, dict) and any(k in data for k in _DOING_FIELDS):
+            refused = _personal_refused(_auto_access.merged(get_database().get_automation(automation_id), data))
         if refused:
             return refused
         body, status = _auto_api.update_automation(get_database(), automation_engine, automation_id, request.get_json())
@@ -161,6 +195,7 @@ def update_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/group', methods=['PUT'])
+@requires("automations.personal")
 def batch_update_automation_group():
     """Batch update group_name for multiple automations."""
     try:
@@ -176,6 +211,7 @@ def batch_update_automation_group():
 
 
 @bp.route('/api/automations/bulk-toggle', methods=['POST'])
+@requires("automations.personal")
 def bulk_toggle_automations():
     """Bulk enable/disable multiple automations."""
     try:
@@ -192,6 +228,7 @@ def bulk_toggle_automations():
 
 
 @bp.route('/api/automations/<int:automation_id>', methods=['DELETE'])
+@requires("automations.personal")
 def delete_automation_endpoint(automation_id):
     """Delete an automation. System automations cannot be deleted."""
     try:
@@ -206,6 +243,7 @@ def delete_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/duplicate', methods=['POST'])
+@requires("automations.personal")
 def duplicate_automation_endpoint(automation_id):
     """Duplicate an automation. System automations cannot be duplicated."""
     try:
@@ -220,7 +258,7 @@ def duplicate_automation_endpoint(automation_id):
             then_actions = []
         refused = _script_refused({"action_type": source.get("action_type"),
                                    "notify_type": source.get("notify_type"),
-                                   "then_actions": then_actions})
+                                   "then_actions": then_actions}) or _personal_refused(source)
         if refused:
             return refused
         body, status = _auto_api.duplicate_automation(get_database(), automation_engine, profile_id, automation_id)
@@ -231,6 +269,7 @@ def duplicate_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/toggle', methods=['POST'])
+@requires("automations.personal")
 def toggle_automation_endpoint(automation_id):
     """Toggle an automation's enabled state."""
     try:
@@ -245,10 +284,14 @@ def toggle_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/run', methods=['POST'])
+@requires("automations.personal")
 def run_automation_endpoint(automation_id):
     """Manually trigger an automation."""
     try:
         refused = _refused([automation_id], _auto_access.may_run)
+        if not refused and not is_admin_request():
+            row = get_database().get_automation(automation_id)
+            refused = _personal_refused(row) if row else None
         if refused:
             return refused
         body, status = _auto_api.run_automation(automation_engine, automation_id, get_current_profile_id())
@@ -259,6 +302,7 @@ def run_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/progress', methods=['GET'])
+@requires("automations.personal")
 def get_automation_progress():
     """Get current progress state for all running/recently finished automations."""
     try:
@@ -268,6 +312,7 @@ def get_automation_progress():
 
 
 @bp.route('/api/automations/activity', methods=['GET'])
+@requires("automations.personal")
 def get_automations_activity():
     """The last 24 hours by automation and the last week by day, for one side."""
     try:
@@ -280,6 +325,7 @@ def get_automations_activity():
 
 
 @bp.route('/api/automations/<int:automation_id>/history', methods=['GET'])
+@requires("automations.personal")
 def get_automation_history(automation_id):
     """Get run history for a specific automation."""
     refused = _refused([automation_id], _auto_access.may_read)
@@ -299,6 +345,7 @@ def _collect_known_signals():
     return _auto_signals.collect_known_signals(get_database())
 
 @bp.route('/api/scripts', methods=['GET'])
+@admin_only
 def list_available_scripts():
     """List executable scripts in the scripts directory."""
     try:
@@ -323,6 +370,7 @@ def list_available_scripts():
 
 
 @bp.route('/api/automations/blocks', methods=['GET'])
+@requires("automations.personal")
 def get_automation_blocks():
     """Return available block types for the automation builder sidebar.
 
@@ -334,6 +382,7 @@ def get_automation_blocks():
     return jsonify(scoped)
 
 @bp.route('/api/automations/test-notify', methods=['POST'])
+@admin_only
 def test_automation_notify():
     """Fire ONE notification step with sample variables — the builder's Test
     button. Sends for real (that's the point: prove the webhook/token works)

@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Blueprint, jsonify, redirect, request
 
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("labels.api")
 
@@ -164,6 +165,7 @@ def create_blueprint() -> Blueprint:
     bp = Blueprint("labels_api", __name__)
 
     @bp.route("/api/labels/cover", methods=["GET"])
+    @requires("music.access")
     def labels_cover():
         """A cover for a release. Cover Art Archive FIRST (exact, by release
         mbid, proxied same-origin), then Deezer/iTunes fuzzy-by-name as the
@@ -202,6 +204,7 @@ def create_blueprint() -> Blueprint:
         return resp
 
     @bp.route("/api/labels/cover-url", methods=["GET"])
+    @requires("music.access")
     def labels_cover_url():
         """The resolved ABSOLUTE cover URL (Deezer/iTunes CDN) for (artist,
         album) as JSON. Used by the download modal + wishlist entry, which need
@@ -223,6 +226,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"url": url})
 
     @bp.route("/api/labels/search", methods=["POST"])
+    @requires("music.access")
     def labels_search():
         """Label search results for the search page's Labels section."""
         body = request.get_json(silent=True) or {}
@@ -245,6 +249,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"labels": labels})
 
     @bp.route("/api/labels/<path:label_mbid>/catalog", methods=["GET"])
+    @requires("music.access")
     def labels_catalog(label_mbid):
         """A label's distinct albums, grouped by their real artist (newest
         first). ``?name=`` supplies the display name (the browse call doesn't
@@ -303,6 +308,7 @@ def create_blueprint() -> Blueprint:
         })
 
     @bp.route("/api/labels/watchlist", methods=["GET"])
+    @requires("music.watchlist")
     def labels_watchlist_list():
         db = _db()
         if db is None:
@@ -314,6 +320,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({"labels": []})
 
     @bp.route("/api/labels/watchlist/check", methods=["POST"])
+    @requires("music.access")
     def labels_watchlist_check():
         body = request.get_json(silent=True) or {}
         mbid = str(body.get("musicbrainz_label_id") or body.get("id") or "").strip()
@@ -334,6 +341,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({"success": False, "is_watching": False, "backlog": False})
 
     @bp.route("/api/labels/watchlist/add", methods=["POST"])
+    @requires("music.access")
     def labels_watchlist_add():
         body = request.get_json(silent=True) or {}
         mbid = str(body.get("musicbrainz_label_id") or body.get("id") or "").strip()
@@ -357,6 +365,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": "add failed"}), 500
 
     @bp.route("/api/labels/watchlist/remove", methods=["POST"])
+    @requires("music.access")
     def labels_watchlist_remove():
         body = request.get_json(silent=True) or {}
         mbid = str(body.get("musicbrainz_label_id") or body.get("id") or "").strip()
@@ -373,6 +382,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": "remove failed"}), 500
 
     @bp.route("/api/labels/watchlist/backlog", methods=["POST"])
+    @requires("music.access")
     def labels_watchlist_backlog():
         body = request.get_json(silent=True) or {}
         mbid = str(body.get("musicbrainz_label_id") or body.get("id") or "").strip()

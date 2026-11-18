@@ -48,6 +48,7 @@ from core.wishlist.routes import (
 )
 from core.settings import config_manager
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -88,6 +89,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/wishlist/process', methods=['POST'])
+@requires("music.access")
 def process_wishlist_api():
     """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
     dl_err = check_download_permission()
@@ -110,6 +112,7 @@ def process_wishlist_api():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/count', methods=['GET'])
+@requires("music.access")
 def get_wishlist_count():
     """Endpoint to get current wishlist count."""
     try:
@@ -121,6 +124,7 @@ def get_wishlist_count():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wishlist/stats', methods=['GET'])
+@requires("music.access")
 def get_wishlist_stats():
     """
     Get wishlist statistics broken down by category.
@@ -147,6 +151,7 @@ def get_wishlist_stats():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wishlist/cycle', methods=['GET'])
+@admin_only
 def get_wishlist_cycle():
     """
     Get the current wishlist processing cycle.
@@ -183,6 +188,7 @@ def set_wishlist_cycle():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wishlist/retry-profile', methods=['GET'])
+@admin_only
 def get_wishlist_retry_profile():
     """
     Get the active wishlist retry profile and the profiles to choose from.
@@ -211,6 +217,7 @@ def set_wishlist_retry_profile():
     return jsonify(payload), status
 
 @bp.route('/api/discovery/lookback-period', methods=['GET'])
+@admin_only
 def get_discovery_lookback_period():
     """
     Get the discovery pool lookback period setting.
@@ -299,6 +306,7 @@ def set_discovery_lookback_period():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery/hemisphere', methods=['GET'])
+@admin_only
 def get_hemisphere():
     """Get the hemisphere setting for seasonal content."""
     try:
@@ -343,6 +351,7 @@ def set_hemisphere():
 
 
 @bp.route('/api/wishlist/tracks', methods=['GET'])
+@requires("music.access")
 def get_wishlist_tracks():
     """
     Endpoint to get wishlist tracks for display in modal.
@@ -363,6 +372,7 @@ def get_wishlist_tracks():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wishlist/export', methods=['GET'])
+@requires("music.access")
 def export_wishlist():
     """The music wishlist as json or csv, exactly the rows the page lists.
     ``category`` limits it to albums or singles like the page's filter.
@@ -407,6 +417,7 @@ def _build_wishlist_route_runtime(
     )
 
 @bp.route('/api/wishlist/download_missing', methods=['POST'])
+@requires("music.access")
 def start_wishlist_missing_downloads():
     """
     This endpoint fetches wishlist tracks and manages them with batch processing
@@ -458,6 +469,7 @@ def _build_wishlist_manual_runtime():
 
 
 @bp.route('/api/wishlist/bulk', methods=['POST'])
+@requires("music.access")
 def bulk_wishlist_action():
     """Apply a bulk action to selected wishlist tracks.
 
@@ -495,6 +507,7 @@ def bulk_wishlist_action():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/clear', methods=['POST'])
+@requires("music.access")
 def clear_wishlist():
     """Endpoint to clear all tracks from the wishlist.
     Also cancels any active wishlist download batch so cleared tracks don't keep downloading."""
@@ -514,6 +527,7 @@ def clear_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/cleanup', methods=['POST'])
+@requires("music.access")
 def cleanup_wishlist():
     """Endpoint to remove tracks from wishlist that already exist in the database."""
     try:
@@ -538,6 +552,7 @@ def cleanup_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/remove-track', methods=['POST'])
+@requires("music.access")
 def remove_track_from_wishlist():
     """Endpoint to remove a single track from the wishlist."""
     try:
@@ -551,6 +566,7 @@ def remove_track_from_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/remove-album', methods=['POST'])
+@requires("music.access")
 def remove_album_from_wishlist():
     """Endpoint to remove all tracks from an album from the wishlist."""
     try:
@@ -573,6 +589,7 @@ def remove_album_from_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/remove-artist', methods=['POST'])
+@requires("music.access")
 def remove_artist_from_wishlist():
     """Remove every wishlist track by one artist (#1065 — one click instead
     of unchecking a whole discography album by album)."""
@@ -587,6 +604,7 @@ def remove_artist_from_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/remove-batch', methods=['POST'])
+@requires("music.access")
 def remove_batch_from_wishlist():
     """Endpoint to remove multiple tracks from the wishlist."""
     try:
@@ -600,6 +618,7 @@ def remove_batch_from_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/ignore-list', methods=['GET'])
+@requires("music.access")
 def get_wishlist_ignore_list():
     """#874: active (non-expired) wishlist ignore entries for this profile."""
     try:
@@ -613,6 +632,7 @@ def get_wishlist_ignore_list():
         return jsonify({"success": False, "error": str(e), "entries": []}), 500
 
 @bp.route('/api/wishlist/ignore-list/remove', methods=['POST'])
+@requires("music.access")
 def remove_from_wishlist_ignore_list():
     """#874: un-ignore a track so it can be auto-acquired again."""
     try:
@@ -630,6 +650,7 @@ def remove_from_wishlist_ignore_list():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/wishlist/ignore-list/clear', methods=['POST'])
+@requires("music.access")
 def clear_wishlist_ignore_list():
     """#874: clear the entire wishlist ignore-list for this profile."""
     try:
@@ -642,6 +663,7 @@ def clear_wishlist_ignore_list():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/add-album-to-wishlist', methods=['POST'])
+@requires("music.access")
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""
     try:

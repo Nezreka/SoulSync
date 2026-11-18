@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from core.permissions import profile_can_download
+from core.permissions import can, enforcing, may_moderate, may_see_request, profile_can_download, refusal, \
+    requires, signed_in
 from core.profile_context import get_current_profile_id, is_admin_request
 from core.requests.music import describe, fulfillment_status, group_rows
 from utils.logging_config import get_logger
@@ -54,15 +55,58 @@ def _notify(profile_id, message, kind="info"):
         logger.debug("request note failed", exc_info=True)
 
 
+def _music_mode(db, profile):
+    """download | ask | none for a profile row: its music.get under the
+    global policy (core.permission_store.music_rights). a database without
+    the permission layers (a bare test double) answers from the old column."""
+    if not hasattr(db, "get_permission_inputs"):
+        return "download" if profile_can_download(profile) else "ask"
+    from core.permission_store import music_rights
+    return music_rights(db, profile)["mode"]
+
+
 def _requesting_profiles(db, only_pid=None):
-    """profiles whose wishlist rows are requests (no download rights)."""
+    """profiles whose wishlist rows are requests (they don't get music right
+    away: ask first, or no longer allowed to get it at all)."""
     out = []
     for p in db.get_all_profiles() or []:
         if only_pid is not None and int(p["id"]) != int(only_pid):
             continue
-        if not profile_can_download(p):
+        if _music_mode(db, p) != "download":
             out.append(p)
     return out
+
+
+# ── who sees and answers whose requests (moderators, #2166) ──────────────
+# admins: everyone's. a moderator (requests.moderate): everyone's, and may
+# approve, decline and tidy anyone's but their own (approving your own ask
+# is downloading without the right). requests.see_all: everyone's, read only.
+# anyone else: their own.
+
+def _ctx():
+    """the caller for may_moderate / may_see_request. a bare test app with no
+    permission map answers from the admin flag alone."""
+    from core.permissions import context_from_g, make_context
+    if enforcing():
+        return context_from_g()
+    return make_context(get_current_profile_id(), is_admin=is_admin_request(), perms={})
+
+
+def _sees_everyone():
+    if is_admin_request():
+        return True
+    return may_see_request(_ctx(), None) if enforcing() else False
+
+
+def _may_answer(owner):
+    """may the caller approve / decline / tidy a request ``owner`` filed?"""
+    if is_admin_request():
+        return True
+    return may_moderate(_ctx(), owner)
+
+
+def _not_a_moderator():
+    return refusal("requests.moderate")
 
 
 def _pending_groups(db, only_pid=None):
@@ -132,6 +176,7 @@ def _find_group(db, profile_id, key):
 
 
 @bp.route("/api/requests/music", methods=["GET"])
+@signed_in
 def list_music_requests():
     """?status=pending|approved|available|declined|all. admins see every
     profile's, members their own."""
@@ -139,8 +184,7 @@ def list_music_requests():
     pid = get_current_profile_id()
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
-    admin = is_admin_request()
-    scope = None if admin else pid
+    scope = None if _sees_everyone() else pid
     status = (request.args.get("status") or "all").lower()
     try:
         sweep_fulfillment(db, only_pid=scope)
@@ -166,17 +210,24 @@ def list_music_requests():
     for h in db.list_music_requests(profile_id=scope):
         counts[h["status"]] = counts.get(h["status"], 0) + 1
     me = db.get_profile(pid) or {}
+    mode = _music_mode(db, me)
     return jsonify({"success": True, "pending": pending, "history": history, "counts": counts,
                     "pending_videos": pending_videos, "video_history": video_history,
-                    "asks_first": not profile_can_download(me), "quota": _quota(db, me)})
+                    "asks_first": mode != "download", "can_request": mode != "none",
+                    "moderator": _may_answer(None) and not is_admin_request(),
+                    "quota": _quota(db, me)})
 
 
 def _quota(db, profile):
     """{limit, days, used, remaining} for a limited asking profile, else None.
     video asks count the same as track asks: an ask is an ask."""
     from core.requests.quota import quota_for, quota_state
-    quota = quota_for(profile)
-    if not quota or profile_can_download(profile):
+    if hasattr(db, "get_permission_inputs") and profile:
+        from core.permission_store import music_rights
+        quota = music_rights(db, profile)["quota"]
+    else:
+        quota = None if profile_can_download(profile) else quota_for(profile)
+    if not quota:
         return None
     try:
         conn = db._get_connection()
@@ -192,6 +243,7 @@ def _quota(db, profile):
 
 
 @bp.route("/api/requests/music/quota", methods=["GET"])
+@signed_in
 def music_request_quota():
     """before an add: how many asks this profile has left (None = no limit)."""
     db = get_database()
@@ -202,6 +254,7 @@ def music_request_quota():
 
 
 @bp.route("/api/requests/music/counts", methods=["GET"])
+@signed_in
 def music_request_counts():
     """the nav badge. admins: requests waiting. members: updates they
     haven't looked at yet (approved, declined, arrived)."""
@@ -212,6 +265,16 @@ def music_request_counts():
     if is_admin_request():
         videos = len(db.list_music_video_requests(status="pending"))
         return jsonify({"success": True, "pending": len(_pending_groups(db)) + videos, "updates": 0})
+    if _may_answer(None):
+        # a moderator's badge: everyone else's waiting requests, plus news on
+        # their own like any member
+        waiting = sum(1 for g in _pending_groups(db) if int(g["profile_id"]) != int(pid))
+        waiting += sum(1 for r in db.list_music_video_requests(status="pending")
+                       if int(r["profile_id"]) != int(pid))
+        unseen = sum(1 for h in db.list_music_requests(profile_id=pid) if not h.get("seen_at"))
+        unseen += sum(1 for r in db.list_music_video_requests(profile_id=pid)
+                      if r["status"] != "pending" and not r.get("seen_at"))
+        return jsonify({"success": True, "pending": waiting, "updates": unseen, "moderator": True})
     try:
         sweep_fulfillment(db, only_pid=pid)
     except Exception:  # noqa: BLE001
@@ -225,6 +288,7 @@ def music_request_counts():
 
 
 @bp.route("/api/requests/music/seen", methods=["POST"])
+@signed_in
 def music_requests_seen():
     pid = get_current_profile_id()
     if pid is None:
@@ -245,12 +309,13 @@ def _group_from_body(db):
 
 
 @bp.route("/api/requests/music/approve", methods=["POST"])
+@signed_in
 def approve_music_request():
     """{profile_id, key}: the requester's rows become downloadable."""
-    if not is_admin_request():
-        return jsonify({"success": False, "error": "Admin only"}), 403
     db = get_database()
     owner, group, body = _group_from_body(db)
+    if not _may_answer(owner):
+        return _not_a_moderator()
     if not group:
         return jsonify({"success": False, "error": "That request isn't waiting any more"}), 404
     flipped = db.approve_request_rows(owner, group["track_ids"])
@@ -267,10 +332,12 @@ def approve_music_request():
 
 
 @bp.route("/api/requests/music/approve-all", methods=["POST"])
+@signed_in
 def approve_all_music_requests():
-    """{profile_id?}: every waiting request (or one profile's) in one go."""
-    if not is_admin_request():
-        return jsonify({"success": False, "error": "Admin only"}), 403
+    """{profile_id?}: every waiting request (or one profile's) in one go. a
+    moderator's "all" is everyone's but their own."""
+    if not _may_answer(None):
+        return _not_a_moderator()
     db = get_database()
     body = request.get_json(silent=True) or {}
     only = body.get("profile_id")
@@ -278,8 +345,12 @@ def approve_all_music_requests():
         only = int(only) if only not in (None, "") else None
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "bad profile_id"}), 400
+    if only is not None and not _may_answer(only):
+        return _not_a_moderator()
     approved = 0
     for group in _pending_groups(db, only_pid=only):
+        if not _may_answer(group["profile_id"]):
+            continue
         if db.approve_request_rows(group["profile_id"], group["track_ids"]):
             db.add_music_request(profile_id=group["profile_id"], requester_name=group.get("requester_name"),
                                  group_key=group["key"], kind=group["kind"], title=group["title"],
@@ -290,6 +361,8 @@ def approve_all_music_requests():
             _event("music_request_approved", group)
             approved += 1
     for req in db.list_music_video_requests(profile_id=only, status="pending"):
+        if not _may_answer(req["profile_id"]):
+            continue
         ok, _err, _code = _start_approved_video_download(db, req)
         if ok and db.set_music_video_request_status(req["id"], "approved",
                                                     resolved_by=get_current_profile_id()):
@@ -301,13 +374,14 @@ def approve_all_music_requests():
 
 
 @bp.route("/api/requests/music/decline", methods=["POST"])
+@signed_in
 def decline_music_request():
     """{profile_id, key, response?}: rows come off (and stay off: ignore-
     listed so a watchlist scan doesn't file them again)."""
-    if not is_admin_request():
-        return jsonify({"success": False, "error": "Admin only"}), 403
     db = get_database()
     owner, group, body = _group_from_body(db)
+    if not _may_answer(owner):
+        return _not_a_moderator()
     if not group:
         return jsonify({"success": False, "error": "That request isn't waiting any more"}), 404
     reason = str(body.get("response") or "").strip()[:500] or None
@@ -355,6 +429,7 @@ def _release_wishes(db, owner, descriptors):
 
 
 @bp.route("/api/requests/music/withdraw", methods=["POST"])
+@signed_in
 def withdraw_music_request():
     """{key}: a member takes back their own waiting request."""
     db = get_database()
@@ -370,13 +445,24 @@ def withdraw_music_request():
 
 
 @bp.route("/api/requests/music/<int:request_id>", methods=["DELETE"])
+@signed_in
 def delete_music_request_history(request_id):
     """take a finished request out of the history (own, or any as admin).
     an approved one still downloading keeps downloading."""
     pid = get_current_profile_id()
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
-    ok = get_database().delete_music_request(request_id, profile_id=None if is_admin_request() else pid)
+    db = get_database()
+    scope = pid
+    if is_admin_request():
+        scope = None
+    elif _may_answer(None):
+        # a moderator tidies anyone's finished request but their own goes the
+        # member's way (scope = them) anyway
+        row = next((h for h in db.list_music_requests() if int(h.get("id") or 0) == int(request_id)), None)
+        if row is not None and _may_answer(row.get("profile_id")):
+            scope = None
+    ok = db.delete_music_request(request_id, profile_id=scope)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
 
 
@@ -385,6 +471,7 @@ def delete_music_request_history(request_id):
 # pending state from, so the row is both the queue and the history.
 
 @bp.route("/api/requests/music/videos", methods=["POST"])
+@requires("music.videos")
 def file_music_video_request():
     """{video_id, url, title, channel?, thumbnail_url?}: a profile without
     download rights asks for a music video. a profile that can download uses
@@ -394,9 +481,16 @@ def file_music_video_request():
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
     me = db.get_profile(pid) or {}
-    if profile_can_download(me):
+    mode = _music_mode(db, me)
+    if mode == "download":
         return jsonify({"success": False,
                         "error": "Downloads are enabled for this profile, use the download endpoint"}), 403
+    if mode == "none":
+        return refusal("music.get")
+    # a music video carries no explicit flag: a profile whose explicit music
+    # is hidden can't vouch for one, so it doesn't ask for them (S17)
+    if enforcing() and can(None, "music.hide_explicit"):
+        return jsonify({"success": False, "error": "restricted", "restricted": True}), 403
     body = request.get_json(silent=True) or {}
     video_id = str(body.get("video_id") or "").strip()
     url = str(body.get("url") or "").strip()
@@ -453,12 +547,13 @@ def _start_approved_video_download(db, req):
 
 
 @bp.route("/api/requests/music/videos/<int:request_id>/approve", methods=["POST"])
+@signed_in
 def approve_music_video_request(request_id):
-    """admin: a waiting video request starts downloading like a direct one."""
-    if not is_admin_request():
-        return jsonify({"success": False, "error": "Admin only"}), 403
+    """admin or moderator: a waiting video request starts downloading like a direct one."""
     db = get_database()
     req = db.get_music_video_request(request_id)
+    if not _may_answer(req["profile_id"] if req else None):
+        return _not_a_moderator()
     if not req:
         return jsonify({"success": False, "error": "Not found"}), 404
     if req["status"] != "pending":
@@ -476,12 +571,13 @@ def approve_music_video_request(request_id):
 
 
 @bp.route("/api/requests/music/videos/<int:request_id>/decline", methods=["POST"])
+@signed_in
 def decline_music_video_request(request_id):
-    """admin: {response?} — the request ends, the requester hears why."""
-    if not is_admin_request():
-        return jsonify({"success": False, "error": "Admin only"}), 403
+    """admin or moderator: {response?} — the request ends, the requester hears why."""
     db = get_database()
     req = db.get_music_video_request(request_id)
+    if not _may_answer(req["profile_id"] if req else None):
+        return _not_a_moderator()
     if not req:
         return jsonify({"success": False, "error": "Not found"}), 404
     reason = str((request.get_json(silent=True) or {}).get("response") or "").strip()[:500] or None
@@ -497,6 +593,7 @@ def decline_music_video_request(request_id):
 
 
 @bp.route("/api/requests/music/videos/<int:request_id>/withdraw", methods=["POST"])
+@signed_in
 def withdraw_music_video_request(request_id):
     """a member takes back their own waiting video request (or an admin any)."""
     pid = get_current_profile_id()
@@ -506,13 +603,14 @@ def withdraw_music_video_request(request_id):
     req = db.get_music_video_request(request_id)
     if not req or req["status"] != "pending":
         return jsonify({"success": False, "error": "Not found"}), 404
-    if int(req["profile_id"]) != int(pid) and not is_admin_request():
+    if int(req["profile_id"]) != int(pid) and not _may_answer(req["profile_id"]):
         return jsonify({"success": False, "error": "Not yours"}), 403
     ok = db.delete_music_video_request(request_id)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
 
 
 @bp.route("/api/requests/music/videos/<int:request_id>", methods=["DELETE"])
+@signed_in
 def delete_music_video_request_history(request_id):
     """take a finished video request out of the history (own, or any as admin)."""
     pid = get_current_profile_id()
@@ -522,7 +620,7 @@ def delete_music_video_request_history(request_id):
     req = db.get_music_video_request(request_id)
     if not req:
         return jsonify({"success": False, "error": "Not found"}), 404
-    if not is_admin_request() and int(req.get("profile_id") or 0) != int(pid):
+    if int(req.get("profile_id") or 0) != int(pid) and not _may_answer(req.get("profile_id")):
         return jsonify({"success": False, "error": "Not found"}), 404
     if req.get("status") == "pending":
         return jsonify({"success": False, "error": "Withdraw a pending request instead"}), 409

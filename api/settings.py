@@ -6,6 +6,7 @@ from flask import request, current_app
 from . import key_store
 from .auth import SCOPE_ADMIN, VALID_SCOPES, require_api_key
 from .helpers import api_success, api_error
+from core.profile_context import admin_only
 
 # Keys that must NEVER be exposed via the API
 _SENSITIVE_KEYS = {
@@ -139,6 +140,7 @@ def register_routes(bp):
     # ---- Bootstrap endpoint (no key yet, but the admin's) ----
 
     @bp.route("/api-keys/bootstrap", methods=["POST"])
+    @admin_only
     def bootstrap_api_key():
         """Generate the first API key when none exist.
 

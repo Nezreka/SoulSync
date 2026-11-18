@@ -9,6 +9,7 @@ from core.discovery.blocked import WORKS, hide_blocked_in_response as _hide_bloc
 from core.personalized import api as _personalized_api
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -31,6 +32,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/personalized/kinds', methods=['GET'])
+@requires("music.access")
 def personalized_list_kinds():
     """List every registered personalized-playlist kind. Includes the
     resolved variant list per kind that supports variants so the UI
@@ -44,6 +46,7 @@ def personalized_list_kinds():
 
 
 @bp.route('/api/personalized/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def personalized_list_playlists():
     """List every persisted personalized playlist for the active profile."""
     try:
@@ -56,6 +59,7 @@ def personalized_list_playlists():
 
 @bp.route('/api/personalized/playlist/<kind>', methods=['GET'])
 @bp.route('/api/personalized/playlist/<kind>/<variant>', methods=['GET'])
+@requires("music.playlist_sync")
 @_hide_blocked({'tracks': WORKS})
 def personalized_get_playlist(kind, variant=''):
     """Get one personalized playlist + its current track snapshot.
@@ -75,6 +79,7 @@ def personalized_get_playlist(kind, variant=''):
 
 @bp.route('/api/personalized/playlist/<kind>/refresh', methods=['POST'])
 @bp.route('/api/personalized/playlist/<kind>/<variant>/refresh', methods=['POST'])
+@requires("music.playlist_sync")
 @_hide_blocked({'tracks': WORKS})
 def personalized_refresh_playlist(kind, variant=''):
     """Run the kind's generator and persist the snapshot."""
@@ -94,6 +99,7 @@ def personalized_refresh_playlist(kind, variant=''):
 
 @bp.route('/api/personalized/playlist/<kind>/config', methods=['PUT'])
 @bp.route('/api/personalized/playlist/<kind>/<variant>/config', methods=['PUT'])
+@requires("music.playlist_sync")
 def personalized_update_config(kind, variant=''):
     """Patch the playlist's per-instance config."""
     try:

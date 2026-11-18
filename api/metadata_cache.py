@@ -15,6 +15,7 @@ import os
 
 from core.profile_context import admin_only
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("api.metadata_cache")
 
@@ -38,6 +39,7 @@ def create_blueprint():
 
 
 @bp.route('/api/metadata-cache/stats', methods=['GET'])
+@requires("admin.tools")
 def metadata_cache_stats():
     """Get metadata cache statistics."""
     try:
@@ -49,6 +51,7 @@ def metadata_cache_stats():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/metadata-cache/browse', methods=['GET'])
+@requires("admin.tools")
 def metadata_cache_browse():
     """Browse cached metadata entities with filtering, search, sorting, and pagination."""
     try:
@@ -76,6 +79,7 @@ def metadata_cache_browse():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/metadata-cache/entity/<source>/<entity_type>/<path:entity_id>', methods=['GET'])
+@requires("admin.tools")
 def metadata_cache_entity_detail(source, entity_type, entity_id):
     """Get detailed view of a single cached entity."""
     try:
@@ -89,6 +93,7 @@ def metadata_cache_entity_detail(source, entity_type, entity_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/metadata-cache/browse-musicbrainz', methods=['GET'])
+@requires("admin.tools")
 def metadata_cache_browse_musicbrainz():
     """Browse MusicBrainz cache entries in the same format as metadata cache browse."""
     try:
@@ -193,6 +198,7 @@ def metadata_cache_clear_musicbrainz():
 
 
 @bp.route('/api/metadata-cache/failed-mb-lookups', methods=['GET'])
+@requires("admin.tools")
 def metadata_cache_failed_mb_lookups():
     """Get all failed MusicBrainz lookups with pagination and filtering."""
     try:
@@ -259,6 +265,7 @@ def metadata_cache_failed_mb_lookups():
 
 
 @bp.route('/api/metadata-cache/mb-entry/<int:entry_id>', methods=['DELETE'])
+@admin_only
 def metadata_cache_delete_mb_entry(entry_id):
     """Delete a single MusicBrainz cache entry by ID."""
     try:
@@ -277,6 +284,7 @@ def metadata_cache_delete_mb_entry(entry_id):
 
 
 @bp.route('/api/metadata-cache/mb-match', methods=['POST'])
+@admin_only
 def metadata_cache_save_mb_match():
     """Save a manual MusicBrainz match for a failed lookup."""
     try:

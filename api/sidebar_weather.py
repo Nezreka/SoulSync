@@ -77,6 +77,7 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from utils.logging_config import get_logger
+from core.permissions import signed_in
 
 logger = get_logger("api.sidebar_weather")
 
@@ -690,6 +691,7 @@ def _weather_payload(cfg=None, shared=True):
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/weather", methods=["GET"])
+@signed_in
 def get_weather():
     # the asking profile's weather (#2163): the install's for an admin, their
     # own for anyone else, off with no profile
@@ -704,6 +706,7 @@ def _no_profile():
 
 
 @bp.route("/api/weather/location", methods=["PUT"])
+@signed_in
 def put_weather_location():
     cfg, shared = _viewer_settings()
     if cfg is None:
@@ -800,16 +803,19 @@ def _put_flag(key, field):
 
 
 @bp.route("/api/weather/display", methods=["PUT"])
+@signed_in
 def put_weather_display():
     return _put_flag("weather.enabled", "enabled")
 
 
 @bp.route("/api/weather/holidays", methods=["PUT"])
+@signed_in
 def put_weather_holidays():
     return _put_flag("weather.holidays", "holidays")
 
 
 @bp.route("/api/weather/units", methods=["PUT"])
+@signed_in
 def put_weather_units():
     cfg, shared = _viewer_settings()
     if cfg is None:

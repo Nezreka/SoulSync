@@ -83,6 +83,7 @@ def create_blueprint():
 
 
 @bp.route("/api/metasync/depot", methods=["GET"])
+@admin_only
 def get_metasync_depot():
     try:
         return jsonify(depot.depot_status(get_database()))
