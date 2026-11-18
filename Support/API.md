@@ -124,6 +124,18 @@ SoulSync supports multiple user profiles. Profile-scoped endpoints (watchlist, w
 
 If omitted, defaults to profile 1 (admin). Profile scoping applies to: watchlist, wishlist, and discovery endpoints.
 
+### What a member's session gets (web UI routes)
+
+What the server is doing is the admin's. A member's session is refused (`403`) these, and the web UI never asks:
+
+- `GET /api/system/stats` (downloads across the server, speed, uptime, memory) and its push, `dashboard:stats`, which only the admins' sockets get
+- `GET /api/repair/progress`, `GET /api/video/health`, `GET /api/video/bulk/status`
+- the diagnostics: `GET /api/debug-info`, `GET /api/logs/tail`, `/api/settings/log-level`, `/api/help/health`, `/api/help/bundle`, `/api/help/logs*`
+
+`GET /api/automations/progress` and the `automation:progress` push give a member the runs of their own automations only, never a system one.
+
+In the music library, `POST /api/library/v2/<entity>/<id>/search` (Automatic Search) and `/enhance` (Enhance Quality, Upgrade) download right away, so a profile that asks first is refused them; its way in is the Wishlist. `GET /api/library/v2/enabled` says what the caller may do: `can_wish`, `can_download`, and `can_grab` (an Interactive Search pick for a library row).
+
 ---
 
 ## MCP for AI clients

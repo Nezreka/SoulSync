@@ -1702,7 +1702,7 @@ The library grid's multi-select action bar. Items go through the same edit-and-l
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
 | POST | \`/bulk/start\` | Start a bulk job: \`{kind, ids[], action, params}\`. Only one bulk op runs at a time — \`409\` if busy | admin |
-| GET | \`/bulk/status\` | Job state (polling fallback for the bell) | video |
+| GET | \`/bulk/status\` | Job state (polling fallback for the bell) | admin |
 
 Bulk actions: \`content_rating\`, \`genre_add\`, \`genre_remove\`, \`monitored\`, \`watched\`, \`refresh_art\`. The \`collection_add\` action runs **inline** (one write, no job) and needs \`kind\` \`movie\`/\`show\` plus \`params.collection_id\`.
 

@@ -4740,7 +4740,7 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \\
 | POST | \`/api/automations/{automation_id}/duplicate\` | Duplicate an automation into your profile | session (profile-scoped) |
 | POST | \`/api/automations/{automation_id}/toggle\` | Enable/disable one automation | session |
 | POST | \`/api/automations/{automation_id}/run\` | Run an automation right now | session (profile-scoped) |
-| GET | \`/api/automations/progress\` | Live progress of running automations | session |
+| GET | \`/api/automations/progress\` | Live progress of running automations. A member gets their own automations' runs only, never a system one | session |
 | GET | \`/api/automations/activity\` | The last 24 hours by automation and the last 7 days by local day. \`?side=video\` for the video side. Returns \`{recent, days, totals}\` | session |
 | GET | \`/api/automations/{automation_id}/history\` | Run history — \`?limit=50&offset=0\` | session |
 | GET | \`/api/scripts\` | Scripts available to the run-script action | session |
@@ -4984,8 +4984,8 @@ Every emit below is server → client, pushed from a background thread — none 
 | \`sync:progress\` | S→C | \`{playlist_id, …state}\` | Playlist sync progress. Join \`sync:{id}\` rooms with \`sync:subscribe\`. |
 | \`sync:active\` | S→C | \`{active, syncs}\` | The currently active syncs — broadcast while any sync runs (deliberately unscoped). |
 | \`repair:progress\` | S→C | \`{job_id: state}\` | Library Maintenance job progress; state carries \`status\`, \`progress\`, \`processed\`, \`total\`, \`log\`, \`finished_at\`. |
-| \`automation:progress\` | S→C | \`{automation_id: state}\` | Automation run progress (also pollable via \`GET /api/automations/progress\`). |
-| \`dashboard:stats\` | S→C | system stats | Dashboard numbers refreshed (every 10s): active/finished downloads, download speed, active syncs, uptime, memory. |
+| \`automation:progress\` | S→C | \`{automation_id: state}\` | Automation run progress (also pollable via \`GET /api/automations/progress\`). Admins get every run; a member only their own automations' runs. |
+| \`dashboard:stats\` | S→C | system stats | Admins only. Server numbers refreshed (every 10s): active/finished downloads, download speed, active syncs, uptime, memory. \`GET /api/system/stats\` is the same, admin only. |
 | \`dashboard:db_stats\` | S→C | database info | Database statistics refreshed (every 10s). |
 | \`dashboard:activity\` | S→C | \`{activities}\` | New activity feed entry (last 10, every 2s). |
 | \`dashboard:toast\` | S→C | \`{icon, title, subtitle}\` | Toast notification shown in the UI. |
