@@ -234,3 +234,24 @@ describe('Ctrl/Cmd K has one owner', () => {
     expect([...new Set(owners)]).toEqual(['src/features/help/host.tsx']);
   });
 });
+
+describe('the button itself (#2171)', () => {
+  // 3.6.7's ? turned sideways on click (its old helper-mode state) and opened
+  // nothing. the sheet replaced that menu: the button shows open by its
+  // colour, and nothing anywhere turns it
+  const css = readdirSync(resolve(process.cwd(), 'static'))
+    .filter((f) => f.endsWith('.css'))
+    .map((f) => readFileSync(resolve(process.cwd(), 'static', f), 'utf8'))
+    .join('\n');
+  const rules = [...css.matchAll(/([^{}]*helper-float-btn[^{}]*)\{([^}]*)\}/g)];
+
+  it('no rule for it rotates it', () => {
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, selector, body] of rules) expect(body, selector.trim()).not.toMatch(/rotate/);
+  });
+
+  it('open, it stays upright', () => {
+    const open = rules.find(([, sel]) => sel.trim() === '.helper-float-btn[aria-expanded="true"]');
+    expect(open?.[2]).toMatch(/transform:\s*none/);
+  });
+});
