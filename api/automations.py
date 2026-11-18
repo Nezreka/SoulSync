@@ -348,9 +348,11 @@ def run_automation_endpoint(automation_id):
 @bp.route('/api/automations/progress', methods=['GET'])
 @requires_any(*_ROUTE_PERMS)
 def get_automation_progress():
-    """Get current progress state for all running/recently finished automations."""
+    """Get current progress state for all running/recently finished automations.
+    a member sees their own automations' runs only, never the system's (#2170)."""
     try:
-        return jsonify(_auto_progress.get_running_progress())
+        running = _auto_progress.get_running_progress()
+        return jsonify(_auto_progress.visible_to(running, get_current_profile_id(), is_admin_request()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

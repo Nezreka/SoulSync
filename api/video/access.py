@@ -302,7 +302,11 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
              # delete a whole title; its preview GET lists file paths
              "/api/video/title-delete",
              # the library manager: its rows carry file paths
-             "/api/video/manager")
+             "/api/video/manager",
+             # server operations the notification panel shows an admin
+             # (#2170): disk, roots and monitor health, and the library
+             # manager's bulk job. members never see either
+             "/api/video/health", "/api/video/bulk")
 
 # config the Settings page writes but content views read: the writes are admin's
 ADMIN_WRITES = ("/api/video/server", "/api/video/downloads/config",

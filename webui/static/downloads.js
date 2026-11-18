@@ -4928,6 +4928,21 @@ const _notifState = {
     clockTimer: null,
 };
 
+// ── who is looking ───────────────────────────────────────────────────────────
+// the panel is everyone's: their own notes, their own downloads, their own
+// automations and imports. what the server is doing (system numbers, health,
+// library scans, repair, the wishlist run, video jobs, other people's syncs)
+// is the admins' (#2170). the server refuses those feeds to a member too; this
+// keeps the panel from asking, and from drawing frames the socket still sends.
+// the same rule the server activity button uses (shell/server-activity.ts).
+function _notifViewerIsAdmin() {
+    let ctx = null;
+    try {
+        ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+    } catch (e) { ctx = null; }
+    return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+}
+
 // ── system status in the tray ────────────────────────────────────────────
 // The dashboard's System Stats strip retired (Boulder: telemetry belongs
 // where you act on it, not as a home-page section). The live numbers moved
@@ -4946,14 +4961,15 @@ window.addEventListener('ss:dashboard-stats', function (e) {
 function _updateNotifDlBadge() {
     const el = document.getElementById('notif-bell-dl');
     if (!el) return;
-    const n = (_notifState.sysStats && _notifState.sysStats.active_downloads) || 0;
+    // the server-wide download count is an admin's number
+    const n = (_notifViewerIsAdmin() && _notifState.sysStats && _notifState.sysStats.active_downloads) || 0;
     el.textContent = n > 99 ? '99+' : n;
     el.style.display = n > 0 ? '' : 'none';
 }
 
 function _notifSysHTML() {
     const s = _notifState.sysStats;
-    if (!s) return '';
+    if (!s || !_notifViewerIsAdmin()) return '';
     const bits = [];
     const dl = s.active_downloads || 0;
     bits.push('<button type="button" class="notif-sys-item notif-sys-item--link" ' +
@@ -4971,6 +4987,7 @@ function _notifSysHTML() {
 }
 
 function _seedNotifSys() {
+    if (!_notifViewerIsAdmin()) return;
     fetch('/api/system/stats').then(r => r.ok ? r.json() : null).then(data => {
         if (!data) return;
         _notifState.sysStats = data;
@@ -5594,14 +5611,43 @@ function _listenbrainzImportActiveHTML() {
 }
 
 function _musicTasksActive() {
+    if (!_notifViewerIsAdmin()) return _memberTasksActive();
     return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
         || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive()
         || _lastfmImportActive() || _listenbrainzImportActive();
 }
 
 function _musicActiveHTML() {
+    if (!_notifViewerIsAdmin()) return _memberActiveHTML();
     return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
         + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+}
+
+// a member's Running now (#2170): only what is theirs. their own automations
+// (the server sends a member nothing else), the downloads this page started,
+// and their listening imports. the unscoped sync pulse lists everyone's
+// playlists, so a member's sync card reads their own downloads only.
+function _memberSyncActiveHTML() {
+    const sources = _activeMusicDownloads();
+    if (!sources.length) return '';
+    const first = sources[0];
+    const title = sources.length === 1
+        ? `Downloading ${_syncProcessName(first)}`
+        : `Downloading ${sources.length} playlists`;
+    const line = sources.length === 1
+        ? _syncProcessLine(first)
+        : sources.map(p => _escToast(_syncProcessName(p))).slice(0, 3).join(', ');
+    return _taskCardHTML(title, _syncProcessProgress(first), line, '', _notifActionHTML('Open Downloads', 'active-downloads'));
+}
+
+function _memberTasksActive() {
+    return _musicAutomationActive() || _activeMusicDownloads().length > 0
+        || _lastfmImportActive() || _listenbrainzImportActive();
+}
+
+function _memberActiveHTML() {
+    return _musicAutomationActiveHTML() + _memberSyncActiveHTML()
+        + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML();
 }
 
 function _seedMusicAutomationTask() {
@@ -5650,10 +5696,15 @@ function _seedListenbrainzImportTask() {
         .catch(() => {});
 }
 
+// the server's own jobs: an admin's to watch (#2170)
+function _adminTasksActive() {
+    return _notifViewerIsAdmin()
+        && (_overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
-    if (btn) btn.classList.toggle('notif-bell-working',
-        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive());
+    if (btn) btn.classList.toggle('notif-bell-working', _adminTasksActive() || _musicTasksActive());
     _ensureTaskPolling();
 }
 
@@ -5662,20 +5713,9 @@ function _updateOverlayBell() {
 // strand an Active card in its last "running" state. Stops itself when idle.
 let _taskPollTimer = null;
 function _ensureTaskPolling() {
-    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive();
+    const active = _adminTasksActive() || _musicTasksActive();
     if (active && !_taskPollTimer) {
-        _taskPollTimer = setInterval(() => {
-            _seedOverlayTask();
-            _seedCollectionSyncTask();
-            _seedCollectionArtTask();
-            _seedVideoBulkTask();
-            _seedMusicAutomationTask();
-            _seedMusicDownloadTask();
-            _seedMusicRepairTask();
-            _seedMusicMediaScanTask();
-            _seedLastfmImportTask();
-            _seedListenbrainzImportTask();
-        }, 12000);
+        _taskPollTimer = setInterval(_seedNotifTasks, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
         _taskPollTimer = null;
@@ -6040,7 +6080,7 @@ setTimeout(_seedNotifPanelFromJournal, 1800);
 let _notifHealth = null;
 
 function _notifHealthHTML() {
-    if (!_notifHealth) return '';
+    if (!_notifHealth || !_notifViewerIsAdmin()) return '';
     const checks = _notifHealth.checks || [];
     if (!checks.length) return '';
     const n = s => checks.filter(c => c.status === s).length;
@@ -6056,6 +6096,7 @@ function _notifHealthHTML() {
 }
 
 function _seedNotifHealth() {
+    if (!_notifViewerIsAdmin()) return Promise.resolve();
     return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
         .then(r => (r.ok ? r.json() : null))
         .then(h => {
@@ -6148,10 +6189,28 @@ function toggleNotifPanel() {
 // a busy night does not push the notes off the panel.
 const _NOTIF_JOBS_SHOWN = 3;
 
+// what Running now asks the server for. a member asks for their own things
+// only: the server's jobs answer an admin alone (#2170)
+function _seedNotifTasks() {
+    _seedMusicAutomationTask();
+    _seedMusicDownloadTask();
+    _seedLastfmImportTask();
+    _seedListenbrainzImportTask();
+    if (!_notifViewerIsAdmin()) return;
+    _seedOverlayTask();
+    _seedCollectionSyncTask();
+    _seedCollectionArtTask();
+    _seedVideoBulkTask();
+    _seedMusicRepairTask();
+    _seedMusicMediaScanTask();
+}
+
 function _renderActiveHost() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
     if (!host) return;
-    const cards = _musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
+    const cards = _musicActiveHTML() + (_notifViewerIsAdmin()
+        ? _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML()
+        : '');
     const scratch = document.createElement('div');
     scratch.innerHTML = cards;
     const jobs = Array.from(scratch.children);
@@ -6206,15 +6265,7 @@ function _openNotifPanel() {
     _renderNotifFeed();
     _seedNotifHealth();   // system health symbols (see _notifHealthHTML)
     _seedNotifSys();      // fresh system numbers even when the socket is down
-    _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
-    _seedCollectionSyncTask();
-    _seedCollectionArtTask();
-    _seedVideoBulkTask();
-    _seedMusicAutomationTask();
-    _seedMusicDownloadTask();
-    _seedMusicRepairTask();
-    _seedMusicMediaScanTask();
-    _seedLastfmImportTask();
+    _seedNotifTasks();    // refresh the Active cards from the server on open (socket keeps them live after)
 
     // Position above the bell button
     if (btn) {
@@ -6334,7 +6385,9 @@ function _notifEntriesHTML() {
         : _notifState.history.filter(e => e.type === _notifState.filter);
     if (entries.length === 0) {
         return _notifState.filter === 'all'
-            ? '<div class="notif-panel-empty"><b>You are all caught up</b>Downloads, scans and jobs leave their notes here.</div>'
+            ? (_notifViewerIsAdmin()
+                ? '<div class="notif-panel-empty"><b>You are all caught up</b>Downloads, scans and jobs leave their notes here.</div>'
+                : '<div class="notif-panel-empty"><b>You are all caught up</b>Your downloads and requests leave their notes here.</div>')
             : '<div class="notif-panel-empty"><b>Nothing with this filter</b>Pick All to see every note.</div>';
     }
     const today = _notifDayStart(Date.now());

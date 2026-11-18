@@ -730,7 +730,7 @@ def repair_history():
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/progress', methods=['GET'])
-@requires("music.access")
+@admin_only
 def repair_job_progress():
     """Get current repair job progress states (for initial page load)"""
     try:
