@@ -5,14 +5,18 @@
  */
 
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { StatsPayload } from '@/shell/server-activity-types';
 
 import { HttpResponse, http, server } from '@/test/msw';
 
 import stats from './__fixtures__/stats.json';
+import { clearCache } from './cache';
 import { Stats, chartDays, niceMax } from './stats';
+
+// every test starts with nothing read ahead or remembered
+beforeEach(() => clearCache());
 
 const DATA = stats as unknown as StatsPayload;
 

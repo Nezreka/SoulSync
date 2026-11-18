@@ -249,6 +249,22 @@ def source_item(srv, rating_key: str, budget: List[int]) -> Optional[ET.Element]
     return el
 
 
+def prefetch_sources(srv, rating_keys: List[str], budget: List[int], workers: int = 6) -> None:
+    """source_item for every new stream at once (each still spends budget), so
+    a poll with several new streams waits for the slowest, not the sum."""
+    misses = []
+    for k in dict.fromkeys(str(k or "") for k in rating_keys):
+        if k.isdigit() and not _cache_get(_source_cache, k, _SOURCE_TTL)[0]:
+            misses.append(k)
+    misses = misses[:max(0, budget[0])]
+    if len(misses) < 2:
+        return
+    budget[0] -= len(misses)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, len(misses)), thread_name_prefix="plex-source") as ex:
+        list(ex.map(lambda k: source_item(srv, k, [1]), misses))
+
+
 def book_tracks(srv, parent_key: str, budget: List[int]) -> Optional[List[Dict[str, Any]]]:
     """the tracks of a book (plex files a book as an album), in order."""
     if not parent_key or not parent_key.isdigit():

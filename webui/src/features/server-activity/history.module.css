@@ -163,6 +163,9 @@
 .row {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
+  /* a long scroll back through history only lays out the rows in view */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
   transition:
     background var(--dur-fast) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard);

@@ -199,6 +199,10 @@ export interface Session {
   } | null;
   thumb: string; // pass to /api/server-activity/image?path=
   art: string;
+  /** the proxy query for the poster, with the item's family to fall back on */
+  image?: string | null;
+  /** the proxy query for the backdrop */
+  backdrop?: string | null;
   duration_ms: number;
   offset_ms: number;
   progress_pct: number;
@@ -282,6 +286,8 @@ export interface ActivityPayload {
   summary: Pulse;
   bandwidth: BandwidthSeries;
   sessions: Session[];
+  /** how old this answer is when served from the shared snapshot */
+  age_ms?: number;
 }
 
 // ── history ───────────────────────────────────────────────────────────────
@@ -349,6 +355,8 @@ export interface HistoryGroup {
   server: ServerKind;
   server_name: string | null;
   thumb: string | null;
+  /** the proxy query for the poster (the show's for a run of episodes) */
+  image?: string | null;
   link: SessionLink | null;
   source: 'live' | 'plex_history';
   plays: PlayRow[];
@@ -415,6 +423,7 @@ export interface HistoryGroupDetail extends HistoryGroup {
 export interface ShelfItem {
   title: string;
   thumb: string | null;
+  image?: string | null;
   hours: number;
   plays: number;
   people: number;

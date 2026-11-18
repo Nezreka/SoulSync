@@ -17,7 +17,8 @@ import type {
   TimelineBand,
 } from '@/shell/server-activity-types';
 
-import { type HistoryQuery, getHistory, getHistoryGroup } from './api';
+import { type HistoryQuery, getHistory, getHistoryGroup, historyParams } from './api';
+import { load, peek, put } from './cache';
 import {
   METHOD_LABEL,
   browserZone,
@@ -132,45 +133,89 @@ interface Loaded {
   logStartedAt: number | null;
 }
 
+/** a cached answer younger than this is shown without asking again */
+export const FRESH_MS = 15000;
+
+export const historyKey = (filters: HistoryFilters, tz: string | undefined) =>
+  `history${historyParams(toQuery(filters, 0, tz))}`;
+
+function firstPage(d: HistoryPayload): Loaded {
+  return {
+    groups: d.groups,
+    days: new Map(d.days.map((x) => [x.date, x])),
+    page: 0,
+    hasMore: d.has_more,
+    summary: d.summary,
+    logStartedAt: d.log_started_at,
+  };
+}
+
+// the filters outlive a tab switch, so History comes back as it was left
+const FILTERS_KEY = 'history:filters';
+const remembered = () => peek<HistoryFilters>(FILTERS_KEY)?.data ?? NO_FILTERS;
+
+/** the first page for the filters History will open with, read ahead */
+export function prefetchHistory(tz: string | undefined): void {
+  const filters = remembered();
+  const key = historyKey(filters, tz);
+  const hit = peek<HistoryPayload>(key);
+  if (hit && Date.now() - hit.at < FRESH_MS) return;
+  void load(key, () => getHistory(toQuery(filters, 0, tz))).catch(() => {
+    // a nicety; the tab asks again when it opens
+  });
+}
+
 function useHistory(filters: HistoryFilters, tz: string | undefined) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [facets, setFacets] = useState<HistoryPayload['facets']>(null);
+  const key = historyKey(filters, tz);
+  const initial = peek<HistoryPayload>(key)?.data;
+  const [loaded, setLoaded] = useState<Loaded | null>(() => (initial ? firstPage(initial) : null));
+  // the filters the rows on screen belong to: other filters dim them until the answer lands
+  const [shownKey, setShownKey] = useState<string | null>(initial ? key : null);
+  const [facets, setFacets] = useState<HistoryPayload['facets']>(() => initial?.facets ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [more, setMore] = useState(false);
   const [nonce, setNonce] = useState(0);
-  const key = JSON.stringify(filters);
 
   useEffect(() => {
-    const ctrl = new AbortController();
+    let live = true;
+    const hit = peek<HistoryPayload>(key);
+    // what is already known paints at once; the server is asked behind it
+    if (hit) {
+      setLoaded(firstPage(hit.data));
+      setShownKey(key);
+      if (hit.data.facets) setFacets(hit.data.facets);
+      setError(null);
+      if (Date.now() - hit.at < FRESH_MS && nonce === 0) {
+        setLoading(false);
+        return;
+      }
+    }
     setLoading(true);
-    setError(null);
-    getHistory(toQuery(filters, 0, tz), ctrl.signal)
+    if (!hit) setError(null);
+    load(key, () => getHistory(toQuery(filters, 0, tz)))
       .then((result) => {
-        if (ctrl.signal.aborted) return;
+        if (!live) return;
         setLoading(false);
         if (!result.ok || !result.data.ok) {
           setError(result.ok ? 'The play log could not be read.' : result.error);
           return;
         }
         const d = result.data;
+        setError(null);
         if (d.facets) setFacets(d.facets);
-        setLoaded({
-          groups: d.groups,
-          days: new Map(d.days.map((x) => [x.date, x])),
-          page: 0,
-          hasMore: d.has_more,
-          summary: d.summary,
-          logStartedAt: d.log_started_at,
-        });
+        setLoaded(firstPage(d));
+        setShownKey(key);
       })
       .catch(() => {
-        // aborted by a newer filter
+        // a newer filter took over
       });
-    return () => ctrl.abort();
+    return () => {
+      live = false;
+    };
     // key stands for filters
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, tz, nonce]);
+  }, [key, nonce]);
 
   const loadMore = useCallback(async () => {
     if (!loaded || !loaded.hasMore || more) return;
@@ -204,6 +249,7 @@ function useHistory(filters: HistoryFilters, tz: string | undefined) {
     facets,
     error,
     loading,
+    stale: loading && shownKey !== key,
     loadingMore: more,
     loadMore,
     retry: () => setNonce((x) => x + 1),
@@ -399,7 +445,7 @@ const HistoryRow = memo(function HistoryRow({
         <span className={h.when}>{timeOfDay(g.started_at)}</span>
         <span className={h.titleCell}>
           <span className={h.posterSlot}>
-            <Poster thumb={g.thumb} kind={g.kind} size="row" />
+            <Poster thumb={g.thumb} image={g.image} kind={g.kind} size="row" />
           </span>
           <span className={h.tt}>
             <span className={h.ttMain}>
@@ -797,8 +843,15 @@ function HistorySkeleton() {
 
 export function History({ onNavigate }: { onNavigate: () => void }) {
   const tz = useMemo(() => browserZone(), []);
-  const [filters, setFilters] = useState<HistoryFilters>(NO_FILTERS);
-  const { loaded, facets, error, loading, loadingMore, loadMore, retry } = useHistory(filters, tz);
+  const [filters, setFiltersState] = useState<HistoryFilters>(remembered);
+  const setFilters = useCallback((next: HistoryFilters) => {
+    put(FILTERS_KEY, next);
+    setFiltersState(next);
+  }, []);
+  const { loaded, facets, error, loading, stale, loadingMore, loadMore, retry } = useHistory(
+    filters,
+    tz,
+  );
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -865,7 +918,7 @@ export function History({ onNavigate }: { onNavigate: () => void }) {
     );
   } else if (loaded) {
     body = (
-      <div className={h.results} data-stale={loading || undefined}>
+      <div className={h.results} data-stale={stale || undefined}>
         <SummaryLine summary={loaded.summary} />
         <div className={cx(h.grid, h.colHead)} aria-hidden="true">
           <span>When</span>

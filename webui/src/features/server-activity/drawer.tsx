@@ -11,17 +11,19 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { getSettings } from './api';
 import d from './drawer.module.css';
-import { History } from './history';
+import { browserZone } from './format';
+import { History, prefetchHistory } from './history';
 import { CloseIcon, NarrowIcon, WidenIcon } from './icons';
 import { useLiveActivity, useNow } from './live';
 import { NowPlaying } from './now-playing';
-import { RANGES, Stats } from './stats';
+import { RANGES, Stats, prefetchStats } from './stats';
 import { Segmented } from './ui';
 
 export type Tab = 'now' | 'history' | 'stats';
 export const TABS: Tab[] = ['now', 'history', 'stats'];
 
 const EXIT_MS = 420;
+const PREFETCH_DELAY_MS = 250;
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -64,6 +66,20 @@ export function Drawer({ open, tab, onTab, onClose }: DrawerProps) {
   const live = useLiveActivity(open, tab === 'now');
   const now = useNow(open && tab === 'now');
   const presets = usePresets(open);
+
+  // History and Stats are read ahead once Now playing has had its turn, so
+  // either tab paints at once when picked
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      const tz = browserZone();
+      prefetchHistory(tz);
+      prefetchStats(statsDays, tz);
+    }, PREFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+    // the range at open; a range picked later loads itself
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // in, then out after the slide
   useEffect(() => {

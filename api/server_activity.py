@@ -181,16 +181,26 @@ def get_server_activity_avatar():
 
 @bp.route('/api/server-activity/image')
 def get_server_activity_image():
-    """proxy a plex or jellyfin image so the token never reaches the browser.
-    ?path=/library/metadata/.../thumb/... or jf:<itemId>"""
+    """proxy a plex or jellyfin picture so the token never reaches the browser.
+
+    ?path=/library/metadata/.../thumb/... or jf:<itemId>, and optionally the
+    item's family (k kind, rk / pk / gk keys, s server, r role) so a missing
+    picture falls back to the season, the show, the album, the artist, and
+    w, the width drawn. cached on disk; the browser keeps it a week."""
     try:
-        from core.server_activity import fetch_image
-        got = fetch_image(request.args.get("path") or "")
-        if not got:
-            return ("", 404)
-        content, ctype = got
-        return Response(content, mimetype=ctype,
-                        headers={"Cache-Control": "public, max-age=300"})
+        from core.server_activity import serve_image, spec_from_args
+        out = serve_image(spec_from_args(request.args), _num("w", int))
     except Exception:
         logger.exception("server activity image proxy failed")
-        return ("", 404)
+        out = {"status": 503}
+    if out["status"] == 200:
+        etag = f'"{out["etag"]}"'
+        headers = {"Cache-Control": "private, max-age=604800", "ETag": etag,
+                   "X-Image-Source": out.get("source") or ""}
+        if etag in (request.headers.get("If-None-Match") or ""):
+            return Response(status=304, headers=headers)
+        return Response(out["content"], mimetype=out["ctype"], headers=headers)
+    if out["status"] == 404:
+        # nothing in the chain has a picture: the browser can stop asking a while
+        return Response("", status=404, headers={"Cache-Control": "private, max-age=900"})
+    return Response("", status=503, headers={"Cache-Control": "no-store", "Retry-After": "2"})
