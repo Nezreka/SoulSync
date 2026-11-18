@@ -194,27 +194,31 @@ def _fetch_plex_watchlist(limit: int) -> List[Dict[str, Any]]:
 # ── the sync ──────────────────────────────────────────────────────────────────
 
 def sync(*, fetch: Optional[Callable[[Dict[str, Any]], Optional[List[Dict[str, Any]]]]] = None,
-         log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+         log: Optional[Callable[[str], None]] = None, gate=None) -> Dict[str, Any]:
     global _running
     with _lock:
         if _running:
             return {"status": "skipped", "reason": "already_running"}
         _running = True
     try:
-        return _sync_inner(fetch or _fetch_members, log or (lambda m: None))
+        return _sync_inner(fetch or _fetch_members, log or (lambda m: None), gate)
     finally:
         with _lock:
             _running = False
 
 
-def _sync_inner(fetch, log) -> Dict[str, Any]:
+def _sync_inner(fetch, log, gate=None) -> Dict[str, Any]:
     from api.video import get_video_db
+    from core.owner_gate import OwnerGate
     db = get_video_db()
     lists = [e for e in load_lists(db) if e["enabled"]]
     if not lists:
         return {"status": "skipped", "reason": "no_lists", "added": 0}
+    # the owner's rights, asked before every add (#2166): a list can't get a
+    # member what they couldn't ask for themselves
+    gate = gate or OwnerGate.for_current(label="import lists")
 
-    added_movies = added_shows = 0
+    added_movies = added_shows = requested = refused = 0
     expansions = 0
     for entry in lists:
         members = fetch(entry)
@@ -227,21 +231,34 @@ def _sync_inner(fetch, log) -> Dict[str, Any]:
             if entry["media"] != "both" and kind != entry["media"]:
                 continue
             key = "%s:%s" % (kind, m["tmdb_id"])
-            fresh_keys.add(key)
             if key in seen:
                 continue                  # user removals never boomerang back
+            w = gate.want("movie" if kind == "movie" else "tv", tmdb_id=m["tmdb_id"],
+                          quality_id=entry.get("quality_profile_id"), title=str(m.get("title") or ""))
+            if w.skip:
+                # not marked seen: once the owner may have it, the next tick adds it
+                refused += 1
+                continue
+            fresh_keys.add(key)
+            if w.request:
+                if gate.file_video_request(
+                        db, kind=kind, tmdb_id=m["tmdb_id"], title=m.get("title") or "?",
+                        year=m.get("year"), poster_url=m.get("poster_url"),
+                        quality_profile_id=w.quality_profile_id,
+                        monitor=entry["monitor"] if kind == "show" else "future") == "filed":
+                    requested += 1
+                    log("List '%s': asked for %s" % (entry["name"], m.get("title")))
+                elif not gate.asked_before(db, kind, m["tmdb_id"]):
+                    fresh_keys.discard(key)   # over the limit: tried again next tick
+                continue
+            qpid = w.quality_profile_id
             if kind == "movie":
                 if db.add_movie_to_wishlist(m["tmdb_id"], m.get("title") or "?",
                                             year=m.get("year"), poster_url=m.get("poster_url"),
                                             profile_id=_owner_profile()):
                     added_movies += 1
-                    if entry.get("quality_profile_id"):
-                        # the list's quality, held to what the owner may have
-                        # (#2168): one they may not pick falls to their default
-                        from core.video.quality_access import held_quality
-                        qpid = held_quality(db, _owner_profile(), "movie", entry["quality_profile_id"])
-                        if qpid:
-                            _stamp_movie_profile(db, m["tmdb_id"], qpid, _owner_profile())
+                    if qpid:
+                        _stamp_movie_profile(db, m["tmdb_id"], qpid, _owner_profile())
                     log("List '%s': wishlisted %s" % (entry["name"], m.get("title")))
             else:
                 if db.add_to_watchlist("show", m["tmdb_id"], m.get("title") or "?",
@@ -254,7 +271,8 @@ def _sync_inner(fetch, log) -> Dict[str, Any]:
                         _expand_policy(db, m, entry["monitor"])
         _mark_seen(db, entry["id"], fresh_keys)
     return {"status": "completed", "lists": len(lists),
-            "added_movies": added_movies, "added_shows": added_shows}
+            "added_movies": added_movies, "added_shows": added_shows,
+            "requested": requested, "refused": refused}
 
 
 def _stamp_movie_profile(db, tmdb_id, qpid, profile_id) -> None:

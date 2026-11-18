@@ -5,7 +5,10 @@ http://<soulsync>/seerr with a soulsync admin api key. they discover and
 search through soulsync's tmdb engine and their requests land on the video
 wishlist (or wait for approval). off until it's turned on in settings, and
 then only an admin key gets in. ``X-Api-User`` picks the soulsync profile a
-call acts for, the way seerr uses it to pick a seerr user.
+call acts for, the way seerr uses it to pick a seerr user, and that profile's
+permissions decide everything after (core.seerr_compat.service). a missing or
+unknown user acts as the fallback profile, or is refused when
+``seerr_compat.refuse_unknown`` is on (new installs, #2166).
 
 the logic is in core/seerr_compat. this file parses requests and wires the
 real engine, video db, profiles and jellyfin users in.
@@ -19,6 +22,7 @@ from functools import wraps
 
 from flask import Blueprint, Response, jsonify, request
 
+from core.permissions import ACCESS_ATTR
 from core.seerr_compat import shapes
 from core.seerr_compat.service import SeerrCompat, SeerrError
 from core.seerr_compat.store import SeerrStore
@@ -58,6 +62,45 @@ def fallback_profile_id() -> int:
         return int(config_manager.get("seerr_compat.profile_id", 1) or 1)
     except (TypeError, ValueError):
         return 1
+
+
+def unknown_users() -> str:
+    """refuse | profile: what a missing or unknown X-Api-User gets. new
+    installs ship refuse_unknown on (core/settings.py defaults); an install
+    from before it has no key and keeps acting as the fallback profile, which
+    the Seerr settings show with a switch to refuse."""
+    from core.seerr_compat.service import FALLBACK_UNKNOWN, REFUSE_UNKNOWN
+    try:
+        refuse = config_manager.get("seerr_compat.refuse_unknown", False)
+    except Exception:  # noqa: BLE001 - unreadable refuses
+        return REFUSE_UNKNOWN
+    if isinstance(refuse, str):
+        refuse = refuse.strip().lower() not in ("false", "0", "off", "")
+    return REFUSE_UNKNOWN if refuse is not False else FALLBACK_UNKNOWN
+
+
+def _perms_for(profile):
+    from core.permission_store import context_for
+    return context_for(get_database(), profile.get("id"))
+
+
+def _quality_profiles():
+    """the video quality profiles with media type and a 4k tag, Default (id 0)
+    first: what a request may pick from (the same rows as
+    /api/permissions/quality-options)."""
+    import json
+    rows = [{"id": 0, "name": "Default", "media_type": None, "tags": []}]
+    for qp in _video_db().named_quality_profiles() or []:
+        tags = []
+        try:
+            blob = json.loads(qp.get("items") or "{}")
+            if isinstance(blob, dict) and str(blob.get("library") or "").lower() == "4k":
+                tags.append("4k")
+        except (TypeError, ValueError):
+            pass
+        rows.append({"id": qp.get("id"), "name": qp.get("name"), "media_type": qp.get("media_type"),
+                     "tags": tags})
+    return rows
 
 
 def _video_db():
@@ -115,25 +158,29 @@ def _jellyfin_users():
     return list(users)
 
 
-def _title_allowed(kind, tmdb_id, profile) -> bool:
-    """kids profiles: the same rating cap the video pages use."""
-    from core.content_filter import restrictions_for
-    cap = restrictions_for(profile).get("cap")
+def _title_allowed(kind, tmdb_id, cap) -> bool:
+    """the acting profile's rating cap for this kind (an age, None = none),
+    the same check the video pages use."""
     if cap is None:
         return True
     from api.video.kids import tmdb_title_allowed
     return tmdb_title_allowed(_video_db(), kind, tmdb_id, cap)
 
 
-def _filter_titles(items, profile):
-    """kids profiles: discover, search and lists keep only the titles the
-    library rates under the cap, the same rule the video discover rails use."""
-    from core.content_filter import restrictions_for
-    cap = restrictions_for(profile).get("cap")
-    if cap is None:
-        return items
+def _filter_titles(items, caps):
+    """discover, search and lists keep only the titles the library rates
+    under the cap of their kind (movies and tv may differ), the same rule the
+    video discover rails use. people and other cards pass."""
     from api.video.kids import filter_tmdb_items
-    return filter_tmdb_items(_video_db(), items, cap)
+    db = _video_db()
+    keep = set()
+    for kind in ("movie", "show"):
+        mine = [it for it in items if isinstance(it, dict) and it.get("kind") == kind]
+        cap = caps.get(kind)
+        kept = mine if cap is None else filter_tmdb_items(db, mine, cap)
+        keep |= {id(it) for it in kept}
+    return [it for it in items if not isinstance(it, dict) or it.get("kind") not in ("movie", "show")
+            or id(it) in keep]
 
 
 def _publish(event, payload):
@@ -157,7 +204,8 @@ def service() -> SeerrCompat:
                 list_profiles=_list_profiles, jellyfin_users=_jellyfin_users,
                 fallback_profile_id=fallback_profile_id, server=_server,
                 title_allowed=_title_allowed, filter_titles=_filter_titles,
-                publish=_publish, show_wanted=_show_wanted)
+                publish=_publish, show_wanted=_show_wanted, perms_for=_perms_for,
+                unknown_users=unknown_users, quality_profiles=_quality_profiles)
         return _service
 
 
@@ -165,9 +213,14 @@ def _message(status, message):
     return jsonify({"message": message}), status
 
 
-def seerr_route(public=False):
+def seerr_route(public=False, acting=True):
     """off -> 404 like the route isn't there. on -> admin api key only
-    (``public`` routes are open, like seerr's own /status)."""
+    (``public`` routes are open, like seerr's own /status). ``acting`` routes
+    then need someone to act for: X-Api-User's profile, or the fallback
+    profile while unknown users aren't refused (else seerr's 403).
+
+    route inventory (#2166): the key is admin-only, so these declare admin;
+    what the acting profile may do is checked inside, per call."""
 
     def deco(f):
         @wraps(f)
@@ -180,12 +233,15 @@ def seerr_route(public=False):
                 if record is None or key_scope(record) != SCOPE_ADMIN:
                     return _message(403, "You do not have permission to access this endpoint")
             try:
+                if not public and acting:
+                    service().profile(_api_user())
                 return f(*args, **kwargs)
             except SeerrError as e:
                 return _message(e.status, str(e))
             except Exception:  # noqa: BLE001
                 logger.exception("seerr api %s %s failed", request.method, request.path)
                 return _message(500, "Something went wrong.")
+        setattr(wrapped, ACCESS_ATTR, ("public", None) if public else ("admin", None))
         return wrapped
     return deco
 
@@ -222,10 +278,9 @@ def status():
 
 
 @bp.route("/auth/me", methods=["GET"])
-@seerr_route()
+@seerr_route(acting=False)
 def auth_me():
-    svc = service()
-    return jsonify(svc.user(svc.profile(_api_user())))
+    return jsonify(service().me(_api_user()))
 
 
 @bp.route("/user", methods=["GET"])
@@ -240,11 +295,7 @@ def users():
 @bp.route("/user/<int:uid>", methods=["GET"])
 @seerr_route()
 def user_one(uid):
-    svc = service()
-    p = svc._get_profile(uid)
-    if not p:
-        raise SeerrError(404, "User not found.")
-    return jsonify(svc.user(p))
+    return jsonify(service().user_one(uid))
 
 
 # ---- discover and search ---------------------------------------------------------
@@ -392,8 +443,8 @@ def request_create():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         raise SeerrError(400, "A JSON body is required.")
-    if body.get("is4k"):
-        raise SeerrError(403, "SoulSync keeps one copy of a title, 4K requests aren't separate.")
+    # is4k and profileId are read by the service: the acting profile's 4K
+    # profile, or its allowed pick (resolve_request_quality)
     return jsonify(service().create_request(_api_user(), body)), 201
 
 
@@ -404,14 +455,43 @@ def request_cancel(request_id):
     return Response(status=204)
 
 
-# ---- what soulsync doesn't have ----------------------------------------------------
+# ---- quality: soulsync's own profiles as radarr/sonarr "servers" ------------------
 
 @bp.route("/service/radarr", methods=["GET"])
+@seerr_route()
+def services_radarr():
+    svc = service()
+    return jsonify(svc.services(svc.profile(_api_user()), "movie"))
+
+
 @bp.route("/service/sonarr", methods=["GET"])
 @seerr_route()
-def services():
-    # no radarr or sonarr behind this: quality comes from soulsync's own profiles
-    return jsonify([])
+def services_sonarr():
+    svc = service()
+    return jsonify(svc.services(svc.profile(_api_user()), "show"))
+
+
+@bp.route("/service/radarr/<int:server_id>", methods=["GET"])
+@seerr_route()
+def service_radarr(server_id):
+    svc = service()
+    out = svc.services(svc.profile(_api_user()), "movie", server_id)
+    if out is None:
+        raise SeerrError(404, "Not Found")
+    return jsonify(out)
+
+
+@bp.route("/service/sonarr/<int:server_id>", methods=["GET"])
+@seerr_route()
+def service_sonarr(server_id):
+    svc = service()
+    out = svc.services(svc.profile(_api_user()), "show", server_id)
+    if out is None:
+        raise SeerrError(404, "Not Found")
+    return jsonify(out)
+
+
+# ---- what soulsync doesn't have ----------------------------------------------------
 
 
 @bp.route("/user/<int:uid>/watchlist", methods=["GET"])

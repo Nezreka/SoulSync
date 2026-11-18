@@ -300,6 +300,34 @@ describe('SoulSync API, Developer Mode, Artwork Cache', () => {
     expect(saved()).toEqual({ seerr_compat: { enabled: false, profile_id: 1 } });
   });
 
+  it('Seerr: an install from before #2166 shows who unknown users act as, and can refuse them', async () => {
+    act(() => store.hydrate({ seerr_compat: { enabled: true, profile_id: 4 } }));
+    part('tools');
+    // no refuse_unknown key: today's fallback profile, named, with the switch off
+    expect(input('seerr-compat-refuse-unknown').checked).toBe(false);
+    await waitFor(() => expect(input('seerr-compat-profile').value).toBe('4'));
+    expect(document.body.textContent).toContain('Jellyfin users with no profile act as:');
+    fireEvent.click(input('seerr-compat-refuse-unknown'));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ seerr_compat: { refuse_unknown: true } });
+    // refusing hides the fallback profile and says what happens instead
+    expect(document.getElementById('seerr-compat-profile')).toBeNull();
+    expect(document.body.textContent).toContain("can't browse or request");
+  });
+
+  it('Seerr: a new install refuses unknown users and can go back to a fallback profile', async () => {
+    act(() =>
+      store.hydrate({ seerr_compat: { enabled: true, profile_id: 1, refuse_unknown: true } }),
+    );
+    part('tools');
+    expect(input('seerr-compat-refuse-unknown').checked).toBe(true);
+    expect(document.getElementById('seerr-compat-profile')).toBeNull();
+    fireEvent.click(input('seerr-compat-refuse-unknown'));
+    await waitFor(() => expect(input('seerr-compat-profile').value).toBe('1'));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({ seerr_compat: { refuse_unknown: false } });
+  });
+
   it('dev mode: activates, and the status follows every switch of it', async () => {
     part('tools');
     const nav = document.createElement('div');
