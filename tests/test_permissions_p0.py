@@ -383,18 +383,18 @@ def test_declarations_are_found_through_wrappers():
     assert P.declared_access(lambda: 1) is None
 
 
-# ── request quality (P0 stub = today's behaviour) ────────────────────────
+# ── request quality (piece B filled it in: tests/test_request_quality_resolver.py) ──
 
 
-def test_resolve_request_quality_keeps_todays_behaviour():
+def test_resolve_request_quality_contract():
     admin = {"id": 1, "is_admin": True}
     assert P.resolve_request_quality(admin, "movie", 4).as_dict() == {
         "profile_id": 4, "needs_approval": False, "refused": False, "error": None, "note": ""}
-    asker = legacy_row(can_download=False)
+    asker = legacy_row(allowed_sides="both", can_download=False)
     d = P.resolve_request_quality(asker, "movie", 4)
-    assert d.profile_id is None and d.needs_approval and not d.refused    # member picks dropped today
+    assert d.profile_id == 4 and d.needs_approval and not d.refused      # member picks are honoured now
     d = P.resolve_request_quality(asker, "music", "4")
-    assert d.profile_id == 4 and d.needs_approval                          # music takes the pick
+    assert d.profile_id == 4 and d.needs_approval
     d = P.resolve_request_quality(legacy_row(), "tv", None, perms=member_perms("adult"))
     assert d.profile_id is None and not d.needs_approval
     d = P.resolve_request_quality(legacy_row(), "tv", 2, perms=member_perms("teen"))

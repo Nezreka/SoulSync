@@ -952,7 +952,12 @@
         // Requests (arr-parity P4): a profile WITHOUT download rights has no
         // acquisition path at all — give it the ask-an-admin button instead of
         // the Get/Watchlist controls (those APIs are gated for this profile).
-        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        // per kind (#2166): movies and shows each have their own "download
+        // right away / ask first / can't request"; VideoRequests knows which
+        var _vr = window.VideoRequests;
+        var _canDl = (_vr && _vr.canGet) ? _vr.canGet(d.kind)
+            : ((typeof canDownload !== 'function') || canDownload());
+        var _mayAsk = !(_vr && _vr.mayAsk) || _vr.mayAsk(d.kind);
         // an owned movie has nothing left to ask for; a show can still be
         // missing seasons. "Requested" once this profile has one waiting.
         var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
@@ -989,7 +994,7 @@
             primary = '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
-        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
+        if (!_canDl && _mayAsk && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
             // what the button says comes from the title's status (#2160,
             // loadTitleStatus): your own ask, or already on its way, is a
             // disabled state; someone else's ask can be joined
@@ -4915,6 +4920,10 @@
             renderEpisodes();
         }
         window.addEventListener('ss:webui-profile-context-changed', onProfileChanged);
+        // the per-kind answer lands after the first paint: repaint the actions
+        document.addEventListener('soulsync:video-access-ready', function () {
+            if (data && root()) renderActions(data);
+        });
         // Metadata edited via the Manage panel → re-render the page from the DB
         // (title/genres/summary changed under us). Quiet events (toggles) skip it.
         document.addEventListener('soulsync:video-meta-changed', function (e) {

@@ -236,8 +236,12 @@ def _sync_inner(fetch, log) -> Dict[str, Any]:
                                             profile_id=_owner_profile()):
                     added_movies += 1
                     if entry.get("quality_profile_id"):
-                        _stamp_movie_profile(db, m["tmdb_id"], entry["quality_profile_id"],
-                                             _owner_profile())
+                        # the list's quality, held to what the owner may have
+                        # (#2168): one they may not pick falls to their default
+                        from core.video.quality_access import held_quality
+                        qpid = held_quality(db, _owner_profile(), "movie", entry["quality_profile_id"])
+                        if qpid:
+                            _stamp_movie_profile(db, m["tmdb_id"], qpid, _owner_profile())
                     log("List '%s': wishlisted %s" % (entry["name"], m.get("title")))
             else:
                 if db.add_to_watchlist("show", m["tmdb_id"], m.get("title") or "?",
