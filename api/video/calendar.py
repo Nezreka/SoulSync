@@ -256,6 +256,11 @@ def register_routes(bp):
                 return jsonify({"success": True, "added": 0, "shows": 0})
             db = get_video_db()
             pid = _profile()
+            # the quality these get (#2168): this profile's usual one for shows
+            from .access import member_quality
+            quality, refused = member_quality(db, "show")
+            if refused:
+                return refused
             from .kids import video_cap
             eps = _episodes(db, start, end,
                             scope="all" if body.get("scope") == "all" else "watchlist",
@@ -291,6 +296,11 @@ def register_routes(bp):
                 added += int(db.add_episodes_to_wishlist(
                     tid, e.get("show_title"), g["eps"], poster_url=poster,
                     library_id=e.get("show_id"), server_source=server, profile_id=pid) or 0)
+                if quality is not None:
+                    for x in g["eps"]:
+                        db.set_wishlist_quality_for_tmdb(tid, quality, season_number=x["season_number"],
+                                                         episode_number=x["episode_number"],
+                                                         profile_id=pid)
                 db.mark_airing_offered(pid, [(tid, x["season_number"], x["episode_number"])
                                              for x in g["eps"]])
             return jsonify({"success": True, "added": added, "shows": len(groups)})
@@ -337,7 +347,6 @@ def register_routes(bp):
         from . import get_video_db
         try:
             from core.video.calendar_feed import profile_may_read_feed
-            from core.content_filter import restrictions_for
             pid = get_video_db().calendar_feed_profile(token)
             if pid is None:
                 return jsonify({"error": "unknown feed"}), 404
@@ -349,7 +358,13 @@ def register_routes(bp):
                 return jsonify({"error": "feed unavailable"}), 503
             if not profile_may_read_feed(profile):
                 return jsonify({"error": "unknown feed"}), 404
-            return _feed(pid, restrictions_for(profile).get("cap"))
+            # the token's profile's own permissions: a kind it can't see stays
+            # out of its feed, each kind under its own rating (#2166)
+            from .kids import feed_cap
+            cap, sees = feed_cap(profile)
+            if not sees:
+                return jsonify({"error": "unknown feed"}), 404
+            return _feed(pid, cap)
         except Exception:
             logger.exception("video calendar feed failed")
             return jsonify({"error": "calendar feed failed"}), 500

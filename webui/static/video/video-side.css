@@ -2410,6 +2410,60 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     font: inherit; font-size: 13px; border: 1px solid var(--white-a12); background: var(--black-a30); color: #fff; }
 .vreq-sheet-select:focus-visible { outline: none; border-color: rgba(var(--accent-rgb), 0.7); }
 .vreq-sheet-select option { background: #18181c; color: #fff; }
+/* the member's ask (#2168): the title as art, then plain facts: the quality
+   (a line when there is one, a short radio list when there are more), who
+   gets asked or "starts downloading", and the quota with its meter */
+.vreq-sheet--ask { max-width: 440px; padding: 0; overflow: hidden auto; max-height: calc(100dvh - 32px);
+    overscroll-behavior: contain; }
+.vreq-ask-art { position: relative; min-height: 136px; display: flex; align-items: flex-end; padding: 16px 20px;
+    background: radial-gradient(120% 130% at 80% 0%, rgba(var(--accent-rgb), 0.5) 0%,
+        rgba(var(--accent-rgb), 0.12) 45%, var(--black-a60) 90%); }
+.vreq-ask-art.has-art { background-image: linear-gradient(180deg, var(--black-a10) 15%, var(--black-a85) 100%),
+    var(--vreq-art); background-size: cover; background-position: center 22%; }
+.vreq-ask-art-in { position: relative; min-width: 0; }
+.vreq-ask-title { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2;
+    overflow-wrap: anywhere; }
+.vreq-ask-meta { font-size: 12.5px; color: var(--white-a70); margin-top: 3px; }
+.vreq-ask-body { padding: 14px 20px 20px; }
+.vreq-ask-body .vreq-choices { margin-bottom: 6px; }
+.vreq-ask-fact { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; font-size: 13.5px;
+    line-height: 1.45; border-top: 1px solid var(--white-a06); }
+.vreq-ask-body > .vreq-ask-fact:first-child { border-top: 0; }
+.vreq-ask-fact > svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--white-a60);
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.vreq-ask-fact b { font-weight: 650; }
+.vreq-ask-soft { color: var(--white-a60); }
+.vreq-ask-grow { flex: 1; min-width: 0; }
+.vreq-qpick { margin-top: 8px; border: 1px solid var(--white-a08); border-radius: var(--radius-control); overflow: hidden; }
+.vreq-qopt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--white-a06); background: transparent;
+    color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.vreq-qopt:first-child { border-top: 0; }
+.vreq-qopt:hover { background: var(--white-a04); }
+.vreq-qopt[aria-checked="true"] { background: var(--white-a05); }
+.vreq-qopt:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: -2px; }
+.vreq-qrad { width: 16px; height: 16px; border-radius: var(--radius-circle); border: 1.5px solid var(--white-a40);
+    position: relative; box-sizing: border-box; }
+.vreq-qopt[aria-checked="true"] .vreq-qrad { border-color: rgb(var(--accent-rgb)); }
+.vreq-qopt[aria-checked="true"] .vreq-qrad::after { content: ""; position: absolute; inset: 3px;
+    border-radius: var(--radius-circle); background: rgb(var(--accent-rgb)); }
+.vreq-qname { min-width: 0; overflow-wrap: anywhere; }
+.vreq-qtag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--radius-pill); white-space: nowrap;
+    color: rgb(var(--success-rgb)); background: rgba(var(--success-rgb), 0.14); }
+.vreq-qtag--ask { color: rgb(var(--warning-rgb)); background: rgba(var(--warning-rgb), 0.14); }
+.vreq-ask-quota { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--white-a50);
+    min-height: 4px; }
+.vreq-ask-quota:empty { display: none; }
+.vreq-ask-meter { flex: 1; height: 5px; border-radius: 3px; background: var(--white-a08); overflow: hidden; }
+.vreq-ask-meter i { display: block; height: 100%; border-radius: 3px; background: rgb(var(--accent-rgb)); }
+.vreq-sheet--ask .vreq-sheet-foot { margin-top: 18px; }
+@media (max-width: 640px) {
+    .vreq-sheet-overlay:has(.vreq-sheet--ask) { align-items: flex-end; padding: 0; }
+    .vreq-sheet--ask { max-width: none; max-height: calc(100dvh - 24px);
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .vreq-sheet--ask .vreq-ask-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .vreq-sheet--ask .vreq-sheet-foot .vreq-btn { flex: 1; padding: 11px 14px; }
+}
 /* cards, for profiles that ask instead of download: the quick Request
    action (same shape as the get button) and the Requested / Available ribbon */
 .vreq-card-btn { width: 30px; height: 30px; border-radius: 9px; padding: 0;

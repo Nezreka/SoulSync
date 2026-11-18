@@ -298,7 +298,62 @@ def _profile_for_request(db, src):
                                   explicit_id=src.get("video_library_id"), title=src.get("title"))
     if not pid:
         pid = kind_default_id(db, kind)
+    pid = _member_held(db, kind, pid)
     return profile_by_id(db, pid, kind=kind), pid
+
+
+def _member_held(db, kind, pid):
+    """a member is judged only by a profile they may pick for this kind
+    (#2168): the title's own (or the household default) when it's in their
+    set, else their default. admins: unchanged."""
+    from . import access
+    if access.is_admin():
+        return pid
+    try:
+        d = access.resolve(db, kind, pid or 0)
+        if not d.refused:
+            return pid
+        mine = access.resolve(db, kind, None)
+    except Exception:  # noqa: BLE001 - judging never fails a search; the grab checks again
+        logger.debug("member quality hold failed", exc_info=True)
+        return pid
+    if mine.refused or mine.profile_id is None:
+        return pid
+    return mine.profile_id
+
+
+NEEDS_OK_MESSAGE = ("That quality needs an OK first. Ask for it from the title's Request button "
+                    "and you'll hear when it's decided.")
+
+
+def _quality_refusal(db, body, kind=None, *, fetch=False):
+    """a member's quality pick on a manual search or grab (#2168): only what
+    they may pick for this kind, else the calm refusal. the pick is put back
+    on the body resolved. ``fetch`` (a grab, a pack, a clients-tab match):
+    a quality that always needs an OK is refused here, it has to be asked
+    for. None when fine (admins always)."""
+    from . import access
+    if access.is_admin() or body is None:
+        return None
+    raw = str(kind or body.get("kind") or body.get("scope") or "movie").lower()
+    if raw == "youtube" or str(body.get("source") or "").lower() == "youtube":
+        return None
+    k = "movie" if raw == "movie" else "show"
+    wanted = body.get("quality_profile_id")
+    if wanted in (None, "", 0, "0"):
+        if not fetch:
+            return None
+        _prof, pid = _profile_for_request(db, body)
+        d = access.resolve(db, k, pid or 0)
+    else:
+        d = access.resolve(db, k, wanted)
+        if d.refused:
+            return access.quality_refusal(d)
+        body["quality_profile_id"] = d.profile_id
+    if fetch and not d.refused and d.needs_approval:
+        return jsonify({"ok": False, "success": False, "error": "needs_approval",
+                        "needs_approval": True, "message": NEEDS_OK_MESSAGE}), 403
+    return None
 
 
 def _with_title_identity(db, src) -> dict:
@@ -764,7 +819,7 @@ def _cap_refusal(db, body, kind=None):
     """a kids profile's manual search, grab or title lookup, refused when
     the title is over its rating cap. a search that names no title can't be
     vouched for, so it is refused too. None when allowed (or no cap)."""
-    from .kids import restricted_response, tmdb_title_allowed, video_cap
+    from .kids import kind_visible, rating_capped, restricted_response, tmdb_title_allowed, video_cap
     cap = video_cap()
     if cap is None:
         return None
@@ -773,6 +828,10 @@ def _cap_refusal(db, body, kind=None):
     if raw == "youtube" or str(body.get("source") or "").lower() == "youtube":
         return None
     k = "movie" if raw == "movie" else "show"
+    if not kind_visible(cap, k):
+        return restricted_response(k)       # a kind this profile can't see at all
+    if not rating_capped(cap, k):
+        return None                         # this kind has no rating cap
     tmdb = _title_tmdb_for(db, k, body)
     if tmdb is None or not tmdb_title_allowed(db, k, tmdb, cap):
         return restricted_response()
@@ -1192,10 +1251,18 @@ def register_routes(bp):
             except (TypeError, ValueError):
                 own = None
         profile, pid = _profile_for_request(db, src)
+        from . import access
+        if access.is_admin():
+            profiles = [{"id": p["id"], "name": p["name"]} for p in list_profiles(db)]
+        else:
+            # a member picks only from what they may have for this kind, and
+            # the title's own pick is the household's, not theirs to change
+            profiles = [{"id": q["id"], "name": q["name"], "asks": q["asks"], "tags": q["tags"]}
+                        for q in access.allowed_qualities(db, kind)]
         return jsonify({
             "kind": kind, "profile_id": int(pid or 0), "profile": profile,
             "assigned": bool(own), "kind_default_id": int(kind_default_id(db, kind) or 0),
-            "profiles": [{"id": p["id"], "name": p["name"]} for p in list_profiles(db)],
+            "profiles": profiles, "member": not access.is_admin(),
             **_title_library_info(db, kind, src),
         })
 
@@ -1324,10 +1391,49 @@ def register_routes(bp):
 
     @bp.route("/downloads/quality/profiles", methods=["GET"])
     def video_quality_profiles_list():
-        """Every selectable profile, Default (id 0) first."""
+        """Every selectable profile, Default (id 0) first, with what each is
+        for (media_type: movie, tv, null = both) and its tags (4k, extended).
+        Admins get the full profiles; a member gets only the ones they may
+        pick (?kind=movie|show for one kind), names and tags, never the
+        blobs (#2168, S23)."""
+        from . import access, get_video_db
+        from core.video.quality_profile import list_profiles, quality_options
+        db = get_video_db()
+        if access.is_admin():
+            meta = {o["id"]: o for o in quality_options(db)}
+            return jsonify({"profiles": [
+                {**p, "media_type": (meta.get(p["id"]) or {}).get("media_type"),
+                 "tags": (meta.get(p["id"]) or {}).get("tags", [])} for p in list_profiles(db)]})
+        kinds = [access.title_kind(request.args.get("kind"))] if access.title_kind(
+            request.args.get("kind")) else ["movie", "show"]
+        out, seen = [], set()
+        for k in kinds:
+            for q in access.allowed_qualities(db, k):
+                if q["id"] in seen:
+                    continue
+                seen.add(q["id"])
+                out.append({"id": q["id"], "name": q["name"], "tags": q["tags"]})
+        return jsonify({"profiles": out})
+
+    @bp.route("/downloads/quality/profiles/<int:profile_id>/media-type", methods=["PUT"])
+    def video_quality_profile_media_type(profile_id):
+        """What a named profile is for (#2168): {"media_type": "movie" | "tv" |
+        null (both)}. Default (id 0) is always both."""
         from . import get_video_db
-        from core.video.quality_profile import list_profiles
-        return jsonify({"profiles": list_profiles(get_video_db())})
+        body = request.get_json(silent=True) or {}
+        if profile_id <= 0:
+            return jsonify({"success": False, "error": "The Default profile is for both."}), 400
+        db = get_video_db()
+        if not db.get_named_quality_profile(profile_id):
+            return jsonify({"success": False, "error": "No such quality profile"}), 404
+        try:
+            ok = db.set_named_quality_profile_media_type(profile_id, body.get("media_type"))
+        except ValueError:
+            return jsonify({"success": False, "error": "media_type is movie, tv or both"}), 400
+        if not ok:
+            return jsonify({"success": False, "error": "Could not save it"}), 500
+        return jsonify({"success": True, "id": profile_id,
+                        "media_type": db.get_named_quality_profile(profile_id).get("media_type")})
 
     @bp.route("/downloads/quality/profiles", methods=["POST"])
     def video_quality_profiles_save():
@@ -1543,7 +1649,7 @@ def register_routes(bp):
         from core.video.mock_search import mock_search
 
         body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
-        refused = _cap_refusal(get_video_db(), body)
+        refused = _cap_refusal(get_video_db(), body) or _quality_refusal(get_video_db(), body)
         if refused:
             return refused
         scope = str(body.get("scope") or "movie").lower()
@@ -1600,7 +1706,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.mock_search import mock_search
         body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
-        refused = _cap_refusal(get_video_db(), body)
+        refused = _cap_refusal(get_video_db(), body) or _quality_refusal(get_video_db(), body)
         if refused:
             return refused
         scope = str(body.get("scope") or "movie").lower()
@@ -1708,7 +1814,7 @@ def register_routes(bp):
         # 507 took 39.9 seconds to arrive, all of it spent earning a magnet that
         # was then thrown away.
         db = get_video_db()
-        refused = _cap_refusal(db, body)
+        refused = _cap_refusal(db, body) or _quality_refusal(db, body, fetch=True)
         if refused:
             return refused
         target = _target_for(db, body.get("kind"), body)
@@ -1977,7 +2083,7 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Missing the pack's source info."}), 400
 
         db = get_video_db()
-        refused = _cap_refusal(db, body, kind="show")
+        refused = _cap_refusal(db, body, kind="show") or _quality_refusal(db, body, kind="show", fetch=True)
         if refused:
             return refused
         target = _target_for(db, "show", body)

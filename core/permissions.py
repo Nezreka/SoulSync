@@ -1433,40 +1433,209 @@ class QualityDecision:
 
 
 QUALITY_NOT_ALLOWED = "quality_not_allowed"
-_MEDIA_ROWS = {"music": "music", "movie": "movies", "movies": "movies", "tv": "tv", "show": "tv"}
+_MEDIA_ROWS = {"music": "music", "movie": "movies", "movies": "movies", "tv": "tv", "show": "tv",
+               "episode": "tv", "season": "tv", "series": "tv"}
+# what a quality profile's media_type must be (or None, both) for each kind
+_MEDIA_TYPE_FOR = {"movies": "movie", "tv": "tv"}
+
+
+def media_row(media_type) -> Optional[str]:
+    """'music' | 'movies' | 'tv' for anything naming one (movie, show,
+    episode, season...), else None."""
+    return _MEDIA_ROWS.get(str(media_type or "").strip().lower())
+
+
+def _qid(value) -> Optional[int]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
+
+def _option_list(options, kind: str) -> Optional[List[Dict[str, Any]]]:
+    """the quality profiles that exist for this kind: [{id, media_type, tags}],
+    in the order given. None when the caller passed none (ids then can't be
+    told apart from unknown ones, every id in the allowed set counts)."""
+    if options is None:
+        return None
+    want = _MEDIA_TYPE_FOR.get(kind)
+    out = []
+    for o in options:
+        if not isinstance(o, Mapping):
+            continue
+        oid = _qid(o.get("id"))
+        if oid is None:
+            continue
+        out.append({"id": oid, "media_type": o.get("media_type") or None,
+                    "tags": [str(t).lower() for t in (o.get("tags") or [])],
+                    "fits": want is None or (o.get("media_type") or None) in (None, want)})
+    return out
+
+
+def _map_of(profile, perms) -> Optional[Mapping[str, Any]]:
+    """the effective map to judge by: the one passed (a map, or a context
+    with a "perms" key), else the profile row's own columns (a caller that
+    passed nothing, for a legacy row). None = can't be built."""
+    if perms is not None:
+        if isinstance(perms, Mapping) and "perms" in perms and "profile_id" in perms:
+            inner = perms.get("perms")
+            return inner if isinstance(inner, Mapping) else None
+        return perms if isinstance(perms, Mapping) else None
+    if isinstance(profile, Mapping) and "perms" in profile and "profile_id" in profile:
+        inner = profile.get("perms")
+        return inner if isinstance(inner, Mapping) else None
+    if isinstance(profile, Mapping) and profile:
+        try:
+            return perms_from_legacy(profile)[0]
+        except Exception:  # noqa: BLE001 - an unreadable row decides nothing
+            return None
+    return None
+
+
+def _is_admin_input(profile, perms) -> bool:
+    for src in (profile, perms):
+        if isinstance(src, Mapping) and "profile_id" in src and "perms" in src:
+            if src.get("is_admin"):
+                return True
+    return is_admin_row(profile) if isinstance(profile, Mapping) and "profile_id" not in profile else False
 
 
 def resolve_request_quality(profile: Optional[Mapping[str, Any]], media_type: str, requested_id,
-                            *, perms: Optional[Mapping[str, Any]] = None) -> QualityDecision:
-    """the quality a request gets, for every request path (dialog, api,
-    seerr, watchlist and collection auto adds).
+                            *, perms: Optional[Mapping[str, Any]] = None, options=None,
+                            kind_default: Optional[int] = None) -> QualityDecision:
+    """the quality a request gets, for every request path (the dialog, the
+    api, wishlist and watchlist adds, manual grabs, seerr, automations and
+    import lists). one function, so every path holds the same line.
 
-    P0: today's behaviour, so nothing moves until piece B fills it in.
-      - admins: what they asked for (None = the normal default), no approval.
-      - music: any id is taken as asked (today's wishlist add); approval when
-        the profile can't download right away.
-      - movies / tv: a member's pick is dropped (api/video/requests.py
-        'quality profiles are admin-only'); the admin picks at approve.
-    piece B: the allowed set, the default, quality_ask, 403 quality_not_allowed
-    for a known disallowed id, unknown ids to the default (logged)."""
-    kind = _MEDIA_ROWS.get(str(media_type or "").lower())
+    profile: the profile row, or a context (make_context / context_for).
+    perms: its effective map (or a context); leave it out only for a row on
+      its own columns, which is read from them. a member whose map can't be
+      built is refused.
+    options: the quality profiles that exist, [{id, media_type, tags}]
+      (core.video.quality_profile.quality_options for video). with them an
+      id of the wrong media type is refused and an id nobody has heard of
+      (a seerr client sending radarr ids) gets the default; without them
+      every id in the allowed set counts.
+    kind_default: the household's default for this kind, used when the
+      person has no default of their own and it sits in their set.
+
+    the rules, for movies and tv (music has no "needs my OK" row):
+      admins: what they asked for (None = the normal default), never refused,
+        never asked. an unknown id with options given is the normal default.
+      no access to the kind, or "can't request": refused (not_allowed).
+      the allowed set: {kind}.quality ("*" = every profile for this kind)
+        intersected with the profiles whose media type fits (movie or tv, or
+        both). nothing left: refused (quality_not_allowed).
+      nothing asked: the person's default ({kind}.quality_default when it's in
+        the set), else the household kind default when it's in the set, else
+        the first allowed. an open set ("*") with no default of its own is
+        None: the normal default (title, library, kind default), as today.
+      asked for an allowed id: that id.
+      asked for a known id outside the set, or of the other media type:
+        refused (quality_not_allowed). the dialog never sends one, so only a
+        tampered call or a stale page gets here.
+      asked for an unknown id: the default, with a note (logged).
+      needs_approval: the person's mode is "ask", or the id is in
+        {kind}.quality_ask, or "4k" is there and the profile is tagged 4k.
+        a "download right away" member with an ask-first pick is asked,
+        which every path turns into a request."""
+    kind = media_row(media_type)
     if kind is None:
         raise ValueError("media_type is music, movie or tv")
-    try:
-        wanted = int(requested_id) if requested_id is not None and requested_id != "" else None
-    except (TypeError, ValueError):
-        wanted = None
-    if is_admin_row(profile):
+    wanted = _qid(requested_id)
+    opts = _option_list(options, kind)
+    known = {o["id"]: o for o in opts} if opts is not None else None
+
+    if _is_admin_input(profile, perms):
+        if wanted is not None and known is not None and wanted not in known:
+            logger.info("quality %s isn't a %s profile here, using the default", wanted, kind)
+            return QualityDecision(None, False, note="unknown quality, used the default")
         return QualityDecision(wanted, False)
-    eff = perms if perms is not None else None
-    if eff is not None:
-        mode = eff.get("%s.get" % kind, "none")
-        asks = mode != "download"
+
+    eff = _map_of(profile, perms)
+    if eff is None:
+        return QualityDecision(None, False, refused=True, error=NOT_ALLOWED,
+                               note="permissions unavailable")
+    if not eff.get("%s.access" % kind):
+        return QualityDecision(None, False, refused=True, error=NOT_ALLOWED,
+                               note="no %s access" % kind)
+    mode = eff.get("%s.get" % kind, "none")
+    if mode not in MODES or mode == "none":
+        return QualityDecision(None, False, refused=True, error=NOT_ALLOWED,
+                               note="%s can't be requested" % kind)
+
+    raw_set = eff.get("%s.quality" % kind, ALL)
+    open_set = raw_set == ALL
+    listed = [] if open_set else [i for i in (_qid(v) for v in (raw_set or [])) if i is not None]
+    if known is not None:
+        fitting = [o["id"] for o in opts if o["fits"]]
+        allowed = fitting if open_set else [i for i in fitting if i in listed]
     else:
-        asks = not profile_can_download(profile)
-    if kind == "music":
-        return QualityDecision(wanted, asks)
-    return QualityDecision(None, asks, note="member picks are dropped until piece B")
+        allowed = None if open_set else listed
+    if allowed is not None and not allowed:
+        return QualityDecision(None, False, refused=True, error=QUALITY_NOT_ALLOWED,
+                               note="no %s quality is allowed" % kind)
+
+    def _ok(i) -> bool:
+        return allowed is None or i in allowed
+
+    own_default = _qid(eff.get("%s.quality_default" % kind))
+    if own_default is not None and _ok(own_default) and (known is None or own_default in known):
+        default = own_default
+    elif open_set:
+        default = None
+    elif kind_default is not None and _ok(_qid(kind_default)):
+        default = _qid(kind_default)
+    else:
+        default = allowed[0] if allowed else None
+
+    note = ""
+    if wanted is None:
+        chosen = default
+    elif known is not None and wanted not in known:
+        logger.info("quality %s isn't a %s profile here, using the default", wanted, kind)
+        chosen, note = default, "unknown quality, used the default"
+    elif known is not None and not known[wanted]["fits"]:
+        return QualityDecision(None, False, refused=True, error=QUALITY_NOT_ALLOWED,
+                               note="quality %s is for the other kind" % wanted)
+    elif not _ok(wanted):
+        return QualityDecision(None, False, refused=True, error=QUALITY_NOT_ALLOWED,
+                               note="quality %s isn't in the allowed set" % wanted)
+    else:
+        chosen = wanted
+
+    asks = mode != "download" or _needs_ok(eff, kind, chosen, opts, kind_default)
+    return QualityDecision(chosen, asks, note=note)
+
+
+def needs_ok(eff: Optional[Mapping[str, Any]], media_type: str, quality_id, *, options=None,
+             kind_default: Optional[int] = None) -> bool:
+    """does this quality always need an OK for this person ({kind}.quality_ask:
+    the id itself, or "4k" and a profile tagged 4k)? quality None is the
+    normal default, judged as the household kind default when one is given."""
+    kind = media_row(media_type)
+    if kind is None:
+        return False
+    return _needs_ok(eff, kind, quality_id, _option_list(options, kind), kind_default)
+
+
+def _needs_ok(eff, kind: str, quality_id, opts, kind_default) -> bool:
+    if not isinstance(eff, Mapping):
+        return False
+    flags = eff.get("%s.quality_ask" % kind) or []
+    if not isinstance(flags, (list, tuple)) or not flags:
+        return False
+    qid = _qid(quality_id)
+    if qid is None:
+        qid = _qid(kind_default)
+    if qid is None:
+        return False
+    if _same_quality(qid, [f for f in flags if not isinstance(f, str)]):
+        return True
+    return "4k" in flags and any(o["id"] == qid and "4k" in o["tags"] for o in (opts or []))
 
 
 # ── "what they can do" ───────────────────────────────────────────────────

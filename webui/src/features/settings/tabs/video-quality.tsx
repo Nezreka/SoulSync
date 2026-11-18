@@ -104,7 +104,17 @@ interface Named {
   id: number;
   name: string;
   profile: VideoProfile;
+  /** what it's for (#2168): movie, tv, or null for both */
+  media_type?: 'movie' | 'tv' | null;
+  tags?: string[];
 }
+
+/** "Used for" choices: the request dialog only offers a profile for its kind */
+const USED_FOR: Array<[string, ReactNode]> = [
+  ['movie', 'Movies'],
+  ['tv', 'TV'],
+  ['both', 'Both'],
+];
 interface Format {
   id: number;
   name: string;
@@ -439,6 +449,42 @@ export function VideoQualitySections() {
     if (ok) void remove();
   }
 
+  /** what a named profile is for (#2168): movies, tv or both */
+  async function setUsedFor(raw: string) {
+    const id = latest.current.selectedId;
+    if (id <= 0) return;
+    const mediaType = raw === 'both' ? null : raw;
+    try {
+      const r = await fetch(`${QUALITY_URL}/profiles/${id}/media-type`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ media_type: mediaType }),
+      });
+      const d = (await r.json()) as {
+        success?: boolean;
+        media_type?: string | null;
+        error?: string;
+      };
+      if (!r.ok || !d.success) {
+        toast(d?.error || 'Couldn’t save what it’s for', 'error');
+        return;
+      }
+      setProfiles((all) =>
+        all.map((p) =>
+          p.id === id ? { ...p, media_type: (d.media_type as Named['media_type']) ?? null } : p,
+        ),
+      );
+      toast(
+        mediaType === null
+          ? 'Offered for movies and TV'
+          : `Offered only for ${mediaType === 'movie' ? 'movies' : 'TV'}`,
+        'success',
+      );
+    } catch {
+      toast('Couldn’t save what it’s for', 'error');
+    }
+  }
+
   async function setKindDefault(kind: string, raw: string, label: string) {
     setDefaultsBusy(kind);
     try {
@@ -529,6 +575,27 @@ export function VideoQualitySections() {
               Delete
             </button>
           </div>
+          {named ? (
+            <div
+              className="form-group"
+              data-vq-used-for=""
+              style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}
+            >
+              <span className="vq-label" style={{ margin: 0 }}>
+                Used for
+              </span>
+              <Seg
+                id="vq-used-for"
+                attr="data-vq-used-for-pick"
+                value={selected?.media_type || 'both'}
+                choices={USED_FOR}
+                pick={(v) => void setUsedFor(v)}
+              />
+              <span className="vq-hint">
+                Members asking for a movie only see Movies and Both profiles; shows, TV and Both.
+              </span>
+            </div>
+          ) : null}
           <div
             className="form-group"
             data-vq-kind-defaults=""

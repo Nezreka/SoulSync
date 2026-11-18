@@ -18,12 +18,129 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.kids")
 
 
+class VideoCap:
+    """what a profile may see on the video side, per kind (#2166): a rating
+    cap age for movies and one for shows (None = no cap), and the kinds it
+    can't see at all (movies.access / tv.access off). every helper here
+    takes one of these or the old plain int cap (one age for both kinds)."""
+
+    __slots__ = ("movie", "show", "blocked")
+
+    def __init__(self, movie=None, show=None, blocked=()):
+        self.movie, self.show, self.blocked = movie, show, frozenset(blocked)
+
+    def __repr__(self):  # pragma: no cover - debugging
+        return "VideoCap(movie=%r, show=%r, blocked=%r)" % (self.movie, self.show, sorted(self.blocked))
+
+    def __eq__(self, other):
+        return isinstance(other, VideoCap) and (self.movie, self.show, self.blocked) == (
+            other.movie, other.show, other.blocked)
+
+    __hash__ = None
+
+    def sees(self, kind) -> bool:
+        k = _kind(kind)
+        return k is not None and k not in self.blocked
+
+    def allows(self, kind, rating) -> bool:
+        k = _kind(kind)
+        if k is None or k in self.blocked:
+            return False
+        return title_allowed(rating, self.movie if k == "movie" else self.show)
+
+
+def kind_allows(cap, kind, rating) -> bool:
+    """may a title of this kind and rating be shown under ``cap`` (a VideoCap,
+    an int age, or None)."""
+    if cap is None:
+        return True
+    if isinstance(cap, VideoCap):
+        return cap.allows(kind, rating)
+    return title_allowed(rating, cap)
+
+
+def kind_visible(cap, kind) -> bool:
+    """is this kind of title visible at all under ``cap`` (ratings aside)?"""
+    return not isinstance(cap, VideoCap) or cap.sees(kind)
+
+
+def cap_from_perms(perms, *, is_admin=False):
+    """a VideoCap for an effective permissions map, None when nothing is
+    restricted. a map that couldn't be built sees nothing."""
+    from core.content_filter import cap_age
+    from core.permissions import FOLLOW
+    if is_admin:
+        return None
+    if not isinstance(perms, dict):
+        return VideoCap(0, 0, ("movie", "show"))
+
+    def _age(v):
+        return None if v in (None, "any") else cap_age(v)
+
+    movie_rating = perms.get("movies.max_rating", "any")
+    tv_rating = perms.get("tv.max_rating", FOLLOW)
+    if tv_rating == FOLLOW:
+        tv_rating = movie_rating
+    blocked = tuple(k for k, row in (("movie", "movies"), ("show", "tv"))
+                    if not perms.get("%s.access" % row))
+    movie, show = _age(movie_rating), _age(tv_rating)
+    if movie is None and show is None and not blocked:
+        return None
+    return VideoCap(movie, show, blocked)
+
+
 def video_cap():
-    """the current profile's rating cap, None when it has none."""
-    return current_restrictions().get("cap")
+    """the current profile's video cap (a VideoCap), None when it has none.
+
+    read from the effective permissions (g.perms) when web_server put them
+    there: per-kind access and a rating per kind (tv follows the movie one
+    unless it has its own). a request without them (tests, edge callers)
+    reads the old profile column through content_filter, one age for both."""
+    from flask import g, has_request_context
+    if not has_request_context():
+        return None
+    if hasattr(g, "_video_cap"):
+        return g._video_cap
+    from .access import ctx, stamped
+    if stamped():
+        c = ctx()
+        cap = cap_from_perms(c.get("perms"), is_admin=bool(c.get("is_admin")))
+    else:
+        age = current_restrictions().get("cap")
+        c = ctx()
+        perms = c.get("perms") if isinstance(c.get("perms"), dict) else {}
+        blocked = tuple(k for k, row in (("movie", "movies"), ("show", "tv"))
+                        if not c.get("is_admin") and not perms.get("%s.access" % row))
+        cap = None if (age is None and not blocked) else VideoCap(age, age, blocked)
+    g._video_cap = cap
+    return cap
 
 
-def restricted_response():
+def feed_cap(profile):
+    """(cap, sees the video side) for a profile row off-request (the tokened
+    calendar feed). its effective permissions, under the policy; a map that
+    can't be built sees nothing."""
+    from core.permissions import is_admin_row
+    if is_admin_row(profile):
+        return None, True
+    try:
+        from core.video.quality_access import effective_for_row
+        perms = effective_for_row(profile)
+    except Exception:  # noqa: BLE001 - can't vouch for the profile: nothing
+        logger.warning("calendar feed: no permissions for profile %s", (profile or {}).get("id"))
+        return VideoCap(0, 0, ("movie", "show")), False
+    cap = cap_from_perms(perms)
+    sees = bool(perms.get("movies.access")) or bool(perms.get("tv.access"))
+    return cap, sees
+
+
+def restricted_response(kind=None):
+    """403 for a title this profile can't have: the calm "not part of your
+    profile" when its whole kind is off, else the kids "restricted"."""
+    cap = video_cap()
+    if kind is not None and isinstance(cap, VideoCap) and not cap.sees(kind):
+        from .access import kind_refusal
+        return kind_refusal(kind)
     return jsonify({"success": False, "error": "restricted", "restricted": True}), 403
 
 
@@ -40,14 +157,14 @@ def library_title_allowed(db, kind, library_id, cap) -> bool:
     if cap is None:
         return True
     k = _kind(kind)
-    if not k:
+    if not k or not kind_visible(cap, k):
         return False
     try:
         rating = db.content_ratings_by_id(k, [library_id]).get(int(library_id))
     except Exception:  # noqa: BLE001 - can't vouch, so no
         logger.exception("kids: rating lookup failed for %s %s", kind, library_id)
         return False
-    return title_allowed(rating, cap)
+    return kind_allows(cap, k, rating)
 
 
 def tmdb_title_rating(db, kind, tmdb_id):
@@ -76,7 +193,29 @@ def tmdb_title_rating(db, kind, tmdb_id):
 def tmdb_title_allowed(db, kind, tmdb_id, cap) -> bool:
     if cap is None:
         return True
-    return title_allowed(tmdb_title_rating(db, kind, tmdb_id), cap)
+    if not kind_visible(cap, _kind(kind)) or _kind(kind) is None:
+        return False
+    if isinstance(cap, VideoCap) and (cap.movie if _kind(kind) == "movie" else cap.show) is None:
+        return True        # this kind has no rating cap: no lookup needed
+    return kind_allows(cap, kind, tmdb_title_rating(db, kind, tmdb_id))
+
+
+def _needs_rating(cap, k) -> bool:
+    """does a title of kind k need its rating looked up under this cap?"""
+    if isinstance(cap, VideoCap):
+        return k not in cap.blocked and (cap.movie if k == "movie" else cap.show) is not None
+    return cap is not None
+
+
+def rating_capped(cap, kind) -> bool:
+    """is this kind held to a rating cap (its titles need a rating lookup)?"""
+    k = _kind(kind)
+    return k is not None and _needs_rating(cap, k)
+
+
+def rating_allowed(cap, kind, rating) -> bool:
+    """a title whose rating the caller already has (a detail payload)."""
+    return kind_allows(cap, kind, rating)
 
 
 def filter_tmdb_items(db, items, cap, kind_key="kind", id_key="tmdb_id"):
@@ -88,7 +227,7 @@ def filter_tmdb_items(db, items, cap, kind_key="kind", id_key="tmdb_id"):
     want: dict = {"movie": set(), "show": set()}
     for it in items:
         k = _kind(it.get(kind_key)) if isinstance(it, dict) else None
-        if k and it.get(id_key) is not None:
+        if k and it.get(id_key) is not None and _needs_rating(cap, k):
             want[k].add(it.get(id_key))
     ratings = {}
     for k, ids in want.items():
@@ -108,12 +247,21 @@ def filter_tmdb_items(db, items, cap, kind_key="kind", id_key="tmdb_id"):
             out.append(it)
             continue
         if k is None:
+            # not a movie or a show (a youtube video): no rating to hold it
+            # to, so only a rating cap leaves it out (kids fail closed)
+            if isinstance(cap, VideoCap) and cap.movie is None and cap.show is None:
+                out.append(it)
+            continue
+        if not kind_visible(cap, k):
+            continue
+        if not _needs_rating(cap, k):
+            out.append(it)
             continue
         try:
             rows = ratings.get(k, {}).get(int(it.get(id_key))) or []
         except (TypeError, ValueError):
             rows = []
-        if title_allowed(strictest(rows), cap):
+        if kind_allows(cap, k, strictest(rows)):
             out.append(it)
     return out
 
@@ -123,6 +271,10 @@ def filter_library_items(db, items, cap, kind, id_key="id"):
     if cap is None or not items:
         return items
     k = _kind(kind)
+    if k is None or not kind_visible(cap, k):
+        return []
+    if not _needs_rating(cap, k):
+        return items
     ids = [it.get(id_key) for it in items if isinstance(it, dict) and it.get(id_key) is not None]
     try:
         ratings = db.content_ratings_by_id(k, ids) if k else {}
@@ -135,7 +287,7 @@ def filter_library_items(db, items, cap, kind, id_key="id"):
             rid = int(it.get(id_key))
         except (TypeError, ValueError):
             continue
-        if title_allowed(ratings.get(rid), cap):
+        if kind_allows(cap, k, ratings.get(rid)):
             out.append(it)
     return out
 
@@ -155,7 +307,7 @@ def filter_mixed_library_items(db, items, cap, kind_key="kind", id_key="id", sho
 
     for it in items:
         k, rid = _ref(it)
-        if k and rid is not None:
+        if k and rid is not None and _needs_rating(cap, k):
             ids[k].append(rid)
     ratings = {}
     for k, v in ids.items():
@@ -167,8 +319,8 @@ def filter_mixed_library_items(db, items, cap, kind_key="kind", id_key="id", sho
     out = []
     for it in items:
         k, rid = _ref(it)
-        if not k or rid is None:
+        if not k or rid is None or not kind_visible(cap, k):
             continue
-        if title_allowed(ratings.get(k, {}).get(int(rid)), cap):
+        if not _needs_rating(cap, k) or kind_allows(cap, k, ratings.get(k, {}).get(int(rid))):
             out.append(it)
     return out

@@ -273,6 +273,42 @@ def list_profiles(db) -> list:
     return out
 
 
+def profile_tags(prof: Any, name: Any = "") -> list:
+    """display tags for a profile (#2168): "4k" when it files into the 4K
+    library or any 2160p tier is on (it can fetch 4K, so "4K always asks"
+    covers it), "extended" when its name says so. read from the blob, never
+    stored."""
+    tags = []
+    prof = prof if isinstance(prof, dict) else {}
+    tiers = prof.get("tiers") or []
+    uhd = any(isinstance(t, dict) and t.get("enabled") and "2160p" in str(t.get("key") or "")
+              for t in tiers)
+    if str(prof.get("library") or "").lower() == "4k" or uhd:
+        tags.append("4k")
+    if "extended" in str(name or "").lower():
+        tags.append("extended")
+    return tags
+
+
+def quality_options(db) -> list:
+    """every profile a request can name, without its blob: [{id, name,
+    media_type, tags}], Default (id 0, both kinds) first. what the request
+    resolver and a member's quality list are built from."""
+    out = [{"id": DEFAULT_PROFILE_ID, "name": "Default", "media_type": None,
+            "tags": profile_tags(load(db), "Default")}]
+    for row in db.named_quality_profiles():
+        out.append({"id": row["id"], "name": row["name"], "media_type": row.get("media_type") or None,
+                    "tags": profile_tags(_profile_from_row(row), row["name"])})
+    return out
+
+
+def options_for_kind(options: list, kind: Any) -> list:
+    """the options a movie (or a show) can use: its own media type or both."""
+    k = title_kind(kind)
+    want = "movie" if k == "movie" else "tv"
+    return [o for o in options if (o.get("media_type") or None) in (None, want)]
+
+
 def _profile_from_row(row: Any) -> dict:
     try:
         return normalize(json.loads(row["items"] or "{}"))
@@ -422,4 +458,5 @@ __all__ = [
     "normalize_tiers", "load", "save", "list_profiles", "profile_by_id",
     "save_named", "delete_named", "load_for_item",
     "title_kind", "kind_default_id", "kind_defaults", "set_kind_default",
+    "profile_tags", "quality_options", "options_for_kind",
 ]

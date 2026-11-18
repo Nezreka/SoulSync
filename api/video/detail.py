@@ -258,8 +258,7 @@ def register_routes(bp):
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
     def video_show_detail(show_id):
         from . import get_video_db
-        from .kids import restricted_response, video_cap
-        from core.content_filter import title_allowed
+        from .kids import rating_allowed, restricted_response, video_cap
         from core.video.watch_scope import current_watcher
         watcher = current_watcher()
         data = get_video_db().show_detail(show_id, watcher=watcher.rows)
@@ -270,15 +269,14 @@ def register_routes(bp):
         data["can_mark_watched"] = watcher.can_mark
         # kids profiles: over the cap (or unrated) is a hard no
         cap = video_cap()
-        if cap is not None and not title_allowed(data.get("content_rating"), cap):
-            return restricted_response()
+        if cap is not None and not rating_allowed(cap, "show", data.get("content_rating")):
+            return restricted_response("show")
         return jsonify(data)
 
     @bp.route("/detail/movie/<int:movie_id>", methods=["GET"])
     def video_movie_detail(movie_id):
         from . import get_video_db
-        from .kids import restricted_response, video_cap
-        from core.content_filter import title_allowed
+        from .kids import rating_allowed, restricted_response, video_cap
         from core.video.watch_scope import current_watcher
         watcher = current_watcher()
         data = get_video_db().movie_detail(movie_id, watcher=watcher.rows)
@@ -288,8 +286,8 @@ def register_routes(bp):
         # a profile with no watch state of its own gets no watched toggle (#1941)
         data["can_mark_watched"] = watcher.can_mark
         cap = video_cap()
-        if cap is not None and not title_allowed(data.get("content_rating"), cap):
-            return restricted_response()
+        if cap is not None and not rating_allowed(cap, "movie", data.get("content_rating")):
+            return restricted_response("movie")
         return jsonify(data)
 
     @bp.route("/detail/<kind>/<int:item_id>/freshen", methods=["GET", "POST"])
@@ -398,11 +396,10 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         # a redirect points at the library detail, which does its own check
         if not d.get("redirect"):
-            from .kids import restricted_response, video_cap
-            from core.content_filter import title_allowed
+            from .kids import rating_allowed, restricted_response, video_cap
             cap = video_cap()
-            if cap is not None and not title_allowed(d.get("content_rating"), cap):
-                return restricted_response()
+            if cap is not None and not rating_allowed(cap, kind, d.get("content_rating")):
+                return restricted_response(kind)
         return jsonify(d)
 
     @bp.route("/tmdb/show/<int:tv_id>/season/<int:season_number>", methods=["GET"])
