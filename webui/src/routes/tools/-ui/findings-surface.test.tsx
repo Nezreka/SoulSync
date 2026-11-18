@@ -2731,7 +2731,7 @@ describe('the detail renderer', () => {
     expect(detail.textContent).toContain('3:30');
   });
 
-  it('missing_cover_art offers a separate apply per image', async () => {
+  it('missing_cover_art applies the cover and a suggested artist photo separately', async () => {
     routes({
       [FINDINGS]: page([
         finding({
@@ -2740,8 +2740,8 @@ describe('the detail renderer', () => {
           details: {
             artist: 'Band',
             found_artwork_url: 'http://x/album.jpg',
+            // #2169: only an artist with no photo gets one suggested
             found_artist_url: 'http://x/artist.jpg',
-            artist_thumb_url: 'http://x/current.jpg',
           },
         }),
       ]),
@@ -2754,8 +2754,8 @@ describe('the detail renderer', () => {
     fireEvent.click(screen.getByText('Use for artist'));
     await flush();
     expect(bodyOf('/1/fix')).toEqual({ fix_action: 'artist' });
-    // The current artist image is context only — it gets no apply button.
-    expect(screen.getAllByRole('button', { name: /Use for/ })).toHaveLength(2);
+    // the cover goes through Apply Art, never through the artist button
+    expect(screen.getAllByRole('button', { name: /Use for/ })).toHaveLength(1);
   });
 
   it('library_retag shows an old → new diff with ∅ for a blank tag', async () => {

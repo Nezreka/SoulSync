@@ -478,8 +478,11 @@ export async function fetchCoverFindingState(id: number): Promise<CoverFindingSt
   try {
     const response = await fetch(repairUrl(`/findings/${id}/cover`));
     if (!response.ok) return null;
-    const data = (await response.json()) as CoverFindingState & { success?: boolean };
-    return data.success === false ? null : data;
+    const data = (await response.json()) as Partial<CoverFindingState> & { success?: boolean };
+    // anything not shaped like a state is no state: the scan's view stands
+    if (data.success !== true || !data.library || !data.files || !data.folder || !data.found)
+      return null;
+    return { ...data, plan: Array.isArray(data.plan) ? data.plan : [] } as CoverFindingState;
   } catch {
     return null;
   }
