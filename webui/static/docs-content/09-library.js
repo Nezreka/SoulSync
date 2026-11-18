@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'library',
+    needs: 'music.library',
     title: 'Music Library',
     icon: '📚',
     pages: [
@@ -51,6 +52,7 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
         },
         {
             id: 'lib-enhanced',
+            needs: 'admin',
             title: 'Library Management',
             lede: 'Manage catalogue metadata and physical file versions in the Library.',
             body: `
@@ -69,6 +71,7 @@ On an album's track list, a small **flame** next to a title marks the album's mo
         },
         {
             id: 'lib-matching',
+            needs: 'admin',
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
@@ -88,6 +91,7 @@ Good matches are the foundation of everything downstream — discovery, similar 
         },
         {
             id: 'lib-tags',
+            needs: 'admin',
             title: 'Write Tags to File',
             lede: 'Sync your database metadata into the actual audio file tags.',
             body: `
@@ -105,6 +109,7 @@ Supports MP3, FLAC, OGG, and M4A via Mutagen. After writing, optional server syn
         },
         {
             id: 'lib-bulk',
+            needs: 'admin',
             title: 'Bulk Operations',
             lede: 'Select tracks across albums and act on all of them at once.',
             body: `
@@ -119,6 +124,7 @@ Select tracks across multiple albums using the checkboxes. The bulk bar appears 
         },
         {
             id: 'lib-missing',
+            needs: 'music.get=download',
             title: 'Download Missing Tracks',
             lede: 'Fill gaps in albums without leaving the library.',
             body: `
@@ -131,6 +137,7 @@ From any album card showing missing tracks, click **Download Missing** to open a
         },
         {
             id: 'lib-smart-delete',
+            needs: 'admin',
             title: 'Remove Entries and Files',
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
@@ -146,6 +153,7 @@ File-removal operations are recorded in the deletion journal. Permanent deletion
         },
         {
             id: 'lib-redownload',
+            needs: 'admin',
             title: 'Track Redownload',
             lede: 'Replace a track with a better copy from a different source or quality.',
             body: `
@@ -160,6 +168,7 @@ A 3-step wizard guides you through redownloading a specific track:
         },
         {
             id: 'lib-issues',
+            needs: 'everyone',
             title: 'Library Issues',
             lede: 'Problems people reported by hand — the manual issue tracker.',
             body: `

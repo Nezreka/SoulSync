@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'artists',
+    needs: 'music.access',
     title: 'Artists & Watchlist',
     icon: '🎤',
     pages: [
         {
             id: 'art-search',
+            needs: 'music.search',
             title: 'Artist Search',
             lede: 'Find any artist and jump straight into their discography.',
             body: `
@@ -35,6 +37,7 @@ At the top, **View on** buttons link to the artist on each matched external serv
         },
         {
             id: 'art-watchlist',
+            needs: 'music.watchlist',
             title: 'Watchlist',
             lede: 'Follow artists and let SoulSync catch every new release for you.',
             body: `
@@ -51,6 +54,7 @@ The watchlist tracks artists you want to follow for new releases. When SoulSync 
         },
         {
             id: 'art-scanning',
+            needs: 'music.watchlist',
             title: 'New Release Scanning',
             lede: 'Automatic daily scans keep your watchlist fresh — or trigger one manually.',
             body: `
@@ -69,6 +73,7 @@ Click **Scan for New Releases** or let the system automation handle it (runs eve
         },
         {
             id: 'art-wishlist',
+            needs: 'music.wishlist',
             title: 'Wishlist',
             lede: 'The queue of tracks waiting to be downloaded — fed by scans, syncs, and your own picks.',
             body: `
@@ -113,6 +118,7 @@ The **Cleanup Wishlist** action removes duplicates (the same track added multipl
         },
         {
             id: 'art-settings',
+            needs: 'music.watchlist',
             title: 'Watchlist Settings',
             lede: 'Control exactly which release types SoulSync grabs for each artist — or set one global rule.',
             body: `
@@ -150,6 +156,7 @@ Live albums and Live tracks are two rules, so you can keep live bonus tracks out
 
 registerDocsSection({
     id: 'label-detail',
+    needs: 'music.access',
     title: 'Record Labels',
     icon: '🏷️',
     pages: [
@@ -224,6 +231,7 @@ Cards show cover art, album title, and "artist · year" (year omitted when unkno
         },
         {
             id: 'label-follow',
+            needs: 'music.watchlist',
             title: 'Following Labels',
             lede: 'Follow a label to monitor its new releases from the Watchlist.',
             body: `

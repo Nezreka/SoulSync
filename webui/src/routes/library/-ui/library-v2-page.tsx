@@ -993,6 +993,45 @@ export function useLibraryV2CanWish(): boolean {
   return useContext(LibraryV2CanWishContext) || useContext(LibraryV2CanWriteContext);
 }
 
+/** the server's can_download: a wish that downloads right away is allowed */
+export const LibraryV2CanDownloadContext = createContext(false);
+/** the server's can_grab: a pick from Interactive Search may name a library row */
+export const LibraryV2CanGrabContext = createContext(false);
+
+/**
+ * #2173: Automatic Search, Enhance Quality and Upgrade start a download. a
+ * profile that asks first (or can't get music) never sees them: its way in
+ * is the Wishlist, which turns into a request. the server says it on
+ * /enabled (can_download); the live permission map follows an admin's
+ * change without a reload. the admin always may.
+ */
+export function useLibraryV2CanSearch(): boolean {
+  const canWrite = useContext(LibraryV2CanWriteContext);
+  const canWish = useLibraryV2CanWish();
+  const server = useContext(LibraryV2CanDownloadContext) || canWrite;
+  const live = useMusicGet().mode === 'download';
+  return canWish && server && live;
+}
+
+/** Interactive Search grabs straight into a library row: the admin, or a
+ *  profile in a library of its own that may download (can_grab). */
+export function useLibraryV2CanGrab(): boolean {
+  const canSearch = useLibraryV2CanSearch();
+  const canWrite = useContext(LibraryV2CanWriteContext);
+  const grab = useContext(LibraryV2CanGrabContext) || canWrite;
+  return canSearch && grab;
+}
+
+/** a search action's own rule: 'search' runs one, 'grab' picks a result */
+type DownloadNeed = 'search' | 'grab';
+
+function useMayDownload(need: DownloadNeed | undefined): boolean {
+  const canSearch = useLibraryV2CanSearch();
+  const canGrab = useLibraryV2CanGrab();
+  if (!need) return true;
+  return need === 'grab' ? canGrab : canSearch;
+}
+
 export function ActionButton({
   icon,
   label,
@@ -1002,6 +1041,7 @@ export function ActionButton({
   disabled,
   requiresWrite = true,
   requiresWish = false,
+  requiresDownload,
   tone = 'default',
   primary = false,
 }: {
@@ -1014,13 +1054,17 @@ export function ActionButton({
   requiresWrite?: boolean;
   /** E-13: monitor/search -- also a profile in a library of its own */
   requiresWish?: boolean;
+  /** #2173: it starts a download. not drawn at all for a profile that can't */
+  requiresDownload?: DownloadNeed;
   tone?: 'default' | 'danger';
   /** the one filled action on a toolbar */
   primary?: boolean;
 }) {
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
+  const mayDownload = useMayDownload(requiresDownload);
   const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
+  if (!mayDownload) return null;
   return (
     <button
       type="button"
@@ -1055,14 +1099,20 @@ function EnhanceQualityButton({
 }) {
   const [open, setOpen] = useState(false);
   const canWrite = useLibraryV2CanWrite();
-  const tracks = useQuery(libraryV2EnhanceQueryOptions('artists', artistId)).data?.tracks ?? [];
-  if (tracks.length === 0) return null;
+  // #2173: enhancing searches and downloads; a profile that asks first
+  // never gets the button, so it never asks the server for the list either
+  const canSearch = useLibraryV2CanSearch();
+  const tracks =
+    useQuery({ ...libraryV2EnhanceQueryOptions('artists', artistId), enabled: canSearch }).data
+      ?.tracks ?? [];
+  if (!canSearch || tracks.length === 0) return null;
   return (
     <>
       <ActionButton
         icon="quality"
         label={`Enhance Quality (${tracks.length})`}
         requiresWish
+        requiresDownload="search"
         title="Files below their quality profile — pick which to upgrade"
         busy={busy}
         onClick={() => setOpen(true)}
@@ -1091,6 +1141,7 @@ function IconActionButton({
   disabled,
   requiresWrite = false,
   requiresWish = false,
+  requiresDownload,
   tone = 'default',
 }: {
   icon: IconName;
@@ -1100,11 +1151,15 @@ function IconActionButton({
   requiresWrite?: boolean;
   /** E-13: monitor/search -- also a profile in a library of its own */
   requiresWish?: boolean;
+  /** #2173: it starts a download. not drawn at all for a profile that can't */
+  requiresDownload?: DownloadNeed;
   tone?: 'default' | 'danger';
 }) {
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
+  const mayDownload = useMayDownload(requiresDownload);
   const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
+  if (!mayDownload) return null;
   return (
     <button
       type="button"
@@ -4774,41 +4829,56 @@ export function LibraryV2Page() {
 
   const canWrite = enabledQuery.data?.canWrite === true;
   const canWish = enabledQuery.data?.canWish === true;
+  const canDownload = enabledQuery.data?.canDownload === true;
+  const canGrab = enabledQuery.data?.canGrab === true;
 
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
       <LibraryV2CanWishContext.Provider value={canWish}>
-        {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
-        <div className={styles.libraryRoot} data-library-v2="">
-          <MirrorStatusBanner />
-          {!canWrite ? (
-            <div className={styles.accessNote} role="note">
-              {canWish
-                ? 'Your library: you can use your Watchlist and Wishlist and search here; other changes are up to the admin.'
-                : 'Read-only: library changes require the admin profile.'}
+        <LibraryV2CanDownloadContext.Provider value={canDownload}>
+          <LibraryV2CanGrabContext.Provider value={canGrab}>
+            {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
+            <div className={styles.libraryRoot} data-library-v2="">
+              <MirrorStatusBanner />
+              {!canWrite ? <LibraryAccessNote canWish={canWish} /> : null}
+              {search.album ? (
+                <AlbumDetailView albumId={search.album} />
+              ) : search.artist ? (
+                <ArtistDetailView artistId={search.artist} />
+              ) : providerArtist(search.discover) ? (
+                <ProviderArtistView
+                  {...(providerArtist(search.discover) as { source: string; providerId: string })}
+                  name={search.discoverName ?? ''}
+                />
+              ) : search.section === 'wanted' ? (
+                <WantedIndexView />
+              ) : search.section === 'songs' ? (
+                <SongIndexView />
+              ) : search.section === 'albums' ? (
+                <AlbumIndexView />
+              ) : (
+                <ArtistIndexView />
+              )}
             </div>
-          ) : null}
-          {search.album ? (
-            <AlbumDetailView albumId={search.album} />
-          ) : search.artist ? (
-            <ArtistDetailView artistId={search.artist} />
-          ) : providerArtist(search.discover) ? (
-            <ProviderArtistView
-              {...(providerArtist(search.discover) as { source: string; providerId: string })}
-              name={search.discoverName ?? ''}
-            />
-          ) : search.section === 'wanted' ? (
-            <WantedIndexView />
-          ) : search.section === 'songs' ? (
-            <SongIndexView />
-          ) : search.section === 'albums' ? (
-            <AlbumIndexView />
-          ) : (
-            <ArtistIndexView />
-          )}
-        </div>
+          </LibraryV2CanGrabContext.Provider>
+        </LibraryV2CanDownloadContext.Provider>
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
+  );
+}
+
+/** what a member may do here, in one line. a profile that asks first wishes
+ *  and an admin approves; it isn't told it can search (#2173). */
+function LibraryAccessNote({ canWish }: { canWish: boolean }) {
+  const canSearch = useLibraryV2CanSearch();
+  return (
+    <div className={styles.accessNote} role="note">
+      {!canWish
+        ? 'Read-only: library changes require the admin profile.'
+        : canSearch
+          ? 'Your library: you can use your Watchlist and Wishlist and search here; other changes are up to the admin.'
+          : 'Your library: add what you want to your Wishlist and an admin approves it. Other changes are up to the admin.'}
+    </div>
   );
 }
 
@@ -4963,6 +5033,7 @@ function ArtistIndexView() {
   const navigate = useNavigate();
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
+  const canSearch = useLibraryV2CanSearch();
   // Debounce the filter box: navigating per keystroke fires a request each key.
   const artistFilter = useUrlSyncedFilter(
     search.q,
@@ -5160,6 +5231,7 @@ function ArtistIndexView() {
         totalMatching={pagination?.total_count ?? 0}
         canWrite={canWrite}
         canWish={canWish}
+        canSearch={canSearch}
         filters={{
           q: search.q,
           sort: search.sort,
@@ -5879,6 +5951,7 @@ export function formatWantedFileQuality(file: LibraryV2WantedRow['file']): strin
 function WantedIndexView() {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
+  const canSearch = useLibraryV2CanSearch();
   const search = Route.useSearch();
   const wantedFilter = useUrlSyncedFilter(
     search.q,
@@ -5911,7 +5984,7 @@ function WantedIndexView() {
   }
 
   function runSearch(trackId: number) {
-    if (searchBusy || !canWish) return;
+    if (searchBusy || !canWish || !canSearch) return;
     runScoped('tracks', trackId);
   }
 
@@ -6067,6 +6140,7 @@ function WantedIndexView() {
                       icon="automatic"
                       title="Search this track"
                       requiresWish
+                      requiresDownload="search"
                       // dd28-16: one banner is shared by every row, so a second
                       // search must not start until the first has reported.
                       disabled={searchBusy}
@@ -6411,6 +6485,8 @@ const RELEASE_KIND_LABELS: Record<string, string> = {
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
+  const canSearch = useLibraryV2CanSearch();
+  const canGrab = useLibraryV2CanGrab();
   const previousArtist = Route.useSearch().artist;
   const openTrackArtist = useOpenTrackArtist();
   const lockedIds = useLockedIds();
@@ -6436,11 +6512,12 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (!canWish) return;
     if (INTERACTIVE_RE.test(action)) {
+      if (!canGrab) return;
       setModalAction({ action, entity });
       return;
     }
     if (!SCOPED_SEARCH_RE.test(action)) return;
-    if (searchBusy) return;
+    if (searchBusy || !canSearch) return;
     const scope = entity?.trackId
       ? { entity: 'tracks' as const, id: entity.trackId }
       : { entity: 'albums' as const, id: albumId };
@@ -8790,6 +8867,8 @@ function ProviderArtistActions({
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
+  const canSearch = useLibraryV2CanSearch();
+  const canGrab = useLibraryV2CanGrab();
   const search = Route.useSearch();
   const releasesMode = search.releases;
   // ldp-03/ldp-04/ldp-05: how `All Releases` renders and how rich the header
@@ -9102,11 +9181,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   function handleAction(action: string, entity?: Lib2EntityRef) {
     if (!canWish) return;
     if (INTERACTIVE_RE.test(action)) {
+      if (!canGrab) return;
       setModalAction({ action, entity });
       return;
     }
     if (SCOPED_SEARCH_RE.test(action)) {
-      if (searchBusy) return;
+      if (searchBusy || !canSearch) return;
       const scope = resolveSearchScope(entity, artistId);
       runScoped(scope.entity, scope.id);
     }
@@ -9210,6 +9290,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         label="Automatic Search"
                         primary
                         requiresWish
+                        requiresDownload="search"
                         title="Search missing/upgradable tracks for this artist"
                         // dd28-16: a double click double-POSTed; the server answered
                         // 409 (job already running) and the client rendered that as
@@ -9224,6 +9305,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         icon="interactive"
                         label="Interactive Search"
                         requiresWish
+                        requiresDownload="grab"
                         title="Manually select from search results across all configured sources"
                         onClick={() => handleAction('Interactive Search')}
                       />,
@@ -10109,6 +10191,7 @@ function AlbumBlock({
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
             requiresWish
+            requiresDownload="search"
             onClick={() =>
               onAction(`Automatic Search: ${album.title}`, {
                 albumId: album.id,
@@ -10120,6 +10203,7 @@ function AlbumBlock({
             icon="interactive"
             title="Interactive Search"
             requiresWish
+            requiresDownload="grab"
             onClick={() =>
               onAction(`Interactive Search: ${album.title}`, {
                 albumId: album.id,
@@ -13016,6 +13100,7 @@ function TrackRow(props: TrackRowProps) {
             icon="automatic"
             title="Automatic Search — search missing/upgradable for this track"
             requiresWish
+            requiresDownload="search"
             disabled={!track.id}
             onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
           />
@@ -13023,6 +13108,7 @@ function TrackRow(props: TrackRowProps) {
             icon="interactive"
             title="Interactive Search — pick the source yourself"
             requiresWish
+            requiresDownload="grab"
             disabled={!track.id}
             onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
           />
@@ -14998,6 +15084,8 @@ function useGlobalAutomaticSearch() {
 
 export function GlobalAutomaticSearchButton() {
   const { canWrite, busy, message, run } = useGlobalAutomaticSearch();
+  // the library-wide search is the admin's: a member never sees it (#2173)
+  if (!canWrite) return null;
   return (
     <span className={styles.automaticSearchWrap}>
       <button
@@ -15047,7 +15135,11 @@ export function LibraryMoreMenu() {
             type="button"
             className={`${styles.btnGhost} ${styles.automaticSearchButton} library-more-btn`}
             aria-label="More library actions"
-            title="Automatic Search, Watch All, Export and file tag values"
+            title={
+              search.canWrite
+                ? 'Automatic Search, Watch All, Export and file tag values'
+                : 'Watch All and Export'
+            }
             {...props}
           >
             More
@@ -15067,18 +15159,23 @@ export function LibraryMoreMenu() {
           </button>
         )}
         items={[
-          {
-            key: 'automatic-search',
-            label: item(
-              'automatic-search',
-              'Automatic Search',
-              'Find missing tracks and better copies of what you have.',
-            ),
-            disabled: search.busy || !search.canWrite,
-            title:
-              'Search every missing Wishlist track and every file below its quality-profile cutoff',
-            onSelect: () => void search.run(),
-          },
+          // the library-wide search is the admin's: a member never sees it (#2173)
+          ...(search.canWrite
+            ? [
+                {
+                  key: 'automatic-search',
+                  label: item(
+                    'automatic-search',
+                    'Automatic Search',
+                    'Find missing tracks and better copies of what you have.',
+                  ),
+                  disabled: search.busy,
+                  title:
+                    'Search every missing Wishlist track and every file below its quality-profile cutoff',
+                  onSelect: () => void search.run(),
+                },
+              ]
+            : []),
           {
             key: 'watch-all',
             label: item(

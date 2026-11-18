@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'workflows',
+    needs: 'admin',
     title: 'Quick-Start Guides',
     icon: '🧭',
     pages: [
@@ -40,6 +41,7 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-download',
+            needs: 'music.get',
             title: 'How to: Download an Album',
             lede: 'Find an album and download it with full metadata, cover art, and proper file organization.',
             body: `
@@ -63,6 +65,7 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-sync',
+            needs: 'music.playlist_sync',
             title: 'How to: Sync a Spotify Playlist',
             lede: 'Import a Spotify playlist and download all its tracks to your local library.',
             body: `
@@ -81,6 +84,7 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-auto',
+            needs: 'music.watchlist',
             title: 'How to: Set Up Auto-Downloads',
             lede: 'Automatically download new releases from your favorite artists — no manual intervention.',
             body: `
@@ -99,6 +103,7 @@ Once your services are connected, do these five things to get the most out of So
         },
         {
             id: 'wf-import',
+            needs: 'music.import',
             title: 'How to: Import Existing Music',
             lede: 'Bring music files you already own into SoulSync with proper metadata and organization.',
             body: `

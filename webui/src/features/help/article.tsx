@@ -15,7 +15,13 @@ import type { ViewProps } from './view-props';
 
 import s from './article.module.css';
 import { openArticleInDocs, openDocsHome } from './links';
-import { findArticle, loadDocs, loadedDocs, type DocsArticle } from './search/docs';
+import {
+  findArticle,
+  hiddenFromViewer,
+  loadDocs,
+  loadedDocs,
+  type DocsArticle,
+} from './search/docs';
 import { Markdown } from './search/markdown';
 import { useHelpStore } from './store';
 import { Button, Placeholder } from './ui';
@@ -23,9 +29,13 @@ import { Button, Placeholder } from './ui';
 type State =
   | { status: 'loading' }
   | { status: 'ready'; article: DocsArticle }
-  | { status: 'missing' };
+  | { status: 'missing' }
+  | { status: 'hidden' };
 
 function lookup(id: string): State {
+  // a guide that isn't for this profile is never shown (#2174), even from a
+  // link someone saved
+  if (hiddenFromViewer(id)) return { status: 'hidden' };
   const article = findArticle(id);
   if (article) return { status: 'ready', article };
   return loadedDocs()?.length ? { status: 'missing' } : { status: 'loading' };
@@ -60,6 +70,19 @@ export function ArticleView({ entry }: ViewProps) {
         <span className={s.bar} data-short />
         <span className={s.srOnly}>Opening the guide</span>
       </div>
+    );
+  }
+
+  if (state.status === 'hidden') {
+    return (
+      <Placeholder
+        title="That guide is for your admin"
+        text="It covers a part of SoulSync your profile doesn't use. Help & Docs has every guide that is yours."
+      >
+        <Button kind="primary" icon="book" onClick={openDocsHome}>
+          Open Help & Docs
+        </Button>
+      </Placeholder>
     );
   }
 

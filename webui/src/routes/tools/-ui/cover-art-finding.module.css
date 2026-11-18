@@ -1,0 +1,176 @@
+/* a cover art finding (#2169): the library, the files, the folder and the
+   found cover side by side, then what Apply Art does in each */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 148px));
+  gap: 16px;
+}
+
+.tile {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.frame {
+  aspect-ratio: 1;
+  width: 100%;
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.round {
+  border-radius: var(--radius-circle);
+}
+
+.empty {
+  padding: 0 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-3);
+}
+
+/* the empty box reads as a gap, not a broken image */
+.frame:has(.empty) {
+  background: transparent;
+  border: 1px dashed var(--white-a20);
+}
+
+.tile figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.place {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.note {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.plan ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan li {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.planPlace {
+  color: var(--text-3);
+}
+
+.plan li.write {
+  color: var(--text-1);
+}
+
+.plan li.write .planPlace {
+  color: var(--success);
+}
+
+.plan li.skip {
+  color: var(--text-3);
+}
+
+.planQuiet {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.actionsNote {
+  flex: 1 1 240px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.artist {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding-top: 16px;
+  border-top: 1px solid var(--white-a08);
+}
+
+.artistText {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.artistText p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+@media (max-width: 720px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plan li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+.plan li.keep {
+  color: var(--text-2);
+}

@@ -14,6 +14,8 @@ import { plainText } from './rank';
 export interface DocsPage {
   id: string;
   title: string;
+  /** who the page is for, when it isn't its section's */
+  needs?: string | string[];
   lede?: string;
   body?: string;
 }
@@ -21,6 +23,8 @@ export interface DocsPage {
 export interface DocsSection {
   id: string;
   title: string;
+  /** who the section is for (docs.js reads it, #2174) */
+  needs?: string | string[];
   pages: DocsPage[];
 }
 
@@ -40,8 +44,14 @@ export interface DocsArticle {
 
 declare global {
   interface Window {
-    /** docs.js's registry (static/docs.js) */
-    SoulSyncDocs?: { sections: () => DocsSection[] };
+    /** docs.js's registry (static/docs.js): only what this viewer may read (#2174) */
+    SoulSyncDocs?: {
+      sections: () => DocsSection[];
+      /** the guide exists, but isn't for this viewer */
+      hidden?: (id: string) => boolean;
+      /** this viewer may read the guide */
+      visible?: (id: string) => boolean;
+    };
   }
 }
 
@@ -84,8 +94,15 @@ export function toArticles(sections: DocsSection[]): DocsArticle[] {
 }
 
 let loaded: DocsArticle[] | null = null;
-/** the registry's size when `loaded` was built: a section registered later rebuilds */
-let builtFrom = 0;
+/** what `loaded` was built from: a section registered later, or a viewer who
+ *  may read a different set (#2174), rebuilds */
+let builtFrom = '';
+
+function shapeOf(sections: DocsSection[]): string {
+  return sections
+    .map((s) => (s && Array.isArray(s.pages) ? `${s.id}:${s.pages.length}` : ''))
+    .join('|');
+}
 const byId = new Map<string, DocsArticle>();
 
 /**
@@ -94,7 +111,8 @@ const byId = new Map<string, DocsArticle>();
  */
 export function loadDocs(source: DocsSource = registrySections): Promise<DocsArticle[]> {
   const sections = source();
-  if (loaded && loaded.length && sections.length === builtFrom) return Promise.resolve(loaded);
+  const shape = shapeOf(sections);
+  if (loaded && loaded.length && shape === builtFrom) return Promise.resolve(loaded);
   const articles = toArticles(sections.filter(isSection));
   byId.clear();
   for (const a of articles) {
@@ -104,7 +122,7 @@ export function loadDocs(source: DocsSource = registrySections): Promise<DocsArt
   }
   loaded = articles;
   // nothing there yet (docs.js not run): the next search asks again
-  builtFrom = articles.length ? sections.length : 0;
+  builtFrom = articles.length ? shape : '';
   return Promise.resolve(articles);
 }
 
@@ -122,9 +140,30 @@ export function findArticle(id: string): DocsArticle | undefined {
   return byId.get(id);
 }
 
+/** the guide exists but isn't for this viewer (an admin's guide, a part of
+ *  SoulSync their profile doesn't have) */
+export function hiddenFromViewer(id: string): boolean {
+  try {
+    return window.SoulSyncDocs?.hidden?.(id) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** may this viewer read the guide. true while docs.js hasn't said (the
+ *  article view answers then) */
+export function visibleToViewer(id: string): boolean {
+  try {
+    const fn = window.SoulSyncDocs?.visible;
+    return typeof fn === 'function' ? fn(id) : true;
+  } catch {
+    return true;
+  }
+}
+
 /** for tests */
 export function resetDocs(): void {
   loaded = null;
-  builtFrom = 0;
+  builtFrom = '';
   byId.clear();
 }

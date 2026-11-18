@@ -21,6 +21,7 @@ import {
 } from './links';
 import { isVideoSide } from './page';
 import { articlesFor, pageHelpFor, type AnswerContext, type PageHelp } from './pages';
+import { visibleToViewer } from './search/docs';
 import { useHelpStore } from './store';
 import { Label, List, Row, Tile } from './ui';
 
@@ -225,7 +226,10 @@ function Answers({ useAnswers, ctx }: { useAnswers: UseAnswers; ctx: AnswerConte
 }
 
 function ReadMore({ entry, isAdmin }: { entry: PageHelp; isAdmin: boolean }) {
-  const articles = articlesFor(entry, isAdmin).slice(0, 3);
+  // only the guides this profile may read (#2174)
+  const articles = articlesFor(entry, isAdmin)
+    .filter((a) => visibleToViewer(a.id))
+    .slice(0, 3);
   const tour = entry.tour;
   if (!articles.length && !tour) return null;
   return (

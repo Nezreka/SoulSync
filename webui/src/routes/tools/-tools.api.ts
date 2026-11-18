@@ -451,6 +451,81 @@ export async function fixFinding(
   return (await response.json()) as FixResult;
 }
 
+/** one place a cover can live, and what Apply Art does there (#2169) */
+export interface CoverPlanStep {
+  place: 'library' | 'files' | 'folder';
+  action: 'write' | 'keep' | 'skip';
+  why: string;
+  count?: number;
+  file?: string;
+}
+
+/** a cover finding as it is now: the library, the files and the folder,
+ *  the found cover and its source, and what Apply Art does in each (#2169) */
+export interface CoverFindingState {
+  album_id: number;
+  library: { has: boolean; locked: boolean; url: string | null };
+  files: { with: number; without: number; unknown: number; url: string | null };
+  folder: { file: string | null; exists: boolean; url: string | null };
+  found: { url: string | null; source: string | null };
+  settings: { embed: boolean; sidecar: boolean };
+  plan: CoverPlanStep[];
+}
+
+/** null when the album left the library or the call failed: the finding
+ *  still shows what the scan saw */
+export async function fetchCoverFindingState(id: number): Promise<CoverFindingState | null> {
+  try {
+    const response = await fetch(repairUrl(`/findings/${id}/cover`));
+    if (!response.ok) return null;
+    const data = (await response.json()) as Partial<CoverFindingState> & { success?: boolean };
+    // anything not shaped like a state is no state: the scan's view stands
+    if (data.success !== true || !data.library || !data.files || !data.folder || !data.found)
+      return null;
+    return { ...data, plan: Array.isArray(data.plan) ? data.plan : [] } as CoverFindingState;
+  } catch {
+    return null;
+  }
+}
+
+/** one copy in a Keep Best preview (#2172) */
+export interface KeepBestCopy {
+  file_id: number;
+  action: 'keep' | 'remove' | 'protected';
+  path: string;
+  playlists: string[];
+  ignored_playlists: string[];
+  playlists_covered: string[];
+  playlist_moves: string[];
+  playlists_blocked: string;
+  protected_reasons: string[];
+}
+
+export interface KeepBestPreview {
+  success: boolean;
+  error?: string;
+  kept_file_id?: number;
+  move_playlist_entries?: boolean;
+  copies?: KeepBestCopy[];
+}
+
+/** what Keep Best would do for a duplicate finding with this fix action,
+ *  nothing changed (#2172). null when the call failed */
+export async function fetchKeepBestPreview(
+  id: number,
+  action: string,
+): Promise<KeepBestPreview | null> {
+  try {
+    const response = await fetch(
+      repairUrl(`/findings/${id}/keep-best-preview?action=${encodeURIComponent(action)}`),
+    );
+    if (response.status >= 500) return null;
+    return (await response.json()) as KeepBestPreview;
+  } catch {
+    return null;
+  }
+}
+
 /** `resolveRepairFinding`. Response ignored by the vanilla. */
 export async function resolveFinding(id: number): Promise<void> {
   await postJson(repairUrl(`/findings/${id}/resolve`));

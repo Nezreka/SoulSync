@@ -1499,6 +1499,108 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
   });
 
+  describe('#2173: download actions follow what the profile may get', () => {
+    const enhanceList = () =>
+      http.get('/api/library/v2/artists/1/enhance', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [1, 2].map((n) => ({
+            track_id: n,
+            title: `Song ${n}`,
+            album_id: 1,
+            album_title: 'Dummy',
+            disc_number: 1,
+            track_number: n,
+            current: 'MP3 128',
+            profile: 'Lossless',
+            target: 'FLAC',
+            monitored: false,
+          })),
+        }),
+      );
+    const ownedArtist = () =>
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', tracks_present: 2, origin: 'library' })],
+          }),
+        }),
+      );
+
+    it('a member who asks first keeps the Wishlist and gets no search, enhance or upgrade', async () => {
+      const enhanceAsked: string[] = [];
+      server.use(
+        http.get('/api/library/v2/enabled', () =>
+          HttpResponse.json({
+            success: true,
+            enabled: true,
+            can_write: false,
+            can_wish: true,
+            can_download: false,
+            can_grab: false,
+          }),
+        ),
+        ownedArtist(),
+        http.get('/api/library/v2/artists/1/enhance', ({ request }) => {
+          enhanceAsked.push(new URL(request.url).pathname);
+          return HttpResponse.json({ success: true, tracks: [] });
+        }),
+      );
+      renderArtist('/library?artist=1');
+
+      expect(await screen.findByText('Dummy')).toBeInTheDocument();
+      // the way in is the Wishlist, which becomes a request
+      expect(await screen.findByText(/add what you want to your Wishlist/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Automatic Search/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Interactive Search/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Enhance Quality/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Upgrade/ })).toBeNull();
+      // it never even asks for the list of files to enhance
+      expect(enhanceAsked).toEqual([]);
+    });
+
+    it('a member who downloads in the shared library searches, but picks no row by hand', async () => {
+      server.use(
+        http.get('/api/library/v2/enabled', () =>
+          HttpResponse.json({
+            success: true,
+            enabled: true,
+            can_write: false,
+            can_wish: true,
+            can_download: true,
+            can_grab: false,
+          }),
+        ),
+        ownedArtist(),
+        enhanceList(),
+      );
+      renderArtist('/library?artist=1');
+
+      expect(
+        await screen.findByRole('button', { name: 'Automatic Search' }, { timeout: 5000 }),
+      ).toBeEnabled();
+      expect(await screen.findByRole('button', { name: /Enhance Quality/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
+      // the server's profile_may_grab refuses a hand pick for a shared row
+      expect(screen.queryByRole('button', { name: /Interactive Search/ })).toBeNull();
+    });
+
+    it('the admin keeps every one of them', async () => {
+      server.use(ownedArtist(), enhanceList());
+      renderArtist('/library?artist=1');
+      expect(
+        await screen.findByRole('button', { name: 'Automatic Search' }, { timeout: 5000 }),
+      ).toBeEnabled();
+      // the toolbar's and the album row's
+      const interactive = screen.getAllByRole('button', { name: 'Interactive Search' });
+      expect(interactive.length).toBeGreaterThan(0);
+      for (const b of interactive) expect(b).toBeEnabled();
+      expect(await screen.findByRole('button', { name: /Enhance Quality/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
+    });
+  });
+
   it('labels the back link with where an arriving visit came from', async () => {
     (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
       { type: 'page', pageId: 'search' },

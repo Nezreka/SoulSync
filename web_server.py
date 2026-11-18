@@ -2460,14 +2460,32 @@ automation_progress_states = _auto_progress.progress_states
 automation_progress_lock = _auto_progress.progress_lock
 
 
+def _automation_owner(automation_id):
+    """the member an automation belongs to, None for a system one (or a row
+    that can't be read: then only the admins hear about it)."""
+    try:
+        row = get_database().get_automation(automation_id) or {}
+    except Exception:  # noqa: BLE001 - unreadable reads as the system's
+        return None
+    if row.get('is_system'):
+        return None
+    return row.get('profile_id')
+
+
 def _init_automation_progress(automation_id, automation_name, action_type):
     """Initialize progress state when an automation starts running."""
-    _auto_progress.init_progress(automation_id, automation_name, action_type)
+    _auto_progress.init_progress(automation_id, automation_name, action_type,
+                                 owner_profile_id=_automation_owner(automation_id))
+
+
+def _emit_automation_progress(event, payload):
+    """admins hear every run, a member only their own (#2170)"""
+    _auto_progress.emit_scoped(socketio.emit, event, payload, ADMIN_SOCKET_ROOM)
 
 
 def _update_automation_progress(automation_id, **kwargs):
     """Update progress state from handler threads. Thread-safe."""
-    _auto_progress.update_progress(automation_id, socketio_emit=socketio.emit, **kwargs)
+    _auto_progress.update_progress(automation_id, socketio_emit=_emit_automation_progress, **kwargs)
 
 # --- Global Matched Downloads Context Management ---
 # Shared with core.runtime_state so the refactored pipeline and web
@@ -4307,7 +4325,7 @@ def _build_system_stats():
     }
 
 @app.route('/api/system/stats')
-@requires("music.dashboard")
+@admin_only
 def get_system_stats():
     """Get system statistics for dashboard"""
     try:
@@ -23965,7 +23983,8 @@ def _emit_system_stats_loop():
         if not _has_connected_clients():
             continue
         try:
-            socketio.emit('dashboard:stats', _build_system_stats())
+            # server telemetry (downloads, uptime, memory) is the admins' (#2170)
+            socketio.emit('dashboard:stats', _build_system_stats(), to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting system stats: {e}")
 
@@ -25842,6 +25861,7 @@ def _emit_automation_progress_loop():
     _auto_progress.emit_progress_loop(
         socketio,
         is_shutting_down=lambda: globals().get('IS_SHUTTING_DOWN', False),
+        admin_room=ADMIN_SOCKET_ROOM,
     )
 
 def _emit_repair_progress_loop():

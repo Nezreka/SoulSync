@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'sample-studio',
+    needs: 'music.sample_studio',
     title: 'Sample Studio',
     icon: '🎛️',
     pages: [
@@ -79,6 +80,7 @@ Temporary audition previews are cleaned up automatically after an hour; saved ch
         },
         {
             id: 'studio-folders',
+            needs: 'admin',
             title: 'Sample Folders',
             lede: 'Choose where saved chops live — one folder or many, organized with your track metadata.',
             body: `

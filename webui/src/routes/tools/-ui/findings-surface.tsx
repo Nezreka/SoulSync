@@ -802,7 +802,7 @@ export function FindingsSurface({
 
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
-    async (findingId: number, trackId: string) => {
+    async (findingId: number, trackId: string, planned?: string) => {
       const catalogue = trackId.startsWith('merge-');
       const native = trackId.startsWith('file-') || trackId.startsWith('keep_best');
       const confirmed = await window.showConfirmDialog?.({
@@ -810,7 +810,9 @@ export function FindingsSurface({
         message: catalogue
           ? 'Merge these catalogue entries into the selected release? Both provider editions and all physical audio files are preserved.'
           : native
-            ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
+            ? // #2172: the plan for this keeper, when the finding fetched one
+              planned ||
+              'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
             : 'Keep this version and remove the other duplicate(s)?',
         confirmText: catalogue ? 'Merge' : 'Keep',
         destructive: true,
@@ -1735,9 +1737,12 @@ export function FindingsSurface({
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
                   onReidentify={setReidentifyingFinding}
-                  onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
+                  onKeepDuplicate={(findingId, trackId, planned) =>
+                    void keepDuplicate(findingId, trackId, planned)
+                  }
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
+                  onChanged={refreshAll}
                 />
               ))
             )}
@@ -2198,6 +2203,7 @@ function FindingCard({
   onUndo,
   onReidentify,
   onInspectRedownload,
+  onChanged,
 }: {
   finding: RepairFinding;
   video?: boolean;
@@ -2216,11 +2222,13 @@ function FindingCard({
   onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
-  onKeepDuplicate: (findingId: number, trackId: string) => void;
+  onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
+  /** something changed the finding outside a fix (a cover picked for it) */
+  onChanged?: () => void;
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
@@ -2249,7 +2257,9 @@ function FindingCard({
         </div>
         <FindingArt
           album={finding.album_thumb_url}
-          artist={finding.artist_thumb_url}
+          // #2169: a cover finding with no cover shows an empty tile, never
+          // the artist's photo standing in for one
+          artist={finding.finding_type === 'missing_cover_art' ? null : finding.artist_thumb_url}
           file={finding.entity_type === 'file' || finding.entity_type === 'folder'}
         />
         <div className="repair-finding-content">
@@ -2440,6 +2450,7 @@ function FindingCard({
                 onApplyCoverArt={onApplyCoverArt}
                 onUndo={onUndo}
                 onFixAction={(target, action) => void onFix(target, action)}
+                onChanged={onChanged}
               />
             )
           ) : null}

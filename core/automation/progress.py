@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # `automation_progress_states` / `automation_progress_lock` in web_server.
 progress_states: dict[int, dict] = {}
 progress_lock = threading.Lock()
+# whose run each state is (#2170): the owner profile id, None for the
+# install's own (system) automations. kept beside the states, not in them, so
+# the pushed payload is unchanged. a run with no owner is an admin's to see.
+progress_owners: dict[int, Optional[int]] = {}
 
 
 def _clamp_percent(value: Any) -> Any:
@@ -44,9 +48,13 @@ def _clamp_percent(value: Any) -> Any:
         return value
 
 
-def init_progress(automation_id: int, automation_name: str, action_type: str) -> None:
-    """Initialize progress state when an automation starts running."""
+def init_progress(automation_id: int, automation_name: str, action_type: str,
+                  owner_profile_id: Optional[int] = None) -> None:
+    """Initialize progress state when an automation starts running.
+    ``owner_profile_id`` is the member whose automation it is (None for a
+    system one): only they and the admins hear about the run."""
     with progress_lock:
+        progress_owners[automation_id] = _owner_id(owner_profile_id)
         progress_states[automation_id] = {
             'status': 'running',
             'automation_name': automation_name,
@@ -96,6 +104,50 @@ def update_progress(
                     socketio_emit('automation:progress', {str(automation_id): dict(state)})
                 except Exception as e:
                     logger.debug("socketio progress emit: %s", e)
+
+
+def _owner_id(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None and value != '' else None
+    except (TypeError, ValueError):
+        return None
+
+
+def owner_of(automation_id: Any) -> Optional[int]:
+    """the profile a run belongs to, None for a system run (or one not known)."""
+    try:
+        return progress_owners.get(int(automation_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def visible_to(payload: dict, profile_id: Any, is_admin: bool) -> dict:
+    """the part of a ``{automation_id: state}`` payload this viewer may see
+    (#2170): an admin sees every run; a member only the runs of their own
+    automations. a system run (library jobs, wishlist, backups) is a server
+    operation, so it never reaches a member."""
+    if is_admin:
+        return dict(payload)
+    me = _owner_id(profile_id)
+    if me is None:
+        return {}
+    return {aid: st for aid, st in payload.items() if owner_of(aid) == me}
+
+
+def emit_scoped(emit: Callable[..., Any], event: str, payload: dict, admin_room: str,
+                member_room: Callable[[int], str] = lambda pid: f'member:{pid}') -> None:
+    """send a ``{automation_id: state}`` payload to the admins' room whole,
+    and to each owner's member room only their own runs."""
+    if not payload:
+        return
+    emit(event, payload, to=admin_room)
+    mine: dict[int, dict] = {}
+    for aid, state in payload.items():
+        owner = owner_of(aid)
+        if owner is not None:
+            mine.setdefault(owner, {})[aid] = state
+    for owner, part in mine.items():
+        emit(event, part, to=member_room(owner))
 
 
 def get_running_progress() -> dict[str, dict]:
@@ -185,6 +237,7 @@ def emit_progress_loop(
     poll_interval: float = 1.0,
     timeout_seconds: int = 7200,
     cleanup_after_seconds: int = 60,
+    admin_room: Optional[str] = None,
 ) -> None:
     """Push `automation:progress` events for active automations.
 
@@ -227,7 +280,13 @@ def emit_progress_loop(
                             stale.append(aid)
                 for aid in stale:
                     del progress_states[aid]
+                    progress_owners.pop(aid, None)
             if active:
-                socketio.emit('automation:progress', active)
+                # the app passes its admins' room: members hear their own
+                # runs only (#2170). no room (a bare caller) is the old push
+                if admin_room:
+                    emit_scoped(socketio.emit, 'automation:progress', active, admin_room)
+                else:
+                    socketio.emit('automation:progress', active)
         except Exception as e:
             logger.debug(f"Error emitting automation progress: {e}")

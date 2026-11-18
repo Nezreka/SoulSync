@@ -21,7 +21,7 @@ import {
 } from './docs';
 import { DOCS_FILES, installRealDocs } from './docs.test-utils';
 
-beforeAll(() => installRealDocs());
+beforeAll(() => installRealDocs({ readAs: 'admin' }));
 afterEach(() => resetDocs());
 
 describe('reading the registry', () => {

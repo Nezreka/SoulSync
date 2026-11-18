@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'settings',
+    needs: 'admin',
     title: 'Settings',
     icon: '⚙️',
     pages: [

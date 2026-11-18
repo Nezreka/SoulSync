@@ -815,6 +815,24 @@ def attach_retag_preview(conn, items: List[dict]) -> None:
             item['preview'] = rows
 
 
+def _duplicate_fix_action(action) -> tuple:
+    """a Keep Best action: 'keep_best' or 'file-<id>', then any of
+    ':confirmed' (the same recording, confirmed) and ':move' / ':nomove'
+    (#2172: move playlist entries to the kept copy, or not; neither follows
+    the job setting). (keeper file id or None, confirmed, move or None)"""
+    base, *flags = str(action or '').split(':')
+    flags = set(flags)
+    if not flags <= {'confirmed', 'move', 'nomove'}:
+        raise ValueError('Choose Keep Best or an exact native file from this review')
+    confirmed = 'confirmed' in flags or base == 'keep_best_confirmed'
+    move = True if 'move' in flags else False if 'nomove' in flags else None
+    if base.startswith('file-'):
+        return int(base.removeprefix('file-')), confirmed, move
+    if base in {'keep_best', 'keep_best_confirmed'}:
+        return None, confirmed, move
+    raise ValueError('Choose Keep Best or an exact native file from this review')
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -3864,21 +3882,29 @@ class RepairWorker:
             members = details.get('tracks') or []
             if native_id not in {int(row['track_id']) for row in members}:
                 raise ValueError('Finding subject is not in this native duplicate review')
-            action = str(details.get('_fix_action') or '')
-            confirm_recording = action.endswith(':confirmed') or action == 'keep_best_confirmed'
-            action = action.removesuffix(':confirmed')
-            keeper = None
-            if action.startswith('file-'):
-                keeper = int(action.removeprefix('file-'))
-            elif action not in {'keep_best', 'keep_best_confirmed'}:
-                raise ValueError('Choose Keep Best or an exact native file from this review')
+            keeper, confirm_recording, move = _duplicate_fix_action(details.get('_fix_action'))
         except (KeyError, TypeError, ValueError) as exc:
             return {'success': False, 'error': str(exc)}
         return apply_keep_best(
             self.db, details, config_manager=self._config_manager,
             transfer_folder=self.transfer_folder, approved=True, keep_file_id=keeper,
-            confirm_recording=confirm_recording,
+            confirm_recording=confirm_recording, move_playlist_entries=move,
         )
+
+    def duplicate_finding_preview(self, finding_id: int, action: str = '') -> Optional[dict]:
+        """#2172: what Keep Best would do for one duplicate finding, changing
+        nothing. ``action`` is the same string a fix sends"""
+        from core.library2.duplicate_review import preview_keep_best
+        details = self._finding_details(finding_id, 'native_duplicate_tracks')
+        if details is None:
+            return None
+        try:
+            keeper, confirm_recording, move = _duplicate_fix_action(action or 'keep_best')
+        except (TypeError, ValueError) as exc:
+            return {'success': False, 'error': str(exc)}
+        return preview_keep_best(
+            self.db, details, config_manager=self._config_manager, keep_file_id=keeper,
+            confirm_recording=confirm_recording, move_playlist_entries=move)
 
     def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
         """A suspect album tag is fixed by picking the right release, which
@@ -5985,6 +6011,61 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_artist_art',
                 'message': 'Applied artist image'}
 
+    def _finding_details(self, finding_id: int, finding_type: str) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT details_json FROM repair_findings WHERE id = ? AND finding_type = ?",
+                (int(finding_id), finding_type)).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if row is None:
+            return None
+        try:
+            return json.loads(row[0] or '{}') or {}
+        except (TypeError, ValueError):
+            return {}
+
+    def cover_finding_state(self, finding_id: int) -> Optional[dict]:
+        """#2169: a cover finding's three places as they are now, the found
+        cover, and what Apply Art would do in each"""
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_state
+        return cover_state(self.db, self._config_manager, finding_id, details)
+
+    def cover_finding_image(self, finding_id: int, place: str) -> Optional[bytes]:
+        details = self._finding_details(finding_id, 'missing_cover_art')
+        if details is None:
+            return None
+        from core.repair_jobs.cover_art_state import cover_image
+        return cover_image(self.db, self._config_manager, details, place)
+
+    def _cover_bytes_for_apply(self, album_id, found_url, library_has):
+        """the exact cover apply writes into files and folders: what the
+        library shows when it has a saved cover, else the found image. None
+        leaves the older lookup in charge"""
+        try:
+            if library_has:
+                from contextlib import closing
+                from core.library2.artwork import build_artwork
+                with closing(self.db._get_connection()) as conn:
+                    conn.row_factory = sqlite3.Row
+                    path = build_artwork(self.db, conn, self._config_manager, 'album', int(album_id))
+                if path and os.path.isfile(path):
+                    with open(path, 'rb') as handle:
+                        return handle.read() or None
+                return None
+            if found_url:
+                from core.library2.artwork import _download_remote_artwork
+                return _download_remote_artwork(found_url)
+        except Exception as e:  # noqa: BLE001 - the older lookup still runs
+            logger.debug("cover bytes for album %s not read: %s", album_id, e)
+        return None
+
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
         """Apply found artwork. ``_fix_action`` selects the target (Pache711):
         'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
@@ -6038,7 +6119,8 @@ class RepairWorker:
             if existing is None:
                 return {'success': False, 'error': 'Album not found in database'}
 
-            locked = bool(existing[1]) and bool((existing[0] or '').strip())
+            library_has = bool((existing[0] or '').strip())
+            locked = bool(existing[1]) and library_has
             if locked:
                 # A manual pick outranks a repair/provider candidate. Use the
                 # chosen URL for the sidecar/embed work below as well.
@@ -6048,10 +6130,11 @@ class RepairWorker:
                     "[repair] album %s art is locked — keeping the chosen cover",
                     native_album_id,
                 )
-            elif artwork_url and (details.get('db_missing', True) or not (existing[0] or '').strip()):
+            elif artwork_url and not library_has:
                 # only when the library has no cover: a finding for a file
                 # with no embedded art replaced the album's cover with the
-                # provider's (a 360px discogs image over a good one)
+                # provider's (a 360px discogs image over a good one). judged
+                # now, not at scan time: a cover saved since then is kept
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
@@ -6123,6 +6206,12 @@ class RepairWorker:
                 msg += ' + applied artist image'
             return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
+        # #2169: the files and the folder get one cover, the one the finding
+        # showed: the library's own when it has one (a pick included), else
+        # the found one. a lookup by the art order here could embed another
+        cover_bytes = self._cover_bytes_for_apply(
+            native_album_id, artwork_url if not library_has else None, library_has)
+
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
             'artist': artist_name, 'album_artist': artist_name,
@@ -6152,7 +6241,7 @@ class RepairWorker:
         art_result = {}
         for folder, folder_files in sorted(by_folder.items()):
             folder_result = apply_art_to_album_files(
-                folder_files, metadata, album_info, folder=folder,
+                folder_files, metadata, album_info, folder=folder, image_bytes=cover_bytes,
             )
             if not art_result:
                 art_result = dict(folder_result)

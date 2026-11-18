@@ -94,7 +94,7 @@ describe('the feed', () => {
     action: null,
   });
 
-  function feed(history: unknown[], filter = 'all') {
+  function feed(history: unknown[], filter = 'all', admin = true) {
     const state = { history, filter, openFamilies: {} };
     const html = lift<() => string>(
       [
@@ -110,6 +110,7 @@ describe('the feed', () => {
       '_notifEntriesHTML',
       {
         _notifState: state,
+        _notifViewerIsAdmin: () => admin,
         _escToast: esc,
         _escAttr: esc,
         _notifIcons: { success: 'S', error: 'E', warning: 'W', info: 'I' },
@@ -149,6 +150,9 @@ describe('the feed', () => {
 
   it('says so when there is nothing, and when a filter leaves nothing', () => {
     expect(feed([]).textContent).toContain('all caught up');
+    // a member's panel is their own notes, not the server's jobs (#2170)
+    expect(feed([], 'all', false).textContent).toContain('Your downloads and requests');
+    expect(feed([], 'all', false).textContent).not.toContain('scans and jobs');
     expect(feed([note('1', 'x', 'info', 1, true)], 'error').textContent).toContain(
       'Nothing with this filter',
     );

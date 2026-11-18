@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'automations',
+    needs: 'automations.personal',
     title: 'Automations',
     icon: '🤖',
     pages: [
@@ -296,6 +297,7 @@ Each automation card shows its **last run time**, **run count**, and last result
         },
         {
             id: 'auto-system',
+            needs: 'admin',
             title: 'System Automations',
             lede: 'Built-in maintenance automations that keep SoulSync healthy out of the box.',
             body: `

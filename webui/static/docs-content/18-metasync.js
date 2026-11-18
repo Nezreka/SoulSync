@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'metasync',
+    needs: 'admin',
     title: 'MetaSync',
     icon: '🌐',
     pages: [

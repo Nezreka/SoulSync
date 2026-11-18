@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 
+import { useMusicGet } from '@/platform/shell/download-rights';
+
 import {
   LIBRARY_V2_QUERY_KEY,
   libraryV2EnabledQueryOptions,
@@ -31,12 +33,16 @@ export function AlbumUpgradeButton({
   const enabled = useQuery(libraryV2EnabledQueryOptions()).data;
   const canWish = enabled?.canWish === true;
   const canWrite = enabled?.canWrite === true;
+  // #2173: an upgrade searches and downloads. a profile that asks first (or
+  // can't get music) never sees it; the server refuses it the same way
+  const live = useMusicGet().mode === 'download';
+  const canUpgrade = canWish && enabled?.canDownload === true && live;
   const enhance = useQuery({
     ...libraryV2EnhanceQueryOptions('artists', artistId ?? 0),
-    enabled: artistId != null && canWish,
+    enabled: artistId != null && canUpgrade,
   });
   const tracks = (enhance.data?.tracks ?? []).filter((t) => t.album_id === albumId);
-  if (!canWish || tracks.length === 0) return null;
+  if (!canUpgrade || tracks.length === 0) return null;
   return (
     <>
       <button

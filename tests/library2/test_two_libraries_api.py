@@ -259,6 +259,10 @@ def test_a_member_who_asks_first_wishes_but_never_starts_a_download(world):
                              json={"monitored": True}).status_code == 200
     r = world.client.post(f"/api/library/v2/artists/{house}/search", json={})
     assert r.status_code == 403
+    # #2173: Enhance Quality is a download too, from the page or the api
+    r = world.client.post(f"/api/library/v2/artists/{house}/enhance", json={"track_ids": []})
+    assert r.status_code == 403
+    assert "asks before downloading" in (r.get_json() or {}).get("error", "")
 
 
 def test_a_member_still_may_not_change_shared_files(world):

@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'troubleshooting',
+    needs: 'admin',
     title: 'Troubleshooting',
     icon: '🩺',
     pages: [
         {
             id: 'ts-help',
+            needs: 'everyone',
             title: 'The Help Button',
             lede: 'The ? at the bottom right opens help beside the page you are on.',
             body: `
@@ -39,6 +41,7 @@ A member gets the same panel without the admin parts: no status line, no Health,
         },
         {
             id: 'ts-search',
+            needs: 'everyone',
             title: 'Search and Ctrl K',
             lede: 'One search for help articles, settings, pages and actions.',
             body: `
@@ -136,6 +139,7 @@ Admins can download every log from the **Logs** tile in the Help panel, or with 
         },
         {
             id: 'ts-tours',
+            needs: 'everyone',
             title: "Tours, What's New and Shortcuts",
             lede: 'Short walkthroughs, the release notes, and every keyboard shortcut.',
             body: `

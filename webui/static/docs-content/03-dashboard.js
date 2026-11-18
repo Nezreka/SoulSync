@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'dashboard',
+    needs: 'admin',
     title: 'Dashboard',
     icon: '📊',
     pages: [
         {
             id: 'dash-overview',
+            needs: 'music.dashboard',
             title: 'Overview & Stats',
             lede: 'Your command center: library stats, alerts, and sync pipelines — all updating live.',
             body: `
@@ -53,6 +55,7 @@ Each history entry is expandable — click to reveal source provenance details:
         },
         {
             id: 'dash-global-search',
+            needs: 'everyone',
             title: 'Global Search',
             lede: 'The floating global search bar was retired — here is what replaced it.',
             body: `
@@ -130,6 +133,7 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
         },
         {
             id: 'dash-tools',
+            needs: 'music.dashboard',
             title: 'Dashboard Sidebar',
             lede: 'Live cards for your week, sync pipelines, automations, and quick navigation.',
             body: `
@@ -253,7 +257,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Orphan File Detector | Finds audio files in your output folder not tracked in the database |
 | Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
-| Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
+| Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). Each finding shows all three plus the cover a source found and which source, an empty box where there is none, and lists what **Apply Art** writes in each place. A library cover is copied to the files and folder; with none, the found cover is saved; a missing cover.jpg comes from the cover inside the files when they have one. A cover you have is never replaced. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
 | Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
 | Library Reorganize | Restructures folders to match your path templates |
@@ -279,7 +283,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
 | Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist. With **Artists** set to library it also walks every artist you own a release by (the old Discography Backfill) and files a finding for each release you don't have (Add to Wishlist on each, or turn on auto add) |
 | Album Completeness | Finds albums you mostly own and wishlists the missing tracks (Fill Album). A song you already have on its single is never downloaded again |
-| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
+| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. A copy in your media server's playlists stays, unless every playlist it is in also holds the kept copy. **Playlists That Never Protect** names playlists (one per \`;\`) that never keep a copy, like a smart playlist of unsorted files. With **Move Playlist Entries** on, or the switch on a finding, the removed copy's entry in a playlist the kept copy is not in is pointed at the kept copy first, in the same place; smart playlists are never changed and a copy whose entry can't move stays. The finding shows what Keep Best will do before you confirm. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
 | Quality Profile Audit | Flags library tracks below their quality profile, including ones not on the Wishlist. You decide per finding: **Wishlist & Upgrade**, or leave it. Changes nothing on its own |
 | Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
 | Album Edition Review | Suggests the release edition that best matches the tracks you own |
@@ -294,6 +298,7 @@ An upgrade from 3.6.1 merges each release your older media servers listed twice 
         },
         {
             id: 'dash-activity',
+            needs: 'music.dashboard',
             title: 'Recent Activity',
             lede: 'The dashboard has no dedicated activity feed — here is where recent events actually surface.',
             body: `
@@ -313,6 +318,7 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
         },
         {
             id: 'dash-notifications',
+            needs: 'everyone',
             title: 'Notifications',
             lede: 'The bell in the corner: what just happened, what is running, and whether anything needs you.',
             body: `
@@ -331,6 +337,10 @@ The bell sits bottom right on every page. The red count is notes you have not se
 
 **Escape** closes the panel. The panel is filled from the server's journal when a page loads, so a reload does not empty it; the bin in the header clears the panel only.
 
+## What a member sees
+
+The panel is everyone's, but what the server is doing is the admin's. A member's panel holds their own notes, their own downloads, their own automations and their listening imports. Health, the footer (downloads across the server, uptime, memory), library scans, repair jobs, the wishlist run and the video jobs are not there, and the server refuses those feeds to a member too.
+
 ## Toasts
 
 A note appears above the bell as it happens. Up to three stand at once, and the line along the bottom is the time left: it stops while you point at the toast. Problems stay about twice as long as good news. Click a toast to dismiss it.
@@ -342,6 +352,7 @@ The clock button opens the journal the server keeps for your profile: search, th
         },
         {
             id: 'dash-stats-deep',
+            needs: 'music.stats',
             title: 'Stats in Depth',
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',
             body: `

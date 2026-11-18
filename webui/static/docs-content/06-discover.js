@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'discover',
+    needs: 'music.discover',
     title: 'Discover Artists',
     icon: '✨',
     pages: [
@@ -153,6 +154,7 @@ Three interactive canvas-based visualization modes for exploring artist relation
         },
         {
             id: 'disc-stats',
+            needs: 'music.stats',
             title: 'Listening Stats',
             lede: 'Analytics about your library and listening activity.',
             body: `
@@ -176,6 +178,7 @@ The **Library** tab shows operational facts instead: Library Health, Library Dis
 
 registerDocsSection({
     id: 'chat-jukebox',
+    needs: 'chat.use',
     title: 'Chat & Jukebox',
     icon: '💬',
     pages: [

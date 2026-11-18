@@ -10,7 +10,7 @@ import { Markdown } from './search/markdown';
 import { useHelpStore } from './store';
 
 beforeAll(async () => {
-  installRealDocs();
+  installRealDocs({ readAs: 'admin' });
   await loadDocs();
 });
 

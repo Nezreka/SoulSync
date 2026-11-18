@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'import',
+    needs: 'music.import',
     title: 'Import Music',
     icon: '📥',
     pages: [
         {
             id: 'imp-setup',
+            needs: 'admin',
             title: 'Import Folder',
             lede: 'Drop audio files in a folder — or upload from your browser — and SoulSync identifies and files them.',
             body: `
@@ -47,6 +49,7 @@ The **Import Needs Attention** automation trigger fires whenever the watcher lea
         },
         {
             id: 'imp-auto',
+            needs: 'admin',
             title: 'Auto-import',
             lede: 'Let the watcher identify and import high-confidence matches on its own.',
             body: `
@@ -90,6 +93,7 @@ A single file gets the same matcher with track candidates instead of releases. P
         },
         {
             id: 'imp-textfile',
+            needs: 'music.playlist_sync',
             title: 'Import from Text File',
             lede: 'Turn a CSV, TSV, TXT, or M3U playlist into a mirrored playlist on the sync page.',
             body: `
@@ -109,6 +113,7 @@ The sync page's **Import Playlist from File** tab takes a **CSV**, **TSV**, **TX
 
 registerDocsSection({
     id: 'player',
+    needs: 'music.access',
     title: 'Media Player',
     icon: '▶️',
     pages: [

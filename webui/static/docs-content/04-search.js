@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'search',
+    needs: 'music.search',
     title: 'Music Downloads',
     icon: '⬇️',
     pages: [
@@ -60,6 +61,7 @@ Narrow results by:
         },
         {
             id: 'search-sources',
+            needs: 'admin',
             title: 'Download Sources',
             lede: 'Ten download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
             body: `
@@ -104,6 +106,7 @@ Tidal, Qobuz, HiFi, and Deezer have no per-source quality setting in SoulSync �
         },
         {
             id: 'search-downloading',
+            needs: 'music.get',
             title: 'Downloading Music',
             lede: 'Pick an album or track, choose exactly what you want, and watch each track move through the pipeline.',
             body: `
@@ -134,6 +137,7 @@ If a download fails — or no suitable file is found — you can open the cached
         },
         {
             id: 'search-postprocess',
+            needs: 'admin',
             title: 'Post-Processing Pipeline',
             lede: 'Every download is verified, tagged, organized, and scanned into your library automatically.',
             body: `
@@ -157,6 +161,7 @@ After a file finishes downloading, it moves through an automatic pipeline before
         },
         {
             id: 'search-quality',
+            needs: 'admin',
             title: 'Quality Profiles',
             lede: 'Tell SoulSync what "good enough" means — from strict audiophile to space-saving.',
             body: `
@@ -178,6 +183,7 @@ Each format has configurable bitrate ranges and a priority order. Enable **Fallb
         },
         {
             id: 'search-manager',
+            needs: 'music.downloads',
             title: 'Download Manager',
             lede: 'Every active and completed download in one place, with live progress and per-track status.',
             body: `
@@ -201,6 +207,7 @@ Use **Clear Completed** on the Active Downloads page to clean up finished items 
 
 registerDocsSection({
     id: 'hydrabase',
+    needs: 'admin',
     title: 'Hydrabase',
     icon: '🌐',
     pages: [

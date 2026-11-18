@@ -88,10 +88,13 @@ export function AlbumArtPickerModal({
   albumId,
   albumTitle,
   onClose,
+  onApplied,
 }: {
   albumId: number;
   albumTitle: string;
   onClose: () => void;
+  /** after a pick landed: the Tools page closes the cover finding it came from */
+  onApplied?: (outcome: ArtApplyOutcome) => void;
 }) {
   const queryClient = useQueryClient();
   // iss27-03: a 5-minute server cache can pin a partial result from a
@@ -114,6 +117,7 @@ export function AlbumArtPickerModal({
       const outcome = await applyLibraryV2AlbumArt(albumId, url);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       announce(outcome, 'cover');
+      onApplied?.(outcome);
       onClose();
     } catch (caught) {
       // dd28-23: a client-side abort does not cancel the server-side apply —

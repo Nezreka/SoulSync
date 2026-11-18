@@ -72704,6 +72704,9 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-detail-subitem .repair-remove-badge { background: rgba(var(--warning-rgb), 0.14); color: var(--warning); }
 #tools-page .repair-detail-subitem .repair-in-playlist { color: var(--accent-light); }
+/* #2172: keep best can move a removed copy's playlist entries */
+#tools-page .repair-duplicate-move { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 4px 0 12px; font-size: 13px; color: var(--text-1); }
+#tools-page .repair-duplicate-move-note { flex-basis: 100%; padding-left: 24px; font-size: 12px; color: var(--text-3); }
 
 /* meters */
 #tools-page .repair-score-bar { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; align-items: center; gap: 16px; padding: 3px 0; }
