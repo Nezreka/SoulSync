@@ -3025,9 +3025,10 @@ class RepairWorker:
 
         if groups.get('native_duplicate_tracks', {}).get('pending'):
             # #2179: how many open duplicates a Keep Best all leaves for a person
-            summary = self.keep_best_summary(job_id=job_id, severity=severity)
-            groups['native_duplicate_tracks']['needs_you'] = (
-                summary['total'] - summary['ready'] if summary else 0)
+            # counted in sql: the groups load often, and parsing every
+            # finding's details here would grow with the library
+            groups['native_duplicate_tracks']['needs_you'] = self._needs_you_count(
+                job_id=job_id, severity=severity)
         for finding_type, group in groups.items():
             group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
             group['manual_conflicts'] = manual_by_type.get(finding_type, 0)
@@ -3937,6 +3938,34 @@ class RepairWorker:
         return preview_keep_best(
             self.db, details, config_manager=self._config_manager, keep_file_id=keeper,
             confirm_recording=confirm_recording, move_playlist_entries=move)
+
+    def _needs_you_count(self, job_id: str = None, severity: str = None) -> int:
+        """#2179: open duplicates a Keep Best all leaves for a person, by the
+        sql twin of keep_best_blockers. 0 when it can't be read"""
+        where = ["status = 'pending'", _NEEDS_YOU_SQL]
+        params: List[Any] = []
+        if job_id:
+            where.append("job_id = ?")
+            params.append(job_id)
+        if severity:
+            where.append("severity = ?")
+            params.append(severity)
+        library = _findings_library_clause()
+        if library:
+            where.append(library)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM repair_findings WHERE {' AND '.join(where)}",
+                params).fetchone()
+            return int(row[0] or 0) if row else 0
+        except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+            logger.debug("Keep Best needs-you count unavailable: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
 
     def keep_best_summary(self, job_id: str = None, severity: str = None,
                           finding_ids: List[int] = None) -> Optional[dict]:
