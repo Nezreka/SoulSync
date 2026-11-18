@@ -59,10 +59,11 @@ def _navidrome(client: Any, playlist: Any, ids: List[str], old_id: str, new_id: 
 
 def _jellyfin(client: Any, playlist: Any, old_id: str, new_id: str) -> bool:
     import requests
+    from core.jellyfin_client import jellyfin_auth_headers
     entries = client._playlist_entries(playlist.id)
     if entries is None:
         return False
-    hdr = {"X-Emby-Token": client.api_key, "Authorization": client._auth_header()}
+    hdr = jellyfin_auth_headers(client.api_key)
     items_url = f"{client.base_url}/Playlists/{playlist.id}/Items"
     for index, (tid, entry_id) in enumerate(list(entries)):
         if tid != old_id:
