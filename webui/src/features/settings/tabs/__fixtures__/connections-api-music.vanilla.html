@@ -403,12 +403,14 @@
                                                             Account</a></div>
                                                     <div class="callback-help">API key: used for metadata enrichment.
                                                         API secret: required for scrobbling.</div>
+                                                    <div class="callback-help" id="lastfm-pro-note">Last.fm API keys need a Pro subscription from 1 December 2026. Without one, SoulSync fills in from free sources (ListenBrainz, Deezer).</div>
                                                 </div>
                                                 <div class="form-group" style="margin-top: 12px;">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="lastfm-scrobble-enabled">
                                                         Scrobble plays to Last.fm
                                                     </label>
+                                                    <div class="setting-help-text">ListenBrainz is the recommended scrobbler: free, no subscription.</div>
                                                 </div>
                                                 <div class="form-actions" id="lastfm-scrobble-actions">
                                                     <button class="test-button"
@@ -632,6 +634,7 @@
                                                         <input type="checkbox" id="listenbrainz-scrobble-enabled">
                                                         Scrobble plays to ListenBrainz
                                                     </label>
+                                                    <div class="setting-help-text" id="listenbrainz-recommended">Recommended for scrobbling: free and open, no subscription. Last.fm API keys need Pro from 1 December 2026.</div>
                                                 </div>
                                                 <div class="form-actions">
                                                     <button class="test-button" type="button" onclick="testConnection('listenbrainz')">Test Connection</button>
