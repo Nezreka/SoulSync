@@ -285,6 +285,16 @@ def test_a_write_the_server_did_not_take_is_a_failure():
     assert out["moved"] == [] and out["failed"]
 
 
+def test_a_playlist_that_reads_empty_is_not_counted_as_moved():
+    # navidrome returns [] when getPlaylist fails: that must not read as
+    # "the old copy is not in it", or the copy goes and the entry breaks
+    from core.sync.playlist_entry_move import move_entries
+    client = _Navidrome([])
+    out = move_entries("navidrome", client, ["Chill"], "old", "new")
+    assert out["moved"] == [] and out["failed"] == [("Chill", "could not read the playlist")]
+    assert client.writes == []
+
+
 def test_the_worker_previews_a_finding_without_touching_it(library):
     import json
     from core.repair_worker import RepairWorker

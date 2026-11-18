@@ -135,7 +135,8 @@ def move_entries(server: str, client: Any, titles: Iterable[str], old_id: str, n
                 ok = False
                 break
             ids = _track_ids(server, client, playlist)
-            if ids is None:
+            # an empty read is a failed read here: the copy was found in this playlist
+            if not ids:
                 out["failed"].append((title, "could not read the playlist"))
                 ok = False
                 break
