@@ -204,3 +204,33 @@ def build_install(tmp_path: Path, shape: str, *, migrate: bool = True):
 __all__ = ["BUILTIN", "member_perms", "member_ctx", "admin_ctx", "broken_ctx", "legacy_row", "SHAPES",
            "EXPECTED_FLAGGED", "make_db", "unmigrate", "insert_profiles", "raw_columns", "layers",
            "run_migration", "build_install"]
+
+
+# ── sign-ups (#2166 follow-up 7) ─────────────────────────────────────────
+
+def signup_not_moved(db):
+    """a generator for a fixture: the shared test database as an install
+    whose old sign-up settings haven't moved to a template yet, the sign-up
+    template Guest. anything the test's sign-ins create (a "New sign-ups"
+    template, the moved flag) is undone after.
+
+        @pytest.fixture(autouse=True)
+        def _signup(): yield from signup_not_moved(web_server.get_database())
+    """
+    from core import permission_store as PS
+    keys = (PS.SIGNUP_MOVED_KEY, "perm_signup_template")
+    saved = {k: db.get_metadata(k) for k in keys}
+    before = {int(t["id"]) for t in db.list_permission_templates()}
+    guest = next((t["id"] for t in db.list_permission_templates() if t.get("slug") == "guest"), None)
+    db.delete_metadata(PS.SIGNUP_MOVED_KEY)
+    if guest is not None:
+        db.set_metadata("perm_signup_template", str(guest))
+    yield
+    for t in db.list_permission_templates():
+        if int(t["id"]) not in before:
+            db.delete_permission_template(int(t["id"]), reassign_to=guest)
+    for k, v in saved.items():
+        if v is None:
+            db.delete_metadata(k)
+        else:
+            db.set_metadata(k, v)

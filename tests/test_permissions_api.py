@@ -50,6 +50,20 @@ def other(db):
 
 
 @pytest.fixture(autouse=True)
+def _signup_settings_moved(db):
+    """the old sign-up settings already moved (#2166): templates stay the
+    four built-ins whatever sign-in settings earlier tests saved"""
+    from core import permission_store as PS
+    saved = db.get_metadata(PS.SIGNUP_MOVED_KEY)
+    db.set_metadata(PS.SIGNUP_MOVED_KEY, "1")
+    yield
+    if saved is None:
+        db.delete_metadata(PS.SIGNUP_MOVED_KEY)
+    else:
+        db.set_metadata(PS.SIGNUP_MOVED_KEY, saved)
+
+
+@pytest.fixture(autouse=True)
 def _open_policy(db):
     db.set_permission_policy_raw("{}")
     yield
