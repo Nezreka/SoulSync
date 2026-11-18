@@ -25,6 +25,7 @@ import {
 } from 'react';
 
 import { settingsStore } from '../settings-store';
+import { markVideoShown } from './video-shown';
 
 export type Kind = 'music' | 'video';
 
@@ -367,6 +368,14 @@ export function ServicesPart({
     ))
       g.classList.toggle('svc-side-active', g.getAttribute('data-svc-side') === state.kind);
   }, [state.kind, state.version]);
+
+  // Video picked on the music side: the video server, keys and download
+  // sections are drawn but only ever loaded when the video side's settings
+  // page is shown, so they sat at Loading... Load them here too.
+  useEffect(() => {
+    if (state.kind === 'video' && document.body.getAttribute('data-side') !== 'video')
+      markVideoShown();
+  }, [state.kind, opened]);
 
   // open: the card's name over it, a vanilla card lifted in by hand
   useLayoutEffect(() => {

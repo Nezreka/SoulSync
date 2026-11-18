@@ -11,6 +11,7 @@ import { settingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
 import { servicesModel, ServicesPart } from './connections-services';
 import { ConnectionsTab } from './connections-tab';
+import { videoShown } from './video-shown';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -124,6 +125,22 @@ describe('the tiles', () => {
     fireEvent.click(document.querySelectorAll<HTMLElement>('#svc-tabs button')[0]);
     act(() => servicesModel.rebuild());
     expect(document.querySelector('#svc-tabs .active')!.textContent).toBe('Music');
+  });
+
+  it('picking Video on the music side loads the video sections, as the video side does', () => {
+    page();
+    act(() => servicesModel.rebuild());
+    const before = videoShown.get();
+    fireEvent.click(document.querySelectorAll<HTMLElement>('#svc-tabs button')[1]);
+    expect(document.querySelector('#svc-tabs .active')!.textContent).toBe('Video');
+    // the server section's libraries sat at Loading... until the video side opened
+    expect(videoShown.get()).toBe(before + 1);
+    // the video side loads them itself when its page is shown: not twice
+    fireEvent.click(document.querySelectorAll<HTMLElement>('#svc-tabs button')[0]);
+    document.body.setAttribute('data-side', 'video');
+    const onVideo = videoShown.get();
+    fireEvent.click(document.querySelectorAll<HTMLElement>('#svc-tabs button')[1]);
+    expect(videoShown.get()).toBe(onVideo);
   });
 });
 

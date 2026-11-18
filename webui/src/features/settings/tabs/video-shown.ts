@@ -13,10 +13,19 @@ export const VIDEO_SETTINGS_PAGE = 'video-settings';
 let shown = 0;
 const listeners = new Set<() => void>();
 
-function heard(event: Event) {
-  if ((event as CustomEvent<string>).detail !== VIDEO_SETTINGS_PAGE) return;
+/**
+ * Load the video sections now: the video side's settings page was shown, or
+ * the music side's Connections switched its services to Video, which draws
+ * the same sections with nothing to fill them.
+ */
+export function markVideoShown() {
   shown += 1;
   for (const listener of listeners) listener();
+}
+
+function heard(event: Event) {
+  if ((event as CustomEvent<string>).detail !== VIDEO_SETTINGS_PAGE) return;
+  markVideoShown();
 }
 if (typeof document !== 'undefined') document.addEventListener('soulsync:video-page-shown', heard);
 
