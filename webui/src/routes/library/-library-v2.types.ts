@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { ReleaseStatus } from '@/components/release-statuses';
+
 // Single route `/library` with the current view driven by search params:
 //   - artist set -> artist detail (albums expand inline)
 //   - album set  -> directly addressable album detail
@@ -412,6 +414,10 @@ export interface LibraryV2ArtistSettings {
   include_compilations: boolean;
   include_instrumentals: boolean;
   include_other_artists: boolean;
+  /** #2175: the artist's own MusicBrainz release statuses, null = the library's */
+  release_statuses?: ReleaseStatus[] | null;
+  /** #2175: the library-wide statuses it follows when it has none of its own */
+  library_release_statuses?: ReleaseStatus[];
   auto_download: boolean;
   lookback_days: number | null;
   preferred_metadata_source: string | null;

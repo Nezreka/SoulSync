@@ -538,6 +538,9 @@ class WatchlistArtist:
     profile_id: int = 1
     # #1822: True = uses the watchlist defaults for the release rules above
     follow_defaults: bool = False
+    # #2175: the MusicBrainz release statuses this artist lets through, a JSON
+    # list. None = the library-wide ones (core.release_statuses)
+    allowed_release_statuses: Optional[str] = None
 
 @dataclass
 class SimilarArtist:
@@ -1669,6 +1672,8 @@ class MusicDatabase:
             self._add_watchlist_follow_defaults_column(cursor)
             # #2082: live tracks apart from live albums. same ordering rule.
             self._add_watchlist_live_tracks_column(cursor)
+            # #2175: per-artist release statuses. same ordering rule.
+            self._add_watchlist_release_statuses_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -4443,6 +4448,22 @@ class MusicDatabase:
             logger.info("Added include_live_tracks column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding include_live_tracks to watchlist_artists: {e}")
+
+    def _add_watchlist_release_statuses_column(self, cursor):
+        """Add allowed_release_statuses (#2175): the MusicBrainz release
+        statuses an artist lets through, a JSON list. NULL follows the
+        library-wide list, and nothing is stamped, so every artist's scan
+        applies the rules it applied the day before."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if not columns or 'allowed_release_statuses' in columns:
+                return
+            cursor.execute(
+                "ALTER TABLE watchlist_artists ADD COLUMN allowed_release_statuses TEXT DEFAULT NULL")
+            logger.info("Added allowed_release_statuses column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding allowed_release_statuses to watchlist_artists: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -19287,7 +19308,7 @@ class MusicDatabase:
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
                                    'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults',
-                                   'include_live_tracks']
+                                   'include_live_tracks', 'allowed_release_statuses']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -19374,6 +19395,9 @@ class MusicDatabase:
                         follow_defaults=bool(row['follow_defaults'])
                         if 'follow_defaults' in existing_columns and row['follow_defaults'] is not None
                         else False,
+                        allowed_release_statuses=(row['allowed_release_statuses']
+                                                  if 'allowed_release_statuses' in existing_columns
+                                                  else None),
                     ))
 
                 return watchlist_artists

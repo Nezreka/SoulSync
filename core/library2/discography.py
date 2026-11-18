@@ -68,6 +68,49 @@ def _stamp_release_types(cursor: Any, album_id: Any, release_group_id: Any, rele
     stamp(cursor, album_id, release_group_id, kinds)
 
 
+def _release_status_lookup(conn: Any, artist: Any, artist_id: int, profile_id: int,
+                           source: Any, provider_result: Any,
+                           source_artist_ids: Dict[str, Any]) -> tuple:
+    """#2175: the MusicBrainz statuses this artist lets through, and each
+    release group's statuses when they keep anything out. Only a
+    MusicBrainz catalogue has them: any other source gets (allowed, None)
+    and nothing is kept out by status."""
+    from core.release_statuses import fetch_group_statuses, is_restrictive
+
+    allowed = _artist_content_filters(conn, artist_id, profile_id).get("release_statuses")
+    if source != "musicbrainz" or not is_restrictive(allowed):
+        return allowed, None
+    keys = artist.keys() if hasattr(artist, "keys") else ()
+    mbid = (getattr(provider_result, "provider_entity_id", None)
+            or source_artist_ids.get("musicbrainz")
+            or (artist["musicbrainz_id"] if "musicbrainz_id" in keys else None))
+    if not mbid:
+        return allowed, None
+    return allowed, fetch_group_statuses(str(mbid))
+
+
+def _group_statuses_for(group_statuses: Any, release_group_id: Any) -> Any:
+    """A release group's statuses from the lookup, None when not known."""
+    if not group_statuses or not release_group_id:
+        return None
+    return group_statuses.get(str(release_group_id).strip().lower())
+
+
+def _statuses_allowed(statuses: Any, allowed: Any) -> bool:
+    from core.release_statuses import statuses_pass
+    return statuses_pass(statuses, allowed)
+
+
+def _stamp_release_statuses(cursor: Any, album_id: Any, release_group_id: Any,
+                            statuses: Any) -> None:
+    """Keep what MusicBrainz said, so the Discography Refresh findings can
+    go by it without asking again (#2175)."""
+    if statuses is None:
+        return
+    from core.release_statuses import stamp
+    stamp(cursor, album_id, release_group_id, statuses)
+
+
 def _normalize_type(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in {"album", "single", "ep", "compilation", "live"}:
@@ -345,8 +388,20 @@ def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[s
         live_tracks = settings.get("include_live_tracks")
         filters["include_live_tracks"] = (
             filters["include_live"] if live_tracks is None else bool(live_tracks))
+        # #2175: the MusicBrainz statuses this artist lets through
+        filters["release_statuses"] = tuple(
+            settings.get("effective_release_statuses") or _library_release_statuses())
         return filters
-    return dict(_CONTENT_FILTER_DEFAULTS)
+    return {**_CONTENT_FILTER_DEFAULTS, "release_statuses": _library_release_statuses()}
+
+
+def _library_release_statuses() -> tuple:
+    from core.release_statuses import library_statuses
+    try:
+        from core.settings import config_manager
+    except Exception:  # noqa: BLE001 - no config reads as every status
+        config_manager = None
+    return library_statuses(config_manager)
 
 
 def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
@@ -528,7 +583,7 @@ def _expand_artist_discography(
     with closing(database._get_connection()) as conn:
         artist = conn.execute(
             "SELECT id, name, spotify_id, external_ids, quality_profile_id, monitored, monitor_new_items, "
-            "discography_synced_at FROM lib2_artists WHERE id=?",
+            "discography_synced_at, musicbrainz_id FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
         if not artist:
@@ -578,6 +633,11 @@ def _expand_artist_discography(
         stats["source"] = source
         stats["total"] = len(provider_result.releases)
         stats["is_complete"] = provider_result.is_complete
+
+        # #2175: asked before any write, so no transaction waits on MusicBrainz
+        allowed_statuses, group_statuses = _release_status_lookup(
+            conn, artist, artist_id, filter_profile_id, source, provider_result,
+            source_artist_ids)
 
         from core.library2.provider_snapshots import record_provider_snapshot
         snapshot_write = record_provider_snapshot(
@@ -664,6 +724,10 @@ def _expand_artist_discography(
             if (auto_monitor_release and content_filters is not None
                     and not _release_type_included(track_count, content_filters)):
                 auto_monitor_release = False
+            release_statuses = _group_statuses_for(group_statuses, release_group_id)
+            if (auto_monitor_release and content_filters is not None
+                    and not _statuses_allowed(release_statuses, allowed_statuses)):
+                auto_monitor_release = False
             if (
                 auto_monitor_release
                 and content_filters is not None
@@ -713,6 +777,8 @@ def _expand_artist_discography(
                 if release_group_id and str(
                         existing["musicbrainz_release_group_id"]).lower() == str(release_group_id).lower():
                     _stamp_release_types(cursor, existing["id"], release_group_id, release)
+                    _stamp_release_statuses(cursor, existing["id"], release_group_id,
+                                            release_statuses)
                 if id_conflict:
                     from core.library2.editions import record_alternative_edition
                     record_alternative_edition(
@@ -749,6 +815,7 @@ def _expand_artist_discography(
             confirm_release_kind(cursor, new_id, album_type)
             if release_group_id:
                 _stamp_release_types(cursor, new_id, release_group_id, release)
+                _stamp_release_statuses(cursor, new_id, release_group_id, release_statuses)
             seen_ids.add(new_id)
             if auto_monitor_release:
                 if not defer_auto_monitor:

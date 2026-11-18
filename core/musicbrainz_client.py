@@ -747,6 +747,25 @@ class MusicBrainzClient:
             logger.error(f"Error browsing releases for release-group {release_group_mbid}: {e}")
             return []
 
+    def browse_artist_releases(self, artist_mbid: str, limit: int = 100,
+                               offset: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """Browse an artist's concrete releases with each one's status and
+        release group (#2175: a release group's statuses). None on an error,
+        so a caller can tell "MusicBrainz didn't answer" from "no releases"."""
+        try:
+            response = self._get("/release", params={
+                'artist': artist_mbid,
+                'fmt': 'json',
+                'limit': min(limit, 100),
+                'offset': offset,
+                'inc': 'release-groups',
+            })
+            response.raise_for_status()
+            return response.json().get('releases', [])
+        except Exception as e:
+            logger.error(f"Error browsing releases for artist {artist_mbid}: {e}")
+            return None
+
     def browse_recording_releases(self, recording_mbid: str, limit: int = 100,
                                   offset: int = 0) -> List[Dict[str, Any]]:
         """Browse the releases one recording is on, with each one's release

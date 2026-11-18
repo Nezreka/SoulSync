@@ -680,6 +680,11 @@ _ADDED_COLUMNS = (
     # Not secondary_types, which path templates read: see release_group_types.
     ("lib2_albums", "release_group_types",
      "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
+    # The MusicBrainz statuses (official, bootleg, ...) of the group's
+    # releases, with the group they were read from (#2175). Read by the
+    # watchlist's release status filter. See core/release_statuses.py.
+    ("lib2_albums", "release_statuses",
+     "ALTER TABLE lib2_albums ADD COLUMN release_statuses TEXT"),
     # The last automatic upgrade attempt for a track (#2060): when, how many
     # in a row found nothing, and against which file. See upgrade_attempts.
     ("lib2_tracks", "upgrade_attempt",

@@ -135,6 +135,21 @@ def _release_rules(watchlist, columns: Iterable[str]) -> tuple[Dict[str, bool], 
     return effective_rules(row, config_manager, override), follows_defaults(row, override)
 
 
+def _release_status_settings(watchlist, columns: Iterable[str]) -> Dict[str, Any]:
+    """#2175: the artist's own MusicBrainz statuses (None = the library's),
+    the library's, and the ones a scan applies."""
+    from core.release_statuses import ARTIST_COLUMN, artist_override, library_statuses
+    from core.settings import config_manager
+
+    own = artist_override(watchlist) if ARTIST_COLUMN in columns else None
+    library = library_statuses(config_manager)
+    return {
+        "release_statuses": list(own) if own else None,
+        "library_release_statuses": list(library),
+        "effective_release_statuses": list(own or library),
+    }
+
+
 def get_artist_settings(conn, artist_id: int, *, profile_id: int = 1) -> Dict[str, Any]:
     """Return lib2 + watchlist settings for one monitored artist."""
     artist = _artist_row(conn, artist_id)
@@ -156,6 +171,7 @@ def get_artist_settings(conn, artist_id: int, *, profile_id: int = 1) -> Dict[st
         "monitor_new_items": artist["monitor_new_items"] or "all",
         **rules,
         "follow_defaults": following,
+        **_release_status_settings(watchlist, columns),
         "auto_download": _bool_value(watchlist, columns, "auto_download", True),
         "lookback_days": watchlist["lookback_days"] if "lookback_days" in columns else None,
         "preferred_metadata_source": (
@@ -204,6 +220,21 @@ def update_artist_settings(
         for field in ("include_albums", "include_eps", "include_singles")
     ):
         raise ArtistSettingsError("At least one of Albums, EPs or Singles must be enabled")
+
+    if "release_statuses" in updates:
+        # #2175: null follows the library-wide statuses, a list is the artist's own
+        from core.release_statuses import (
+            ARTIST_COLUMN, ReleaseStatusError, encode, validate_allowed)
+        raw_statuses = updates["release_statuses"]
+        if raw_statuses is None:
+            encoded = None
+        else:
+            try:
+                encoded = encode(validate_allowed(raw_statuses))
+            except ReleaseStatusError as exc:
+                raise ArtistSettingsError(str(exc)) from exc
+        if ARTIST_COLUMN in columns:
+            values[ARTIST_COLUMN] = encoded
 
     if "lookback_days" in updates:
         lookback = updates["lookback_days"]

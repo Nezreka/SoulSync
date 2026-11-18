@@ -30,6 +30,14 @@ import {
 } from '@/components/card-size';
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import {
+  describeStatuses,
+  normalizeOverride,
+  normalizeStatuses,
+  RELEASE_STATUS_COPY,
+  RELEASE_STATUSES,
+  toggleStatus,
+} from '@/components/release-statuses';
+import {
   routedNamesQueryOptions,
   useAudiobookFolderConfigured,
   useSetAudiobookRoute,
@@ -2297,6 +2305,12 @@ export function ArtistSettingsModal({
 
   const sourceOptions = settingsQuery.data?.metadata_sources ?? [];
   const watchlist = artist.monitored ? draft : null;
+  // #2175: the artist's own MusicBrainz statuses, null = the library's
+  const libraryStatuses = normalizeStatuses(watchlist?.library_release_statuses);
+  const ownStatuses = normalizeOverride(watchlist?.release_statuses);
+  function setOwnStatuses(statuses: LibraryV2ArtistSettings['release_statuses']) {
+    setDraft((current) => (current ? { ...current, release_statuses: statuses } : current));
+  }
 
   return (
     <LibraryToolDialog
@@ -2417,6 +2431,39 @@ export function ArtistSettingsModal({
                           onChange={(checked) => setBoolean(field, checked)}
                         />
                       ))}
+                    </div>
+                  </fieldset>
+                  <fieldset className={ls.group}>
+                    <legend className={ls.groupHint}>Release status</legend>
+                    <div className={ls.rows}>
+                      <SwitchRow
+                        label="Use the library's statuses"
+                        sub={`Grabbing ${describeStatuses(
+                          ownStatuses ?? libraryStatuses,
+                        )}. Statuses come from MusicBrainz; a release without one always gets through.`}
+                        checked={ownStatuses === null}
+                        onChange={(checked) =>
+                          setOwnStatuses(checked ? null : [...libraryStatuses])
+                        }
+                      />
+                    </div>
+                    <div className={ls.chips} role="group" aria-label="Release statuses">
+                      {RELEASE_STATUSES.map((status) => {
+                        const shown = ownStatuses ?? libraryStatuses;
+                        const on = shown.includes(status);
+                        return (
+                          <ChipCheck
+                            key={status}
+                            label={RELEASE_STATUS_COPY[status].label}
+                            title={RELEASE_STATUS_COPY[status].hint}
+                            checked={on}
+                            disabled={ownStatuses === null || (on && shown.length === 1)}
+                            onChange={(checked) =>
+                              setOwnStatuses(toggleStatus(shown, status, checked))
+                            }
+                          />
+                        );
+                      })}
                     </div>
                   </fieldset>
                   <div className={ls.fields}>

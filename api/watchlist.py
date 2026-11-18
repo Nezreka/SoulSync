@@ -144,7 +144,7 @@ def register_routes(bp):
         Body: {"include_albums": true, "include_live": false, ...}
         Accepts any combination of: include_albums, include_eps, include_singles,
         include_live, include_live_tracks, include_remixes, include_acoustic,
-        include_compilations, follow_defaults.
+        include_compilations, follow_defaults, release_statuses.
 
         include_live is about live albums, include_live_tracks about a live
         version on any other release. Until include_live_tracks is sent once
@@ -153,6 +153,11 @@ def register_routes(bp):
         follow_defaults true puts the artist back on the watchlist defaults.
         Sending release rules for an artist that follows the defaults gives it
         its own rules, starting from the defaults it was getting (#1822).
+
+        release_statuses is a list of MusicBrainz statuses (official,
+        promotion, bootleg, pseudo-release, withdrawn, expunged, cancelled)
+        the artist lets through, or null to follow the library-wide list
+        (#2175).
         """
         body = request.get_json(silent=True) or {}
         profile_id = parse_profile_id(request)
@@ -170,6 +175,17 @@ def register_routes(bp):
             if parsed is None:
                 return api_error("BAD_REQUEST", f"{key} must be a boolean.", 400)
             updates[key] = parsed
+        status_update = {}
+        if "release_statuses" in body:
+            from core.release_statuses import ReleaseStatusError, encode, validate_allowed
+            if body["release_statuses"] is None:
+                status_update["allowed_release_statuses"] = None
+            else:
+                try:
+                    status_update["allowed_release_statuses"] = encode(
+                        validate_allowed(body["release_statuses"]))
+                except ReleaseStatusError as exc:
+                    return api_error("BAD_REQUEST", str(exc), 400)
 
         try:
             db = get_database()
@@ -179,11 +195,11 @@ def register_routes(bp):
             if quality_profile_id is not None:
                 updates["quality_profile_id"] = quality_profile_id
 
-            if not updates:
+            if not updates and not status_update:
                 return api_error(
                     "BAD_REQUEST",
                     "No valid fields provided. Allowed: "
-                    f"{', '.join(sorted(allowed_fields | {'quality_profile_id', 'follow_defaults'}))}",
+                    f"{', '.join(sorted(allowed_fields | {'quality_profile_id', 'follow_defaults', 'release_statuses'}))}",
                     400,
                 )
 
@@ -217,6 +233,8 @@ def register_routes(bp):
                     None if v is None else int(v) if key == "quality_profile_id" else int(bool(v))
                     for key, v in updates.items()
                 ]
+                set_parts += [f"{k} = ?" for k in status_update]
+                values += list(status_update.values())
 
                 cursor.execute(f"""
                     UPDATE watchlist_artists
@@ -226,6 +244,10 @@ def register_routes(bp):
 
                 if cursor.rowcount > 0:
                     conn.commit()
+                    if status_update:
+                        from api.serializers import release_statuses_out
+                        updates["release_statuses"] = release_statuses_out(
+                            status_update["allowed_release_statuses"])
                     return api_success({"message": "Watchlist settings updated.", "updated": updates})
                 return api_error("NOT_FOUND", "Artist not found in watchlist.", 404)
         except Exception as e:

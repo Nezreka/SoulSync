@@ -307,6 +307,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Watchlist**: follow artists and labels, and SoulSync scans for new releases on a schedule.
   - Per-artist rules: albums, EPs, singles, live albums, live tracks, remixes, compilations.
+  - MusicBrainz release status (Official, Promotion, Bootleg, ...), library wide or per artist.
   - One edition per album (the original release or the most complete), with clean copies left out.
   - Lookback windows, scan source and auto-download.
   - The **Artist Inspector** shows linked IDs per provider and recent releases, and a **Blocklist** keeps out things you never want.
