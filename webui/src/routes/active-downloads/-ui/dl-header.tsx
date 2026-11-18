@@ -292,7 +292,7 @@ export function DlHeader({
 }: DlHeaderProps) {
   const ctx = useContext(DownloadsMediaContext);
   return (
-    <div className="dlh">
+    <div className="dlh" data-tour="downloads.header">
       <header className="pgf-head">
         <div className="pgf-head-main">
           <h1 className="pgf-title">Downloads</h1>

@@ -4,6 +4,109 @@ registerDocsSection({
     icon: '🩺',
     pages: [
         {
+            id: 'ts-help',
+            title: 'The Help Button',
+            lede: 'The ? at the bottom right opens help beside the page you are on.',
+            body: `
+## Opening it
+
+Click the **?** at the bottom right, or press \`?\` or \`F1\` anywhere. Help opens as a panel on the right, beside the page, so you can follow along while you read. On a phone it fills the screen, with a close button at the top. Press \`Esc\` or click **?** again to close it.
+
+## What's in it
+
+- **Search** at the top: help articles, settings, pages and actions in one list. See [Search and Ctrl K](#ts-search).
+- **Status** (admins): one line that says everything is running, or how many things need you. Click it for [Health](#ts-health).
+- **On this page**: what the page you are on is for, and live answers built from what is happening right now, like why three downloads are still queued or which folder isn't writable. Each answer has the buttons that fix it. A page with nothing to say shows no answers.
+- **Read more**: the help articles worth reading on that page. They open inside the panel; **Open in Help & Docs** takes you to the full page.
+- **Tour**: on pages that have one, a row that starts it. See [Tours](#ts-tours).
+- **What's new**, **Shortcuts**, **Help & Docs**, and **Logs** for admins.
+- **Get help**: [Report a problem](#ts-debug), Discord and GitHub.
+
+The footer shows your version, whether you run in Docker, and whether an update is out.
+
+## The dot on the ?
+
+When Health finds something that needs an admin, a small amber dot shows on the **?**. Only errors light it, never warnings, and only admins see it.
+
+## For members
+
+A member gets the same panel without the admin parts: no status line, no Health, no Logs and no diagnostics. Search finds only the pages they can open, their own My Account settings, and the actions they are allowed. Instead of Report a problem they get:
+
+- **Report a song, album or title**: use **Report** on its **⋯** menu. It goes to your admin.
+- **Your reports**: what you reported and what happened to each one.
+- **Ask on Discord**.
+`
+        },
+        {
+            id: 'ts-search',
+            title: 'Search and Ctrl K',
+            lede: 'One search for help articles, settings, pages and actions.',
+            body: `
+Press \`Ctrl K\` (\`⌘K\` on a Mac) on any page to open the search palette in the middle of the screen. The search field at the top of the Help panel is the same search.
+
+## What it finds
+
+| Group | What | Example |
+|------|------|------|
+| Actions | things SoulSync can do right now | Quick scan the library, Scan the watchlist now, Check folders and services now, Open the logs |
+| Settings | a setting, by its own name | Download path, Plex token |
+| Pages | every page you can open | Go to Wishlist |
+| Help | every help article, by title, heading and text | Folder Setup |
+
+Results for the page you are on come first, then the ones you used recently. Use the arrow keys to move, \`Enter\` to open, \`Esc\` to close. A shortcut shows beside an action that has one.
+
+Picking a setting opens Settings on the right tab and takes you to the field. Picking an article opens it inside the Help panel.
+
+When you type a name, the last row offers **Search music for** that name, which hands it to the Search page.
+
+> [!NOTE]
+> \`Ctrl K\` opens this search everywhere, Settings included. On the Settings page, press \`/\` to jump to the Settings search box instead.
+
+Members see only the pages and actions their profile allows, and no settings beyond My Account.
+`
+        },
+        {
+            id: 'ts-health',
+            title: 'Health',
+            lede: 'Every check SoulSync runs on itself, in one list, with the fix beside each problem.',
+            body: `
+Health is for admins. Open it from the status line at the top of the Help panel, or search for **Check folders and services now**.
+
+## What it says
+
+One sentence on top, like "Two things need you. Everything else is running." Then:
+
+- **Needs you**: errors. These light the amber dot on the **?**.
+- **Worth a look**: warnings.
+- **Finish setting up**: the setup items you haven't done yet.
+- **Running fine**: every check that passed, folded away, so you can see what was checked.
+
+Each problem has a plain title, a line on why, a fix button when there is one, and **Learn more** when an article explains it. **Check again** runs everything fresh. Results are kept for 30 seconds otherwise, and a check that can't answer in time says it couldn't check rather than holding up the rest.
+
+## What it checks
+
+| Area | Check | Fix offered |
+|------|------|------|
+| Services | your media server answers | Test again, or open Connections |
+| Services | which metadata source you use, and whether Spotify is rate limited and for how long | nothing to do: it resumes on its own |
+| Services | each download source answers, and recent download client failures | Test again, or open Downloads settings |
+| Folders | the download, transfer, import and music library folders exist and SoulSync can write to them. In Docker it says when a path is probably not mounted | open that folder's setting |
+| Folders | the path mapping between your download client and SoulSync, so finished files are where SoulSync looks | open the path mapping setting |
+| Disk | free space on the music and download folders, and the video folders | open the folder settings |
+| Video | library folders, recycle folder, maintenance errors, sources, indexers, download clients, import lists, YouTube cookies | a link to the right setting or page for each |
+| Workers | enrichment workers that are paused or stopped | Resume |
+| Downloads | downloads waiting in review | Open review |
+| Automations | an automation whose last run failed | open it |
+| Setup | unfinished setup items | each item's own action |
+| Updates | an update is out, and how important it is | release notes |
+
+Disk space warns under 2 GB free, or under the minimum free space you set for video, and turns into an error under 1 GB.
+
+> [!TIP]
+> Most problems are folders. If Health says a folder isn't writable in Docker, check that the folder's owner matches your PUID and PGID, and that the path is mounted in your compose file. See [Docker & Deployment](#gs-docker).
+`
+        },
+        {
             id: 'ts-logs',
             title: 'Logs',
             lede: 'Where to find SoulSync\'s logs and what each one contains.',
@@ -21,27 +124,73 @@ The Settings → Logs tab streams live logs with real-time operational diagnosti
 
 > [!TIP]
 > When something breaks, start with \`app.log\` — it carries the request and worker trail for nearly every failure. Raise the [log level](#set-other) to Debug first if you need more detail, then drop it back to Info afterward.
+
+## Downloading logs
+
+Admins can download every log from the **Logs** tile in the Help panel, or with the **Download** button on the Settings › Logs tab. The list shows each log with its older copies (\`app.log.1\`, \`.2\`, \`.3\`), how big each one is and when it was last written. Download one file, one log with all its older copies, or everything as one zip with a README that says what is inside.
+
+**Remove secrets** is on by default: every line has its keys and tokens removed as it downloads. Turning it off asks you once first, because raw logs can contain API keys and tokens.
+`
+        },
+        {
+            id: 'ts-tours',
+            title: "Tours, What's New and Shortcuts",
+            lede: 'Short walkthroughs, the release notes, and every keyboard shortcut.',
+            body: `
+## Tours
+
+Three short tours point at the real thing on screen, one step at a time:
+
+- **Getting around**: the sidebar, the music and video sides, profiles, Server Activity, notifications, and help itself.
+- **Your first download**: search, pick a result, the download window, and following it in Downloads.
+- **Your first video request**: find a movie or show, open it, ask for it (or get it, if you can download), and Requests.
+
+Start one from **Read more** in the Help panel, on a page the tour is about. **Getting around** is offered on the Dashboard. Use \`←\` and \`→\` to step, \`Esc\` to stop. A step whose target isn't on screen is skipped.
+
+## What's new
+
+The **What's new** tile in the Help panel lists what shipped in this version, newest first, with **Show me** when there is something to look at. It shows the version as new until you open it. The version button in the sidebar footer shows the same release notes.
+
+## Shortcuts
+
+The **Shortcuts** tile lists every keyboard shortcut SoulSync has: help, search, the player, the expanded player, page keys like the calendar's, and the docs. The list is built from the code that handles each key, so it stays true. On a phone it says shortcuts need a keyboard.
 `
         },
         {
             id: 'ts-debug',
-            title: 'Debug Info',
-            lede: 'One click collects everything needed to diagnose a problem.',
+            title: 'Report a Problem',
+            lede: 'A bug report with diagnostics you can read first, secrets removed.',
             body: `
-The **Copy Debug Info** button — in the **Help & Docs sidebar header**, just under the search box — collects a comprehensive diagnostic snapshot. Pick how many log lines to include and which log file to sample (app, post-processing, acoustid, or source reuse), then click:
+Open **Report a problem** from the Help panel (admins), or search for it with \`Ctrl K\`. The **Report a problem** button in the Help & Docs sidebar opens the same thing.
 
-- System info: version, OS, Python version, Docker status, ffmpeg version, uptime
-- Service status: media server, Soulseek, Spotify, and metadata services
-- Library and database statistics
-- Paths and their existence/writability checks
-- Config summary (source mode, quality profile, organization template, feature toggles)
-- Worker status
-- Recent log lines
+## 1. What happened?
+
+Write what you did and what went wrong. **Where** is filled in with the page you were on.
+
+## 2. What's included
+
+Every line is a switch, and the preview under it is exactly the text that gets shared. Switch a line off and it leaves the preview, the copy and the file.
+
+| Line | On by default | What it is |
+|------|------|------|
+| Version and platform | yes | SoulSync, Docker, Python, ffmpeg |
+| Services and Health | yes | what is connected, and today's Health findings |
+| Settings, secrets removed | yes | only what you changed; keys, tokens and passwords show as \`***\` |
+| Folder paths | yes | turn it off if your paths show your name |
+| Last 200 log lines | yes | from \`app.log\`, secrets removed |
+| Recent errors only | no | the errors from the last 24 hours, secrets removed |
+| Attach full logs (zip) | no | every log as a zip, downloaded beside the bundle |
+
+Secrets show as \`***\` so you can see the redaction happened. API keys, tokens, passwords and logins inside URLs are removed from settings, from every log line and from the whole text at the end.
+
+## 3. Send it
+
+- **Open a GitHub issue**: opens a new issue with the title, version, platform and your summary filled in, and downloads the full bundle as a file. GitHub links can't carry the whole thing, so drag the file from your downloads into the issue.
+- **Copy for Discord**: a short block that fits in one message.
+- **Download the bundle**: the file, named like \`soulsync-diagnostics-3.6.7-2026-11-17.txt\`.
 
 > [!NOTE]
-> Debug output is **safe to share**: passwords, API keys, and tokens are never included — credential fields appear only as "connected / not connected" booleans. Still, give the pasted output a quick glance before posting it publicly.
-
-Paste it into a GitHub issue or the Discord when asking for help — it answers most of the follow-up questions you'd otherwise get.
+> Give the preview a quick read before you post it publicly. It is redacted, but you know your own setup best.
 `
         },
         {
@@ -111,11 +260,12 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 ## Before you report
 
 1. Reproduce the problem once more so you can describe the exact steps.
-2. Check the [logs](#ts-logs) and [debug info](#ts-debug) — include both.
+2. Look at [Health](#ts-health): it may already name the problem and the fix.
 3. Search existing issues to avoid duplicates.
 
 ## Where to go
 
+- **Report a problem** in the Help panel: writes the GitHub issue for you, with the diagnostics attached. See [Report a problem](#ts-debug).
 - **GitHub Issues**: [github.com/Nezreka/SoulSync/issues](https://github.com/Nezreka/SoulSync/issues) — bug reports and feature requests
 - **Discord**: [discord.gg/wGvKqVQwmy](https://discord.gg/wGvKqVQwmy) — community help and discussion
 
@@ -124,8 +274,10 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 - SoulSync version and how you run it (Docker, bare metal, OS)
 - Steps to reproduce
 - Expected vs. actual behavior
-- Debug info output (credentials are already excluded)
+- The diagnostics bundle from [Report a problem](#ts-debug) (secrets are already removed)
 - Relevant log lines around the failure
+
+If you are a member, your admin runs the server: report a wrong song, album or title from its **⋯** menu and it goes to them. **Your reports** in the Help panel shows what happened to each one.
 
 > [!TIP]
 > A good bug report is a gift. Version + steps + logs gets most issues diagnosed in one reply instead of five.

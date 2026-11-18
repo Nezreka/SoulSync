@@ -46,7 +46,8 @@ export function browserHref(href: string): string {
   }
 }
 
-function runAction(item: ChecklistItem) {
+/** a row's own action; Help's Health runs the same one for its Set up buttons */
+export function runAction(item: Pick<ChecklistItem, 'id' | 'href'>) {
   const w = window as ShellWindow;
   switch (item.id) {
     case 'torrent':

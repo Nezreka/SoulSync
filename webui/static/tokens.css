@@ -146,6 +146,10 @@
     --sa-well: #07070b;
     --sa-text: #eef1f7;
 
+    /* ── Help sheet (scrap/help/mockup.html) ── */
+    --help-sheet: #13131a;
+    --help-on-accent: #04140a;
+
     /* ── Radius ─────────────────────────────────────────────────────── */
     --radius-xs: 4px;
     --radius-sm: 6px;

@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe('ToolCard chrome', () => {
-  it('keeps the card id — helper.js anchors its popovers on these', () => {
+  it('keeps the card id it is given', () => {
     const { container } = render(<ToolCard id="db-updater-card" title="Database Updater" />);
     expect(container.querySelector('#db-updater-card')).not.toBeNull();
     expect(container.querySelector('.tool-card')).not.toBeNull();

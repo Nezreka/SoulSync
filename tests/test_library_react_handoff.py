@@ -55,9 +55,7 @@ def test_the_vanilla_library_ids_are_claimed_by_nobody():
     getElementById returns whichever node comes first in the document and that
     was the vanilla one. Then the vanilla markup went and the port took the ids
     over. Library v2 replaced that port outright, and it is CSS-module scoped —
-    it renders none of those ids, and nothing reads them any more: helper.js
-    anchors the library tour on `.nav-button[data-page="library"]`, not on the
-    page's internals.
+    it renders none of those ids, and nothing reads them any more.
 
     What still matters is the half that outlived the ids: nothing in index.html
     may claim them either, because the VIDEO library page lives in there and a
@@ -69,11 +67,6 @@ def test_the_vanilla_library_ids_are_claimed_by_nobody():
             f"#{anchor} is back in index.html — the music library is React-only, "
             "so a vanilla element answering to it can only be the wrong one"
         )
-
-    helper = (_ROOT / "webui" / "static" / "helper.js").read_text(encoding="utf-8")
-    assert '.nav-button[data-page="library"]' in helper, (
-        "the library tour lost its only anchor"
-    )
 
 
 def test_vanilla_library_list_is_gone():

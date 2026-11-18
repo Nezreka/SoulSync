@@ -667,6 +667,16 @@ declare global {
       /** the open drawer hands each payload over, for the badge */
       _sawActivity?: (d: unknown) => void;
     };
+    /** the help sheet (features/help/host.tsx); the ? button's shim in helper.js opens it */
+    SoulSyncHelp?: {
+      open: (view?: string, params?: Record<string, string>) => void;
+      close: () => void;
+      toggle: () => void;
+      isOpen: () => boolean;
+      openSearch: () => void;
+    };
+    /** docs.js: open a docs article on the Help & Docs page */
+    navigateToDocsSection?: (id: string) => void;
     /** the React drawer (features/server-activity/host.tsx); the shell opens it */
     SoulSyncActivityDrawer?: {
       open: (tab?: string) => void;
@@ -924,10 +934,6 @@ declare global {
     showLaunchPinScreen?: () => void;
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
-
-    /** Ask the tools page to show whichever tab holds `selector`. True when it
-     *  had to switch, so the caller knows to wait a frame before measuring. */
-    revealToolsTabFor?: (selector: string) => boolean;
   }
 }
 

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { VdlDownload, VdlFilter, VdlMeta, VdlView, VdlYtMeta } from './-vdl.types';
 
+import { videoDownloadsFeed } from './-dl.feed';
 import {
   blockAndRetryFailedVideoDownloads,
   blockVideoRelease,
@@ -180,6 +181,8 @@ export function useVideoDownloads(): VdlDownloadsController {
   const refresh = useCallback(async () => {
     const data = await fetchVideoDownloads();
     if (data.downloads) {
+      // the help sheet's Downloads answers read this poll instead of their own
+      videoDownloadsFeed.publish(data);
       setDownloads(data.downloads);
       updateVideoDownloadsBadge(data.downloads.filter((d) => vdlIsActive(d.status)).length);
       // The old page never rendered the empty state on a failed fetch — a
@@ -192,6 +195,7 @@ export function useVideoDownloads(): VdlDownloadsController {
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const detach = videoDownloadsFeed.attach(() => void refresh());
     const tick = async () => {
       if (!alive) return;
       if (!document.hidden) await refresh();
@@ -202,6 +206,7 @@ export function useVideoDownloads(): VdlDownloadsController {
     void tick();
     return () => {
       alive = false;
+      detach();
       if (timer) clearTimeout(timer);
     };
   }, [refresh]);
