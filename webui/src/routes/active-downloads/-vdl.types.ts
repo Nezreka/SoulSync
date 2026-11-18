@@ -122,6 +122,8 @@ export interface VdlSearchCtx {
   channel_id?: string | null;
   published_at?: string | null;
   description?: string | null;
+  /** the title's TMDB id, when the grab knew it (wishlist grabs, show-page grabs) */
+  tmdb_id?: number | null;
 }
 
 /* ── filters ───────────────────────────────────────────────────────────── */

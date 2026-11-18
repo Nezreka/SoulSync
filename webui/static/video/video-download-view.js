@@ -973,7 +973,10 @@
             media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
             year: o.year, poster_url: o.poster,
             search_ctx: { scope: p.scope || 'movie', title: p.title || '', year: o.year,
-                season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null }
+                season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null,
+                // the title's tmdb id for the downloads card's detail: media_id
+                // is a library id on an owned title (#2176)
+                tmdb_id: o.tmdbId || o.tvId || ((o.source || o.mediaSource) === 'tmdb' ? (o.id || o.mediaId) : null) || null }
         };
         if (src === 'soulseek') {
             // the other accepted (live slskd) hits become the auto-retry pool

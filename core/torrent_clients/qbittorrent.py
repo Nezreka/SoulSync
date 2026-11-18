@@ -438,6 +438,7 @@ class QBittorrentAdapter:
             tracker=tracker_host(item.get('tracker')),
             # pausedUP / stoppedUP map to completed, still stopped all the same
             paused=str(item.get('state') or '').startswith(('paused', 'stopped')),
+            moving=str(item.get('state') or '') == 'moving',
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

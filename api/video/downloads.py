@@ -258,6 +258,29 @@ def _parse_text(hit) -> str:
     return title
 
 
+def _reimport_from_client(db, dl) -> bool:
+    """Put an unplaced torrent/usenet download back in the monitor's hands when
+    its stored path went stale (the client moved the file after we read it, out
+    of its incomplete folder: #2176) and the client still has the job. The next
+    tick asks the client where the file is and imports it from there. False
+    (nothing changed) when the file is still where we left it, or the client
+    no longer knows the job: then Retry means another release, as before."""
+    import os
+    import time
+    if str(dl.get("status") or "") != "import_failed":
+        return False
+    path = dl.get("dest_path")
+    if path and os.path.exists(str(path)):
+        return False
+    from core.video.client_download import current_job_file
+    if not current_job_file(dl):
+        return False
+    db.update_video_download(dl["id"], status="downloading", progress=100.0, error=None,
+                             dest_path=None, completed_at=None,
+                             progress_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+    return True
+
+
 def _title_keys(src) -> tuple:
     """(library id, tmdb id) a search body names its title by. media_id is a
     library id when media_source says library, else a tmdb id (the old
@@ -2334,6 +2357,12 @@ def register_routes(bp):
         dl = db.get_video_download(body.get("id"))
         if not dl:
             return jsonify({"ok": False, "error": "Download not found."}), 404
+        if not body.get("next") and _reimport_from_client(db, dl):
+            # the file downloaded fine and only the import failed: try the
+            # import again from wherever the client has the file now, instead
+            # of grabbing a different release (#2176)
+            ensure_started(get_video_db)
+            return jsonify({"ok": True, "mode": "reimport", "status": "downloading"})
         want_next = bool(body.get("next")) or \
             str(dl.get("source") or "soulseek").lower() != "soulseek"
         if want_next:

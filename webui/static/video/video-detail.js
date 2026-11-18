@@ -4414,12 +4414,19 @@
         var s = seasonByNum(selectedSeason);
         return s ? (s.episodes || []).filter(function (e) { return !e.owned; }) : [];
     }
+    // where data.id comes from. a library payload carries no `source` of its
+    // own, so grabs sent media_id (the library row id) with no media_source,
+    // and the downloads card read it as a tmdb id: library show 37 showed up
+    // as tmdb's Seven of One (#2176). currentSource is what the page loaded.
+    function _dataSource() {
+        return (data && data.source) || currentSource || 'library';
+    }
     function _grabParams(en, src) {
         // poster travels with the grab → the downloads page rows (and the season
         // group header, which borrows its first row's art) render real posters
         // instead of the placeholder TV orb. Same resolver the wishlist writes use.
         return { title: data.title, source: src, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(), year: data.year,
             tmdbId: data.tmdb_id || null, poster: _showPoster() };
     }
     // Optimistic per-episode state for the search phase — the grab has no row in
@@ -4607,7 +4614,7 @@
         // behaviour back.
         return VideoGrab.season({ title: data.title, season: selectedSeason,
             episodes: missing.map(function (e) { return e.episode_number; }),
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(), year: data.year,
             tmdbId: data.tmdb_id || null, poster: _showPoster() },
             function (en, state) { _setEpSynthetic(en, state); }
         ).then(function (res) {
@@ -4691,7 +4698,7 @@
     function _openManualSearch(scope, en) {
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source,
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(),
             tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
     }
 
@@ -4700,7 +4707,7 @@
     function manualSearchMovie() {
         if (!data || data.kind !== 'movie' || !window.VideoDownload || !VideoDownload.manualSearch) return;
         VideoDownload.manualSearch({ title: data.title, scope: 'movie', year: data.year,
-            mediaId: data.id, mediaSource: data.source,
+            mediaId: data.id, mediaSource: _dataSource(),
             tmdbId: data.source === 'tmdb' ? data.id : (data.tmdb_id || null),
             poster: data.source === 'tmdb' ? (data.poster_url || null)
                 : (data.has_poster ? '/api/video/poster/movie/' + data.id : null) });
