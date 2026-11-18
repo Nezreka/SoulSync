@@ -23,10 +23,9 @@ logger = get_logger("video.quality_access")
 
 
 def _ctx(profile_id, music_db=None):
-    from core.permission_store import context_for
+    from core.permission_store import context_for, profile_db
     if music_db is None:
-        from database.music_database import get_database
-        music_db = get_database()
+        music_db = profile_db()
     return context_for(music_db, profile_id)
 
 
@@ -39,17 +38,16 @@ def context_for_profile(profile_id, music_db=None) -> dict:
 def effective_for_row(profile) -> dict:
     """the effective permissions for a profile row (raises when they can't
     be built). the tokened calendar feed reads its profile through this."""
-    from core.permission_store import effective_for
-    from database.music_database import get_database
-    perms, _source = effective_for(get_database(), profile)
+    from core.permission_store import effective_for, profile_db
+    perms, _source = effective_for(profile_db(), profile)
     return perms
 
 
 def first_admin_name():
     """the name a member's ask goes to ("Sam gets asked first"), or None."""
     try:
-        from database.music_database import get_database
-        return (get_database().get_profile(1) or {}).get("name") or None
+        from core.permission_store import profile_db
+        return (profile_db().get_profile(1) or {}).get("name") or None
     except Exception:  # noqa: BLE001 - only words
         return None
 

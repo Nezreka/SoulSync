@@ -21,6 +21,14 @@ from core import permissions as P
 logger = logging.getLogger(__name__)
 
 
+def profile_db():
+    """the database profiles, templates and the policy live in. the video side
+    reads people through this instead of importing the music database, so
+    core/video stays free of music imports."""
+    from database.music_database import get_database
+    return get_database()
+
+
 class PermissionsUnavailable(Exception):
     """the effective map can't be built (a read failed, stored data is
     unreadable, a template is gone). the caller fails closed."""
