@@ -1191,9 +1191,13 @@ def _check_lastfm_user(username):
     api_key = config_manager.get('lastfm.api_key', '')
     if not api_key:
         return False, "Last.fm isn't set up on this server yet, ask the admin to add an API key in Settings."
+    from core.lastfm_client import LASTFM_IMPORT_REJECTED_MESSAGE, LastFMClient, LastFMKeyRejected
     try:
-        from core.lastfm_client import LastFMClient
         data = LastFMClient(api_key=api_key).get_user_recent_tracks(username, limit=1)
+    except LastFMKeyRejected:
+        # pro only from 1 december 2026. nothing here can stand in for a
+        # last.fm import, so say so plainly and point at listenbrainz
+        return False, LASTFM_IMPORT_REJECTED_MESSAGE
     except Exception as e:
         return False, f"Couldn't reach Last.fm: {e}"
     recent = (data or {}).get('recenttracks')

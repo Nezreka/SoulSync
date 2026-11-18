@@ -1135,6 +1135,24 @@ def _no_match_credit_fetch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_provider_cache_and_lastfm_key(monkeypatch):
+    """the last.fm / listenbrainz / deezer answer cache and the remembered
+    last.fm key refusal live per process. each test starts with neither, and
+    nothing a test caches reaches the database."""
+    from core import lastfm_client, lastfm_fallback, listenbrainz_public, provider_cache
+    provider_cache.use_store(provider_cache.MemoryStore())
+    lastfm_client.reset_key_state()
+    # the free fallbacks ask deezer / listenbrainz / musicbrainz. no test asks
+    # the real ones; the fallback tests set their own answers
+    monkeypatch.setattr(lastfm_fallback, "_deezer_get", lambda *a, **k: None)
+    monkeypatch.setattr(listenbrainz_public, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(listenbrainz_public, "artist_mbid", lambda *a, **k: None)
+    yield
+    lastfm_client.reset_key_state()
+    provider_cache.use_store(provider_cache.MemoryStore())
+
+
+@pytest.fixture(autouse=True)
 def _fresh_reconciler_name_misses():
     """the reconciler believes a file-name miss for a few minutes; each test
     starts without one from another test"""

@@ -108,6 +108,8 @@ export const ORIGIN_NAMES: Record<string, string> = {
   lastfm: 'Last.fm',
   tidal: 'Tidal',
   deezer: 'Deezer',
+  listenbrainz: 'ListenBrainz',
+  listening_history: 'SoulSync',
 };
 
 /**
