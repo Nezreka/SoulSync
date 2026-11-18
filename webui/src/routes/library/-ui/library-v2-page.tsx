@@ -238,6 +238,7 @@ import {
 import { EnhanceQualityModal } from './enhance-quality-modal';
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
+import { floatingMenuPlacement } from './floating-menu-placement';
 import { HistoryEventList, HistorySteps, HistoryTree } from './history-event-list';
 import {
   groupHistoryEvents,
@@ -3221,31 +3222,48 @@ function AlbumMetadataForm({
  *  nothing. `onDeleted` lets the deep-link view navigate back to the artist
  *  after a successful delete; the row doesn't need it (it just disappears
  *  once the query invalidates). */
-/** where a floating menu sits: under its button, right edges lined up, and
- *  above the button when there isn't room below. it closes on scroll and
- *  resize instead of drifting away from the button it belongs to */
+/** where a floating menu sits (floatingMenuPlacement: under its button, right
+ *  edges lined up, kept on the screen). it closes on scroll and resize instead
+ *  of drifting away from the button it belongs to */
+// measured at the top left corner with right let go (.overflowMenu pins
+// right: 0, which with left: 0 stretches it across the screen), so its width
+// is its natural width
+const MENU_MEASURE: CSSProperties = { visibility: 'hidden', top: 0, left: 0, right: 'auto' };
+
 function useFloatingMenuPosition(
   anchorRef: { current: HTMLElement | null },
   menuRef: { current: HTMLElement | null },
   open: boolean,
   close: () => void,
-): CSSProperties {
-  const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
+): { style: CSSProperties; inlineSubmenu: boolean } {
+  const [position, setPosition] = useState<{ style: CSSProperties; inlineSubmenu: boolean }>({
+    style: MENU_MEASURE,
+    inlineSubmenu: false,
+  });
   useLayoutEffect(() => {
     if (!open) {
-      setPosition({ visibility: 'hidden' });
+      setPosition({ style: MENU_MEASURE, inlineSubmenu: false });
       return;
     }
     const anchor = anchorRef.current?.getBoundingClientRect();
-    if (!anchor) return;
-    const height = menuRef.current?.offsetHeight ?? 0;
-    const gap = 8;
-    const below = anchor.bottom + gap;
-    const top =
-      below + height > window.innerHeight - 12 && anchor.top - gap - height > 12
-        ? anchor.top - gap - height
-        : below;
-    setPosition({ top, right: Math.max(12, window.innerWidth - anchor.right) });
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+    const place = floatingMenuPlacement(
+      anchor,
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition({
+      style: {
+        top: place.top,
+        left: place.left,
+        right: 'auto',
+        maxWidth: place.maxWidth,
+        maxHeight: place.maxHeight,
+        overflowY: place.maxHeight !== undefined ? 'auto' : undefined,
+      },
+      inlineSubmenu: place.inlineSubmenu,
+    });
   }, [open, anchorRef, menuRef]);
   useEffect(() => {
     if (!open) return;
@@ -3324,7 +3342,16 @@ export function AlbumOverflowMenu({
   });
 
   const menuRef = useRef<HTMLDivElement>(null);
-  const menuPosition = useFloatingMenuPosition(wrapRef, menuRef, open, () => setOpen(false));
+  const menuPlace = useFloatingMenuPosition(wrapRef, menuRef, open, () => setOpen(false));
+  // the provider list opening in place inside a scrolling menu starts below
+  // the fold: bring Enrich to the top of the menu so the list shows
+  const enrichRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const menu = menuRef.current;
+    const at = enrichRef.current;
+    if (!showSubmenu || !menuPlace.inlineSubmenu || !menu || !at) return;
+    if (menu.scrollHeight > menu.clientHeight) menu.scrollTop = at.offsetTop;
+  }, [showSubmenu, menuPlace.inlineSubmenu]);
 
   useEffect(() => {
     if (!open) return;
@@ -3346,8 +3373,10 @@ export function AlbumOverflowMenu({
             // their overflow, half the menu cut off
             <div
               ref={menuRef}
-              className={`${styles.overflowMenu} ${styles.overflowMenuFloating}`}
-              style={menuPosition}
+              className={`${styles.overflowMenu} ${styles.overflowMenuFloating}${
+                menuPlace.inlineSubmenu ? ` ${styles.overflowMenuInlineSub}` : ''
+              }`}
+              style={menuPlace.style}
               onClick={(e) => e.stopPropagation()}
             >
               {onOpenPage ? (
@@ -3514,11 +3543,17 @@ export function AlbumOverflowMenu({
                 Report a Problem…
               </button>
               <div
+                ref={enrichRef}
                 className={styles.submenuContainer}
-                onMouseEnter={() => {
-                  if (canWrite) setShowSubmenu(true);
+                // hover opens it for a mouse only: a tap sends a mouseenter
+                // just before its click, so the list opened and the click's
+                // toggle shut it again, Enrich did nothing on a phone (#2183)
+                onPointerEnter={(e) => {
+                  if (e.pointerType === 'mouse' && canWrite) setShowSubmenu(true);
                 }}
-                onMouseLeave={() => setShowSubmenu(false)}
+                onPointerLeave={(e) => {
+                  if (e.pointerType === 'mouse') setShowSubmenu(false);
+                }}
               >
                 <button
                   type="button"
