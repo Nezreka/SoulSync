@@ -901,7 +901,7 @@ label.chip input[type='checkbox']:checked {
   gap: 10px;
   padding: 14px 16px;
   border: 1px solid var(--white-a06);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
 }
 
@@ -971,7 +971,7 @@ label.chip input[type='checkbox']:checked {
   gap: 8px;
   min-width: 0;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a05);
   color: var(--white-a70);
   font-family: var(--font-mono);
@@ -1020,7 +1020,7 @@ label.chip input[type='checkbox']:checked {
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--white-a12);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a05);
   color: var(--text-1);
   font-size: 14px;
