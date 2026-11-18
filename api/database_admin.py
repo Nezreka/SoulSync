@@ -437,13 +437,13 @@ def _run_soulsync_full_refresh(incremental=False):
     try:
         transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         if not os.path.isdir(transfer_path):
-            _db_update_error_callback(f"Output folder not found: {transfer_path}")
+            _db_update_error_callback(f"Music library folder not found: {transfer_path}")
             return
 
         logger.info("[%s] Indexing local files: %s", label, transfer_path)
         db = get_database()
 
-        _db_update_phase_callback('Scanning output folder...')
+        _db_update_phase_callback('Scanning music library folder...')
         audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         audio_files = []
         for root, _dirs, files in os.walk(transfer_path):
@@ -597,10 +597,10 @@ def _run_soulsync_deep_scan():
         staging_path = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
 
         if not os.path.isdir(transfer_path):
-            _db_update_error_callback(f"Output folder not found: {transfer_path}")
+            _db_update_error_callback(f"Music library folder not found: {transfer_path}")
             return
 
-        logger.info(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
+        logger.info(f"[SoulSync Deep Scan] Starting — music library folder: {transfer_path}")
         _db_update_phase_callback('scanning')
 
         # Phase 1: Collect all audio files in Transfer
@@ -611,7 +611,7 @@ def _run_soulsync_deep_scan():
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
                     transfer_files.add(os.path.realpath(os.path.join(root, filename)))
 
-        logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
+        logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in the music library folder")
 
         # Phase 2: Get all imported file rows that resolve inside Transfer.
         # Entity server_source is deliberately irrelevant: standalone/import

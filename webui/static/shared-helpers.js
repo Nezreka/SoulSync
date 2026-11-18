@@ -1314,7 +1314,7 @@ function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
     const safeRef = String(playlistRef).replace(/'/g, "\\'");
     const safeSource = String(source).replace(/'/g, "\\'");
     return `
-        <label class="playlist-modal-organize-toggle" title="Download into a playlist-named folder (Artist - Track) under your transfer path">
+        <label class="playlist-modal-organize-toggle" title="Download into a playlist-named folder (Artist - Track) in your music library folder">
             <input type="checkbox" id="${playlistDetailsOrganizeCheckboxId(playlistRef)}"
                 onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
             <span>Organize by playlist</span>

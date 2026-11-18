@@ -479,7 +479,7 @@ export function DuplicateCleanerCard() {
       icon="copies"
       title="Duplicate Cleaner"
       helpTool="duplicate-cleaner"
-      info="Detect and remove duplicate tracks in output folder"
+      info="Detect and remove duplicate tracks in your music library folder"
       stats={[
         {
           label: 'Files Scanned:',

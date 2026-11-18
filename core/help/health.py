@@ -303,7 +303,7 @@ def music_folders() -> List[tuple]:
     side reads and writes"""
     rows = [
         ("download", "Download folder", str(_config_get("soulseek.download_path", "./downloads") or ""), "downloads"),
-        ("transfer", "Transfer folder", str(_config_get("soulseek.transfer_path", "./Transfer") or ""), "downloads"),
+        ("transfer", "Music library folder", str(_config_get("soulseek.transfer_path", "./Transfer") or ""), "downloads"),
     ]
     staging = str(_config_get("import.staging_path", "") or "")
     if staging:

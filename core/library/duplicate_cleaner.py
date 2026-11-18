@@ -58,9 +58,9 @@ def _run_duplicate_cleaner():
         if not transfer_folder or not os.path.exists(transfer_folder):
             with duplicate_cleaner_lock:
                 duplicate_cleaner_state["status"] = "error"
-                duplicate_cleaner_state["phase"] = "Output folder not configured or does not exist"
-                duplicate_cleaner_state["error_message"] = "Please configure output folder in settings"
-            logger.warning(f"[Duplicate Cleaner] Transfer folder not found: {transfer_folder}")
+                duplicate_cleaner_state["phase"] = "Music library folder not configured or does not exist"
+                duplicate_cleaner_state["error_message"] = "Please set your music library folder in Settings → Library → Folders"
+            logger.warning(f"[Duplicate Cleaner] Music library folder not found: {transfer_folder}")
             return
 
         # Create the quarantine if it doesn't exist — hidden ('.deleted') so media

@@ -4289,7 +4289,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Duplicate Cleaner',
         content: `
             <h4>What does this tool do?</h4>
-            <p>The Duplicate Cleaner scans your output folder for duplicate audio files and automatically removes lower-quality versions, keeping only the best copy.</p>
+            <p>The Duplicate Cleaner scans your music library folder for duplicate audio files and automatically removes lower-quality versions, keeping only the best copy.</p>
 
             <h4>How it detects duplicates</h4>
             <p>Files are considered duplicates when:</p>
@@ -4308,7 +4308,7 @@ const TOOL_HELP_CONTENT = {
             </ol>
 
             <h4>Where do deleted files go?</h4>
-            <p>Removed files are moved to <code>Transfer/.deleted/</code> folder (not permanently deleted). You can review and recover them if needed.</p>
+            <p>Removed files are moved to a <code>.deleted/</code> folder inside your music library folder (not permanently deleted). You can review and recover them if needed.</p>
 
             <h4>Safety Features</h4>
             <ul>
@@ -4902,7 +4902,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Duplicate Scan Done',
         content: `
             <h4>What is this trigger?</h4>
-            <p>Fires when the duplicate cleaner finishes scanning your output folder for duplicate audio files.</p>
+            <p>Fires when the duplicate cleaner finishes scanning your music library folder for duplicate audio files.</p>
 
             <h4>Available variables for notifications</h4>
             <p><code>{files_scanned}</code>, <code>{duplicates_found}</code>, <code>{space_freed}</code></p>
@@ -5100,7 +5100,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Run Duplicate Cleaner',
         content: `
             <h4>What does this action do?</h4>
-            <p>Scans your output folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
+            <p>Scans your music library folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
 
             <h4>Safety</h4>
             <p>Removed files are moved to a hidden <code>.deleted/</code> subfolder your media server ignores, not permanently deleted. You can recover them if needed.</p>

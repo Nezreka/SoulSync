@@ -626,11 +626,11 @@ export function ProcessingCards({ store }: SettingsTabProps) {
               'import-transfer-permanent',
               loads ? imp.transfer_is_permanent !== false : false,
               (v) => store.set('import', 'transfer_is_permanent', v),
-              'Music Library is my permanent library — never move files out',
+              'Music library folder is my permanent library — never move files out',
             )}
             help={
               <>
-                On by default for new installs. Turn this <strong>off</strong> if your Music Library
+                On by default for new installs. Turn this <strong>off</strong> if your music library
                 folder is just a scratch drop area rather than your real, permanent library (served
                 by Navidrome/Plex/etc.). A Deep Scan then never relocates files it doesn't recognize
                 out to Staging — it leaves them in place and just reports them. Even with this off,

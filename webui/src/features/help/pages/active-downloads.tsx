@@ -575,8 +575,8 @@ export function musicDownloadAnswers(
       body: (
         <>
           <p>
-            Into your transfer folder, tagged and renamed with your naming template. Anything that
-            fails a check waits in Review instead.
+            Into your music library folder, tagged and renamed with your naming template. Anything
+            that fails a check waits in Review instead.
           </p>
           <Acts>
             <Act kind="secondary" icon="folder" onClick={() => openSettings('downloads')}>

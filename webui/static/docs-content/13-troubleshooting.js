@@ -93,7 +93,7 @@ Each problem has a plain title, a line on why, a fix button when there is one, a
 | Services | your media server answers | Test again, or open Connections |
 | Services | which metadata source you use, and whether Spotify is rate limited and for how long | nothing to do: it resumes on its own |
 | Services | each download source answers, and recent download client failures | Test again, or open Downloads settings |
-| Folders | the download, transfer, import and music library folders exist and SoulSync can write to them. In Docker it says when a path is probably not mounted | open that folder's setting |
+| Folders | the download, music library, import and additional library folders exist and SoulSync can write to them. In Docker it says when a path is probably not mounted | open that folder's setting |
 | Folders | the path mapping between your download client and SoulSync, so finished files are where SoulSync looks | open the path mapping setting |
 | Disk | free space on the music and download folders, and the video folders | open the folder settings |
 | Video | library folders, recycle folder, maintenance errors, sources, indexers, download clients, import lists, YouTube cookies | a link to the right setting or page for each |

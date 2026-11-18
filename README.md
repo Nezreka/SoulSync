@@ -212,7 +212,7 @@ One search box with three modes.
 
 | Mode | What happens |
 |---|---|
-| **Download as-is** | Untouched, into Transfer |
+| **Download as-is** | Untouched, into your music library folder |
 | **Enriched download** *(recommended)* | Each file is matched to a real release, tagged, given cover art and filed |
 | **Tag it yourself** | For bootlegs, live sets and mixtapes |
 
@@ -861,7 +861,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Logs | `/app/logs` | |
 | Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
 | Downloads | `/app/downloads` | The same folder slskd and your clients download to |
-| Library output | `/app/Transfer` | Where organized music is filed |
+| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music Library Folder to this path |
 | Import | `/app/Staging` | Optional, for importing music you already have |
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |

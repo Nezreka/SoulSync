@@ -254,7 +254,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Job | What it does |
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
-| Orphan File Detector | Finds audio files in your output folder not tracked in the database |
+| Orphan File Detector | Finds audio files in your music library folder not tracked in the database |
 | Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). Each finding shows all three plus the cover a source found and which source, an empty box where there is none, and lists what **Apply Art** writes in each place. A library cover is copied to the files and folder; with none, the found cover is saved; a missing cover.jpg comes from the cover inside the files when they have one. A cover you have is never replaced. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
@@ -651,16 +651,16 @@ After the scan, SoulSync updates its own database automatically via the **Auto-U
             title: 'Duplicate Cleaner',
             lede: 'One-click automatic duplicate removal — best copy wins, losers go to the recycle bin.',
             body: `
-The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in output folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
+The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in your music library folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
 
 ![Duplicate Cleaner card with files scanned, duplicates found, and space freed](dash-duplicates.jpg)
 
 ## How it decides
 
-It scans the Transfer/output folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
+It scans your music library folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
 
 - **Keep rule:** best format wins — FLAC/lossless tier > OPUS/OGG > M4A/AAC > MP3/WMA; same-format ties broken by **larger file size**.
-- **Losers are moved, not deleted** — into \`Transfer/.deleted/\` with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
+- **Losers are moved, not deleted** — into a \`.deleted/\` folder inside your music library folder with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
 
 Protected from ever being flagged: intentionally created **lossy companions** (the lossy-copy feature's same-stem MP3/Opus/M4A next to a lossless source), the \`.deleted\` quarantine itself, and the atomic-publish staging tree (which holds half-downloaded albums — a textbook false duplicate).
 

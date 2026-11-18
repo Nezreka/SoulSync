@@ -179,7 +179,7 @@ def test_download_inside_transfer_warns(tmp_path):
     health.configure(config_get=_config(cfg), is_docker=lambda: False)
     found = _by_id(health.check_paths())
     f = found["paths.download.inside"]
-    assert f["severity"] == "warning" and "inside the transfer folder" in f["title"]
+    assert f["severity"] == "warning" and "inside the music library folder" in f["title"]
 
 
 def test_library_folder_may_be_the_transfer_folder(tmp_path):

@@ -96,7 +96,7 @@ describe('settings answers', () => {
       expect(titles(container)).toEqual([
         "Download folder isn't writable",
         "Soulseek (slskd) isn't answering",
-        'Download folder or transfer folder?',
+        'Download folder or music library folder?',
         'What does Hybrid do?',
       ]),
     );

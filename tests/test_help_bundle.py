@@ -64,7 +64,7 @@ HEALTH = {"status": "error", "checked_at": "2026-11-17T21:42:00Z",
                "title": "Jellyfin isn't answering", "detail": "http://jellyfin:8096 didn't answer."},
               {"id": "downloads.review", "severity": "warning", "area": "downloads",
                "title": "4 downloads are waiting for you", "detail": ""},
-              {"id": "paths.transfer", "severity": "ok", "area": "paths", "title": "Transfer folder writable",
+              {"id": "paths.transfer", "severity": "ok", "area": "paths", "title": "Music library folder writable",
                "detail": ""}]}
 
 
@@ -170,7 +170,7 @@ def test_services_carry_health():
     text = _parts(bundle.build(now=NOW))["services"]["text"]
     assert "Health: 1 errors, 1 warnings" in text
     assert "[error] Jellyfin isn't answering" in text
-    assert "Transfer folder writable" not in text          # ok findings stay out
+    assert "Music library folder writable" not in text          # ok findings stay out
     assert "Paused        lastfm" in text or "lastfm" in text
 
 

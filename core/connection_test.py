@@ -209,9 +209,9 @@ def run_service_test(service, test_config):
                                 break
                     if found_enough:
                         break
-                return True, f"SoulSync standalone ready! Output folder: {transfer_path}" + (f" ({count}+ audio files)" if count > 0 else " (empty)")
+                return True, f"SoulSync standalone ready! Music library folder: {transfer_path}" + (f" ({count}+ audio files)" if count > 0 else " (empty)")
             else:
-                return False, f"Output folder not found: {transfer_path}"
+                return False, f"Music library folder not found: {transfer_path}"
         elif service == "soulseek":
             if download_orchestrator is None:
                 return False, "Download orchestrator failed to initialize. Check server logs for startup errors."

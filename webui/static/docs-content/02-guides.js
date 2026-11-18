@@ -57,7 +57,7 @@ Once your services are connected, do these five things to get the most out of So
 5. **Click Download** — SoulSync finds each track, downloads, tags, and organizes the files automatically.
 :::
 
-**Result:** tracks appear in your output folder as \`Artist/Album/01 - Title.flac\`, and your media server is notified to scan.
+**Result:** tracks appear in your music library folder as \`Artist/Album/01 - Title.flac\`, and your media server is notified to scan.
 
 > [!TIP]
 > If a track fails, open the download in **Active Downloads** — you can retry it or pick an alternative source file (candidate) from a different user.
