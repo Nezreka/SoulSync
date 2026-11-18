@@ -476,7 +476,7 @@ def test_quality_options_route_uses_the_resolvers_list(monkeypatch):
 def test_podcasts_read_follow_only_and_the_summary_speaks_to_you():
     rows = {r['id']: r for r in P.catalogue_payload()['rows']}
     assert rows['podcasts.get']['value_labels']['none'] == 'Follow only'
-    assert rows['music.get']['value_labels']['none'] == "Can't request"
+    assert rows['music.get']['value_labels']['none'] == 'Requests off'
     eff = P.effective(None, P.BUILTIN_TEMPLATES[1]['perms'], {'automations.personal': False}, {'id': 9})
     you = P.summarize(eff, name='You')
     assert any(line['text'].startswith('Podcasts:') for line in you['lines'])

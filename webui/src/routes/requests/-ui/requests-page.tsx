@@ -13,15 +13,19 @@ import type { RequestItem, RequestTab } from '../-requests.types';
 
 import {
   approveAllMusicRequests,
+  approveMediaRequest,
   approveMusicRequest,
   approveMusicVideoRequest,
+  declineMediaRequest,
   declineMusicRequest,
   declineMusicVideoRequest,
+  deleteMediaRequest,
   deleteMusicRequest,
   deleteMusicVideoRequest,
   invalidateMusicRequests,
   markMusicRequestsSeen,
   musicRequestsQueryOptions,
+  withdrawMediaRequest,
   withdrawMusicRequest,
   withdrawMusicVideoRequest,
 } from '../-requests.api';
@@ -38,6 +42,7 @@ import {
   itemOwner,
   itemTitle,
   itemTracks,
+  kindLabel,
   quotaLine,
   statusText,
   subLine,
@@ -49,8 +54,13 @@ import styles from './requests-page.module.css';
 
 export const PROFILE_NOTIFY_EVENT = 'soulsync:profile-notify';
 
-function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
-  window.showToast?.(message, type);
+function toast(
+  message: string,
+  type: 'success' | 'error' | 'info' | 'warning' = 'success',
+  opts?: { history?: boolean },
+) {
+  if (opts) window.showToast?.(message, type, null, opts);
+  else window.showToast?.(message, type);
 }
 
 /** a failed action: the server's refusal in its own calm words (#2166, the
@@ -59,7 +69,8 @@ function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' =
 function failToast(error: unknown, fallback: string) {
   const refused = refusalMessage((error as { data?: unknown } | null)?.data);
   if (refused) {
-    toast(refused, 'info');
+    // a refusal is said once, not kept in the notification panel (#2191)
+    toast(refused, 'info', { history: false });
     return;
   }
   toast(error instanceof Error ? error.message : fallback, 'error');
@@ -120,6 +131,9 @@ export function RequestsPage() {
       if (item.source === 'video-pending') {
         return approveMusicVideoRequest(profileId, item.video.id);
       }
+      if (item.source === 'media-pending') {
+        return approveMediaRequest(profileId, item.media.id);
+      }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return approveMusicRequest(profileId, {
         profile_id: item.group.profile_id,
@@ -132,7 +146,9 @@ export function RequestsPage() {
           ? item.group.requester_name
           : item.source === 'video-pending'
             ? item.video.requester_name
-            : '';
+            : item.source === 'media-pending'
+              ? item.media.requester_name
+              : '';
       toast(name ? `Approved. ${name} will hear when it lands` : 'Approved');
       afterChange();
     },
@@ -146,6 +162,9 @@ export function RequestsPage() {
     mutationFn: ({ item, response }: { item: RequestItem; response: string }) => {
       if (item.source === 'video-pending') {
         return declineMusicVideoRequest(profileId, item.video.id, response || undefined);
+      }
+      if (item.source === 'media-pending') {
+        return declineMediaRequest(profileId, item.media.id, response || undefined);
       }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return declineMusicRequest(profileId, {
@@ -169,6 +188,9 @@ export function RequestsPage() {
       if (item.source === 'video-pending') {
         return withdrawMusicVideoRequest(profileId, item.video.id);
       }
+      if (item.source === 'media-pending') {
+        return withdrawMediaRequest(profileId, item.media.id);
+      }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return withdrawMusicRequest(profileId, item.group.key);
     },
@@ -185,6 +207,9 @@ export function RequestsPage() {
     mutationFn: (item: RequestItem) => {
       if (item.source === 'video-history') {
         return deleteMusicVideoRequest(profileId, item.video.id);
+      }
+      if (item.source === 'media-history') {
+        return deleteMediaRequest(profileId, item.media.id);
       }
       if (item.source !== 'history') throw new Error('Only finished requests can be removed');
       return deleteMusicRequest(profileId, item.row.id);
@@ -212,7 +237,9 @@ export function RequestsPage() {
   });
 
   const waitingCount =
-    (listQuery.data?.pending.length ?? 0) + (listQuery.data?.pendingVideos.length ?? 0);
+    (listQuery.data?.pending.length ?? 0) +
+    (listQuery.data?.pendingVideos.length ?? 0) +
+    (listQuery.data?.pendingMedia?.length ?? 0);
 
   const confirmApproveAll = async () => {
     const noun = waitingCount === 1 ? 'request' : 'requests';
@@ -228,11 +255,11 @@ export function RequestsPage() {
   };
 
   const confirmWithdraw = async (item: RequestItem) => {
-    const isVideo = item.source === 'video-pending';
+    const stored = item.source === 'video-pending' || item.source === 'media-pending';
     const ok = window.showConfirmDialog
       ? await window.showConfirmDialog({
           title: 'Withdraw request',
-          message: isVideo
+          message: stored
             ? `Take back your request for ${itemTitle(item)}?`
             : `Take back your request for ${itemTitle(item)}? It comes off your wishlist too.`,
           confirmText: 'Withdraw',
@@ -377,7 +404,9 @@ function RequestRow({
       ? item.row.admin_response
       : item.source === 'video-history'
         ? item.video.admin_response
-        : null;
+        : item.source === 'media-history'
+          ? item.media.admin_response
+          : null;
 
   return (
     <li className={styles.row} data-status={item.status}>
@@ -386,7 +415,15 @@ function RequestRow({
           <img src={image} alt="" loading="lazy" onError={() => setImageFailed(true)} />
         ) : (
           <span className={styles.thumbGlyph}>
-            {kind === 'album' ? '◎' : kind === 'track' ? '♪' : '▶'}
+            {kind === 'album'
+              ? '◎'
+              : kind === 'track'
+                ? '♪'
+                : kind === 'audiobook'
+                  ? '▤'
+                  : kind === 'podcast'
+                    ? '◉'
+                    : '▶'}
           </span>
         )}
       </div>
@@ -394,9 +431,7 @@ function RequestRow({
       <div className={styles.main}>
         <div className={styles.titleLine}>
           <span className={styles.rowTitle}>{itemTitle(item)}</span>
-          <span className={styles.kind}>
-            {kind === 'album' ? 'Album' : kind === 'track' ? 'Track' : 'Music video'}
-          </span>
+          <span className={styles.kind}>{kindLabel(kind)}</span>
         </div>
         {subLine(item) ? <div className={styles.sub}>{subLine(item)}</div> : null}
         <div className={styles.who}>{whoAsked(item, showNames, Date.now(), viewerId)}</div>
@@ -447,7 +482,10 @@ function RequestRow({
                     Withdraw
                   </Menu.Item>
                 ) : null}
-                {!pending && (item.source === 'history' || item.source === 'video-history') ? (
+                {!pending &&
+                (item.source === 'history' ||
+                  item.source === 'video-history' ||
+                  item.source === 'media-history') ? (
                   <Menu.Item className={styles.menuItem} onClick={onRemove}>
                     Remove from history
                   </Menu.Item>
@@ -483,7 +521,9 @@ function DeclineDialog({
       ? item.group.requester_name
       : item?.source === 'video-pending'
         ? item.video.requester_name
-        : '';
+        : item?.source === 'media-pending'
+          ? item.media.requester_name
+          : '';
 
   return (
     <DialogFrame open={item != null} onOpenChange={(open) => (!open ? onClose() : undefined)}>

@@ -163,6 +163,20 @@ def sweep_fulfillment(db, only_pid=None) -> int:
             _notify(int(req["profile_id"]), f"{req.get('title') or 'The video'} is in your library now",
                     "success")
             _event("music_request_available", _video_group(req))
+    changed += _sweep_media(db, only_pid)
+    return changed
+
+
+def _sweep_media(db, only_pid=None) -> int:
+    """approved book and episode asks flip to available once they're here."""
+    from core.requests.media import AUDIOBOOK, book_in_library, describe as describe_media, episode_on_disk
+    changed = 0
+    for req in db.list_media_requests(profile_id=only_pid, status="approved"):
+        here = (book_in_library(req.get("item_key")) if req.get("kind") == AUDIOBOOK
+                else episode_on_disk(db, req.get("payload") or {}))
+        if here and db.mark_media_request_available(req["id"]):
+            changed += 1
+            _notify(int(req["profile_id"]), f"{describe_media(req)} is in your library now", "success")
     return changed
 
 
@@ -214,10 +228,22 @@ def list_music_requests():
                                  else sum(1 for r in video_rows if r["status"] == "pending"))}
     for h in db.list_music_requests(profile_id=scope):
         counts[h["status"]] = counts.get(h["status"], 0) + 1
+    media_rows = db.list_media_requests(profile_id=scope)
+    pending_media = [r for r in media_rows if r["status"] == "pending"] \
+        if status in ("pending", "all") else []
+    if status == "pending":
+        media_history = []
+    elif status == "all":
+        media_history = [r for r in media_rows if r["status"] != "pending"]
+    else:
+        media_history = [r for r in media_rows if r["status"] == status]
+    counts["pending_media"] = sum(1 for r in media_rows if r["status"] == "pending")
     me = db.get_profile(pid) or {}
     mode = _music_mode(db, me)
     return jsonify({"success": True, "pending": pending, "history": history, "counts": counts,
                     "pending_videos": pending_videos, "video_history": video_history,
+                    "pending_media": [_media_public(r) for r in pending_media],
+                    "media_history": [_media_public(r) for r in media_history],
                     "asks_first": mode != "download", "can_request": mode != "none",
                     "moderator": _may_answer(None) and not is_admin_request(),
                     "quota": _quota(db, me)})
@@ -265,15 +291,20 @@ def music_request_counts():
         return jsonify({"success": False, "error": "profile_required"}), 401
     if is_admin_request():
         videos = len(db.list_music_video_requests(status="pending"))
-        return jsonify({"success": True, "pending": len(_pending_groups(db)) + videos, "updates": 0})
+        media = len(db.list_media_requests(status="pending"))
+        return jsonify({"success": True, "pending": len(_pending_groups(db)) + videos + media, "updates": 0})
     if _may_answer(None):
         # a moderator's badge: everyone else's waiting requests, plus news on
         # their own like any member
         waiting = sum(1 for g in _pending_groups(db) if int(g["profile_id"]) != int(pid))
         waiting += sum(1 for r in db.list_music_video_requests(status="pending")
                        if int(r["profile_id"]) != int(pid))
+        waiting += sum(1 for r in db.list_media_requests(status="pending")
+                       if int(r["profile_id"]) != int(pid))
         unseen = sum(1 for h in db.list_music_requests(profile_id=pid) if not h.get("seen_at"))
         unseen += sum(1 for r in db.list_music_video_requests(profile_id=pid)
+                      if r["status"] != "pending" and not r.get("seen_at"))
+        unseen += sum(1 for r in db.list_media_requests(profile_id=pid)
                       if r["status"] != "pending" and not r.get("seen_at"))
         return jsonify({"success": True, "pending": waiting, "updates": unseen, "moderator": True})
     try:
@@ -284,7 +315,11 @@ def music_request_counts():
     my_videos = db.list_music_video_requests(profile_id=pid)
     pending_videos = sum(1 for r in my_videos if r["status"] == "pending")
     unseen += sum(1 for r in my_videos if r["status"] != "pending" and not r.get("seen_at"))
-    return jsonify({"success": True, "pending": len(_pending_groups(db, only_pid=pid)) + pending_videos,
+    my_media = db.list_media_requests(profile_id=pid)
+    pending_media = sum(1 for r in my_media if r["status"] == "pending")
+    unseen += sum(1 for r in my_media if r["status"] != "pending" and not r.get("seen_at"))
+    return jsonify({"success": True,
+                    "pending": len(_pending_groups(db, only_pid=pid)) + pending_videos + pending_media,
                     "updates": unseen})
 
 
@@ -295,7 +330,8 @@ def music_requests_seen():
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
     db = get_database()
-    marked = db.mark_music_requests_seen(pid) + db.mark_music_video_requests_seen(pid)
+    marked = (db.mark_music_requests_seen(pid) + db.mark_music_video_requests_seen(pid)
+              + db.mark_media_requests_seen(pid))
     return jsonify({"success": True, "marked": marked})
 
 
@@ -370,6 +406,11 @@ def approve_all_music_requests():
             _notify(int(req["profile_id"]),
                     f"{req.get('title') or 'The video'} was approved, it's on the way", "success")
             _event("music_request_approved", _video_group(req))
+            approved += 1
+    for req in db.list_media_requests(profile_id=only, status="pending"):
+        if not _may_answer(req["profile_id"]):
+            continue
+        if _approve_media(db, req) is None:
             approved += 1
     return jsonify({"success": True, "approved": approved})
 
@@ -626,4 +667,102 @@ def delete_music_video_request_history(request_id):
     if req.get("status") == "pending":
         return jsonify({"success": False, "error": "Withdraw a pending request instead"}), 409
     ok = db.delete_music_video_request(request_id)
+    return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
+
+
+# ── audiobook and podcast episode requests (#2188) ─────────────────────
+# a profile on Ask first for books or episodes asks from the audiobook and
+# podcast pages (api/audiobooks.py, api/podcasts.py); the asks are answered
+# here, on the same page and by the same people as music.
+
+def _media_public(req):
+    """a request as the page reads it: the payload stays on the server."""
+    return {k: v for k, v in req.items() if k != "payload"}
+
+
+def _approve_media(db, req):
+    """start what the approval means, then mark it. None on success, else
+    (error, status)."""
+    from core.requests.media import describe as describe_media, start_approved
+    error = start_approved(req)
+    if error:
+        return error, 502
+    if not db.set_media_request_status(req["id"], "approved", resolved_by=get_current_profile_id()):
+        return "That request isn't waiting any more", 409
+    _notify(int(req["profile_id"]), f"{describe_media(req)} was approved, it's on the way", "success")
+    return None
+
+
+@bp.route("/api/requests/media/<int:request_id>/approve", methods=["POST"])
+@signed_in
+def approve_media_request(request_id):
+    """admin or moderator: a waiting book goes on their wishlist, an episode
+    starts downloading."""
+    db = get_database()
+    req = db.get_media_request(request_id)
+    if not _may_answer(req["profile_id"] if req else None):
+        return _not_a_moderator()
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if req["status"] != "pending":
+        return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    failed = _approve_media(db, req)
+    if failed:
+        return jsonify({"success": False, "error": failed[0]}), failed[1]
+    return jsonify({"success": True})
+
+
+@bp.route("/api/requests/media/<int:request_id>/decline", methods=["POST"])
+@signed_in
+def decline_media_request(request_id):
+    """admin or moderator: {response?}. the request ends, the requester hears why."""
+    from core.requests.media import describe as describe_media
+    db = get_database()
+    req = db.get_media_request(request_id)
+    if not _may_answer(req["profile_id"] if req else None):
+        return _not_a_moderator()
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    reason = str((request.get_json(silent=True) or {}).get("response") or "").strip()[:500] or None
+    if not db.set_media_request_status(request_id, "declined", resolved_by=get_current_profile_id(),
+                                       admin_response=reason):
+        return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    _notify(int(req["profile_id"]), f"{describe_media(req)} was declined" + (f": {reason}" if reason else ""),
+            "warning")
+    return jsonify({"success": True})
+
+
+@bp.route("/api/requests/media/<int:request_id>/withdraw", methods=["POST"])
+@signed_in
+def withdraw_media_request(request_id):
+    """a member takes back their own waiting request (or a moderator anyone's)."""
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    db = get_database()
+    req = db.get_media_request(request_id)
+    if not req or req["status"] != "pending":
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if int(req["profile_id"]) != int(pid) and not _may_answer(req["profile_id"]):
+        return jsonify({"success": False, "error": "Not yours"}), 403
+    ok = db.delete_media_request(request_id)
+    return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
+
+
+@bp.route("/api/requests/media/<int:request_id>", methods=["DELETE"])
+@signed_in
+def delete_media_request_history(request_id):
+    """take a finished request out of the history (own, or any as admin)."""
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    db = get_database()
+    req = db.get_media_request(request_id)
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if int(req.get("profile_id") or 0) != int(pid) and not _may_answer(req.get("profile_id")):
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if req.get("status") == "pending":
+        return jsonify({"success": False, "error": "Withdraw a pending request instead"}), 409
+    ok = db.delete_media_request(request_id)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))

@@ -146,9 +146,9 @@ describe('the policy over a template', () => {
     ).toBeNull();
   });
 
-  it('says values in words, with Admins only for a ceiling', () => {
-    expect(valueText(row('movies.get'), 'none', null, 'P')).toBe('Admins only');
-    expect(valueText(row('movies.get'), 'none', null, 'T')).toBe("Can't request");
+  it('says a mode the same way in the policy and a template (#2192)', () => {
+    expect(valueText(row('movies.get'), 'none', null, 'P')).toBe('Requests off');
+    expect(valueText(row('movies.get'), 'none', null, 'T')).toBe('Requests off');
     expect(valueText(row('movies.request_limit'), { n: 3, days: 1 }, null)).toBe('3 asks a day');
     expect(valueText(row('tv.max_rating'), 'PG-13', null)).toBe('TV-14');
     expect(valueText(row('movies.quality'), [3], FIXTURE.quality as never)).toBe(
@@ -163,7 +163,7 @@ describe('the impact line', () => {
     expect(line.lead).toBe('Saving reaches all 5 members now.');
     expect(line.people[0]).toEqual({
       name: 'Priya',
-      text: 'Getting movies goes from Download right away to Ask first, Movies rating goes from Any to R and 1 more',
+      text: 'Movie requests goes from Auto-approve to Require approval, Movies rating goes from Any to R and 1 more',
     });
     expect(line.tail).toBe(
       "Odd runs on old settings. The policy holds them too, but those settings aren't rewritten.",

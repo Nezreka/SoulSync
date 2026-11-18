@@ -155,3 +155,19 @@ def media_download_error(permission: str):
     if has_map:
         return refusal(permission) if map_refuses(permission, "download") else None
     return download_permission_error()
+
+
+def media_asks_first(permission: str) -> bool:
+    """True when the current request's permission map says ``permission``
+    (books.get, podcasts.get) is Ask first: not right away, but asking is
+    allowed (#2188). the caller files a request for an admin instead of
+    downloading. no map (an api key, a bare test app) never asks: the
+    download switch answers there, as before."""
+    from flask import g, has_request_context
+
+    from core.permissions import map_refuses
+    try:
+        has_map = has_request_context() and "perms" in g
+    except Exception:  # noqa: BLE001 - can't tell, nothing asks
+        return False
+    return bool(has_map) and map_refuses(permission, "download") and not map_refuses(permission, "ask")

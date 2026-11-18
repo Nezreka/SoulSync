@@ -661,6 +661,11 @@ def _emit_activity_toast(event, item):
 # sockets of admin profiles sit in this room, every other profile's in
 # member:<id>; a socket is in exactly one of them (see _ws_join_role_room)
 ADMIN_SOCKET_ROOM = 'role:admin'
+# sockets of profiles that have Chat & Arcade (chat.use). the room chat's
+# live push goes to: a member without it never got the messages' content
+# on the wire, and the page it can't open stopped asking /api/chat for its
+# name on every room message and toasting the refusal (#2191)
+CHAT_SOCKET_ROOM = 'perm:chat'
 set_activity_toast_emitter(_emit_activity_toast)
 # Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
 from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
@@ -23465,7 +23470,7 @@ def _emit_chat_push_loop():
                         except Exception:
                             logger.debug("chat: loop game-carrier archive failed", exc_info=True)
                         socketio.emit('chat:room_protocol', {
-                            'room': room, 'events': proto_events[-40:]})
+                            'room': room, 'events': proto_events[-40:]}, to=CHAT_SOCKET_ROOM)
                     if decoded:      # a reaction-only tick still tracks PMs below
                         try:
                             get_database().add_chat_messages(room, decoded)
@@ -23474,7 +23479,7 @@ def _emit_chat_push_loop():
                         socketio.emit('chat:room_message', {
                             'room': room,
                             'messages': decoded[-20:],
-                        })
+                        }, to=CHAT_SOCKET_ROOM)
             convos = run_async(_slsk.get_conversations()) or []
             unread_users = [str(c.get('username') or '') for c in convos
                             if c.get('hasUnAcknowledgedMessages')
@@ -23489,7 +23494,7 @@ def _emit_chat_push_loop():
                     # 'grew' gates the toast: only a RISING count notifies (a read
                     # clearing the flag must not), and never the boot baseline
                     'grew': prev >= 0 and unread > prev,
-                })
+                }, to=CHAT_SOCKET_ROOM)
             # Chat-archive retention: once a day at most, best-effort. The
             # archive only grows while this loop runs (it does the archiving),
             # so gating the sweep on the loop is no loss — and a setting
@@ -23930,6 +23935,7 @@ def _ws_join_role_room():
         logger.debug("role room: %s", e)
         return
     leave_room(ADMIN_SOCKET_ROOM)
+    leave_room(CHAT_SOCKET_ROOM)
     if pid is None:
         return
     if is_admin:
@@ -23937,6 +23943,20 @@ def _ws_join_role_room():
         join_room(ADMIN_SOCKET_ROOM)
     else:
         join_room(f'member:{pid}')
+    if is_admin or _ws_profile_may_chat(pid):
+        join_room(CHAT_SOCKET_ROOM)
+
+
+def _ws_profile_may_chat(pid) -> bool:
+    """chat.use for this profile under the global policy. fails closed: a
+    map that can't be read keeps the socket out of chat's room."""
+    try:
+        from core import permission_store as _PS
+        from core.permissions import can as _can
+        return bool(_can(_PS.context_for(get_database(), pid), 'chat.use'))
+    except Exception as e:  # noqa: BLE001 - no room is the safe answer
+        logger.debug("chat room: %s", e)
+        return False
 
 
 def _ws_session_profile():

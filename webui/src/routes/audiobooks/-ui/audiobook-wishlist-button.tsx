@@ -1,3 +1,5 @@
+import { usePermMode } from '@/platform/shell/my-permissions';
+
 import type { AudiobookItem } from '../-audiobooks.types';
 
 import { useAudiobookContext } from './audiobook-context';
@@ -30,27 +32,45 @@ const HEART_PATH =
  * id, not an ASIN, and wishlisting one would store a row nothing could search.
  */
 export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWishlistButtonProps) {
-  const { isWishlisted, isWishlistBusy, toggleWishlist } = useAudiobookContext();
+  const { isWishlisted, isWishlistBusy, isRequested, toggleWishlist } = useAudiobookContext();
+  // Ask first for books (#2188): the heart asks an admin instead of wishing
+  const asks = usePermMode('books') === 'ask';
 
   if (book.source !== 'audible') return null;
 
   const wanted = isWishlisted(book.asin);
-  const busy = isWishlistBusy(book.asin);
+  const requested = !wanted && asks && isRequested(book.asin);
+  const busy = isWishlistBusy(book.asin) || requested;
   // a wished book is grabbed by the wishlist pass, so adding is a download:
   // hidden for a profile that can't get books (body[data-books-get=none]), like
-  // every other download button. taking a book off stays.
+  // every other download button. taking a book off stays. a profile that asks
+  // first keeps it (data-books-asks): for them it's a request
   const addHook = wanted ? undefined : '';
-  const label = wanted ? 'On your wishlist' : 'Add to wishlist';
+  const label = wanted
+    ? 'On your wishlist'
+    : requested
+      ? 'Requested'
+      : asks
+        ? 'Request this book'
+        : 'Add to wishlist';
+  const fullLabel = wanted
+    ? 'Wishlisted'
+    : requested
+      ? 'Requested'
+      : asks
+        ? 'Request'
+        : 'Add to wishlist';
 
-  const icon = wanted ? (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={HEART_PATH} fill="currentColor" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={HEART_PATH} fill="none" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
+  const icon =
+    wanted || requested ? (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d={HEART_PATH} fill="currentColor" />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d={HEART_PATH} fill="none" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    );
 
   if (variant === 'full') {
     return (
@@ -58,12 +78,13 @@ export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWis
         type="button"
         className={`${styles.wishlistFull} ${wanted ? styles.wishlistFullOn : ''}`}
         data-books-action={addHook}
+        data-books-asks=""
         onClick={() => void toggleWishlist(book)}
         disabled={busy}
-        aria-pressed={wanted}
+        aria-pressed={wanted || requested}
       >
         {icon}
-        {wanted ? 'Wishlisted' : 'Add to wishlist'}
+        {fullLabel}
       </button>
     );
   }
@@ -73,13 +94,14 @@ export function AudiobookWishlistButton({ book, variant = 'icon' }: AudiobookWis
       type="button"
       className={`${styles.wishlistIcon} ${wanted ? styles.wishlistIconOn : ''}`}
       data-books-action={addHook}
+      data-books-asks=""
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
         void toggleWishlist(book);
       }}
       disabled={busy}
-      aria-pressed={wanted}
+      aria-pressed={wanted || requested}
       aria-label={label}
       title={label}
     >

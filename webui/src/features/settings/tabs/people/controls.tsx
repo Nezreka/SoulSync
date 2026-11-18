@@ -25,6 +25,7 @@ import {
   RATINGS,
   aboveCeiling,
   capLine,
+  heldAt,
   idOutside,
   impactLine,
   isCount,
@@ -239,22 +240,34 @@ function CountControl({
 }
 
 const MODE_HELP: Record<string, string> = {
-  download: 'Download right away: it starts as soon as they pick it.',
-  ask: 'Ask first: what they pick lands in your Requests.',
-  none: "Can't request: they can look, but not ask.",
+  download: 'Auto-approve: it downloads as soon as they pick it.',
+  ask: 'Require approval: what they pick lands in your Requests.',
+  none: 'Requests off: they can look, but not ask.',
 };
 
+/** a podcast's own words: following is always allowed, episodes are asked for */
+const PODCAST_HELP: Record<string, string> = {
+  download: 'Auto-approve: new episodes of shows they follow download on their own.',
+  ask: 'Require approval: they ask for episodes, and each one lands in your Requests.',
+  none: 'Follow only: they follow shows and play episodes, nothing downloads for them.',
+};
+
+function modeHelpFor(row: CatalogueRow, value: PermValue): string {
+  const words = row.id === 'podcasts.get' ? PODCAST_HELP : MODE_HELP;
+  return words[str(value)] ?? row.help;
+}
+
 const POLICY_TITLE: Partial<Record<string, (row: CatalogueRow) => string>> = {
-  mode: (row) => `${row.label}, at most`,
-  rating: (row) =>
-    row.id.startsWith('tv.') ? 'Highest TV rating anyone gets' : 'Highest rating anyone gets',
-  count: () => 'Request limit, at most',
+  rating: () => 'Maximum content rating',
+  count: () => 'Maximum request limit',
 };
 
 function policyHelp(row: CatalogueRow): string {
   switch (row.kind) {
     case 'mode':
-      return 'Ask first means you approve every one, even for people whose template says download.';
+      return row.id === 'podcasts.get'
+        ? 'Require approval sends every episode to your Requests. Follow only: they follow shows, nothing downloads for them.'
+        : 'Require approval sends every one to your Requests, even for people whose template says Auto-approve.';
     case 'rating':
       return row.id.startsWith('tv.')
         ? 'Same as movies keeps shows at the movie limit for every member.'
@@ -301,18 +314,20 @@ function RowControl({
       );
     }
     case 'mode': {
+      // the option in force is the pressed one: a template asking for more
+      // than the policy allows shows what it gets, never what it asks (#2189)
+      const shown = layer === 'T' ? heldAt(row, value, ceiling) : value;
       const options = MODES.filter((m) => row.values.includes(m)).map((m) => ({
         value: m,
         label: modeLabel(row, m, layer),
         disabled:
-          disabled ||
-          (layer === 'T' && ceiling !== undefined && aboveCeiling(row, m, ceiling) && m !== value),
+          disabled || (layer === 'T' && ceiling !== undefined && aboveCeiling(row, m, ceiling)),
       }));
       return (
         <Seg
           label={row.label}
           options={options}
-          value={str(value) as (typeof MODES)[number]}
+          value={str(shown) as (typeof MODES)[number]}
           onChange={(m) => onChange(m)}
         />
       );
@@ -320,11 +335,12 @@ function RowControl({
     case 'rating': {
       const tv = row.id.startsWith('tv.');
       const values = tv ? ['follow', ...RATINGS] : RATINGS;
+      const shown = layer === 'T' ? heldAt(row, value ?? 'any', ceiling) : value;
       return (
         <select
           className={css.sel}
           aria-label={row.label}
-          value={str(value ?? 'any')}
+          value={str(shown ?? 'any')}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         >
@@ -332,12 +348,7 @@ function RowControl({
             <option
               key={r}
               value={r}
-              disabled={
-                layer === 'T' &&
-                ceiling !== undefined &&
-                r !== value &&
-                aboveCeiling(row, r, ceiling)
-              }
+              disabled={layer === 'T' && ceiling !== undefined && aboveCeiling(row, r, ceiling)}
             >
               {ratingLabel(r, tv)}
             </option>
@@ -345,15 +356,18 @@ function RowControl({
         </select>
       );
     }
-    case 'count':
+    case 'count': {
+      const raw = isCount(value) ? value : { n: 0, days: 7 };
+      const shown = layer === 'T' ? heldAt(row, raw, ceiling) : raw;
       return (
         <CountControl
           row={row}
-          value={isCount(value) ? value : { n: 0, days: 7 }}
+          value={isCount(shown) ? shown : raw}
           disabled={disabled}
           onChange={onChange}
         />
       );
+    }
     default:
       return null;
   }
@@ -484,7 +498,7 @@ function QualityGroup({
       {choiceRow ? (
         <div className={css.qFoot}>
           <label>
-            {layer === 'P' ? 'Members start on' : 'Starts on'}
+            Default quality profile
             <select
               className={css.sel}
               aria-label={choiceRow.label}
@@ -587,9 +601,10 @@ export function CategoryRows({
       layer === 'P'
         ? policyHelp(row)
         : row.kind === 'mode'
-          ? (MODE_HELP[str(value)] ?? row.help)
+          ? modeHelpFor(row, heldAt(row, value, ceil))
           : row.help;
-    const lock = needs ?? (capped || forced ? capLine(row, ceil as PermValue, quality) : null);
+    const lock =
+      needs ?? (capped || forced ? capLine(row, ceil as PermValue, quality, value) : null);
     return (
       <RowShell
         key={row.id}
@@ -624,7 +639,7 @@ export function CategoryRows({
     const needs = layer === 'T' ? needsLine(setRow, values, byId) : null;
     sections.push(
       <div key={setRow.id}>
-        <div className={css.sect}>{layer === 'P' ? 'Quality members may pick' : 'Quality'}</div>
+        <div className={css.sect}>Allowed quality profiles</div>
         <div className={`${css.group} ${needs ? css.dim : ''}`}>
           {needs ? <RowShell title={setRow.label} lock={needs} dim /> : null}
           <QualityGroup

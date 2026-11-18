@@ -855,7 +855,7 @@ async function checkMusicRequestQuota() {
     // there at all (a stale page after an admin's change); say so calmly
     const perms = window.SoulSyncPerms;
     if (perms && perms.mode('music') === 'none') {
-        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info');
+        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info', null, { history: false });
         return false;
     }
     if (typeof canDownload !== 'function' || canDownload()) return true;

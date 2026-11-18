@@ -19,7 +19,15 @@ interface SoulSyncNavProfile {
 
 declare global {
   interface Window {
-    showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** static/downloads.js. opts.history false shows the toast but keeps it
+     *  out of the notification panel and its journal: a refusal or a
+     *  progress line isn't something to come back to (#2191) */
+    showToast?: (
+      message: string,
+      type?: string,
+      durationOrContext?: number | string | null,
+      opts?: { history?: boolean; journal?: boolean },
+    ) => void;
     /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
     SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;
     /** static/profile-nav.js: the sidebar's permission rule and the landing page (#2154, #2156) */

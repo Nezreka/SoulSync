@@ -48,13 +48,19 @@ describe('global policy', () => {
       'Administration',
     ]);
     expect(rail).toHaveTextContent("Sidebar and look aren't here");
-    // a mode row is a ceiling: Admins only instead of Can't request
-    const seg = within(pane).getByRole('group', { name: 'Getting movies' });
+    // one word for each mode, the same as a template's (#2192)
+    const seg = within(pane).getByRole('group', { name: 'Movie requests' });
     expect(
       within(seg)
         .getAllByRole('button')
         .map((b) => b.textContent),
-    ).toEqual(['Download right away', 'Ask first', 'Admins only']);
+    ).toEqual(['Auto-approve', 'Require approval', 'Requests off']);
+    // the rows' own names, no ", at most" (#2192)
+    expect(pane).toHaveTextContent('Maximum content rating');
+    expect(pane).toHaveTextContent('Maximum request limit');
+    expect(pane).toHaveTextContent('Allowed quality profiles');
+    expect(pane).toHaveTextContent('Default quality profile');
+    expect(pane).not.toHaveTextContent('requests, at most');
   });
 
   it('says who a change reaches before saving, then saves only what moved', async () => {
@@ -64,11 +70,13 @@ describe('global policy', () => {
     const pane = await openPolicy();
     expect(screen.queryByRole('button', { name: 'Save policy' })).toBeNull();
     fireEvent.click(
-      within(within(pane).getByRole('group', { name: 'Getting movies' })).getByText('Ask first'),
+      within(within(pane).getByRole('group', { name: 'Movie requests' })).getByText(
+        'Require approval',
+      ),
     );
     await waitFor(() =>
       expect(pane).toHaveTextContent(
-        'Saving reaches all 5 members now. Priya: Getting movies goes from Download right away to Ask first',
+        'Saving reaches all 5 members now. Priya: Movie requests goes from Auto-approve to Require approval',
       ),
     );
     expect(pane).toHaveTextContent('Odd runs on old settings.');
@@ -91,11 +99,11 @@ describe('global policy', () => {
       'Limited here',
     );
     expect(screen.getByRole('tab', { name: /^Movies/ })).not.toHaveTextContent('Limited here');
-    const seg = within(pane).getByRole('group', { name: 'Getting movies' });
-    fireEvent.click(within(seg).getByText('Admins only'));
-    expect(within(seg).getByText('Admins only')).toHaveAttribute('aria-pressed', 'true');
+    const seg = within(pane).getByRole('group', { name: 'Movie requests' });
+    fireEvent.click(within(seg).getByText('Requests off'));
+    expect(within(seg).getByText('Requests off')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
-    expect(within(seg).getByText('Download right away')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(seg).getByText('Auto-approve')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: 'Save policy' })).toBeNull();
   });
 
@@ -133,14 +141,18 @@ describe('global policy', () => {
     });
     const pane = await openPolicy();
     fireEvent.click(
-      within(within(pane).getByRole('group', { name: 'Getting movies' })).getByText('Ask first'),
+      within(within(pane).getByRole('group', { name: 'Movie requests' })).getByText(
+        'Require approval',
+      ),
     );
     const save = await screen.findByRole('button', { name: 'Save policy' });
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
     await waitFor(() => expect(pane).toHaveTextContent("Permissions can't be read right now."));
     expect(
-      within(within(pane).getByRole('group', { name: 'Getting movies' })).getByText('Ask first'),
+      within(within(pane).getByRole('group', { name: 'Movie requests' })).getByText(
+        'Require approval',
+      ),
     ).toHaveAttribute('aria-pressed', 'true');
   });
 

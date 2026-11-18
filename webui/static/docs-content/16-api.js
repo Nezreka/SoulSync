@@ -4968,8 +4968,14 @@ Members submit download requests; admins approve or decline them.
 | POST | \`/api/requests/music/decline\` | Decline one request | admin |
 | POST | \`/api/requests/music/withdraw\` | Withdraw your own request | session |
 | DELETE | \`/api/requests/music/{request_id}\` | Delete a request from history | session (own) / admin |
+| POST | \`/api/requests/media/{request_id}/approve\` | Approve an audiobook or podcast episode request | admin / moderator |
+| POST | \`/api/requests/media/{request_id}/decline\` | Decline one, with an optional \`response\` | admin / moderator |
+| POST | \`/api/requests/media/{request_id}/withdraw\` | Withdraw your own waiting one | session |
+| DELETE | \`/api/requests/media/{request_id}\` | Delete a finished one from history | session (own) / admin |
 
 \`POST /api/requests/music/approve\` takes \`{"profile_id": 2, "key": "<request-key>"}\` with an optional \`response\` note (truncated to 500 characters) and answers \`{"success": true, "approved": <n>}\`. \`approve-all\` takes an optional \`profile_id\` — omit it to approve everything pending. \`decline\` takes the same body shape as \`approve\`. \`withdraw\` takes \`{"key": "<request-key>"}\`.
+
+Audiobook and podcast episode requests come from a profile on **Require approval** for them: \`POST /api/audiobooks/wishlist\` and \`POST /api/podcasts/download\` answer \`{"success": true, "requested": true}\` instead of adding or downloading. \`GET /api/requests/music\` lists them as \`pending_media\` and \`media_history\` (each with \`kind\` \`audiobook\` or \`podcast\`), and the counts include them. Approving a book puts it on the requester's audiobook wishlist; approving an episode starts its download.
 
 ## Profile admin
 

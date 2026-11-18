@@ -31,9 +31,15 @@ describe('my permissions: the map', () => {
     expect(modeFor(permsOf(BOOKS_OFF), 'books')).toBe('none');
   });
 
-  it('books and podcasts have no Ask first: an ask there is none', () => {
-    expect(modeFor(permsOf({ ...ADULT, 'books.get': 'ask' }), 'books')).toBe('none');
-    expect(modeFor(permsOf({ ...ADULT, 'podcasts.get': 'ask' }), 'podcasts')).toBe('none');
+  it('books and podcasts ask first like music (#2188)', () => {
+    expect(modeFor(permsOf({ ...ADULT, 'books.get': 'ask' }), 'books')).toBe('ask');
+    expect(modeFor(permsOf({ ...ADULT, 'podcasts.get': 'ask' }), 'podcasts')).toBe('ask');
+    const can = describePermissions(
+      permsOf({ ...ADULT, 'books.get': 'ask', 'podcasts.get': 'ask' }),
+    );
+    expect(can.rows.find((r) => r.id === 'books')?.lead).toBe(
+      'Audiobooks on request, podcast episodes on request',
+    );
   });
 
   it('admins download everything, an unknown mode is none', () => {
