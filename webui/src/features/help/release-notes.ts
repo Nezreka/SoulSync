@@ -76,7 +76,9 @@ export const RELEASES: Release[] = [
       'Settings rebuilt in React: it looks and works the same, loads its tabs once and saves only what you changed.',
       'A Seerr compatible API at /seerr, so Litefin and other Seerr apps can discover and request through the video side (thanks Thibs, #2151).',
       'Server Activity rebuilt for Plex and Jellyfin: now playing and why it converts, stop with a message, and SoulSync’s own play history and stats.',
-      'Other versions on the album menu: pick another edition with a preview first (thanks wolf39us, #2145).',
+      'Other versions on the album menu: pick another edition with a preview first, and an album split over two rows merges back into one (thanks wolf39us, #2145, #2178).',
+      'A MusicBrainz release status filter: keep bootlegs, promos and the like off the wishlist, library wide or per artist (thanks Ericsson, #2175).',
+      'Missing episodes count only the seasons you monitor, and torrent imports wait for qBittorrent to finish moving the file (thanks hilburn, #2176, #2177).',
       'A flame on an album’s most played tracks, and “N to rename” on the artist page (thanks wolf39us, #2144, #2141).',
       'Collection completeness on the Library cards and table, with sorts and filters (thanks SeadogsBooty, #2106 to #2109).',
       'Band names like Above & Beyond and K/DA stay one artist, compilations stay under their album artist, and numbered releases never cross (#2131, #2133 to #2136, #2150).',
@@ -103,6 +105,25 @@ export const RELEASES: Release[] = [
         title: 'Keep Best and playlists',
         desc: 'Duplicates in the same playlists can go, playlists you name never protect a copy, and an option moves a removed copy’s playlist entries to the kept one (thanks Storm, #2172).',
         page: 'tools',
+      },
+      {
+        title: 'Release status filter',
+        desc: 'Pick which MusicBrainz release statuses the watchlist wants, like Official only, for the whole library or one artist in Artist Settings. Everything stays allowed until you pick (thanks Ericsson, #2175).',
+        page: 'library',
+      },
+      {
+        title: 'Two albums that are one',
+        desc: 'When one album sits on two rows, Other versions offers to merge them into one, and switching an edition brings its title, type and date along, so an album stops sitting under EPs (thanks wolf39us, #2178).',
+        page: 'library',
+      },
+      {
+        title: 'Missing means monitored',
+        desc: 'A show’s missing count and Get missing cover the episodes you monitor; gaps in unmonitored seasons are shown apart and left alone (thanks hilburn, #2177).',
+        page: 'video-library',
+      },
+      {
+        title: 'Imports find the moved file',
+        desc: 'A torrent import waits while qBittorrent moves the file out of its incomplete folder, and Retry on a failed import asks the client where the file is now. Show-page grabs no longer show the wrong show on the downloads card (thanks hilburn, #2176).',
       },
       {
         title: 'Settings, rebuilt',
