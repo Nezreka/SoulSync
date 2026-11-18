@@ -576,8 +576,13 @@ class DeezerWorker:
 
     def _update_artist(self, artist_id: int, data: Dict[str, Any]):
         """Store Deezer metadata for an artist"""
+        # data is get_artist_info's spotify-shaped dict: nb_fan is followers.total
+        raw = data.get('_raw_data') or {}
+        fans = (data.get('followers') or {}).get('total') or raw.get('nb_fan')
         self._write('artist', artist_id, data.get('id'),
-                    backfill={'image_url': data.get('picture_xl')})
+                    backfill={'image_url': data.get('picture_xl')},
+                    # deezer fans, shown as fans (core.library2.artist_about)
+                    payload={'fans': int(fans) if fans else None})
 
     def _update_album(self, album_id: int, search_data: Dict[str, Any],
                       full_data: Optional[Dict[str, Any]]):

@@ -15,15 +15,17 @@ import {
 import { buildHeroBadges } from '../-artist-detail.hero';
 import {
   artistFormatTags,
+  artistTags,
   buildGenreChips,
   categoryStats,
   type CategoryStats,
-  cleanArtistBio,
   formatHeroNumber,
   heroImage,
   type HeroImageStage,
   heroImageSrc,
+  heroNumbers,
   nextHeroImageStage,
+  pickArtistBio,
   resolvedCategoryStats,
   streamCategoryStats,
   totalReleaseCount,
@@ -31,6 +33,7 @@ import {
 import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ReportIssueButton } from '../../issues/-ui/report-issue-button';
+import { AboutSourceNote } from './about-source-note';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { ArtistFixMatch } from './artist-matches-modal';
@@ -198,7 +201,11 @@ export function ArtistHero({
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
   const chips = buildGenreChips(artist);
-  const bio = cleanArtistBio(artist.lastfm_bio);
+  // last.fm first, then the media server's summary, then the free sources
+  const pickedBio = pickArtistBio(artist);
+  const bio = pickedBio?.text ?? '';
+  const tagsSource = artistTags(artist).source;
+  const numbers = heroNumbers(artist);
   const [bioExpanded, setBioExpanded] = useState(false);
   const bioRef = useRef<HTMLDivElement | null>(null);
   /**
@@ -530,10 +537,11 @@ export function ArtistHero({
           <div className="artist-genres-container" id="artist-genres">
             {chips.map((chip) => (
               <span
-                key={`${chip.fromLastfm ? 'lfm' : 'genre'}-${chip.label}`}
+                key={`${chip.source}-${chip.label}`}
                 className="genre-tag"
-                // Last.fm tags are dimmed so they read as secondary.
-                style={chip.fromLastfm ? { opacity: 0.6 } : undefined}
+                // tags (last.fm, or musicbrainz without it) are dimmed so they
+                // read as secondary.
+                style={chip.source !== 'genre' ? { opacity: 0.6 } : undefined}
               >
                 {chip.label}
               </span>
@@ -572,19 +580,19 @@ export function ArtistHero({
             </div>
           ) : null}
 
+          <AboutSourceNote
+            bioSource={pickedBio?.source}
+            bioUrl={pickedBio?.url}
+            tagsSource={chips.some((chip) => chip.source !== 'genre') ? tagsSource : null}
+          />
+
           <div className="artist-hero-numbers">
-            {artist.lastfm_listeners ? (
-              <div className="artist-hero-stat" id="artist-hero-listeners">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_listeners)}</span>
-                <span className="hero-stat-label">listeners</span>
+            {numbers.map((stat) => (
+              <div className="artist-hero-stat" id={`artist-hero-${stat.id}`} key={stat.id}>
+                <span className="hero-stat-value">{formatHeroNumber(stat.value)}</span>
+                <span className="hero-stat-label">{stat.label}</span>
               </div>
-            ) : null}
-            {artist.lastfm_playcount ? (
-              <div className="artist-hero-stat" id="artist-hero-playcount">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_playcount)}</span>
-                <span className="hero-stat-label">plays</span>
-              </div>
-            ) : null}
+            ))}
           </div>
 
           {/* Completion bars are library-only: a source artist owns nothing, so

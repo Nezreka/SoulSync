@@ -1180,6 +1180,7 @@ def get_artist_discography(artist_id):
                                json_extract(enrichment, '$.lastfm.listeners') AS lastfm_listeners,
                                json_extract(enrichment, '$.lastfm.playcount') AS lastfm_playcount,
                                json_extract(enrichment, '$.lastfm.tags') AS lastfm_tags,
+                               enrichment,
                                {_ARTIST_IDS_SQL}
                         FROM lib2_artists WHERE name_key = ? LIMIT 1
                     """.format(_ARTIST_IDS_SQL=_ARTIST_IDS_SQL), (_catalogue_name_key(artist_name),))
@@ -1220,6 +1221,10 @@ def get_artist_discography(artist_id):
                         # Bio fallback from summary
                         if not artist_info.get('lastfm_bio') and lib.get('summary'):
                             artist_info['bio'] = lib['summary']
+                        # bio/tags/numbers from the free sources when last.fm
+                        # has none, each with its source
+                        from core.library2.artist_about import resolve_artist_about
+                        artist_info['about'] = resolve_artist_about(lib.get('enrichment'))
                 finally:
                     conn_lib.close()
         except Exception as e:

@@ -26632,6 +26632,21 @@ div.artist-hero-badge {
     text-decoration: underline;
 }
 
+/* where the bio or tags came from when it is not last.fm: one quiet line */
+.artist-about-source {
+    font-size: 0.72em;
+    color: var(--white-a35);
+    margin: -8px 0 12px;
+}
+.artist-about-source a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--white-a20);
+}
+.artist-about-source a:hover {
+    color: var(--white-a60);
+}
+
 /* Stats — listener/play count boxes */
 .artist-hero-stat {
     display: flex;

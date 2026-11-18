@@ -123,6 +123,12 @@ def _json_list(raw: Any) -> List[str]:
         return []
 
 
+def _artist_about(row: Any) -> Dict[str, Any]:
+    """the artist page's bio/tags/numbers with their sources (artist_about)."""
+    from .artist_about import resolve_artist_about
+    return resolve_artist_about(row["enrichment"] if "enrichment" in row.keys() else None)
+
+
 def _artist_provider_ids(row: Any) -> Dict[str, str]:
     """Every qualified provider id stored on an artist row (guide §2.5): the
     dedicated ``spotify_id`` column plus the ``external_ids`` namespaces."""
@@ -1223,6 +1229,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # (those workers still write legacy rows — Stufe 2). Say which, instead
         # of letting the chips imply parity.
         "enrichment_depth": "full" if a["legacy_artist_id"] is not None else "native",
+        # bio, tags and numbers from whichever source has them, last.fm first
+        "about": _artist_about(a),
         "monitored": _scoped_flag(conn, "artist", a),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
