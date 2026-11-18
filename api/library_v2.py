@@ -25,7 +25,7 @@ import time
 from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
-from flask import jsonify, make_response, request, send_file
+from flask import has_request_context, jsonify, make_response, request, send_file
 
 from core.library2 import ADMIN_PROFILE_ID
 from core.library2 import bootstrap as lib2_bootstrap
@@ -34,6 +34,7 @@ from core.library2.job_registry import JobAlreadyRunning, JobRegistry
 # looking at (#1199): a ContextVar does not cross a thread start, so without
 # this a job for someone's own library would answer from the shared one.
 from core.library_scope import carrying_scope
+from core.permissions import requires, signed_in
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
@@ -319,6 +320,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     """
 
     def _page_allowed() -> bool:
+        # the real app answers from the profile's permissions (the library
+        # page needs the music side too); a bare test app from its getter
+        from core.permissions import can, enforcing
+        if enforcing() and has_request_context():
+            return can(None, "music.library")
         if profile_page_allowed_getter is None:
             return True
         try:
@@ -385,7 +391,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             def guarded(*args, **kwargs):
                 _resolve_merged_ids(kwargs)
                 return _guard() or view(*args, **kwargs)
-            return app.route(rule, **options)(guarded)
+            # declared for the route inventory: the library page. writes are
+            # narrowed further by _guard (admin, or wishing in your own library)
+            return app.route(rule, **options)(requires("music.library")(guarded))
         return register
 
     def _named_row_hidden():
@@ -480,7 +488,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # review 4 R4-D-6: a profile that no longer exists (a stale
             # session) is no profile, not one allowed to download
             profile = get_database().get_profile(_profile())
-            return bool(profile and profile.get("can_download", 1))
+            if not (profile and profile.get("can_download", 1)):
+                return False
+            # music.get under the policy and the music side (#2166)
+            from core.permissions import can, enforcing
+            return can(None, "music.get", "download") if enforcing() and has_request_context() else True
         except Exception:  # noqa: BLE001 - unreadable profile: a request, never a grab
             return False
 
@@ -725,6 +737,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "scope": wanted})
 
     @app.route("/api/library/v2/enabled")
+    @signed_in
     def lib2_enabled():
         # iss29-C10: `_guard` rejects every mutating request from a non-admin
         # profile (P0-02 — the lib2 monitored columns are global), but this

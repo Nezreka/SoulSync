@@ -10,6 +10,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 
 from utils.logging_config import get_logger
+from core.profile_context import admin_only
 
 logger = get_logger("api.music_assistant")
 
@@ -32,6 +33,7 @@ def _client():
 
 
 @bp.route('/api/music-assistant/sources', methods=['GET'])
+@admin_only
 def list_sources():
     client = _client()
     if client is None:
@@ -46,6 +48,7 @@ def list_sources():
 
 
 @bp.route('/api/music-assistant/select-source', methods=['POST'])
+@admin_only
 def select_source():
     client = _client()
     if client is None:

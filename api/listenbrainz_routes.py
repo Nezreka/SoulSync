@@ -32,6 +32,7 @@ from core.profile_context import get_current_profile_id
 from core.runtime_state import add_activity_item
 from utils.logging_config import get_logger
 from core.discovery.blocked import WORKS, hide_blocked_in_response as _hide_blocked
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -62,6 +63,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/discover/listenbrainz/created-for', methods=['GET'])
+@requires("music.access")
 def get_listenbrainz_created_for():
     """Get playlists created for the user by ListenBrainz (from cache)"""
     try:
@@ -73,6 +75,7 @@ def get_listenbrainz_created_for():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/listenbrainz/user-playlists', methods=['GET'])
+@requires("music.access")
 def get_listenbrainz_user_playlists():
     """Get user's own ListenBrainz playlists (from cache)"""
     try:
@@ -84,6 +87,7 @@ def get_listenbrainz_user_playlists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/listenbrainz/collaborative', methods=['GET'])
+@requires("music.access")
 def get_listenbrainz_collaborative():
     """Get collaborative ListenBrainz playlists (from cache)"""
     try:
@@ -95,6 +99,7 @@ def get_listenbrainz_collaborative():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
+@requires("music.access")
 @_hide_blocked({'tracks': WORKS})
 def get_listenbrainz_playlist_tracks(playlist_mbid):
     """Get tracks from a specific ListenBrainz playlist (from cache, with on-demand refresh)"""
@@ -144,6 +149,7 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
 
 # Manual refresh endpoint for ListenBrainz
 @bp.route('/api/discover/listenbrainz/refresh', methods=['POST'])
+@requires("music.access")
 def refresh_listenbrainz():
     """Manually refresh ListenBrainz playlists cache"""
     try:
@@ -163,6 +169,7 @@ def refresh_listenbrainz():
 # ========================================
 
 @bp.route('/api/lastfm/configured', methods=['GET'])
+@requires("music.discover")
 def lastfm_configured():
     """Return whether a Last.fm API key is configured (used to gate the Radio section)."""
     lf = _lastfm_worker().client if _lastfm_worker() else None
@@ -170,6 +177,7 @@ def lastfm_configured():
 
 
 @bp.route('/api/lastfm/search/tracks', methods=['GET'])
+@requires("music.discover")
 def lastfm_search_tracks():
     """Search Last.fm for tracks matching a query string.
 
@@ -227,6 +235,7 @@ def lastfm_search_tracks():
 
 
 @bp.route('/api/lastfm/radio/generate', methods=['POST'])
+@requires("music.discover")
 def lastfm_radio_generate():
     """Generate a Last.fm Radio playlist from a seed track.
 
@@ -318,6 +327,7 @@ def lastfm_radio_generate():
 
 
 @bp.route('/api/discover/listenbrainz/lastfm-radio', methods=['GET'])
+@requires("music.access")
 def get_listenbrainz_lastfm_radio():
     """Get cached Last.fm Radio playlists (from DB cache).
 
@@ -354,6 +364,7 @@ def get_listenbrainz_lastfm_radio():
 # ========================================
 
 @bp.route('/api/listenbrainz/series-detect', methods=['GET'])
+@requires("music.playlist_sync")
 def get_listenbrainz_series_detect():
     """Detect whether a LB playlist title belongs to a rotating series.
 
@@ -394,6 +405,7 @@ def _lb_state_key(playlist_mbid, profile_id=None):
     return f"{profile_id}:{playlist_mbid}"
 
 @bp.route('/api/listenbrainz/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_all_listenbrainz_playlists():
     """Get all stored ListenBrainz playlists for frontend hydration (scoped to current profile)"""
     try:
@@ -433,6 +445,7 @@ def get_all_listenbrainz_playlists():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/state/<playlist_mbid>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_listenbrainz_playlist_state(playlist_mbid):
     """Get specific ListenBrainz playlist state (detailed version)"""
     try:
@@ -468,6 +481,7 @@ def get_listenbrainz_playlist_state(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/reset/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_listenbrainz_playlist(playlist_mbid):
     """Reset ListenBrainz playlist to fresh phase (clear discovery/sync data)"""
     try:
@@ -501,6 +515,7 @@ def reset_listenbrainz_playlist(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/remove/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def remove_listenbrainz_playlist(playlist_mbid):
     """Remove ListenBrainz playlist from state (doesn't affect cache)"""
     try:
@@ -525,6 +540,7 @@ def remove_listenbrainz_playlist(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/discovery/start/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_listenbrainz_discovery(playlist_mbid):
     """Initialize and start Spotify discovery process for a ListenBrainz playlist"""
     try:
@@ -586,11 +602,13 @@ def start_listenbrainz_discovery(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/discovery/status/<playlist_mbid>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_listenbrainz_discovery_status(playlist_mbid):
     """Get real-time discovery status for a ListenBrainz playlist"""
     return _get_source_discovery_status(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz playlist not found", "ListenBrainz")
 
 @bp.route('/api/listenbrainz/update-phase/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_listenbrainz_phase(playlist_mbid):
     """Update ListenBrainz playlist phase (for phase transitions and persistence)"""
     try:
@@ -630,6 +648,7 @@ def update_listenbrainz_phase(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_listenbrainz_discovery_match():
     """Update a ListenBrainz discovery result with manually selected Spotify track"""
     try:
@@ -699,6 +718,7 @@ def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
     return convert_results_to_spotify_tracks(discovery_results, "ListenBrainz")
 
 @bp.route('/api/wing-it/sync', methods=['POST'])
+@requires("music.access")
 def wing_it_sync():
     """Sync a playlist to the media server using raw track names — no metadata discovery."""
     try:
@@ -769,6 +789,7 @@ def wing_it_sync():
 
 
 @bp.route('/api/listenbrainz/sync/start/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_listenbrainz_sync(playlist_mbid):
     """Start sync process for a ListenBrainz playlist using discovered Spotify tracks"""
     try:
@@ -830,11 +851,13 @@ def start_listenbrainz_sync(playlist_mbid):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/listenbrainz/sync/status/<playlist_mbid>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_listenbrainz_sync_status(playlist_mbid):
     """Get sync status for a ListenBrainz playlist"""
     return _get_source_sync_status(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz playlist not found", "ListenBrainz", "ListenBrainz playlist", _pl_name_safe)
 
 @bp.route('/api/listenbrainz/sync/cancel/<playlist_mbid>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_listenbrainz_sync(playlist_mbid):
     """Cancel sync for a ListenBrainz playlist"""
     return _cancel_source_sync(listenbrainz_playlist_states, _lb_state_key(playlist_mbid), "ListenBrainz", "ListenBrainz playlist not found")

@@ -20,6 +20,7 @@ from core.permissions import may_manage_profile
 from core.profile_context import admin_only, admin_or_api_key, get_current_profile_id
 from core.security.rate_limit import TargetedLimiter
 from utils.logging_config import get_logger
+from core.permissions import own_or_admin, public, signed_in
 
 logger = get_logger("api.profile_admin")
 
@@ -79,6 +80,7 @@ def list_audit():
 # ── sign out everywhere ──────────────────────────────────────────────────
 
 @bp.route("/api/profiles/<int:profile_id>/sign-out-everywhere", methods=["POST"])
+@own_or_admin
 def sign_out_everywhere(profile_id):
     """every browser signed in as this profile loses it. yourself: this
     browser stays signed in. someone else: admin only (profile 1 by itself)."""
@@ -104,6 +106,7 @@ def sign_out_everywhere(profile_id):
 # ── signed-in devices ────────────────────────────────────────────────────
 
 @bp.route("/api/profiles/<int:profile_id>/devices", methods=["GET"])
+@own_or_admin
 def list_devices(profile_id):
     """browsers signed in as this profile (yourself, or an admin)."""
     pid, _name, is_admin = _actor()
@@ -117,6 +120,7 @@ def list_devices(profile_id):
 
 
 @bp.route("/api/profiles/<int:profile_id>/devices/<device_id>", methods=["DELETE"])
+@own_or_admin
 def revoke_device(profile_id, device_id):
     """sign one browser out. (this one too, if you pick it.)"""
     pid, name, is_admin = _actor()
@@ -236,6 +240,7 @@ def _oidc_only_on() -> bool:
 
 
 @bp.route("/api/invite/<token>", methods=["GET"])
+@public
 def read_invite(token):
     """what the invite page shows before someone accepts: nothing private.
     while sign-in is oidc only (#1839) the page sends the person to the
@@ -309,6 +314,7 @@ def _invite_fields(body):
 
 
 @bp.route("/api/invite/<token>/accept", methods=["POST"])
+@public
 def accept_invite(token):
     """{name, avatar_color?, pin?, password?}: makes the profile with the
     invite's access and signs this browser in as it. the invite is spent
@@ -376,6 +382,7 @@ def _avatar_path(profile_id: int) -> str:
 
 
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["POST"])
+@own_or_admin
 def upload_avatar(profile_id):
     """multipart 'file': any image pillow reads, re-encoded to a 512px webp
     (so nothing but pixels is kept: no metadata, no svg, no scripts)."""
@@ -417,6 +424,7 @@ def upload_avatar(profile_id):
 
 
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["GET"])
+@signed_in
 def get_avatar(profile_id):
     path = _avatar_path(profile_id)
     if not os.path.isfile(path):
@@ -427,6 +435,7 @@ def get_avatar(profile_id):
 
 
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["DELETE"])
+@own_or_admin
 def delete_avatar(profile_id):
     db = get_database()
     pid, name, is_admin = _actor()

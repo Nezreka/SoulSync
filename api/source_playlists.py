@@ -43,6 +43,7 @@ from core.profile_context import admin_only, get_current_profile_id
 from core.spotify_client import _is_globally_rate_limited as _spotify_rate_limited
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -108,6 +109,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/spotify/search', methods=['GET'])
+@requires("music.access")
 def search_spotify():
     """Generic Spotify search endpoint - supports tracks, albums, artists"""
     use_hydrabase = _is_hydrabase_active()
@@ -164,6 +166,7 @@ def _spotify_fallback_source() -> str:
 
 
 @bp.route('/api/spotify/search_tracks', methods=['GET'])
+@requires("music.access")
 def search_spotify_tracks():
     """Search for tracks on Spotify - used by discovery fix modal"""
     use_hydrabase = _is_hydrabase_active()
@@ -236,6 +239,7 @@ def search_spotify_tracks():
 
 
 @bp.route('/api/itunes/search_tracks', methods=['GET'])
+@requires("music.access")
 def search_itunes_tracks():
     """Search for tracks on iTunes — used by the import-modal
     "Search for Match" dialog and by discovery-fix flows.
@@ -311,6 +315,7 @@ def search_itunes_tracks():
 
 
 @bp.route('/api/deezer/search_tracks', methods=['GET'])
+@requires("music.access")
 def search_deezer_tracks():
     """Search for tracks on Deezer — used by the import-modal "Search
     for Match" dialog and by discovery-fix flows.
@@ -385,6 +390,7 @@ def search_deezer_tracks():
 
 
 @bp.route('/api/musicbrainz/search_tracks', methods=['GET'])
+@requires("music.access")
 def search_musicbrainz_tracks():
     """Search for tracks on MusicBrainz — used by the Discovery Fix popup
     cascade and any future surface that needs track-level MB search in the
@@ -456,6 +462,7 @@ def search_musicbrainz_tracks():
 
 
 @bp.route('/api/itunes/album/<album_id>', methods=['GET'])
+@requires("music.access")
 def get_itunes_album_tracks(album_id):
     """Fetches full track details for a specific iTunes album."""
     try:
@@ -522,6 +529,7 @@ def get_itunes_album_tracks(album_id):
 
 
 @bp.route('/api/discover/album/<source>/<album_id>', methods=['GET'])
+@requires("music.access")
 def get_discover_album(source, album_id):
     """
     Source-agnostic album endpoint for discover page.
@@ -831,6 +839,7 @@ def get_discover_album(source, album_id):
 # ===================================================================
 
 @bp.route('/api/hifi/status', methods=['GET'])
+@admin_only
 def hifi_status():
     """Check if HiFi API instances are reachable."""
     try:
@@ -847,6 +856,7 @@ def hifi_status():
 
 
 @bp.route('/api/soundcloud/status', methods=['GET'])
+@admin_only
 def soundcloud_status():
     """Report SoundCloud client availability + a quick reachability probe.
 
@@ -881,6 +891,7 @@ def soundcloud_status():
 
 
 @bp.route('/api/hifi/instances', methods=['GET'])
+@admin_only
 def hifi_instances():
     """Check availability of all HiFi API instances."""
     try:
@@ -1037,6 +1048,7 @@ def hifi_list_instances():
 # ===================================================================
 
 @bp.route('/api/deezer-download/test', methods=['POST'])
+@admin_only
 def deezer_download_test():
     """Test Deezer ARL token authentication."""
     try:
@@ -1096,6 +1108,7 @@ def deezer_download_test():
 
 
 @bp.route('/api/deezer-download/test-search', methods=['GET'])
+@admin_only
 def deezer_download_test_search():
     """Test Deezer download search (temporary testing endpoint)."""
     try:
@@ -1134,6 +1147,7 @@ def deezer_download_test_search():
 
 
 @bp.route('/api/deezer-download/test-download', methods=['POST'])
+@admin_only
 def deezer_download_test_download():
     """Test Deezer download of a single track (temporary testing endpoint)."""
     try:
@@ -1224,6 +1238,7 @@ def tidal_download_auth_check():
 
 
 @bp.route('/api/tidal/download/auth/status', methods=['GET'])
+@admin_only
 def tidal_download_auth_status():
     """Check if Tidal download client is authenticated."""
     try:
@@ -1304,6 +1319,7 @@ def qobuz_auth_token():
 
 
 @bp.route('/api/qobuz/auth/status', methods=['GET'])
+@admin_only
 def qobuz_auth_status():
     """Check if Qobuz client is authenticated."""
     try:
@@ -1358,6 +1374,7 @@ def tidal_disconnect():
 
 
 @bp.route('/api/tidal/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
     client = get_tidal_client_for_profile() or _tidal_client()
@@ -1495,6 +1512,7 @@ def _fetch_tidal_playlist(client, playlist_id, *, reuse_recent=False):
 
 
 @bp.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
     client = get_tidal_client_for_profile() or _tidal_client()
@@ -1586,6 +1604,7 @@ def _ensure_tidal_mirror(playlist_id, playlist, profile_id):
 
 
 @bp.route('/api/tidal/discovery/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_tidal_discovery(playlist_id):
     """Start Spotify discovery process for a Tidal playlist"""
     try:
@@ -1685,23 +1704,27 @@ def _fetch_and_run_tidal_discovery(playlist_id, client):
     _run_tidal_discovery_worker(playlist_id)
 
 @bp.route('/api/tidal/discovery/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_discovery_status(playlist_id):
     """Get real-time discovery status for a Tidal playlist"""
     return _get_source_discovery_status(tidal_discovery_states, playlist_id, "Tidal discovery not found", "Tidal")
 
 
 @bp.route('/api/tidal/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_tidal_discovery_match():
     """Update a Tidal discovery result with manually selected Spotify track"""
     return _update_source_discovery_match(tidal_discovery_states, "tidal", "Tidal", "tidal_track", _first_artist_str_or_obj)
 
 
 @bp.route('/api/tidal/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_playlist_states():
     """Get all stored Tidal playlist discovery states for frontend hydration (similar to YouTube playlists)"""
     return _get_source_playlist_states(tidal_discovery_states, "Tidal", "Tidal")
 
 @bp.route('/api/tidal/state/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_playlist_state(playlist_id):
     """Get specific Tidal playlist state (detailed version matching YouTube's state endpoint)"""
     try:
@@ -1735,16 +1758,19 @@ def get_tidal_playlist_state(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/tidal/reset/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_tidal_playlist(playlist_id):
     """Reset Tidal playlist to fresh phase (clear discovery/sync data)"""
     return _reset_source_playlist(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
 
 @bp.route('/api/tidal/delete/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_tidal_playlist(playlist_id):
     """Delete Tidal playlist state completely"""
     return _delete_source_playlist(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
 
 @bp.route('/api/tidal/update_phase/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_tidal_playlist_phase(playlist_id):
     """Update Tidal playlist phase (used when modal closes to reset from download_complete to discovered)"""
     return _update_source_playlist_phase(tidal_discovery_states, playlist_id, "Tidal playlist not found", "Tidal", _PHASE_LIST, False)
@@ -2235,6 +2261,7 @@ def convert_tidal_results_to_spotify_tracks(discovery_results):
 # ===================================================================
 
 @bp.route('/api/tidal/sync/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_tidal_sync(playlist_id):
     """Start sync process for a Tidal playlist using discovered Spotify tracks"""
     return _start_source_sync(
@@ -2246,11 +2273,13 @@ def start_tidal_sync(playlist_id):
         activity_label="Tidal", error_label="Tidal")
 
 @bp.route('/api/tidal/sync/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_tidal_sync_status(playlist_id):
     """Get sync status for a Tidal playlist"""
     return _get_source_sync_status(tidal_discovery_states, playlist_id, "Tidal playlist not found", "Tidal", "Tidal playlist", _pl_name_attr_or_unknown)
 
 @bp.route('/api/tidal/sync/cancel/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_tidal_sync(playlist_id):
     """Cancel sync for a Tidal playlist"""
     return _cancel_source_sync(tidal_discovery_states, playlist_id, "Tidal", "Tidal playlist not found")
@@ -2430,6 +2459,7 @@ def _get_metadata_fallback_client():
     return _get_itunes_client()
 
 @bp.route('/api/deezer/arl-status', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_arl_status():
     """Check if Deezer ARL is configured and authenticated."""
     try:
@@ -2447,6 +2477,7 @@ def get_deezer_arl_status():
 
 
 @bp.route('/api/deezer/arl-playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
     try:
@@ -2497,6 +2528,7 @@ def get_deezer_arl_playlists():
 
 
 @bp.route('/api/deezer/arl-playlist/<playlist_id>', methods=['GET'])
+@requires("music.access")
 def get_deezer_arl_playlist_tracks(playlist_id):
     """Fetch full playlist with tracks via ARL (like /api/spotify/playlist/<id>)."""
     try:
@@ -2566,6 +2598,7 @@ def get_deezer_arl_playlist_tracks(playlist_id):
 
 
 @bp.route('/api/discover/deezer/editorial', methods=['GET'])
+@requires("music.access")
 def get_deezer_editorial_playlists():
     """Deezer's own curated playlists, for a Discover shelf.
 
@@ -2617,6 +2650,7 @@ def get_deezer_editorial_playlists():
 
 
 @bp.route('/api/search/browse/deezer', methods=['GET'])
+@requires("music.access")
 def get_search_browse_deezer():
     """What's charting on Deezer for one search-page browse tile (#1984).
 
@@ -2640,6 +2674,7 @@ def get_search_browse_deezer():
 
 
 @bp.route('/api/discover/deezer/genres', methods=['GET'])
+@requires("music.access")
 def get_deezer_editorial_genres():
     """The genre chips the editorial shelf offers."""
     try:
@@ -2653,6 +2688,7 @@ def get_deezer_editorial_genres():
 
 
 @bp.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
+@requires("music.access")
 def get_deezer_playlist(playlist_id):
     """Fetch a Deezer playlist by ID or URL"""
     try:
@@ -2738,6 +2774,7 @@ def get_deezer_playlist(playlist_id):
 
 
 @bp.route('/api/deezer/playlist-load/<job_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_playlist_load_status(job_id):
     with deezer_playlist_load_lock:
         state = deezer_playlist_load_jobs.get(job_id)
@@ -2757,6 +2794,7 @@ def get_deezer_playlist_load_status(job_id):
         return jsonify(payload)
 
 @bp.route('/api/deezer/discovery/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_deezer_discovery(playlist_id):
     """Start Spotify discovery process for a Deezer playlist"""
     try:
@@ -2834,21 +2872,25 @@ def start_deezer_discovery(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/deezer/discovery/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_discovery_status(playlist_id):
     """Get real-time discovery status for a Deezer playlist"""
     return _get_source_discovery_status(deezer_discovery_states, playlist_id, "Deezer discovery not found", "Deezer")
 
 @bp.route('/api/deezer/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_deezer_discovery_match():
     """Update a Deezer discovery result with manually selected Spotify track"""
     return _update_source_discovery_match(deezer_discovery_states, "deezer", "Deezer", "deezer_track", _first_artist_plain)
 
 @bp.route('/api/deezer/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_playlist_states():
     """Get all stored Deezer playlist discovery states for frontend hydration"""
     return _get_source_playlist_states(deezer_discovery_states, "Deezer", "Deezer")
 
 @bp.route('/api/deezer/state/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_playlist_state(playlist_id):
     """Get specific Deezer playlist state (detailed version)"""
     try:
@@ -2882,16 +2924,19 @@ def get_deezer_playlist_state(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/deezer/reset/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_deezer_playlist(playlist_id):
     """Reset Deezer playlist to fresh phase (clear discovery/sync data)"""
     return _reset_source_playlist(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
 
 @bp.route('/api/deezer/delete/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_deezer_playlist(playlist_id):
     """Delete Deezer playlist state completely"""
     return _delete_source_playlist(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
 
 @bp.route('/api/deezer/update_phase/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_deezer_playlist_phase(playlist_id):
     """Update Deezer playlist phase (used when modal closes to reset from download_complete to discovered)"""
     return _update_source_playlist_phase(deezer_discovery_states, playlist_id, "Deezer playlist not found", "Deezer", _PHASE_LIST, True)
@@ -2935,6 +2980,7 @@ def convert_deezer_results_to_spotify_tracks(discovery_results):
 # ===================================================================
 
 @bp.route('/api/deezer/sync/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_deezer_sync(playlist_id):
     """Start sync process for a Deezer playlist using discovered Spotify tracks"""
     return _start_source_sync(
@@ -2946,11 +2992,13 @@ def start_deezer_sync(playlist_id):
         activity_label="Deezer", error_label="Deezer")
 
 @bp.route('/api/deezer/sync/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_deezer_sync_status(playlist_id):
     """Get sync status for a Deezer playlist"""
     return _get_source_sync_status(deezer_discovery_states, playlist_id, "Deezer playlist not found", "Deezer", "Deezer playlist", _pl_name_strict)
 
 @bp.route('/api/deezer/sync/cancel/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_deezer_sync(playlist_id):
     """Cancel sync for a Deezer playlist"""
     return _cancel_source_sync(deezer_discovery_states, playlist_id, "Deezer", "Deezer playlist not found")
@@ -2988,6 +3036,7 @@ def _get_qobuz_client_for_sync():
 
 
 @bp.route('/api/qobuz/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_playlists():
     """Fetches the authenticated user's Qobuz playlists (metadata only).
 
@@ -3044,6 +3093,7 @@ def get_qobuz_playlists():
 
 
 @bp.route('/api/qobuz/playlist/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Qobuz playlist."""
     qobuz = _get_qobuz_client_for_sync()
@@ -3078,6 +3128,7 @@ def get_qobuz_playlist_tracks(playlist_id):
 
 
 @bp.route('/api/qobuz/discovery/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_qobuz_discovery(playlist_id):
     """Start Spotify discovery process for a Qobuz playlist."""
     try:
@@ -3144,24 +3195,28 @@ def start_qobuz_discovery(playlist_id):
 
 
 @bp.route('/api/qobuz/discovery/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_discovery_status(playlist_id):
     """Get real-time discovery status for a Qobuz playlist."""
     return _get_source_discovery_status(qobuz_discovery_states, playlist_id, "Qobuz discovery not found", "Qobuz")
 
 
 @bp.route('/api/qobuz/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_qobuz_discovery_match():
     """Update a Qobuz discovery result with manually selected Spotify track"""
     return _update_source_discovery_match(qobuz_discovery_states, "qobuz", "Qobuz", "qobuz_track", _first_artist_plain)
 
 
 @bp.route('/api/qobuz/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_playlist_states():
     """Get all stored Qobuz playlist discovery states for frontend hydration."""
     return _get_source_playlist_states(qobuz_discovery_states, "Qobuz", "Qobuz")
 
 
 @bp.route('/api/qobuz/state/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_playlist_state(playlist_id):
     """Get specific Qobuz playlist state (detailed version)."""
     try:
@@ -3195,18 +3250,21 @@ def get_qobuz_playlist_state(playlist_id):
 
 
 @bp.route('/api/qobuz/reset/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_qobuz_playlist(playlist_id):
     """Reset Qobuz playlist to fresh phase (clear discovery/sync data)."""
     return _reset_source_playlist(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
 
 
 @bp.route('/api/qobuz/delete/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_qobuz_playlist(playlist_id):
     """Delete Qobuz playlist state completely."""
     return _delete_source_playlist(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
 
 
 @bp.route('/api/qobuz/update_phase/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_qobuz_playlist_phase(playlist_id):
     """Update Qobuz playlist phase (used when modal closes to reset from download_complete to discovered)."""
     return _update_source_playlist_phase(qobuz_discovery_states, playlist_id, "Qobuz playlist not found", "Qobuz", _PHASE_LIST, True)
@@ -3249,6 +3307,7 @@ def convert_qobuz_results_to_spotify_tracks(discovery_results):
 # ===================================================================
 
 @bp.route('/api/qobuz/sync/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_qobuz_sync(playlist_id):
     """Start sync process for a Qobuz playlist using discovered Spotify tracks."""
     return _start_source_sync(
@@ -3261,12 +3320,14 @@ def start_qobuz_sync(playlist_id):
 
 
 @bp.route('/api/qobuz/sync/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_qobuz_sync_status(playlist_id):
     """Get sync status for a Qobuz playlist."""
     return _get_source_sync_status(qobuz_discovery_states, playlist_id, "Qobuz playlist not found", "Qobuz", "Qobuz playlist", _pl_name_strict)
 
 
 @bp.route('/api/qobuz/sync/cancel/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_qobuz_sync(playlist_id):
     """Cancel sync for a Qobuz playlist."""
     return _cancel_source_sync(qobuz_discovery_states, playlist_id, "Qobuz", "Qobuz playlist not found")
@@ -3307,6 +3368,7 @@ def _convert_link_results_to_spotify_tracks(discovery_results, label):
     return convert_results_to_spotify_tracks(discovery_results, label)
 
 @bp.route('/api/spotify/parse-public', methods=['POST'])
+@requires("music.playlist_sync")
 def parse_spotify_public_endpoint():
     """Parse a public Spotify playlist or album URL without API auth"""
     try:
@@ -3391,6 +3453,7 @@ def parse_spotify_public_endpoint():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/spotify-public/discovery/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_spotify_public_discovery(url_hash):
     """Start Spotify discovery process for a Spotify Public playlist"""
     try:
@@ -3428,21 +3491,25 @@ def start_spotify_public_discovery(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/spotify-public/discovery/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_spotify_public_discovery_status(url_hash):
     """Get real-time discovery status for a Spotify Public playlist"""
     return _get_source_discovery_status(spotify_public_discovery_states, url_hash, "Spotify Public discovery not found", "Spotify Public")
 
 @bp.route('/api/spotify-public/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_spotify_public_discovery_match():
     """Update a Spotify Public discovery result with manually selected Spotify track"""
     return _update_source_discovery_match(spotify_public_discovery_states, "spotify_public", "Spotify Public", "spotify_public_track", _first_artist_plain)
 
 @bp.route('/api/spotify-public/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_spotify_public_playlist_states():
     """Get all stored Spotify Public playlist discovery states for frontend hydration"""
     return _get_source_playlist_states(spotify_public_discovery_states, "Spotify Public", "Spotify Public")
 
 @bp.route('/api/spotify-public/state/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_spotify_public_playlist_state(url_hash):
     """Get specific Spotify Public playlist state (detailed version)"""
     try:
@@ -3475,16 +3542,19 @@ def get_spotify_public_playlist_state(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/spotify-public/reset/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_spotify_public_playlist(url_hash):
     """Reset Spotify Public playlist to fresh phase (clear discovery/sync data)"""
     return _reset_source_playlist(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
 
 @bp.route('/api/spotify-public/delete/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_spotify_public_playlist(url_hash):
     """Delete Spotify Public playlist state completely"""
     return _delete_source_playlist(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
 
 @bp.route('/api/spotify-public/update_phase/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_spotify_public_playlist_phase(url_hash):
     """Update Spotify Public playlist phase (used when modal closes to reset from download_complete to discovered)"""
     return _update_source_playlist_phase(spotify_public_discovery_states, url_hash, "Spotify Public playlist not found", "Spotify Public", _PHASE_LIST, True)
@@ -3529,6 +3599,7 @@ def convert_spotify_public_results_to_spotify_tracks(discovery_results):
 # ===================================================================
 
 @bp.route('/api/spotify-public/sync/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_spotify_public_sync(url_hash):
     """Start sync process for a Spotify Public playlist using discovered Spotify tracks"""
     return _start_source_sync(
@@ -3540,11 +3611,13 @@ def start_spotify_public_sync(url_hash):
         activity_label="Spotify Link", error_label="Spotify Public")
 
 @bp.route('/api/spotify-public/sync/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_spotify_public_sync_status(url_hash):
     """Get sync status for a Spotify Public playlist"""
     return _get_source_sync_status(spotify_public_discovery_states, url_hash, "Spotify Public playlist not found", "Spotify Public", "Spotify Link playlist", _pl_name_strict)
 
 @bp.route('/api/spotify-public/sync/cancel/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_spotify_public_sync(url_hash):
     """Cancel sync for a Spotify Public playlist"""
     return _cancel_source_sync(spotify_public_discovery_states, url_hash, "Spotify Public", "Spotify Public playlist not found")
@@ -3555,6 +3628,7 @@ def cancel_spotify_public_sync(url_hash):
 # ===================================================================
 
 @bp.route('/api/itunes-link/parse', methods=['POST'])
+@requires("music.playlist_sync")
 def parse_itunes_link_endpoint():
     """Parse an iTunes/Apple Music album or track URL into a virtual playlist."""
     try:
@@ -3582,6 +3656,7 @@ def parse_itunes_link_endpoint():
 
 
 @bp.route('/api/itunes-link/discovery/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_itunes_link_discovery(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3617,11 +3692,13 @@ def start_itunes_link_discovery(url_hash):
 
 
 @bp.route('/api/itunes-link/discovery/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_itunes_link_discovery_status(url_hash):
     return _get_source_discovery_status(itunes_link_discovery_states, url_hash, "iTunes Link discovery not found", "iTunes Link")
 
 
 @bp.route('/api/itunes-link/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_itunes_link_discovery_match():
     try:
         data = request.get_json()
@@ -3659,11 +3736,13 @@ def update_itunes_link_discovery_match():
 
 
 @bp.route('/api/itunes-link/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_itunes_link_playlist_states():
     return _get_source_playlist_states(itunes_link_discovery_states, "iTunes Link")
 
 
 @bp.route('/api/itunes-link/state/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_itunes_link_playlist_state(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3691,6 +3770,7 @@ def get_itunes_link_playlist_state(url_hash):
 
 
 @bp.route('/api/itunes-link/reset/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_itunes_link_playlist(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3718,6 +3798,7 @@ def reset_itunes_link_playlist(url_hash):
 
 
 @bp.route('/api/itunes-link/delete/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_itunes_link_playlist(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3733,6 +3814,7 @@ def delete_itunes_link_playlist(url_hash):
 
 
 @bp.route('/api/itunes-link/update_phase/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_itunes_link_playlist_phase(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3757,6 +3839,7 @@ def update_itunes_link_playlist_phase(url_hash):
 
 
 @bp.route('/api/itunes-link/sync/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_itunes_link_sync(url_hash):
     try:
         if url_hash not in itunes_link_discovery_states:
@@ -3799,11 +3882,13 @@ def start_itunes_link_sync(url_hash):
 
 
 @bp.route('/api/itunes-link/sync/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_itunes_link_sync_status(url_hash):
     return _get_source_sync_status(itunes_link_discovery_states, url_hash, "iTunes Link not found", "iTunes Link", "iTunes Link", _pl_name_strict)
 
 
 @bp.route('/api/itunes-link/sync/cancel/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_itunes_link_sync(url_hash):
     return _cancel_source_sync(itunes_link_discovery_states, url_hash, "iTunes Link", "iTunes Link not found")
 
@@ -3817,6 +3902,7 @@ def cancel_itunes_link_sync(url_hash):
 @bp.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
 @bp.route('/api/qobuz/discovery/unmatch', methods=['POST'])
 @bp.route('/api/ytmusic/discovery/unmatch', methods=['POST'])
+@requires("music.playlist_sync")
 def unmatch_discovery_track():
     """Remove a discovery match — sets track back to Not Found"""
     try:
@@ -3983,6 +4069,7 @@ listenbrainz_playlist_states = {}  # Key: playlist_mbid, Value: persistent playl
 listenbrainz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="listenbrainz_discovery")
 
 @bp.route('/api/youtube/parse', methods=['POST'])
+@requires("music.playlist_sync")
 def parse_youtube_playlist_endpoint():
     """Parse a YouTube playlist URL and return structured track data"""
     try:
@@ -4069,6 +4156,7 @@ def parse_youtube_playlist_endpoint():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/discovery/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_youtube_discovery(url_hash):
     """Start Spotify discovery process for a YouTube playlist"""
     try:
@@ -4109,12 +4197,14 @@ def start_youtube_discovery(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/discovery/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_youtube_discovery_status(url_hash):
     """Get real-time discovery status for a YouTube playlist"""
     return _get_source_discovery_status(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube")
 
 
 @bp.route('/api/youtube/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_youtube_discovery_match():
     """Update a YouTube discovery result with manually selected Spotify track"""
     try:
@@ -4431,6 +4521,7 @@ def _calculate_similarity(str1, str2):
     return intersection / union if union > 0 else 0
 
 @bp.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_youtube_sync(url_hash):
     """Start sync process for a YouTube playlist using discovered Spotify tracks"""
     # mirrored playlists ride this endpoint too (mirrored_<id> keys). their
@@ -4453,11 +4544,13 @@ def start_youtube_sync(url_hash):
         activity_label="YouTube", error_label="YouTube")
 
 @bp.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_youtube_sync_status(url_hash):
     """Get sync status for a YouTube playlist"""
     return _get_source_sync_status(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube", "YouTube playlist", _pl_name_safe)
 
 @bp.route('/api/youtube/sync/cancel/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_youtube_sync(url_hash):
     """Cancel sync for a YouTube playlist"""
     return _cancel_source_sync(youtube_playlist_states, url_hash, "YouTube", "YouTube playlist not found")
@@ -4465,6 +4558,7 @@ def cancel_youtube_sync(url_hash):
 # New YouTube Playlist Management Endpoints (for persistent state)
 
 @bp.route('/api/youtube/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_all_youtube_playlists():
     """Get all stored YouTube playlists for frontend hydration (similar to Spotify playlists)"""
     try:
@@ -4503,6 +4597,7 @@ def get_all_youtube_playlists():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/state/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_youtube_playlist_state(url_hash):
     """Get specific YouTube playlist state (detailed version of status endpoint)"""
     try:
@@ -4537,6 +4632,7 @@ def get_youtube_playlist_state(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/reset/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_youtube_playlist(url_hash):
     """Reset YouTube playlist to fresh phase (clear discovery/sync data)"""
     try:
@@ -4613,6 +4709,7 @@ def reset_youtube_playlist(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/delete/<url_hash>', methods=['DELETE'])
+@requires("music.playlist_sync")
 def delete_youtube_playlist(url_hash):
     """Remove YouTube playlist from backend storage entirely"""
     try:
@@ -4639,6 +4736,7 @@ def delete_youtube_playlist(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/youtube/update_phase/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_youtube_playlist_phase(url_hash):
     """Update YouTube playlist phase (used when modal closes to reset from download_complete to discovered)"""
     return _update_source_playlist_phase(youtube_playlist_states, url_hash, "YouTube playlist not found", "YouTube", _PHASE_LIST_YT, False)
@@ -4663,6 +4761,7 @@ ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefi
 
 
 @bp.route('/api/ytmusic/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_playlists():
     """List the signed-in YouTube Music account's own library playlists, Liked Music first."""
     from core.ytmusic_library import fetch_library_playlists, fetch_liked_music_row, library_playlists_to_rows
@@ -4693,6 +4792,7 @@ def get_ytmusic_playlists():
 
 
 @bp.route('/api/ytmusic/playlist/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_playlist_tracks(playlist_id):
     """Fetch full track details for a specific YouTube Music playlist."""
     from core.youtube_music_meta import fetch_ytmusic_playlist
@@ -4724,6 +4824,7 @@ def get_ytmusic_playlist_tracks(playlist_id):
 
 
 @bp.route('/api/ytmusic/discovery/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_ytmusic_discovery(playlist_id):
     """Start Spotify discovery process for a YouTube Music playlist"""
     from core.youtube_music_meta import fetch_ytmusic_playlist
@@ -4787,12 +4888,14 @@ def start_ytmusic_discovery(playlist_id):
 
 
 @bp.route('/api/ytmusic/discovery/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_discovery_status(playlist_id):
     """Get real-time discovery status for a YouTube Music playlist"""
     return _get_source_discovery_status(ytmusic_discovery_states, playlist_id, "YouTube Music discovery not found", "YouTube Music")
 
 
 @bp.route('/api/ytmusic/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_ytmusic_discovery_match():
     """Update a YouTube Music discovery result with manually selected Spotify track."""
     try:
@@ -4923,12 +5026,14 @@ def update_ytmusic_discovery_match():
 
 
 @bp.route('/api/ytmusic/playlists/states', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_playlist_states():
     """Get all stored YouTube Music discovery states for frontend hydration"""
     return _get_source_playlist_states(ytmusic_discovery_states, "YouTube Music", "YouTube Music")
 
 
 @bp.route('/api/ytmusic/state/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_playlist_state(playlist_id):
     """Get specific YouTube Music playlist state (detailed version of the status endpoint)"""
     try:
@@ -4963,18 +5068,21 @@ def get_ytmusic_playlist_state(playlist_id):
 
 
 @bp.route('/api/ytmusic/reset/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def reset_ytmusic_playlist(playlist_id):
     """Reset YouTube Music playlist to fresh phase (clear discovery/sync data)"""
     return _reset_source_playlist(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
 
 
 @bp.route('/api/ytmusic/delete/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def delete_ytmusic_playlist(playlist_id):
     """Delete YouTube Music playlist state completely"""
     return _delete_source_playlist(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
 
 
 @bp.route('/api/ytmusic/update_phase/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_ytmusic_playlist_phase(playlist_id):
     """Update YouTube Music playlist phase (used when modal closes to reset from download_complete to discovered)"""
     return _update_source_playlist_phase(ytmusic_discovery_states, playlist_id, "YouTube Music playlist not found", "YouTube Music", _PHASE_LIST, False)
@@ -5016,6 +5124,7 @@ def convert_ytmusic_results_to_spotify_tracks(discovery_results):
 
 
 @bp.route('/api/ytmusic/sync/start/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_ytmusic_sync(playlist_id):
     """Start sync process for a YouTube Music playlist using discovered Spotify tracks"""
     # Unlike start_youtube_sync, mirrored playlists never reach this endpoint:
@@ -5034,12 +5143,14 @@ def start_ytmusic_sync(playlist_id):
 
 
 @bp.route('/api/ytmusic/sync/status/<playlist_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_ytmusic_sync_status(playlist_id):
     """Get sync status for a YouTube Music playlist"""
     return _get_source_sync_status(ytmusic_discovery_states, playlist_id, "YouTube Music playlist not found", "YouTube Music", "YouTube Music playlist", _pl_name_safe)
 
 
 @bp.route('/api/ytmusic/sync/cancel/<playlist_id>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_ytmusic_sync(playlist_id):
     """Cancel sync for a YouTube Music playlist"""
     return _cancel_source_sync(ytmusic_discovery_states, playlist_id, "YouTube Music", "YouTube Music playlist not found")
@@ -5154,6 +5265,7 @@ def _run_playlist_organize_download(mirrored_playlist_id, automation_id=None, pr
 
 
 @bp.route('/api/sync/start', methods=['POST'])
+@requires("music.access")
 def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
     return start_playlist_sync_from_payload(request.get_json() or {})
@@ -5237,6 +5349,7 @@ def start_playlist_sync_from_payload(data):
 
 
 @bp.route('/api/sync/status/<playlist_id>', methods=['GET'])
+@requires("music.access")
 def get_sync_status(playlist_id):
     """Polls for the status of an ongoing sync."""
     with sync_lock:
@@ -5261,6 +5374,7 @@ def get_sync_status(playlist_id):
 
 
 @bp.route('/api/sync/cancel', methods=['POST'])
+@requires("music.access")
 def cancel_playlist_sync():
     """Cancels an ongoing sync process."""
     data = request.get_json()

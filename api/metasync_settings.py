@@ -189,6 +189,7 @@ def _settings_view():
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/metasync", methods=["GET"])
+@admin_only
 def get_metasync_settings():
     return jsonify(_settings_view())
 
