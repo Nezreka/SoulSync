@@ -37,7 +37,10 @@ def member():
     db = _db()
     pid = db.create_profile(name='m_%s' % uuid4().hex[:8])
     tid = next(t['id'] for t in db.list_permission_templates() if t['slug'] == 'adult')
-    PS.change_profile(db, db.get_profile(pid), {'template_id': tid, 'set': {}})
+    # both sides on, so a refusal below is the admin rule, not a side that's off
+    PS.change_profile(db, db.get_profile(pid), {'template_id': tid,
+                                                'set': {'movies.access': True, 'tv.access': True}})
+    assert _as(pid).get('/api/video/dashboard').status_code == 200
     yield pid
     try:
         db.delete_profile(pid)
