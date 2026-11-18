@@ -8,6 +8,15 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **members can only do what their profile allows.** with login on or an admin pin, a member could still download with downloads off (playlist start missing, audiobooks, youtube follows), edit shared library metadata including the explicit flag, reorganize anyone's files, run the duplicate cleaner and other tools, cancel someone else's video download, rebind the install's spotify, tidal, deezer, last.fm or qobuz accounts, change the media server setup, read live server logs, claim another jellyfin user, and get around request limits and rating caps. all of those are refused now, and the buttons are gone for them. found while planning the people and permissions work (#2166, #2167, #2168).
 - members see their own downloads and toasts, not everyone's. past download history is admin only for now, since old rows don't say who started them.
 
+## help
+
+- **the ? is a real help panel now.** it knows the page you're on and answers from what's actually happening there: why three downloads sit in queued (the uploader has 41 people ahead of you), why a song wasn't found, when your request will arrive, why a folder can't be written.
+- **ctrl k (cmd k) searches everything**: help articles, settings, pages and actions, from anywhere. settings' own search moved to `/`.
+- **health** checks your servers, download sources, folders, free disk space, workers, review queue, automations and updates, with a fix button for each problem. the ? gets an amber dot when something is actually broken (admins only).
+- **report a problem** builds a diagnostics bundle you can read before it goes anywhere, secrets removed, each part switchable, then opens a prefilled github issue, copies a short version for discord, or downloads it. copy debug info used to send log lines unredacted.
+- **download your logs**: one log, a log with its backups, or everything as a zip, secrets removed by default.
+- what's new, shortcuts and three tours (getting around, your first download, your first video request) that a test keeps from pointing at things that moved. the old click-anything hints, troubleshoot and setup progress are gone; they had gone stale.
+
 ## settings
 
 - **the settings page is react.** every tab, music and video, the shell and the page itself. it looks and works the same, it just loads its tabs once and saves only what you changed.
