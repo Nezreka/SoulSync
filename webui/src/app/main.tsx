@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { mountCandidateInspectorHost } from '@/features/downloads/inspector-modal';
 import { mountFeaturePickerHost } from '@/features/feature-picker/host';
+import { mountHelpHost } from '@/features/help/host';
 import { mountOnboardingHost } from '@/features/onboarding/host';
 import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountServerActivityHost } from '@/features/server-activity/host';
@@ -87,4 +88,6 @@ mountPersonEditorHost();
 mountSettingsHost();
 // the server activity drawer (#2155: the shell opens it for admins only)
 mountServerActivityHost();
+// the help sheet the ? button opens (scrap/help/PLAN.md): window.SoulSyncHelp
+mountHelpHost();
 void bootstrapApp();

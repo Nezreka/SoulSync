@@ -2,9 +2,9 @@
  * The Settings page's own behaviour (SETTINGS_PORT.md step V4b): what was left
  * of settings.js once every tab was React. Opening the page (load, the first
  * tab), the tab switch, the search, the save status button and its save, the
- * keyboard on the section headers, Ctrl/Cmd+K, the password managers kept off
- * the credential fields, the masked secrets, and the Sources helpers other
- * pages call.
+ * keyboard on the section headers, / for the search, the password managers
+ * kept off the credential fields, the masked secrets, and the Sources helpers
+ * other pages call.
  *
  * The markup is still index.html's until the route is React (step V4c), so
  * this works on it exactly as settings.js did. It is in the shell bundle
@@ -500,7 +500,7 @@ export function toggleSourceCard(header: HTMLElement | null) {
 // ── keyboard ──
 
 /** the section headers are role="button": Enter and Space toggle them, and
- *  aria-expanded follows; Ctrl/Cmd+K goes to the search */
+ *  aria-expanded follows; / goes to the search */
 function wireKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
@@ -524,15 +524,34 @@ function wireKeyboard() {
       ),
     );
   });
-  document.addEventListener('keydown', (e) => {
-    if (!(e.ctrlKey || e.metaKey) || (e.key || '').toLowerCase() !== 'k') return;
-    const page = document.getElementById('settings-page');
-    const input = document.getElementById('stg-search-input') as HTMLInputElement | null;
-    if (!page || !input || !page.offsetParent) return;
-    e.preventDefault();
-    input.focus();
-    input.select();
-  });
+  document.addEventListener('keydown', onSettingsSearchKey);
+}
+
+function typingIn(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'SELECT' ||
+    el.isContentEditable
+  );
+}
+
+/** `/` on the Settings page goes to its search. Ctrl/Cmd K is the help
+ *  palette's everywhere, Settings included (features/help/host.tsx), and the
+ *  palette finds settings too. */
+export function onSettingsSearchKey(e: KeyboardEvent) {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+  if (typingIn(e.target)) return;
+  const page = document.getElementById('settings-page');
+  const input = document.getElementById('stg-search-input') as HTMLInputElement | null;
+  if (!page || !input || !page.offsetParent) return;
+  // a modal on top (a service or source window) keeps its own keys
+  if (document.querySelector('[aria-modal="true"]')) return;
+  e.preventDefault();
+  input.focus();
+  input.select();
 }
 
 // ── at load ──

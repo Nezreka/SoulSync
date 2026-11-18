@@ -182,7 +182,7 @@ That's a lot of pages, and most people use a few. **Customize**, at the bottom o
 Click the **version number** in the sidebar footer to open the **What's New** modal with release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit — the version button glows when an update is available (green for routine, yellow for major, red for critical). Docker users are notified when a new image is available.
 
 > [!TIP]
-> Press \`?\` anywhere to open the interactive helper menu, and \`Ctrl+K\` for helper search. The floating **?** button toggles click-anything help overlays.
+> Press \`?\` or \`F1\` anywhere, or click the **?** at the bottom right, to open help beside the page you are on. \`Ctrl K\` searches help, settings, pages and actions from anywhere. See [The Help Button](#ts-help).
 `
         },
         {

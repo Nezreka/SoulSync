@@ -690,6 +690,7 @@ export function SearchPage() {
 
               <div
                 id="enhanced-results-container"
+                data-tour="search.results"
                 className={view === 'results' ? styles.results : 'hidden'}
               >
                 {served ? (

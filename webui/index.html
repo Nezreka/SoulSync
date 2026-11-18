@@ -270,7 +270,7 @@
 
     <div class="main-container">
         <!-- Mobile Navigation -->
-        <button class="hamburger-btn" id="hamburger-btn" aria-label="Open navigation" aria-expanded="false"
+        <button class="hamburger-btn" id="hamburger-btn" data-tour="shell.menu" aria-label="Open navigation" aria-expanded="false"
             aria-controls="app-sidebar">
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
@@ -302,7 +302,7 @@
                     </button>
                 </div>
                 <!-- Audio ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
-                <div class="side-toggle" role="group" aria-label="Switch between Audio and Video">
+                <div class="side-toggle" data-tour="shell.side-switch" role="group" aria-label="Switch between Audio and Video">
                     <span class="side-toggle-thumb" aria-hidden="true"></span>
                     <button type="button" class="side-toggle-btn active" data-side-target="music">
                         <svg class="side-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -328,7 +328,7 @@
                         <span>Video</span>
                     </button>
                 </div>
-                <div id="profile-indicator" class="profile-indicator" style="display: none;">
+                <div id="profile-indicator" class="profile-indicator" data-tour="shell.profile" style="display: none;">
                     <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
                     <button type="button" id="profile-indicator-button" class="profile-indicator-main"
                         aria-haspopup="menu" aria-expanded="false" title="Switch profile">
@@ -364,7 +364,7 @@
             <div class="sidebar-scroll">
 
                 <!-- Navigation Section -->
-                <nav class="sidebar-nav">
+                <nav class="sidebar-nav" data-tour="shell.nav">
                     <a class="nav-button" data-page="dashboard" href="/dashboard">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -613,7 +613,7 @@
                 </script>
 
                 <!-- Video Navigation (shell-only; shown when body[data-side="video"], wired by video/video-side.js) -->
-                <nav class="sidebar-nav video-nav" aria-label="Video navigation">
+                <nav class="sidebar-nav video-nav" data-tour="shell.nav" aria-label="Video navigation">
                     <a class="nav-button" data-video-page="video-dashboard" href="/video-dashboard">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -640,7 +640,7 @@
                             </svg></span>
                         <span class="nav-text">Search</span>
                     </a>
-                    <a class="nav-button" data-video-page="video-discover" href="/video-discover">
+                    <a class="nav-button" data-video-page="video-discover" data-tour="video.nav-discover" href="/video-discover">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10" />
@@ -849,7 +849,7 @@
 
                 <!-- Version Section -->
                 <div class="version-section">
-                    <button class="version-button" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
+                    <button class="version-button" data-tour="shell.version" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
                 </div>
 
                 <!-- Status Section (music side) -->
@@ -965,7 +965,7 @@
                             <div class="vsr-hero-glow" aria-hidden="true"></div>
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Find a title, search your indexers for a release, or see what is new</p>
-                            <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                            <div class="vsr-tabs" data-tour="video.search-modes" role="tablist" aria-label="Search mode">
                                 <!-- named for what each searches (#1909). "enhanced" and
                                      "basic" said nothing about that; data-vsr-tab keeps the
                                      old ids so the code is unchanged -->
@@ -981,7 +981,7 @@
                             </div>
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
-                                <div class="vsr-searchbar">
+                                <div class="vsr-searchbar" data-tour="video.search-field">
                                     <svg class="vsr-search-ic" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"
                                         stroke="currentColor" stroke-width="2" stroke-linecap="round">
                                         <circle cx="11" cy="11" r="7" />
@@ -1042,7 +1042,7 @@
                                 <div class="loading-spinner"></div>
                                 <div class="loading-text">Searching&hellip;</div>
                             </div>
-                            <div class="vsr-results" data-video-search-results></div>
+                            <div class="vsr-results" data-video-search-results data-tour="video.search-results"></div>
                             <div class="vsr-state" data-video-search-hint>
                                 <div class="vsr-state-ic">&#127902;</div>
                                 <div class="vsr-state-title">Search SoulSync</div>
@@ -1371,7 +1371,7 @@
                      video/video-requests.js, styled by .vreq-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-requests" hidden>
                     <div class="vreq-page">
-                        <div class="vreq-head">
+                        <div class="vreq-head" data-tour="video.requests">
                             <h1 class="vreq-title-h">Requests</h1>
                             <p class="vreq-sub-h">What your household asked for. Approve once, everyone who asked
                                 hears about it.</p>
@@ -1487,7 +1487,7 @@
                                     <p class="vd-overview" data-vd-overview></p>
                                     <!-- where it stands: requested, on the way, downloading, partly here (#2160) -->
                                     <div class="vts-host" data-vd-title-status hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions data-tour="video.title-actions"></div>
                                     <!-- the library line: the React island portals it here on a library show -->
                                     <div class="vd-libline" data-vd-libline></div>
                                     <div class="vd-kudos">
@@ -1627,7 +1627,7 @@
                                     <p class="vd-overview" data-vd-overview></p>
                                     <!-- where it stands: requested, on the way, downloading, partly here (#2160) -->
                                     <div class="vts-host" data-vd-title-status hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions data-tour="video.title-actions"></div>
                                     <!-- the library line (copies, quality, match): the React island
                                          portals it here on a library movie, so the page needs no second tab -->
                                     <div class="vd-libline" data-vd-libline></div>
@@ -3091,7 +3091,7 @@
             <!-- Tools & Operations — React (webui/src/routes/tools). The
                  424-line vanilla region that lived here was deleted with the
                  P7 flip; #tools-page and its card classes are re-rendered by
-                 ToolsPage so style.css and helper.js still resolve. -->
+                 ToolsPage so style.css still resolves. -->
 
             <!-- ═══════════════════════════════════════════════════════════════════
                  WATCHLIST PAGE
@@ -4235,7 +4235,7 @@
         <div class="no-track-message hidden" id="no-track-message"><span>Play a track to get started</span></div>
     </div>
 
-    <button class="activity-float-btn" id="activity-float-btn" style="display:none" onclick="ServerActivity.toggle()"
+    <button class="activity-float-btn" id="activity-float-btn" data-tour="shell.activity" style="display:none" onclick="ServerActivity.toggle()"
         title="Server Activity — live streams">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -4243,7 +4243,7 @@
         </svg>
         <span class="activity-float-badge" id="activity-float-badge" style="display:none">0</span>
     </button>
-    <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications"
+    <button class="notif-bell-btn" id="notif-bell-btn" data-tour="shell.notifications" onclick="toggleNotifPanel()" title="Notifications"
         aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -4253,9 +4253,9 @@
         <span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
         <span class="notif-bell-dl" id="notif-bell-dl" style="display:none" title="Active downloads">0</span>
     </button>
-    <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()"
-        title="Interactive Help — click any element to learn about it">
-        <span>?</span>
+    <button class="helper-float-btn" id="helper-float-btn" data-tour="shell.help" onclick="toggleHelperMode()" title="Help (?)"
+        aria-label="Help" aria-haspopup="dialog" aria-expanded="false" aria-controls="soulsync-help-sheet">
+        <span aria-hidden="true">?</span>
     </button>
 
     <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>

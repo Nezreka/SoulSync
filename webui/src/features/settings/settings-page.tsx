@@ -186,7 +186,7 @@ export function SettingsPage({
                 <input
                   type="text"
                   id="stg-search-input"
-                  placeholder="Search settings  (Ctrl K)"
+                  placeholder="Search settings  (/)"
                   aria-label="Search settings"
                   autoComplete="off"
                   aria-controls="stg-search-results"

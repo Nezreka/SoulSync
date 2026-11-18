@@ -142,7 +142,9 @@ def test_video_assets_referenced():
 def test_music_sidebar_nav_still_intact():
     # The original music nav (a sibling .sidebar-nav WITHOUT the video-nav class)
     # must still carry its pages — the video side is additive, not a rewrite.
-    music_nav = _block(_INDEX, r'<nav class="sidebar-nav">', "</nav>")
+    # exactly class="sidebar-nav" (not "sidebar-nav video-nav"); other
+    # attributes like the tour anchor are fine
+    music_nav = _block(_INDEX, r'<nav class="sidebar-nav"(?:\s[^>]*)?>', "</nav>")
     for page in ("dashboard", "sync", "library", "settings", "issues", "help"):
         assert f'data-page="{page}"' in music_nav, f"music nav lost '{page}'"
     # The music subtitle is still the default in markup (JS swaps it at runtime).

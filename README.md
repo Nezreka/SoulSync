@@ -597,6 +597,13 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 
 The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
 
+## Help
+
+- The **?** (or `?`, `F1`) opens a help panel beside the page you are on: live answers for that page, the articles worth reading, and three short tours.
+- **Ctrl K** anywhere searches help articles, settings, pages and actions in one list.
+- **Health** (admins) checks services, folders, disk, path mapping, workers, the video side and updates, with a fix beside each problem.
+- **Report a problem** builds a redacted diagnostics bundle you can read line by line, then opens a prefilled GitHub issue, copies a Discord message or saves a file. **Logs** downloads any log, or all of them as a zip, secrets removed.
+
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
