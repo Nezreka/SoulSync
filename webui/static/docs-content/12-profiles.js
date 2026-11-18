@@ -56,7 +56,7 @@ The result is what they can do. **Admins are never limited**: the policy, templa
 
 A short sentence at the top says how many people there are, how many have changes of their own and how many requests are waiting for you. Filter by **Everyone**, **Admins**, **Has changes**, **Turned off** or **Needs a look**, or **Find someone** by name.
 
-Each row shows the person's template (with how many changes they have), then Music, Movies, TV and Books: a dot for whether they get it right away, ask first or can't, with the quality and rating under it. The Requests column shows how many asks they've used this window. Click a row to open their editor (see [Editing one person](#docs/prof-editor)).
+Each row shows the person's template (with how many changes they have), then Music, Movies, TV and Books: a dot for whether they get it right away, ask first or can't, with the quality and rating under it. The Requests column shows each limited kind and how many asks they've used this window ("Movies 1/5 · TV 3"). Click a row to open their editor (see [Editing one person](#docs/prof-editor)).
 
 **Invite** and **Add person** sit above the list (see [Adding people](#docs/prof-manage)).
 `
@@ -71,7 +71,7 @@ Each row shows the person's template (with how many changes they have), then Mus
 - a switch can be on, or **Admins only**
 - **Getting music**, **Getting movies** and the rest can be capped at Ask first, or at Can't request
 - **Up to** caps the highest rating anyone gets
-- **Request limit, at most** caps how many asks anyone gets
+- **Request limit, at most** caps how many asks anyone gets, one ceiling each for music, movies and TV
 - **Quality members may pick** limits the quality profiles anyone can ask for, and **Needs my OK** marks the ones that always come to you first. **4K always asks** covers every 4K profile, later ones too
 - **Hide explicit music** can be forced on for everyone
 
@@ -165,7 +165,7 @@ The same rows show in the editor, on each template and in the global policy. Any
 - **Connect their own accounts**: Spotify, Tidal, ListenBrainz, Last.fm, their Plex user or Navidrome login
 - **Own library**: their downloads go to their own folder and server library (set per person)
 - **Chat & Arcade**
-- **Their own automations**: playlist pulls, scans of their own watchlist, listening imports and notes to themselves. System jobs stay with admins. Their automations only run on their own events (not someone else's downloads), and their notifications only go to public internet addresses.
+- **Their own automations**: playlist pulls, scans of their own watchlist, listening imports and notes to themselves. System jobs stay with admins. Their automations only run on their own events: their downloads finishing or failing, their wishlist and watchlist finds, their playlists syncing, their requests being approved, declined or arriving, their issues getting an answer. Someone else's events and install-wide ones (library scans, database updates, backups, maintenance) never reach them; an admin's automations hear everything. Their notifications only go to public internet addresses.
 
 ## Movies and TV shows
 
@@ -196,7 +196,7 @@ These are separate from Getting music: someone can ask first for music and still
 
 ## Requests & moderation
 
-- **Request limit**: asks per so many days. Downloads they get right away are never capped. Every ask counts from when it was made, so withdrawing one doesn't hand it back. Music, music videos, movies, shows and YouTube asks all count toward the same limit, and the People list shows how many each person used.
+- **Request limit** (one under Music, Movies and TV shows each): asks per so many days. Downloads they get right away are never capped. Every ask counts from when it was made, so withdrawing one doesn't hand it back. Albums, tracks and music videos count toward the music limit, movies toward the movie limit, and shows, seasons, episodes and YouTube videos toward the TV limit (YouTube counts toward movies for someone without TV). The People list shows how many each person used of each.
 - **See everyone's requests**: members see only their own unless this is on
 - **Moderator**: approve, decline and manage other people's requests and issues. Never their own asks, and never settings, people or tools.
 - **Cancel their own downloads** and **Report problems**: always on, for everyone
@@ -250,7 +250,7 @@ A member sees only what they can use:
 
 - no Request button on a title they can't ask for, no quality menu with one option, no Customize when it's locked
 - a page they reach by link that isn't theirs shows a calm note instead of an error: "Audiobooks aren't part of your profile. Ask Boulder if you'd like them."
-- request sheets say how many asks are left, like "3 of 5 asks left this week"
+- request sheets say how many asks of that kind are left, like "3 of 5 movie asks left this week"
 
 ## What you can do
 
@@ -258,7 +258,7 @@ A member's own **Profile & account** has a **What you can do** card: the same pl
 
 ## Seerr apps
 
-Apps built for Seerr (Jellyseerr, Overseerr) act as the profile linked to the Jellyfin user they send, under that person's permissions: their ratings, their Getting movies and Getting shows, their quality and their limit. They see only their own requests unless they can see everyone's.
+Apps built for Seerr (Jellyseerr, Overseerr) act as the profile linked to the Jellyfin user they send, under that person's permissions: their ratings, their Getting movies and Getting shows, their quality and their movie and TV limits. They see only their own requests unless they can see everyone's.
 
 A Jellyfin user with no profile is refused on new installs. Installs that had Seerr set up before keep acting as the profile they always did; Settings > System > Seerr Compatible API shows which one, with **Refuse Jellyfin users with no profile** to stop it.
 `
@@ -306,7 +306,7 @@ Upgrading changes nothing about what anyone can do:
 
 - The global policy starts wide open.
 - Adult, Teen, Kids and Guest become real templates, each with the sidebar new profiles used to see.
-- Every member is matched to the template their settings equal. Anything that differs (pages, a rating, a request limit) is kept as a personal change.
+- Every member is matched to the template their settings equal. Anything that differs (pages, a rating, a request limit) is kept as a personal change. The old one request limit becomes the music, movie and TV limits, each starting from it: music and video always counted on their own, so nobody's music allowance shrinks, and movies and TV each get what video had.
 - What each person can do is checked against their old settings before it's saved. Admins skip all of it.
 
 ## Needs a look
