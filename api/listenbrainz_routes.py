@@ -171,9 +171,17 @@ def refresh_listenbrainz():
 @bp.route('/api/lastfm/configured', methods=['GET'])
 @requires("music.discover")
 def lastfm_configured():
-    """Return whether a Last.fm API key is configured (used to gate the Radio section)."""
+    """Return whether a Last.fm API key is configured (used to gate the Radio section).
+
+    ``usable`` is False while Last.fm refuses the key (Pro only from 1 December
+    2026); the radio still works then, from Deezer's artist radio.
+    """
     lf = _lastfm_worker().client if _lastfm_worker() else None
-    return jsonify({"configured": bool(lf and lf.api_key)})
+    configured = bool(lf and lf.api_key)
+    from core.lastfm_client import lastfm_key_status
+    status = lastfm_key_status(lf.api_key if configured else '')
+    return jsonify({"configured": configured, "usable": status['usable'],
+                    "key_rejected": status['key_rejected'], "message": status['message']})
 
 
 @bp.route('/api/lastfm/search/tracks', methods=['GET'])
@@ -196,38 +204,10 @@ def lastfm_search_tracks():
         if not lf or not lf.api_key:
             return jsonify({"success": False, "error": "Last.fm not configured", "results": []}), 400
 
-        # Use raw API call to get multiple results (search_track only returns best match)
-        data = lf._make_request('track.search', {'track': q, 'limit': 8})
-        if not data:
-            return jsonify({"success": True, "results": []})
-
-        raw = data.get('results', {}).get('trackmatches', {}).get('track', [])
-        if not isinstance(raw, list):
-            raw = [raw] if raw else []
-
-        results = []
-        for t in raw:
-            # Last.fm image array: [{#text: url, size: small/medium/large/extralarge}]
-            image_url = lf.get_best_image(t.get('image', []))
-            # last.fm's generic grey-star placeholder loads fine, so onError
-            # never fires and every row shows the same star - send '' and let
-            # the ui draw its own art-empty glyph instead
-            if image_url and '2a96cbd8b46e442fc41c2b86b821562f' in image_url:
-                image_url = ''
-            # listeners arrives as '' or missing on some matches; int('')
-            # raised and one bad row 500'd the WHOLE search
-            try:
-                listeners = int(t.get('listeners') or 0)
-            except (TypeError, ValueError):
-                listeners = 0
-            results.append({
-                'name': t.get('name', ''),
-                'artist': t.get('artist', ''),
-                'mbid': t.get('mbid', ''),
-                'listeners': listeners,
-                'image_url': image_url or '',
-            })
-        return jsonify({"success": True, "results": results})
+        # last.fm's track search, deezer's when the key is refused or it found nothing
+        from core import lastfm_fallback
+        results, source = lastfm_fallback.search_tracks(q, limit=8, lastfm=lf)
+        return jsonify({"success": True, "results": results, "source": source})
 
     except Exception as e:
         logger.error(f"Error searching Last.fm tracks: {e}")
@@ -261,22 +241,26 @@ def lastfm_radio_generate():
         if not lf or not lf.api_key:
             return jsonify({"success": False, "error": "Last.fm not configured"}), 400
 
-        # Fetch similar tracks from Last.fm
-        similar = lf.get_similar_tracks(artist_name, track_name, limit=25)
+        # last.fm's similar tracks; deezer's artist radio when the key is
+        # refused (pro only from 1 december 2026) or last.fm has nothing
+        from core import lastfm_fallback
+        from core.listenbrainz_manager import RADIO_SOURCE_NAMES, radio_playlist_title
+        similar, similar_source = lastfm_fallback.similar_tracks(artist_name, track_name, limit=25, lastfm=lf)
         if not similar:
-            return jsonify({"success": False, "error": "No similar tracks found on Last.fm"}), 404
+            return jsonify({"success": False, "error": "No similar tracks found on Last.fm or Deezer"}), 404
 
         # Persist to DB via manager
         lb_manager, _username, _source = _get_profile_lb_manager()
-        playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar)
-        title = f"Last.fm Radio: {track_name} by {artist_name}"
+        playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar,
+                                                              source=similar_source)
+        title = radio_playlist_title(track_name, artist_name, similar_source)
 
         # Build playlist dict that mirrors the LB playlist format expected by the discovery pipeline
         playlist_data = {
             'identifier': f"lastfm_radio/{playlist_mbid}",
             'name': title,
             'title': title,
-            'creator': 'Last.fm',
+            'creator': RADIO_SOURCE_NAMES.get(similar_source, 'Last.fm'),
             'tracks': [
                 {
                     'track_name': t['name'],

@@ -499,9 +499,12 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
                       limit: int = 20) -> List[Dict[str, Any]]:
     """fresh-artist leg: lastfm tag top artists the library does not have,
     their top tracks. art is borrowed from the pool when the artist shows
-    up there; artless rows are dropped rather than shipped as grey circles."""
-    if not lastfm_client:
-        return []
+    up there; artless rows are dropped rather than shipped as grey circles.
+
+    last.fm first. with no last.fm (not set up, or the key refused without
+    pro from 1 december 2026) the tag's artists come from deezer's playlists
+    for it, and their top tracks from deezer too."""
+    from core import lastfm_fallback
     tags = SEASON_LASTFM_TAGS.get(season_key, [])
     if not tags:
         return []
@@ -519,11 +522,16 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
         from core.library2.importer import normalize_name
         out = []
         for tag in tags:
-            artists = lastfm_client.get_tag_top_artists(tag, limit=12) or []
+            artists, tag_source = lastfm_fallback.tag_top_artists(tag, limit=12, lastfm=lastfm_client)
             fresh = [a.get("name") for a in artists
                      if a.get("name") and normalize_name(a["name"]) not in known][:5]
+            # deezer's tag artists take deezer's top tracks: no musicbrainz
+            # lookup per artist for a background shelf
+            free = ("listenbrainz", "deezer") if tag_source == "lastfm" else ("deezer",)
             for name in fresh:
-                for track in (lastfm_client.get_artist_top_tracks(name, limit=2) or []):
+                top, _src = lastfm_fallback.artist_top_tracks(
+                    name, limit=2, lastfm=lastfm_client, free_sources=free)
+                for track in top:
                     title = track.get("name")
                     if not title:
                         continue

@@ -84,6 +84,31 @@ describe('loadTopTracks', () => {
     expect(state.downloadable).toBe(false);
   });
 
+  // Last.fm keys need Pro from 1 December 2026: the by-name pass can answer
+  // from ListenBrainz or Deezer, and the heading names who did
+  it.each([
+    ['listenbrainz', 'Popular on ListenBrainz'],
+    ['deezer', 'Top Tracks (Deezer)'],
+    ['lastfm', 'Popular on Last.fm'],
+  ])('labels the by-name pass by its source (%s)', async (source, title) => {
+    stubRoutes({
+      '/top-tracks': () => json({ success: false }),
+      'lastfm-top-tracks': () => json({ success: true, source, tracks: [{ name: 'Lullaby' }] }),
+    });
+    const state = await loadTopTracks(42, 'Low');
+    expect(state.source).toBe(source);
+    expect(state.title).toBe(title);
+    expect(state.downloadable).toBe(false);
+  });
+
+  it('reads a by-name answer with no source as Last.fm (an older server)', async () => {
+    stubRoutes({
+      '/top-tracks': () => json({ success: false }),
+      'lastfm-top-tracks': () => json({ success: true, tracks: [{ name: 'Lullaby' }] }),
+    });
+    expect((await loadTopTracks(42, 'Low')).title).toBe('Popular on Last.fm');
+  });
+
   it('falls back when the source returns an EMPTY track list', async () => {
     stubRoutes({
       '/top-tracks': () => json({ success: true, source: 'deezer', tracks: [] }),

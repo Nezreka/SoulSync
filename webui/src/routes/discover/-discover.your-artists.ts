@@ -36,6 +36,10 @@ export const SOURCE_NAMES: Record<string, string> = {
   lastfm: 'Last.fm',
   tidal: 'Tidal',
   deezer: 'Deezer',
+  // stand-ins for Last.fm's top artists when it is not set up or refused the
+  // key (Last.fm keys need Pro from 1 December 2026)
+  listenbrainz: 'ListenBrainz',
+  listening_history: 'SoulSync',
 };
 
 /** Origin-dot colours (5311). Anything unrecognised falls back to grey. */
@@ -44,6 +48,7 @@ export const SOURCE_COLORS: Record<string, string> = {
   lastfm: '#D51007',
   tidal: '#00FFFF',
   deezer: '#A238FF',
+  listenbrainz: '#EB743B',
 };
 export const SOURCE_COLOR_FALLBACK = '#666';
 

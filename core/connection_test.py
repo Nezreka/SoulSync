@@ -347,10 +347,9 @@ def run_service_test(service, test_config):
             try:
                 from core.lastfm_client import LastFMClient
                 client = LastFMClient(api_key=api_key)
-                if client.validate_api_key():
-                    return True, "Successfully connected to Last.fm!"
-                else:
-                    return False, "Invalid Last.fm API key."
+                # a refused key (no pro subscription) answers with the plain
+                # pro message, not "invalid"
+                return client.check_api_key()
             except Exception as e:
                 return False, f"Last.fm connection error: {str(e)}"
         elif service == "genius":

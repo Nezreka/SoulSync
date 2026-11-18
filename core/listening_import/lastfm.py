@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from core.lastfm_client import LastFMClient
+from core.lastfm_client import LASTFM_IMPORT_REJECTED_MESSAGE, LastFMClient, LastFMKeyRejected, key_rejection
 from core.listening_import.dedup import insert_import_events
 from core.listening_import.profiles import ProfileImportWorkers
 from core.listening_scope import SHARED_OWNER, owner_key
@@ -39,6 +39,8 @@ TRANSIENT_PAGE_RETRY_BASE_SECONDS = 5
 
 
 def _safe_error_message(error: Exception) -> str:
+    if isinstance(error, LastFMKeyRejected):
+        return LASTFM_IMPORT_REJECTED_MESSAGE
     return re.sub(r"([?&]api_key=)[^&\s]+", r"\1REDACTED", str(error))
 
 
@@ -112,6 +114,11 @@ class LastFMListeningImportWorker:
                 return {"status": "error", "error": state["error"], **state}
             if not self.config_manager.get("lastfm.api_key", ""):
                 state = self._set_state(status="error", error="Last.fm API key not configured")
+                return {"status": "error", "error": state["error"], **state}
+            # a key last.fm refused lately (pro only from 1 december 2026):
+            # say so now instead of starting a crawl that cannot read a page
+            if key_rejection(self.config_manager.get("lastfm.api_key", "")):
+                state = self._set_state(status="error", error=LASTFM_IMPORT_REJECTED_MESSAGE)
                 return {"status": "error", "error": state["error"], **state}
 
             self._thread = threading.Thread(
@@ -318,6 +325,9 @@ class LastFMListeningImportWorker:
         for attempt in range(1, TRANSIENT_PAGE_RETRIES + 1):
             try:
                 return client.get_user_recent_tracks(username, page=page, limit=PAGE_LIMIT, from_ts=from_ts)
+            except LastFMKeyRejected:
+                # not a hiccup: retrying cannot help
+                raise
             except Exception as e:
                 if attempt >= TRANSIENT_PAGE_RETRIES:
                     raise

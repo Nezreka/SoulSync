@@ -202,6 +202,7 @@ import { ensurePageOrigin, pushArtistOrigin } from '../../artist-detail/-artist-
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { gapSameRelease, gapSourceLabel } from '../../artist-detail/-artist-detail.gap-fill';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
+import { popularTracksTitle } from '../../artist-detail/-artist-detail.top-tracks';
 import {
   checkWatchlistRequest,
   toggleWatchlistRequest,
@@ -7673,7 +7674,9 @@ function TopTracksSidebar({
   return (
     <div className="artist-hero-right">
       <div className="hero-sidebar-title">
-        {topTracks.data?.kind === 'lastfm' ? 'Popular on Last.fm' : 'Top Tracks'}
+        {topTracks.data?.kind === 'lastfm'
+          ? popularTracksTitle(topTracks.data.source)
+          : 'Top Tracks'}
       </div>
       <div className="hero-top-tracks">
         {tracks.map((track, index) => {

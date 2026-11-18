@@ -22398,21 +22398,27 @@ def get_artist_hero_stats():
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
 @requires("music.access")
 def get_artist_lastfm_top_tracks(artist_id):
-    """Get top tracks for an artist from Last.fm (lazy-loaded by frontend)."""
+    """An artist's most played tracks by name (lazy-loaded by frontend).
+
+    Last.fm first; ListenBrainz popularity then Deezer when Last.fm is not set
+    up, refused the key (Pro only from 1 December 2026) or had nothing.
+    ``source`` names who answered so the heading reads right.
+    """
     try:
         artist_name = request.args.get('name', '')
         if not artist_name:
             return jsonify({'success': False, 'error': 'Artist name required'}), 400
 
-        if not lastfm_worker or not lastfm_worker.client:
-            return jsonify({'success': True, 'tracks': []})
-
-        limit = int(request.args.get('limit', 100))
-        tracks = lastfm_worker.client.get_artist_top_tracks(artist_name, limit=min(limit, 100))
-        return jsonify({'success': True, 'tracks': tracks})
+        limit = min(int(request.args.get('limit', 100)), 100)
+        from core import lastfm_fallback
+        client = lastfm_worker.client if lastfm_worker and lastfm_worker.client else None
+        if client is None or not client.api_key:
+            client = lastfm_fallback.configured_client()
+        tracks, source = lastfm_fallback.artist_top_tracks(artist_name, limit=limit, lastfm=client)
+        return jsonify({'success': True, 'tracks': tracks, 'source': source})
     except Exception as e:
-        logger.error(f"Error fetching Last.fm top tracks: {e}")
-        return jsonify({'success': True, 'tracks': []})
+        logger.error(f"Error fetching artist top tracks by name: {e}")
+        return jsonify({'success': True, 'tracks': [], 'source': ''})
 
 # ================================================================================================
 @app.route('/api/lastfm/auth-url', methods=['GET'])

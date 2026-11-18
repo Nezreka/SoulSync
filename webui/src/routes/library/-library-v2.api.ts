@@ -992,12 +992,14 @@ export async function fetchArtistTopTracks(input: {
       };
     }
   }
-  const fallback = await readJson<{ success: boolean; tracks?: ArtistTopTrack[] }>(
+  // by name: Last.fm, else ListenBrainz / Deezer (Last.fm keys need Pro from
+  // 1 December 2026). `source` says which answered
+  const fallback = await readJson<{ success: boolean; source?: string; tracks?: ArtistTopTrack[] }>(
     apiClient.get('artist/0/lastfm-top-tracks', { searchParams: { name: input.name, limit: 10 } }),
   ).catch(() => null);
   return {
     kind: 'lastfm',
-    source: 'lastfm',
+    source: fallback?.source || 'lastfm',
     resolvedArtistId: null,
     tracks: (fallback?.tracks ?? []).slice(0, 10),
   };

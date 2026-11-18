@@ -1682,6 +1682,14 @@ class MusicDatabase:
             self._add_metadata_cache_tables(cursor)
             self._ensure_metadata_cache_indexes(cursor)
 
+            # remembered last.fm / listenbrainz / deezer answers, so a lapsed
+            # last.fm key does not empty the features that read them
+            try:
+                from core.provider_cache import ensure_schema as _ensure_provider_cache
+                _ensure_provider_cache(cursor)
+            except Exception as e:
+                logger.error(f"Error creating provider_response_cache: {e}")
+
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
 

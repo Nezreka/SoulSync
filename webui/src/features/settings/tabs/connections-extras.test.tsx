@@ -154,6 +154,33 @@ describe('the Scrobbling and Extras cards', () => {
     expect(shell.showToast).toHaveBeenCalledWith('Quarantine cleared', 'success');
   });
 
+  it('Last.fm says plainly when the key was refused (Pro only from 1 December 2026)', async () => {
+    const pro =
+      'Last.fm now requires a Pro subscription for API keys (from 1 December 2026). Your key was not accepted.';
+    answers['/api/lastfm/configured'] = { configured: true, key_rejected: true, message: pro };
+    group();
+    await waitFor(() => expect(el('lastfm-key-rejected')?.textContent).toBe(pro));
+    // ListenBrainz is the recommended scrobbler, on both cards
+    expect(document.getElementById('listenbrainz-recommended')?.textContent).toMatch(/Recommended/);
+    expect(document.getElementById('lastfm-pro-note')?.textContent).toMatch(/Pro subscription/);
+  });
+
+  it('a working key shows no refusal, and Test asks again', async () => {
+    answers['/api/lastfm/configured'] = { configured: true, key_rejected: false, message: '' };
+    group();
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/lastfm/configured')).toHaveLength(1),
+    );
+    expect(document.getElementById('lastfm-key-rejected')).toBeNull();
+    const buttons = document.querySelectorAll<HTMLButtonElement>(
+      '[data-service="lastfm"] .form-actions:last-child .test-button',
+    );
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/lastfm/configured')).toHaveLength(2),
+    );
+  });
+
   it('the test row and each card test the service', async () => {
     group();
     const row = [...document.querySelectorAll<HTMLButtonElement>('.api-test-buttons button')];

@@ -10,7 +10,7 @@
  * kept here, before the test row (connections-services.tsx).
  */
 
-import { type ReactNode, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsStore } from '../settings-store';
 
@@ -134,6 +134,36 @@ function ConcertsCard({ store }: { store: SettingsStore }) {
 
 // ── Last.fm ──
 
+/** From 1 December 2026 a Last.fm API key needs a Pro subscription. The
+ *  server remembers a refused key (/api/lastfm/configured says so); the card
+ *  then says it plainly instead of a bare "invalid key". */
+export const LASTFM_PRO_NOTE =
+  'Last.fm API keys need a Pro subscription from 1 December 2026. Without one, SoulSync fills in from free sources (ListenBrainz, Deezer).';
+
+export interface LastfmKeyStatus {
+  key_rejected: boolean;
+  message: string;
+}
+
+export function useLastfmKeyStatus(): [LastfmKeyStatus, () => void] {
+  const [status, setStatus] = useState<LastfmKeyStatus>({ key_rejected: false, message: '' });
+  const refresh = useCallback(() => {
+    fetch('/api/lastfm/configured')
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data: Partial<LastfmKeyStatus> | null) => {
+        if (!data) return;
+        const next = { key_rejected: !!data.key_rejected, message: data.message || '' };
+        // unchanged: keep the same object, so nothing re-renders
+        setStatus((prev) =>
+          prev.key_rejected === next.key_rejected && prev.message === next.message ? prev : next,
+        );
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(refresh, [refresh]);
+  return [status, refresh];
+}
+
 function LastfmCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
@@ -142,6 +172,7 @@ function LastfmCard({ store }: { store: SettingsStore }) {
   const user = useTrimmed(store, 'lastfm', 'username');
   const scrobble = useChecked(store, 'lastfm', 'scrobble_enabled');
   const authorized = !!((settings.lastfm || {}) as Section_).session_key;
+  const [keyStatus, refreshKeyStatus] = useLastfmKeyStatus();
 
   // save first, so the API secret is stored
   async function authorize() {
@@ -162,6 +193,11 @@ function LastfmCard({ store }: { store: SettingsStore }) {
 
   return (
     <ServiceCard service="lastfm" colour="#d51007" title="Last.fm" titleClass="lastfm-title">
+      {keyStatus.key_rejected ? (
+        <div className="setting-warning" id="lastfm-key-rejected" role="status">
+          {keyStatus.message}
+        </div>
+      ) : null}
       <Field label="API Key:">
         <SecretInput id="lastfm-api-key" placeholder="Last.fm API Key" {...key} />
       </Field>
@@ -200,12 +236,18 @@ function LastfmCard({ store }: { store: SettingsStore }) {
         <div className="callback-help">
           API key: used for metadata enrichment. API secret: required for scrobbling.
         </div>
+        <div className="callback-help" id="lastfm-pro-note">
+          {LASTFM_PRO_NOTE}
+        </div>
       </div>
       <div className="form-group" style={{ marginTop: '12px' }}>
         <label className="checkbox-label">
           <input type="checkbox" id="lastfm-scrobble-enabled" {...scrobble} /> Scrobble plays to
           Last.fm
         </label>
+        <div className="setting-help-text">
+          ListenBrainz is the recommended scrobbler: free, no subscription.
+        </div>
       </div>
       <div className="form-actions" id="lastfm-scrobble-actions">
         <button className="test-button" onClick={() => void authorize()}>
@@ -216,7 +258,7 @@ function LastfmCard({ store }: { store: SettingsStore }) {
         </span>
       </div>
       <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'lastfm')} />
+        <TestButton onClick={() => void testService(store, 'lastfm').then(refreshKeyStatus)} />
       </div>
     </ServiceCard>
   );
@@ -509,6 +551,10 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
           <input type="checkbox" id="listenbrainz-scrobble-enabled" {...scrobble} /> Scrobble plays
           to ListenBrainz
         </label>
+        <div className="setting-help-text" id="listenbrainz-recommended">
+          Recommended for scrobbling: free and open, no subscription. Last.fm API keys need Pro from
+          1 December 2026.
+        </div>
       </div>
       <div className="form-actions">
         <TestButton onClick={() => void testService(store, 'listenbrainz')} />

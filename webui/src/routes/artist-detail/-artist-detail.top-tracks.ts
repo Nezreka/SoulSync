@@ -9,8 +9,11 @@ import type { ArtistDetailTrack } from './-artist-detail.types';
  * Two passes, in order:
  *   1. the metadata source (Spotify / Deezer) via /api/artist/<id>/top-tracks,
  *      which returns FULL track objects so each row gets a real download action
- *   2. Last.fm playcount, which is display-only — the vanilla deliberately
- *      offers no download there because the rows carry no usable metadata
+ *   2. most played by name, which is display-only — the vanilla deliberately
+ *      offers no download there because the rows carry no usable metadata.
+ *      Last.fm first; ListenBrainz then Deezer when Last.fm is not set up or
+ *      refused the key (Pro only from 1 December 2026). `source` names who
+ *      answered, so the heading says it.
  *
  * Sources that cannot rank by popularity (iTunes / Discogs / MusicBrainz)
  * answer success=false, which is what makes pass 2 reachable at all.
@@ -21,7 +24,14 @@ export const TOP_TRACKS_SOURCE_LABELS: Record<string, string> = {
   spotify: 'Top Tracks (Spotify)',
   deezer: 'Top Tracks (Deezer)',
   lastfm: 'Popular on Last.fm',
+  listenbrainz: 'Popular on ListenBrainz',
 };
+
+/** The heading for the by-name pass. Deezer there is a ranking without
+ *  play counts, so it reads as Top Tracks (Deezer). */
+export function popularTracksTitle(source: string | undefined): string {
+  return (source && TOP_TRACKS_SOURCE_LABELS[source]) || TOP_TRACKS_SOURCE_LABELS.lastfm;
+}
 
 export function topTracksTitle(source: string | undefined): string {
   return (source && TOP_TRACKS_SOURCE_LABELS[source]) || 'Top Tracks';
@@ -108,9 +118,11 @@ export async function loadTopTracks(
     );
     const data = await response.json();
     if (!data?.success || !data.tracks?.length) return EMPTY_TOP_TRACKS;
+    // an older server sends no source: it only ever asked Last.fm
+    const source = typeof data.source === 'string' && data.source ? data.source : 'lastfm';
     return {
-      source: 'lastfm',
-      title: TOP_TRACKS_SOURCE_LABELS.lastfm,
+      source,
+      title: popularTracksTitle(source),
       tracks: data.tracks,
       downloadable: false,
     };

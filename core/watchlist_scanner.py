@@ -5469,6 +5469,7 @@ class WatchlistScanner:
 
             logger.info(f"Last.fm radio: generating playlists for {len(top_tracks)} top tracks")
 
+            from core import lastfm_fallback
             from core.lastfm_client import LastFMClient
             from core.listenbrainz_manager import ListenBrainzManager
 
@@ -5484,15 +5485,19 @@ class WatchlistScanner:
                     continue
 
                 try:
-                    similar = client.get_similar_tracks(artist_name, track_name, limit=25)
+                    # last.fm first; deezer's artist radio when the key is
+                    # refused (pro only from 1 december 2026) or it has nothing
+                    similar, similar_source = lastfm_fallback.similar_tracks(
+                        artist_name, track_name, limit=25, lastfm=client)
                     if not similar:
                         logger.info(f"Last.fm radio: no similar tracks for '{artist_name} - {track_name}'")
                         continue
 
-                    playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar)
+                    playlist_mbid = lb_manager.save_lastfm_radio_playlist(
+                        track_name, artist_name, similar, source=similar_source)
                     logger.info(
                         f"Last.fm radio: saved '{track_name}' by '{artist_name}' "
-                        f"→ {playlist_mbid} ({len(similar)} tracks)"
+                        f"→ {playlist_mbid} ({len(similar)} tracks from {similar_source})"
                     )
                     generated += 1
                 except Exception as track_err:

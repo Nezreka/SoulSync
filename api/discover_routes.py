@@ -2910,6 +2910,47 @@ def _trigger_your_artists_refresh(profile_id: int):
     threading.Thread(target=_run, daemon=True, name="YourArtistsRefresh").start()
 
 
+# an artist needs this many plays here before "your listening" counts it
+YOUR_LISTENING_MIN_PLAYS = 3
+
+
+def _your_top_artists_fallback(database, profile_id: int):
+    """(artists, source_service) standing in for Last.fm's top artists: the
+    profile's ListenBrainz stats (official server only, public, no token
+    needed), else SoulSync's own listening history."""
+    username = ''
+    try:
+        lb = database.get_profile_listenbrainz(profile_id) or {}
+        token, base_url, username = lb.get('token'), lb.get('base_url') or '', lb.get('username') or ''
+        if not token and profile_id == 1:
+            token = config_manager.get('listenbrainz.token', '')
+            base_url = config_manager.get('listenbrainz.base_url', '') or ''
+            username = config_manager.get('listenbrainz.username', '') or ''
+        if not token or base_url.strip():
+            # no account, or a self-hosted / maloja server with no stats api
+            username = ''
+        elif not username.strip():
+            from core.listenbrainz_client import ListenBrainzClient
+            username = ListenBrainzClient(token=token, base_url='').get_authenticated_username() or ''
+        username = username.strip()
+    except Exception as e:
+        logger.debug(f"[Your Artists] ListenBrainz account lookup failed: {e}")
+        username = ''
+    if username:
+        from core import listenbrainz_public
+        rows = listenbrainz_public.user_top_artists(username, limit=200)
+        if rows:
+            return [{'name': r['name']} for r in rows], 'listenbrainz'
+    try:
+        rows = database.get_top_artists(time_range='all', limit=200, profile_id=profile_id) or []
+    except Exception as e:
+        logger.debug(f"[Your Artists] listening history read failed: {e}")
+        rows = []
+    return ([{'name': r['name']} for r in rows
+             if r.get('name') and int(r.get('play_count') or 0) >= YOUR_LISTENING_MIN_PLAYS],
+            'listening_history')
+
+
 def _fetch_and_match_liked_artists(profile_id: int):
     """Background worker: fetch from services, deduplicate, match to active source."""
     database = get_database()
@@ -2965,21 +3006,33 @@ def _fetch_and_match_liked_artists(profile_id: int):
             lastfm_secret = config_manager.get('lastfm.api_secret', '')
             lastfm_session = config_manager.get('lastfm.session_key', '')
             logger.info(f"[Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
-            if lastfm_key and lastfm_secret and lastfm_session:
-                from core.lastfm_client import LastFMClient
+            lastfm_artists = []
+            from core.lastfm_client import LastFMClient, lastfm_usable
+            if lastfm_key and lastfm_secret and lastfm_session and lastfm_usable(lastfm_key):
                 lfm = LastFMClient(api_key=lastfm_key, api_secret=lastfm_secret, session_key=lastfm_session)
                 username = lfm.get_authenticated_username()
                 logger.info(f"[Your Artists] Last.fm username resolved: {username or 'NONE'}")
                 if username:
                     logger.info(f"[Your Artists] Fetching top artists from Last.fm ({username})...")
-                    artists = lfm.get_user_top_artists(username, period='overall', limit=200)
-                    for a in artists:
+                    lastfm_artists = lfm.get_user_top_artists(username, period='overall', limit=200)
+                    for a in lastfm_artists:
                         database.upsert_liked_artist(
                             artist_name=a['name'], source_service='lastfm',
                             image_url=a.get('image_url'), profile_id=profile_id
                         )
-                    fetched += len(artists)
-                    logger.info(f"[Your Artists] Fetched {len(artists)} from Last.fm")
+                    fetched += len(lastfm_artists)
+                    logger.info(f"[Your Artists] Fetched {len(lastfm_artists)} from Last.fm")
+            if not lastfm_artists:
+                # last.fm not set up, its key refused (pro only from 1 december
+                # 2026) or it had nothing: listenbrainz, else what you played here
+                fallback, fallback_source = _your_top_artists_fallback(database, profile_id)
+                for a in fallback:
+                    database.upsert_liked_artist(
+                        artist_name=a['name'], source_service=fallback_source, profile_id=profile_id
+                    )
+                fetched += len(fallback)
+                if fallback:
+                    logger.info(f"[Your Artists] Fetched {len(fallback)} top artists from {fallback_source}")
     except Exception as e:
         logger.error(f"[Your Artists] Last.fm fetch error: {e}")
 
