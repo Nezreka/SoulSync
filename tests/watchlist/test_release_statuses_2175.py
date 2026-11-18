@@ -86,6 +86,13 @@ def test_statuses_are_read_the_way_musicbrainz_writes_them():
         RS.validate_allowed(["official", "nope"])
 
 
+@pytest.fixture(autouse=True)
+def _fresh_status_cache():
+    RS.clear_cache()
+    yield
+    RS.clear_cache()
+
+
 class _MB:
     def __init__(self, pages):
         self.pages = pages
@@ -117,10 +124,37 @@ def test_musicbrainz_not_answering_keeps_nothing_out():
     assert RS.fetch_group_statuses("", client=Down()) is None
 
 
-def test_a_huge_catalogue_stops_at_the_page_cap():
+def test_a_huge_catalogue_stops_at_the_page_cap_and_filters_nothing():
+    # past the cap a group's official release may be unread: no guessing
     client = _MB([[_release(f"rg-{n}", "Bootleg") for n in range(100)]] * 50)
-    groups = RS.fetch_group_statuses("mb-1", client=client, max_pages=3)
-    assert len(client.calls) == 3 and groups
+    assert RS.fetch_group_statuses("mb-1", client=client, max_pages=3) is None
+    assert len(client.calls) == 3
+
+
+def test_musicbrainz_failing_midway_filters_nothing():
+    # page 1 only saw rg-a's bootleg; its official release was on page 2
+    class Flaky(_MB):
+        def browse_artist_releases(self, mbid, limit=100, offset=0):
+            self.calls.append(offset)
+            return [_release("rg-a", "Bootleg")] * 100 if offset == 0 else None
+    assert RS.fetch_group_statuses("mb-1", client=Flaky([])) is None
+
+
+def test_a_full_answer_is_remembered_and_a_failure_is_not():
+    client = _MB([[_release("rg-a", "Official")]])
+    assert RS.fetch_group_statuses("MB-2", client=client) == {"rg-a": {"official"}}
+    assert RS.fetch_group_statuses("mb-2", client=client) == {"rg-a": {"official"}}
+    assert client.calls == [0]
+
+    class Down:
+        calls = 0
+
+        def browse_artist_releases(self, *_a, **_k):
+            Down.calls += 1
+            return None
+    RS.fetch_group_statuses("mb-3", client=Down())
+    RS.fetch_group_statuses("mb-3", client=Down())
+    assert Down.calls == 2
 
 
 # -- the watchlist scanner -----------------------------------------------------

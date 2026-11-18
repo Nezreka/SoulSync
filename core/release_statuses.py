@@ -19,6 +19,8 @@ Every status is allowed by default, so nothing changes until you pick.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any, Dict, Iterable, Mapping, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
@@ -158,8 +160,38 @@ def _raw_mb_client():
     return getattr(client, "_client", client)
 
 
+_CACHE_TTL = 24 * 3600
+_cache: Dict[str, Tuple[float, Optional[Dict[str, Set[str]]]]] = {}
+_cache_lock = threading.Lock()
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
 def fetch_group_statuses(artist_mbid: str, *, client: Any = None,
                          max_pages: int = MAX_BROWSE_PAGES) -> Optional[Dict[str, Set[str]]]:
+    """:func:`_fetch_group_statuses`, remembered for a day per artist: a
+    watchlist scan asks for every artist, and a big one is up to 30
+    rate-limited pages. only a full answer is kept."""
+    mbid = str(artist_mbid or "").strip().lower()
+    if not mbid:
+        return None
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(mbid)
+        if hit and now - hit[0] < _CACHE_TTL:
+            return hit[1]
+    groups = _fetch_group_statuses(mbid, client=client, max_pages=max_pages)
+    if groups is not None:
+        with _cache_lock:
+            _cache[mbid] = (now, groups)
+    return groups
+
+
+def _fetch_group_statuses(artist_mbid: str, *, client: Any = None,
+                          max_pages: int = MAX_BROWSE_PAGES) -> Optional[Dict[str, Set[str]]]:
     """Every release group of an artist's releases on MusicBrainz, with the
     statuses its releases have. A release with no status adds nothing, so a
     group of only those maps to an empty set. None when MusicBrainz could
@@ -184,7 +216,9 @@ def fetch_group_statuses(artist_mbid: str, *, client: Any = None,
             logger.debug("release status browse failed for %s: %s", mbid, exc)
             page = None
         if page is None:
-            return groups or None
+            # a half answer can't be filtered by: a group's official release
+            # may sit on a page we never read. everything passes instead
+            return None
         for release in page:
             if not isinstance(release, Mapping):
                 continue
@@ -200,7 +234,10 @@ def fetch_group_statuses(artist_mbid: str, *, client: Any = None,
             break
         offset += 100
     else:
-        logger.info("release statuses for %s stopped after %s pages", mbid, max_pages)
+        # same as an error: past the cap a group's other releases are unread
+        logger.info("release statuses for %s stopped after %s pages, not filtering by status",
+                    mbid, max_pages)
+        return None
     return groups
 
 
