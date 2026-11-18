@@ -334,8 +334,13 @@ def test_a_worker_match_without_a_list_fetches_it_by_id(tmp_path, monkeypatch):
     asked = []
     monkeypatch.setattr(pc, "refresh_match_credits",
                         lambda db, et, eid, service, pid: asked.append((service, pid)) or 2)
+    monkeypatch.setattr(pc, "_has_snapshot", lambda *a: False)
     assert pc.keep_match_credits("db", "track", 7, "tidal", "t-1") == 2
     assert pc.keep_match_credits("db", "track", 7, "itunes", "it-1") == 0
+    assert asked == [("tidal", "t-1")]
+    # a list kept for the match already: no request
+    monkeypatch.setattr(pc, "_has_snapshot", lambda *a: True)
+    assert pc.keep_match_credits("db", "track", 7, "tidal", "t-1") == 0
     assert asked == [("tidal", "t-1")]
 
 
@@ -379,4 +384,50 @@ def test_an_empty_answer_may_be_an_outage_and_is_asked_again(tmp_path, online, m
     tried = _searcher(monkeypatch, candidates=0)
     pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
     pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
+    assert tried == [None, "ODESZA"]          # remembered, but only for a few days
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_credit_checks SET checked_at=datetime('now', '-4 days')")
+        conn.commit()
+    pc.ensure_track_credits(db, track, {"spotify"}, artist_hints=["ODESZA"])
     assert tried == [None, "ODESZA", None, "ODESZA"]
+
+
+def test_musicbrainz_and_tidal_never_search_by_text(tmp_path, online, monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn)
+        conn.commit()
+    tried = _searcher(monkeypatch, candidates=5)
+    monkeypatch.setattr(pc, "_credit_client", lambda service: None)
+    pc.ensure_track_credits(db, track, {"musicbrainz", "tidal"}, artist_hints=["ODESZA"])
+    assert tried == []
+
+
+def test_an_isrc_musicbrainz_does_not_know_is_not_asked_again(tmp_path, online, monkeypatch):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track = _track(conn, isrc="USX9P1700001")
+        conn.commit()
+    asked = []
+    client = _mb(isrc=[])
+    client.track_artist_credits_by_isrc = lambda code: asked.append(code) or None
+    monkeypatch.setattr(pc, "_credit_client", lambda service: client)
+    pc.ensure_track_credits(db, track, {"musicbrainz"})
+    pc.ensure_track_credits(db, track, {"musicbrainz"})
+    assert asked == ["USX9P1700001"]
+
+
+def test_discogs_answers_only_when_every_track_the_number_can_mean_agrees():
+    """Nezreka's review: disc 2 track 1 and disc 1 track 1 both mint _t1"""
+    release = {"artists": [{"id": 1, "name": "Main"}], "tracklist": [
+        {"type_": "track", "position": "1-1", "title": "A"},
+        {"type_": "track", "position": "1-2", "title": "B"},
+        {"type_": "track", "position": "2-1", "title": "C",
+         "artists": [{"id": 9, "name": "Guest"}]},
+    ]}
+    client = _discogs(release)
+    assert client.track_artist_credits("r1_t1") is None          # disc 1 or disc 2?
+    assert client.track_artist_credits("r1_t2") == [{"id": "1", "name": "Main"}]
+    same = {"artists": [{"id": 1, "name": "Main"}], "tracklist": [
+        {"type_": "track", "position": "A1"}, {"type_": "track", "position": "B1"}]}
+    assert _discogs(same).track_artist_credits("r1_t1") == [{"id": "1", "name": "Main"}]

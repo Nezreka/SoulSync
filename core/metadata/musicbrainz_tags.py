@@ -202,6 +202,14 @@ def write_tag(audio, tag, value, symbols):
         if frame == "UFID":
             audio.tags.add(symbols.UFID(owner=desc, data=values[0].encode("ascii")))
         elif frame == "TXXX":
+            # one frame per tag, whatever case another tagger used for its
+            # description (Picard: TXXX:ARTISTS, here TXXX:Artists): keep the
+            # file's own spelling and never add a second frame beside it
+            existing = [k for k in audio.tags.keys() if k.upper() == f"TXXX:{desc}".upper()]
+            if existing:
+                desc = existing[0].split(":", 1)[1]
+                for key in existing:
+                    del audio.tags[key]
             audio.tags.add(symbols.TXXX(encoding=3, desc=desc, text=values))
         else:
             from mutagen import id3

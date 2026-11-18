@@ -1464,11 +1464,15 @@ class TidalClient:
                 headers={'accept': 'application/vnd.api+json'},
                 timeout=10,
             )
+            if response.status_code == 429:
+                raise Exception("Rate limited (429) on track_artist_credits")
             if response.status_code != 200:
                 logger.debug(f"Tidal track artists failed: {response.status_code}")
                 return None
             data = response.json() or {}
         except Exception as e:
+            if _is_rate_limit_error(e):
+                raise  # the rate_limited decorator paces and retries
             logger.debug(f"Tidal track artists for {track_id} unavailable: {e}")
             return None
         names = {
@@ -1482,6 +1486,7 @@ class TidalClient:
                for ref in refs if isinstance(ref, dict) and names.get(str(ref.get('id')))]
         return out or None
 
+    @rate_limited
     def get_track(self, track_id: str) -> Optional[Dict]:
         """Get full track details by Tidal ID."""
         try:

@@ -995,8 +995,10 @@ class MusicBrainzClient:
         """``(recording id, credits)`` for the recording an ISRC names, exact
         and without a text search. None when MusicBrainz knows no recording
         for it, or its recordings credit different artists."""
+        # raises on an outage: only MusicBrainz answering "none" is an answer
         lists = [(str(r.get('id') or ''), artist_credit_list(r))
-                 for r in self.lookup_recordings_by_isrc(isrc) or [] if isinstance(r, dict)]
+                 for r in self.lookup_recordings_by_isrc(isrc, raise_on_error=True) or []
+                 if isinstance(r, dict)]
         lists = [(rid, credits) for rid, credits in lists if rid and credits]
         if not lists:
             return None

@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS lib2_credit_checks (
 CREDIT_CHECK_TTL_DAYS = 180
 # a track no search found at a source is not searched there again for this long
 UNMATCHED_RETRY_DAYS = 30
+# an empty answer (no results at all) may be an outage: asked again sooner
+EMPTY_RETRY_DAYS = 3
+# sources whose text search can never match a track: their results carry no
+# album to check against (MusicBrainz is found by ISRC, Tidal by its id)
+_NO_TEXT_SEARCH = frozenset({"musicbrainz", "tidal"})
 
 
 def ensure_provider_credits_schema(cursor: Any) -> None:
@@ -460,6 +465,20 @@ def refresh_match_credits(database: Any, entity_type: str, entity_id: int,
             conn.close()
 
 
+def _has_snapshot(database: Any, entity_type: str, entity_id: int, service: str) -> bool:
+    conn = None
+    try:
+        conn = database._get_connection()
+        return conn.execute(
+            "SELECT 1 FROM lib2_provider_credits WHERE entity_type=? AND entity_id=? AND source=? "
+            "LIMIT 1", (entity_type, int(entity_id), service)).fetchone() is not None
+    except Exception:  # noqa: BLE001 - unreadable: fetch
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def keep_match_credits(database: Any, entity_type: str, entity_id: int, service: str,
                        provider_id: Optional[str], artists: Optional[list] = None) -> int:
     """An enrichment worker matched a track at a credit source: keep that
@@ -471,7 +490,8 @@ def keep_match_credits(database: Any, entity_type: str, entity_id: int, service:
     if service not in _SOURCES or entity_type not in ("track", "album") or not provider_id:
         return 0
     if artists is None:
-        if not ONLINE_REFRESH:
+        if not ONLINE_REFRESH or _has_snapshot(database, entity_type, entity_id, service):
+            # a list for this match is kept already (a rematch drops it first)
             return 0
         return refresh_match_credits(database, entity_type, entity_id, service, str(provider_id))
     conn = None
@@ -568,19 +588,27 @@ def _unmatched_key(conn: Any, track_id: Any, hints: Iterable[str]) -> str:
 
 def _searched_lately(conn: Any, service: str, key: str) -> bool:
     try:
+        row = conn.execute(
+            "SELECT names_json FROM lib2_credit_checks WHERE source=? AND provider_id=? "
+            "AND checked_at >= datetime('now', ?)",
+            (service, key, f"-{UNMATCHED_RETRY_DAYS} days")).fetchone()
+        if row is None:
+            return False
+        if row[0] != '"empty"':
+            return True
         return conn.execute(
             "SELECT 1 FROM lib2_credit_checks WHERE source=? AND provider_id=? "
             "AND checked_at >= datetime('now', ?)",
-            (service, key, f"-{UNMATCHED_RETRY_DAYS} days")).fetchone() is not None
+            (service, key, f"-{EMPTY_RETRY_DAYS} days")).fetchone() is not None
     except Exception:  # noqa: BLE001 - no ledger yet: search
         return False
 
 
-def _record_unmatched(conn: Any, service: str, key: str) -> None:
+def _record_unmatched(conn: Any, service: str, key: str, *, empty: bool = False) -> None:
     conn.execute(LIB2_CREDIT_CHECKS_DDL)
     conn.execute(
         "INSERT OR REPLACE INTO lib2_credit_checks(source, provider_id, names_json, checked_at)"
-        " VALUES(?, ?, '[]', CURRENT_TIMESTAMP)", (service, key))
+        " VALUES(?, ?, ?, CURRENT_TIMESTAMP)", (service, key, '"empty"' if empty else '[]'))
 
 
 # a combined artist's parts a track is looked up under, at most
@@ -638,17 +666,25 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
             if has_snapshot or (provider_id and any(
                     s == service for s, _n in checked_track_credits(conn, track_id))):
                 continue
+            search_key = (_unmatched_key(conn, track_id, artist_hints)
+                          if not provider_id and match else "")
+            if search_key and _searched_lately(conn, service, search_key):
+                continue    # this very lookup found nothing there lately
             if not provider_id and service == "musicbrainz":
                 # an ISRC names the recording exactly, no text search
                 isrc = (conn.execute("SELECT isrc FROM lib2_tracks WHERE id=?",
                                      (int(track_id),)).fetchone() or [None])[0]
                 client = _credit_client("musicbrainz") if str(isrc or "").strip() else None
-                exact = client.track_artist_credits_by_isrc(str(isrc)) if client else None
-            search_key = (_unmatched_key(conn, track_id, artist_hints)
-                          if not provider_id and not exact and match else "")
-            if search_key and _searched_lately(conn, service, search_key):
-                continue    # this very search found nothing there lately
-            if search_key:
+                if client is not None:
+                    try:
+                        exact = client.track_artist_credits_by_isrc(str(isrc))
+                    except Exception as exc:  # noqa: BLE001 - an outage: ask again next time
+                        logger.debug("isrc lookup for track %s failed: %s", track_id, exc)
+                        continue
+                    if not exact and search_key:
+                        _record_unmatched(conn, service, search_key)   # it answered: none
+                        conn.commit()
+            if search_key and not exact and service not in _NO_TEXT_SEARCH:
                 from core.library2.native_enrich import enrich_native_entity_for_service
                 answered = False
                 for artist in (None, *_hint_names(artist_hints)):
@@ -661,10 +697,11 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
                         provider_id = str(stored_provider_id(conn, "track", track_id, service) or "")
                     if provider_id or (result or {}).get("locked"):
                         break
-                # remembered only when the provider answered and nothing fit:
-                # an empty answer can be an outage the search helpers folded
-                if not provider_id and answered and not (result or {}).get("locked"):
-                    _record_unmatched(conn, service, search_key)
+                # an answer with results none of which fit (or several did)
+                # is remembered for the full time; an empty one for a few
+                # days only, it can be an outage the search helpers folded
+                if not provider_id and not (result or {}).get("locked"):
+                    _record_unmatched(conn, service, search_key, empty=not answered)
                     conn.commit()
             if not provider_id and not exact:
                 continue

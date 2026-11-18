@@ -51,7 +51,9 @@ def read_tag_field(audio, field: str) -> Any:
     field = _FIELD_ALIASES.get(field, field)
     if field == 'artists':
         if isinstance(audio.tags, ID3):
-            frame = audio.tags.get('TXXX:Artists')
+            # Picard writes TXXX:ARTISTS, this writer TXXX:Artists (the
+            # description is case sensitive in ID3): either is the list
+            frame = audio.tags.get('TXXX:ARTISTS') or audio.tags.get('TXXX:Artists')
             values = frame.text if frame else []
         elif isinstance(audio, MP4):
             values = audio.get('----:com.apple.iTunes:ARTISTS') or audio.get('\xa9ART', [])
@@ -1103,8 +1105,11 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         # the post-download enrichment writer at
         # core/metadata/enrichment.py.
         if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
+            # one frame: keep Picard's spelling when the file has it
+            desc = 'ARTISTS' if audio.tags.get('TXXX:ARTISTS') else 'Artists'
             audio.tags.delall('TXXX:Artists')
-            audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(artists_list)))
+            audio.tags.delall('TXXX:ARTISTS')
+            audio.tags.add(TXXX(encoding=3, desc=desc, text=list(artists_list)))
             written.append('artists_multi')
     if album_artist:
         audio.tags.delall('TPE2')

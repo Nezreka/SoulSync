@@ -101,3 +101,23 @@ def test_written_list_reads_back_as_no_change(tmp_path, multi, ext, codec):
     # and a second write changes nothing again
     tw.write_tag_fields(str(path), {'artists': ['Camellia', 'Toby Fox']})
     assert tw.read_file_tags(str(path))['artists'] == ['Camellia', 'Toby Fox']
+
+
+def test_picards_artists_frame_is_read_and_kept_one(tmp_path, multi):
+    """Nezreka's review: Picard writes TXXX:ARTISTS; only TXXX:Artists was
+    read, so its files always showed a change and got a second frame"""
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg not installed')
+    from mutagen.id3 import ID3, TXXX
+    path = tmp_path / "picard.mp3"
+    _ffmpeg(path, 'libmp3lame')
+    tags = ID3(str(path))
+    tags.add(TXXX(encoding=3, desc='ARTISTS', text=['Camellia', 'Toby Fox']))
+    tags.save(str(path))
+    read = tw.read_file_tags(str(path))
+    assert read['artists'] == ['Camellia', 'Toby Fox']
+    assert _row(tw.build_tag_diff(read, DB), 'artists')['changed'] is False
+    tw.write_tag_fields(str(path), {'artists': ['Camellia', 'Toby Fox', 'Guest']})
+    frames = [k for k in ID3(str(path)).keys() if k.upper() == 'TXXX:ARTISTS']
+    assert frames == ['TXXX:ARTISTS']
+    assert tw.read_file_tags(str(path))['artists'] == ['Camellia', 'Toby Fox', 'Guest']
