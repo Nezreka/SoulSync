@@ -59,6 +59,19 @@ describe('the table cells', () => {
     expect(personCells({ 'music.access': false } as never, null).music.text).toBe('Off');
   });
 
+  it('says how many asks someone used once the server counted them', () => {
+    const maya = FIXTURE.perms['3'] as unknown as { effective: Record<string, never> };
+    const used = personCells(maya.effective, FIXTURE.quality as never, { used: 2, limit: 5 });
+    expect(used.requests).toEqual({ tone: 'plain', text: '2 of 5 used', sub: 'a week' });
+    // a count for an older limit (the limit changed since) shows just the limit
+    const stale = personCells(maya.effective, FIXTURE.quality as never, { used: 2, limit: 3 });
+    expect(stale.requests.text).toBe('5 asks');
+    // never more used than the limit
+    expect(
+      personCells(maya.effective, FIXTURE.quality as never, { used: 9, limit: 5 }).requests.text,
+    ).toBe('5 of 5 used');
+  });
+
   it('counts people the way the chips filter them', () => {
     const people = FIXTURE.profiles.profiles.map((p) => ({
       person: p as never,

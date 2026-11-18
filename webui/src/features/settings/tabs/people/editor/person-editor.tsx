@@ -222,13 +222,15 @@ function PersonEditor({ request }: { request: EditorRequest }) {
     let changes: ProfilePermissions['changes'] = [];
     let fresh: ProfilePermissions = model.saved;
     try {
-      if (adminChanged) await saveProfile(profileId, { is_admin: draft.isAdmin });
-      if (!draft.isAdmin) {
-        const body = saveBody(model, draft);
-        if (body) {
-          fresh = await savePermissions(profileId, body);
-          changes = fresh.changes ?? [];
-        }
+      // the admin switch and what they can do go in one call, so a failure
+      // never leaves them half changed
+      const body = draft.isAdmin ? null : saveBody(model, draft);
+      if (adminChanged || body) {
+        fresh = await savePermissions(profileId, {
+          ...(body ?? { set: {}, reset: [] }),
+          ...(adminChanged ? { is_admin: draft.isAdmin } : {}),
+        });
+        changes = fresh.changes ?? [];
       }
     } catch (e) {
       setSaving(false);
@@ -253,13 +255,6 @@ function PersonEditor({ request }: { request: EditorRequest }) {
         nextLook = { ...nextLook, savedHome: look.home, home: look.home };
       } catch (e) {
         failed.push(`the home page didn't save: ${e instanceof Error ? e.message : 'error'}`);
-      }
-    }
-    if (adminChanged) {
-      try {
-        fresh = await fetchPermissions(profileId);
-      } catch {
-        /* the saves went through; the next open shows the rest */
       }
     }
     const nextModel = buildModel(model.catalogue, model.templates, fresh, model.quality);
@@ -347,11 +342,7 @@ function PersonEditor({ request }: { request: EditorRequest }) {
   const isSelf = viewer?.profileId === profileId;
   const summary = buildSummary(model, resolved.effective, isAdmin);
   const role = isOwner ? 'Owner' : isAdmin ? 'Admin' : 'Member';
-  const signIn = card?.has_password
-    ? 'Signs in with a password'
-    : card?.has_pin
-      ? 'Opens with a PIN'
-      : 'Opens from the profile picker';
+  const signIn = signInWords(card);
 
   const switchTo = (tid: number) => {
     const next = switchTemplate(model, draft, tid);
@@ -969,4 +960,26 @@ export function mountPersonEditorHost(): void {
   createRoot(el).render(<PersonEditorHost />);
   window.openPersonEditor = openPersonEditor;
   window.closePersonEditor = closePersonEditor;
+}
+
+/** the header's "Signs in with Plex": the server's signin, else the old guess */
+function signInWords(card: ProfileCard | null): string {
+  switch (card?.signin) {
+    case 'oidc':
+      return 'Signs in with OIDC';
+    case 'plex':
+      return 'Signs in with Plex';
+    case 'password':
+      return 'Signs in with a password';
+    case 'pin':
+      return 'Opens with a PIN';
+    case 'picker':
+      return 'Opens from the profile picker';
+    default:
+      return card?.has_password
+        ? 'Signs in with a password'
+        : card?.has_pin
+          ? 'Opens with a PIN'
+          : 'Opens from the profile picker';
+  }
 }

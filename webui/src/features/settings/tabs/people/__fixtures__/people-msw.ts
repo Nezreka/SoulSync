@@ -45,6 +45,8 @@ export function servePeople(
     /** rows on top of the saved policy */
     policy?: Json;
     forbid?: boolean;
+    /** /api/permissions/asks-used's used map */
+    asksUsed?: Record<string, { limit: number; days: number; used: number; remaining: number }>;
     onPolicy?: (body: Json, dry: boolean) => Response | undefined;
     onTemplate?: (id: number, body: Json, dry: boolean) => Response | undefined;
     onDelete?: (id: number, reassign: string | null) => Response | undefined;
@@ -71,6 +73,9 @@ export function servePeople(
       opts.forbid ? deny() : HttpResponse.json(FIXTURE.catalogue),
     ),
     http.get('*/api/permissions/quality-options', () => HttpResponse.json(FIXTURE.quality)),
+    http.get('*/api/permissions/asks-used', () =>
+      HttpResponse.json({ success: true, used: opts.asksUsed ?? {} }),
+    ),
     http.get('*/api/permissions/policy', () => (opts.forbid ? deny() : HttpResponse.json(policy))),
     http.get('*/api/permissions/templates', () =>
       opts.forbid ? deny() : HttpResponse.json(templates),

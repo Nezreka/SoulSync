@@ -256,7 +256,11 @@ export interface PersonCells {
   requests: Cell;
 }
 
-export function personCells(eff: PermMap, quality: QualityOptions | null): PersonCells {
+export function personCells(
+  eff: PermMap,
+  quality: QualityOptions | null,
+  asks: { used: number; limit: number } | null = null,
+): PersonCells {
   const q = quality ?? { music: [], movies: [], tv: [] };
   const sub = (...bits: Array<string | null | false | undefined>) =>
     bits.filter(Boolean).join(' · ') || undefined;
@@ -301,7 +305,11 @@ export function personCells(eff: PermMap, quality: QualityOptions | null): Perso
     isCount(limit) && limit.n
       ? {
           tone: 'plain',
-          text: `${limit.n} ${plural(limit.n, 'ask', 'asks')}`,
+          // "2 of 5 used" once the server counted them (music and video together)
+          text:
+            asks && asks.limit === limit.n
+              ? `${Math.min(asks.used, limit.n)} of ${limit.n} used`
+              : `${limit.n} ${plural(limit.n, 'ask', 'asks')}`,
           sub: periodWords(limit.days),
         }
       : { tone: 'plain', text: 'No limit' };
@@ -313,6 +321,8 @@ export interface PersonRow {
   perms: PersonPerms | null;
   /** the permissions read failed: the row says so instead of guessing */
   failed: boolean;
+  /** asks spent in their window, when they have a limit (/api/permissions/asks-used) */
+  asks?: { used: number; limit: number; days: number; remaining: number } | null;
 }
 
 export const isAdmin = (r: PersonRow) => r.person.is_admin || r.person.id === 1;

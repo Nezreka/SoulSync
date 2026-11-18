@@ -135,7 +135,11 @@ export function SidebarLook({
                 </div>
                 <div className={styles.prov}>
                   {following ? (
-                    <span className={styles.from}>Follows what new profiles see</span>
+                    <span className={styles.from}>
+                      {p.default?.template
+                        ? `From ${p.default.template}`
+                        : 'Follows what new profiles see'}
+                    </span>
                   ) : (
                     <>
                       <span className={styles.mine}>Set for {name}</span>
@@ -154,7 +158,9 @@ export function SidebarLook({
                           });
                         }}
                       >
-                        Back to the default
+                        {p.default?.template
+                          ? `Back to ${p.default.template}`
+                          : 'Back to the default'}
                       </button>
                     </>
                   )}

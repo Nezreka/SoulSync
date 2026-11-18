@@ -457,6 +457,7 @@ function QualityGroup({
                     <span className={`${css.tag} ${css.tagAccent}`}>Default</span>
                   ) : null}
                 </div>
+                {o.range ? <div className={css.qRange}>{o.range}</div> : null}
                 {outside ? <LockLine>Global policy: admins only</LockLine> : null}
               </div>
               {flagRow && on ? (

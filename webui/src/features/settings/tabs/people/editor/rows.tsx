@@ -466,6 +466,7 @@ export function QualityBlock({ ctx, media }: { ctx: EditorCtx; media: 'movie' | 
                   {tagFor(o)}
                   {isPick ? <span className={styles.tagDef}>Starts here</span> : null}
                 </div>
+                {o.range ? <div className={styles.qd}>{o.range}</div> : null}
                 {isCapped ? (
                   <div className={styles.qd}>
                     <PolicyLock ctx={ctx} text="Global policy keeps this for admins." />

@@ -122,6 +122,8 @@ export interface QualityOption {
   name: string;
   media_type?: string | null;
   tags?: string[];
+  /** what it fetches, "720p to 1080p" (video only) */
+  range?: string;
   is_default?: boolean;
 }
 
@@ -144,6 +146,8 @@ export interface ProfileCard {
   home_page?: string | null;
   library_mode?: string | null;
   library_root?: string | null;
+  /** how they sign in (/api/profiles, #2166) */
+  signin?: 'oidc' | 'plex' | 'password' | 'pin' | 'picker';
 }
 
 /** /api/profiles/<id>/features (#2157, #2164) */
@@ -158,10 +162,14 @@ export interface FeaturesAdminPayload {
   follows_default?: boolean;
   own_off?: string[] | null;
   lock_set?: boolean;
-  default?: { off: string[]; locked: boolean };
+  /** what they follow when nobody set theirs: their template's Sidebar & look
+   * (template names it), else what new profiles see */
+  default?: { off: string[]; locked: boolean; template?: string; template_id?: number };
 }
 
 export interface SaveBody {
+  /** the admin switch rides the same call (one atomic change, #2166) */
+  is_admin?: boolean;
   template_id?: number;
   set: PermMap;
   reset: string[] | 'all';

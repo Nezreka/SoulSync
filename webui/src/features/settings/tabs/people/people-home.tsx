@@ -123,7 +123,7 @@ function PersonLine({
       </div>
     );
   } else {
-    const cells = personCells(row.perms.effective, quality);
+    const cells = personCells(row.perms.effective, quality, row.asks ?? null);
     body = (
       <>
         <StateCell cell={cells.music} hide={css.hideSm} />

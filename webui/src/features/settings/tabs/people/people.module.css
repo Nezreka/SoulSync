@@ -942,6 +942,12 @@
   font-weight: 500;
 }
 
+.qRange {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .tag {
   display: inline-flex;
   align-items: center;

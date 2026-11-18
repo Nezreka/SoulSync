@@ -19,6 +19,10 @@ import { PersonEditorHost, closePersonEditor, openPersonEditor } from './index';
 type Body = Record<string, unknown>;
 let puts: Body[] = [];
 let profilePuts: Body[] = [];
+// how Maya signs in, as /api/profiles says (#2166)
+let signin: string | undefined;
+// what /api/profiles/7/features says she follows
+let lookDefault: Record<string, unknown> = { off: [], locked: false };
 let featurePosts: Body[] = [];
 let permGets = 0;
 let perms: ProfilePermissions;
@@ -55,7 +59,14 @@ function useApi(payload: ProfilePermissions = FIX.maya as unknown as ProfilePerm
         profiles: [
           { id: 1, name: 'Boulder', is_admin: true },
           { id: 3, name: 'Sam', is_admin: true },
-          { id: 7, name: 'Maya', is_admin: false, has_password: true, avatar_color: '#ec4899' },
+          {
+            id: 7,
+            name: 'Maya',
+            is_admin: false,
+            has_password: true,
+            avatar_color: '#ec4899',
+            signin: signin,
+          },
           { id: 9, name: 'Odd', is_admin: false },
         ],
       }),
@@ -76,7 +87,9 @@ function useApi(payload: ProfilePermissions = FIX.maya as unknown as ProfilePerm
       profilePuts.push((await request.json()) as Body);
       return HttpResponse.json({ success: true });
     }),
-    http.get('/api/profiles/:id/features', () => HttpResponse.json(FEATURES)),
+    http.get('/api/profiles/:id/features', () =>
+      HttpResponse.json({ ...FEATURES, default: lookDefault }),
+    ),
     http.post('/api/profiles/:id/features', async ({ request }) => {
       featurePosts.push((await request.json()) as Body);
       return HttpResponse.json(FEATURES);
@@ -106,6 +119,8 @@ async function save() {
 beforeEach(() => {
   puts = [];
   profilePuts = [];
+  signin = undefined;
+  lookDefault = { off: [], locked: false };
   featurePosts = [];
   permGets = 0;
   window.SoulSyncWebShellBridge = undefined;
@@ -286,8 +301,9 @@ describe('editing', () => {
     expect(sentence()).toBe('Can use everything, including settings and people.');
     expect(screen.queryByLabelText('Follows')).toBeNull();
     await save();
-    expect(profilePuts).toEqual([{ is_admin: true }]);
-    expect(puts).toEqual([]);
+    // one call: the admin switch rides the permissions PUT (#2166)
+    expect(profilePuts).toEqual([]);
+    expect(puts).toEqual([{ set: {}, reset: [], is_admin: true }]);
   });
 
   it('switching template keeps the changes that still differ', async () => {
@@ -354,6 +370,13 @@ describe('saving', () => {
     expect(puts).toEqual([]);
   });
 
+  it('names the template a follower gets their sidebar from', async () => {
+    lookDefault = { off: ['stats'], locked: false, template: 'Teen', template_id: 2 };
+    await open(7, { category: 'look' });
+    expect(await screen.findByText('From Teen')).toBeInTheDocument();
+    expect(screen.queryByText('Follows what new profiles see')).toBeNull();
+  });
+
   it('asks before throwing away unsaved changes', async () => {
     await open(7, { category: 'tv' });
     fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Download right away' }));
@@ -414,8 +437,8 @@ describe('who gets it', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(8);
     expect((screen.getByLabelText('Follows') as HTMLSelectElement).value).toBe('4');
     await save();
-    expect(profilePuts).toEqual([{ is_admin: false }]);
-    expect(puts).toEqual([{ template_id: 4, set: {}, reset: 'all' }]);
+    expect(profilePuts).toEqual([]);
+    expect(puts).toEqual([{ template_id: 4, set: {}, reset: 'all', is_admin: false }]);
   });
 
   it('a profile on its own settings needs a look, and picking a template carries them over', async () => {
@@ -430,6 +453,19 @@ describe('who gets it', () => {
     await save();
     expect(puts[0].template_id).toBe(2);
     expect(puts[0].reset).toBe('all');
+  });
+});
+
+describe('the header', () => {
+  it.each([
+    ['plex', 'Signs in with Plex'],
+    ['oidc', 'Signs in with OIDC'],
+    ['pin', 'Opens with a PIN'],
+    [undefined, 'Signs in with a password'],
+  ])('says how they sign in (%s)', async (how, words) => {
+    signin = how;
+    await open(7);
+    expect(await screen.findByText(words)).toBeInTheDocument();
   });
 });
 

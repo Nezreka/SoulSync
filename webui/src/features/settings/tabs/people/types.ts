@@ -68,6 +68,8 @@ export interface QualityOption {
   is_default?: boolean;
   media_type?: string | null;
   tags?: string[];
+  /** what it fetches, "720p to 1080p" (video only) */
+  range?: string;
 }
 export interface QualityOptions {
   music: QualityOption[];

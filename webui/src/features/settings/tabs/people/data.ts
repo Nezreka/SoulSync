@@ -12,6 +12,7 @@ import { SHELL_PROFILE_CONTEXT_CHANGED_EVENT } from '@/platform/shell/bridge';
 import type { Catalogue, PermMap, Person, QualityOptions, Template } from './types';
 
 import {
+  getAsksUsed,
   getCatalogue,
   getInvites,
   getPersonPerms,
@@ -41,15 +42,18 @@ export type LoadState =
   | { status: 'ready'; data: PeopleData };
 
 export async function loadPeople(signal?: AbortSignal): Promise<LoadState> {
-  const [catalogue, quality, policy, templates, profiles, waiting, invites] = await Promise.all([
-    getCatalogue(signal),
-    getQualityOptions(signal),
-    getPolicy(signal),
-    getTemplates(signal),
-    getProfiles(signal),
-    getWaiting(signal).catch(() => null),
-    getInvites(signal),
-  ]);
+  const [catalogue, quality, policy, templates, profiles, waiting, invites, asks] =
+    await Promise.all([
+      getCatalogue(signal),
+      getQualityOptions(signal),
+      getPolicy(signal),
+      getTemplates(signal),
+      getProfiles(signal),
+      getWaiting(signal).catch(() => null),
+      getInvites(signal),
+      // "2 of 5 used": a list that can't be read leaves just the limit showing
+      getAsksUsed(signal).catch(() => null),
+    ]);
   for (const r of [catalogue, policy, templates, profiles]) {
     if (!r.ok) return { status: 'error', message: r.message, forbidden: r.status === 403 };
   }
@@ -62,9 +66,15 @@ export async function loadPeople(signal?: AbortSignal): Promise<LoadState> {
       p.is_admin || p.id === 1 ? Promise.resolve(null) : getPersonPerms(p.id, signal),
     ),
   );
+  const used = asks && asks.ok ? asks.data.used || {} : {};
   const people: PersonRow[] = list.map((person, i) => {
     const r = perms[i];
-    return { person, perms: r && r.ok ? r.data : null, failed: !!r && !r.ok };
+    return {
+      person,
+      perms: r && r.ok ? r.data : null,
+      failed: !!r && !r.ok,
+      asks: used[String(person.id)] ?? null,
+    };
   });
   return {
     status: 'ready',
