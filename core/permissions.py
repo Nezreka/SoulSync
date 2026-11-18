@@ -300,7 +300,7 @@ CATEGORIES: List[Dict[str, str]] = [
     {"id": "music", "label": "Music", "help": "Library, discover, playlists and downloads."},
     {"id": "books", "label": "Audiobooks & podcasts", "help": "Books and shows to listen to."},
     {"id": "requests", "label": "Requests & moderation",
-     "help": "How many asks, whose requests they see, and who may answer them."},
+     "help": "Whose requests they see, and who may answer them. Each kind's request limit sits with it."},
     {"id": "admin", "label": "Administration",
      "help": "These belong to admins. Members never get them."},
     {"id": "look", "label": "Sidebar & look",
@@ -381,6 +381,10 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Titles above it, or with no rating, stay out of sight.", default="any",
        needs=("movies.access",), legacy="max_rating",
        enforced_at=("core/content_filter.py via api/video/kids.py", "NEW write paths (S16)")),
+    _p("movies.request_limit", COUNT, "movies", "Request limit",
+       "Movie asks. Movies they get right away are never capped.",
+       default={"n": 0, "days": 7}, needs=("movies.access",), legacy="request_limit",
+       enforced_at=("api/video/requests.py", "seerr _file_request", "core/owner_gate.py")),
     _p("movies.quality", SET, "movies", "Quality they can ask for",
        "Only profiles for movies.", default=ALL, needs=("movies.access",), media="movie",
        enforced_at=("resolve_request_quality on every request path (S23, #2168)",)),
@@ -432,6 +436,10 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "TV ratings follow the movie one unless you set their own: PG-13 allows up to TV-14.",
        default=FOLLOW, needs=("tv.access",), legacy="max_rating",
        enforced_at=("core/content_filter.py (today one cap for both)",)),
+    _p("tv.request_limit", COUNT, "tv", "Request limit",
+       "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
+       default={"n": 0, "days": 7}, needs=("tv.access",), legacy="request_limit",
+       enforced_at=("api/video/requests.py", "seerr _file_request", "core/owner_gate.py")),
     _p("tv.quality", SET, "tv", "Quality they can ask for", "Only profiles for shows.",
        default=ALL, needs=("tv.access",), media="tv"),
     _p("tv.quality_default", CHOICE, "tv", "Starts on", "What a request gets when they don't pick.",
@@ -452,6 +460,11 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Albums and tracks marked explicit are left out.", default=False,
        needs=("music.access",), legacy="hide_explicit",
        enforced_at=("api/content_guard.py", "NEW paths (S17)")),
+    _p("music.request_limit", COUNT, "music", "Request limit",
+       "Album, track and music video asks. Music they get right away is never capped.",
+       default={"n": 0, "days": 7}, needs=("music.access",), legacy="request_limit",
+       enforced_at=("api/music_requests.py quota", "music_database music quota",
+                    "core/owner_gate.py")),
     _p("music.quality", SET, "music", "Quality they can ask for", "Music quality profiles.",
        default=ALL, needs=("music.access",), media="music",
        enforced_at=("resolver on web_server wishlist add, api/wishlist_routes.py, "
@@ -520,10 +533,6 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        enforced_at=("api/podcasts.py", "core/podcast_automation.py")),
 
     # ── requests & moderation ────────────────────────────────────────────
-    _p("requests.limit", COUNT, "requests", "Request limit",
-       "Asks only. Downloads they get right away are never capped.",
-       default={"n": 0, "days": 7}, legacy="request_limit",
-       enforced_at=("core/requests/quota.py", "music_database music quota", "seerr _file_request")),
     _p("requests.see_all", BOOL, "requests", "See everyone's requests",
        "Members see only their own unless this is on.", default=False,
        enforced_at=("NEW: GET /api/video/requests, music requests list, seerr list (S7)",)),
@@ -564,6 +573,63 @@ CATALOGUE: Dict[str, Perm] = {r.id: r for r in CATALOGUE_ROWS}
 STORED_IDS: Tuple[str, ...] = tuple(r.id for r in CATALOGUE_ROWS if r.stored)
 PRESENTATION_IDS: Tuple[str, ...] = tuple(r.id for r in CATALOGUE_ROWS if r.presentation)
 PAGE_ROWS: Tuple[Perm, ...] = tuple(r for r in CATALOGUE_ROWS if r.pages)
+
+# ── request limits, one per kind ─────────────────────────────────────────
+# music, movies and TV each have their own limit. "requests.limit" was the
+# one shared row before; it's still read as "every kind's" so an old caller
+# (a body that sets it, a can() that asks it) keeps working: setting it sets
+# all three, and asking it is held to the strictest.
+LIMIT_KINDS: Tuple[str, ...] = ("music", "movies", "tv")
+LIMIT_ROWS: Dict[str, str] = {k: "%s.request_limit" % k for k in LIMIT_KINDS}
+OLD_LIMIT = "requests.limit"
+LIMIT_WORDS = {"music": "music", "movies": "movie", "tv": "TV"}
+
+# what an ask is, to the limit it counts toward. a season, a whole series
+# and an episode are TV; a music video is music. youtube rides with TV, or
+# with movies for a profile that has no TV (see ask_limit_kind).
+_ASK_KIND = {"album": "music", "track": "music", "single": "music", "music": "music",
+             "music_video": "music", "artist": "music",
+             "movie": "movies", "movies": "movies",
+             "show": "tv", "tv": "tv", "series": "tv", "season": "tv", "episode": "tv"}
+
+
+def limit_words(lim: Mapping[str, int], kind: Optional[str] = None) -> str:
+    """"5 movie asks a week", "1 ask a day", "3 TV asks every 10 days"."""
+    n = int(lim.get("n") or 0)
+    days = int(lim.get("days") or 7)
+    noun = ("%s ask" % LIMIT_WORDS[kind]) if kind else "ask"
+    noun += "" if n == 1 else "s"
+    span = "a day" if days == 1 else "a week" if days == 7 else "a month" if days == 30 \
+        else "every %d days" % days
+    return "%d %s %s" % (n, noun, span)
+
+
+def ask_limit_kind(kind, perms: Optional[Mapping[str, Any]] = None) -> Optional[str]:
+    """'music' | 'movies' | 'tv' for an ask of this kind, else None. a youtube
+    video counts toward TV (it's a channel's episode), or toward movies when
+    the profile can't see TV at all, so it never lands on a limit they can't
+    see."""
+    k = str(kind or "").strip().lower()
+    if k == "youtube":
+        if perms is not None and not perms.get("tv.access") and perms.get("movies.access"):
+            return "movies"
+        return "tv"
+    return _ASK_KIND.get(k)
+
+
+def limit_of(perms: Optional[Mapping[str, Any]], kind: str) -> Dict[str, int]:
+    """{n, days} for one kind from an effective map; n 0 = no limit. a map
+    without the row (an old one) reads the shared row it came from."""
+    perms = perms or {}
+    lim = perms.get(LIMIT_ROWS[kind])
+    if not isinstance(lim, Mapping):
+        lim = perms.get(OLD_LIMIT)
+    if not isinstance(lim, Mapping):
+        return {"n": 0, "days": 7}
+    try:
+        return {"n": int(lim.get("n") or 0), "days": max(1, int(lim.get("days") or 7))}
+    except (TypeError, ValueError):
+        return {"n": 0, "days": 7}
 # every page the catalogue knows, and its row
 PAGE_OWNER: Dict[str, str] = {pg: r.id for r in PAGE_ROWS for pg in r.pages}
 # pages a page list never decides: always there, admin only, or derived
@@ -751,6 +817,12 @@ def clean_layer(layer: Optional[Mapping[str, Any]], *, fill: Optional[Mapping[st
     if not isinstance(layer, Mapping):
         raise PermissionDataError("a permission map is an object")
     out: Dict[str, Any] = {}
+    if OLD_LIMIT in layer:
+        # the one shared limit sets each kind that doesn't name its own
+        layer = dict(layer)
+        old = layer.pop(OLD_LIMIT)
+        for row in LIMIT_ROWS.values():
+            layer.setdefault(row, old)
     for key, value in layer.items():
         if key not in CATALOGUE or not CATALOGUE[key].stored:
             if keep_unknown:
@@ -931,7 +1003,7 @@ LEGACY_GROUPS: Dict[str, Tuple[str, ...]] = {
     "can_download": ("music.get", "movies.get", "tv.get", "books.get", "podcasts.get"),
     "hide_explicit": ("music.hide_explicit",),
     "max_rating": ("movies.max_rating", "tv.max_rating"),
-    "request_limit": ("requests.limit",),
+    "request_limit": tuple(LIMIT_ROWS.values()),
 }
 # the request_limit group covers both columns
 LEGACY_COLUMNS = ("allowed_sides", "allowed_pages", "can_download", "hide_explicit", "max_rating",
@@ -990,14 +1062,19 @@ def perms_from_legacy(profile: Mapping[str, Any]) -> Tuple[Dict[str, Any], List[
     except (TypeError, ValueError):
         reasons.append("request limit unreadable")
         n, days = 0, 7
+    # music and video each counted against these columns on their own, so
+    # every kind starts from them: nobody's music allowance shrinks, and
+    # movies and TV each get what video had
     if n <= 0:
-        perms["requests.limit"] = {"n": 0, "days": 7}
+        lim = {"n": 0, "days": 7}
     else:
         if n > COUNT_MAX:
             reasons.append("request limit %d above %d" % (n, COUNT_MAX))
-        perms["requests.limit"] = {"n": min(n, COUNT_MAX), "days": min(max(1, days), DAYS_MAX)}
+        lim = {"n": min(n, COUNT_MAX), "days": min(max(1, days), DAYS_MAX)}
         if days > DAYS_MAX:
             reasons.append("request window %d days above %d" % (days, DAYS_MAX))
+    for row in LIMIT_ROWS.values():
+        perms[row] = dict(lim)
     pages = profile.get("allowed_pages")
     if pages is None:
         for r in PAGE_ROWS:
@@ -1029,7 +1106,9 @@ def legacy_from_perms(eff: Mapping[str, Any]) -> Dict[str, Any]:
     else:
         pages = [pg for r in PAGE_ROWS if eff.get(r.id) for pg in r.pages]
     rating = eff.get("movies.max_rating") or "any"
-    limit = eff.get("requests.limit") or {"n": 0, "days": 7}
+    # the columns hold one limit: they cache the music one (the column was
+    # music's before video had requests)
+    limit = limit_of(eff, "music")
     return {
         "allowed_sides": sides,
         "allowed_pages": pages,
@@ -1089,6 +1168,10 @@ def cache_matches(profile: Mapping[str, Any], eff: Mapping[str, Any], *, strict:
     for pid in ("books.get", "podcasts.get"):
         if (eff.get(pid) == "download") != dl:
             out.append(pid)
+    for kind in ("movies", "tv"):
+        lim = limit_of(eff, kind)
+        if ((lim["n"], lim["days"]) if lim["n"] > 0 else None) != old["quota"]:
+            out.append(LIMIT_ROWS[kind])
     from core.content_filter import cap_age
     tv = eff.get("tv.max_rating")
     if cap_age(None if tv in (None, "any") else tv) != old["cap"]:
@@ -1212,7 +1295,10 @@ def can(profile_ctx: Optional[Mapping[str, Any]], permission: str, context: Any 
       choice     ignored (read the map for the value)
       set_flag   an id; True when that id always needs approval
       fixed      always True
-    presentation rows raise ValueError: they never grant."""
+    presentation rows raise ValueError: they never grant.
+    requests.limit (the old shared limit) is held to every kind's."""
+    if permission == OLD_LIMIT:
+        return all(can(profile_ctx, row, context) for row in LIMIT_ROWS.values())
     row = CATALOGUE.get(permission)
     if row is None:
         logger.error("can(): unknown permission %r, refusing", permission)
@@ -1716,6 +1802,13 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
                     "none": "you can't request them"}[m]
         return {"download": "gets it right away", "ask": "asks first", "none": "can't request"}[m]
 
+    def asks_bit(kind):
+        # "5 asks a week" on the kind's own line, when that kind asks first
+        lim = limit_of(eff, kind)
+        if not lim["n"] or eff.get("%s.get" % kind) != "ask":
+            return []
+        return [limit_words(lim, kind)]
+
     def second_person(label):
         # "Their own automations" reads "Your own automations" to the member
         if not you:
@@ -1726,17 +1819,20 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
         bits = ["Movies: %s" % mode_words(eff["movies.get"])]
         if eff.get("movies.max_rating") not in (None, "any"):
             bits.append("up to %s" % eff["movies.max_rating"])
+        bits += asks_bit("movies")
         lines.append({"category": "movies", "text": ", ".join(bits) + "."})
     if eff.get("tv.access"):
         bits = ["TV shows: %s" % mode_words(eff["tv.get"])]
         tv = eff.get("tv.max_rating")
         if tv not in (None, "any"):
             bits.append("up to %s" % TV_RATING_LABELS.get(tv, tv))
+        bits += asks_bit("tv")
         lines.append({"category": "tv", "text": ", ".join(bits) + "."})
     if eff.get("music.access"):
         bits = ["Music: %s" % mode_words(eff["music.get"])]
         if eff.get("music.hide_explicit"):
             bits.append("clean only")
+        bits += asks_bit("music")
         lines.append({"category": "music", "text": ", ".join(bits) + "."})
     if eff.get("books.access"):
         lines.append({"category": "books", "text": "Audiobooks: %s." % mode_words(eff["books.get"])})
@@ -1744,10 +1840,6 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
         lines.append({"category": "books", "text": "Podcasts: %s." % (
             "new episodes download on their own" if eff.get("podcasts.get") == "download"
             else "%s follow shows, episodes don't download" % ("you" if you else "they"))})
-    limit = eff.get("requests.limit") or {}
-    if limit.get("n"):
-        span = "day" if limit["days"] == 1 else "week" if limit["days"] == 7 else "%d days" % limit["days"]
-        lines.append({"category": "requests", "text": "Up to %d asks a %s." % (limit["n"], span)})
     never = [second_person(CATALOGUE[pid].label) for pid in STORED_IDS
              if CATALOGUE[pid].kind == BOOL and not eff.get(pid) and not CATALOGUE[pid].group
              and pid not in ("requests.see_all", "requests.moderate")]

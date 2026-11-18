@@ -990,6 +990,7 @@ CREATE TABLE IF NOT EXISTS video_request_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id  INTEGER NOT NULL,
     request_id  INTEGER UNIQUE,                  -- the video_requests row it was (gone or not)
+    kind        TEXT,                            -- movie | show | episode | youtube (v75)
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_vreq_log_profile ON video_request_log(profile_id, created_at);

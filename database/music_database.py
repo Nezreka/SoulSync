@@ -29015,19 +29015,15 @@ class MusicDatabase:
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
         if key in asks:
             return False
-        # one limit for every ask (#2166, core/requests/asks.py): music videos
-        # and movie / show requests count too. a count that can't be read is
-        # a full limit
-        from core.requests.asks import video_asks_used
+        # the music limit (core/requests/asks.py): music videos count too,
+        # movies and shows have their own. a count that can't be read is a
+        # full limit
         try:
             others = self._music_video_asks_since(cursor, profile_id, quota['days'])
         except Exception:  # noqa: BLE001
             logger.warning("music video ask count failed for profile %s", profile_id, exc_info=True)
             return True
-        video = video_asks_used(profile_id, quota['days'])
-        if video is None:
-            return True
-        if len(asks) + others + video >= quota['limit']:
+        if len(asks) + others >= quota['limit']:
             return True
         # a new ask: logged in the add's own transaction, so it counts even
         # after the rows it makes are withdrawn or deleted

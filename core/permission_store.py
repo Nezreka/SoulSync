@@ -327,6 +327,9 @@ def _resolve_reset(reset, categories) -> List[str]:
     if not isinstance(reset, list):
         raise PermissionRequestError("reset is a list of ids or \"all\"")
     for pid in reset:
+        if pid == P.OLD_LIMIT:
+            ids.extend(P.LIMIT_ROWS.values())
+            continue
         if pid not in P.CATALOGUE or not P.CATALOGUE[pid].stored:
             raise PermissionRequestError("unknown permission %r" % pid)
         ids.append(pid)
@@ -345,6 +348,12 @@ def _clean_set(body_set, layer: str = "O") -> Dict[str, Any]:
         return {}
     if not isinstance(body_set, Mapping):
         raise PermissionRequestError("set is an object of permission: value")
+    if P.OLD_LIMIT in body_set:
+        # the one shared limit (an older caller) sets each kind it doesn't name
+        body_set = dict(body_set)
+        old = body_set.pop(P.OLD_LIMIT)
+        for row_id in P.LIMIT_ROWS.values():
+            body_set.setdefault(row_id, old)
     out = {}
     for pid, value in body_set.items():
         row = P.CATALOGUE.get(pid)
@@ -740,7 +749,7 @@ def music_rights(db, profile: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """what a profile row may do with music, from its effective map:
     {"mode": "download" | "ask" | "none", "quota": {limit, days} | None,
     "hide_explicit": bool}. the mode is music.get under music.access (a
-    video-only member gets none), the quota is requests.limit (asks only).
+    video-only member gets none), the quota is music.request_limit (asks only).
     admins: download, no quota, nothing hidden. a map that can't be built is
     no music and everything hidden: the caller fails closed."""
     if not profile:
@@ -754,12 +763,9 @@ def music_rights(db, profile: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         return dict(_MUSIC_CLOSED)
     ctx = P.make_context(profile.get("id"), perms=eff)
     mode = "download" if P.can(ctx, "music.get", "download") else "ask" if P.can(ctx, "music.get", "ask") else "none"
-    limit = eff.get("requests.limit") or {}
-    try:
-        n, days = int(limit.get("n") or 0), int(limit.get("days") or 7)
-    except (TypeError, ValueError):
-        n, days = 1, P.DAYS_MAX
-    quota = {"limit": n, "days": max(1, days)} if n > 0 and mode == "ask" else None
+    limit = P.limit_of(eff, "music")
+    n, days = limit["n"], limit["days"]
+    quota = {"limit": n, "days": days} if n > 0 and mode == "ask" else None
     return {"mode": mode, "quota": quota, "hide_explicit": P.can(ctx, "music.hide_explicit")}
 
 
