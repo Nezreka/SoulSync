@@ -19,7 +19,6 @@ const FILTERS = readFileSync(
   resolve(process.cwd(), 'src/routes/artist-detail/-ui/discography-filters.tsx'),
   'utf8',
 );
-const HELPER = readFileSync(resolve(process.cwd(), 'static/helper.js'), 'utf8');
 
 describe('the view toggle', () => {
   it('names the two sources instead of grading the UI', () => {
@@ -29,9 +28,9 @@ describe('the view toggle', () => {
     expect(FILTERS).not.toMatch(/>\s*Enhanced\s*</);
   });
 
-  it('keeps the data-view values, which css and the helper select on', () => {
+  it('keeps the data-view values, which css selects on', () => {
     // Renaming these would break .enhanced-view-toggle-btn[data-view="..."] in
-    // style.css and helper.js without making anything clearer.
+    // style.css without making anything clearer.
     expect(FILTERS).toContain('data-view="standard"');
     expect(FILTERS).toContain('data-view="enhanced"');
   });
@@ -39,22 +38,5 @@ describe('the view toggle', () => {
   it('explains the difference on hover, since the names are short', () => {
     expect(FILTERS).toContain('Everything this artist released');
     expect(FILTERS).toContain('What you actually own');
-  });
-});
-
-describe('the helper popovers agree with the buttons', () => {
-  it('would otherwise call the same control two different things', () => {
-    const standard = HELPER.slice(
-      HELPER.indexOf('[data-view="standard"]'),
-      HELPER.indexOf('[data-view="enhanced"]'),
-    );
-    const enhanced = HELPER.slice(HELPER.indexOf('[data-view="enhanced"]'));
-    expect(standard).toContain("title: 'Discography'");
-    expect(enhanced.slice(0, 400)).toContain("title: 'Your library'");
-  });
-
-  it('says the library view is empty for an artist you own nothing by', () => {
-    const enhanced = HELPER.slice(HELPER.indexOf('[data-view="enhanced"]'));
-    expect(enhanced.slice(0, 600)).toContain('own nothing by');
   });
 });
