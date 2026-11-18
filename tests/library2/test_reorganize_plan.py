@@ -753,3 +753,45 @@ def test_reorganize_numbers_each_track_of_a_multi_track_single(imported_conn, mo
 
     names = sorted(os.path.basename(t["new_path_abs"]) for t in plan["tracks"])
     assert names == [f"{n:02d} - {title}.flac" for n, title in enumerate(titles, 1)]
+
+
+# ── #2195: $quality comes from the file, as a download fills it ─────────────
+
+def _quality_setup(conn, monkeypatch, tmp_path, template):
+    from core.imports import file_ops, paths
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": template},
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    asked = []
+
+    def _quality(path, **_k):
+        asked.append(path)
+        return "FLAC 24bit_44.1kHz"
+
+    monkeypatch.setattr(file_ops, "get_audio_quality_string", _quality)
+    _, album_id, _ = _seed(conn, album_title="Ballbreaker", tracks=(("Hard As a Rock", 1, 1),))
+    on_disk = tmp_path / "01 - Hard As a Rock.flac"
+    on_disk.write_bytes(b"x")
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=paths.build_final_path_for_track,
+        transfer_dir=str(tmp_path), resolve_file_path_fn=lambda p: str(on_disk))
+    return plan, asked, str(on_disk)
+
+
+def test_a_rename_keeps_quality_in_the_name(imported_conn, monkeypatch, tmp_path):
+    plan, asked, on_disk = _quality_setup(
+        imported_conn, monkeypatch, tmp_path,
+        "$albumartist/$album ($year)/$albumartist - $album - $track - $title - $quality")
+    assert asked == [on_disk]
+    name = os.path.basename(plan["tracks"][0]["new_path_abs"])
+    assert name.endswith("Hard As a Rock - FLAC 24bit_44.1kHz.flac"), name
+
+
+def test_files_are_not_opened_when_no_template_uses_quality(imported_conn, monkeypatch, tmp_path):
+    plan, asked, _ = _quality_setup(
+        imported_conn, monkeypatch, tmp_path, "$albumartist/$album/$track - $title")
+    assert asked == []
+    assert os.path.basename(plan["tracks"][0]["new_path_abs"]) == "01 - Hard As a Rock.flac"
