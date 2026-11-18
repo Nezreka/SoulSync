@@ -3101,7 +3101,7 @@ function pfLimitRow(st) {
     return { row, sync };
 }
 
-async function openProfileEditor({ mode = 'create', profile = null } = {}) {
+async function openProfileEditor({ mode = 'create', profile = null, identityOnly = false } = {}) {
     pfCloseMenus(false);
     const me = currentProfile;
     if (!me) return;
@@ -3110,6 +3110,13 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const isSelf = mode === 'self';
     const adminEditsOther = !isCreate && !isSelf && !!me.is_admin;
     const p = profile || {};
+    // what someone can do lives in the person editor sheet now (#2166).
+    // this editor keeps who they are, the PIN and the library folder, and
+    // the sheet sends people here for those (identityOnly). no sheet (the
+    // react bundle didn't load): the old editor below still has every field
+    if (adminEditsOther && !identityOnly && typeof window.openPersonEditor === 'function'
+        && window.openPersonEditor(p.id)) return;
+    const permsElsewhere = adminEditsOther && identityOnly && typeof window.openPersonEditor === 'function';
     const loginMode = _pfManageState ? _pfManageState.loginMode : profileLoginMode;
     const librarySupported = _pfManageState ? _pfManageState.librarySupported : true;
     const libraryAvailable = _pfManageState ? _pfManageState.libraryAvailable !== false : true;
@@ -3152,9 +3159,13 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     let featureChooser = null;
 
     const title = isCreate ? 'Add a profile' : isSelf ? 'Your profile' : `Edit ${p.name}`;
-    const modal = pfModal({ title, size: '', layerClass: 'pf-layer--editor', dismissable: false });
+    // from the sheet, closing comes back to it
+    const modal = pfModal({
+        title, size: '', layerClass: 'pf-layer--editor', dismissable: false,
+        onClose: permsElsewhere ? () => setTimeout(() => window.openPersonEditor(p.id), 0) : null,
+    });
     const stepIds = ['identity', 'access'];
-    const stepNames = isSelf ? ['Profile', 'Sign-in'] : ['Who', 'Access'];
+    const stepNames = isSelf ? ['Profile', 'Sign-in'] : permsElsewhere ? ['Who', 'PIN & library'] : ['Who', 'Access'];
     let step = 0;
     let furthest = isCreate ? 0 : 1;
 
@@ -3317,6 +3328,32 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const passwordError = pfEl('p', { class: 'pf-field-error', role: 'alert' });
     passwordInput.addEventListener('input', () => { st.password = passwordInput.value; passwordError.textContent = ''; });
 
+    // own library (#1199): the switch and the folder, an existing profile only
+    function ownLibraryGroup() {
+        const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
+        folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
+        const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
+            folderInput,
+            pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex, Jellyfin or Navidrome (0.58+, give their Navidrome user only that library) and pick that library under their account.' }),
+        ]);
+        const inactive = !librarySupported;
+        // parked beats unsupported in the message: the server can be the
+        // right one and the feature still be off, and a control that
+        // cannot succeed has to say so rather than fail on save
+        const parked = !libraryAvailable;
+        const ownSwitch = pfSwitch({
+            title: 'Own library',
+            desc: parked ? 'Not available in this build yet.'
+                : inactive ? `${libraryReason || 'Needs Plex, Jellyfin or Navidrome 0.58+.'} Until then their downloads go to the shared folder.`
+                : 'Their downloads go to their own folder and their own server library.',
+            checked: st.library_mode === 'own',
+            disabled: parked || (inactive && st.library_mode !== 'own'),
+            onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
+        });
+        folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
+        return pfEl('div', { class: 'pf-group', style: 'margin-top:4px' }, [ownSwitch.row, folderBox]);
+    }
+
     if (isSelf) {
         pane2.append(
             pfEl('div', { class: 'pf-section-title', text: 'Privacy' }),
@@ -3363,6 +3400,22 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             signOutOthers,
         ]));
         pane2.append(pfEl('div', { class: 'pf-section-title', text: 'This device' }), pfEl('div', { class: 'pf-group' }, deviceRows));
+    } else if (permsElsewhere) {
+        // who they are, their PIN and their folder. templates, downloads,
+        // ratings, quality and the sidebar are one click away in the sheet
+        const openPerms = pfEl('button', { type: 'button', class: 'pf-btn', text: 'Open permissions' });
+        openPerms.addEventListener('click', () => modal.close());
+        pane2.append(
+            pfEl('div', { class: 'pf-nudge', id: 'pf-open-permissions' }, [
+                pfEl('div', {}, [
+                    pfEl('strong', { text: 'What they can do' }),
+                    pfEl('span', { text: 'Templates, downloads, ratings, quality and their sidebar are in their permissions. Closing this goes back there.' }),
+                ]),
+                openPerms,
+            ]),
+            pfEl('div', { class: 'pf-section-title', text: 'Privacy' }), pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
+            pfEl('div', { class: 'pf-section-title', text: 'Library' }), ownLibraryGroup(),
+        );
     } else {
         // admin switch (editing someone else only)
         const accessBox = pfEl('div');
@@ -3458,30 +3511,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         pagesBox.addEventListener('change', syncPagesSummary);
         const details = pfEl('details', { class: 'pf-details' }, [pfEl('summary', { text: isCreate ? 'Home page' : 'Home page and library' })]);
         details.append(homeField);
-        if (!isCreate) {
-            const folderInput = pfEl('input', { type: 'text', class: 'pf-input', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Output folder', placeholder: libraryHint || '/app/libraries/name', value: st.library_root });
-            folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
-            const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
-                folderInput,
-                pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex, Jellyfin or Navidrome (0.58+, give their Navidrome user only that library) and pick that library under their account.' }),
-            ]);
-            const inactive = !librarySupported;
-            // parked beats unsupported in the message: the server can be the
-            // right one and the feature still be off, and a control that
-            // cannot succeed has to say so rather than fail on save
-            const parked = !libraryAvailable;
-            const ownSwitch = pfSwitch({
-                title: 'Own library',
-                desc: parked ? 'Not available in this build yet.'
-                    : inactive ? `${libraryReason || 'Needs Plex, Jellyfin or Navidrome 0.58+.'} Until then their downloads go to the shared folder.`
-                    : 'Their downloads go to their own folder and their own server library.',
-                checked: st.library_mode === 'own',
-                disabled: parked || (inactive && st.library_mode !== 'own'),
-                onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
-            });
-            folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
-            details.append(pfEl('div', { class: 'pf-group', style: 'margin-top:4px' }, [ownSwitch.row, folderBox]));
-        }
+        if (!isCreate) details.append(ownLibraryGroup());
 
         // what shows for them (#2157): an existing profile only, a new one
         // starts with what new profiles see
