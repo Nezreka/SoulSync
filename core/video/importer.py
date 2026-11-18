@@ -170,9 +170,11 @@ def title_locked(db, dl: dict) -> bool:
     try:
         kind = "movie" if _scope_of(dl) == "movie" else "show"
         item = int(str((dl or {}).get("media_id") or "").strip())
-        if str((dl or {}).get("media_source") or "tmdb") == "library":
-            return bool(db.is_hands_off(kind, item))
-        return item in db.hands_off_tmdb_ids()[kind]
+        # media_id is a tmdb id only when media_source says so; a row with
+        # none carries a library id (a show-page grab, #2176)
+        if str((dl or {}).get("media_source") or "").lower() == "tmdb":
+            return item in db.hands_off_tmdb_ids()[kind]
+        return bool(db.is_hands_off(kind, item))
     except Exception:   # noqa: BLE001 - no id or no answer means not locked
         return False
 

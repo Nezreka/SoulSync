@@ -120,6 +120,11 @@ class TorrentStatus:
     # and without this the clients tab offered Pause again on a torrent that
     # was already paused, so the button did nothing (#2125).
     paused: bool = False
+    # the client is moving the finished files (qbittorrent's 'moving': out of
+    # its incomplete / temp folder into the final one, or a category's own
+    # path). content_path / save_path still name the old place until it is
+    # done, so nothing should be read from them yet (#2176).
+    moving: bool = False
 
 
 class AdoptedRef(str):

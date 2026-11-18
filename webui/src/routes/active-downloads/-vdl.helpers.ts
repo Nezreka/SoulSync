@@ -115,6 +115,7 @@ export function vdlParseCtx(d: Pick<VdlDownload, 'search_ctx'>): VdlSearchCtx {
       channel_id: typeof parsed.channel_id === 'string' ? parsed.channel_id : null,
       published_at: typeof parsed.published_at === 'string' ? parsed.published_at : null,
       description: typeof parsed.description === 'string' ? parsed.description : null,
+      tmdb_id: num(parsed.tmdb_id),
     };
   } catch {
     return {};
@@ -256,18 +257,23 @@ export function vdlBinCountLabel(items: { is_folder?: boolean | null }[]): strin
 
 /**
  * The lazy detail URL for an expanded card: TMDB for movie/TV, the cached
- * YouTube metadata for youtube rows. Null for owned re-grabs (media_id isn't
- * a TMDB id there) — the drawer renders the download facts without it.
+ * YouTube metadata for youtube rows. media_id is a TMDB id only when
+ * media_source says 'tmdb'. Anything else (an owned re-grab, or a row with no
+ * media_source, which is a library id too) uses the TMDB id the grab put in
+ * its search context, or null: the drawer then renders the download facts
+ * without it. Reading a library id as a TMDB id showed a different show
+ * (library show 37 is TMDB's Seven of One, #2176).
  */
 export function vdlMetaURL(d: VdlDownload): string | null {
   const t = vdlRowType(d);
   if (t === 'youtube')
     return `/api/video/downloads/yt-meta/${encodeURIComponent(String(d.media_id))}`;
-  if (d.media_source === 'library') return null;
+  const c = vdlParseCtx(d);
+  const tmdb = d.media_source === 'tmdb' ? d.media_id : c.tmdb_id;
+  if (tmdb == null || tmdb === '') return null;
   const kind = t === 'movie' ? 'movie' : 'show';
-  let url = `/api/video/downloads/meta/${kind}/${encodeURIComponent(String(d.media_id))}`;
+  let url = `/api/video/downloads/meta/${kind}/${encodeURIComponent(String(tmdb))}`;
   if (d.kind === 'episode') {
-    const c = vdlParseCtx(d);
     if (c.season != null && c.episode != null)
       url += `?season=${encodeURIComponent(c.season)}&episode=${encodeURIComponent(c.episode)}`;
   }
