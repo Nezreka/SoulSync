@@ -146,7 +146,11 @@
     // following wishes new uploads to download, so a profile with downloads
     // off can't follow (the server refuses it too)
     function downloadsOff() {
-        if (typeof canDownload !== 'function' || canDownload()) return false;
+        // youtube has its own mode (#2166); until it's loaded, the old switch
+        var vr = window.VideoRequests;
+        var can = (vr && typeof vr.canGet === 'function') ? vr.canGet('youtube')
+            : (typeof canDownload !== 'function' || canDownload());
+        if (can) return false;
         if (typeof showToast === 'function') {
             showToast('Downloads are off for this profile, so it can\'t follow channels or playlists.', 'info');
         }

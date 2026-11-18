@@ -23,6 +23,8 @@ import {
   isModerator,
   isOn,
   modeFor,
+  musicVideosAllowed,
+  notOff,
   requestLimit,
   seesAllRequests,
   loadAdminName,
@@ -113,6 +115,16 @@ export function usePermMode(media: PermMedia): PermMode {
 
 export function usePermOn(id: string): boolean {
   return isOn(useMyPermissions(), id);
+}
+
+/** true unless the server's map turns this row off (see notOff) */
+export function usePermNotOff(id: string): boolean {
+  return notOff(useMyPermissions(), id);
+}
+
+/** may this profile see and get music videos (see musicVideosAllowed) */
+export function useMusicVideosAllowed(): boolean {
+  return musicVideosAllowed(useMyPermissions());
 }
 
 export function useHasAccess(media: PermMedia): boolean {

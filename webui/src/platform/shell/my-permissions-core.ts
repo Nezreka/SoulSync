@@ -146,6 +146,24 @@ export function isOn(perms: MyPermissions | null | undefined, id: string): boole
   return perms.effective[id] === true;
 }
 
+/** a row the server hasn't turned off: true until the answer says false.
+ *  for hiding a control a member can't use without hiding it for everyone
+ *  in the moment before the map arrives (the fallback has no page rows). */
+export function notOff(perms: MyPermissions | null | undefined, id: string): boolean {
+  if (!perms || perms.isAdmin) return true;
+  return perms.effective[id] !== false;
+}
+
+/** music videos for this profile: the Videos part on, and explicit music not
+ *  hidden (videos carry no explicit flag, so the server refuses them to a
+ *  hide-explicit profile). admins and the moment before the map: yes. */
+export function musicVideosAllowed(perms: MyPermissions | null | undefined): boolean {
+  if (!perms || perms.isAdmin) return true;
+  return (
+    perms.effective['music.videos'] !== false && perms.effective['music.hide_explicit'] !== true
+  );
+}
+
 export function hasAccess(perms: MyPermissions | null | undefined, media: PermMedia): boolean {
   if (!perms || perms.isAdmin) return true;
   return perms.effective[ACCESS_ROW[media]] !== false;

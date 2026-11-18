@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { usePermMode } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
@@ -45,12 +45,15 @@ function CalendarRoute() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const profile = useProfile();
+  // the calendar's get buttons are for episodes: TV's own mode (#2166),
+  // not music's
+  const tvGet = usePermMode('tv');
   useReactPageShell('calendar', '?media=video');
   return (
     <CalendarPage
       profileId={profile.profileId}
       isAdmin={profile.isAdmin}
-      canDownload={!profileAsksFirst()}
+      canDownload={tvGet === 'download'}
       search={search}
       onSearch={(next) =>
         void navigate({ search: (prev) => ({ ...prev, ...next, media: 'video' }), replace: true })

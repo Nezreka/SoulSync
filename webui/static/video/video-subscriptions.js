@@ -51,7 +51,10 @@
         });
         // an import follows every channel in the file, which wishes their
         // uploads: a profile with downloads off is told so instead
-        if (typeof canDownload === 'function' && !canDownload()) {
+        var vr = window.VideoRequests;
+        var canGet = (vr && typeof vr.canGet === 'function') ? vr.canGet('youtube')
+            : (typeof canDownload !== 'function' || canDownload());
+        if (!canGet) {
             el.querySelector('[data-vsub-body]').innerHTML =
                 '<p class="vsub-sub">Downloads are off for this profile, so it can\'t import subscriptions. ' +
                 'Ask an admin to turn downloads on, or to import the file for you.</p>';

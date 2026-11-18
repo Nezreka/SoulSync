@@ -23,6 +23,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useRequestRights } from '@/platform/shell/my-permissions';
+
 import type {
   AutomationApiRow,
   AutomationCardRow,
@@ -406,6 +408,9 @@ export function AutomationsCard({
   timeline?: boolean;
 } = {}) {
   const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard(side);
+  // running or pausing the install's own automations is an admin's (S4): a
+  // member's system rows have no controls, the server refuses them anyway
+  const { isAdmin } = useRequestRights();
   const [showAll, setShowAll] = useState(false);
   const shownCompact = timeline ? 5 : 3;
   const view = compact && !showAll ? allRows.slice(0, shownCompact) : allRows;
@@ -597,7 +602,7 @@ export function AutomationsCard({
                       )}
                     </span>
                     <span className="dash-autom-actions" onClick={(e) => e.stopPropagation()}>
-                      {!row.running ? (
+                      {!row.running && (isAdmin || !row.system) ? (
                         <>
                           <button
                             type="button"

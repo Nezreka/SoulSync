@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useFeatureOn } from '@/platform/features';
 import { acquireVerb, profileAsksFirst, useMusicGet } from '@/platform/shell/download-rights';
+import { useMusicVideosAllowed } from '@/platform/shell/my-permissions';
 
 import type { SearchVideo } from '../../search/-search.types';
 
@@ -482,10 +483,12 @@ function ArtistVideoRailItem({
   );
 }
 
-/** music videos switched off (#1909): no section, and no yt-dlp search
- *  behind it either */
+/** music videos switched off (#1909), or not part of this profile (#2166:
+ *  music.videos off, or explicit music hidden): no section, and no yt-dlp
+ *  search behind it either */
 export function ArtistVideosSection(props: { artistName?: string | null; standalone?: boolean }) {
-  const on = useFeatureOn('music_videos');
+  const allowed = useMusicVideosAllowed();
+  const on = useFeatureOn('music_videos') && allowed;
   return on ? <ArtistVideosPanel {...props} /> : null;
 }
 
