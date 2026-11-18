@@ -100,6 +100,13 @@ DDL = [
     "CREATE INDEX IF NOT EXISTS idx_server_plays_group ON server_plays(group_key)",
     "CREATE INDEX IF NOT EXISTS idx_server_plays_open ON server_plays(stopped_at) WHERE stopped_at IS NULL",
     "CREATE INDEX IF NOT EXISTS idx_server_plays_user ON server_plays(user, started_at)",
+    # history pages: newest group first, read from the index alone
+    "CREATE INDEX IF NOT EXISTS idx_server_plays_group_started ON server_plays(group_key, started_at)",
+    # when the log began (the first live play) and the plex history import marker
+    "CREATE INDEX IF NOT EXISTS idx_server_plays_source ON server_plays(source, started_at)",
+    # history's people menu (with each one's picture) and servers menu, from the index alone
+    "CREATE INDEX IF NOT EXISTS idx_server_plays_user_avatar ON server_plays(user, started_at, user_avatar)",
+    "CREATE INDEX IF NOT EXISTS idx_server_plays_server ON server_plays(server, started_at)",
     """CREATE TABLE IF NOT EXISTS server_activity_minutes (
         minute INTEGER PRIMARY KEY,
         streams INTEGER NOT NULL DEFAULT 0,
@@ -143,6 +150,7 @@ def use_connection_factory(factory: Optional[Callable[[], Any]]) -> None:
     global _factory, _schema_ready
     _factory = factory or _default_factory
     _schema_ready = False
+    bump_generation()
 
 
 def connect():
@@ -173,6 +181,22 @@ def query(sql: str, params: Iterable[Any] = ()) -> List[Dict[str, Any]]:
 
 
 # ── writes ──────────────────────────────────────────────────────────────────
+#
+# every write that changes the plays moves the generation on; history and
+# stats keep their answers while it stands still.
+
+_generation = [0]
+_generation_lock = threading.Lock()
+
+
+def generation() -> int:
+    return _generation[0]
+
+
+def bump_generation() -> None:
+    with _generation_lock:
+        _generation[0] += 1
+
 
 def _jsonish(v: Any) -> Any:
     if isinstance(v, (dict, list)):
@@ -206,6 +230,8 @@ def apply_ops(ops: List[tuple]) -> None:
             elif op[0] == "minute":
                 conn.execute(minute_sql, tuple(op[1:6]))
         conn.commit()
+    if any(op[0] in ("play", "drop") for op in ops):
+        bump_generation()
 
 
 def load_open_plays() -> List[Dict[str, Any]]:
@@ -229,6 +255,8 @@ def prune(retention_days: int, now: float) -> int:
                          (cutoff,)).rowcount
         conn.execute("DELETE FROM server_activity_minutes WHERE minute < ?", (int(cutoff // 60),))
         conn.commit()
+    if n:
+        bump_generation()
     return n or 0
 
 
@@ -240,6 +268,7 @@ def clear_play_log() -> Dict[str, Any]:
         n = conn.execute("DELETE FROM server_plays WHERE stopped_at IS NOT NULL").rowcount
         conn.execute("DELETE FROM server_activity_minutes")
         conn.commit()
+    bump_generation()
     try:
         from core.server_activity import stats
         stats.invalidate()

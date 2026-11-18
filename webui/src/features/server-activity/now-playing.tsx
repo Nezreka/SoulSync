@@ -16,7 +16,7 @@ import type {
   Session,
 } from '@/shell/server-activity-types';
 
-import { imageUrl, sendMessage, stopStream } from './api';
+import { imageSrc, sendMessage, stopStream } from './api';
 import {
   METHOD_LABEL,
   clock,
@@ -57,6 +57,8 @@ import {
 
 // ── the pulse strip ──
 
+/** the blurred backdrop behind a card never needs more than this */
+const BACKDROP_WIDTH = 480;
 export function PulseStrip({
   pulse,
   bandwidth,
@@ -261,7 +263,7 @@ export const StreamCard = memo(function StreamCard({
   const [mode, setMode] = useState<Mode>(null);
   const live = useGlide(s, receivedAt, now);
   const book = isBookKind(s.kind) ? s.book?.progress : null;
-  const art = imageUrl(s.art || s.thumb);
+  const art = imageSrc(s.backdrop, s.art || s.thumb, BACKDROP_WIDTH);
   const badges = qualityBadges(s);
   const who = whoLine(s, multiServer);
   const drawn = useDrawn(open);
@@ -296,7 +298,7 @@ export const StreamCard = memo(function StreamCard({
           aria-controls={detailId}
           onClick={() => onToggle(s.id)}
         >
-          <Poster thumb={s.thumb} kind={s.kind} />
+          <Poster thumb={s.thumb} image={s.image} kind={s.kind} />
           <span className={n.info}>
             <span className={n.titleRow}>
               <span className={n.title}>{s.title}</span>

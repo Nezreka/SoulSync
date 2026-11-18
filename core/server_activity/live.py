@@ -15,7 +15,7 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 import core.server_activity as sa
-from core.server_activity import geo, links, store
+from core.server_activity import geo, images, links, store
 from core.server_activity import jellyfin as jf
 from core.server_activity import plex as px
 from core.server_activity.quality import summarize_playback
@@ -83,6 +83,8 @@ def _plex_sessions(db=None) -> tuple:
     plex_pass = None if sub is None else bool(sub)
     info.update(name=name, version=str(sa._g(srv, "version", "") or "") or None, reachable=True, plex_pass=plex_pass)
     budget = [px.SOURCE_FETCH_BUDGET]
+    # the library items behind new streams, asked side by side instead of one after another
+    px.prefetch_sources(srv, [el.get("ratingKey") or "" for el in els], budget)
     for el in els:
         try:
             f = px.facts(el)
@@ -247,10 +249,32 @@ def _ensure_recorder_loaded(now: float) -> None:
 
 # ── the poll ────────────────────────────────────────────────────────────────
 
+def _both_servers(db=None) -> tuple:
+    """plex and jellyfin asked at the same time; a poll takes the slower of
+    the two, not the sum."""
+    jf_cfg = sa._jellyfin_config(db)
+    if not (jf_cfg["base_url"] and jf_cfg["api_key"]):
+        return _plex_sessions(db), ([], None)
+    box: Dict[str, Any] = {}
+
+    def run_jf():
+        try:
+            box["jf"] = _jellyfin_sessions(db)
+        except Exception:   # noqa: BLE001
+            logger.debug("jellyfin poll failed", exc_info=True)
+    t = threading.Thread(target=run_jf, name="server-activity-jf", daemon=True)
+    t.start()
+    try:
+        plex = _plex_sessions(db)
+    finally:
+        t.join()
+    return plex, box.get("jf") or ([], {"server": "jellyfin", "name": "Jellyfin", "version": None,
+                                        "reachable": False, "plex_pass": None})
+
+
 def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
     now = time.time() if now is None else now
-    plex_sessions, plex_info = _plex_sessions(db)
-    jf_sessions, jf_info = _jellyfin_sessions(db)
+    (plex_sessions, plex_info), (jf_sessions, jf_info) = _both_servers(db)
     servers = [i for i in (plex_info, jf_info) if i is not None]
     sessions = plex_sessions + jf_sessions
     from core.server_activity.settings import get_settings
@@ -260,6 +284,9 @@ def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
         hint = s.get("_link") or {}
         s["keys"] = {"rating_key": hint.get("rating_key") or None, "parent_key": hint.get("parent_key") or None,
                      "grandparent_key": hint.get("grandparent_key") or None}
+        # the proxy queries for the poster and the backdrop, with the family to fall back on
+        s["image"] = images.row_image(s)
+        s["backdrop"] = images.row_image(dict(s, thumb=s.get("art") or s.get("thumb")), role="art")
         conn = s["connection"]
         if conn.get("remote"):
             conn["location"] = geo.lookup(conn.get("public_ip") or conn.get("ip"), now)
@@ -318,9 +345,47 @@ def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
     return out
 
 
-def get_activity(db=None, max_age: float = 2.5) -> Dict[str, Any]:
-    """the live payload. a poll younger than ``max_age`` is shared; never raises."""
+STALE_OK = 15.0
+_refresh_lock = threading.Lock()
+_refreshing = {"on": False}
+
+
+def _spawn(fn: Callable[[], None]) -> None:
+    threading.Thread(target=fn, name="server-activity-refresh", daemon=True).start()
+
+
+def _refresh_soon(db, max_age: float) -> None:
+    """one background poll at a time."""
+    with _refresh_lock:
+        if _refreshing["on"]:
+            return
+        _refreshing["on"] = True
+
+    def run():
+        try:
+            get_activity(db, max_age=max_age, stale_ok=0)
+        finally:
+            with _refresh_lock:
+                _refreshing["on"] = False
+    _spawn(run)
+
+
+def get_activity(db=None, max_age: float = 2.5, stale_ok: float = STALE_OK) -> Dict[str, Any]:
+    """the live payload. a poll younger than ``max_age`` is shared; never raises.
+
+    with ``stale_ok`` (the http route; the drawer opening) a snapshot up to that
+    old answers at once and a fresh poll starts behind it; the socket push
+    brings the fresh one. ``age_ms`` says how old the answer is so the
+    progress bars start from the right place. the sampler and the controls
+    pass 0 (and ``max_age=0`` is always a fresh poll): they want the server
+    as it is now."""
     try:
+        data, at = _snapshot["data"], _snapshot["at"]
+        age = time.time() - at
+        if stale_ok and max_age > 0 and data is not None and 0 <= age < stale_ok:
+            if age >= max_age:
+                _refresh_soon(db, max_age)
+            return dict(data, age_ms=int(age * 1000))
         with _poll_lock:
             if _snapshot["data"] is not None and time.time() - _snapshot["at"] < max_age:
                 return _snapshot["data"]
@@ -336,7 +401,7 @@ def get_activity(db=None, max_age: float = 2.5) -> Dict[str, Any]:
 # ── controls ────────────────────────────────────────────────────────────────
 
 def _find(session_key: str) -> Optional[Dict[str, Any]]:
-    data = get_activity(max_age=0)
+    data = get_activity(max_age=0, stale_ok=0)
     for s in data.get("sessions") or []:
         if str(s.get("session_key")) == str(session_key) or str(s.get("id")) == str(session_key):
             return s
@@ -421,7 +486,7 @@ def sampler_tick(has_subscribers: bool, emit: Optional[Callable[[Dict[str, Any]]
     does), push to open drawers. returns the payload it used."""
     if not sa.any_server_configured():
         return None
-    data = get_activity(max_age=LIVE_INTERVAL - 0.5 if has_subscribers else IDLE_INTERVAL - 0.5)
+    data = get_activity(max_age=LIVE_INTERVAL - 0.5 if has_subscribers else IDLE_INTERVAL - 0.5, stale_ok=0)
     if has_subscribers and emit is not None:
         emit(data)
     _maybe_maintain(time.time() if now is None else now)

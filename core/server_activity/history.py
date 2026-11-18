@@ -9,12 +9,16 @@ those rows say so (``source: 'plex_history'``) and carry no time or method.
 from __future__ import annotations
 
 import json
+import re
+import threading
 import time
 from datetime import datetime, timedelta, timezone
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import core.server_activity as sa
 from core.server_activity import store
+from core.server_activity.images import row_image
 from core.server_activity.reasons import label as reason_label
 
 logger = sa.logger
@@ -194,7 +198,7 @@ def build_group(plays: List[Dict[str, Any]]) -> Dict[str, Any]:
                    "version": last.get("player_version")},
         "connection": {"remote": bool(last.get("remote")), "ip": last.get("ip"), "location": last.get("location")},
         "server": last.get("server"), "server_name": last.get("server_name"),
-        "thumb": last.get("thumb"), "link": link,
+        "thumb": last.get("thumb"), "image": row_image(last), "link": link,
         "source": first.get("source") or "live",
         "plays": [play_row(p) for p in plays],
     }
@@ -210,12 +214,87 @@ def _range(f: Dict[str, Any], now: float) -> Dict[str, Any]:
     return out
 
 
+# answers kept while the play log stands still (store.generation) and for a
+# minute at most, so the "last 7 days" edge moves on. a tab switch or a filter
+# put back reads from here.
+CACHE_TTL = 60.0
+_CACHE_MAX = 64
+_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def invalidate() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _cached(key: tuple, build):
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < CACHE_TTL:
+            _cache.move_to_end(key)
+            return hit[1]
+    val = build()
+    if val is not None:
+        with _cache_lock:
+            _cache[key] = (now, val)
+            _cache.move_to_end(key)
+            while len(_cache) > _CACHE_MAX:
+                _cache.popitem(last=False)
+    return val
+
+
 def get_history(*, kind: Optional[str] = None, user: Optional[str] = None, method: Optional[str] = None,
                 server: Optional[str] = None, start: Optional[float] = None, end: Optional[float] = None,
                 days: Optional[int] = None, q: Optional[str] = None, page: int = 0, per_page: int = 50,
                 tz: Optional[str] = None, limit: Optional[int] = None, now: Optional[float] = None
                 ) -> Dict[str, Any]:
-    now = time.time() if now is None else now
+    args = dict(kind=kind, user=user, method=method, server=server, start=start, end=end, days=days, q=q,
+                page=page, per_page=per_page, tz=tz, limit=limit)
+    if now is not None:     # a fixed clock (tests, exports) is never cached
+        return _get_history(now=now, cacheable=False, **args)
+    key = ("page", store.generation(), *sorted((k, str(v)) for k, v in args.items()))
+    return _cached(key, lambda: (lambda r: r if r.get("ok") else None)(
+        _get_history(now=time.time(), cacheable=True, **args))) or \
+        {"ok": False, "reason": "error", "groups": [], "history": []}
+
+
+def _facets(f: Dict[str, Any]) -> Dict[str, Any]:
+    """the people and servers menus over the date range. both read from
+    indexes only (user, started_at, user_avatar) and (server, started_at)."""
+    fw, fa = _where({"start": f.get("start"), "end": f.get("end")})
+    users = [{"user": r["user"], "avatar": r["avatar"], "plays": r["n"]} for r in store.query(
+        f"SELECT user, MAX(user_avatar) AS avatar, COUNT(*) AS n FROM server_plays WHERE {fw} "
+        "GROUP BY user ORDER BY n DESC", fa)]
+    servers = [name for name in ("plex", "jellyfin") if store.query(
+        f"SELECT 1 AS x FROM server_plays WHERE server = ? AND {fw} LIMIT 1", [name, *fa])]
+    return {"users": users, "servers": servers}
+
+
+def _overview(f: Dict[str, Any], where: str, args: List[Any], cache_key: Optional[tuple],
+              facets: bool = True) -> tuple:
+    """(summary row, facets, when the log began). the same for every page of
+    one filter, so later pages reuse page one's. a cached overview always
+    carries the facets (page one wants them); an uncached one only when asked."""
+    with_facets = facets or cache_key is not None
+
+    def build():
+        s = store.query(
+            "SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms, COUNT(DISTINCT user) AS people, "
+            "SUM(CASE WHEN method = 'transcode' THEN 1 ELSE 0 END) AS converted, "
+            "SUM(CASE WHEN method IS NOT NULL THEN 1 ELSE 0 END) AS with_method, "
+            "COUNT(DISTINCT CASE WHEN remote = 1 THEN COALESCE(location, ip) END) AS away_places, "
+            f"MIN(started_at) AS first FROM server_plays WHERE {where}", args)[0]
+        first_live = store.query("SELECT MIN(started_at) AS t FROM server_plays WHERE source = 'live'")[0]["t"]
+        return s, _facets(f) if with_facets else None, first_live
+    if cache_key is None:
+        return build()
+    return _cached(("overview", store.generation(), *cache_key), build)
+
+
+def _get_history(*, kind, user, method, server, start, end, days, q, page, per_page, tz, limit, now,
+                 cacheable) -> Dict[str, Any]:
     if limit and not per_page:
         per_page = limit
     per_page = max(1, min(200, int(per_page or 50)))
@@ -239,12 +318,9 @@ def get_history(*, kind: Optional[str] = None, user: Optional[str] = None, metho
             for r in rows:
                 by.setdefault(r["group_key"], []).append(r)
             groups = [build_group(by[k]) for k in gk if by.get(k)]
-        s = store.query(
-            "SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS played_ms, COUNT(DISTINCT user) AS people, "
-            "SUM(CASE WHEN method = 'transcode' THEN 1 ELSE 0 END) AS converted, "
-            "SUM(CASE WHEN method IS NOT NULL THEN 1 ELSE 0 END) AS with_method, "
-            "COUNT(DISTINCT CASE WHEN remote = 1 THEN COALESCE(location, ip) END) AS away_places, "
-            f"MIN(started_at) AS first FROM server_plays WHERE {where}", args)[0]
+        # keyed by the filter as asked ("last 7 days"), not the moving start it becomes
+        okey = (kind, user, method, server, start, end, days, q) if cacheable else None
+        s, facets, first_live = _overview(f, where, args, okey, facets=page == 0)
         days_out: List[Dict[str, Any]] = []
         if groups:
             lo = min(g["started_at"] for g in groups)
@@ -262,17 +338,8 @@ def get_history(*, kind: Optional[str] = None, user: Optional[str] = None, metho
             for d in sorted({local_date(g["started_at"], zone) for g in groups}, reverse=True):
                 b = buckets.get(d, [0, 0])
                 days_out.append({"date": d, "plays": b[0], "played_ms": b[1]})
-        facets = None
-        if page == 0:
-            fw, fa = _where({"start": f.get("start"), "end": f.get("end")})
-            facets = {
-                "users": [{"user": r["user"], "avatar": r["avatar"], "plays": r["n"]} for r in store.query(
-                    f"SELECT user, MAX(user_avatar) AS avatar, COUNT(*) AS n FROM server_plays WHERE {fw} "
-                    "GROUP BY user ORDER BY n DESC", fa)],
-                "servers": [r["server"] for r in store.query(
-                    f"SELECT DISTINCT server FROM server_plays WHERE {fw}", fa)],
-            }
-        first_live = store.query("SELECT MIN(started_at) AS t FROM server_plays WHERE source = 'live'")[0]["t"]
+        if page != 0:
+            facets = None
     except Exception:   # noqa: BLE001
         logger.exception("server activity history failed")
         return {"ok": False, "reason": "error", "groups": [], "history": []}
@@ -358,6 +425,11 @@ def _kind_for(ptype: str, section: str) -> str:
     return ptype if ptype in ("movie", "episode", "clip") else "other"
 
 
+def _key_of(path: Optional[str]) -> Optional[str]:
+    m = re.match(r"^/library/metadata/(\d+)$", str(path or ""))
+    return m.group(1) if m else None
+
+
 def plex_history_rows(elements: List[Any], *, machine: str, accounts: Dict[str, str],
                       devices: Dict[str, Dict[str, str]], sections: Dict[str, str], until: float,
                       server_name: str) -> List[Dict[str, Any]]:
@@ -385,8 +457,9 @@ def plex_history_rows(elements: List[Any], *, machine: str, accounts: Dict[str, 
         rows.append({
             "play_key": f"plexh:{machine}:{hk}", "group_key": "", "source": "plex_history",
             "server": "plex", "server_name": server_name, "session_key": None, "kind": kind,
-            "rating_key": a.get("ratingKey"), "parent_key": a.get("parentRatingKey"),
-            "grandparent_key": a.get("grandparentRatingKey"),
+            # history names the family as paths (parentKey="/library/metadata/12")
+            "rating_key": a.get("ratingKey"), "parent_key": a.get("parentRatingKey") or _key_of(a.get("parentKey")),
+            "grandparent_key": a.get("grandparentRatingKey") or _key_of(a.get("grandparentKey")),
             "title": a.get("title") or "", "parent_title": a.get("parentTitle"),
             "grandparent_title": a.get("grandparentTitle"), "subtitle": None,
             "year": int(a["year"]) if str(a.get("year") or "").isdigit() else None,
