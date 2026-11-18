@@ -29,6 +29,10 @@ def db(tmp_path):
     database.close()
 
 
+# (event_type, _event_owner) for every event the fixture saw
+OWNERS: list = []
+
+
 @pytest.fixture
 def events():
     """Every published event, checked against its trigger block as it arrives."""
@@ -37,11 +41,16 @@ def events():
     def forwarder(event_type, data):
         block = _BLOCKS.get(event_type)
         assert block is not None, f"{event_type} has no trigger in blocks.py"
+        # _event_owner is the engine's (whose event it is), not a variable
+        owner = data.get("_event_owner")
+        data = {k: v for k, v in data.items() if not k.startswith("_")}
         undeclared = set(data) - set(block.get("variables", []))
         assert not undeclared, f"{event_type} sends {sorted(undeclared)} which its block does not list"
         captured.append((event_type, data))
+        OWNERS.append((event_type, owner))
 
     app_events._reset_for_tests()
+    OWNERS.clear()
     app_events.register_forwarder(forwarder)
     yield captured
     app_events._reset_for_tests()
@@ -98,6 +107,21 @@ def test_a_new_wishlist_item_is_announced_once(db, events):
     assert events == [("audiobook_wishlist_item_added", {
         "title": "The Final Empire", "author": "Brandon Sanderson",
         "series": "Mistborn", "asin": "B1"})]
+    # the wishlist's own profile owns it
+    assert OWNERS == [("audiobook_wishlist_item_added", 1)]
+
+
+def test_events_belong_to_the_profile_whose_row_it_is(db, events):
+    """a second profile's add, follow and new release are theirs, not the
+    admin's (#2166 follow-up 25)."""
+    from core.audiobook_watchlist import scan_author
+    db.add_to_wishlist(BOOK, profile_id=7)
+    db.follow_author("Brandon Sanderson", since_date="2026-01-01", profile_id=7)
+    scan_author(db.get_watchlist(profile_id=7)[0], db=db, client=_Catalogue([_release("N9", "Isles")]))
+    owners = dict(OWNERS)
+    assert owners["audiobook_wishlist_item_added"] == 7
+    assert owners["audiobook_author_followed"] == 7
+    assert owners["audiobook_new_release"] == 7
 
 
 def test_following_and_unfollowing_are_announced(db, events):

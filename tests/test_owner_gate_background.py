@@ -193,7 +193,9 @@ def test_file_request_once_and_never_again_after_a_decline(vdb):
     pub = lambda e, d: events.append((e, d))  # noqa: E731
     assert g.file_video_request(vdb, kind="movie", tmdb_id=10, title="Heat", publish=pub) == "filed"
     assert g.file_video_request(vdb, kind="movie", tmdb_id=10, title="Heat", publish=pub) == "asked"
-    assert events == [("video_request_created", {"kind": "movie", "title": "Heat", "requester": "Maya"})]
+    # the owner's ask, whoever's job filed it (#2166 follow-up 25)
+    assert events == [("video_request_created", {"kind": "movie", "title": "Heat", "requester": "Maya",
+                                                 "_event_owner": 7})]
     rid = vdb.list_video_requests(profile_id=OWNER)[0]["id"]
     vdb.resolve_video_request(rid, status="denied", resolved_by=1)
     fresh = gate(ask_first())
