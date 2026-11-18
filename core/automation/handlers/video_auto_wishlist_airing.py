@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.automation.deps import AutomationDeps
 
 from core.automation.handlers.video_run_guard import VideoRunGuard
+from core.owner_gate import OwnerGate
 
 # Overlap guard: the engine skips a run while this is True (busy).
 _RUN_GUARD = VideoRunGuard(timeout_seconds=3600)
@@ -119,6 +120,11 @@ def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dic
     return get_video_db().add_episodes_to_wishlist(
         show_tmdb_id, show_title, episodes, poster_url=poster_url, library_id=library_id,
         server_source=resolve_video_server(), profile_id=_profile())
+
+
+def _default_video_db():
+    from api.video import get_video_db
+    return get_video_db()
 
 
 def _show_poster_url(library_id: Any) -> Optional[str]:
@@ -273,9 +279,13 @@ def auto_video_add_airing_episodes_all_profiles(config: Dict[str, Any], deps: Au
     fetch_airing = kwargs.pop('fetch_airing', None) or _default_fetch_airing
     fetch_follows = kwargs.pop('fetch_follows', None) or _default_followed_shows
     follower_profiles = kwargs.pop('follower_profiles', None)
+    # each pass asks its own profile's rights (tests stand them in)
+    gate_for = kwargs.pop('gate_for', None)
 
     def run_pass(pass_deps, pid, is_owner):
         extra = dict(kwargs)
+        if gate_for is not None:
+            extra['gate'] = gate_for(pid)
         if not is_owner:
             follows = {str(f.get('tmdb_id')) for f in (fetch_follows(pid) or [])}
             extra['fetch_airing'] = lambda start, end: [
@@ -291,6 +301,25 @@ def auto_video_add_airing_episodes_all_profiles(config: Dict[str, Any], deps: Au
 def _default_followed_shows(profile_id: int) -> List[Dict[str, Any]]:
     from api.video import get_video_db
     return get_video_db().followed_shows(profile_id=profile_id)
+
+
+def _request_episodes(gate, db, tid, title, poster, eps, quality, mark_offered) -> int:
+    """one request per episode for an ask-first owner. an episode filed (or
+    asked for before) gets its receipt; one over the request limit doesn't,
+    so the next run offers it again."""
+    from core.requests.video import episode_request_title
+    filed, done = 0, []
+    for e in eps:
+        sn, en = e['season_number'], e['episode_number']
+        out = gate.file_video_request(
+            db, kind='episode', tmdb_id=tid, title=episode_request_title(str(title or tid), sn, en),
+            poster_url=poster, quality_profile_id=quality, season_number=sn, episode_number=en)
+        if out in ('filed', 'asked'):
+            done.append(_key(tid, sn, en))
+        filed += out == 'filed'
+    if done:
+        mark_offered(done)
+    return filed
 
 
 def auto_video_add_airing_episodes(
@@ -311,6 +340,8 @@ def auto_video_add_airing_episodes(
     set_seeded: Optional[Callable[[], None]] = None,
     unowned_follows: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     tmdb_airings: Optional[Callable[[Any, str, str], Dict[str, Any]]] = None,
+    gate: Optional[OwnerGate] = None,
+    request_db: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """Add the last week's aired (unowned, monitored, followed-show) episodes to the
     video wishlist, each one once, and first tidy the watchlist by dropping shows
@@ -330,6 +361,9 @@ def auto_video_add_airing_episodes(
         set_seeded = set_seeded or _default_set_seeded
         unowned_follows = unowned_follows or _default_unowned_follows
         tmdb_airings = tmdb_airings or _default_tmdb_airings
+        # the owner's rights per show, asked at add time (#2166)
+        gate = gate or OwnerGate.for_current(label='airing auto-wishlist')
+        request_db = request_db or _default_video_db
         automation_id = config.get('_automation_id')
         prune_ended = config.get('prune_ended', True)
         try:
@@ -459,23 +493,38 @@ def auto_video_add_airing_episodes(
                                              'poster_url': poster_url}
 
             # Each show's receipt lands right after its write, so a failure
-            # part-way leaves the rest to be offered by the next run.
-            added = 0
+            # part-way leaves the rest to be offered by the next run. the
+            # owner's rights decide first (#2166): a show they may not get is
+            # left without a receipt, so it's offered again (inside the week)
+            # once they may; ask first files one request per episode, unless
+            # an approved request for the show already covers what comes next.
+            added = requested = skipped = 0
             for (tid, title), grp in by_show.items():
                 poster = _show_poster_url(grp['library_id']) or grp.get('poster_url')
+                w = gate.want('tv', tmdb_id=tid, title=str(title or tid))
+                if w.skip:
+                    skipped += len(grp['eps'])
+                    continue
+                if w.request and not gate.approved_show(request_db(), tid):
+                    requested += _request_episodes(gate, request_db(), tid, title, poster, grp['eps'],
+                                                   w.quality_profile_id, mark_offered)
+                    continue
                 added += int(add_episodes(tid, title, grp['eps'], grp['library_id'], poster) or 0)
                 mark_offered([_key(tid, e['season_number'], e['episode_number']) for e in grp['eps']])
             shows = len(by_show)
 
             done = ('Added %d aired episode(s) across %d show(s) to the wishlist'
                     % (added, shows)) if added else 'No new aired episodes to wishlist'
+            if requested:
+                done += ' · sent %d episode(s) for approval' % requested
             if pruned:
                 done += ' · pruned %d ended show(s)' % pruned
             deps.update_progress(
                 automation_id, status='finished', progress=100, phase='Complete',
                 log_line=done, log_type='success')
             return {'status': 'completed', 'episodes_added': added, 'shows': shows,
-                    'shows_pruned': pruned, '_manages_own_progress': True}
+                    'shows_pruned': pruned, 'requested': requested, 'skipped': skipped,
+                    '_manages_own_progress': True}
         except Exception as e:  # noqa: BLE001
             deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
             return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

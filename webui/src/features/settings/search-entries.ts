@@ -5,7 +5,9 @@
  *   anchor.id       an element id in the tab's markup (the input, its row)
  *   anchor.heading  a section title or heading on the tab, matched by text
  *   open            the card lives in a modal: a service tile (Connections)
- *                   or a source tile (Sources) opens it first
+ *                   or a source tile (Sources) opens it first; or it is on
+ *                   one of the People tab's parts (Global policy, Templates,
+ *                   ...), which openPeopleSettings brings up first
  *   side            only that side's settings page shows it (video-side.css
  *                   hides [data-music-only] / [data-video-only] blocks)
  *   file            the tab file the anchor is in; search-entries.test.ts
@@ -24,13 +26,19 @@ export type SettingsTab =
   | 'quality'
   | 'library'
   | 'discovery'
+  | 'people'
   | 'appearance'
   | 'advanced'
   | 'logs';
 
 export type Anchor = { id: string } | { heading: string };
 
-export type Opener = { service: string; kind?: 'music' | 'video' } | { source: string };
+export type PeoplePart = 'people' | 'policy' | 'templates' | 'invites' | 'activity';
+
+export type Opener =
+  | { service: string; kind?: 'music' | 'video' }
+  | { source: string }
+  | { people: PeoplePart };
 
 export interface SettingsEntry {
   /** stable: recents remember it */
@@ -1237,14 +1245,6 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'cors websocket origin domain',
   },
   {
-    label: 'New sign-ups start on',
-    tab: 'advanced',
-    anchor: id('security-signup-sides'),
-    file: 'system-security.tsx',
-    hint: 'music, video or both',
-    keywords: 'signup register new profiles side',
-  },
-  {
     label: 'Experimental features',
     tab: 'advanced',
     anchor: heading('Experimental'),
@@ -1252,6 +1252,84 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     hint: 'JioSaavn, Bandcamp',
     keywords: 'experimental preview jiosaavn bandcamp',
     side: 'music',
+  },
+
+  // ── People (#2166): the parts along the top of the tab. a part's own
+  // pane id where it has one, else its button (people-tab.tsx PILLS) ──
+  {
+    label: 'People',
+    tab: 'people',
+    anchor: id('ppl-pill-people'),
+    file: 'people/people-tab.tsx',
+    open: { people: 'people' },
+    hint: 'everyone who uses SoulSync here',
+    keywords: 'people profiles users members family manage add person edit access permissions',
+  },
+  {
+    label: 'Global policy',
+    tab: 'people',
+    anchor: id('ppl-pol-pane'),
+    file: 'people/policy-screen.tsx',
+    open: { people: 'policy' },
+    hint: 'the most any member can have',
+    keywords: 'policy ceiling limit everyone members cap permissions',
+  },
+  {
+    label: 'Templates',
+    tab: 'people',
+    anchor: id('ppl-tpl-pane'),
+    file: 'people/templates-screen.tsx',
+    open: { people: 'templates' },
+    hint: 'Adult, Teen, Kids, Guest and your own',
+    keywords: 'template preset adult teen kids guest presets permissions sidebar look',
+  },
+  {
+    id: 'setting:people:signup-template',
+    label: 'New people start as',
+    tab: 'people',
+    anchor: id('ppl-tpl-pane'),
+    file: 'people/templates-screen.tsx',
+    open: { people: 'templates' },
+    hint: 'the template for Plex and OIDC sign-ups',
+    keywords: 'signup sign up register new profiles plex oidc default template start',
+  },
+  {
+    id: 'setting:people:moderator',
+    label: 'Moderator',
+    tab: 'people',
+    anchor: id('ppl-tpl-pane'),
+    file: 'people/templates-screen.tsx',
+    open: { people: 'templates' },
+    hint: 'Requests & moderation, in a template or a person',
+    keywords: 'moderator moderate approve decline requests issues see everyone',
+  },
+  {
+    id: 'setting:people:request-quality',
+    label: 'Request quality',
+    tab: 'people',
+    anchor: id('ppl-pol-pane'),
+    file: 'people/policy-screen.tsx',
+    open: { people: 'policy' },
+    hint: 'quality members may pick, 4K always asks',
+    keywords: 'quality 4k request ask needs my ok starts on movies tv profile',
+  },
+  {
+    label: 'Invites',
+    tab: 'people',
+    anchor: id('ppl-pill-invites'),
+    file: 'people/people-tab.tsx',
+    open: { people: 'invites' },
+    hint: 'links that let someone join',
+    keywords: 'invite link join share token',
+  },
+  {
+    label: 'Activity',
+    tab: 'people',
+    anchor: id('ppl-pill-activity'),
+    file: 'people/people-tab.tsx',
+    open: { people: 'activity' },
+    hint: 'who changed what',
+    keywords: 'activity audit log history changes',
   },
 
   // ── Logs ──
@@ -1319,6 +1397,7 @@ export function tabTitle(tab: SettingsTab): string {
 type Openers = {
   openServiceModal?: (id: string) => void;
   openSourceModal?: (id: string) => void;
+  openPeopleSettings?: (part: PeoplePart) => void;
 };
 const openers = () => window as unknown as Openers;
 
@@ -1420,6 +1499,8 @@ export async function landSetting(entry: SettingsEntry, side: 'music' | 'video')
     openers().openServiceModal?.(entry.open.service);
   } else if (entry.open && 'source' in entry.open) {
     openers().openSourceModal?.(entry.open.source);
+  } else if (entry.open && 'people' in entry.open) {
+    openers().openPeopleSettings?.(entry.open.people);
   }
   let el: HTMLElement | null = null;
   await wait(() => {

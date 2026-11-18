@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify
 
 from core.media_server import specs
 from utils.logging_config import get_logger
+from core.permissions import signed_in
 
 logger = get_logger("api.media_servers")
 
@@ -67,6 +68,7 @@ def describe_all(include_state: bool = True):
 
 
 @bp.route('/api/media-servers', methods=['GET'])
+@signed_in
 def list_media_servers():
     return jsonify(describe_all())
 

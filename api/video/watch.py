@@ -301,7 +301,12 @@ def register_routes(bp):
         cap = video_cap()
         if cap is not None and not tmdb_title_allowed(
                 get_video_db(), "movie" if kd == "m" else "show", tmdb_id, cap):
-            return restricted_response()
+            return restricted_response("movie" if kd == "m" else "show")
+        # the quality (#2168): this profile's usual one for the kind
+        from .access import member_quality
+        quality, refused = member_quality(get_video_db(), "movie" if kd == "m" else "show")
+        if refused:
+            return refused
         # Bus-carried fallbacks (already length-capped by the protocol layer).
         fb_title = str(body.get("ti") or "").strip()[:200]
         fb_poster = str(body.get("po") or "").strip()[:300] or None
@@ -356,6 +361,8 @@ def register_routes(bp):
                 poster_url=(d or {}).get("poster_url") or fb_poster,
                 library_id=lib, server_source=srv, detail_json=blob,
                 profile_id=_profile())
+            if ok and quality is not None:
+                db.set_wishlist_quality_for_tmdb(tmdb_id, quality, profile_id=_profile())
             if ok:
                 _search_now("movie", tmdb_id)
             return jsonify({"success": ok, "added": 1 if ok else 0})
@@ -392,6 +399,9 @@ def register_routes(bp):
             tmdb_id, show_title, [ep],
             poster_url=(d or {}).get("poster_url") or fb_poster,
             library_id=lib, server_source=srv, profile_id=_profile())
+        if n and quality is not None:
+            db.set_wishlist_quality_for_tmdb(tmdb_id, quality, season_number=season_n,
+                                             episode_number=episode_n, profile_id=_profile())
         if n:
             _search_now("episode", tmdb_id, season_number=season_n, episode_number=episode_n)
         return jsonify({"success": n > 0, "added": n})

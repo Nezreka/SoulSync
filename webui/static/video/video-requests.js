@@ -24,7 +24,7 @@
     'use strict';
 
     var PAGE_ID = 'video-requests';
-    var state = { loaded: false, rows: [], tab: 'pending', quota: null };
+    var state = { loaded: false, rows: [], tab: 'pending', quota: null, quotas: null, moderator: false, seeAll: false };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -50,11 +50,12 @@
     var MONITOR_LABELS = { all: 'All seasons', first_season: 'First season',
         latest_season: 'Latest season', future: 'Only new episodes', pilot: 'Pilot only' };
 
-    function openSheet(inner, onReady) {
+    function openSheet(inner, onReady, mod, label) {
         return new Promise(function (resolve) {
             var overlay = document.createElement('div');
             overlay.className = 'vreq-sheet-overlay';
-            overlay.innerHTML = '<div class="vreq-sheet" role="dialog" aria-modal="true">' + inner + '</div>';
+            overlay.innerHTML = '<div class="vreq-sheet' + (mod ? ' ' + mod : '') + '" role="dialog" aria-modal="true"' +
+                (label ? ' aria-label="' + esc(label) + '"' : '') + '>' + inner + '</div>';
             var done = false;
             function close(value) {
                 if (done) return;
@@ -140,6 +141,146 @@
         });
     }
 
+    // ── the member's ask (#2168): one dialog for asking and getting ──────────
+    // only the qualities this profile may pick for this kind of title (the
+    // server's /requests/options, the same rules every path is held to). one
+    // allowed: no menu, just "Comes in X". two or more: a short list, the
+    // usual one picked, "Asks first" on the ones that need an OK; the button
+    // says Get it or Ask for it to match, and the quota line follows.
+    var ICONS = {
+        quality: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/>' +
+            '<path d="M7 10v4M7 12h3M10 10v4M14 10h2a2 2 0 0 1 0 4h-2z"/></svg>',
+        clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+        down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>'
+    };
+    var KIND_WORDS = { movie: 'Movie', show: 'Series', episode: 'Episode' };
+
+    function askLineHtml(asks, who) {
+        return asks
+            ? ICONS.clock + '<div><b>' + esc(who ? who + ' gets' : 'An admin gets') + ' asked first.</b> ' +
+                '<span class="vreq-ask-soft">You’ll see it in Requests the moment it’s approved.</span></div>'
+            : ICONS.down + '<div>Starts downloading right away.</div>';
+    }
+    // movies and TV each have their own request limit; the server says
+    // which one a quota is (kind: movies | tv)
+    function kindWord(q) {
+        return q && q.kind === 'movies' ? 'movie ' : q && q.kind === 'tv' ? 'TV ' : '';
+    }
+    function quotaHtml(quota, asks) {
+        if (!asks) return '<span>No limit on what you get right away</span>';
+        if (!quota || !(Number(quota.limit) > 0)) return '';
+        var left = Math.max(0, Number(quota.remaining) || 0), lim = Number(quota.limit);
+        var span = Number(quota.days) === 1 ? 'today' : Number(quota.days) === 7 ? 'this week'
+            : 'in ' + quota.days + ' days';
+        return '<span>' + left + ' of ' + lim + ' ' + kindWord(quota) + 'ask' + (lim === 1 ? '' : 's') +
+            ' left ' + span + '</span>' +
+            '<span class="vreq-ask-meter" aria-hidden="true"><i style="width:' +
+            Math.round(100 * left / Math.max(1, lim)) + '%"></i></span>';
+    }
+    function qualityPickHtml(list, chosen) {
+        if (list.length === 1) {
+            return '<div class="vreq-ask-fact" data-vreq-ask-quality>' + ICONS.quality +
+                '<div>Comes in <b>' + esc(list[0].name) + '</b></div></div>';
+        }
+        return '<div class="vreq-ask-fact" data-vreq-ask-quality>' + ICONS.quality +
+            '<div class="vreq-ask-grow"><span id="vreq-ask-q">Quality</span>' +
+            '<div class="vreq-qpick" role="radiogroup" aria-labelledby="vreq-ask-q">' +
+            list.map(function (q) {
+                var on = q.id === chosen;
+                var tag = q.asks ? '<span class="vreq-qtag vreq-qtag--ask">Asks first</span>'
+                    : q['default'] ? '<span class="vreq-qtag">Usual</span>' : '';
+                return '<button type="button" class="vreq-qopt" role="radio" aria-checked="' + on + '"' +
+                    ' tabindex="' + (on ? '0' : '-1') + '" data-vreq-q="' + q.id + '">' +
+                    '<span class="vreq-qrad" aria-hidden="true"></span><span class="vreq-qname">' + esc(q.name) +
+                    '</span>' + tag + '</button>';
+            }).join('') + '</div></div></div>';
+    }
+
+    // opts: {kind, title, year, poster, opts: /requests/options?kind=, quota}.
+    // resolves {monitor, quality_profile_id, get} or null when cancelled.
+    function askSheet(o) {
+        var info = o.opts || {};
+        var list = (info.qualities || []).map(function (q) {
+            return { id: Number(q.id) || 0, name: String(q.name || ''), asks: !!q.asks, 'default': !!q['default'] };
+        });
+        var downloader = info.mode === 'download';
+        var chosen = list.length ? (list.filter(function (q) { return q['default']; })[0] || list[0]).id : null;
+        function asksFor(id) {
+            if (!downloader) return true;
+            var q = list.filter(function (x) { return x.id === id; })[0];
+            return !!(q && q.asks);
+        }
+        var show = o.kind === 'show';
+        var choices = show ? MONITOR_CHOICES.map(function (c) {
+            return '<button type="button" class="vreq-choice' + (c.id === 'all' ? ' is-on' : '') +
+                '" data-vreq-choice="' + c.id + '">' +
+                '<span class="vreq-choice-label">' + esc(c.label) + '</span>' +
+                '<span class="vreq-choice-hint">' + esc(c.hint) + '</span></button>';
+        }).join('') : '';
+        var meta = [o.year, KIND_WORDS[o.kind] || ''].filter(Boolean).join(' · ');
+        var art = o.poster ? ' style="--vreq-art:url(&quot;' + esc(o.poster) + '&quot;)"' : '';
+        var asks = asksFor(chosen);
+        var inner =
+            '<div class="vreq-ask-art' + (o.poster ? ' has-art' : '') + '"' + art + '>' +
+                '<div class="vreq-ask-art-in"><div class="vreq-ask-title">' + esc(o.title || '') + '</div>' +
+                (meta ? '<div class="vreq-ask-meta">' + esc(meta) + '</div>' : '') + '</div></div>' +
+            '<div class="vreq-ask-body">' +
+                (show ? '<div class="vreq-sheet-label">Which seasons?</div><div class="vreq-choices">' + choices + '</div>' : '') +
+                (list.length ? qualityPickHtml(list, chosen) : '') +
+                '<div class="vreq-ask-fact" data-vreq-askline>' + askLineHtml(asks, info.asks_who) + '</div>' +
+                '<div class="vreq-ask-quota" data-vreq-quota>' + quotaHtml(info.quota, asks) + '</div>' +
+                '<div class="vreq-sheet-foot">' +
+                    '<button type="button" class="vreq-btn vreq-btn--ghost" data-vreq-sheet-cancel>Cancel</button>' +
+                    '<button type="button" class="vreq-btn vreq-btn--primary" data-vreq-sheet-go>' +
+                        (asks ? 'Ask for it' : 'Get it') + '</button>' +
+                '</div>' +
+            '</div>';
+        return openSheet(inner, function (sheet, close) {
+            var picked = show ? 'all' : null;
+            function paint() {
+                var a = asksFor(chosen);
+                sheet.querySelector('[data-vreq-askline]').innerHTML = askLineHtml(a, info.asks_who);
+                sheet.querySelector('[data-vreq-quota]').innerHTML = quotaHtml(info.quota, a);
+                sheet.querySelector('[data-vreq-sheet-go]').textContent = a ? 'Ask for it' : 'Get it';
+                sheet.querySelectorAll('[data-vreq-q]').forEach(function (b) {
+                    var on = Number(b.getAttribute('data-vreq-q')) === chosen;
+                    b.setAttribute('aria-checked', String(on));
+                    b.tabIndex = on ? 0 : -1;
+                });
+            }
+            sheet.addEventListener('click', function (e) {
+                var c = e.target.closest('[data-vreq-choice]');
+                if (c) {
+                    picked = c.getAttribute('data-vreq-choice');
+                    sheet.querySelectorAll('[data-vreq-choice]').forEach(function (b) {
+                        b.classList.toggle('is-on', b === c);
+                    });
+                    return;
+                }
+                var q = e.target.closest('[data-vreq-q]');
+                if (q) { chosen = Number(q.getAttribute('data-vreq-q')); paint(); return; }
+                if (e.target.closest('[data-vreq-sheet-go]')) {
+                    close({ monitor: picked, quality_profile_id: chosen, get: !asksFor(chosen) });
+                }
+            });
+            // a radio group moves with the arrow keys
+            sheet.addEventListener('keydown', function (e) {
+                var q = e.target.closest && e.target.closest('[data-vreq-q]');
+                if (!q || ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].indexOf(e.key) < 0) return;
+                e.preventDefault();
+                var all = Array.prototype.slice.call(sheet.querySelectorAll('[data-vreq-q]'));
+                var i = all.indexOf(q) + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1);
+                var next = all[(i + all.length) % all.length];
+                chosen = Number(next.getAttribute('data-vreq-q'));
+                paint();
+                next.focus();
+            });
+            var first = sheet.querySelector('.vreq-choice.is-on') || sheet.querySelector('[data-vreq-q][aria-checked="true"]') ||
+                sheet.querySelector('[data-vreq-sheet-go]');
+            if (first) first.focus();
+        }, 'vreq-sheet--ask', o.title || 'Request');
+    }
+
     // Approve sheet (admin): for a show not in the library yet, which folder
     // its episodes are filed in. Pre-set to the stored type (TMDB's suggestion,
     // fetched now if there is none). Shown only when an Anime folder is set; a
@@ -197,6 +338,7 @@
     }
 
     window.VideoRequestSheet = { pickSeasons: pickSeasons, pickRequest: pickRequest, askReason: askReason,
+        askSheet: askSheet,
         monitorLabel: function (m) { return MONITOR_LABELS[m] || ''; } };
 
     // ── where an approved request stands ───────────────────────────────────
@@ -333,8 +475,22 @@
         return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
     }
 
+    // may this profile approve or decline the whole group? admins any;
+    // a moderator (requests.moderate) anyone's but their own (the server
+    // stamps can_decide per row)
+    function decides(g) {
+        return g.bucket === 'pending' && g.rows.every(function (r) {
+            return r.can_decide === undefined ? isAdmin() : !!r.can_decide;
+        });
+    }
+    function mineIn(g) {
+        var me = profileId();
+        return g.rows.some(function (r) { return me != null && Number(r.profile_id) === Number(me); });
+    }
+    function decider() { return isAdmin() || state.moderator; }
+
     function whoAsked(g) {
-        if (!isAdmin()) return 'You asked';
+        if (!isAdmin() && !state.seeAll) return 'You asked';
         var seen = {}, names = [];
         g.rows.forEach(function (r) {
             var n = r.requester_name || 'Someone';
@@ -358,7 +514,7 @@
 
     function emptyText() {
         if (state.tab === 'pending') {
-            return isAdmin()
+            return decider()
                 ? 'Nothing waiting. When someone asks for a movie or show, it lands here.'
                 : 'Nothing waiting. Hit Request on any movie or show you want.';
         }
@@ -384,10 +540,10 @@
               ' aria-valuemax="100" aria-valuenow="' + pct + '"><span style="width:' + pct + '%"></span></div>';
         var notes = g.rows.filter(function (r) { return r.note; }).map(function (r) {
             return '<div class="vreq-note">“' + esc(r.note) + '”' +
-                (isAdmin() && r.requester_name ? ' <span class="vreq-note-by">' + esc(r.requester_name) + '</span>' : '') + '</div>';
+                ((isAdmin() || state.seeAll) && r.requester_name ? ' <span class="vreq-note-by">' + esc(r.requester_name) + '</span>' : '') + '</div>';
         }).join('');
         var first = g.rows[0];
-        var approve = (g.bucket === 'pending' && isAdmin())
+        var approve = decides(g)
             ? '<button class="vreq-btn vreq-btn--primary" type="button" data-vreq-approve="' + first.id + '">Approve</button>'
             : '';
         return '<div class="vreq-row" data-vreq-row="' + esc(g.key) + '">' + poster +
@@ -431,9 +587,26 @@
         if (!q || !(Number(q.limit) > 0)) return '';
         var limit = Number(q.limit), left = Math.max(0, Number(q.remaining) || 0), days = Number(q.days) || 7;
         var span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : 'in the last ' + days + ' days';
-        var noun = limit === 1 ? 'request' : 'requests';
-        if (left <= 0) return limit === 1 ? 'You’ve used your request ' + span : 'You’ve used all ' + limit + ' requests ' + span;
+        var word = kindWord(q);
+        var noun = word + (limit === 1 ? 'request' : 'requests');
+        if (left <= 0) return limit === 1 ? 'You’ve used your ' + noun + ' ' + span : 'You’ve used all ' + limit + ' ' + noun + ' ' + span;
         return left + ' of ' + limit + ' ' + noun + ' left ' + span;
+    }
+    // every limited kind's line, for the page header ("2 of 5 movie
+    // requests left this week · 1 of 3 TV requests left this week")
+    function quotasLine(qs, fallback) {
+        var lines = ['movies', 'tv'].map(function (k) { return qs && qs[k] ? quotaLine(qs[k]) : ''; })
+            .filter(Boolean);
+        return lines.length ? lines.join(' · ') : quotaLine(fallback);
+    }
+    // the quota an ask of this kind spends (a youtube video rides with TV,
+    // or movies for a profile without TV, like the server's ask_limit_kind)
+    function quotaFor(qs, kind, fallback) {
+        if (!qs) return fallback || null;
+        var perms = window.SoulSyncPerms;
+        var tv = !perms || perms.access('tv') || !perms.access('movies');
+        var k = kind === 'movie' ? 'movies' : kind === 'youtube' ? (tv ? 'tv' : 'movies') : 'tv';
+        return qs[k] || null;
     }
 
     // the header: the quiet quota line for members, approve all for admins
@@ -448,7 +621,7 @@
             head.appendChild(text);
         }
         var quota = text.querySelector('.vreq-quota');
-        var line = isAdmin() ? '' : quotaLine(state.quota);
+        var line = isAdmin() ? '' : quotasLine(state.quotas, state.quota);
         if (line && !quota) {
             quota = document.createElement('p');
             quota.className = 'vreq-quota';
@@ -458,7 +631,7 @@
 
         var waiting = groups.filter(function (g) { return g.bucket === 'pending'; }).length;
         var btn = head.querySelector('[data-vreq-approve-all]');
-        if (isAdmin() && waiting > 1) {
+        if (decider() && waiting > 1) {
             if (!btn) {
                 btn = document.createElement('button');
                 btn.type = 'button';
@@ -477,9 +650,10 @@
     function render() {
         var subH = $('.vreq-sub-h');
         if (subH) {
-            subH.textContent = isAdmin()
+            subH.textContent = decider()
                 ? 'What your household asked for. Approve once, everyone who asked hears about it.'
-                : 'What you asked for, and where it’s at.';
+                : state.seeAll ? 'What everyone asked for, and where it’s at.'
+                    : 'What you asked for, and where it’s at.';
         }
         var groups = groupRows(state.rows);
         state.groups = groups;
@@ -519,6 +693,9 @@
                 if (!d || !d.success) return;
                 state.rows = d.requests || [];
                 state.quota = d.quota || null;
+                state.quotas = d.quotas || null;
+                state.moderator = !!d.moderator;
+                state.seeAll = !!d.see_all;
                 setBadge(d.pending || 0);
                 remember(d);
                 render();
@@ -654,20 +831,22 @@
         if (same) return;
         var items = [];
         var admin = isAdmin();
-        var named = (profilesCache.list || []).length > 1;
-        if (g.bucket === 'pending' && admin) {
+        // the quality is the admin's to change on approval; a moderator
+        // approves at the quality the request was filed with
+        var named = admin && (profilesCache.list || []).length > 1;
+        if (decides(g)) {
             if (g.kind === 'show') items.push({ id: 'seasons', label: named ? 'Approve with seasons and quality…' : 'Approve with seasons…' });
             else if (g.kind !== 'youtube' && named) items.push({ id: 'seasons', label: 'Approve with quality…' });
             items.push({ id: 'decline', label: 'Decline…', danger: true });
         }
         if (admin && canSearchAgain(g.lead)) items.push({ id: 'retry', label: 'Search again' });
-        if (g.bucket === 'pending' && !admin) items.push({ id: 'withdraw', label: 'Withdraw', danger: true });
+        if (g.bucket === 'pending' && !admin && mineIn(g)) items.push({ id: 'withdraw', label: 'Withdraw', danger: true });
         if (g.kind === 'youtube') {
             items.push({ id: 'ytopen', label: 'Open on YouTube' });
         } else {
             items.push({ id: 'open', label: g.kind === 'movie' ? 'Open movie' : 'Open show' });
         }
-        if (g.bucket !== 'pending') items.push({ id: 'remove', label: 'Remove from history' });
+        if (g.bucket !== 'pending' && (admin || mineIn(g))) items.push({ id: 'remove', label: 'Remove from history' });
 
         menuEl = document.createElement('div');
         menuEl.className = 'vreq-menu';
@@ -707,7 +886,7 @@
             else if (which === 'seasons') {
                 pickRequest({ kind: g.kind, title: g.title, current: g.monitor || 'all',
                     heading: g.kind === 'show' ? 'Approve which seasons?' : 'Approve at which quality?',
-                    confirm: 'Approve', profiles: profilesCache.list, quality: g.quality_profile_id,
+                    confirm: 'Approve', profiles: isAdmin() ? profilesCache.list : [], quality: g.quality_profile_id,
                     typeFor: g.kind === 'show' ? g.tmdb_id : null })
                     .then(function (res) { if (res) approve(g, res); });
             }
@@ -778,7 +957,8 @@
     }
     function remember(d) {
         var rows = (d && d.requests) || [];
-        mineCache.data = { rows: rows, quota: (d && d.quota) || null, states: cardStates(rows) };
+        mineCache.data = { rows: rows, quota: (d && d.quota) || null, quotas: (d && d.quotas) || null,
+            states: cardStates(rows) };
         mineCache.at = Date.now();
         mineCache.pid = profileId();
         return mineCache.data;
@@ -797,6 +977,53 @@
 
     function canDl() {
         return (typeof canDownload !== 'function') || canDownload();
+    }
+
+    // what this profile may do per kind (#2166): {movie, show, youtube} each
+    // 'download' | 'ask' | 'none', from the server's own rules. until it's
+    // here the old one-switch answer stands in.
+    var accessCache = { data: null, pid: null, inflight: null };
+    function loadAccess(force) {
+        var pid = profileId();
+        if (!force && accessCache.data && accessCache.pid === pid) return Promise.resolve(accessCache.data);
+        if (accessCache.inflight) return accessCache.inflight;
+        accessCache.inflight = fetch('/api/video/requests/options', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && d.success) {
+                    accessCache.data = { modes: d.modes || {}, moderator: !!d.moderator };
+                    accessCache.pid = pid;
+                    document.dispatchEvent(new CustomEvent('soulsync:video-access-ready'));
+                }
+                return accessCache.data;
+            })
+            .catch(function () { return accessCache.data; })
+            .then(function (v) { accessCache.inflight = null; return v; });
+        return accessCache.inflight;
+    }
+    function kindKey(kind) {
+        return kind === 'movie' ? 'movie' : kind === 'youtube' ? 'youtube' : 'show';
+    }
+    function modeFor(kind) {
+        var d = accessCache.data;
+        if (!d || accessCache.pid !== profileId()) return null;
+        return d.modes[kindKey(kind)] || 'none';
+    }
+    // may this profile get this kind right away (the Get controls)?
+    function canGet(kind) {
+        var m = modeFor(kind);
+        return m === null ? canDl() : m === 'download';
+    }
+    // may it ask for this kind at all (the Request button)?
+    function mayAsk(kind) {
+        var m = modeFor(kind);
+        return m === null ? true : m !== 'none';
+    }
+    function loadOptions(kind) {
+        return fetch('/api/video/requests/options?kind=' + encodeURIComponent(kind),
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; });
     }
 
     function changed() {
@@ -824,21 +1051,29 @@
         if (item.kind === 'youtube' && !item.youtube_id) return Promise.resolve(null);
         if (item.kind !== 'episode' && item.kind !== 'youtube' &&
             (!item.tmdb_id || (item.kind !== 'movie' && item.kind !== 'show'))) return Promise.resolve(null);
-        return Promise.all([mine(true), loadProfiles()]).then(function (res) {
-            var m = res[0], profiles = res[1];
+        var youtube = item.kind === 'youtube';
+        var optKind = item.kind === 'movie' ? 'movie' : 'show';
+        return Promise.all([mine(true), youtube ? Promise.resolve(null) : loadOptions(optKind)]).then(function (res) {
+            var m = res[0], opts = res[1];
             if (m && m.states[key] === 'requested') {
                 toast('Already requested. You’ll hear when it’s decided', 'info');
                 return null;
             }
-            if (m && quotaSpent(m.quota)) {
-                toast(quotaLine(m.quota) || 'You’ve used your requests for now', 'warning');
+            if (opts && opts.mode === 'none') {
+                toast((optKind === 'movie' ? 'Movies aren’t' : 'Shows aren’t') +
+                    ' part of your profile. Ask an admin if you’d like them', 'info');
                 return null;
             }
-            var named = profiles.length > 1;
+            var spend = m ? quotaFor(m.quotas, item.kind, m.quota) : null;
+            if (quotaSpent(spend) && !(opts && opts.mode === 'download')) {
+                toast(quotaLine(spend) || 'You’ve used your requests for now', 'warning');
+                return null;
+            }
             // youtube has no quality profiles and no seasons: no sheet
-            var pick = (item.kind === 'show' || (named && item.kind !== 'youtube'))
-                ? pickRequest({ kind: item.kind, title: item.title || '', current: 'all', profiles: profiles })
-                : Promise.resolve({ monitor: null, quality_profile_id: 0 });
+            var pick = youtube
+                ? Promise.resolve({ monitor: null, quality_profile_id: null, get: false })
+                : askSheet({ kind: item.kind, title: item.title || '', year: item.year, poster: item.poster_url,
+                    opts: opts || { mode: 'ask', qualities: [], quota: spend } });
             return pick.then(function (choice) {
                 if (!choice) return null;
                 var body = { kind: item.kind, title: item.title, year: item.year,
@@ -851,7 +1086,10 @@
                     if (item.kind === 'episode') { body.season = item.season; body.episode = item.episode; }
                 }
                 if (choice.monitor) body.monitor = choice.monitor;
-                if (choice.quality_profile_id > 0) body.quality_profile_id = choice.quality_profile_id;
+                if (choice.quality_profile_id !== null && choice.quality_profile_id !== undefined) {
+                    body.quality_profile_id = choice.quality_profile_id;
+                }
+                if (choice.get) body.get = true;
                 return fetch('/api/video/requests', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
                     .then(function (r) {
@@ -863,7 +1101,10 @@
                         var j = out.j;
                         if (out.status === 429) {
                             // request limit used up: the server's own words, calmly
-                            if (mineCache.data && j.quota) mineCache.data.quota = j.quota;
+                            if (mineCache.data && j.quota) {
+                                if (j.quota.kind && mineCache.data.quotas) mineCache.data.quotas[j.quota.kind] = j.quota;
+                                else mineCache.data.quota = j.quota;
+                            }
                             toast(j.error || 'You’ve used your requests for now', 'warning');
                             return null;
                         }
@@ -878,7 +1119,12 @@
                             changed();
                             return { ok: false, on_the_way: true };
                         }
-                        if (!j.success) throw new Error(j.error || '');
+                        if (!j.success) throw new Error(j.message || j.error || '');
+                        if (j.got) {
+                            toast('On its way. It starts downloading now', 'success');
+                            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                            return { ok: true, got: true };
+                        }
                         toast(j.already ? 'Already requested. You’ll hear when it’s decided'
                             : j.joined ? 'Someone already asked, you’re on it too. You’ll hear when it’s decided'
                                 : 'Requested. You’ll hear when it’s decided', 'success');
@@ -894,7 +1140,7 @@
 
     // the card's quick action for a profile that can't download
     function cardButton(o) {
-        if (!o) return '';
+        if (!o || !mayAsk(o.kind)) return '';
         var attrs = '';
         if (o.kind === 'youtube') {
             if (!o.youtubeId) return '';
@@ -993,7 +1239,11 @@
         cardButton: cardButton,
         hydrate: hydrate,
         mine: mine,
-        profiles: loadProfiles
+        profiles: loadProfiles,
+        access: loadAccess,
+        mode: modeFor,
+        canGet: canGet,
+        mayAsk: mayAsk
     };
 
     function pollBadge() {
@@ -1022,6 +1272,9 @@
     function init() {
         document.addEventListener('soulsync:video-page-shown', onPageShown);
         window.addEventListener('soulsync:profile-notify', onProfileNotify);
+        // what this profile may do per kind: now, and again when it switches
+        loadAccess();
+        window.addEventListener('ss:webui-profile-context-changed', function () { loadAccess(true); });
         // badge without visiting the page — same lazy cadence as the other navs
         setTimeout(pollBadge, 4000);
         setInterval(pollBadge, 60000);

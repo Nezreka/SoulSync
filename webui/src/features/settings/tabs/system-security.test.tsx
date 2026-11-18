@@ -240,9 +240,6 @@ describe('OIDC and the rest', () => {
     fireEvent.change(el('security-oidc-client-secret'), { target: { value: ' s3 ' } });
     fireEvent.click(el('security-oidc-signin-auto-create'));
     fireEvent.click(el('security-plex-signin'));
-    fireEvent.change(el('security-signup-sides'), { target: { value: 'both' } });
-    fireEvent.change(el('security-signup-request-limit'), { target: { value: '' } });
-    fireEvent.change(el('security-signup-request-limit-days'), { target: { value: '30' } });
     fireEvent.click(el('security-trust-proxy'));
     fireEvent.change(el('security-auth-proxy-header'), { target: { value: ' Remote-User ' } });
     await waitFor(() => expect(store.hasPending()).toBe(false));
@@ -251,9 +248,6 @@ describe('OIDC and the rest', () => {
       oidc_client_secret: ' s3 ',
       oidc_signin_auto_create: false,
       plex_signin: true,
-      signup_sides: 'both',
-      signup_request_limit: 0,
-      signup_request_limit_days: 30,
       trust_reverse_proxy: true,
       auth_proxy_header: 'Remote-User',
     });

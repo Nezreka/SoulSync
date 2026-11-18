@@ -21,6 +21,8 @@ from core.runtime_state import download_tasks, tasks_lock
 from core.search import stream as _search_stream
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only
 
 logger = get_logger("api.quarantine")
 
@@ -81,6 +83,7 @@ def _admin_manages_this():
 
 
 @bp.route('/api/quarantine/clear', methods=['POST'])
+@admin_only
 def clear_quarantine():
     """Delete all files and folders inside the ss_quarantine directory."""
     from core.library.cleanup import clear_quarantine_folder
@@ -107,6 +110,7 @@ def _get_quarantine_dir():
 
 
 @bp.route('/api/quarantine/list', methods=['GET'])
+@requires("music.access")
 def list_quarantine():
     """Return all quarantined files with sidecar metadata."""
     try:
@@ -155,6 +159,7 @@ def list_quarantine():
 
 
 @bp.route('/api/review-queue/summary', methods=['GET'])
+@requires("music.access")
 def review_queue_summary():
     """counts for the review badge, cheap enough to poll.
 
@@ -183,6 +188,7 @@ def review_queue_summary():
 
 
 @bp.route('/api/quarantine/<entry_id>', methods=['DELETE'])
+@admin_only
 def delete_quarantine_item(entry_id):
     """Delete a quarantined file + sidecar.
 
@@ -261,6 +267,7 @@ def _after_approved_import(context, batch):
 
 
 @bp.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
+@admin_only
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
     quarantine gates skipped for this explicit user-approved pass."""
@@ -402,6 +409,7 @@ def approve_quarantine_item(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/stream', methods=['GET'])
+@requires("music.access")
 def stream_quarantine_item(entry_id):
     """Stream a quarantined audio file in-app (range-supported) so the user can
     listen before deciding to approve, search again, or delete it. The file
@@ -429,6 +437,7 @@ def _get_quarantine_entry(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/play', methods=['POST'])
+@requires("music.access")
 def play_quarantine_item(entry_id):
     """Load a quarantined file into the media player (review queue ▶)."""
     try:
@@ -453,6 +462,7 @@ def play_quarantine_item(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/compare-stream', methods=['POST'])
+@requires("music.access")
 def compare_stream_quarantine_item(entry_id):
     """Stream-search the EXPECTED track for a quarantined file (A/B compare),
     using the quarantined file's duration to guide candidate ranking."""
@@ -490,6 +500,7 @@ def compare_stream_quarantine_item(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/entry', methods=['GET'])
+@requires("music.access")
 def get_quarantine_audit_entry(entry_id):
     """Synthesize a library_history-shaped entry from a quarantine sidecar so
     the review queue opens the SAME Audit Trail modal for quarantined files
@@ -537,6 +548,7 @@ def get_quarantine_audit_entry(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/file-tags', methods=['GET'])
+@requires("music.access")
 def get_quarantine_file_tags(entry_id):
     """Embedded tags of a quarantined file — feeds the Audit modal's Tags /
     Lyrics tabs. mutagen detects the format from content, so the swapped
@@ -556,6 +568,7 @@ def get_quarantine_file_tags(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
+@admin_only
 def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
     can manually finish via the existing Import flow."""

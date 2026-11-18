@@ -27,6 +27,7 @@ from flask import Blueprint, jsonify, request
 
 from beatport_unified_scraper import BeatportUnifiedScraper
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("api.beatport")
 
@@ -189,6 +190,7 @@ def _browse_response(section, cache_key, key, items):
 # --- Beatport Data API ---
 
 @bp.route('/api/beatport/hero-tracks')
+@requires("music.playlist_sync")
 def get_beatport_hero_tracks():
     """Get fresh tracks from Beatport hero slideshow for the rebuild slider"""
     try:
@@ -342,6 +344,7 @@ def get_beatport_hero_tracks():
         }), 500
 
 @bp.route('/api/beatport/new-releases')
+@requires("music.playlist_sync")
 def get_beatport_new_releases():
     """Get new releases from Beatport for the rebuild slider grid"""
     try:
@@ -477,6 +480,7 @@ def get_beatport_new_releases():
 
 
 @bp.route('/api/beatport/featured-charts')
+@requires("music.playlist_sync")
 def get_beatport_featured_charts():
     """Get featured charts from Beatport for the charts slider grid using GridSlider approach"""
     try:
@@ -629,6 +633,7 @@ def get_beatport_featured_charts():
 
 
 @bp.route('/api/beatport/dj-charts')
+@requires("music.playlist_sync")
 def get_beatport_dj_charts():
     """Get DJ charts from Beatport for the DJ charts slider using Carousel approach"""
     try:
@@ -777,6 +782,7 @@ def get_beatport_dj_charts():
 # ================================= #
 
 @bp.route('/api/beatport/genres', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genres():
     """Get current Beatport genres with images dynamically scraped from homepage"""
     try:
@@ -815,6 +821,7 @@ def get_beatport_genres():
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/tracks', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_tracks(genre_slug, genre_id):
     """Get tracks for a specific Beatport genre"""
     try:
@@ -856,6 +863,7 @@ def get_beatport_genre_tracks(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/chart/extract', methods=['POST'])
+@requires("music.playlist_sync")
 def extract_beatport_chart_tracks():
     """Extract tracks from a specific Beatport chart URL"""
     try:
@@ -918,6 +926,7 @@ def extract_beatport_chart_tracks():
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_top_10(genre_slug, genre_id):
     """Get top 10 tracks for a specific Beatport genre"""
     try:
@@ -955,6 +964,7 @@ def get_beatport_genre_top_10(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/releases-top-10', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_releases_top_10(genre_slug, genre_id):
     """Get top 10 releases for a specific Beatport genre"""
     try:
@@ -992,6 +1002,7 @@ def get_beatport_genre_releases_top_10(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/releases-top-100', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_releases_top_100(genre_slug, genre_id):
     """Get top 100 releases for a specific Beatport genre"""
     try:
@@ -1032,6 +1043,7 @@ def get_beatport_genre_releases_top_100(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/staff-picks', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_staff_picks(genre_slug, genre_id):
     """Get staff picks for a specific Beatport genre"""
     try:
@@ -1072,6 +1084,7 @@ def get_beatport_genre_staff_picks(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-top-10', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_hype_top_10(genre_slug, genre_id):
     """Get hype top 10 tracks for a specific Beatport genre"""
     try:
@@ -1109,6 +1122,7 @@ def get_beatport_genre_hype_top_10(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-top-100', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_hype_top_100(genre_slug, genre_id):
     """Get hype top 100 tracks for a specific Beatport genre"""
     try:
@@ -1146,6 +1160,7 @@ def get_beatport_genre_hype_top_100(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/hype-picks', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_hype_picks(genre_slug, genre_id):
     """Get hype picks for a specific Beatport genre"""
     try:
@@ -1186,6 +1201,7 @@ def get_beatport_genre_hype_picks(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/latest-releases', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_latest_releases(genre_slug, genre_id):
     """Get latest releases for a specific Beatport genre"""
     try:
@@ -1226,6 +1242,7 @@ def get_beatport_genre_latest_releases(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/new-charts', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_new_charts(genre_slug, genre_id):
     """Get new charts for a specific Beatport genre"""
     try:
@@ -1266,6 +1283,7 @@ def get_beatport_genre_new_charts(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/hero', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_hero(genre_slug, genre_id):
     """Get hero slider data for a specific Beatport genre with 1-hour caching"""
     try:
@@ -1336,6 +1354,7 @@ def get_beatport_genre_hero(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10-lists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_top10_lists(genre_slug, genre_id):
     """Get Top 10 lists (Beatport + Hype) for a specific genre with 1-hour caching"""
     try:
@@ -1407,6 +1426,7 @@ def get_beatport_genre_top10_lists(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/top-10-releases', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_top10_releases(genre_slug, genre_id):
     """Get Top 10 releases for a specific genre using .partial-artwork elements with 1-hour caching"""
     try:
@@ -1475,6 +1495,7 @@ def get_beatport_genre_top10_releases(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/genre/<genre_slug>/<genre_id>/sections', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_sections(genre_slug, genre_id):
     """Discover all available sections for a specific Beatport genre"""
     try:
@@ -1510,6 +1531,7 @@ def get_beatport_genre_sections(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/list', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_list():
     """one beatport list by ref (or a pasted beatport url), shaped as the
     chart_data discovery takes. every chart-type list opens through here."""
@@ -1532,6 +1554,7 @@ def get_beatport_list():
 
 
 @bp.route('/api/beatport/import', methods=['POST'])
+@requires("music.playlist_sync")
 def import_beatport_list():
     """import a beatport list into soulsync: the live mirror a list's
     identification has always made (keyed by its ref, so it refreshes with the
@@ -1575,6 +1598,7 @@ def import_beatport_list():
 
 
 @bp.route('/api/beatport/snapshot', methods=['POST'])
+@requires("music.playlist_sync")
 def save_beatport_snapshot():
     """freeze a beatport list as it is today, as a dated mirrored playlist."""
     from core.beatport.playlist import save_snapshot
@@ -1589,6 +1613,7 @@ def save_beatport_snapshot():
 
 
 @bp.route('/api/beatport/top-100', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_top_100():
     """Get Beatport Top 100 tracks"""
     try:
@@ -1623,6 +1648,7 @@ def get_beatport_top_100():
         }), 500
 
 @bp.route('/api/beatport/genre-image/<genre_slug>/<genre_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_genre_image(genre_slug, genre_id):
     """Get image for a specific Beatport genre"""
     try:
@@ -1663,6 +1689,7 @@ def get_beatport_genre_image(genre_slug, genre_id):
         }), 500
 
 @bp.route('/api/beatport/hype-top-100', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_hype_top_100():
     """Get Beatport Hype Top 100 - Improved with fixed URL"""
     try:
@@ -1697,6 +1724,7 @@ def get_beatport_hype_top_100():
         }), 500
 
 @bp.route('/api/beatport/top-100-releases', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_top_100_releases():
     """Get Beatport Top 100 Releases - New endpoint"""
     try:
@@ -1730,6 +1758,7 @@ def get_beatport_top_100_releases():
         }), 500
 
 @bp.route('/api/beatport/homepage/new-releases', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_new_releases():
     """Get Beatport New Releases from homepage section"""
     try:
@@ -1761,6 +1790,7 @@ def get_beatport_homepage_new_releases():
         }), 500
 
 @bp.route('/api/beatport/homepage/hype-picks', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_hype_picks():
     """Get Beatport Hype Picks from homepage section"""
     try:
@@ -1792,6 +1822,7 @@ def get_beatport_homepage_hype_picks():
         }), 500
 
 @bp.route('/api/beatport/homepage/top-10-releases', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_top_10_releases():
     """Get Beatport Top 10 Releases from homepage section"""
     try:
@@ -1823,6 +1854,7 @@ def get_beatport_homepage_top_10_releases():
         }), 500
 
 @bp.route('/api/beatport/homepage/top-10-lists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_top10_lists():
     """Get Beatport Top 10 Lists from homepage - both Beatport Top 10 and Hype Top 10"""
     try:
@@ -1874,6 +1906,7 @@ def get_beatport_homepage_top10_lists():
         }), 500
 
 @bp.route('/api/beatport/homepage/top-10-releases-cards', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_top10_releases_cards():
     """Get Beatport Top 10 Releases CARDS from homepage (not individual tracks)"""
     try:
@@ -1932,6 +1965,7 @@ def get_beatport_homepage_top10_releases_cards():
         }), 500
 
 @bp.route('/api/beatport/scrape-releases', methods=['POST'])
+@requires("music.playlist_sync")
 def scrape_beatport_releases():
     """General scraper endpoint - takes release URLs and returns tracks"""
     try:
@@ -1997,6 +2031,7 @@ def scrape_beatport_releases():
         }), 500
 
 @bp.route('/api/beatport/release-metadata', methods=['POST'])
+@requires("music.playlist_sync")
 def get_beatport_release_metadata():
     """Fetch structured release metadata for direct download modal (skip discovery)"""
     try:
@@ -2044,6 +2079,7 @@ _enrichment_tasks = {}  # enrichment_id -> {completed, total, current_track, don
 _enrichment_tasks_lock = threading.Lock()
 
 @bp.route('/api/beatport/enrich-tracks', methods=['POST'])
+@requires("music.playlist_sync")
 def enrich_beatport_tracks():
     """Start Beatport track enrichment. Returns immediately; poll /enrich-progress for updates."""
     try:
@@ -2173,6 +2209,7 @@ def enrich_beatport_tracks():
 
 
 @bp.route('/api/beatport/enrich-progress/<enrichment_id>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_enrichment_progress(enrichment_id):
     """Poll enrichment progress. Returns current state; includes tracks when done."""
     with _enrichment_tasks_lock:
@@ -2198,6 +2235,7 @@ def get_enrichment_progress(enrichment_id):
         return resp
 
 @bp.route('/api/beatport/homepage/featured-charts', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_homepage_featured_charts():
     """Get Beatport Featured Charts from homepage section"""
     try:
@@ -2229,6 +2267,7 @@ def get_beatport_homepage_featured_charts():
         }), 500
 
 @bp.route('/api/beatport/chart-sections', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_chart_sections():
     """Get dynamically discovered Beatport chart sections"""
     try:
@@ -2258,6 +2297,7 @@ def get_beatport_chart_sections():
         }), 500
 
 @bp.route('/api/beatport/dj-charts-improved', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_dj_charts_improved():
     """Get Beatport DJ Charts using improved method"""
     try:
@@ -2292,6 +2332,7 @@ def get_beatport_dj_charts_improved():
 
 
 @bp.route('/api/beatport/hype-picks')
+@requires("music.playlist_sync")
 def get_beatport_hype_picks():
     """Get Beatport Hype Picks for the rebuild slider grid (EXACT same pattern as new-releases)"""
     try:

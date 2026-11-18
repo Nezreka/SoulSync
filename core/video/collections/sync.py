@@ -374,13 +374,18 @@ def forget_fed(db, did) -> None:
 
 
 def wishlist_missing_movies(db, definition: Dict[str, Any], missing, *,
-                            refeed: bool = False) -> int:
+                            refeed: bool = False, gate=None) -> int:
     """For a 'list' MOVIE collection with wishlist_missing on, add the members the
     user doesn't own to the wishlist. Franchise/list only, smart collections have
     no 'missing'. each title gets fed once per collection (see _FED_KEY).
     ``refeed`` is the manual 'wishlist these' button, it skips the ledger.
     returns how many NEW wishlist rows landed. No-ops safely if the db doesn't
-    expose the wishlist method (unit-test fakes)."""
+    expose the wishlist method (unit-test fakes).
+
+    the profile it acts for (the automation owner, or whoever pressed the
+    button) has its rights asked before every add (#2166): no access or
+    can't request adds nothing (and leaves the title unfed, so it comes once
+    they may), ask first files a request, the rating cap holds."""
     if not (definition.get("wishlist_missing") and definition.get("kind") == "list"
             and (definition.get("media_type") or "movie") == "movie"):
         return 0
@@ -392,6 +397,8 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing, *,
         _pid = get_current_profile_id() or 1
     except Exception:  # noqa: BLE001 - no profile context → admin behavior
         _pid = 1
+    from core.owner_gate import OwnerGate, quality_kw
+    gate = gate or OwnerGate(_pid, label="collections")
     did = definition.get("id")
     fed = _fed_ids(db, did)
     before = set(fed)
@@ -411,9 +418,18 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing, *,
         if tid in on_list:
             fed.add(tid)            # already on the wishlist, not a new add
             continue
+        w = gate.want("movie", tmdb_id=tid, title=str(m.get("title") or ""))
+        if w.skip:
+            continue
+        if w.request:
+            if gate.file_video_request(db, kind="movie", tmdb_id=tid, title=m.get("title") or "Untitled",
+                                       year=m.get("year"), poster_url=m.get("poster_url"),
+                                       quality_profile_id=w.quality_profile_id) in ("filed", "asked"):
+                fed.add(tid)
+            continue
         try:
             if add(tid, m.get("title") or "Untitled", year=m.get("year"),
-                   poster_url=m.get("poster_url"), status="wanted", profile_id=_pid):
+                   poster_url=m.get("poster_url"), status="wanted", profile_id=_pid, **quality_kw(w)):
                 n += 1
                 fed.add(tid)
         except Exception:   # noqa: BLE001 - one bad wishlist row shouldn't stop the sync
@@ -434,7 +450,7 @@ _SHOW_WATCHLIST_CAP = 10      # status lookups per sync run — the rest next pa
 
 
 def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
-                            engine=None, cap: int = _SHOW_WATCHLIST_CAP) -> int:
+                            engine=None, cap: int = _SHOW_WATCHLIST_CAP, gate=None) -> int:
     """For a 'list' SHOW collection with the acquire-missing toggle on, FOLLOW
     the missing shows (idempotent; 'mute' tombstones respected — a muted show is
     never re-followed by automation). Returns shows followed."""
@@ -459,6 +475,9 @@ def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
     except Exception:  # noqa: BLE001 - no profile context → admin behavior
         _pid = 1
     states = states_fn("show", profile_id=_pid) if callable(states_fn) else {}
+    # the follower's rights per show (#2166), as for movies above
+    from core.owner_gate import OwnerGate
+    gate = gate or OwnerGate(_pid, label="collections")
 
     added = 0
     checked = 0
@@ -476,6 +495,14 @@ def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
             status = str(detail.get("status") or "").strip().lower()
             if status in _TERMINAL_STATUS:
                 continue                        # nothing will air — manual-get territory
+            w = gate.want("tv", tmdb_id=int(tid), title=str(m.get("title") or ""))
+            if w.skip:
+                continue
+            if w.request:
+                gate.file_video_request(db, kind="show", tmdb_id=int(tid), title=m.get("title") or "Untitled",
+                                        poster_url=m.get("poster_url"),
+                                        quality_profile_id=w.quality_profile_id, monitor="future")
+                continue
             if add("show", int(tid), m.get("title") or "Untitled",
                    poster_url=m.get("poster_url"), profile_id=_pid):
                 added += 1

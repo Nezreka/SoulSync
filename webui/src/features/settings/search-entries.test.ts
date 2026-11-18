@@ -25,6 +25,9 @@ const read = (file: string) => readFileSync(join(TABS, file), 'utf8');
 function anchorIn(entry: SettingsEntry, source: string): boolean {
   if ('id' in entry.anchor) {
     const id = entry.anchor.id;
+    // the People tab's part buttons: id={`ppl-pill-${id}`}, one per PILLS row
+    const pill = /^ppl-pill-([a-z]+)$/.exec(id);
+    if (pill && source.includes('id={`ppl-pill-${id}`}')) return source.includes(`['${pill[1]}', `);
     return source.includes(`"${id}"`) || source.includes(`'${id}'`);
   }
   const h = entry.anchor.heading.replace(/&/g, '&amp;');
@@ -109,6 +112,29 @@ describe('landing on one', () => {
       true,
     );
     expect(document.getElementById('max-concurrent-downloads')).toHaveFocus();
+  });
+
+  it('opens the People part an entry sits on before looking for it', async () => {
+    document.body.innerHTML = `
+      <div id="settings-page">
+        <button class="stg-tab" data-tab="people">People</button>
+      </div>`;
+    window.navigateToPage = vi.fn();
+    window.switchSettingsTab = vi.fn();
+    const part = vi.fn((which: string) => {
+      // the part mounts its pane once it is picked
+      if (which === 'templates') {
+        const pane = document.createElement('div');
+        pane.id = 'ppl-tpl-pane';
+        document.getElementById('settings-page')!.append(pane);
+      }
+    });
+    (window as unknown as { openPeopleSettings: typeof part }).openPeopleSettings = part;
+    const entry = SETTINGS_ENTRIES.find((e) => e.label === 'New people start as')!;
+    expect(await landSetting(entry, 'music')).toBe(true);
+    expect(window.switchSettingsTab).toHaveBeenCalledWith('people');
+    expect(part).toHaveBeenCalledWith('templates');
+    delete (window as unknown as { openPeopleSettings?: unknown }).openPeopleSettings;
   });
 
   it('finds a section by its heading', () => {

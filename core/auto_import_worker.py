@@ -2172,6 +2172,8 @@ class AutoImportWorker:
         if candidate.disc_structure and len(candidate.disc_structure) > 1:
             total_discs = max(candidate.disc_structure.keys())
 
+        # whose files these were (#1504 breadcrumbs): the events below are theirs
+        import_owners = set()
         processed = 0
         errors = []
         reid_final_paths = []   # #889: where the pipeline landed each file (same-home guard)
@@ -2421,6 +2423,7 @@ class AutoImportWorker:
                 _owner = _owner_breadcrumb(file_path, consume=True)
                 if _owner:
                     context['profile_id'] = _owner
+                    import_owners.add(_owner)
 
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)
@@ -2489,18 +2492,20 @@ class AutoImportWorker:
         # Emit automation events
         if processed > 0 and self._automation_engine:
             try:
-                self._automation_engine.emit('import_completed', {
+                # staged files with no owner breadcrumb are the install's
+                from core.automation.owners import owned
+                self._automation_engine.emit('import_completed', owned({
                     'track_count': str(processed),
                     'album_name': album_name,
                     'artist': artist_name,
-                })
-                self._automation_engine.emit('batch_complete', {
+                }, import_owners))
+                self._automation_engine.emit('batch_complete', owned({
                     'playlist_name': f'Import: {album_name}',
                     'artist': artist_name,
                     'total_tracks': str(len(match_result.get('matches', []))),
                     'completed_tracks': str(processed),
                     'failed_tracks': str(len(errors)),
-                })
+                }, import_owners))
             except Exception as e:
                 logger.debug("automation emit failed: %s", e)
 

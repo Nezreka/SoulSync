@@ -9,6 +9,12 @@ person in profile management.
 
 nothing set = music only and no limit, exactly what sign-up made before
 these settings existed.
+
+people and permissions (#2166): a new profile now follows the sign-up
+template ("New people start as" under People > Templates). these settings
+moved there once (core.permission_store.move_signup_settings); they still
+write the profile's columns first, which is only what it keeps if it can't
+be put on the template.
 """
 
 from __future__ import annotations
@@ -92,6 +98,9 @@ def create_signup_profile(db, name: str, access: SignupAccess, *, can_download: 
         if not db.update_profile(pid, request_limit=access.request_limit,
                                  request_limit_days=access.request_limit_days):
             logger.warning("Sign-up: profile %s made, but its request limit wasn't saved", pid)
+    if pid and hasattr(db, "get_permission_inputs"):
+        from core.permission_store import place_new_signup
+        place_new_signup(db, pid)
     return pid
 
 

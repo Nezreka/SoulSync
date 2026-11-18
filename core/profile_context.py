@@ -211,6 +211,8 @@ def admin_only(view_fn):
                 "error": "Admin access required",
             }), 403
         return view_fn(*args, **kwargs)
+    # the route inventory (tests/test_route_permissions.py) reads this
+    wrapper._soulsync_access = ("admin", None)
     return wrapper
 
 
@@ -234,6 +236,7 @@ def admin_or_api_key(view_fn):
         if refused is not None:
             return refused
         return view_fn(*args, **kwargs)
+    wrapper._soulsync_access = ("admin", None)
     return wrapper
 
 

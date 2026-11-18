@@ -22,6 +22,7 @@ from core.help import bundle as help_bundle
 from core.help import health as help_health
 from core.help import logs as help_logs
 from core import profile_context
+from core.permissions import signed_in
 from core.profile_context import admin_only
 from utils.logging_config import get_logger
 
@@ -185,7 +186,9 @@ def _no_such_log():
 
 # ---------------------------------------------------------------- routes
 @bp.route("/api/help/status", methods=["GET"])
+@signed_in
 def help_status():
+    # every profile's ? button asks; only an admin gets an answer
     if not profile_context.is_admin_request():
         return jsonify({})
     return jsonify(help_health.status_snapshot())

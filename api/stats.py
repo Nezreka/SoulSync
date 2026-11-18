@@ -19,6 +19,8 @@ from flask import Blueprint, jsonify, request
 from core.metadata import is_internal_image_host
 from core.profile_context import get_current_profile_id, is_admin_request
 from utils.logging_config import get_logger
+from core.permissions import requires, signed_in
+from core.profile_context import admin_only
 
 logger = get_logger("api.stats")
 
@@ -65,6 +67,7 @@ from core.stats import queries as _stats_queries
 
 
 @bp.route('/api/stats/cached', methods=['GET'])
+@requires("music.access")
 def stats_cached():
     """Get all pre-computed stats for a time range from cache. Instant response."""
     try:
@@ -76,6 +79,7 @@ def stats_cached():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/year', methods=['GET'])
+@requires("music.stats")
 def stats_year_in_listening():
     """Your Year in Listening — one fixed twelve-month period, not a range.
 
@@ -91,6 +95,7 @@ def stats_year_in_listening():
 
 
 @bp.route('/api/stats/album-tracks/<album_id>', methods=['GET'])
+@requires("music.access")
 def stats_album_tracks(album_id):
     """An owned album's tracks, ready for the media player's queue.
 
@@ -106,6 +111,7 @@ def stats_album_tracks(album_id):
 
 
 @bp.route('/api/stats/overview', methods=['GET'])
+@requires("music.stats")
 def stats_overview():
     """Get aggregate listening stats for a time range."""
     try:
@@ -116,6 +122,7 @@ def stats_overview():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-artists', methods=['GET'])
+@requires("music.stats")
 def stats_top_artists():
     """Get top artists by play count."""
     try:
@@ -128,6 +135,7 @@ def stats_top_artists():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-albums', methods=['GET'])
+@requires("music.stats")
 def stats_top_albums():
     """Get top albums by play count."""
     try:
@@ -140,6 +148,7 @@ def stats_top_albums():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-tracks', methods=['GET'])
+@requires("music.stats")
 def stats_top_tracks():
     """Get top tracks by play count."""
     try:
@@ -152,6 +161,7 @@ def stats_top_tracks():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/timeline', methods=['GET'])
+@requires("music.stats")
 def stats_timeline():
     """Get play count per time period for chart rendering."""
     try:
@@ -164,6 +174,7 @@ def stats_timeline():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/genres', methods=['GET'])
+@requires("music.stats")
 def stats_genres():
     """Get genre distribution by play count."""
     try:
@@ -174,6 +185,7 @@ def stats_genres():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/library-health', methods=['GET'])
+@requires("music.stats")
 def stats_library_health():
     """Get library health metrics."""
     try:
@@ -183,6 +195,7 @@ def stats_library_health():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/db-storage', methods=['GET'])
+@requires("music.stats")
 def stats_db_storage():
     """Get database storage breakdown by table."""
     try:
@@ -192,6 +205,7 @@ def stats_db_storage():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/library-disk-usage', methods=['GET'])
+@requires("music.stats")
 def stats_library_disk_usage():
     """Library on-disk size + per-format breakdown.
 
@@ -207,6 +221,7 @@ def stats_library_disk_usage():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/recent', methods=['GET'])
+@requires("music.access")
 def stats_recent():
     """Get recently played tracks."""
     try:
@@ -218,6 +233,7 @@ def stats_recent():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/weekly-digest', methods=['GET'])
+@requires("music.access")
 def stats_weekly_digest():
     """This-week listening digest for the dashboard banner."""
     try:
@@ -295,6 +311,7 @@ def _fix_stats_listening_image_url(thumb_url):
         return url
 
 @bp.route('/api/stats/listening-events', methods=['GET'])
+@requires("music.stats")
 def stats_listening_events():
     """Rows behind a clicked listening stats chart segment."""
     try:
@@ -324,6 +341,7 @@ def stats_listening_events():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/lyrics/fetch', methods=['POST'])
+@requires("music.access")
 def fetch_lyrics_endpoint():
     """Fetch lyrics for the now-playing media player.
 
@@ -440,6 +458,7 @@ def fetch_lyrics_endpoint():
 
 
 @bp.route('/api/stats/resolve-track', methods=['POST'])
+@requires("music.access")
 def stats_resolve_track():
     """Resolve a track by title+artist to get its file_path for playback."""
     try:
@@ -457,6 +476,7 @@ def stats_resolve_track():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/listening-stats/sync', methods=['POST'])
+@requires("music.stats")
 def listening_stats_sync():
     """Trigger an immediate listening stats poll."""
     try:
@@ -468,6 +488,7 @@ def listening_stats_sync():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/listening-stats/status', methods=['GET'])
+@requires("music.stats")
 def listening_stats_status():
     """Get listening stats worker status."""
     try:
@@ -544,6 +565,7 @@ def _run_own(worker, body):
 
 
 @bp.route('/api/lastfm/listening-import/status', methods=['GET'])
+@signed_in
 def lastfm_listening_import_status():
     """Get Last.fm listening-history import status."""
     try:
@@ -578,6 +600,7 @@ def lastfm_listening_import_status():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/lastfm/listening-import/run', methods=['POST'])
+@requires("music.stats")
 def lastfm_listening_import_run():
     """Start or update the Last.fm listening-history import."""
     try:
@@ -603,6 +626,7 @@ def lastfm_listening_import_run():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/lastfm/listening-import/cancel', methods=['POST'])
+@requires("music.stats")
 def lastfm_listening_import_cancel():
     """Cancel the active Last.fm listening-history import."""
     try:
@@ -618,6 +642,7 @@ def lastfm_listening_import_cancel():
 
 
 @bp.route('/api/listenbrainz/listening-import/status', methods=['GET'])
+@signed_in
 def listenbrainz_listening_import_status():
     """Get ListenBrainz listening-history import status."""
     try:
@@ -649,6 +674,7 @@ def listenbrainz_listening_import_status():
 
 
 @bp.route('/api/listenbrainz/listening-import/run', methods=['POST'])
+@requires("music.stats")
 def listenbrainz_listening_import_run():
     """Start or update the ListenBrainz listening-history import."""
     try:
@@ -675,6 +701,7 @@ def listenbrainz_listening_import_run():
 
 
 @bp.route('/api/listenbrainz/listening-import/cancel', methods=['POST'])
+@requires("music.stats")
 def listenbrainz_listening_import_cancel():
     """Cancel the active ListenBrainz listening-history import."""
     try:

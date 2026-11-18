@@ -1048,6 +1048,7 @@ def _run_deep_scan_task(server_type, run_epoch=None):
 
 
 @bp.route('/api/database/stats', methods=['GET'])
+@admin_only
 def get_database_stats():
     """Endpoint to get current database statistics."""
     try:
@@ -1102,6 +1103,7 @@ def start_database_update():
     return jsonify({"success": True, "message": "Database update started."})
 
 @bp.route('/api/database/update/status', methods=['GET'])
+@admin_only
 def get_database_update_status():
     """Endpoint to poll for the current update status."""
     _check_db_update_stall()  # self-heal a hung job before reporting (#859)

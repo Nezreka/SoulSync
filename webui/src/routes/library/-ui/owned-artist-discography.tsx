@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { acquireVerb, profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import type { ProviderRelease } from '../-library-v2.api';
 
@@ -38,13 +38,14 @@ export function OwnedArtistDiscographyButton({
   providerIds: Partial<Record<string, string>> | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  // ask first says Request; can't request (#2166) has no button at all
+  const { asksFirst, cantRequest, verb } = useMusicGet();
   const identity = preferredProviderIdentity(providerIds);
   const detail = useQuery({
     ...artistDetailQueryOptions(identity?.source ?? '', identity?.id ?? '', artistName),
     enabled: open && identity != null,
   });
-  if (!identity) return null;
-  const asksFirst = profileAsksFirst();
+  if (!identity || cantRequest) return null;
   const payload = detail.data?.success === false ? null : detail.data;
   const failure = detail.isError
     ? (detail.error as Error)?.message
@@ -64,7 +65,7 @@ export function OwnedArtistDiscographyButton({
           <LineIcon name="download" />
         </span>
         <span className="discog-btn-text">
-          {open && detail.isFetching ? 'Loading discography…' : `${acquireVerb()} Discography`}
+          {open && detail.isFetching ? 'Loading discography…' : `${verb} Discography`}
         </span>
       </button>
       {open && failure !== null ? (

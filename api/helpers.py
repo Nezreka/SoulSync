@@ -133,3 +133,25 @@ def download_permission_error():
     if reason:
         return jsonify({"success": False, "error": reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None
+
+
+def media_download_error(permission: str):
+    """download_permission_error for one kind of media (#2166): when the
+    request carries a permission map (every signed-in profile behind the
+    profile gate), ``permission`` (books.get, podcasts.get) on "download" in
+    that map, under the global policy, is the whole answer: getting books or
+    episodes is its own row, so a member who asks first for music can still
+    get audiobooks right away, and the other way round (follow-up 14). with
+    no map (an api key, or a helper unit-tested without the gate) the
+    profile's one download switch answers, as before. the permission names
+    the media, never the profile: that is still the session's."""
+    from flask import g, has_request_context
+
+    from core.permissions import map_refuses, refusal
+    try:
+        has_map = has_request_context() and "perms" in g
+    except Exception:  # noqa: BLE001 - can't tell, the switch answers
+        has_map = False
+    if has_map:
+        return refusal(permission) if map_refuses(permission, "download") else None
+    return download_permission_error()

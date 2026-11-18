@@ -26,6 +26,7 @@ import { useEffect } from 'react';
 
 import { FinishSetupCard } from '@/features/onboarding/checklist-card';
 import { useFeatureOn } from '@/platform/features';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import { useDashboardHeader } from '../-dash.header';
 import { ActiveDownloadsShell } from './active-downloads-shell';
@@ -43,7 +44,10 @@ export function DashboardPage() {
   const header = useDashboardHeader();
   // cards for parts this profile switched off stay off the dashboard (#1909)
   const statsOn = useFeatureOn('stats');
-  const playlistsOn = useFeatureOn('playlists');
+  // playlist sync off for this profile: no sync rail, its auto-sync runs
+  // aren't theirs (#2166)
+  const playlistSync = usePermNotOff('music.playlist_sync');
+  const playlistsOn = useFeatureOn('playlists') && playlistSync;
   const automationsOn = useFeatureOn('automations');
 
   useEffect(() => {

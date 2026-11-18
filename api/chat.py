@@ -28,6 +28,7 @@ from urllib.parse import urljoin, urlparse
 from flask import Blueprint, g, jsonify, request
 
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("chat.api")
 
@@ -847,6 +848,7 @@ def create_blueprint() -> Blueprint:
     _ARCADE_MAX_STAKE = 1000
 
     @bp.route("/api/chat/arcade/bank", methods=["GET"])
+    @requires("chat.use")
     def arcade_bank_get():
         db = _db()
         if db is None:
@@ -854,6 +856,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(db.get_arcade_bank(int(getattr(g, "profile_id", 1) or 1)))
 
     @bp.route("/api/chat/arcade/bank", methods=["POST"])
+    @requires("chat.use")
     def arcade_bank_adjust():
         """Stake or collect. Bounded per call so a typo (or a bug) cannot mint
         a fortune in one request; going below zero is refused outright, which
@@ -874,6 +877,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(out)
 
     @bp.route("/api/chat/settings", methods=["GET"])
+    @requires("chat.use")
     def chat_settings_get():
         """The chat settings for the cog modal (admin-only — these are
         server-wide). The GIPHY key is never echoed back, only whether one
@@ -906,6 +910,7 @@ def create_blueprint() -> Blueprint:
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
+    @requires("chat.use")
     def chat_settings_set():
         if not bool(getattr(g, "is_admin", True)):
             return jsonify({"error": "Admin access required"}), 403
@@ -994,6 +999,7 @@ def create_blueprint() -> Blueprint:
         return chat_settings_get()
 
     @bp.route("/api/chat/room/react", methods=["POST"])
+    @requires("chat.use")
     def chat_room_react():
         """Send a reaction: an empty-text envelope carrying {re:{k,e}} that
         SoulSync clients aggregate into chips (other clients see line noise).
@@ -1029,6 +1035,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True})
 
     @bp.route("/api/chat/user/<path:username>", methods=["GET"])
+    @requires("chat.use")
     def chat_user_card(username):
         """The user popover: presence + info card from slskd, best-effort
         per field (peers can be offline / refuse info)."""
@@ -1066,6 +1073,7 @@ def create_blueprint() -> Blueprint:
         return jsonify(out)
 
     @bp.route("/api/chat/user/<path:username>/note", methods=["POST"])
+    @requires("chat.use")
     def chat_user_note_set(username):
         """Save the local, private note for a user ('' clears it)."""
         if not _can_use_shared_account():
@@ -1080,6 +1088,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True, "note": note.strip()})
 
     @bp.route("/api/chat/user/<path:username>/shares", methods=["GET"])
+    @requires("chat.use")
     def chat_user_shares(username):
         """Browse a peer's shares: their directory list (names + file counts).
         Files are fetched per-directory — big shares are tens of thousands of
@@ -1103,6 +1112,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"username": username, "directories": dirs})
 
     @bp.route("/api/chat/user/<path:username>/shares/files", methods=["GET"])
+    @requires("chat.use")
     def chat_user_share_files(username):
         """One directory of a peer's share: [{filename, size}]."""
         client = _client()
@@ -1129,6 +1139,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"username": username, "directory": directory, "files": out})
 
     @bp.route("/api/chat/user/<path:username>/download", methods=["POST"])
+    @requires("chat.use")
     def chat_user_download(username):
         """Queue files from a peer's share into the normal slskd download
         pipeline (they land in the downloads folder and import like any other
@@ -1138,6 +1149,9 @@ def create_blueprint() -> Blueprint:
             return jsonify({"error": "Soulseek (slskd) is not configured"}), 503
         if not (bool(getattr(g, "is_admin", True)) or bool(getattr(g, "can_download", True))):
             return jsonify({"error": "Your profile can't start downloads"}), 403
+        from core.permissions import can, enforcing, refusal
+        if enforcing() and not can(None, "music.get", "download"):
+            return refusal("music.get")
         files = (request.get_json(silent=True) or {}).get("files")
         if not isinstance(files, list) or not files:
             return jsonify({"error": "files required"}), 400
@@ -1161,6 +1175,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True, "queued": queued, "failed": len(files) - queued})
 
     @bp.route("/api/chat/gifs", methods=["GET"])
+    @requires("chat.use")
     def chat_gifs():
         """GIF search (GIPHY — Tenor's API was shut down June 2026), proxied so
         the API key never reaches the browser. Key: ``soulseek.chat_giphy_key``
@@ -1194,6 +1209,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"gifs": gifs})
 
     @bp.route("/api/chat/files/library-search", methods=["GET"])
+    @requires("chat.use")
     def chat_files_library_search():
         """Pick-a-track-from-your-library search for the share flow: title or
         artist match, only tracks with a stored file path in the caller's
@@ -1228,6 +1244,7 @@ def create_blueprint() -> Blueprint:
                 logger.debug("chat: song index refresh failed", exc_info=True)
 
     @bp.route("/api/chat/wanted/resolve-share", methods=["POST"])
+    @requires("chat.use")
     def chat_wanted_resolve_share():
         """Look up local library files matching a Wanted/ISO card, computing the
         relative share filenames for Soulseek P2P direct sharing."""
@@ -1428,6 +1445,7 @@ def create_blueprint() -> Blueprint:
                 conn.close()
 
     @bp.route("/api/chat/files/upload", methods=["POST"])
+    @requires("chat.use")
     def chat_files_upload():
         """Upload to filepost.dev and hand back the CDN link + metadata.
 
@@ -1509,6 +1527,7 @@ def create_blueprint() -> Blueprint:
                         "size": size, "mime": mime})
 
     @bp.route("/api/chat/files/import", methods=["POST"])
+    @requires("chat.use")
     def chat_files_import():
         """Save a shared audio file into YOUR library: fetch the filepost link
         into the auto-import staging folder, where the import pipeline picks it
@@ -1565,6 +1584,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True, "name": name, "bytes": got, "auto_import": auto})
 
     @bp.route("/api/chat/rooms", methods=["GET"])
+    @requires("chat.use")
     def chat_rooms():
         """The rooms rail: home room + joined extras. Any profile can read;
         managing the set is admin-only (the account's room memberships are
@@ -1577,6 +1597,7 @@ def create_blueprint() -> Blueprint:
         })
 
     @bp.route("/api/chat/rooms/available", methods=["GET"])
+    @requires("chat.use")
     def chat_rooms_available():
         """The room browser: every public Soulseek room with its user count.
         The full list is a few thousand rooms — cached 5 minutes; the page
@@ -1606,6 +1627,7 @@ def create_blueprint() -> Blueprint:
                         "can_manage": bool(getattr(g, "is_admin", True))})
 
     @bp.route("/api/chat/rooms/join", methods=["POST"])
+    @requires("chat.use")
     def chat_rooms_join():
         """Admin joins a public room: persisted to config (slskd forgets rooms
         on restart; the hydrate re-joins on demand) + joined now."""
@@ -1633,6 +1655,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True, "room": room})
 
     @bp.route("/api/chat/rooms/leave", methods=["POST"])
+    @requires("chat.use")
     def chat_rooms_leave():
         """Admin leaves an extra room (config + slskd). The home room is left
         via the auto-join setting, not here — one obvious path each."""
@@ -1657,6 +1680,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True})
 
     @bp.route("/api/chat/status", methods=["GET"])
+    @requires("chat.use")
     def chat_status():
         """Cheap page hydrate: is chat usable, which room, may I send."""
         client = _client()
@@ -1672,6 +1696,7 @@ def create_blueprint() -> Blueprint:
         })
 
     @bp.route("/api/chat/room", methods=["GET"])
+    @requires("chat.use")
     def chat_room():
         """A joined room (?room=…, default the community room): ensure joined,
         then messages + user list."""
@@ -1789,6 +1814,7 @@ def create_blueprint() -> Blueprint:
                         "protocol": feed})
 
     @bp.route("/api/chat/room/protocol", methods=["POST"])
+    @requires("chat.use")
     def chat_room_protocol_send():
         """Send a PROTOCOL carrier into the room: an empty-text envelope whose
         'p' object coordinates SoulSync clients (a vote, a beacon, a pin).
@@ -1827,6 +1853,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True})
 
     @bp.route("/api/chat/jukebox/resolve", methods=["POST"])
+    @requires("chat.use")
     def chat_jukebox_resolve():
         """Turn a user's jukebox input into candidate tracks.
 
@@ -1879,6 +1906,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"results": results})
 
     @bp.route("/api/chat/link-preview", methods=["GET"])
+    @requires("chat.use")
     def chat_link_preview():
         """Fetch OpenGraph and page metadata for an external link in chat."""
         raw_url = str(request.args.get("url") or "").strip()
@@ -1956,6 +1984,7 @@ def create_blueprint() -> Blueprint:
         return "vibe", "", "", " ".join(keep[:6])[:80]
 
     @bp.route("/api/chat/jukebox/radio", methods=["POST"])
+    @requires("chat.use")
     def chat_jukebox_radio():
         if not _can_send():
             return jsonify({"error": "Chat sending is admin-only on this server"}), 403
@@ -2076,6 +2105,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"query": None, "why": "no similar data"})
 
     @bp.route("/api/chat/room/history", methods=["GET"])
+    @requires("chat.use")
     def chat_room_history():
         """Scrollback: a page of archived messages strictly OLDER than
         ``before`` (a timestamp), oldest-first within the page."""
@@ -2094,6 +2124,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"messages": msgs, "done": len(msgs) < limit})
 
     @bp.route("/api/chat/room/search", methods=["GET"])
+    @requires("chat.use")
     def chat_room_search():
         """Archive search: ?room=&q= → newest-first matches (message text or
         sender). Local archive only — Soulseek has no server-side history."""
@@ -2109,6 +2140,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"messages": db.search_chat_messages(room, qstr), "q": qstr})
 
     @bp.route("/api/chat/room/message", methods=["POST"])
+    @requires("chat.use")
     def chat_room_send():
         client = _client()
         if client is None:
@@ -2266,6 +2298,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True})
 
     @bp.route("/api/chat/conversations", methods=["GET"])
+    @requires("chat.use")
     def chat_conversations():
         client = _client()
         if client is None:
@@ -2282,6 +2315,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"conversations": convos or [], "can_send": _can_send()})
 
     @bp.route("/api/chat/conversations/<path:username>", methods=["GET"])
+    @requires("chat.use")
     def chat_conversation(username):
         client = _client()
         if client is None:
@@ -2310,6 +2344,7 @@ def create_blueprint() -> Blueprint:
                         "can_send": _can_send()})
 
     @bp.route("/api/chat/conversations/<path:username>", methods=["POST"])
+    @requires("chat.use")
     def chat_conversation_send(username):
         client = _client()
         if client is None:

@@ -162,16 +162,28 @@
                                                     </label>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>Jellyfin users with no profile request as:</label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="seerr-compat-refuse-unknown">
+                                                        Refuse Jellyfin users with no profile
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Jellyfin users with no profile act as:</label>
                                                     <select id="seerr-compat-profile">
                                                         <option value="1">Loading...</option>
                                                     </select>
                                                     <div class="setting-help-text"
                                                         style="margin-top: 4px; color: #888; font-size: 12px;">
-                                                        A profile that can download gets requests on its wishlist
-                                                        right away. One without download rights sends them to the
-                                                        Requests page for approval first.
+                                                        Right now anyone without a profile browses and requests as
+                                                        this profile, with its permissions. Turn on Refuse above to
+                                                        stop that.
                                                     </div>
+                                                </div>
+                                                <div class="setting-help-text"
+                                                    style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                    Each person gets what their profile allows: movies and shows
+                                                    separately, Download right away or Ask first, their rating
+                                                    limit, request limit and quality.
                                                 </div>
                                             </div>
                                         </div>

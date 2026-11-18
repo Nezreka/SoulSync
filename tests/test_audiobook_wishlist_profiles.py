@@ -37,6 +37,8 @@ def owners_may_download(monkeypatch):
     tested in tests/test_security_nov17_audiobooks.py."""
     import core.permissions as perms
     monkeypatch.setattr(perms, "owner_may_download", lambda pid, get_profile=None: True)
+    # books.get is its own permission (#2166): the passes ask owner_may_get
+    monkeypatch.setattr(perms, "owner_may_get", lambda pid, permission, db=None: True)
 
 
 @pytest.fixture

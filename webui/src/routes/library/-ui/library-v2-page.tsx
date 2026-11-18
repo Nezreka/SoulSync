@@ -37,7 +37,7 @@ import {
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -8700,6 +8700,8 @@ function ProviderArtistActions({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // ask first says Request; can't request (#2166) has no button at all
+  const musicGet = useMusicGet();
   const watchlistId = watchlist?.id ?? null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
@@ -8748,14 +8750,14 @@ function ProviderArtistActions({
           {busy ? 'Loading…' : watching ? 'Watching' : 'Add to Watchlist'}
         </button>
       ) : null}
-      {payload.discography ? (
+      {payload.discography && !musicGet.cantRequest ? (
         <button
           type="button"
           className={`library-artist-download-btn ${styles.heroSecondary}`}
           onClick={() => setDownloading(true)}
         >
           <SvgIcon name="download" />
-          {profileAsksFirst() ? 'Request Discography' : 'Download Discography'}
+          {musicGet.asksFirst ? 'Request Discography' : 'Download Discography'}
         </button>
       ) : null}
       {downloading && payload.discography ? (

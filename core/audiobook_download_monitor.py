@@ -21,7 +21,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -714,7 +714,7 @@ def tick(db: Any = None) -> Dict[str, int]:
                 )
             _forget_fallbacks(asin)
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
-            _announce_import(row, imported_path)
+            _announce_import(row, imported_path, _asin_owners(database, asin))
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
             # waiting for the rest of itself, which is a normal state a torrent
@@ -724,12 +724,14 @@ def tick(db: Any = None) -> Dict[str, int]:
             # told once, when the hold starts: the row stays staged for every
             # later tick and a message per poll would be spam
             if row.get("status") != "staged":
-                _announce_row("audiobook_import_needs_attention", row, reason=held_msg)
+                _announce_row("audiobook_import_needs_attention", row, owners=_asin_owners(database, asin),
+                              reason=held_msg)
             mark_status(row["download_id"], "importing", held_reason=held_msg, release_title=release_title)
         elif patch.get("status") == "failed":
             mark_status(row["download_id"], "failed", error=str(patch.get("error") or ""), release_title=release_title)
             summary["failed"] += 1
-            _announce_row("audiobook_download_failed", row, error=str(patch.get("error") or ""))
+            _announce_row("audiobook_download_failed", row, owners=_asin_owners(database, asin),
+                          error=str(patch.get("error") or ""))
             _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:
                 database.mark_wishlist_status(
@@ -740,7 +742,21 @@ def tick(db: Any = None) -> Dict[str, int]:
     return summary
 
 
-def _announce_import(row: Dict[str, Any], imported_path: str) -> None:
+def _asin_owners(database: Any, asin: str) -> List[int]:
+    """the profiles that wanted this book: its wishlist rows' owners. the
+    library is shared, so a download is everyone's who asked for it. none
+    known (a manual grab): the event is the install's."""
+    if not asin:
+        return []
+    try:
+        return [pid for pid in database.profiles_with_rows()
+                if database.get_wishlist_entry(asin, profile_id=pid)]
+    except Exception:                                       # noqa: BLE001
+        logger.debug("Could not read who wanted %s", asin, exc_info=True)
+        return []
+
+
+def _announce_import(row: Dict[str, Any], imported_path: str, owners: Any = None) -> None:
     """Tell the automation engine a book landed, as the music importers do.
 
     ``import_completed`` is the trigger Settings offers for "an import
@@ -753,17 +769,19 @@ def _announce_import(row: Dict[str, Any], imported_path: str) -> None:
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not describe the imported book: %s", exc)
         book = {}
-    announce("import_completed",
+    announce("import_completed", owner=owners,
              track_count=1,
              album_name=book.get("title") or row.get("title") or "",
              artist=first_author(book, row.get("author") or ""))
 
 
-def _announce_row(event_type: str, row: Dict[str, Any], **extra: Any) -> None:
-    """A download event for ``row``: its title and author plus ``extra``."""
+def _announce_row(event_type: str, row: Dict[str, Any], owners: Any = None, **extra: Any) -> None:
+    """A download event for ``row``: its title and author plus ``extra``,
+    for the profiles that wanted it."""
     from core.audiobook_events import announce
 
-    announce(event_type, title=row.get("title") or "", author=row.get("author") or "", **extra)
+    announce(event_type, owner=owners, title=row.get("title") or "", author=row.get("author") or "",
+             **extra)
 
 
 def _fallback_limit() -> int:

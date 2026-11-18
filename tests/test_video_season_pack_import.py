@@ -382,6 +382,7 @@ def test_the_batch_row_does_not_publish_a_second_notification():
     import types
     mod = types.ModuleType("core.video.download_events")
     mod.publish = lambda name, payload: published.append(name)
+    mod.owned = lambda data, owner: data
     old = sys.modules.get("core.video.download_events")
     sys.modules["core.video.download_events"] = mod
     try:

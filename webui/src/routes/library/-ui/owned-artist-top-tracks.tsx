@@ -1,6 +1,6 @@
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { getShellBridge } from '@/platform/shell/bridge';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import type { ArtistDetailTrack } from '../../artist-detail/-artist-detail.types';
 
@@ -32,7 +32,8 @@ export function OwnedTopTrackActions({
   artistId: unknown;
   downloadable: boolean;
 }) {
-  const asksFirst = profileAsksFirst();
+  // ask first says Request; can't request (#2166) has no button
+  const { asksFirst, cantRequest } = useMusicGet();
   const wishlist = async () => {
     if (window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) return;
     try {
@@ -82,7 +83,7 @@ export function OwnedTopTrackActions({
         className="hero-top-track-add"
         size={12}
       />
-      {downloadable ? (
+      {downloadable && !cantRequest ? (
         <button
           type="button"
           className="hero-top-track-download"
@@ -111,8 +112,8 @@ export function OwnedTopTracksDownloadAll({
   artistName: string;
   artistId: unknown;
 }) {
-  if (!tracks.length) return null;
-  const asksFirst = profileAsksFirst();
+  const { asksFirst, cantRequest } = useMusicGet();
+  if (!tracks.length || cantRequest) return null;
   return (
     <button
       type="button"

@@ -48,7 +48,7 @@ function quotaNote(quota: RequestQuota | null) {
   if (!quota) return null;
   return (
     <Note>
-      You've used {quota.used} of your {plural(quota.limit, 'request')} in the last{' '}
+      You've used {quota.used} of your {plural(quota.limit, 'music request')} in the last{' '}
       {plural(quota.days, 'day')}.
     </Note>
   );
@@ -63,9 +63,9 @@ function quotaAnswers(quota: RequestQuota | null): PageAnswer[] {
       live: true,
       body: (
         <p>
-          You've used all {plural(quota.limit, 'request')} for the last {plural(quota.days, 'day')}.
-          Each one stops counting {quota.days} days after you made it, so you can ask again as they
-          drop off.
+          You've used all {plural(quota.limit, 'music request')} for the last{' '}
+          {plural(quota.days, 'day')}. Each one stops counting {quota.days} days after you made it,
+          so you can ask again as they drop off. Movies and TV have limits of their own.
         </p>
       ),
     },

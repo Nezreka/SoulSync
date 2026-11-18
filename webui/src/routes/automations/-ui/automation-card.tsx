@@ -361,6 +361,8 @@ export function AutomationCard({
 
   const enabled = a.enabled === true || a.enabled === 1;
   const isSystem = a.is_system === true || a.is_system === 1;
+  // running a system automation is an admin's (S4): a member's row drops Run
+  const mayRun = !isSystem || window.SOULSYNC_BOOT_PROFILE?.is_admin !== false;
   const running = isRunning(progress);
   const now = Date.now();
   const meta = automationMeta(a, now, paused);
@@ -452,20 +454,22 @@ export function AutomationCard({
             />
             <span aria-hidden="true" />
           </label>
-          <button
-            type="button"
-            className="automx-icon-btn"
-            title="Run now"
-            aria-label={`Run ${a.name} now`}
-            onClick={(event) => {
-              stop(event);
-              on.onRun?.(a);
-            }}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4 2.5v11l9-5.5z" />
-            </svg>
-          </button>
+          {mayRun && (
+            <button
+              type="button"
+              className="automx-icon-btn"
+              title="Run now"
+              aria-label={`Run ${a.name} now`}
+              onClick={(event) => {
+                stop(event);
+                on.onRun?.(a);
+              }}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 2.5v11l9-5.5z" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             className="automx-icon-btn automx-chevron"
@@ -536,13 +540,15 @@ export function AutomationCard({
             </div>
 
             <div className="automx-detail-acts">
-              <button
-                type="button"
-                className="automx-cap automx-cap-primary"
-                onClick={() => on.onRun?.(a)}
-              >
-                Run now
-              </button>
+              {mayRun && (
+                <button
+                  type="button"
+                  className="automx-cap automx-cap-primary"
+                  onClick={() => on.onRun?.(a)}
+                >
+                  Run now
+                </button>
+              )}
               <button type="button" className="automx-cap" onClick={() => on.onEdit?.(a)}>
                 Edit
               </button>

@@ -21,6 +21,7 @@ from api.source_playlists import (
 from core.profile_context import admin_only
 from core.settings import config_manager
 from utils.logging_config import get_logger
+from core.permissions import signed_in
 
 logger = get_logger("web_server")
 
@@ -189,6 +190,7 @@ def hydrabase_disconnect():
     return jsonify({"success": True})
 
 @bp.route('/api/hydrabase/status')
+@signed_in
 def hydrabase_status():
     """Check if connected to Hydrabase."""
     try:
@@ -214,6 +216,7 @@ def hydrabase_status():
     })
 
 @bp.route('/api/hydrabase/comparisons')
+@admin_only
 def hydrabase_comparisons():
     """Get recent comparison results (Hydrabase vs Spotify vs fallback source)."""
     if not _dev_mode_enabled():

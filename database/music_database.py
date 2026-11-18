@@ -1645,6 +1645,9 @@ class MusicDatabase:
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_device_oidc_session(cursor)
+            # people and permissions (#2166): templates, policy, personal
+            # changes. after every profile column above it reads
+            self._add_permission_layers(cursor)
             self._revoke_stale_device_rows(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -5810,6 +5813,152 @@ class MusicDatabase:
             'disabled': bool(val('disabled', 0)),
         }
 
+    # ── people and permissions (#2166, #2167, #2168) ─────────────────────
+    # global policy (metadata perm_policy) > template (permission_templates) >
+    # personal changes (profiles.perm_overrides) = effective. the old profile
+    # columns stay as the written-through cache; see core/permissions.py.
+
+    def _add_permission_layers(self, cursor):
+        """the tables and the zero-change mapping. idempotent and safe on a
+        live install: it only ever adds a table, two columns and metadata
+        keys, and writes template_id / perm_overrides for a profile whose
+        mapping recomputes to exactly what its old columns do. it never
+        writes an old column. a profile that doesn't map keeps its columns,
+        stays template-less and is listed in perm_needs_look."""
+        try:
+            cursor.execute("PRAGMA table_info(profiles)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if not cols:
+                return
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS permission_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slug TEXT UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    perms TEXT NOT NULL,
+                    sidebar TEXT,
+                    builtin INTEGER NOT NULL DEFAULT 0,
+                    sort INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            for col, decl in (("template_id", "INTEGER"), ("perm_overrides", "TEXT")):
+                if col not in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE profiles ADD COLUMN {col} {decl}")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" not in str(e).lower():
+                            raise
+            cursor.execute("SELECT value FROM metadata WHERE key = 'perm_migrated_v1' LIMIT 1")
+            if not cursor.fetchone():
+                self._seed_permission_templates(cursor)
+                cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('perm_policy', '{}')")
+                cursor.execute("SELECT id FROM permission_templates WHERE slug = 'guest'")
+                guest = cursor.fetchone()
+                if guest:
+                    cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('perm_signup_template', ?)",
+                                   (str(guest[0]),))
+                cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('perm_migrated_v1', '1')")
+            self._map_legacy_profiles(cursor)
+        except Exception as e:
+            logger.error(f"Error in permission layers migration: {e}")
+
+    def _seed_permission_templates(self, cursor):
+        """the four built-ins from init.js PROFILE_PRESETS, each with what
+        new profiles see today (ui_features_default) as its sidebar."""
+        from core.permissions import BUILTIN_TEMPLATES
+        cursor.execute("SELECT value FROM metadata WHERE key = 'ui_features_default' LIMIT 1")
+        row = cursor.fetchone()
+        sidebar = {"off": [], "locked": False}
+        if row and row[0]:
+            try:
+                saved = json.loads(row[0])
+                if isinstance(saved, dict):
+                    from core.ui_features import normalize_off
+                    sidebar = {"off": normalize_off(saved.get("off")), "locked": bool(saved.get("locked"))}
+            except (TypeError, ValueError):
+                pass
+        for order, tpl in enumerate(BUILTIN_TEMPLATES):
+            cursor.execute(
+                "INSERT OR IGNORE INTO permission_templates (slug, name, description, perms, sidebar, builtin, sort) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?)",
+                (tpl["slug"], tpl["name"], tpl["description"], json.dumps(tpl["perms"], sort_keys=True),
+                 json.dumps(sidebar), order))
+
+    def _legacy_profile_from_row(self, row, columns) -> Dict[str, Any]:
+        """the permission fields of a profile row, read the way get_profile
+        reads them (so the mapping sees what every check sees)."""
+        is_admin = bool(row['is_admin'])
+        ap_raw = row['allowed_pages'] if 'allowed_pages' in columns else None
+        try:
+            pages = json.loads(ap_raw) if ap_raw else None
+        except (TypeError, ValueError):
+            pages = {"unreadable": ap_raw}
+        return {
+            'id': row['id'], 'name': row['name'], 'is_admin': is_admin,
+            'allowed_pages': pages,
+            'allowed_sides': self._profile_sides(row, columns, is_admin),
+            'can_download': bool(row['can_download']) if 'can_download' in columns else True,
+            **self._profile_controls(row, columns),
+        }
+
+    def _map_legacy_profiles(self, cursor):
+        """steps 3 and 4: every non-admin profile without a template gets
+        the built-in its old columns already equal, its real differences as
+        personal changes, then a recompute that must match its columns. any
+        mismatch: nothing is written for it and it's listed for a look.
+        runs every boot, so a profile made the old way since is mapped too."""
+        from core.permissions import PermissionDataError, match_template
+        cursor.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1")
+        row = cursor.fetchone()
+        policy = row[0] if row and row[0] else None
+        try:
+            from core.permissions import clean_layer
+            clean_layer(policy)
+        except PermissionDataError as e:
+            logger.error("permission mapping skipped: the global policy is unreadable (%s)", e)
+            return
+        cursor.execute("SELECT id, slug, name, perms FROM permission_templates WHERE builtin = 1 ORDER BY sort, id")
+        templates = []
+        for t in cursor.fetchall():
+            try:
+                perms = json.loads(t['perms'])
+            except (TypeError, ValueError):
+                continue
+            templates.append({"id": t['id'], "slug": t['slug'], "name": t['name'], "perms": perms})
+        cursor.execute("SELECT * FROM profiles WHERE template_id IS NULL AND id != 1 AND COALESCE(is_admin, 0) = 0")
+        rows = cursor.fetchall()
+        if not rows:
+            return
+        columns = [d[0] for d in cursor.description]
+        cursor.execute("SELECT value FROM metadata WHERE key = 'perm_needs_look' LIMIT 1")
+        nl = cursor.fetchone()
+        try:
+            needs_look = json.loads(nl[0]) if nl and nl[0] else {}
+            if not isinstance(needs_look, dict):
+                needs_look = {}
+        except (TypeError, ValueError):
+            needs_look = {}
+        mapped = 0
+        for r in rows:
+            profile = self._legacy_profile_from_row(r, columns)
+            result = match_template(profile, templates, policy)
+            if result["ok"]:
+                cursor.execute("UPDATE profiles SET template_id = ?, perm_overrides = ? "
+                               "WHERE id = ? AND template_id IS NULL",
+                               (result["template_id"], json.dumps(result["overrides"], sort_keys=True), r['id']))
+                needs_look.pop(str(r['id']), None)
+                mapped += 1
+            else:
+                needs_look[str(r['id'])] = result["reasons"]
+                logger.warning("permissions: profile %s (%s) kept on its own settings: %s",
+                               r['id'], profile.get('name'), "; ".join(result["reasons"]))
+        cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('perm_needs_look', ?)",
+                       (json.dumps(needs_look, sort_keys=True),))
+        if mapped:
+            logger.info("permissions: %d profile(s) now follow a template, nothing they can do changed", mapped)
+
     def _add_profile_sides(self, cursor):
         """Add the allowed_sides column ('music'|'video'|'both') to profiles.
 
@@ -9247,6 +9396,23 @@ class MusicDatabase:
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _profile_signin(row, columns) -> str:
+        """how this profile signs in, for the people editor's header (#2166):
+        oidc or plex when an account is linked (sign-in lands on it), else a
+        password, a pin, or just the profile picker."""
+        def has(col):
+            return col in columns and row[col] is not None and row[col] != ''
+        if has('oidc_identity'):
+            return 'oidc'
+        if has('plex_account_id'):
+            return 'plex'
+        if has('password_hash'):
+            return 'password'
+        if has('pin_hash'):
+            return 'pin'
+        return 'picker'
+
     def get_all_profiles(self) -> List[Dict[str, Any]]:
         """Get all profiles"""
         try:
@@ -9282,6 +9448,7 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     })
                 return results
         except Exception as e:
@@ -9321,6 +9488,7 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     }
                 return None
         except Exception as e:
@@ -9354,6 +9522,9 @@ class MusicDatabase:
             logger.error(f"Error creating profile: {e}")
             return None
 
+    _PERMISSION_CACHE_FIELDS = frozenset({'allowed_pages', 'can_download', 'allowed_sides', 'request_limit',
+                                           'request_limit_days', 'hide_explicit', 'max_rating', 'is_admin'})
+
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
         allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
@@ -9380,13 +9551,145 @@ class MusicDatabase:
                     values
                 )
                 conn.commit()
-                return cursor.rowcount > 0
+                ok = cursor.rowcount > 0
+            # an access change made through the old editor reaches the
+            # permission layers, so the effective map and the columns agree
+            if ok and set(updates) & self._PERMISSION_CACHE_FIELDS:
+                try:
+                    from core.permission_store import resync_after_legacy_update
+                    resync_after_legacy_update(self, int(profile_id))
+                except Exception as e:  # noqa: BLE001 - the edit itself is saved; the layers catch up on boot
+                    logger.error("permissions: resync after profile %s edit failed: %s", profile_id, e)
+            return ok
         except sqlite3.IntegrityError:
             logger.warning("Profile update failed (duplicate name?)")
             return False
         except Exception as e:
             logger.error(f"Error updating profile {profile_id}: {e}")
             return False
+
+    # ── permission layers: plain reads and writes. the rules live in
+    #    core/permissions.py, the glue in core/permission_store.py. reads
+    #    raise on error: a permission check must never read "unreadable" as
+    #    "nothing set" ─────────────────────────────────────────────────────
+
+    def get_permission_inputs(self, profile_id: int) -> Dict[str, Any]:
+        """{profile_id, template_id, overrides, template_perms, template_found,
+        policy} for one profile in one connection. raises on a read error."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT template_id, perm_overrides FROM profiles WHERE id = ?", (int(profile_id),))
+            row = cursor.fetchone()
+            if row is None:
+                return {"profile_id": int(profile_id), "missing": True}
+            tid = row['template_id']
+            perms = None
+            if tid is not None:
+                cursor.execute("SELECT perms FROM permission_templates WHERE id = ?", (tid,))
+                t = cursor.fetchone()
+                perms = t['perms'] if t else None
+            cursor.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1")
+            pol = cursor.fetchone()
+            return {"profile_id": int(profile_id), "missing": False, "template_id": tid,
+                    "overrides": row['perm_overrides'], "template_perms": perms,
+                    "template_found": tid is None or perms is not None,
+                    "policy": pol['value'] if pol else None}
+
+    def get_permission_policy_raw(self) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM metadata WHERE key = 'perm_policy' LIMIT 1").fetchone()
+            return row['value'] if row else None
+
+    def set_permission_policy_raw(self, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                         "VALUES ('perm_policy', ?, CURRENT_TIMESTAMP)", (value,))
+            conn.commit()
+
+    def list_permission_templates(self) -> List[Dict[str, Any]]:
+        """every template with who follows it, in rail order."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM permission_templates ORDER BY sort, id").fetchall()
+            follow = conn.execute(
+                "SELECT template_id, id, name FROM profiles WHERE template_id IS NOT NULL "
+                "AND id != 1 AND COALESCE(is_admin, 0) = 0 ORDER BY id").fetchall()
+        by_tpl: Dict[int, List[Dict[str, Any]]] = {}
+        for f in follow:
+            by_tpl.setdefault(f['template_id'], []).append({"id": f['id'], "name": f['name']})
+        return [dict(dict(r), followers=by_tpl.get(r['id'], [])) for r in rows]
+
+    def get_permission_template(self, template_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM permission_templates WHERE id = ?", (int(template_id),)).fetchone()
+            return dict(row) if row else None
+
+    def create_permission_template(self, *, name: str, description: str, perms: str, sidebar: Optional[str],
+                                   sort: int = 100) -> int:
+        with self._get_connection() as conn:
+            cur = conn.execute("INSERT INTO permission_templates (name, description, perms, sidebar, builtin, sort) "
+                               "VALUES (?, ?, ?, ?, 0, ?)", (name, description, perms, sidebar, int(sort)))
+            conn.commit()
+            return int(cur.lastrowid)
+
+    def update_permission_template(self, template_id: int, **fields) -> bool:
+        allowed = {k: v for k, v in fields.items() if k in ("name", "description", "perms", "sidebar", "sort")}
+        if not allowed:
+            return False
+        with self._get_connection() as conn:
+            sets = ", ".join(f"{k} = ?" for k in allowed)
+            cur = conn.execute(f"UPDATE permission_templates SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (*allowed.values(), int(template_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_permission_template(self, template_id: int, reassign_to: Optional[int] = None) -> bool:
+        """delete a template. its followers move to ``reassign_to`` (their
+        personal changes come along), or the delete is refused while anyone
+        follows it (returns False)."""
+        with self._get_connection() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM profiles WHERE template_id = ?", (int(template_id),)).fetchone()[0]
+            if n and reassign_to is None:
+                return False
+            if n:
+                conn.execute("UPDATE profiles SET template_id = ? WHERE template_id = ?",
+                             (int(reassign_to), int(template_id)))
+            cur = conn.execute("DELETE FROM permission_templates WHERE id = ?", (int(template_id),))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def set_profile_permission_layers(self, profile_id: int, template_id: Optional[int], overrides: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE profiles SET template_id = ?, perm_overrides = ? WHERE id = ?",
+                               (template_id, overrides, int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def write_profile_permission_cache(self, profile_id: int, columns: Dict[str, Any]) -> bool:
+        """write the old columns from an effective map (the cache). a raw
+        write on purpose: update_profile would read it as an edit made the
+        old way and map it back."""
+        cols = {k: v for k, v in columns.items()
+                if k in ("allowed_sides", "allowed_pages", "can_download", "hide_explicit", "max_rating",
+                         "request_limit", "request_limit_days")}
+        if "allowed_pages" in cols:
+            cols["allowed_pages"] = json.dumps(cols["allowed_pages"]) if cols["allowed_pages"] is not None else None
+        for k in ("can_download", "hide_explicit"):
+            if k in cols:
+                cols[k] = int(bool(cols[k]))
+        if not cols:
+            return False
+        with self._get_connection() as conn:
+            sets = ", ".join(f"{k} = ?" for k in cols)
+            cur = conn.execute(f"UPDATE profiles SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (*cols.values(), int(profile_id)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def remap_legacy_profiles(self) -> None:
+        """map any template-less member onto a template now (the boot step)."""
+        with self._get_connection() as conn:
+            self._map_legacy_profiles(conn.cursor())
+            conn.commit()
 
     def bump_profile_session_epoch(self, profile_id: int,
                                    keep_device_id: Optional[str] = None) -> Optional[int]:
@@ -16236,6 +16539,17 @@ class MusicDatabase:
                     quality_profile_id,
                 )
                 return self._wishlist_outcome("rejected", reason="unknown quality_profile_id")
+
+            # the owner's permissions (#2166): a member who can't request
+            # music, or whose explicit music is hidden, is held to it here,
+            # whichever page, job or scan made the add. an admin's add for
+            # them (request_approved: the Library v2 mirror) is the admin's
+            if not request_approved and isinstance(spotify_track_data, dict):
+                from core.permission_store import wish_refusal
+                _refused = wish_refusal(self, profile_id, spotify_track_data)
+                if _refused:
+                    logger.info("Skipping wishlist add for profile %s: %s", profile_id, _refused)
+                    return self._wishlist_outcome("rejected", spotify_track_data.get('id'), reason=_refused)
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -28671,12 +28985,21 @@ class MusicDatabase:
         return keys
 
     def _music_request_quota_blocks(self, cursor, profile_id, track_data, source_type, track_id) -> bool:
-        from core.permissions import profile_can_download
         from core.requests.music import group_key
-        from core.requests.quota import quota_for
         profile = self.get_profile(profile_id)
-        quota = quota_for(profile)
-        if not quota or profile_can_download(profile):
+        if not profile or int(profile_id) == 1:
+            return False
+        # mode and limit from the profile's permissions (#2166): music.get and
+        # requests.limit, under the global policy. a profile whose rights
+        # can't be read gets no new asks
+        from core.permission_store import music_rights
+        rights = music_rights(self, profile)
+        if rights["mode"] == "download":
+            return False
+        if rights["mode"] == "none":
+            return True
+        quota = rights["quota"]
+        if not quota:
             return False
         # this branch keys a row <track>::<album> from its first insert
         # (core/wishlist/identity.py), so the row an add would refresh -- and
@@ -28692,7 +29015,15 @@ class MusicDatabase:
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
         if key in asks:
             return False
-        if len(asks) >= quota['limit']:
+        # the music limit (core/requests/asks.py): music videos count too,
+        # movies and shows have their own. a count that can't be read is a
+        # full limit
+        try:
+            others = self._music_video_asks_since(cursor, profile_id, quota['days'])
+        except Exception:  # noqa: BLE001
+            logger.warning("music video ask count failed for profile %s", profile_id, exc_info=True)
+            return True
+        if len(asks) + others >= quota['limit']:
             return True
         # a new ask: logged in the add's own transaction, so it counts even
         # after the rows it makes are withdrawn or deleted
@@ -29055,19 +29386,23 @@ class MusicDatabase:
         the request rows plus the ask log, so a withdrawn or deleted request
         still counts. One video asked twice in the window is one ask. Raises
         on a db error: the quota check fails closed on it."""
-        window = f"-{int(days)} days"
         with self._get_connection() as conn:
-            cursor = conn.cursor()
-            self._ensure_music_video_request_schema(cursor)
-            cursor.execute(
-                "SELECT COUNT(*) FROM ("
-                "SELECT 'video:' || video_id AS k FROM music_video_requests "
-                "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
-                "UNION SELECT ask_key FROM music_request_ask_log "
-                "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
-                (int(profile_id), window, int(profile_id), window))
-            row = cursor.fetchone()
-            return int(row[0]) if row else 0
+            return self._music_video_asks_since(conn.cursor(), profile_id, days)
+
+    def _music_video_asks_since(self, cursor, profile_id: int, days: int) -> int:
+        """count_music_video_requests_since on a cursor the caller holds (the
+        wishlist add counts inside its own transaction)."""
+        window = f"-{int(days)} days"
+        self._ensure_music_video_request_schema(cursor)
+        cursor.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT 'video:' || video_id AS k FROM music_video_requests "
+            "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
+            "UNION SELECT ask_key FROM music_request_ask_log "
+            "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
+            (int(profile_id), window, int(profile_id), window))
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

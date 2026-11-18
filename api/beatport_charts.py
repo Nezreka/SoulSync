@@ -41,6 +41,7 @@ from core.profile_context import get_current_profile_id
 from core.runtime_state import add_activity_item
 from core.spotify_client import _is_globally_rate_limited as _spotify_rate_limited
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -70,6 +71,7 @@ def create_blueprint():
     return bp
 
 @bp.route('/api/beatport/discovery/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_beatport_discovery(url_hash):
     """Start Spotify discovery for Beatport chart tracks"""
     import json
@@ -156,12 +158,14 @@ def start_beatport_discovery(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/discovery/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_discovery_status(url_hash):
     """Get real-time discovery status for a Beatport chart"""
     return _get_source_discovery_status(beatport_chart_states, url_hash, "Beatport chart not found", "Beatport")
 
 
 @bp.route('/api/beatport/discovery/update_match', methods=['POST'])
+@requires("music.playlist_sync")
 def update_beatport_discovery_match():
     """Update a Beatport discovery result with manually selected Spotify track"""
     try:
@@ -260,6 +264,7 @@ def _run_beatport_discovery_worker(url_hash):
 
 
 @bp.route('/api/beatport/sync/start/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def start_beatport_sync(url_hash):
     """Start sync process for a Beatport chart using discovered Spotify tracks"""
     try:
@@ -325,6 +330,7 @@ def start_beatport_sync(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/sync/status/<url_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_sync_status(url_hash):
     """Get sync status for a Beatport chart"""
     try:
@@ -369,6 +375,7 @@ def get_beatport_sync_status(url_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/sync/cancel/<url_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def cancel_beatport_sync(url_hash):
     """Cancel sync for a Beatport chart"""
     try:
@@ -405,6 +412,7 @@ def cancel_beatport_sync(url_hash):
 # ===================================================================
 
 @bp.route('/api/beatport/charts', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_charts():
     """Get all persistent Beatport chart states for frontend hydration"""
     try:
@@ -447,6 +455,7 @@ def get_beatport_charts():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/charts/status/<chart_hash>', methods=['GET'])
+@requires("music.playlist_sync")
 def get_beatport_chart_status(chart_hash):
     """Get individual Beatport chart status with full state data"""
     try:
@@ -479,6 +488,7 @@ def get_beatport_chart_status(chart_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/charts/update-phase/<chart_hash>', methods=['POST'])
+@requires("music.playlist_sync")
 def update_beatport_chart_phase(chart_hash):
     """Update Beatport chart phase (for modal close operations and reset)"""
     try:
@@ -525,6 +535,7 @@ def update_beatport_chart_phase(chart_hash):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/beatport/charts/delete/<chart_hash>', methods=['DELETE'])
+@requires("music.playlist_sync")
 def delete_beatport_chart(chart_hash):
     """Delete a Beatport chart from backend storage"""
     try:

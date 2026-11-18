@@ -1,4 +1,5 @@
 """request quotas: at most N asks per D days for a profile that has a limit.
+music, movies and TV each have their own (core/requests/asks.py counts them).
 
 an ask is one request as the person sees it: a movie, a show, an album or a
 single track (music groups rows the way core.requests.music does). admins and
@@ -37,9 +38,14 @@ def over_quota(quota: Optional[Dict[str, int]], used: int) -> bool:
     return bool(quota) and int(used) >= quota["limit"]
 
 
-def quota_message(quota: Dict[str, int]) -> str:
+_KIND_WORD = {"music": "music ", "movies": "movie ", "tv": "TV "}
+
+
+def quota_message(quota: Dict[str, int], kind: Optional[str] = None) -> str:
+    """"You've used your 5 movie requests for this week". ``kind`` is the
+    limit's kind (music | movies | tv); each kind has its own limit."""
     span = "day" if quota["days"] == 1 else "week" if quota["days"] == 7 else f"{quota['days']} days"
-    noun = "request" if quota["limit"] == 1 else "requests"
+    noun = _KIND_WORD.get(kind or "", "") + ("request" if quota["limit"] == 1 else "requests")
     return f"You've used your {quota['limit']} {noun} for this {span}" if span in ("day", "week") \
         else f"You've used your {quota['limit']} {noun} for the last {span}"
 

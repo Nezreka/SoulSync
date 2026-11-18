@@ -885,7 +885,10 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         try:
             if deps.automation_engine:
                 _credits = _batch_event_credits(batch, queue)
-                deps.automation_engine.emit('batch_complete', {
+                from core.automation.owners import owned
+                # the batch's profile; a batch that downloaded nothing and
+                # only pays an earlier batch's scan is the install's
+                deps.automation_engine.emit('batch_complete', owned({
                     'playlist_name': playlist_name,
                     'artist': _credits['artist'],
                     'title': _credits['title'],
@@ -894,7 +897,7 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
                     'more_batches_pending': 'true' if more_pending else 'false',
-                })
+                }, batch.get('profile_id') if successful_downloads > 0 else None))
         except Exception as e:
             logger.debug("batch_complete emit failed: %s", e)
 
@@ -1168,11 +1171,14 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
 
                     try:
                         if deps.automation_engine:
-                            deps.automation_engine.emit('download_failed', {
+                            from core.automation.owners import owned
+                            _owner = (download_tasks.get(task_id) or {}).get('profile_id') \
+                                or download_batches[batch_id].get('profile_id')
+                            deps.automation_engine.emit('download_failed', owned({
                                 'artist': track_info.get('artist_name', ''),
                                 'title': track_info.get('track_name', ''),
                                 'reason': track_info.get('failure_reason', 'Unknown'),
-                            })
+                            }, _owner))
                     except Exception as e:
                         logger.debug("download_failed emit failed: %s", e)
 

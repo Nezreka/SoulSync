@@ -199,8 +199,28 @@ const A = {
   requests: { id: 'prof-requests', title: 'Requests', lede: 'Members ask, admins approve' },
   permissions: {
     id: 'prof-permissions',
-    title: 'Permissions & Limits',
-    lede: 'What each profile can see and do',
+    title: 'What Each Permission Does',
+    lede: 'Every row in the editor, by category',
+  },
+  people: {
+    id: 'prof-people',
+    title: 'People and Access',
+    lede: 'Policy, templates and personal changes',
+  },
+  templates: {
+    id: 'prof-templates',
+    title: 'Templates',
+    lede: 'Adult, Teen, Kids, Guest and your own',
+  },
+  reqQuality: {
+    id: 'prof-quality',
+    title: 'Request Quality',
+    lede: 'Which quality each person can ask for',
+  },
+  members: {
+    id: 'prof-members',
+    title: 'What Members See',
+    lede: 'Only what they can use',
   },
   accounts: {
     id: 'prof-accounts',
@@ -416,8 +436,8 @@ registerPageHelp({
   title: 'Settings',
   summary: 'How SoulSync connects, downloads, files and tags your music.',
   memberSummary: 'Your own accounts, sign-in and what you see.',
-  articles: [A.accounts, A.features],
-  adminArticles: [A.setMedia, A.setDownload, A.folders, A.docker],
+  articles: [A.accounts, A.features, A.members],
+  adminArticles: [A.setMedia, A.setDownload, A.people, A.templates, A.folders, A.docker],
 });
 registerPageHelp({
   id: 'issues',
@@ -434,6 +454,7 @@ registerPageHelp({
   summary: 'What people asked for, waiting for a yes, and where each approved one is now.',
   memberSummary: 'What you asked for, whether your admin said yes, and where each one is now.',
   articles: [A.requests, A.vaccess],
+  adminArticles: [A.reqQuality],
 });
 registerPageHelp({
   id: 'help',

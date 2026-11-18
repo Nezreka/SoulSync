@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { getShellProfileContext } from '@/platform/shell/bridge';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicGet } from '@/platform/shell/download-rights';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
@@ -224,7 +224,9 @@ export function ArtistHero({
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
-  const asksFirst = profileAsksFirst();
+  // download, ask first, or can't request at all (#2166): the last has no
+  // button, not a dead one
+  const { asksFirst, cantRequest } = useMusicGet();
   /** setting the photo writes the shared library, the server and artist.jpg,
       so it's the admin's. no shell (a test) leaves it to the server's 403. */
   const canChangePhoto = getShellProfileContext()?.isAdmin !== false;
@@ -472,7 +474,7 @@ export function ArtistHero({
             <div
               className="discog-download-wrap"
               id="discog-download-wrap"
-              style={{ display: hasReleases ? '' : 'none' }}
+              style={{ display: hasReleases && !cantRequest ? '' : 'none' }}
             >
               <button
                 type="button"

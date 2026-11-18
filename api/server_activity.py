@@ -10,6 +10,8 @@ import re
 from flask import Blueprint, Response, jsonify, request
 
 from utils.logging_config import get_logger
+from core.profile_context import admin_or_api_key
+from core.permissions import signed_in
 
 logger = get_logger("web_server")
 
@@ -56,6 +58,7 @@ def _num(name, cast=float):
 
 
 @bp.route('/api/server-activity')
+@admin_or_api_key
 def get_server_activity():
     """what's playing on plex and jellyfin now, the pulse and the bandwidth
     series. never raises: no server or a down one is a state the ui shows."""
@@ -68,6 +71,7 @@ def get_server_activity():
 
 
 @bp.route('/api/server-activity/history')
+@admin_or_api_key
 def get_server_activity_history():
     """the play log as binge-grouped rows, filtered, newest first."""
     try:
@@ -84,6 +88,7 @@ def get_server_activity_history():
 
 
 @bp.route('/api/server-activity/history/<group_key>')
+@admin_or_api_key
 def get_server_activity_history_group(group_key):
     """one history row opened: its plays, timeline and facts."""
     if not _GROUP_KEY.match(group_key or ""):
@@ -98,6 +103,7 @@ def get_server_activity_history_group(group_key):
 
 
 @bp.route('/api/server-activity/stats')
+@admin_or_api_key
 def get_server_activity_stats():
     """the stats sheet over 7 / 30 / 90 / 365 days, from the play log."""
     try:
@@ -109,6 +115,7 @@ def get_server_activity_stats():
 
 
 @bp.route('/api/server-activity/stop', methods=['POST'])
+@admin_or_api_key
 def stop_server_activity_stream():
     """end a stream with a message the viewer sees (plex with plex pass, jellyfin)."""
     try:
@@ -123,6 +130,7 @@ def stop_server_activity_stream():
 
 
 @bp.route('/api/server-activity/message', methods=['POST'])
+@admin_or_api_key
 def message_server_activity_stream():
     """show a message on the player without stopping (jellyfin only)."""
     try:
@@ -137,6 +145,7 @@ def message_server_activity_stream():
 
 
 @bp.route('/api/server-activity/settings', methods=['GET', 'POST'])
+@admin_or_api_key
 def server_activity_settings():
     """upload speed, geo lookup, play log retention and stop presets."""
     from core.server_activity import get_settings, save_settings
@@ -153,6 +162,7 @@ def server_activity_settings():
 
 
 @bp.route('/api/server-activity/plays/clear', methods=['POST'])
+@admin_or_api_key
 def clear_server_activity_plays():
     """empty the play log (plays still running carry on)."""
     try:
@@ -164,6 +174,7 @@ def clear_server_activity_plays():
 
 
 @bp.route('/api/server-activity/avatar')
+@admin_or_api_key
 def get_server_activity_avatar():
     """a viewer's picture, ?user=plex:<id> or jellyfin:<id>. the url comes from
     the server, never from the browser."""
@@ -180,6 +191,7 @@ def get_server_activity_avatar():
 
 
 @bp.route('/api/server-activity/image')
+@signed_in
 def get_server_activity_image():
     """proxy a plex or jellyfin picture so the token never reaches the browser.
 

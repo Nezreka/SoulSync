@@ -161,8 +161,12 @@ _MIRROR_GATE_MARKERS = (
 
 
 def _by_id_mirrored_routes():
+    # permission declarations (@requires("music.access")) may sit between the
+    # route and the def. they answer the same 403 for every id, so they can't
+    # tell a foreign id from a missing one: the ownership 404 still decides.
     return re.findall(
         r"@bp\.route\('/api/mirrored-playlists/<int:playlist_id>[^']*'[^)]*\)\s*\n"
+        r"(?:@(?!bp\.route)[^\n]*\n)*"
         r"def (\w+)\(playlist_id\):((?:\n(?!@bp\.route).*)*)", _MPL)
 
 

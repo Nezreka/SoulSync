@@ -140,11 +140,12 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
                 logger.info(f"[Wishlist Processing] Added {track_name} to wishlist")
                 try:
                     if automation_engine:
-                        automation_engine.emit('wishlist_item_added', {
+                        from core.automation.owners import owned
+                        automation_engine.emit('wishlist_item_added', owned({
                             'artist': failed_track_info.get('artist_name', ''),
                             'title': track_name,
                             'reason': failed_track_info.get('failure_reason', ''),
-                        })
+                        }, owner_profile_id))
                 except Exception as e:
                     logger.debug("emit wishlist_item_added failed: %s", e)
             elif status == 'updated' or (status == 'skipped' and reason == 'duplicate'):

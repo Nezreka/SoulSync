@@ -26,6 +26,15 @@ from core.security import plex_signin  # noqa: E402
 from core.security.plex_signin import PlexAccount  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _signup_not_moved():
+    """the old sign-up path these tests pin, on an install whose settings
+    haven't moved to the sign-up template yet (#2166); the moved path is
+    tests/test_permissions_followups.py's"""
+    from tests.permissions_fixtures import signup_not_moved
+    yield from signup_not_moved(web_server.get_database())
+
+
 def _uid():
     return uuid4().hex[:8]
 

@@ -2,7 +2,8 @@
 
 Same lifecycle (open → in_progress → resolved | dismissed, reopenable, resolved
 retained), same permission split (any profile reports and sees/withdraws its
-OWN issues; the admin sees all, gets the reporter name, and resolves), same
+OWN issues; an admin or a moderator sees all, gets the reporter name, and
+resolves), same
 snapshot pattern (the item's state denormalized at report time so the report
 outlives library changes). Caller identity rides flask.g (set app-wide by
 web_server's before_request) — never the request body.
@@ -43,6 +44,21 @@ def _is_admin() -> bool:
     # music supports secondary admins, and the frontend checks the same flag).
     # Fallback: the video convention, profile 1.
     return bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
+
+
+def _manages() -> bool:
+    """an admin, or a moderator (requests.moderate, #2166), who answers,
+    triages and tidies everyone's issues the way an admin does: the music
+    side's rule (api/issues.py _caller). never settings, people or tools:
+    those routes ask for an admin themselves."""
+    if _is_admin():
+        return True
+    try:
+        from . import access
+        return bool(access.is_moderator())
+    except Exception:  # noqa: BLE001 - can't tell: not a moderator
+        logger.debug("moderator check failed", exc_info=True)
+        return False
 
 
 def _pid() -> int:
@@ -115,12 +131,12 @@ def register_routes(bp):
         issues = get_video_db().get_issues(
             _pid(), status=q.get("status") or None, category=q.get("category") or None,
             entity_type=q.get("entity_type") or None,
-            limit=q.get("limit", 100), offset=q.get("offset", 0), is_admin=_is_admin())
+            limit=q.get("limit", 100), offset=q.get("offset", 0), is_admin=_manages())
         for i in issues:
             i["fix_action"] = fix_action(i.get("category") or "")
-            if not _is_admin():   # reporter identity is admin-only (music standard)
+            if not _manages():   # reporter identity is for those who manage issues (music standard)
                 i.pop("reporter_name", None)
-        counts = get_video_db().get_issue_counts(_is_admin(), _pid())
+        counts = get_video_db().get_issue_counts(_manages(), _pid())
         if q.get("status") and q.get("status") != "all":
             total = counts.get(q.get("status"), len(issues))
         else:
@@ -143,7 +159,7 @@ def register_routes(bp):
         db = get_video_db()
         payload, code = issue_service.report(
             _side(), actor=_pid(), actor_name=getattr(g, "profile_name", None) or "",
-            is_admin=_is_admin(), entity_type=entity_type, entity_id=str(entity_id),
+            is_admin=_manages(), entity_type=entity_type, entity_id=str(entity_id),
             category=category, body=body, snapshot=lambda: _snapshot(db, entity_type, entity_id))
         if code == 400:
             payload["error"] = "title and entity_id required"
@@ -152,7 +168,7 @@ def register_routes(bp):
     @bp.route("/issues/<int:issue_id>", methods=["GET"])
     def video_issues_get(issue_id):
         from . import get_video_db
-        payload, code = issue_service.detail(_side(), actor=_pid(), is_admin=_is_admin(),
+        payload, code = issue_service.detail(_side(), actor=_pid(), is_admin=_manages(),
                                              issue_id=issue_id)
         if code == 404:
             payload["error"] = "not found"
@@ -170,11 +186,11 @@ def register_routes(bp):
         # rule) — ANY other field in the payload is an outright 403, never
         # a silent partial apply. someone else's issue stays 403 here (the
         # contract the video tests pin), GET hides it as 404.
-        if not _is_admin() and issue["profile_id"] != _pid():
+        if not _manages() and issue["profile_id"] != _pid():
             return jsonify({"success": False, "error": "forbidden"}), 403
         payload, code = issue_service.triage(_side(), actor=_pid(),
                                              actor_name=getattr(g, "profile_name", None) or "",
-                                             is_admin=_is_admin(), issue_id=issue_id, body=body)
+                                             is_admin=_manages(), issue_id=issue_id, body=body)
         if code == 403:
             payload["error"] = "forbidden"
         return jsonify(payload), code
@@ -186,7 +202,7 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         payload, code = issue_service.bulk(_side(), actor=_pid(),
                                            actor_name=getattr(g, "profile_name", None) or "",
-                                           is_admin=_is_admin(), ids=body.get("ids"), body=body,
+                                           is_admin=_manages(), ids=body.get("ids"), body=body,
                                            delete=get_video_db().delete_issue)
         return jsonify(payload), code
 
@@ -195,7 +211,7 @@ def register_routes(bp):
         """reply on an issue: its reporter, a follower, or an admin."""
         payload, code = issue_service.comment(_side(), actor=_pid(),
                                               actor_name=getattr(g, "profile_name", None) or "",
-                                              is_admin=_is_admin(), issue_id=issue_id,
+                                              is_admin=_manages(), issue_id=issue_id,
                                               body=request.get_json(silent=True) or {})
         return jsonify(payload), code
 
@@ -206,7 +222,7 @@ def register_routes(bp):
         issue = db.get_issue(issue_id)
         if not issue:
             return jsonify({"success": False, "error": "not found"}), 404
-        if not _is_admin() and issue["profile_id"] != _pid():
+        if not _manages() and issue["profile_id"] != _pid():
             return jsonify({"success": False, "error": "forbidden"}), 403
         return jsonify({"success": db.delete_issue(issue_id)})
 
@@ -214,8 +230,8 @@ def register_routes(bp):
     def video_issues_counts():
         from . import get_video_db
         db = get_video_db()
-        counts = db.get_issue_counts(_is_admin(), _pid())
-        counts["updates"] = 0 if _is_admin() else db.issue_threads.unread_count(_pid())
+        counts = db.get_issue_counts(_manages(), _pid())
+        counts["updates"] = 0 if _manages() else db.issue_threads.unread_count(_pid())
         return jsonify({"success": True, "counts": counts})
 
     @bp.route("/issues/categories", methods=["GET"])

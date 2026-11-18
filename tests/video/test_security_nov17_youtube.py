@@ -26,6 +26,13 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(perms, "owner_may_download", lambda pid, get_profile=None: real(
         pid, lambda p: {CAN: {"id": CAN, "can_download": True},
                         CANNOT: {"id": CANNOT, "can_download": False}}.get(p)))
+    # the scans ask the owner's permissions (#2166): movies and tv right away
+    # for CAN, ask first for CANNOT
+    import core.owner_gate as og
+    from tests.permissions_fixtures import member_ctx
+    monkeypatch.setattr(og, "_default_context", lambda pid: {
+        CAN: member_ctx(profile_id=CAN),
+        CANNOT: member_ctx(profile_id=CANNOT, **{"movies.get": "ask", "tv.get": "ask"})}[pid])
     try:
         yield videoapi._video_db
     finally:

@@ -12,6 +12,7 @@ from core import metasync_charts as charts
 from core.playlists import auto_identify
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -43,6 +44,7 @@ def identify_soon(playlist_id):
 
 
 @bp.route('/api/metasync/charts', methods=['GET'])
+@requires("music.access")
 def list_metasync_charts():
     try:
         return jsonify({"charts": charts.list_charts(get_database(), get_current_profile_id())})
@@ -52,6 +54,7 @@ def list_metasync_charts():
 
 
 @bp.route('/api/metasync/charts/<key>/open', methods=['POST'])
+@requires("music.access")
 def open_metasync_chart(key):
     profile_id = get_current_profile_id()
     if profile_id is None:

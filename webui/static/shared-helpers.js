@@ -1902,6 +1902,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                         ` : ''}
                         ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. You can still see what's here and what you already have. Ask your admin if you'd like it.</p>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" data-tour="download.start" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
@@ -1909,9 +1910,10 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                     <button class="download-control-btn sync-to-server-btn" id="sync-server-btn-${virtualPlaylistId}" onclick="syncPlaylistToServer('${virtualPlaylistId}')" ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>
                         Sync to Server
                     </button>` : ''}
-                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                    <button class="download-control-btn" data-request-action id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
                         ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
+                    <span class="music-asks-left" data-asks-left aria-live="polite"></span>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
                     </button>
@@ -1951,6 +1953,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     } else {
         void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     }
+    // a profile that asks first sees what's left of its limit (#2166)
+    if (typeof window.fillMusicAsksLeft === 'function') window.fillMusicAsksLeft(modal);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 

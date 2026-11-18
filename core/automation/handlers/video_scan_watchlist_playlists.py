@@ -116,11 +116,11 @@ def _profile() -> int:
 
 def _default_fetch_playlists() -> List[Dict[str, Any]]:
     from api.video import get_video_db
-    from core.permissions import owner_may_download
+    from core.owner_gate import OwnerGate
     # a followed playlist wishes new videos to download, so a profile with
     # downloads off has nothing to scan for (asked each pass)
-    if not owner_may_download(_profile()):
-        logger.info("playlist scan: profile %s has downloads off, skipped", _profile())
+    if not OwnerGate(_profile(), label="playlist scan").may_youtube():
+        logger.info("playlist scan: profile %s may not get new uploads, skipped", _profile())
         return []
     return get_video_db().list_watchlist_playlists(profile_id=_profile())
 

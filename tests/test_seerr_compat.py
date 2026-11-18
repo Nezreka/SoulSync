@@ -556,7 +556,7 @@ def test_request_quota_and_side_and_kids_checks(client, h):
     a title over a kids cap are all refused with seerr's 403."""
     assert _post(client, 5, {"mediaType": "movie", "mediaId": NEW_MOVIE}).status_code == 201
     over = _post(client, 5, {"mediaType": "movie", "mediaId": 555})
-    assert over.status_code == 403 and "used your 1 request" in over.get_json()["message"]
+    assert over.status_code == 403 and "used your 1 movie request" in over.get_json()["message"]
     assert _post(client, 4, {"mediaType": "movie", "mediaId": NEW_MOVIE}).status_code == 403
     h.restricted.add(("movie", 556))
     assert _post(client, 2, {"mediaType": "movie", "mediaId": 556}).status_code == 403

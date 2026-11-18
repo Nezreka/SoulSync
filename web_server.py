@@ -873,6 +873,33 @@ def _enforce_launch_pin():
         return jsonify({"error": "locked", "launch_pin_required": True}), 401
 
 
+def _load_request_perms(pid, profile=None):
+    """g.perms for the skip branch of _set_profile_context. an admin gets
+    the admin map; a member its effective map; a map that can't be built is
+    None, which every check reads as no."""
+    from core.permissions import admin_map as _perm_admin_map
+    if g.is_admin:
+        g.perms, g.perms_source = _perm_admin_map(), 'admin'
+        return
+    try:
+        from core.permission_store import effective_for as _perm_effective_for
+        if profile is None:
+            profile = get_database().get_profile(pid)
+        if not profile:
+            g.perms, g.perms_source = None, 'none'
+            return
+        g.perms, g.perms_source = _perm_effective_for(get_database(), profile)
+    except Exception as _perm_exc:
+        logger.warning("permissions unavailable for profile %s: %s", pid, _perm_exc)
+        g.perms, g.perms_source = None, 'none'
+
+
+# every request in this app is held to the routes' declarations
+# (core.permissions.requires); a bare test app that mounts a blueprint isn't
+from core.permissions import GATE_FLAG as _PERM_GATE_FLAG  # noqa: E402
+app.config[_PERM_GATE_FLAG] = True
+
+
 # --- Profile Context (before_request hook) ---
 @app.before_request
 def _set_profile_context():
@@ -1000,10 +1027,11 @@ def _set_profile_context():
         path == '/' or
         path.startswith('/api/v1/')):
         g.profile_id = pid
+        _skip_profile = None
         if pid != 1 and 'profile_id' in session:
             try:
                 database = get_database()
-                profile = database.get_profile(pid)
+                profile = _skip_profile = database.get_profile(pid)
                 if not profile:
                     for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
                         session.pop(_k, None)
@@ -1030,6 +1058,12 @@ def _set_profile_context():
                 logger.warning("profile session validate (skip path): %s", e)
                 g.is_admin = False
                 g.can_download = False
+                g.perms, g.perms_source = None, 'none'
+                return
+        # /api/profiles/me/* is held to the caller's permissions too
+        # (account.connect), so the map is loaded here as on every other api
+        if path.startswith('/api/profiles') and g.profile_id is not None:
+            _load_request_perms(g.profile_id, _skip_profile)
         return
 
     if pid != 1 and 'profile_id' in session:
@@ -1071,6 +1105,24 @@ def _set_profile_context():
             # read the music db themselves
             g.request_limit = int((profile or {}).get('request_limit') or 0)
             g.request_limit_days = int((profile or {}).get('request_limit_days') or 7)
+            # what this profile may do (#2166): policy > template > personal
+            # changes, once per request for can() and @requires. a map that
+            # can't be built fails closed: no admin, no downloads, no side,
+            # and a page-only api is refused (its page list can't be trusted)
+            from core.permission_store import effective_for as _perm_effective_for
+            try:
+                g.perms, g.perms_source = _perm_effective_for(database, profile)
+            except Exception as _perm_exc:
+                logger.warning("permissions unavailable for profile %s: %s", pid, _perm_exc)
+                g.perms, g.perms_source = None, 'none'
+                g.is_admin = False
+                g.can_download = False
+                g.allowed_sides = 'none'
+                g.profile_id = pid
+                from core.permissions import page_for_path as _perm_page_for_path
+                if _perm_page_for_path(path) is not None:
+                    return jsonify({"success": False, "error": "page_not_allowed"}), 403
+                return
             # a page left off the profile's list: its own apis refuse too,
             # not just the hidden nav button
             from core.permissions import page_denied
@@ -1086,11 +1138,15 @@ def _set_profile_context():
             g.is_admin = False
             g.can_download = False
             g.allowed_sides = 'none'
+            g.perms, g.perms_source = None, 'none'
             g.profile_id = pid
             from core.permissions import page_for_path
             if page_for_path(path) is not None:
                 return jsonify({"success": False, "error": "page_not_allowed"}), 403
 
+    if g.is_admin:
+        from core.permissions import admin_map as _perm_admin_map
+        g.perms, g.perms_source = _perm_admin_map(), 'admin'
     g.profile_id = pid
 
 
@@ -1195,6 +1251,7 @@ from api.mirrored_playlists import _owned_mirrored_playlist  # noqa: E402  (wiri
 # api/* blueprint modules need them at import time, and importing web_server
 # from there is circular. Same objects, one home.
 from core.profile_context import admin_only, get_current_profile_id, is_admin_request  # noqa: E402
+from core.permissions import public, requires, signed_in  # noqa: E402
 
 
 def get_spotify_client_for_profile(profile_id=None):
@@ -1305,6 +1362,11 @@ def check_download_permission():
     if reason:
         # an unreadable profile is a passing problem, not a switch that's off
         return jsonify({'success': False, 'error': reason}), (503 if reason == PROFILE_UNREADABLE else 403)
+    # music.get on "download" (#2166): under the global policy, and only with
+    # the music side on (a video-only member doesn't download music)
+    from core.permissions import can, enforcing, refusal
+    if enforcing() and not can(None, 'music.get', 'download'):
+        return refusal('music.get')
     return None
 
 # --- Docker Helper Functions ---
@@ -2067,6 +2129,7 @@ except Exception as e:
 # before_request — same dual-route convention as the legacy /api/library/*
 # routes.
 @app.route('/api/library/tracks', methods=['GET'])
+@requires("music.access")
 def library_tracks_web():
     """Session-auth track search backing the Sample Studio library panel.
 
@@ -2095,6 +2158,7 @@ def library_tracks_web():
 
 
 @app.route('/api/library/tracks/recent', methods=['GET'])
+@requires("music.access")
 def library_recent_tracks_web():
     """Newest library tracks for the Sample Studio panel before you search.
 
@@ -2122,6 +2186,7 @@ def _sample_track_key(raw):
 
 
 @app.route('/api/sample/analysis', methods=['GET'])
+@requires("music.sample_studio")
 def sample_analysis_web():
     try:
         from api.sample import fetch_analysis, SampleHttpError
@@ -2141,6 +2206,7 @@ def sample_analysis_web():
 
 
 @app.route('/api/sample/analyze', methods=['POST'])
+@requires("music.sample_studio")
 def sample_analyze_web():
     try:
         from api.sample import enqueue_track_analysis, SampleHttpError
@@ -2164,6 +2230,7 @@ def sample_analyze_web():
 
 
 @app.route('/api/sample/peaks', methods=['GET'])
+@requires("music.sample_studio")
 def sample_peaks_web():
     try:
         from api.sample import fetch_peaks, SampleHttpError
@@ -2183,6 +2250,7 @@ def sample_peaks_web():
 
 
 @app.route('/api/sample/preview', methods=['POST'])
+@requires("music.sample_studio")
 def sample_preview_web():
     try:
         from api.sample import _parse_render_params, render_preview, SampleHttpError
@@ -2199,6 +2267,7 @@ def sample_preview_web():
 
 
 @app.route('/api/sample/preview/<preview_id>', methods=['GET'])
+@requires("music.sample_studio")
 def sample_preview_file_web(preview_id):
     try:
         from api.sample import preview_file_path, SampleHttpError
@@ -2213,6 +2282,7 @@ def sample_preview_file_web(preview_id):
 
 
 @app.route('/api/sample/chop', methods=['POST'])
+@requires("music.sample_studio")
 def sample_chop_web():
     try:
         from api.sample import _parse_render_params, save_chop, SampleHttpError
@@ -2235,6 +2305,7 @@ def sample_chop_web():
 
 
 @app.route('/api/sample/trim', methods=['POST'])
+@requires("music.sample_studio")
 def sample_trim_web():
     try:
         from api.sample import parse_trim_body, trim_selection, SampleHttpError
@@ -2250,6 +2321,7 @@ def sample_trim_web():
 
 
 @app.route('/api/sample/folders', methods=['GET'])
+@requires("music.sample_studio")
 def sample_folders_web():
     try:
         from api.sample import list_sample_folders, SampleHttpError
@@ -2264,6 +2336,7 @@ def sample_folders_web():
 
 
 @app.route('/api/sample/stash', methods=['GET'])
+@requires("music.sample_studio")
 def sample_stash_web():
     try:
         from api.sample import list_stash_entries, SampleHttpError
@@ -2278,6 +2351,7 @@ def sample_stash_web():
 
 
 @app.route('/api/sample/stash/<int:entry_id>', methods=['DELETE'])
+@requires("music.sample_studio")
 def sample_stash_delete_web(entry_id):
     try:
         from api.sample import remove_stash_entry, SampleHttpError
@@ -2292,6 +2366,7 @@ def sample_stash_delete_web(entry_id):
 
 
 @app.route('/api/sample/stash/<int:entry_id>/audio', methods=['GET'])
+@requires("music.sample_studio")
 def sample_stash_audio_web(entry_id):
     try:
         from api.sample import stash_audio_path, SampleHttpError
@@ -2306,6 +2381,7 @@ def sample_stash_audio_web(entry_id):
 
 
 @app.route('/api/sample/stash/export', methods=['GET'])
+@requires("music.sample_studio")
 def sample_stash_export_web():
     try:
         from api.sample import export_stash_zip, SampleHttpError
@@ -2321,6 +2397,7 @@ def sample_stash_export_web():
 
 
 @app.route('/api/sample/stems', methods=['POST'])
+@requires("music.sample_studio")
 def sample_stems_web():
     try:
         from api.sample import separate_stems, SampleHttpError
@@ -2340,6 +2417,7 @@ def sample_stems_web():
 
 
 @app.route('/api/sample/stems/status', methods=['GET'])
+@requires("music.sample_studio")
 def sample_stems_status_web():
     try:
         from api.sample import stems_status, SampleHttpError
@@ -2358,6 +2436,7 @@ def sample_stems_status_web():
 
 
 @app.route('/api/sample/stems/<track_id>/<stem>/audio', methods=['GET'])
+@requires("music.sample_studio")
 def sample_stem_audio_web(track_id, stem):
     try:
         from api.sample import stem_audio_path, SampleHttpError
@@ -3498,11 +3577,13 @@ from core.media_server import specs as _media_specs
 # --- Web UI Routes ---
 
 @app.route('/')
+@public
 def index():
     return render_template('index.html')
 
 
 @app.route('/sw.js')
+@public
 def service_worker():
     """Serve sw.js from root scope so the service worker can intercept
     fetches site-wide. A service worker only controls URLs at or below
@@ -3521,6 +3602,7 @@ def service_worker():
 
 
 @app.route('/<path:page>')
+@public
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
     if not should_serve_webui_spa(f'/{page}'):
@@ -3669,6 +3751,7 @@ def _get_enrichment_status():
 # Status check caching to reduce unnecessary API calls
 
 @app.route('/status')
+@signed_in
 def get_status():
     if not config_manager:
         return jsonify({"error": "Server configuration manager is not initialized."}), 500
@@ -3889,6 +3972,7 @@ def _regenerate_batch_m3u(batch, tracks):
 
 
 @app.route('/api/save-playlist-m3u', methods=['POST'])
+@admin_only
 def save_playlist_m3u():
     """Save M3U playlist file to the relevant download folder"""
     try:
@@ -3943,6 +4027,7 @@ def save_playlist_m3u():
 
 
 @app.route('/api/generate-playlist-m3u', methods=['POST'])
+@requires("music.access")
 def generate_playlist_m3u():
     """Generate M3U content with real file paths resolved from the library DB.
     Each track entry uses its actual stored file_path rather than a synthesised
@@ -4222,6 +4307,7 @@ def _build_system_stats():
     }
 
 @app.route('/api/system/stats')
+@requires("music.dashboard")
 def get_system_stats():
     """Get system statistics for dashboard"""
     try:
@@ -4343,6 +4429,7 @@ def debug_memory_objects():
 
 
 @app.route('/api/activity/feed')
+@requires("music.dashboard")
 def get_activity_feed():
     """Get recent activity feed for dashboard"""
     try:
@@ -4356,6 +4443,7 @@ def get_activity_feed():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/activity/toasts')
+@signed_in
 def get_recent_toasts():
     """Get recent activities that should show toasts"""
     try:
@@ -4376,6 +4464,7 @@ def get_recent_toasts():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs')
+@requires("music.access")
 def get_activity_logs():
     """Get formatted activity feed for display in sync page log area"""
     try:
@@ -4721,6 +4810,7 @@ def handle_settings():
 
 
 @app.route('/api/metadata/art-sources', methods=['GET'])
+@admin_only
 def get_art_sources():
     """Cover-art sources the current user can actually use, in default order.
 
@@ -4743,6 +4833,7 @@ def get_art_sources():
 
 
 @app.route('/api/dev-mode', methods=['GET', 'POST'])
+@signed_in
 def handle_dev_mode():
     global dev_mode_enabled
     if request.method == 'POST':
@@ -4771,6 +4862,7 @@ from api.hydrabase_routes import (  # noqa: E402
 )
 
 @app.route('/api/prowlarr/indexers', methods=['GET'])
+@admin_only
 def prowlarr_indexers_endpoint():
     """List indexers Prowlarr currently exposes — name, protocol, enabled state.
 
@@ -4952,6 +5044,7 @@ def get_log_tail():
 # ===========================
 
 @app.route('/api/genre-whitelist/defaults', methods=['GET'])
+@admin_only
 def get_genre_whitelist_defaults():
     """Return the default genre whitelist."""
     from core.genre_filter import DEFAULT_GENRES
@@ -4961,6 +5054,7 @@ def get_genre_whitelist_defaults():
 # /api/mirrored-playlists/list moved to api/mirrored_playlists.py
 
 @app.route('/api/playlists/materialize/rebuild', methods=['POST'])
+@admin_only
 def rebuild_playlist_materialization_endpoint():
     """(Re)build every "organize by playlist" folder from current library ownership
     (the manual Settings button). Safe to call any time — it's a derived view and
@@ -4985,6 +5079,7 @@ def rebuild_playlist_materialization_endpoint():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/setup/status', methods=['GET'])
+@signed_in
 def setup_status_endpoint():
     """Check if first-run setup has been completed."""
     # The setup wizard sets this flag when completed. download_source.mode is only
@@ -5018,6 +5113,7 @@ def setup_complete_endpoint():
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
+@admin_only
 def test_connection_endpoint():
     data = request.get_json()
     service = data.get('service')
@@ -5253,6 +5349,7 @@ def settings_verify_endpoint():
 
 
 @app.route('/api/test-dashboard-connection', methods=['POST'])
+@requires("music.dashboard")
 def test_dashboard_connection_endpoint():
     """Test connection from dashboard - creates specific dashboard activity items"""
     data = request.get_json()
@@ -5470,6 +5567,7 @@ def clear_plex_library_preference():
 
 
 @app.route('/api/plex/music-libraries', methods=['GET'])
+@signed_in
 def get_plex_music_libraries():
     """Get list of all available music libraries from Plex"""
     try:
@@ -5577,6 +5675,7 @@ def select_jellyfin_user():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/jellyfin/music-libraries', methods=['GET'])
+@signed_in
 def get_jellyfin_music_libraries():
     """Get list of all available music libraries from Jellyfin"""
     try:
@@ -5642,6 +5741,7 @@ def select_jellyfin_music_library():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/navidrome/cover/<cover_id>', methods=['GET'])
+@requires("music.access")
 def navidrome_cover(cover_id):
     """Proxy a Navidrome (Subsonic) cover-art image to the browser.
 
@@ -5669,6 +5769,7 @@ def navidrome_cover(cover_id):
 
 
 @app.route('/api/navidrome/music-folders', methods=['GET'])
+@admin_only
 def get_navidrome_music_folders():
     """Get list of available music folders from Navidrome"""
     try:
@@ -5732,6 +5833,7 @@ def select_navidrome_music_folder():
 # ===============================
 
 @app.route('/api/detect-soulseek', methods=['POST'])
+@admin_only
 def detect_soulseek_endpoint():
     logger.info("Received auto-detect request for slskd")
 
@@ -5825,6 +5927,7 @@ def _complete_profile_spotify_auth(profile_id, auth_code):
 
 
 @app.route('/auth/spotify')
+@requires("account.connect")
 def auth_spotify():
     """
     Initiates Spotify OAuth authentication flow.
@@ -6006,6 +6109,7 @@ def auth_spotify_export():
 
 
 @app.route('/auth/tidal')
+@requires("account.connect")
 def auth_tidal():
     """
     Initiates Tidal OAuth authentication flow
@@ -6233,6 +6337,7 @@ def _spotify_auth_result_page(detail_text: str, authenticated: bool = True) -> s
 
 
 @app.route('/callback')
+@public
 def spotify_callback():
     """
     Handles Spotify OAuth callback via the main Flask app (port 8008).
@@ -6372,6 +6477,7 @@ def spotify_disconnect():
 
 
 @app.route('/api/spotify/rate-limit-status', methods=['GET'])
+@signed_in
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
@@ -6432,6 +6538,7 @@ def _finish_tidal_auth(auth_code):
 
 
 @app.route('/tidal/callback')
+@public
 def tidal_callback():
     """
     Handles the callback from Tidal after the user authorizes the application.
@@ -6492,6 +6599,7 @@ def auth_deezer():
 
 
 @app.route('/deezer/callback')
+@public
 def deezer_callback():
     """Handle Deezer OAuth callback — exchange code for access token."""
     auth_code = request.args.get('code')
@@ -6560,6 +6668,7 @@ def deezer_callback():
 # --- Placeholder API Endpoints for Other Pages ---
 
 @app.route('/api/activity')
+@signed_in
 def get_activity():
     # Placeholder: returns mock activity data
     mock_activity = [
@@ -6569,6 +6678,7 @@ def get_activity():
     return jsonify({"activities": mock_activity})
 
 @app.route('/api/playlists')
+@signed_in
 def get_playlists():
     # Placeholder: returns mock playlist data
     if spotify_client and spotify_client.is_authenticated():
@@ -6582,6 +6692,7 @@ def get_playlists():
     return jsonify({"playlists": [], "error": "Spotify not authenticated."})
 
 @app.route('/api/sync', methods=['POST'])
+@signed_in
 def start_sync():
     # Placeholder: simulates starting a sync
     return jsonify({"success": True, "message": "Sync process started."})
@@ -6620,6 +6731,7 @@ def _build_search_deps():
 
 
 @app.route('/api/search/sources', methods=['GET'])
+@requires("music.access")
 def search_sources():
     """Return the list of active download sources available for basic search.
 
@@ -6651,6 +6763,7 @@ def search_sources():
 
 
 @app.route('/api/search', methods=['POST'])
+@requires("music.access")
 def search_music():
     """Basic download-source file search.
 
@@ -6721,6 +6834,7 @@ def _mark_request_free_ok_for_spotify(source: str) -> None:
 
 
 @app.route('/api/enhanced-search', methods=['POST'])
+@requires("music.access")
 def enhanced_search():
     """Unified metadata search across configured sources + local DB artists.
 
@@ -6774,6 +6888,7 @@ def enhanced_search():
 
 
 @app.route('/api/enhanced-search/by-id', methods=['POST'])
+@requires("music.access")
 def enhanced_search_by_id():
     """Resolve a pasted metadata link to a single album or track (#775).
 
@@ -6802,6 +6917,7 @@ def enhanced_search_by_id():
 
 
 @app.route('/api/enhanced-search/source/<source_name>', methods=['POST'])
+@requires("music.access")
 def enhanced_search_source(source_name):
     """Streaming NDJSON search for one alternate metadata source.
 
@@ -6865,6 +6981,7 @@ def enhanced_search_source(source_name):
 
 
 @app.route('/api/enhanced-search/library-check', methods=['POST'])
+@requires("music.access")
 def enhanced_search_library_check():
     """Batch-check which albums/tracks from search results are already in the library.
 
@@ -6886,6 +7003,7 @@ def enhanced_search_library_check():
         return jsonify({'albums': [], 'tracks': []})
 
 @app.route('/api/enhanced-search/stream-track', methods=['POST'])
+@requires("music.access")
 def stream_enhanced_search_track():
     """Single-track preview search — finds the best Soulseek/stream-source match.
 
@@ -6948,6 +7066,7 @@ def _music_video_deps():
 
 
 @app.route('/api/music-video/download', methods=['POST'])
+@requires("music.videos")
 def download_music_video():
     """Download a YouTube video as a music video file to the configured music videos folder."""
     dl_err = check_download_permission()
@@ -6983,6 +7102,7 @@ def download_music_video():
 
 
 @app.route('/api/music-video/status/<video_id>', methods=['GET'])
+@requires("music.videos")
 def get_music_video_status(video_id):
     """Get download status for a music video."""
     status = _music_video.state.get(video_id)
@@ -7379,6 +7499,7 @@ def _playback_queue_prefetch_status(batch_ids):
 
 
 @app.route('/api/playback/queue/prefetch', methods=['POST'])
+@requires("music.access")
 def playback_queue_prefetch():
     """Acquire missing queue entries through the existing download pipeline."""
     permission_error = check_download_permission()
@@ -7400,6 +7521,7 @@ def playback_queue_prefetch():
 
 
 @app.route('/api/playback/queue/prefetch/status', methods=['GET'])
+@requires("music.access")
 def playback_queue_prefetch_status():
     batch_ids = [value for value in request.args.getlist('batch_ids') if value]
     if not batch_ids:
@@ -7510,6 +7632,7 @@ def _pinned_batch_deps():
 
 
 @app.route('/api/download', methods=['POST'])
+@requires("music.access")
 def start_download():
     """Simple download route"""
     dl_err = check_download_permission()
@@ -8138,6 +8261,7 @@ def _find_completed_file_robust_legacy(download_dir, api_filename, transfer_dir=
 
 
 @app.route('/api/downloads/status')
+@requires("music.access")
 def get_download_status():
     """
     A robust status checker that correctly finds completed files by searching
@@ -8655,6 +8779,7 @@ def _norm_track_key(s: str) -> str:
 
 
 @app.route('/api/downloads/task/<task_id>/detail', methods=['GET'])
+@requires("music.access")
 def get_task_detail(task_id):
     """Full per-track detail for the track-detail modal: live task state merged
     with the durable library_history provenance (location, quality, AcoustID
@@ -8699,6 +8824,7 @@ def get_task_detail(task_id):
 
 
 @app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
+@requires("music.access")
 def get_task_candidates(task_id):
     """Returns the cached search candidates for a download task so the UI can show what was found."""
     try:
@@ -9183,6 +9309,7 @@ def request_media_scan():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/scan/status', methods=['GET'])
+@requires("music.access")
 def get_scan_status():
     """
     Get current media scan status.
@@ -9244,6 +9371,7 @@ def maintain_search_history():
 # else uses), the matching library track row, and the history entries.
 
 @app.route('/api/download-origins')
+@requires("music.access")
 def get_download_origins():
     try:
         origin = request.args.get('origin', 'watchlist')
@@ -9315,6 +9443,7 @@ def delete_download_origins():
 
 
 @app.route('/api/library/recently-added')
+@requires("music.access")
 def get_recently_added_albums():
     """The dashboard rail: newest albums to land, folded from library_history
     with art backfilled from the library (see the db method's docstring).
@@ -9354,6 +9483,7 @@ def get_recently_added_albums():
 
 
 @app.route('/api/library/history')
+@requires("music.access")
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
     try:
@@ -9383,6 +9513,7 @@ def get_library_history():
 
 
 @app.route('/api/library/history/<int:history_id>/file-tags')
+@requires("music.access")
 def get_library_history_file_tags(history_id: int):
     """Read embedded tags from the actual audio file for one library
     history row. Backs the Audit Trail modal's "Embedded Tags" section.
@@ -9418,6 +9549,7 @@ def get_library_history_file_tags(history_id: int):
 
 
 @app.route('/api/library/artists')
+@requires("music.access")
 def get_library_artists():
     """Get artists for the library page with search, filtering, and pagination"""
     try:
@@ -9478,6 +9610,7 @@ def get_library_artists():
         }), 500
 
 @app.route('/api/library/albums/<album_id>/tracks')
+@requires("music.access")
 def get_library_album_tracks(album_id):
     """The tracks of one owned album, for the album card's play button.
 
@@ -9504,6 +9637,7 @@ def get_library_album_tracks(album_id):
         return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 @app.route('/api/library/unmatched-summary')
+@requires("music.access")
 def get_library_unmatched_summary():
     """How many tracks imported without a match, for the library banner (#1202).
 
@@ -9532,6 +9666,7 @@ def get_library_unmatched_summary():
 
 
 @app.route('/api/test-artist/<artist_id>')
+@admin_only
 def test_artist_endpoint(artist_id):
     """Simple test endpoint"""
     return jsonify({
@@ -9542,6 +9677,7 @@ def test_artist_endpoint(artist_id):
 # ── artist detail family lives in api/artist_detail.py now ──────────────────
 
 @app.route('/api/library/completion-stream', methods=['POST'])
+@requires("music.access")
 def library_completion_stream():
     """Stream completion status for library artist detail view - checks ownership per release via SSE"""
     try:
@@ -9716,6 +9852,7 @@ def library_completion_stream():
     )
 
 @app.route('/api/library/check-tracks', methods=['POST'])
+@requires("music.access")
 def library_check_tracks():
     """Check which tracks from a list are already owned in the library.
     Uses a single batch DB query + in-memory fuzzy matching for speed."""
@@ -9887,6 +10024,7 @@ def library_check_tracks():
 # ==================== Enhanced Library Management Endpoints ====================
 
 @app.route('/api/library/artist/<artist_id>/enhanced')
+@requires("music.access")
 def get_artist_enhanced_detail(artist_id):
     """Get full artist detail with all albums and tracks for enhanced library view."""
     try:
@@ -9918,6 +10056,7 @@ def get_artist_enhanced_detail(artist_id):
 
 # ── Re-identify an imported track (#889) ──
 @app.route('/api/reidentify/sources', methods=['GET'])
+@requires("music.access")
 def reidentify_sources():
     """Source tabs for the Re-identify modal — every metadata source with a live
     client, the active one flagged so the UI selects it by default."""
@@ -9929,6 +10068,7 @@ def reidentify_sources():
 
 
 @app.route('/api/reidentify/search', methods=['GET'])
+@requires("music.access")
 def reidentify_search():
     """Search one metadata source for the releases a track appears on.
 
@@ -9960,6 +10100,7 @@ def reidentify_search():
 
 
 @app.route('/api/reidentify/apply', methods=['POST'])
+@requires("music.access")
 def reidentify_apply():
     """Apply a re-identify: stage the track's library file + write a single-use hint
     so the auto-import worker re-files it under the chosen release (Phase 2).
@@ -10346,6 +10487,7 @@ def reconcile_embedded_ids():
 
 
 @app.route('/api/library/reconcile-embedded-ids/status', methods=['GET'])
+@requires("admin.tools")
 def get_reconcile_embedded_ids_status():
     """Poll the status of the embedded-ID reconcile job."""
     with _reconcile_ids_lock:
@@ -10362,6 +10504,7 @@ def get_reconcile_embedded_ids_status():
 
 
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
+@requires("music.access")
 def reorganize_album_preview(album_id):
     """Preview file reorganization for an album — returns current vs
     proposed paths without moving anything. It plans with the same
@@ -10407,6 +10550,7 @@ def reorganize_album_preview(album_id):
 
 
 @app.route('/api/library/album/<album_id>/reorganize', methods=['POST'])
+@requires("music.access")
 def reorganize_album_files(album_id):
     """Enqueue an album for reorganize. Returns immediately — the
     queue worker processes items FIFO. Repeat clicks for an album
@@ -10443,6 +10587,7 @@ def reorganize_album_files(album_id):
 
 
 @app.route('/api/library/artist/<artist_id>/reorganize-all', methods=['POST'])
+@requires("music.access")
 def reorganize_all_artist_albums(artist_id):
     """Enqueue every album for an artist. Replaces the old frontend
     bulk-loop. Each album becomes its own queue item, processed FIFO.
@@ -10480,6 +10625,7 @@ def reorganize_all_artist_albums(artist_id):
 
 
 @app.route('/api/library/reorganize/queue', methods=['GET'])
+@requires("music.access")
 def reorganize_queue_snapshot():
     """Snapshot of the reorganize queue — what's running, what's queued,
     recent completions. Polled by the status panel."""
@@ -10504,6 +10650,7 @@ def _reorganize_item_is_callers(item) -> bool:
 
 
 @app.route('/api/library/reorganize/queue/<queue_id>/cancel', methods=['POST'])
+@requires("music.access")
 def reorganize_queue_cancel(queue_id):
     """Cancel a queued item (running items can't be cleanly cancelled —
     see the queue module's design rules)."""
@@ -10520,6 +10667,7 @@ def reorganize_queue_cancel(queue_id):
 
 
 @app.route('/api/library/reorganize/queue/clear', methods=['POST'])
+@requires("music.access")
 def reorganize_queue_clear():
     """Cancel all queued items at once (the running item continues)."""
     try:
@@ -10828,6 +10976,7 @@ from api.content_guard import VOUCHED_KEY as _CONTENT_GUARD_VOUCHED  # noqa: E40
 
 
 @app.route('/api/library/play', methods=['POST'])
+@requires("music.access")
 def library_play_track():
     """Start playing a track directly from the user's library (no download needed)."""
     try:
@@ -10902,6 +11051,7 @@ def library_play_track():
 
 
 @app.route('/api/library/log-play', methods=['POST'])
+@requires("music.access")
 def library_log_play():
     """Record a SoulSync web-player play into listening_history + bump the
     track's play_count/last_played (feeds 'recently played' and smart radio).
@@ -10935,6 +11085,7 @@ def library_log_play():
 
 
 @app.route('/api/library/log-play/eligible', methods=['POST'])
+@requires("music.access")
 def library_log_play_eligible():
     """Mark a web-player listening_history row as scrobble-eligible.
 
@@ -11195,6 +11346,7 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
 
 
 @app.route('/api/library/search-service', methods=['POST'])
+@requires("music.access")
 def library_search_service():
     """Search a specific service for matching entities (for manual matching).
     Body: { service: str, entity_type: str, query: str }
@@ -11222,6 +11374,7 @@ def library_search_service():
 
 
 @app.route('/api/library/match-artist-releases', methods=['POST'])
+@requires("music.library")
 def library_match_artist_releases():
     """Return a lean release strip for one exact artist match candidate.
 
@@ -11404,6 +11557,7 @@ def library_import_existing_track_for_missing_slot(album_id):
 # ==================================================================================
 
 @app.route('/api/library/blacklist', methods=['GET'])
+@requires("music.access")
 def get_blacklist():
     """Get all blacklisted download sources."""
     try:
@@ -11581,6 +11735,7 @@ def _library_track_route_id(track_id):
 
 
 @app.route('/api/library/track/<track_id>/redownload/search-metadata', methods=['POST'])
+@requires("music.access")
 def redownload_search_metadata(track_id):
     """Step one of the redownload modal: candidate metadata for the track."""
     from core.library.redownload import search_metadata
@@ -11594,6 +11749,7 @@ def redownload_search_metadata(track_id):
 
 
 @app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
+@requires("music.access")
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
     track_id = _library_track_route_id(track_id)
@@ -11640,6 +11796,7 @@ from core.library.redownload import (
 
 
 @app.route('/api/library/track/<track_id>/redownload/start', methods=['POST'])
+@requires("music.access")
 def redownload_start(track_id):
     dl_err = check_download_permission()
     if dl_err:
@@ -11674,6 +11831,7 @@ def inspect_task_sources(task_id):
 
 
 @app.route('/api/downloads/task/<task_id>/library-track', methods=['GET'])
+@requires("music.access")
 def task_library_track(task_id):
     """The Library-v2 track a download task is for, so its Interactive Search
     can be the library's own; ``track_id`` is null when it names none."""
@@ -11712,6 +11870,7 @@ def _wishlist_search_override(track, data):
 
 
 @app.route('/api/wishlist/inspect', methods=['POST'])
+@requires("music.access")
 def inspect_wishlist_sources():
     """Search manually for one wishlist track: every source, with the verdicts."""
     try:
@@ -11730,6 +11889,7 @@ def inspect_wishlist_sources():
 
 
 @app.route('/api/wishlist/inspect/download', methods=['POST'])
+@requires("music.access")
 def download_wishlist_pick():
     """Download the exact file picked in the inspector for a wishlist track.
 
@@ -11784,6 +11944,7 @@ from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_resp
 
 
 @app.route('/api/library/radio')
+@requires("music.access")
 @_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
@@ -11826,6 +11987,7 @@ def library_radio():
 # ==================== End Enhanced Library Management ====================
 
 @app.route('/api/stream/start', methods=['POST'])
+@requires("music.access")
 def stream_start():
     """Start streaming a track in the background (per-listener session)."""
     global stream_background_task
@@ -11883,6 +12045,7 @@ def stream_start():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/stream/status')
+@requires("music.access")
 def stream_status():
     """Get current streaming status and progress for THIS listener."""
     try:
@@ -12016,6 +12179,7 @@ _LAST_SERVED_AUDIO = {'path': None, 'url': None}
 
 
 @app.route('/stream/audio')
+@requires("music.access")
 def stream_audio():
     """Serve THIS listener's current audio file with range request support."""
     try:
@@ -12053,6 +12217,7 @@ def stream_audio():
 
 
 @app.route('/stream/library-audio')
+@requires("music.access")
 def stream_library_audio():
     """Serve an arbitrary LIBRARY audio file by path, with range support.
 
@@ -12081,6 +12246,7 @@ def stream_library_audio():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stream/stop', methods=['POST'])
+@requires("music.access")
 def stream_stop():
     """Stop THIS listener's stream and clean up its staging dir."""
     try:
@@ -12312,6 +12478,7 @@ def _generate_album_suggestions(selected_artist, search_result):
         return []
 
 @app.route('/api/match/suggestions', methods=['POST'])
+@requires("music.access")
 def get_match_suggestions():
     """Get AI-powered suggestions for artist or album matching"""
     try:
@@ -12336,6 +12503,7 @@ def get_match_suggestions():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/match/search', methods=['POST'])
+@requires("music.access")
 def search_match():
     """Manual search for artists or albums"""
     try:
@@ -12698,6 +12866,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
     return started_count
 
 @app.route('/api/download/matched', methods=['POST'])
+@requires("music.access")
 def start_matched_download():
     """
     Starts a matched download. Supports:
@@ -12863,6 +13032,7 @@ def _enriched_files(data):
 
 
 @app.route('/api/search/enriched/match', methods=['POST'])
+@requires("music.access")
 def enriched_match():
     """the chosen release's tracklist plus which picked file is which track"""
     dl_err = check_download_permission()
@@ -12898,6 +13068,7 @@ def enriched_match():
 
 
 @app.route('/api/search/enriched/start', methods=['POST'])
+@requires("music.access")
 def enriched_start():
     """start an enriched download: an album (files + assignments) or a single
     track (one file + track_id)"""
@@ -13056,6 +13227,7 @@ from core.search import manual_download as _manual
 
 
 @app.route('/api/search/manual/start', methods=['POST'])
+@requires("music.access")
 def manual_start():
     dl_err = check_download_permission()
     if dl_err:
@@ -14950,6 +15122,7 @@ def _check_for_updates():
         logger.debug(f"Update check failed: {e}")
 
 @app.route('/api/update-check', methods=['GET'])
+@signed_in
 def check_for_update():
     """Check if a newer version is available on GitHub. Release-aware: a
     published release newer than the running base version reports its
@@ -14980,6 +15153,7 @@ def _update_check_payload():
 
 # ── Notification history (Kazimir) ───────────────────────────────
 @app.route('/api/notifications/log', methods=['POST'])
+@signed_in
 def log_notifications():
     """Journal a batch of UI toasts so 'Clear All' in the bell panel loses
     nothing. The frontend flushes these fire-and-forget every few seconds."""
@@ -14993,6 +15167,7 @@ def log_notifications():
 
 
 @app.route('/api/notifications/history', methods=['GET', 'DELETE'])
+@signed_in
 def notification_history():
     """The persistent notification journal for the ACTIVE profile —
     filterable by type, searchable, paginated. DELETE clears it."""
@@ -15236,6 +15411,7 @@ from api.database_admin import (  # noqa: E402
 # permanently. Shared by both sides because it is one package.
 
 @app.route('/api/ytdlp/status', methods=['GET'])
+@admin_only
 def ytdlp_status():
     """Installed vs newest available, so 'might be out of date' is a fact rather
     than a guess. The PyPI lookup is best-effort — no network must never mean no
@@ -15264,6 +15440,7 @@ def ytdlp_status():
 
 
 @app.route('/api/ytdlp/update', methods=['POST'])
+@requires("music.access")
 def ytdlp_update():
     """Install the newest yt-dlp. Admin only — this runs a package install."""
     if not bool(getattr(g, 'is_admin', True)):
@@ -15283,6 +15460,7 @@ def ytdlp_update():
 
 # /api/metadata-cache* endpoints: lifted to api/metadata_cache.py.
 @app.route('/api/musicbrainz/search', methods=['GET'])
+@requires("music.access")
 def musicbrainz_search_api():
     """Search MusicBrainz for manual matching. Returns raw results."""
     try:
@@ -15363,6 +15541,7 @@ _MB_RECORDING_MBID_RE = re.compile(
 
 
 @app.route('/api/musicbrainz/recording/<mbid>', methods=['GET'])
+@requires("music.access")
 def musicbrainz_recording_lookup_api(mbid):
     """Look up a single MusicBrainz recording by MBID and return it in the
     Fix-popup-compatible flat track shape. Powers the MBID-paste field —
@@ -15429,6 +15608,7 @@ def start_duplicate_cleaner():
         return jsonify({"success": True, "message": "Duplicate cleaner started"})
 
 @app.route('/api/duplicate-cleaner/status', methods=['GET'])
+@requires("admin.tools")
 def get_duplicate_cleaner_status():
     """Get current duplicate cleaner status"""
     with duplicate_cleaner_lock:
@@ -16215,6 +16395,7 @@ def _store_batch_source(batch_id, username, filename):
         _sr.info(traceback.format_exc())
 
 @app.route('/api/playlists/<playlist_id>/download_missing', methods=['POST'])
+@requires("music.access")
 def start_playlist_missing_downloads(playlist_id):
     """
     This endpoint receives the list of missing tracks and manages them with batch processing
@@ -16302,6 +16483,7 @@ def start_playlist_missing_downloads(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/active-processes', methods=['GET'])
+@signed_in
 def get_active_processes():
     """
     Returns all active processes for frontend rehydration:
@@ -16416,6 +16598,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
 
 
 @app.route('/api/playlists/<batch_id>/download_status', methods=['GET'])
+@requires("music.access")
 def get_batch_download_status(batch_id):
     """Returns real-time status for a single batch."""
     try:
@@ -16432,6 +16615,7 @@ def get_batch_download_status(batch_id):
 
 
 @app.route('/api/download_status/batch', methods=['GET'])
+@requires("music.access")
 def get_batched_download_statuses():
     """Returns status for multiple download batches in one request."""
     try:
@@ -16455,6 +16639,7 @@ def get_batched_download_statuses():
 
 
 @app.route('/api/download_status/watch', methods=['POST'])
+@requires("music.access")
 def watch_download_batches():
     """keepalive from a backgrounded tab: its open modals still count as watched."""
     data = request.get_json(silent=True) or {}
@@ -16486,6 +16671,7 @@ def _downloads_for_member(body, pid):
 
 
 @app.route('/api/downloads/all', methods=['GET'])
+@requires("music.downloads")
 def get_all_downloads_unified():
     """Unified downloads list for the centralized Downloads page."""
     try:
@@ -16500,6 +16686,7 @@ def get_all_downloads_unified():
 
 
 @app.route('/api/downloads/batch-history', methods=['GET'])
+@requires("music.downloads")
 def get_batch_history():
     """Return completed batch summaries from the last N days for the batch panel history section."""
     try:
@@ -16658,6 +16845,7 @@ def _cancel_refused(owner_profile_id):
 
 
 @app.route('/api/downloads/cancel_task', methods=['POST'])
+@requires("music.access")
 def cancel_download_task():
     """
     Cancels a single, specific download task.
@@ -16943,6 +17131,7 @@ def _atomic_cancel_task(playlist_id, track_index):
         return False, f"Internal error: {str(e)}", None
 
 @app.route('/api/downloads/cancel_task_v2', methods=['POST'])
+@requires("music.access")
 def cancel_task_v2():
     """
     NEW ATOMIC CANCEL SYSTEM V2
@@ -17167,6 +17356,7 @@ def _cancel_one_batch(batch_id):
 
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
+@requires("music.access")
 def cancel_batch(batch_id):
     """
     Cancels an entire batch - useful for cancelling during analysis phase
@@ -17216,6 +17406,7 @@ def cancel_batch(batch_id):
 
 # NEW ENDPOINT: Add this function to web_server.py
 @app.route('/api/playlists/cleanup_batch', methods=['POST'])
+@requires("music.access")
 def cleanup_batch():
     """
     Cleans up a completed or cancelled batch from the server's in-memory state.
@@ -17297,6 +17488,7 @@ def cleanup_batch():
 # ===============================
 
 @app.route('/api/sync/history', methods=['GET'])
+@requires("music.access")
 def get_sync_history():
     """Get paginated sync history."""
     try:
@@ -17345,6 +17537,7 @@ def get_sync_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/sync/history/<int:entry_id>', methods=['GET'])
+@requires("music.access")
 def get_sync_history_entry(entry_id):
     """Get a single sync history entry with full cached data for re-trigger."""
     try:
@@ -17369,6 +17562,7 @@ def get_sync_history_entry(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/sync/history/<int:entry_id>/play')
+@requires("music.access")
 def play_sync_history_entry(entry_id):
     """Resolve a synced playlist into owned rows plus an acquisition-aware queue."""
     try:
@@ -17441,6 +17635,7 @@ def play_sync_history_entry(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
+@requires("music.access")
 def readd_sync_track_to_wishlist(entry_id, track_index):
     """Re-add a synced unmatched track to the wishlist with the SAME context the
     sync originally used (source_type='playlist' + the playlist's name/id), so it
@@ -17492,6 +17687,7 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
 
 
 @app.route('/api/sync/history/<int:entry_id>', methods=['DELETE'])
+@requires("music.access")
 def delete_sync_history_entry_api(entry_id):
     """Delete a sync history entry."""
     try:
@@ -17502,6 +17698,7 @@ def delete_sync_history_entry_api(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/sync/history/names', methods=['GET'])
+@requires("music.access")
 def get_sync_history_playlist_names():
     """Return distinct playlist names ever synced, for server playlist cross-reference."""
     try:
@@ -17579,6 +17776,7 @@ def _server_playlist_guard(active_server, playlist_id, playlist_name):
 
 
 @app.route('/api/server/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_server_playlists():
     """Playlists on the active media server, as this profile may see them.
 
@@ -17729,6 +17927,7 @@ def _fetch_server_playlist_tracks(active_server, client, playlist_id, playlist_n
 
 
 @app.route('/api/server/playlist/<playlist_id>/tracks', methods=['GET'])
+@requires("music.playlist_sync")
 def get_server_playlist_tracks(playlist_id):
     """Get tracks from a server playlist with source match info from sync history."""
     try:
@@ -17907,6 +18106,7 @@ def get_server_playlist_tracks(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/adopt', methods=['POST'])
+@requires("music.playlist_sync")
 def adopt_server_playlist_route(playlist_id):
     """a server playlist soulsync didn't make becomes a My Playlist under the
     same name, each track pinned to its server track, so syncing it writes
@@ -17941,6 +18141,7 @@ def adopt_server_playlist_route(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/tag-mood', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_tag_mood(playlist_id):
     """Add a mood tag to every song on a plex playlist (wolf39us), so a plex
     smart playlist can be built on "mood is <tag>". Plex metadata only; it
@@ -17974,6 +18175,7 @@ def server_playlist_tag_mood(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_align(playlist_id):
     """Align a server playlist's ORDER to the source ('Align playlists').
 
@@ -18080,6 +18282,7 @@ def _jellyfin_recreated_playlist_id(playlist_name):
 
 
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_replace_track(playlist_id):
     """Replace a track in a server playlist. Rebuilds the playlist with the swap."""
     try:
@@ -18295,6 +18498,7 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
 
 
 @app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_add_track(playlist_id):
     """Add a track to a server playlist at a specific position.
 
@@ -18482,6 +18686,7 @@ def server_playlist_add_track(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/unmatch-track', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_unmatch_track(playlist_id):
     """Break a wrong source/server pairing without touching the playlist.
 
@@ -18516,6 +18721,7 @@ def server_playlist_unmatch_track(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/remove-track', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_remove_track(playlist_id):
     """Remove a track from a server playlist by its server track ID."""
     try:
@@ -18609,6 +18815,7 @@ def server_playlist_remove_track(playlist_id):
 
 
 @app.route('/api/server/playlist/<playlist_id>/delete', methods=['POST'])
+@requires("music.playlist_sync")
 def server_playlist_delete(playlist_id):
     """Delete a server playlist outright — SoulSync-made or not.
 
@@ -18730,6 +18937,7 @@ def _library_thumb_resolver(active_server):
 
 
 @app.route('/api/library/search-tracks', methods=['GET'])
+@requires("music.access")
 def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
     try:
@@ -18847,6 +19055,7 @@ def _presync_extra(row):
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/presync', methods=['GET'])
+@requires("music.access")
 def mirrored_presync_matches(playlist_id):
     """every song of a mirror next to the library track it will sync as."""
     try:
@@ -18910,6 +19119,7 @@ def _presync_row(database, playlist_id, mirror_track_id):
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/presync/match', methods=['POST'])
+@requires("music.access")
 def mirrored_presync_set_match(playlist_id):
     """pick the library track one song of a mirror syncs as. stored the way the
     server editor stores a swap (a user-confirmed match the sync honours), and
@@ -18945,6 +19155,7 @@ def mirrored_presync_set_match(playlist_id):
 
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/presync/unmatch', methods=['POST'])
+@requires("music.access")
 def mirrored_presync_unmatch(playlist_id):
     """this library track is the wrong one: never match the two again, and the
     song goes back to missing so the sync downloads it."""
@@ -18974,6 +19185,7 @@ def mirrored_presync_unmatch(playlist_id):
 
 
 @app.route('/api/manual-library-matches', methods=['GET'])
+@requires("music.access")
 def mlm_list():
     """List manual library matches for the current profile."""
     try:
@@ -18987,6 +19199,7 @@ def mlm_list():
 
 
 @app.route('/api/manual-library-matches/unmatched', methods=['GET'])
+@requires("music.access")
 def mlm_unmatched():
     """Pre-populated worklist of wanted-but-unmatched tracks (#1289)."""
     try:
@@ -19001,6 +19214,7 @@ def mlm_unmatched():
 
 
 @app.route('/api/manual-library-matches/source-search', methods=['GET'])
+@requires("music.access")
 def mlm_source_search():
     """Search wishlist + sync history for source track candidates."""
     try:
@@ -19016,6 +19230,7 @@ def mlm_source_search():
 
 
 @app.route('/api/manual-library-matches/library-search', methods=['GET'])
+@requires("music.access")
 def mlm_library_search():
     """Search the local library for candidate tracks."""
     try:
@@ -19030,6 +19245,7 @@ def mlm_library_search():
 
 
 @app.route('/api/manual-library-matches', methods=['POST'])
+@requires("music.access")
 def mlm_save():
     """Create or replace a manual library match."""
     try:
@@ -19069,6 +19285,7 @@ def mlm_save():
 
 
 @app.route('/api/manual-library-matches/<int:match_id>', methods=['DELETE'])
+@requires("music.access")
 def mlm_delete(match_id):
     """Delete a manual library match by ID.
 
@@ -19094,6 +19311,7 @@ def mlm_delete(match_id):
 
 
 @app.route('/api/playlists/<playlist_id>/ownership-preview', methods=['POST'])
+@requires("music.access")
 def playlist_ownership_preview(playlist_id):
     """which of these tracks are already in the library, before Begin Analysis.
 
@@ -19124,6 +19342,7 @@ def playlist_ownership_preview(playlist_id):
 
 
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
+@requires("music.access")
 def start_missing_tracks_process(playlist_id):
     """
     A single, robust endpoint to kick off the entire missing tracks workflow.
@@ -19407,6 +19626,7 @@ def start_missing_tracks_process(playlist_id):
     })
 
 @app.route('/api/tracks/download_missing', methods=['POST'])
+@requires("music.access")
 def start_missing_downloads():
     """Legacy endpoint - redirect to new playlist-based endpoint"""
     dl_err = check_download_permission()
@@ -19637,6 +19857,7 @@ def _invalidate_sync_fingerprint(playlist_id):
         logger.error(f"Error clearing sync fingerprint for {playlist_id}: {e}")
 
 @app.route('/api/spotify/playlists', methods=['GET'])
+@requires("music.playlist_sync")
 def get_spotify_playlists():
     """Fetches all user playlists from Spotify and enriches them with local sync status."""
     client = get_spotify_client_for_profile()
@@ -19783,6 +20004,7 @@ def _spotify_playlist_public_response(playlist_id):
 
 
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
+@requires("music.access")
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
     # Use THIS profile's own Spotify (their playlists/private content); falls
@@ -19978,6 +20200,7 @@ def get_playlist_tracks(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
+@requires("music.access")
 def get_spotify_album_tracks(album_id):
     """Fetches full track details for a specific album."""
     _mark_request_free_ok_for_spotify('spotify')  # the URL itself targets Spotify
@@ -20150,6 +20373,7 @@ def get_spotify_album_tracks(album_id):
 
 
 @app.route('/api/spotify/track/<track_id>', methods=['GET'])
+@requires("music.access")
 def get_spotify_track(track_id):
     """Fetches full track details including album data for a specific track."""
     source_override = request.args.get('source', '').strip().lower()
@@ -20350,6 +20574,7 @@ def start_library_v2_bootstrap_autostart() -> bool:
 # --- Artist Bubble Snapshot System ---
 
 @app.route('/api/artist_bubbles/snapshot', methods=['POST'])
+@requires("music.access")
 def save_artist_bubble_snapshot():
     """
     Saves a snapshot of current artist bubble state for persistence across page refreshes.
@@ -20357,6 +20582,7 @@ def save_artist_bubble_snapshot():
     return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "artist_bubbles", "artist bubbles", "artist bubble snapshot", "artists")
 
 @app.route('/api/artist_bubbles/hydrate', methods=['GET'])
+@requires("music.access")
 def hydrate_artist_bubbles():
     """
     Loads artist bubbles with live status by cross-referencing snapshots with active processes.
@@ -20507,6 +20733,7 @@ def hydrate_artist_bubbles():
 # --- Search Bubble Snapshot System ---
 
 @app.route('/api/search_bubbles/snapshot', methods=['POST'])
+@requires("music.access")
 def save_search_bubble_snapshot():
     """
     Saves a snapshot of current search bubble state for persistence across page refreshes.
@@ -20514,6 +20741,7 @@ def save_search_bubble_snapshot():
     return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "search_bubbles", "search bubbles", "search bubble snapshot", "albums/tracks")
 
 @app.route('/api/search_bubbles/hydrate', methods=['GET'])
+@requires("music.access")
 def hydrate_search_bubbles():
     """
     Loads search bubbles with live status by cross-referencing snapshots with active processes.
@@ -20644,11 +20872,13 @@ def hydrate_search_bubbles():
         }), 500
 
 @app.route('/api/beatport_bubbles/snapshot', methods=['POST'])
+@requires("music.access")
 def save_beatport_bubble_snapshot():
     """Saves a snapshot of current Beatport download bubble state for persistence."""
     return _save_source_bubble_snapshot("bubbles", "No bubble data provided", "beatport_bubbles", "Beatport bubbles", "Beatport bubble snapshot", "charts")
 
 @app.route('/api/beatport_bubbles/hydrate', methods=['GET'])
+@requires("music.access")
 def hydrate_beatport_bubbles():
     """Loads Beatport download bubbles with live status from snapshot."""
     try:
@@ -21220,6 +21450,7 @@ def stop_metadata_update():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/status', methods=['GET'])
+@requires("music.access")
 def get_metadata_update_status():
     """Get current metadata update status"""
     try:
@@ -21239,6 +21470,7 @@ def get_metadata_update_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/active-media-server', methods=['GET'])
+@signed_in
 def get_active_media_server():
     """Get the currently active media server"""
     try:
@@ -21258,6 +21490,7 @@ def get_active_media_server():
 # ── Mirrored Playlists ────────────────────────────────────────────────
 
 @app.route('/api/import/newpipe', methods=['POST'])
+@requires("music.playlist_sync")
 def import_newpipe_backup():
     """Read the playlists out of a NewPipe backup (the export .zip or newpipe.db).
 
@@ -21290,6 +21523,7 @@ def import_newpipe_backup():
 
 
 @app.route('/api/mirror-playlist', methods=['POST'])
+@requires("music.playlist_sync")
 def mirror_playlist_endpoint():
     """Save or update a mirrored playlist."""
     try:
@@ -21423,12 +21657,14 @@ def _build_playlist_explorer_deps():
 
 
 @app.route('/api/playlist-explorer/build-tree', methods=['POST'])
+@requires("music.explorer")
 def playlist_explorer_build_tree():
     return _playlists_explorer.playlist_explorer_build_tree(_build_playlist_explorer_deps())
 
 
 
 @app.route('/api/playlist-explorer/album-tracks/<album_id>', methods=['GET'])
+@requires("music.explorer")
 def playlist_explorer_album_tracks(album_id):
     """Fetch track listing for an album. Works with active metadata source. Caches results."""
     try:
@@ -21992,6 +22228,7 @@ except Exception as e:
 # --- API Rate Monitor Endpoints ---
 
 @app.route('/api/rate-monitor/history/<service_key>', methods=['GET'])
+@requires("music.dashboard")
 def get_rate_monitor_history(service_key):
     """Get 24-hour minute-bucketed call history for a service. Used by the detail modal graph."""
     try:
@@ -22075,6 +22312,7 @@ def _int_or_none(value):
 
 
 @app.route('/api/artist/hero-stats', methods=['GET'])
+@requires("music.access")
 def get_artist_hero_stats():
     """The numbers the rich artist header shows (ldp-05).
 
@@ -22140,6 +22378,7 @@ def get_artist_hero_stats():
 
 
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
+@requires("music.access")
 def get_artist_lastfm_top_tracks(artist_id):
     """Get top tracks for an artist from Last.fm (lazy-loaded by frontend)."""
     try:
@@ -22615,6 +22854,7 @@ except Exception as e:
 # --- Hydrabase Worker API Endpoints ---
 
 @app.route('/api/hydrabase-worker/status', methods=['GET'])
+@signed_in
 def hydrabase_worker_status():
     """Get Hydrabase P2P mirror worker status for UI polling"""
     try:
@@ -22690,6 +22930,7 @@ except Exception as e:
     soulid_worker = None
 
 @app.route('/api/soulid/status', methods=['GET'])
+@signed_in
 def soulid_status():
     """Get SoulID worker status for UI polling."""
     try:
@@ -24389,6 +24630,19 @@ from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
 _cfg_pa(get_database=get_database, config_manager=config_manager,
         require_login_enabled=_require_login_enabled)
 app.register_blueprint(_bp_pa())
+
+# people and permissions (#2166): catalogue, policy, templates, per-profile
+# permissions and the member's own map. contract: scrap/permissions/API.md
+from api.permissions_routes import configure as _cfg_perm, create_blueprint as _bp_perm
+
+
+def _perm_video_db():
+    from api.video import get_video_db as _gvd
+    return _gvd()
+
+
+_cfg_perm(get_database=get_database, get_video_db=_perm_video_db, config_get=config_manager.get)
+app.register_blueprint(_bp_perm())
 
 # per-profile notes (request approved, issue answered): pushed to the
 # requester's profile room; core.profile_notify journals them too

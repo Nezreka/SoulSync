@@ -31,6 +31,27 @@ through each one this hooks the app once (register(app)):
     GET  /api/library/v2/artists/<id>/play-queue  files of explicit tracks
     GET  /api/library/v2/tracks/<id>              an explicit track is 403 restricted
 
+  more lists (S17, #2166): what a kid can still reach elsewhere
+    GET  /api/library/radio, /api/library/tracks(/recent),
+         /api/library/search-tracks, /api/library/recently-added
+                                              library tracks: their own flag,
+                                              else the catalogue's (lib2)
+    GET  /api/discover/*, /api/personalized/*, /api/stats/*
+                                              any card flagged explicit, any
+                                              depth; library tracks by lookup
+    /api/sample/*                             a library track that's explicit
+                                              is 403 restricted (Sample Studio
+                                              plays and splits its audio)
+    POST /api/music-video/download            no explicit data on a video:
+                                              a hide_explicit profile can't
+                                              fetch one (asking is refused in
+                                              api/music_requests.py)
+  wishlist adds are held in the database (core.permission_store.wish_refusal)
+
+which profile is restricted: music.hide_explicit in the profile's permission
+map (g.perms, so a global policy can force it on), or its hide_explicit
+column; either one hides.
+
 explicit NULL is allowed on purpose: most libraries carry no explicit data,
 and hiding every unknown would empty them. only a truthy flag counts
 (core/content_filter.is_explicit).
@@ -67,12 +88,87 @@ _DEEP = re.compile(r"^(/api/enhanced-search/by-id|/api/artist-detail/[^/]+"
                    r"|/api/artist/[^/]+/discography(/gap-fill)?)$")
 
 
+_LIBRARY_TRACK_LISTS = {
+    "/api/library/radio": ("tracks",),
+    "/api/library/tracks": ("data", "tracks"),
+    "/api/library/tracks/recent": ("data", "tracks"),
+    "/api/library/search-tracks": ("tracks",),
+}
+_FEEDS = re.compile(r"^/api/(discover|personalized|stats)/")
+_SAMPLE = "/api/sample/"
+
+
 def _hide_explicit() -> bool:
+    try:
+        from flask import g
+        if "perms" in g:
+            from core.permissions import restricted
+            if restricted("music.hide_explicit"):
+                return True
+    except Exception:  # noqa: BLE001 - the kids guard fails closed
+        logger.exception("content guard: permissions unreadable")
+        return True
     try:
         return bool(current_restrictions().get("hide_explicit"))
     except Exception:  # noqa: BLE001 - the kids guard fails closed
         logger.exception("content guard: restrictions unreadable")
         return True
+
+
+def _track_ref(item, *, ids_are_tracks=False):
+    """(file_path, lib2 id, server/legacy id) of a library track card, or None
+    when the card names no library track."""
+    if not isinstance(item, dict):
+        return None
+    fp = item.get("file_path") or item.get("path")
+    lib2 = item.get("lib2_track_id")
+    tid = item.get("track_id") or item.get("db_track_id") or item.get("legacy_track_id")
+    if tid is None and ids_are_tracks:
+        tid = item.get("id")
+    if not fp and lib2 in (None, "") and tid in (None, ""):
+        return None
+    return fp, lib2, tid
+
+
+def _explicit_card(conn, item, *, ids_are_tracks=False):
+    """a card flagged explicit, or a library track the catalogue says is."""
+    if not isinstance(item, dict):
+        return False
+    if is_explicit(item.get("explicit")):
+        return True
+    album = item.get("album")
+    if isinstance(album, dict) and is_explicit(album.get("explicit")):
+        return True
+    ref = _track_ref(item, ids_are_tracks=ids_are_tracks)
+    if ref is None or conn is None:
+        return False
+    from core.library2.explicit import library_track_is_explicit
+    fp, lib2, tid = ref
+    try:
+        return library_track_is_explicit(conn, file_path=fp, lib2_track_id=lib2, track_id=tid)
+    except Exception:  # noqa: BLE001 - can't check it, don't show it
+        logger.exception("content guard: explicit lookup failed")
+        return True
+
+
+def _drop_explicit(value, conn, *, ids_are_tracks=False):
+    """drop explicit cards from every list, however deep, library tracks by
+    lookup. the walk keeps every other shape as it was."""
+    if isinstance(value, list):
+        return [_drop_explicit(x, conn, ids_are_tracks=ids_are_tracks) for x in value
+                if not _explicit_card(conn, x, ids_are_tracks=ids_are_tracks)]
+    if isinstance(value, dict):
+        return {k: _drop_explicit(v, conn, ids_are_tracks=ids_are_tracks) for k, v in value.items()}
+    return value
+
+
+def _sample_track_ids():
+    ids = [(request.view_args or {}).get("track_id"), request.args.get("track_id")]
+    if request.method in ("POST", "PUT", "PATCH"):
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            ids.append(body.get("track_id"))
+    return [t for t in ids if t not in (None, "")]
 
 
 def _restricted():
@@ -115,6 +211,20 @@ def _stream_is_vouched() -> bool:
 
 def _guard_play():
     path = request.path
+    if path.startswith(_SAMPLE):
+        ids = _sample_track_ids()
+        if not ids or not _hide_explicit():
+            return None
+        try:
+            with _get_database()._get_connection() as conn:
+                from core.library2.explicit import library_track_is_explicit
+                blocked = any(library_track_is_explicit(conn, track_id=t) for t in ids)
+        except Exception:  # noqa: BLE001 - can't check it, don't open it
+            logger.exception("content guard: explicit lookup failed")
+            blocked = True
+        return _restricted() if blocked else None
+    if path == "/api/music-video/download" and request.method == "POST":
+        return _restricted() if _hide_explicit() else None
     if (path, request.method) in _UNVOUCHED_STREAMS or (
             request.method == "POST" and _REVIEW_PLAY.match(path)):
         return _restricted() if _hide_explicit() else None
@@ -221,8 +331,39 @@ def _deep_clean(value):
     return value
 
 
+def _filter_lists(path, response):
+    """S17: the library lists and the discover / stats feeds."""
+    data = response.get_json(silent=True)
+    if not isinstance(data, (dict, list)):
+        return response
+    library = path in _LIBRARY_TRACK_LISTS or path == "/api/library/recently-added"
+    try:
+        with _get_database()._get_connection() as conn:
+            if path in _LIBRARY_TRACK_LISTS:
+                keys = _LIBRARY_TRACK_LISTS[path]
+                holder = data
+                for k in keys[:-1]:
+                    holder = holder.get(k) if isinstance(holder, dict) else None
+                if isinstance(holder, dict) and isinstance(holder.get(keys[-1]), list):
+                    holder[keys[-1]] = _drop_explicit(holder[keys[-1]], conn, ids_are_tracks=True)
+            else:
+                data = _drop_explicit(data, conn, ids_are_tracks=library)
+    except Exception:  # noqa: BLE001 - can't check them, don't show them
+        logger.exception("content guard: explicit lookup failed")
+        body, status = _restricted()
+        body.status_code = status
+        return body
+    response.set_data(json.dumps(data))
+    return response
+
+
 def _filter_response(response):
     path = request.path
+    if (path in _LIBRARY_TRACK_LISTS or path == "/api/library/recently-added" or _FEEDS.match(path)) \
+            and request.method == "GET":
+        if response.status_code != 200 or "json" not in (response.mimetype or "") or not _hide_explicit():
+            return response
+        return _filter_lists(path, response)
     lib2 = (_LIB2_ARTIST.match(path) or _LIB2_ALBUM.match(path)
             or _LIB2_PLAY_QUEUE.match(path) or _LIB2_TRACK.match(path))
     wanted = (path == "/api/enhanced-search" or _SEARCH_SOURCE.match(path)

@@ -46,6 +46,15 @@
     var currentSource = 'library';  // 'library' (video.db) or 'tmdb' (live preview)
     var artAttemptedFor = null;     // lazy art refresh runs once per detail view
 
+    // may this profile get this kind right away (#2166)? movies, shows and
+    // youtube each have their own mode (VideoRequests, from the server's
+    // rules); until that's loaded, the old one switch answers
+    function vdCanGet(kind) {
+        var vr = window.VideoRequests;
+        if (vr && typeof vr.canGet === 'function') return vr.canGet(kind);
+        return (typeof canDownload !== 'function') || canDownload();
+    }
+
     var TMDB_URL = '/api/video/tmdb/';
     function detailURL(kind, id, source) {
         return source === 'tmdb' ? TMDB_URL + kind + '/' + id : DETAIL_URL + kind + '/' + id;
@@ -952,7 +961,11 @@
         // Requests (arr-parity P4): a profile WITHOUT download rights has no
         // acquisition path at all — give it the ask-an-admin button instead of
         // the Get/Watchlist controls (those APIs are gated for this profile).
-        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        // per kind (#2166): movies and shows each have their own "download
+        // right away / ask first / can't request"; VideoRequests knows which
+        var _vr = window.VideoRequests;
+        var _canDl = vdCanGet(d.kind);
+        var _mayAsk = !(_vr && _vr.mayAsk) || _vr.mayAsk(d.kind);
         // an owned movie has nothing left to ask for; a show can still be
         // missing seasons. "Requested" once this profile has one waiting.
         var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
@@ -989,7 +1002,7 @@
             primary = '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
-        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
+        if (!_canDl && _mayAsk && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
             // what the button says comes from the title's status (#2160,
             // loadTitleStatus): your own ask, or already on its way, is a
             // disabled state; someone else's ask can be joined
@@ -2021,7 +2034,7 @@
                     tmdbId: data.tmdb_id || (data.source === 'tmdb' ? data.id : null),
                     source: lib ? 'library' : 'tmdb' },
             season: season, missingOnly: missingOnly, nextUp: data.next_up || null,
-            canDownload: (typeof canDownload !== 'function') || canDownload(),
+            canDownload: vdCanGet('show'),
             canGrab: !!window.VideoGrab,
             downloads: Object.assign({}, _dlActive), finished: Object.assign({}, _dlDone)
         };
@@ -2791,7 +2804,9 @@
         // A profile without download rights can't grab or wishlist — it can
         // ASK for the video instead (the request flow). Owned videos keep
         // their treatment: nothing left to ask for.
-        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var noDl = !(window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload())) && window.VideoRequests;
         var ch = (data && data._channel) || {};
         var reqBtn = (!ep.owned && noDl)
             ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
@@ -2859,7 +2874,9 @@
             : '';
         var state = ep.owned ? '<span class="vd-ytc-state vd-ytc-state--owned">✓ Downloaded</span>'
             : (ep.wished ? '<span class="vd-ytc-state vd-ytc-state--wished">In wishlist</span>' : '');
-        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var noDl = !(window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload())) && window.VideoRequests;
         var ch = (data && data._channel) || {};
         var actions;
         if (!ep.owned && noDl) {
@@ -3007,7 +3024,9 @@
         if (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all') seasonMissing = [];   // a filtered view isn't "the season"
         // A profile without download rights gets no acquisition buttons here either —
         // the server 403s the grab/wishlist endpoints for it (same as the per-row buttons).
-        var canDl = (typeof canDownload !== 'function') || canDownload();
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var canDl = (window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload()));
         if (!seasonMissing.length || !canDl) return '';
         var scope = grabScope();
         return '<div class="vd-season-actions">' +
@@ -4915,6 +4934,18 @@
             renderEpisodes();
         }
         window.addEventListener('ss:webui-profile-context-changed', onProfileChanged);
+        // the per-kind answer lands after the first paint: repaint the actions
+        // the episode rows' get / ask buttons follow it too, repainted only
+        // when the answer for this page moved (open panels stay open)
+        var _lastKindGet = null;
+        document.addEventListener('soulsync:video-access-ready', function () {
+            if (data && root()) renderActions(data);
+            var kindGet = vdCanGet(currentKind === 'movie' ? 'movie' : data && data.source === 'youtube' ? 'youtube' : 'show');
+            // before the first answer the page was drawn from the old switch
+            var before = _lastKindGet === null ? ((typeof canDownload !== 'function') || canDownload()) : _lastKindGet;
+            if (before !== kindGet && data && root()) renderEpisodes();
+            _lastKindGet = kindGet;
+        });
         // Metadata edited via the Manage panel → re-render the page from the DB
         // (title/genres/summary changed under us). Quiet events (toggles) skip it.
         document.addEventListener('soulsync:video-meta-changed', function (e) {

@@ -354,14 +354,16 @@ def _commit_refresh(
         )
         try:
             if deps.engine:
-                deps.engine.emit('playlist_changed', {
+                from core.automation.owners import owned
+                # the mirror's owner (a system refresh walks everyone's)
+                deps.engine.emit('playlist_changed', owned({
                     'playlist_name': pl.get('name', ''),
                     'playlist_id': str(pl.get('id', '')),
                     'old_count': str(len(old_ids)),
                     'new_count': str(len(new_ids)),
                     'added': str(added),
                     'removed': str(removed),
-                })
+                }, pl.get('profile_id') or 1))
         except Exception as e:
             deps.logger.debug("playlist_synced automation emit failed: %s", e)
     else:

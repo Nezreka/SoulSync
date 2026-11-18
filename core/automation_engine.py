@@ -1119,13 +1119,57 @@ class AutomationEngine:
 
     # --- Event Bus ---
 
+    # whose event this is (#2166 follow-up 25): stamped at emit time from the
+    # request's profile, or the background profile an automation runs as.
+    # an event with no owner is the install's (a batch finishing, a scan).
+    EVENT_OWNER_KEY = '_event_owner'
+    # events that carry nothing about anyone's things: a member's own
+    # automation may listen to these without an owner
+    OWNERLESS_EVENTS = frozenset({'app_started'})
+
+    @staticmethod
+    def _event_owner():
+        try:
+            from flask import g, has_request_context
+            if has_request_context():
+                pid = getattr(g, 'profile_id', None)
+                return int(pid) if pid is not None else None
+        except Exception:  # noqa: BLE001 - no owner is the install's
+            return None
+        try:
+            from core.profile_context import get_background_profile
+            pid = get_background_profile()
+            return int(pid) if pid is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def emit(self, event_type, data):
-        """Called from web_server.py when events occur. Non-blocking."""
+        """Called from web_server.py when events occur. Non-blocking.
+
+        whose event it is (core/automation/owners.py): a site that knows
+        names it (one id, or a list for several people); otherwise whoever
+        is acting (the request's profile, the background job's owner) is
+        stamped. install-wide events (scans, database updates, maintenance)
+        never carry an owner, so only admins' automations hear them."""
         if not self._running:
             return
+        from core.automation.owners import INSTALL_EVENTS, owner_value
+        data = dict(data or {})
+        if event_type in INSTALL_EVENTS:
+            data.pop(self.EVENT_OWNER_KEY, None)
+        elif self.EVENT_OWNER_KEY in data:
+            value = owner_value(data[self.EVENT_OWNER_KEY])
+            if value is None:
+                data.pop(self.EVENT_OWNER_KEY, None)
+            else:
+                data[self.EVENT_OWNER_KEY] = value
+        else:
+            owner = self._event_owner()
+            if owner is not None:
+                data[self.EVENT_OWNER_KEY] = owner
         thread = threading.Thread(
             target=self._process_event,
-            args=(event_type, dict(data)),
+            args=(event_type, data),
             daemon=True,
             name=f'automation-event-{event_type}'
         )
@@ -1276,6 +1320,77 @@ class AutomationEngine:
             return any(results)
         return all(results)
 
+    def personal_refusal(self, auto):
+        """why a member's own automation may not run, or None (S4, decision 4).
+
+        a system automation or one an admin owns runs as before. one a member
+        owns runs only while that member keeps "Their own automations" (an
+        auto-sync schedule from the sync page: while they keep Playlist
+        sync, core.automation.access.permission_for) and only a personal
+        action (core.permissions.PERSONAL_AUTOMATION_ACTIONS) with notes for
+        steps: rows saved before the rule (search and download, library
+        cleanup, ...) are skipped, not run. an owner whose rights can't be
+        read is skipped too."""
+        if not auto or auto.get('is_system'):
+            return None
+        owner = auto.get('profile_id')
+        try:
+            if owner is None or int(owner) == 1:
+                return None
+        except (TypeError, ValueError):
+            return 'its owner is unknown'
+        try:
+            from core.automation.access import permission_for, personal_refusal
+            from core.permission_store import context_for
+            from core.permissions import can
+            ctx = context_for(self.db, owner)
+            if ctx.get('is_admin'):
+                return None
+            perm = permission_for(auto)
+            if not can(ctx, perm):
+                if perm == 'music.playlist_sync':
+                    return "its owner's profile doesn't include playlist sync"
+                return "its owner's profile doesn't include their own automations"
+            reason = personal_refusal(auto)
+            return "it isn't a personal automation" if reason else None
+        except Exception as e:  # noqa: BLE001 - can't tell, so it doesn't run
+            logger.warning("automation %s: owner rights unreadable: %s", auto.get('id'), e)
+            return "its owner's rights couldn't be read"
+
+    def _member_owner(self, auto):
+        """the member (non-admin) who owns this automation, else None: a
+        system row, an admin's, or an owner that can't be read (personal
+        refusal answers for that one)."""
+        if not auto or auto.get('is_system'):
+            return None
+        try:
+            owner = int(auto.get('profile_id'))
+        except (TypeError, ValueError):
+            return None
+        if owner == 1:
+            return None
+        try:
+            prof = self.db.get_profile(owner) or {}
+        except Exception:  # noqa: BLE001 - unreadable: treat as a member's
+            return owner
+        return None if prof.get('is_admin') else owner
+
+    def event_refusal(self, auto, event_data):
+        """why a member's own automation doesn't run on this event, or None.
+        a member's automation hears only their own events (one stamped with
+        their profile, _event_owner) and the few that carry nothing of
+        anyone's: another member's downloads, requests or playlists, or the
+        install's own batches, never reach a member's notes."""
+        owner = self._member_owner(auto)
+        if owner is None:
+            return None
+        if str(auto.get('trigger_type') or '') in self.OWNERLESS_EVENTS:
+            return None
+        from core.automation.owners import owners_of
+        if owner in owners_of(event_data):
+            return None
+        return "the event isn't its owner's"
+
     def _run_event_automation(self, auto, automation_id, event_data):
         """Execute action for an event-triggered automation."""
         # Global per-side pause — event triggers are simply dropped while the
@@ -1288,6 +1403,11 @@ class AutomationEngine:
         paused = self.feature_paused(auto)
         if paused:
             logger.info(f"Event automation '{auto.get('name')}' skipped — {paused}")
+            return
+
+        refused = self.personal_refusal(auto) or self.event_refusal(auto, event_data)
+        if refused:
+            logger.info(f"Event automation '{auto.get('name')}' skipped — {refused}")
             return
 
         action_type = auto.get('action_type')
@@ -1376,12 +1496,18 @@ class AutomationEngine:
                             self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
                         except Exception as e:
                             logger.debug("event progress init: %s", e)
+                    # act as the automation's owner, like a scheduled run:
+                    # what the handler emits is that owner's, not nobody's
+                    from core.profile_context import set_background_profile, reset_background_profile
+                    _bg_token = set_background_profile(auto.get('profile_id') or 1)
                     try:
                         result = handler_info['handler'](action_config) or {}
                         logger.info(f"Event automation '{auto.get('name')}' executed: {result.get('status', 'ok')}")
                     except Exception as e:
                         result = {'status': 'error', 'error': str(e)}
                         logger.error(f"Event automation '{auto.get('name')}' action failed: {e}")
+                    finally:
+                        reset_background_profile(_bg_token)
                     # Finalize progress tracking
                     if self._progress_finish_fn:
                         try:
@@ -1461,6 +1587,12 @@ class AutomationEngine:
                                  error=None)
                 return
 
+        refused = self.personal_refusal(auto)
+        if refused:
+            logger.info(f"Automation '{auto.get('name')}' skipped — {refused}")
+            self._finish_run(auto, automation_id, {'status': 'skipped', 'reason': refused}, error=None)
+            return
+
         action_type = auto.get('action_type')
 
         # notify_only for scheduled automations
@@ -1501,6 +1633,16 @@ class AutomationEngine:
         # profile 1, so this is a no-op for them — only non-admin-owned
         # automations gain their correct identity in the background.
         _effective_profile_id = profile_id if profile_id is not None else (auto.get('profile_id') or 1)
+        # a member's own automation acts for that member only: its watchlist
+        # scan reads their artists, not every profile's (a scheduled run used
+        # to pass no profile, which scan_watchlist reads as "all profiles")
+        if not auto.get('is_system') and _effective_profile_id != 1 and '_profile_id' not in action_config:
+            try:
+                _owner_is_admin = bool((self.db.get_profile(int(_effective_profile_id)) or {}).get('is_admin'))
+            except Exception:  # noqa: BLE001 - unknown owner: keep it to its own
+                _owner_is_admin = False
+            if not _owner_is_admin:
+                action_config['_profile_id'] = _effective_profile_id
 
         # Action delay (skipped for manual run_now)
         delay_minutes = action_config.get('delay', 0)
@@ -1831,6 +1973,11 @@ class AutomationEngine:
         if not then_actions:
             return
 
+        # a member's own automation sends notes only to public addresses
+        # (#2166 follow-up 26): the url is theirs to type, the server is the
+        # one that fetches it, so it's held like any server fetch
+        guard = self._member_owner(automation) is not None
+
         # Build template variables
         variables = {
             'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -1859,23 +2006,26 @@ class AutomationEngine:
                         logger.debug("Then-action '%s' skipped by its conditions", t)
                         continue
                 if t == 'discord_webhook':
-                    self._send_discord_notification(c, variables)
+                    self._send_discord_notification(c, variables, guard=guard)
                 elif t == 'pushbullet':
                     self._send_pushbullet_notification(c, variables)
                 elif t == 'telegram':
                     self._send_telegram_notification(c, variables)
                 elif t == 'ntfy':
-                    self._send_ntfy_notification(c, variables)
+                    self._send_ntfy_notification(c, variables, guard=guard)
                 elif t == 'gotify':
-                    self._send_gotify_notification(c, variables)
+                    self._send_gotify_notification(c, variables, guard=guard)
                 elif t == 'webhook':
-                    self._send_webhook(c, variables)
+                    self._send_webhook(c, variables, guard=guard)
                 elif t == 'fire_signal':
                     sig = self._sanitize_signal_name(c.get('signal_name', ''))
                     if sig:
                         emit_data = {k: v for k, v in action_result.items() if not k.startswith('_')}
                         emit_data['_chain_depth'] = chain_depth + 1
                         emit_data['signal_name'] = sig
+                        # a signal is its automation's owner's: a member's
+                        # signal starts only their own automations
+                        emit_data[self.EVENT_OWNER_KEY] = automation.get('profile_id') or 1
                         logger.info(f"Automation '{automation.get('name')}' firing signal: {sig} (depth={chain_depth + 1})")
                         self.emit('signal:' + sig, emit_data)
                 elif t == 'run_script':
@@ -1950,7 +2100,24 @@ class AutomationEngine:
                 return cycle
         return None
 
-    def _send_discord_notification(self, config, variables):
+    @staticmethod
+    def _post(url, guard=False, **kwargs):
+        """requests.post for a notification step. guarded (a member's own
+        automation), the address must be public http or https, checked the
+        way every server fetch is (core.podcast_ingest_guard.check_url), and
+        redirects aren't followed, so a public url can't bounce the post to a
+        private one."""
+        if guard:
+            from core.podcast_ingest_guard import check_url
+            ok, reason = check_url(url)
+            if not ok:
+                # a RuntimeError, so the webhook step reports it instead of
+                # trying its default payload at the same address
+                raise RuntimeError(f"Notes from your own automations go to public addresses only: {reason}")
+            kwargs['allow_redirects'] = False
+        return requests.post(url, **kwargs)
+
+    def _send_discord_notification(self, config, variables, guard=False):
         """POST to Discord webhook with template variable substitution."""
         url = config.get('webhook_url', '').strip()
         if not url:
@@ -1962,7 +2129,7 @@ class AutomationEngine:
         for key, value in variables.items():
             message = message.replace('{' + key + '}', value)
 
-        resp = requests.post(url, json={"content": message}, timeout=10)
+        resp = self._post(url, guard, json={"content": message}, timeout=10)
         if resp.status_code not in (200, 204):
             raise RuntimeError(f"Discord webhook returned {resp.status_code}: {resp.text[:200]}")
 
@@ -2026,7 +2193,7 @@ class AutomationEngine:
             text = text.replace('{' + key + '}', value)
         return text
 
-    def _send_ntfy_notification(self, config, variables):
+    def _send_ntfy_notification(self, config, variables, guard=False):
         """Publish to an ntfy topic.
 
         Self-hosted by most people who use it, so the server is configurable and
@@ -2073,11 +2240,11 @@ class AutomationEngine:
         elif username:
             auth = (username, password)
 
-        resp = requests.post(server, json=payload, headers=headers, auth=auth, timeout=10)
+        resp = self._post(server, guard, json=payload, headers=headers, auth=auth, timeout=10)
         if resp.status_code >= 400:
             raise RuntimeError(f"ntfy returned {resp.status_code}: {resp.text[:200]}")
 
-    def _send_gotify_notification(self, config, variables):
+    def _send_gotify_notification(self, config, variables, guard=False):
         """Send a message to a Gotify server.
 
         The token is an APPLICATION token, not a client one, and it goes in the
@@ -2104,12 +2271,12 @@ class AutomationEngine:
         except (TypeError, ValueError):
             payload['priority'] = 5
 
-        resp = requests.post(f'{server}/message', params={'token': token},
-                             json=payload, timeout=10)
+        resp = self._post(f'{server}/message', guard, params={'token': token},
+                          json=payload, timeout=10)
         if resp.status_code >= 400:
             raise RuntimeError(f"Gotify returned {resp.status_code}: {resp.text[:200]}")
 
-    def _send_webhook(self, config, variables):
+    def _send_webhook(self, config, variables, guard=False):
         """Send a POST request to a user-configured webhook URL with JSON payload."""
         url = config.get('url', '').strip()
         if not url:
@@ -2140,11 +2307,11 @@ class AutomationEngine:
             try:
                 body, is_json = self._render_webhook_template(template, variables)
                 if is_json:
-                    resp = requests.post(url, json=body, headers=headers, timeout=15)
+                    resp = self._post(url, guard, json=body, headers=headers, timeout=15)
                 else:
                     if headers.get('Content-Type') == 'application/json':
                         headers['Content-Type'] = 'text/plain; charset=utf-8'
-                    resp = requests.post(url, data=body.encode('utf-8'), headers=headers, timeout=15)
+                    resp = self._post(url, guard, data=body.encode('utf-8'), headers=headers, timeout=15)
                 if resp.status_code >= 400:
                     raise RuntimeError(f"Webhook returned {resp.status_code}: {resp.text[:200]}")
                 return
@@ -2163,7 +2330,7 @@ class AutomationEngine:
                 message = message.replace('{' + key + '}', value)
             payload['message'] = message
 
-        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        resp = self._post(url, guard, json=payload, headers=headers, timeout=15)
         if resp.status_code >= 400:
             raise RuntimeError(f"Webhook returned {resp.status_code}: {resp.text[:200]}")
 

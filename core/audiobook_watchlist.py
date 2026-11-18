@@ -202,16 +202,17 @@ def scan_author(
 
     # Following without auto-wishlist is "tell me, do not fetch". The releases
     # are still counted and reported, so the card can say what turned up.
-    # an owner with downloads off gets the same: a wishlisted book is grabbed
-    # by the next pass, so nothing is wishlisted for them (asked each scan)
-    from core.permissions import owner_may_download
-    if not row.get("auto_wishlist", 1) or not owner_may_download(profile_id):
+    # an owner who can't get books gets the same: a wishlisted book is grabbed
+    # by the next pass, so nothing is wishlisted for them (asked each scan;
+    # books.get, apart from music, #2166)
+    from core.permissions import owner_may_get
+    if not row.get("auto_wishlist", 1) or not owner_may_get(profile_id, "books.get"):
         outcome["wishlisted"] = 0
         database.mark_author_scanned(name, found=outcome["found"], profile_id=profile_id, role=role)
         if outcome["found"]:
             logger.info("Followed author %s: %d new, not wishlisted (auto-wishlist off)",
                         name, outcome["found"])
-        _announce_new_releases(name, role, fresh, 0)
+        _announce_new_releases(name, role, fresh, 0, profile_id)
         return outcome
 
     # The narrator rule was answered once, when the author was followed: an
@@ -229,17 +230,19 @@ def scan_author(
                         name, payload.get("title"), narrator_mode)
 
     database.mark_author_scanned(name, found=outcome["wishlisted"], profile_id=profile_id, role=role)
-    _announce_new_releases(name, role, fresh, outcome["wishlisted"])
+    _announce_new_releases(name, role, fresh, outcome["wishlisted"], profile_id)
     return outcome
 
 
-def _announce_new_releases(name: str, role: str, fresh: list, wishlisted: int) -> None:
-    """One event per followed author that turned up something new."""
+def _announce_new_releases(name: str, role: str, fresh: list, wishlisted: int,
+                           profile_id: Any = None) -> None:
+    """One event per followed author that turned up something new, for the
+    profile following them (two profiles following one author: two events)."""
     if not fresh:
         return
     from core.audiobook_events import announce, join_titles
 
-    announce("audiobook_new_release", artist=name, role=role, count=len(fresh),
+    announce("audiobook_new_release", owner=profile_id, artist=name, role=role, count=len(fresh),
              wishlisted=wishlisted, titles=join_titles(b.get("title") for b in fresh))
 
 

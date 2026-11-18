@@ -701,6 +701,8 @@ function CompatProfile({
 function ApiSection({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
+  // an install from before #2166 has no key and keeps today's fallback profile
+  const refuseUnknown = Boolean(loads) && (settings['seerr_compat'] || {}).refuse_unknown === true;
   const check = (id: string, section: string, label: string) => (
     <div className="form-group">
       <label className="checkbox-label">
@@ -801,12 +803,36 @@ function ApiSection({ store }: { store: SettingsStore }) {
           </div>
           {check('seerr-compat-enabled', 'seerr_compat', 'Answer as Seerr at /seerr')}
           <div className="form-group">
-            <label>Jellyfin users with no profile request as:</label>
-            <CompatProfile store={store} section="seerr_compat" id="seerr-compat-profile" />
-            <div className="setting-help-text" style={{ marginTop: '4px', ...HELP }}>
-              A profile that can download gets requests on its wishlist right away. One without
-              download rights sends them to the Requests page for approval first.
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                id="seerr-compat-refuse-unknown"
+                checked={loads ? refuseUnknown : false}
+                onChange={(event) =>
+                  store.set('seerr_compat', 'refuse_unknown', event.target.checked)
+                }
+              />{' '}
+              Refuse Jellyfin users with no profile
+            </label>
+          </div>
+          {refuseUnknown ? (
+            <div className="setting-help-text" style={{ marginBottom: '10px', ...HELP }}>
+              A Jellyfin user that isn&apos;t linked to a profile can&apos;t browse or request until
+              you link their account or give a profile the same name.
             </div>
+          ) : (
+            <div className="form-group">
+              <label>Jellyfin users with no profile act as:</label>
+              <CompatProfile store={store} section="seerr_compat" id="seerr-compat-profile" />
+              <div className="setting-help-text" style={{ marginTop: '4px', ...HELP }}>
+                Right now anyone without a profile browses and requests as this profile, with its
+                permissions. Turn on Refuse above to stop that.
+              </div>
+            </div>
+          )}
+          <div className="setting-help-text" style={{ marginTop: '4px', ...HELP }}>
+            Each person gets what their profile allows: movies and shows separately, Download right
+            away or Ask first, their rating limit, request limit and quality.
           </div>
         </div>
       </div>
