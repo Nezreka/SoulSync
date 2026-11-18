@@ -23,6 +23,14 @@
         Plex: '/static/img/brands/plex.png',
         Jellyfin: '/static/img/brands/jellyfin.png',
     };
+    // the download arrow, drawn: the arrow glyph U+2B73 is missing from android's
+    // fonts and showed as an empty box on Get Show (#2184). sized to the text
+    // around it and coloured by it. DownloadGlyph in components/primitives is
+    // the react twin
+    var DL_IC = '<svg class="vd-dl-ic" viewBox="0 0 24 24" width="1em" height="1em" fill="none" ' +
+        'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ' +
+        'aria-hidden="true" focusable="false" style="vertical-align:-0.125em">' +
+        '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>';
     var VIEW_KEY = 'soulsync_vd_season_view';
     var VIEWS = [
         { id: 'rail', label: 'Rail', ic: '▦' },
@@ -1075,10 +1083,10 @@
         if (d.kind === 'show' && window.VideoGet && _canDl) {
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             var getShow = '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
             if (!primary && (!haveShow || missingEps > 0)) primary = getShow;
-            else getMore += moreItem('missing', '⭳', haveShow
+            else getMore += moreItem('missing', DL_IC, haveShow
                 ? (missingEps ? 'Get ' + missingEps + ' missing episode' + (missingEps === 1 ? '' : 's') + '…' : 'Get episodes…')
                 : 'Get show…');
         }
@@ -2837,13 +2845,13 @@
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             '<div class="vd-ep-badge">Downloaded</div>' +
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">⭳</button>' +
+                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">' + DL_IC + '</button>' +
                         '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             (reqBtn ||
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download this video now" aria-label="Download video">⭳</button>' +
+                                '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>' +
                             '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
                                 '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
                                 '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
@@ -2892,7 +2900,7 @@
         } else {
             actions = (!ep.owned
                     ? '<button class="vd-ep-getbtn vd-ep-grab vd-ytc-get" type="button" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download this video now" aria-label="Download video">⭳</button>'
+                        '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>'
                     : '') +
                 '<span class="vd-pop">' +
                 '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
@@ -2900,7 +2908,7 @@
                 '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
                 (ep.owned
                     ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download again (e.g. after deleting it on the server)">⭳ Download again</button>'
+                        '" title="Download again (e.g. after deleting it on the server)">' + DL_IC + ' Download again</button>'
                     : '<button class="vd-manage-btn vd-ytc-wish' + (ep.wished ? ' watching' : '') + '" type="button" role="menuitem" ' +
                         'data-vd-yt-wish="' + esc(id) + '"><span class="watchlist-icon">' + (ep.wished ? '✓' : '＋') + '</span> ' +
                         '<span class="watchlist-text">' + (ep.wished ? 'In Wishlist' : 'Wishlist') + '</span></button>') +
@@ -3040,7 +3048,7 @@
             '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
             '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
                 'title="Download every missing video ' + scope.what + '">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>' +
             '<span class="vd-pop">' +
                 '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +

@@ -16,6 +16,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { DownloadGlyph } from '@/components/primitives';
+
 import type {
   RenamePreview,
   VideoBackupList,
@@ -440,7 +442,7 @@ export function VideoBackupsCard() {
                 title="Download this backup"
                 aria-label="Download this backup"
               >
-                ⭳
+                <DownloadGlyph />
               </a>
               <button
                 type="button"

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { extractFunction, extractVar } from './vanilla-extract';
 
 /**
  * The Oct 26 detail-page pass, on the real vanilla functions.
@@ -21,7 +21,9 @@ const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'),
 
 function fn<T>(name: string, preamble = ''): T {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`${preamble}\n${extractFunction(name, SRC)}\nreturn ${name};`)() as T;
+  return new Function(
+    `${extractVar('DL_IC', SRC)}\n${preamble}\n${extractFunction(name, SRC)}\nreturn ${name};`,
+  )() as T;
 }
 
 type Ep = { owned?: boolean; air_date?: string | null; watched?: boolean };

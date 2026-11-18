@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { extractFunction, extractVar } from './vanilla-extract';
 
 /**
  * The bar over a YouTube channel's year, or a playlist.
@@ -24,6 +24,7 @@ function bar(season: Record<string, unknown>, ctx: Ctx = {}): HTMLElement {
     tmdb_id: ctx.tmdb_id === undefined ? 1396 : ctx.tmdb_id,
   };
   const preamble = `
+    ${extractVar('DL_IC', SRC)}
     var data = ${JSON.stringify(data)};
     var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')}, state: 'all', duration: 'all' };
     window.VideoGrab = ${ctx.grab === false ? 'undefined' : '{}'};

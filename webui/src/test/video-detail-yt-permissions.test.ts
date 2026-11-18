@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { extractFunction } from './vanilla-extract';
+import { extractFunction, extractVar } from './vanilla-extract';
 
 /**
  * YouTube video rows on the channel detail page.
@@ -24,6 +24,7 @@ function row(
   opts: { canDownload: boolean; requests: boolean },
 ): string {
   const preamble = `
+    ${extractVar('DL_IC', SRC)}
     var selectedSeason = 2024;
     var data = { _channel: { youtube_id: 'UC123', title: 'Test Channel' } };
     function esc(s) { return String(s == null ? '' : s); }
@@ -44,6 +45,7 @@ function row(
 
 function seasonBar(season: Record<string, unknown>, opts: { canDownload: boolean }): string {
   const preamble = `
+    ${extractVar('DL_IC', SRC)}
     var data = { kind: 'channel', source: 'youtube' };
     var ytFilter = { q: '', state: 'all', duration: 'all' };
     function canDownload() { return ${opts.canDownload ? 'true' : 'false'}; }
