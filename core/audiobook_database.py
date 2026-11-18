@@ -466,8 +466,8 @@ class AudiobookDatabase:
             conn.commit()
             from core.audiobook_events import announce, first_author, series_title
 
-            announce("audiobook_wishlist_item_added", title=title, author=first_author(book),
-                     series=series_title(book), asin=asin)
+            announce("audiobook_wishlist_item_added", owner=profile_id, title=title,
+                     author=first_author(book), series=series_title(book), asin=asin)
             return True
         except sqlite3.IntegrityError:
             return False
@@ -904,7 +904,7 @@ class AudiobookDatabase:
             conn.commit()
             from core.audiobook_events import announce
 
-            announce("audiobook_author_followed", name=name, role=role or "author")
+            announce("audiobook_author_followed", owner=profile_id, name=name, role=role or "author")
             return True
         except sqlite3.IntegrityError:
             return False
@@ -925,7 +925,7 @@ class AudiobookDatabase:
             if cursor.rowcount > 0:
                 from core.audiobook_events import announce
 
-                announce("audiobook_author_unfollowed", name=str(name or "").strip(),
+                announce("audiobook_author_unfollowed", owner=profile_id, name=str(name or "").strip(),
                          role=role or "author")
             return cursor.rowcount > 0
         except sqlite3.Error as exc:

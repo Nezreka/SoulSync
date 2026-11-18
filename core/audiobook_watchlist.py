@@ -212,7 +212,7 @@ def scan_author(
         if outcome["found"]:
             logger.info("Followed author %s: %d new, not wishlisted (auto-wishlist off)",
                         name, outcome["found"])
-        _announce_new_releases(name, role, fresh, 0)
+        _announce_new_releases(name, role, fresh, 0, profile_id)
         return outcome
 
     # The narrator rule was answered once, when the author was followed: an
@@ -230,17 +230,19 @@ def scan_author(
                         name, payload.get("title"), narrator_mode)
 
     database.mark_author_scanned(name, found=outcome["wishlisted"], profile_id=profile_id, role=role)
-    _announce_new_releases(name, role, fresh, outcome["wishlisted"])
+    _announce_new_releases(name, role, fresh, outcome["wishlisted"], profile_id)
     return outcome
 
 
-def _announce_new_releases(name: str, role: str, fresh: list, wishlisted: int) -> None:
-    """One event per followed author that turned up something new."""
+def _announce_new_releases(name: str, role: str, fresh: list, wishlisted: int,
+                           profile_id: Any = None) -> None:
+    """One event per followed author that turned up something new, for the
+    profile following them (two profiles following one author: two events)."""
     if not fresh:
         return
     from core.audiobook_events import announce, join_titles
 
-    announce("audiobook_new_release", artist=name, role=role, count=len(fresh),
+    announce("audiobook_new_release", owner=profile_id, artist=name, role=role, count=len(fresh),
              wishlisted=wishlisted, titles=join_titles(b.get("title") for b in fresh))
 
 
