@@ -246,6 +246,16 @@ def test_a_4k_profile_that_always_asks_turns_a_download_into_a_request(client, h
     assert r.get_json()["status"] == shapes.REQUEST_APPROVED
 
 
+def test_an_id_only_radarr_knows_gets_the_persons_default(client, h, ctxs):
+    # the shared resolver with this install's quality list (#2166 follow-up
+    # 22): a radarr profile id soulsync never had lands on their default,
+    # never stored as is
+    pid = ctxs(35, member_ctx(profile_id=35, **{"movies.quality": [0, 3], "movies.quality_default": 3}))
+    r = _post(client, pid, {"mediaType": "movie", "mediaId": NEW_MOVIE, "profileId": 9999})
+    assert r.status_code == 201, r.data
+    assert r.get_json()["profileId"] == 3
+
+
 def test_profile_id_goes_through_the_resolver(client, h, ctxs):
     calls = []
 

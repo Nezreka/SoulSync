@@ -85,22 +85,12 @@ def _perms_for(profile):
 
 
 def _quality_profiles():
-    """the video quality profiles with media type and a 4k tag, Default (id 0)
-    first: what a request may pick from (the same rows as
-    /api/permissions/quality-options)."""
-    import json
-    rows = [{"id": 0, "name": "Default", "media_type": None, "tags": []}]
-    for qp in _video_db().named_quality_profiles() or []:
-        tags = []
-        try:
-            blob = json.loads(qp.get("items") or "{}")
-            if isinstance(blob, dict) and str(blob.get("library") or "").lower() == "4k":
-                tags.append("4k")
-        except (TypeError, ValueError):
-            pass
-        rows.append({"id": qp.get("id"), "name": qp.get("name"), "media_type": qp.get("media_type"),
-                     "tags": tags})
-    return rows
+    """the video quality profiles with media type, tags and range, Default
+    (id 0) first: the request resolver's own list
+    (core.video.quality_profile.quality_options), so the 4K tag here is the
+    one "4K always asks" means on every other path."""
+    from core.video.quality_profile import quality_options
+    return quality_options(_video_db())
 
 
 def _video_db():

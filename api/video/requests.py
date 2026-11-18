@@ -64,9 +64,12 @@ def _profile_row(pid):
 
 
 def _used(db, quota) -> int:
-    """asks spent in the quota's window. a count that can't be read is a
-    full quota: refuse the ask rather than let it through uncounted."""
-    used = db.count_video_requests_since(_me(), quota["days"])
+    """asks spent in the quota's window, music asks included (one limit for
+    every ask). a count that can't be read is a full quota: refuse the ask
+    rather than let it through uncounted."""
+    # one count for every ask, music and video (core/requests/asks.py)
+    from core.requests.asks import asks_used
+    used = asks_used(_me(), quota["days"], video_db=db)
     return quota["limit"] if used is None else int(used)
 
 

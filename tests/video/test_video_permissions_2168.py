@@ -438,3 +438,19 @@ def test_unmapped_request_reads_the_old_stamps(env):
         assert access.mode("movie") == "ask" and access.has_kind("show")
         with pytest.raises(LookupError):
             access.quota_row(5)       # no limit on record is not "no limit"
+
+
+# ── moderators manage issues too (#2166 follow-up 21) ────────────────────
+
+
+def test_a_moderator_manages_everyones_video_issues(env):
+    c, db, _q, as_admin, as_member, _app = env
+    iid = db.create_issue(5, "movie", 1, "wrong_poster", "Bad art", reporter_name="Maya")
+    as_member(pid=8, name="Kim")
+    assert c.get("/api/video/issues").get_json()["issues"] == []          # not theirs
+    assert c.put(f"/api/video/issues/{iid}", json={"status": "resolved"}).status_code == 403
+    as_member(pid=7, name="Mo", **{"requests.moderate": True})
+    listed = c.get("/api/video/issues").get_json()["issues"]
+    assert [i["id"] for i in listed] == [iid] and listed[0]["reporter_name"] == "Maya"
+    r = c.put(f"/api/video/issues/{iid}", json={"status": "resolved", "admin_response": "fixed"})
+    assert r.status_code == 200 and db.get_issue(iid)["status"] == "resolved"

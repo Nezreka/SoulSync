@@ -1573,8 +1573,11 @@ def process_wishlist_automatically(
                 database = runtime.get_profiles_database()
                 # a profile without download rights keeps a wishlist of
                 # requests: the scheduler only downloads the rows an admin
-                # approved (it used to grab every profile's whole list)
-                from core.permissions import profile_can_download
+                # approved (it used to grab every profile's whole list).
+                # "download rights" is music.get under the global policy
+                # (#2166 follow-up 24), not the cached column, so a policy
+                # cap holds for every member
+                from core.library2.mirror_outbox import music_asks_first
                 all_profiles = database.get_all_profiles()
                 if scoped:
                     scoped_profile_ids = requested_profile_ids or {int(runtime.profile_id)}
@@ -1584,7 +1587,7 @@ def process_wishlist_automatically(
                     ]
                     if len(scoped_profile_ids) == 1:
                         runtime.profile_id = next(iter(scoped_profile_ids))
-                approved_only = {p['id']: not profile_can_download(p) for p in all_profiles}
+                approved_only = {p['id']: music_asks_first(database, p) for p in all_profiles}
 
                 def _count(p):
                     if approved_only[p['id']]:

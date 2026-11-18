@@ -203,6 +203,10 @@ def plex_signin_check():
             return jsonify({'success': False, 'error': "SoulSync isn't connected to a Plex server"}), 503
         account = plex_signin.resolve_account(account_token, machine)
         database = get_database()
+        # new people start as the sign-up template (#2166); the old sign-up
+        # settings move there the first time
+        from core.permission_store import move_signup_settings
+        move_signup_settings(database, config_manager.get)
         result = plex_signin.sign_in(
             database, account,
             allow_create=bool(config_manager.get('security.plex_signin_auto_create', True)),
@@ -389,6 +393,8 @@ def oidc_signin_callback():
         result = oidc_signin.connect_profile(database, flow.profile_id, account)
         return _oidc_done(result.error, mode)
 
+    from core.permission_store import move_signup_settings
+    move_signup_settings(database, config_manager.get)
     result = oidc_signin.sign_in(
         database, account, settings,
         allow_create=bool(config_manager.get('security.oidc_signin_auto_create', True)),

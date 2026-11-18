@@ -209,7 +209,9 @@ def test_connecting_an_own_account_needs_account_connect(made):
 
 
 def test_a_member_without_their_own_automations_is_refused(made):
-    c = _as(made(**{'automations.personal': False}))
+    # playlist sync alone still reaches the auto-sync schedules
+    # (tests/test_permissions_followups.py), so both rows are off here
+    c = _as(made(**{'automations.personal': False, 'music.playlist_sync': False}))
     assert c.get('/api/automations').status_code == 403
     assert c.post('/api/automations', json={'name': 'x', 'action_type': 'refresh_mirrored'}).status_code == 403
 

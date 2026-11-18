@@ -24,11 +24,20 @@ bp = Blueprint("permissions", __name__)
 
 get_database = None
 get_video_db = None
+config_get = None
 
 
-def configure(*, get_database, get_video_db=None):
+def configure(*, get_database, get_video_db=None, config_get=None):
     globals()["get_database"] = get_database
     globals()["get_video_db"] = get_video_db
+    globals()["config_get"] = config_get
+
+
+def _signup_moved(db):
+    """the old System > Security sign-up settings become the sign-up
+    template the first time an admin looks (store.move_signup_settings)."""
+    if config_get is not None:
+        store.move_signup_settings(db, config_get)
 
 
 def create_blueprint():
@@ -76,8 +85,11 @@ def catalogue():
 @bp.route("/api/permissions/quality-options", methods=["GET"])
 @admin_only
 def quality_options():
-    """the quality profiles each quality row can pick from, with media type
-    and display tags. video Default (id 0) is always there."""
+    """the quality profiles each quality row can pick from, with media type,
+    display tags and a short range line ("720p to 1080p"). video Default
+    (id 0) is always there. the video list is the request resolver's own
+    (core.video.quality_profile.quality_options), so the 4K tag here is the
+    one "4K always asks" applies to."""
     out = {"music": [], "movies": [], "tv": []}
     try:
         for qp in get_database().list_quality_profiles():
@@ -85,27 +97,15 @@ def quality_options():
                                  "is_default": bool(qp.get("is_default"))})
     except Exception as exc:  # noqa: BLE001
         logger.debug("music quality profiles unreadable: %s", exc)
-    video = []
+    rows = [{"id": 0, "name": "Default", "media_type": None, "tags": [], "range": ""}]
     try:
         if get_video_db is not None:
-            video = get_video_db().named_quality_profiles()
+            from core.video.quality_profile import quality_options as video_options
+            rows = video_options(get_video_db())
     except Exception as exc:  # noqa: BLE001
         logger.debug("video quality profiles unreadable: %s", exc)
-    rows = [{"id": 0, "name": "Default", "media_type": None, "tags": []}]
-    for qp in video:
-        tags = []
-        try:
-            blob = json.loads(qp.get("items") or "{}")
-            if isinstance(blob, dict) and str(blob.get("library") or "").lower() == "4k":
-                tags.append("4k")
-        except (TypeError, ValueError):
-            pass
-        if "extended" in str(qp.get("name") or "").lower():
-            tags.append("extended")
-        rows.append({"id": qp.get("id"), "name": qp.get("name"), "media_type": qp.get("media_type"),
-                     "tags": tags})
-    out["movies"] = [r for r in rows if r["media_type"] in (None, "movie")]
-    out["tv"] = [r for r in rows if r["media_type"] in (None, "tv")]
+    out["movies"] = [r for r in rows if r.get("media_type") in (None, "movie")]
+    out["tv"] = [r for r in rows if r.get("media_type") in (None, "tv")]
     return jsonify(dict(out, success=True))
 
 
@@ -137,7 +137,9 @@ def put_policy():
 @bp.route("/api/permissions/templates", methods=["GET"])
 @admin_only
 def list_templates():
-    return jsonify(store.templates_payload(get_database()))
+    db = get_database()
+    _signup_moved(db)
+    return jsonify(store.templates_payload(db))
 
 
 @bp.route("/api/permissions/templates", methods=["POST"])
@@ -191,9 +193,49 @@ def delete_template(template_id):
 @admin_only
 def put_signup_template():
     try:
-        return jsonify(store.set_signup_template(get_database(), _body().get("template_id")))
+        db = get_database()
+        # an admin's own pick wins over the old settings, so they move first
+        _signup_moved(db)
+        return jsonify(store.set_signup_template(db, _body().get("template_id")))
     except store.PermissionRequestError as exc:
         return _err(exc)
+
+
+@bp.route("/api/permissions/asks-used", methods=["GET"])
+@admin_only
+def asks_used():
+    """the People list's Requests column (#2166 follow-up 10): for every
+    member with a request limit, the asks spent in its window, music and
+    video together (core/requests/asks.py, the same count every limit check
+    uses). {"used": {"<id>": {limit, days, used, remaining}}}; a member
+    whose count can't be read is left out (the row shows just the limit)."""
+    from core.requests.asks import asks_used as count
+    from core.requests.quota import quota_state
+    db = get_database()
+    out = {}
+    for prof in db.get_all_profiles():
+        if P.is_admin_row(prof):
+            continue
+        try:
+            eff, _source = store.effective_for(db, prof)
+        except store.PermissionsUnavailable:
+            continue
+        limit = eff.get("requests.limit") or {}
+        try:
+            n, days = int(limit.get("n") or 0), int(limit.get("days") or 7)
+        except (TypeError, ValueError):
+            continue
+        if n <= 0:
+            continue
+        try:
+            video_db = get_video_db() if get_video_db is not None else None
+        except Exception:  # noqa: BLE001 - counted as unreadable below
+            video_db = None
+        used = count(prof["id"], days, music_db=db, video_db=video_db) if video_db is not None else None
+        if used is None:
+            continue
+        out[str(prof["id"])] = quota_state({"limit": n, "days": max(1, days)}, used)
+    return jsonify({"success": True, "used": out})
 
 
 def _profile_or_404(profile_id):
@@ -221,9 +263,14 @@ def put_profile_permissions(profile_id):
         body = _body()
         prof = _profile_or_404(profile_id)
         out = store.change_profile(get_database(), prof, body)
-        _audit("permissions_profile", target_id=profile_id, target_name=prof.get("name"),
-               detail={"template_id": body.get("template_id"), "set": body.get("set"),
-                       "reset": body.get("reset"), "reset_categories": body.get("reset_categories")})
+        if out.get("admin_changed"):
+            # the same words the profiles route logs (api/user_profiles.py)
+            _audit("admin_granted" if body.get("is_admin") else "admin_revoked",
+                   target_id=profile_id, target_name=prof.get("name"))
+        if not body.get("is_admin"):
+            _audit("permissions_profile", target_id=profile_id, target_name=prof.get("name"),
+                   detail={"template_id": body.get("template_id"), "set": body.get("set"),
+                           "reset": body.get("reset"), "reset_categories": body.get("reset_categories")})
         return jsonify(out)
     except store.PermissionRequestError as exc:
         return _err(exc)

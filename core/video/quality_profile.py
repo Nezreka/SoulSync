@@ -290,15 +290,41 @@ def profile_tags(prof: Any, name: Any = "") -> list:
     return tags
 
 
+_RANGE_ORDER = ("SD", "720p", "1080p", "2160p")
+
+
+def profile_range(prof: Any) -> str:
+    """a short line for what a profile fetches (#2166): "720p to 1080p",
+    "1080p", "SD to 4K". from its enabled tiers, never stored. empty when
+    nothing is on."""
+    prof = prof if isinstance(prof, dict) else {}
+    seen = set()
+    for t in prof.get("tiers") or []:
+        if not (isinstance(t, dict) and t.get("enabled")):
+            continue
+        key = str(t.get("key") or "")
+        res = key.rsplit("-", 1)[-1] if "-" in key else "SD"
+        if res in _RANGE_ORDER:
+            seen.add(res)
+    if not seen:
+        return ""
+    ranked = [r for r in _RANGE_ORDER if r in seen]
+    words = ["4K" if r == "2160p" else r for r in (ranked[0], ranked[-1])]
+    return words[0] if words[0] == words[1] else "%s to %s" % (words[0], words[1])
+
+
 def quality_options(db) -> list:
     """every profile a request can name, without its blob: [{id, name,
-    media_type, tags}], Default (id 0, both kinds) first. what the request
-    resolver and a member's quality list are built from."""
+    media_type, tags, range}], Default (id 0, both kinds) first. what the
+    request resolver, a member's quality list and the people editor are
+    built from."""
+    default = load(db)
     out = [{"id": DEFAULT_PROFILE_ID, "name": "Default", "media_type": None,
-            "tags": profile_tags(load(db), "Default")}]
+            "tags": profile_tags(default, "Default"), "range": profile_range(default)}]
     for row in db.named_quality_profiles():
+        prof = _profile_from_row(row)
         out.append({"id": row["id"], "name": row["name"], "media_type": row.get("media_type") or None,
-                    "tags": profile_tags(_profile_from_row(row), row["name"])})
+                    "tags": profile_tags(prof, row["name"]), "range": profile_range(prof)})
     return out
 
 

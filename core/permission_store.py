@@ -350,11 +350,53 @@ def _clean_set(body_set, layer: str = "O") -> Dict[str, Any]:
     return out
 
 
+def _admin_count(db) -> int:
+    return sum(1 for p in db.get_all_profiles() if p.get("is_admin"))
+
+
+def _set_admin_flag(db, profile_id: int, on: bool) -> None:
+    if not db.update_profile(int(profile_id), is_admin=1 if on else 0):
+        raise PermissionsUnavailable("couldn't save the admin switch for profile %s" % profile_id)
+
+
 def change_profile(db, profile: Mapping[str, Any], body: Mapping[str, Any]) -> Dict[str, Any]:
-    """PUT /api/profiles/<id>/permissions: {template_id?, set?, reset?,
-    reset_categories?}. resets run before sets. a profile on its own
+    """PUT /api/profiles/<id>/permissions: {is_admin?, template_id?, set?,
+    reset?, reset_categories?}. resets run before sets. a profile on its own
     settings (legacy) moves onto the template named, or the one its
-    columns match best, with its columns as personal changes."""
+    columns match best, with its columns as personal changes.
+
+    is_admin (#2166 follow-up 4) goes in the same call, so the editor never
+    leaves someone half changed: true makes them an admin (nothing else in
+    the body applies to an admin; their template and changes stay stored
+    for if it's ever turned off); false on an admin makes them a member and
+    the rest of the body lands in the same call, and if that part fails the
+    admin switch goes back. profile 1 stays an admin, and so does the last
+    admin."""
+    if "is_admin" in body and body["is_admin"] is not None:
+        want = body["is_admin"]
+        if not isinstance(want, bool):
+            raise PermissionRequestError("is_admin is true or false")
+        pid = int(profile["id"])
+        if want and not P.is_admin_row(profile):
+            _set_admin_flag(db, pid, True)
+            out = profile_payload(db, db.get_profile(pid) or dict(profile, is_admin=True))
+            out["changes"] = []
+            out["admin_changed"] = True
+            return out
+        if not want and P.is_admin_row(profile):
+            if pid == 1:
+                raise PermissionRequestError("The main admin profile stays an admin.", 409, "owner_admin")
+            if _admin_count(db) <= 1:
+                raise PermissionRequestError("SoulSync needs at least one admin.", 409, "last_admin")
+            _set_admin_flag(db, pid, False)
+            rest = {k: v for k, v in body.items() if k != "is_admin"}
+            try:
+                out = change_profile(db, db.get_profile(pid) or dict(profile, is_admin=False), rest)
+            except Exception:
+                _set_admin_flag(db, pid, True)
+                raise
+            out["admin_changed"] = True
+            return out
     if P.is_admin_row(profile):
         raise PermissionRequestError("Admins can use everything; there's nothing to set.", 409, "admin_profile")
     lay = layers_for(db, profile)
@@ -567,6 +609,120 @@ def set_signup_template(db, template_id) -> Dict[str, Any]:
     return {"success": True, "signup_template_id": tid}
 
 
+# ── sign-ups (#2166 follow-up 7) ─────────────────────────────────────────
+#
+# a profile made by sign-in (plex, oidc) follows the sign-up template
+# ("New people start as" under People > Templates), with no personal
+# changes. the old System > Security settings (the side it starts on, a
+# request limit, and "new profiles can download" per sign-in method) moved
+# there once: when they gave something other than Guest, they became a
+# "New sign-ups" template that new people start as.
+
+SIGNUP_MOVED_KEY = "perm_signup_settings_moved"
+SIGNUP_TEMPLATE_NAME = "New sign-ups"
+_GET_ROWS = ("music.get", "movies.get", "tv.get", "books.get", "podcasts.get")
+
+
+def signup_settings_perms(get, guest: Mapping[str, Any]) -> Dict[str, Any]:
+    """what the old security.signup_* and *_default_can_download settings
+    gave a new profile, as a full template map on top of Guest. downloads:
+    the old one switch covered every kind, so it maps to every get row, and
+    only when every sign-in method that's turned on said yes (a method that
+    said no keeps asking; the stricter one wins)."""
+    from core.security.signup_defaults import signup_access
+    perms = dict(guest, **P.signup_overrides(signup_access(get), guest))
+    methods = [m for m in ("plex", "oidc") if bool(get("security.%s_signin" % m, False))]
+    if methods and all(bool(get("security.%s_signin_default_can_download" % m, False)) for m in methods):
+        for row in _GET_ROWS:
+            perms[row] = "download"
+    return P.clean_layer(perms, fill=P.TEMPLATE_DEFAULTS)
+
+
+_SIGNUP_KEYS = ("security.signup_sides", "security.signup_request_limit", "security.signup_request_limit_days",
+                "security.plex_signin_default_can_download", "security.oidc_signin_default_can_download")
+
+
+def _signup_settings_matter(get) -> bool:
+    """did the old settings ever shape a sign-up? only when one was saved,
+    or a sign-in that makes profiles is on (then the shipped defaults were
+    what new people got). an install that never did either just starts new
+    people as Guest, with no extra template."""
+    if any(get(key, None) is not None for key in _SIGNUP_KEYS):
+        return True
+    return any(bool(get("security.%s_signin" % m, False)) and bool(get("security.%s_signin_auto_create" % m, True))
+               for m in ("plex", "oidc"))
+
+
+def move_signup_settings(db, get) -> Optional[int]:
+    """once per install: the old sign-up settings become the sign-up
+    template. only while the sign-up template is still the seeded Guest (an
+    admin who already picked one keeps it). returns the sign-up template id.
+    a failure logs and tries again next time; sign-up keeps the old columns
+    meanwhile (place_new_signup does nothing until this has run)."""
+    try:
+        if db.get_metadata(SIGNUP_MOVED_KEY) == "1":
+            return signup_template_id(db)
+        tid = signup_template_id(db)
+        row = db.get_permission_template(tid) if tid is not None else None
+        if row and row.get("slug") == "guest" and get is not None and _signup_settings_matter(get):
+            guest = P.clean_layer(_loads(row.get("perms"), "a template"), fill=P.TEMPLATE_DEFAULTS)
+            wanted = signup_settings_perms(get, guest)
+            if P.diff_overrides(guest, wanted):
+                existing = next((t for t in db.list_permission_templates()
+                                 if (t.get("name") or "").lower() == SIGNUP_TEMPLATE_NAME.lower()), None)
+                if existing:
+                    new_id = int(existing["id"])
+                else:
+                    new_id = db.create_permission_template(
+                        name=SIGNUP_TEMPLATE_NAME,
+                        description="What people who sign in with Plex or OIDC start with.",
+                        perms=json.dumps(wanted, sort_keys=True), sidebar=row.get("sidebar"))
+                set_signup_template(db, new_id)
+                tid = new_id
+                logger.info("permissions: the old sign-up settings are the %r template now (%s)",
+                            SIGNUP_TEMPLATE_NAME, new_id)
+        db.set_metadata(SIGNUP_MOVED_KEY, "1")
+        return tid
+    except Exception as exc:  # noqa: BLE001 - try again next time
+        logger.warning("permissions: moving the sign-up settings failed, will retry: %s", exc)
+        return None
+
+
+def place_on_template(db, profile_id, template_id) -> bool:
+    """a brand new member follows ``template_id`` with no personal changes,
+    and its cache columns follow it. False (and the profile keeps the
+    columns it was made with) when the template is gone or unreadable."""
+    try:
+        tid = int(template_id)
+        if not db.get_permission_template(tid):
+            return False
+        db.set_profile_permission_layers(int(profile_id), tid, "{}")
+        prof = db.get_profile(int(profile_id))
+        if not prof:
+            return False
+        eff, source = effective_for(db, prof)
+        if source != "template":
+            return False
+        write_cache(db, prof, eff)
+        return True
+    except Exception as exc:  # noqa: BLE001 - the columns it was made with still hold
+        logger.warning("permissions: profile %s not placed on template %s: %s", profile_id, template_id, exc)
+        return False
+
+
+def place_new_signup(db, profile_id) -> bool:
+    """a profile sign-in just made follows the sign-up template. only once
+    the old settings have moved (until then the columns sign-up wrote from
+    them are the same thing)."""
+    try:
+        if db.get_metadata(SIGNUP_MOVED_KEY) != "1":
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    tid = signup_template_id(db)
+    return tid is not None and place_on_template(db, profile_id, tid)
+
+
 # ── music, for the routes and the wishlist (piece A) ─────────────────────
 
 _MUSIC_CLOSED = {"mode": "none", "quota": None, "hide_explicit": True}
@@ -639,4 +795,6 @@ __all__ = ["PermissionsUnavailable", "PermissionRequestError", "load_policy", "l
            "resync_after_legacy_update", "templates_payload", "profile_payload", "me_payload",
            "change_profile", "change_policy", "policy_payload", "create_template", "change_template",
            "delete_template", "set_signup_template", "music_rights", "wish_refusal",
+           "SIGNUP_MOVED_KEY", "SIGNUP_TEMPLATE_NAME", "signup_settings_perms", "move_signup_settings",
+           "place_on_template", "place_new_signup",
            "WISH_NOT_ALLOWED", "WISH_EXPLICIT"]

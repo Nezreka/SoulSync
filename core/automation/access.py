@@ -20,6 +20,10 @@ your own automations.
   watchlist scan, listening imports) and their steps only send notes. no
   run_script, no fire_signal (a signal wakes the install's automations), and
   owned_by is theirs to set only as "auto_sync" (the sync page's schedules).
+- an auto_sync row is part of Playlist sync, not of "Their own automations":
+  a member keeps (and runs) their auto-sync schedules while they have
+  music.playlist_sync, whatever automations.personal says, and loses them
+  when playlist sync is off (permission_for).
 
 Pure decisions: the route layer passes in the row and the caller.
 """
@@ -37,7 +41,8 @@ OWNER_DENIED = "That automation can't be filed under that owner."
 # the steps a member's automation may take after its action: notes, nothing else
 NOTE_STEPS = frozenset({"discord_webhook", "pushbullet", "telegram", "ntfy", "gotify", "webhook"})
 # owned_by: who a row is filed under. "system:*" rows are the engine's own
-MEMBER_OWNERS = frozenset({"", "auto_sync"})
+AUTO_SYNC = "auto_sync"
+MEMBER_OWNERS = frozenset({"", AUTO_SYNC})
 ADMIN_OWNERS = frozenset({"", "auto_sync", "video", "music"})
 
 
@@ -136,6 +141,16 @@ def owner_refusal(data: Optional[Mapping[str, Any]], is_admin: bool) -> Optional
     return None if value in (ADMIN_OWNERS if is_admin else MEMBER_OWNERS) else OWNER_DENIED
 
 
+def permission_for(data: Optional[Mapping[str, Any]]) -> str:
+    """the permission a member needs for this row or create body: the sync
+    page's auto-sync schedules follow Playlist sync, everything else is
+    "Their own automations"."""
+    owner = data.get("owned_by") if isinstance(data, Mapping) else None
+    if isinstance(owner, str) and owner.strip() == AUTO_SYNC:
+        return "music.playlist_sync"
+    return "automations.personal"
+
+
 def merged(stored: Optional[Mapping[str, Any]], body: Optional[Mapping[str, Any]]) -> dict:
     """what a row would be after an update body lands on it (the fields the
     personal check reads)."""
@@ -149,4 +164,5 @@ def merged(stored: Optional[Mapping[str, Any]], body: Optional[Mapping[str, Any]
 
 
 __all__ = ["DENIED", "SCRIPT_DENIED", "NOT_PERSONAL", "OWNER_DENIED", "NOTE_STEPS", "may_read", "may_run",
-           "may_change", "uses_run_script", "personal_refusal", "owner_refusal", "merged"]
+           "may_change", "uses_run_script", "personal_refusal", "owner_refusal", "merged", "AUTO_SYNC",
+           "permission_for"]

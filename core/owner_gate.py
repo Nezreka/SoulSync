@@ -304,10 +304,9 @@ class OwnerGate:
             return False
         if n <= 0:
             return True
-        try:
-            used = video_db.count_video_requests_since(self.owner_id, days)
-        except Exception:  # noqa: BLE001
-            used = None
+        # one count for every ask, music and video (core/requests/asks.py)
+        from core.requests.asks import asks_used
+        used = asks_used(self.owner_id, days, video_db=video_db)
         if used is None:
             return False
         return P.can(ctx, "requests.limit", used)

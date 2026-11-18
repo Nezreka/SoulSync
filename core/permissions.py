@@ -66,6 +66,39 @@ def owner_may_download(pid, get_profile: Optional[Callable[[int], Optional[Dict[
     return profile_can_download(profile)
 
 
+def owner_may_get(pid, permission: str, db=None) -> bool:
+    """owner_may_download for one kind of media (#2166): may a background
+    job get ``permission`` (books.get, podcasts.get) right away for the
+    profile that owns the row? read from that owner's effective permissions
+    under the global policy (core.permission_store.context_for), at grab
+    time, so turning it off after the add counts. ``db`` is the music
+    database (the default one when None). fails closed: an owner whose
+    rights can't be read is skipped this pass."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid == 1:
+        return True
+    try:
+        from core.permission_store import context_for
+        if db is None:
+            from database.music_database import get_database
+            db = get_database()
+        if not hasattr(db, "get_permission_inputs"):
+            # a database without the permission tables (an old test double)
+            # answers from the profile's one download switch, as before
+            return owner_may_download(pid, db.get_profile)
+        ctx = context_for(db, pid)
+    except Exception:  # noqa: BLE001 - see docstring
+        return False
+    if not isinstance(ctx, Mapping):
+        return False
+    if ctx.get("is_admin"):
+        return True
+    return can(ctx, permission, "download")
+
+
 def download_denied_reason(pid, get_profile: Callable[[int], Optional[Dict[str, Any]]]) -> Optional[str]:
     """why this profile may not start a download, or None when it may."""
     if pid is None:
@@ -247,6 +280,9 @@ KINDS = (BOOL, RESTRICT, MODE, RATING, COUNT, SET, CHOICE, SET_FLAG, FIXED, ADMI
 
 MODES = ("none", "ask", "download")                 # low to high
 MODE_LABELS = {"download": "Download right away", "ask": "Ask first", "none": "Can't request"}
+# a mode row whose values read differently (#2166 follow-up 6): a podcast
+# can always be followed, only the downloading is off
+ROW_VALUE_LABELS = {"podcasts.get": {"download": "Download right away", "none": "Follow only"}}
 RATINGS = ("G", "PG", "PG-13", "R", "any")          # low to high
 FOLLOW = "follow"                                   # tv.max_rating: same as movies
 TV_RATING_LABELS = {"G": "TV-Y7", "PG": "TV-PG", "PG-13": "TV-14", "R": "TV-MA", "any": "Any"}
@@ -1322,6 +1358,30 @@ def requires(permission: str, value: Any = None):
     return deco
 
 
+def requires_any(*permissions: str):
+    """route decorator like requires(), but any one of these rows lets the
+    caller in, and the route narrows what each one reaches. the automations
+    routes serve both "Their own automations" and the sync page's auto-sync
+    schedules, which follow Playlist sync. refuses with the first row."""
+    if not permissions:
+        raise ValueError("requires_any(): name at least one permission")
+    for permission in permissions:
+        row = CATALOGUE.get(permission)
+        if row is None:
+            raise ValueError("requires_any(): unknown permission %r" % permission)
+        if row.kind == PRESENTATION:
+            raise ValueError("requires_any(): %s is presentation only and never grants" % permission)
+
+    def deco(view_fn):
+        @functools.wraps(view_fn)
+        def wrapper(*args, **kwargs):
+            if enforcing() and not any(can(None, p) for p in permissions):
+                return refusal(permissions[0])
+            return view_fn(*args, **kwargs)
+        return _mark(wrapper, ("perm_any", tuple(permissions)))
+    return deco
+
+
 # web_server sets this on its app next to the profile gate
 # (_set_profile_context). a request in that app is always held to the
 # declarations, and one with no profile context there is no one, so it is
@@ -1404,8 +1464,9 @@ def api_key_only(view_fn):
 
 
 def declared_access(view_fn) -> Optional[Tuple[str, Any]]:
-    """what a view declares: ("perm", id) | ("admin", None) | ("self", None)
-    | ("public", None), looking through functools.wraps layers, else None."""
+    """what a view declares: ("perm", id) | ("perm_any", (ids)) | ("admin", None)
+    | ("self", None) | ("public", None), looking through functools.wraps
+    layers, else None."""
     seen = 0
     fn = view_fn
     while fn is not None and seen < 20:
@@ -1647,9 +1708,19 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
         return {"sentence": "%s can use everything, including settings and people." % name,
                 "lines": [], "never": []}
     lines: List[Dict[str, str]] = []
+    you = name == "You"
 
     def mode_words(m):
+        if you:
+            return {"download": "you get them right away", "ask": "you ask first",
+                    "none": "you can't request them"}[m]
         return {"download": "gets it right away", "ask": "asks first", "none": "can't request"}[m]
+
+    def second_person(label):
+        # "Their own automations" reads "Your own automations" to the member
+        if not you:
+            return label
+        return label.replace("Their ", "Your ").replace(" their ", " your ")
 
     if eff.get("movies.access"):
         bits = ["Movies: %s" % mode_words(eff["movies.get"])]
@@ -1669,11 +1740,15 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
         lines.append({"category": "music", "text": ", ".join(bits) + "."})
     if eff.get("books.access"):
         lines.append({"category": "books", "text": "Audiobooks: %s." % mode_words(eff["books.get"])})
+    if eff.get("podcasts.access"):
+        lines.append({"category": "books", "text": "Podcasts: %s." % (
+            "new episodes download on their own" if eff.get("podcasts.get") == "download"
+            else "%s follow shows, episodes don't download" % ("you" if you else "they"))})
     limit = eff.get("requests.limit") or {}
     if limit.get("n"):
         span = "day" if limit["days"] == 1 else "week" if limit["days"] == 7 else "%d days" % limit["days"]
         lines.append({"category": "requests", "text": "Up to %d asks a %s." % (limit["n"], span)})
-    never = [CATALOGUE[pid].label for pid in STORED_IDS
+    never = [second_person(CATALOGUE[pid].label) for pid in STORED_IDS
              if CATALOGUE[pid].kind == BOOL and not eff.get(pid) and not CATALOGUE[pid].group
              and pid not in ("requests.see_all", "requests.moderate")]
     sides = [c for c, on in (("music", eff.get("music.access")), ("movies", eff.get("movies.access")),
@@ -1698,7 +1773,7 @@ def catalogue_payload() -> Dict[str, Any]:
             "scope": r.scope, "group": r.group, "also_in": list(r.also_in), "needs": list(r.needs),
             "set_row": r.set_row or None, "media": r.media or None, "presentation": r.presentation,
             "stored": r.stored, "legacy": r.legacy or None,
-            "value_labels": (MODE_LABELS if r.kind == MODE else
+            "value_labels": (ROW_VALUE_LABELS.get(r.id) or MODE_LABELS if r.kind == MODE else
                              (TV_RATING_LABELS if r.id == "tv.max_rating" else {})),
         })
     return {"categories": CATEGORIES, "rows": rows, "kinds": list(KINDS), "modes": list(MODES),
@@ -1706,7 +1781,7 @@ def catalogue_payload() -> Dict[str, Any]:
             "open_policy": OPEN_POLICY}
 
 
-__all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
+__all__ = ["profile_can_download", "owner_may_get", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
            "PROFILE_UNREADABLE", "strict_profile_getter",
            "may_manage_profile", "may_cancel_download", "profile_view_for", "profiles_listed_for",
            "PUBLIC_PROFILE_FIELDS",
@@ -1720,6 +1795,6 @@ __all__ = ["profile_can_download", "download_denied_reason", "DOWNLOADS_OFF", "N
            "floor_map", "perms_from_legacy", "template_from_legacy", "legacy_from_perms",
            "legacy_behaviour", "cache_matches", "match_template", "signup_overrides", "make_context",
            "context_from_g", "can", "may_moderate", "may_see_request", "refusal", "refusal_body",
-           "REFUSAL_STATUS", "NOT_ALLOWED", "requires", "public", "self_only", "declared_access",
+           "REFUSAL_STATUS", "NOT_ALLOWED", "requires", "requires_any", "public", "self_only", "declared_access",
            "ACCESS_ATTR", "QualityDecision", "QUALITY_NOT_ALLOWED", "resolve_request_quality",
            "summarize", "catalogue_payload", "is_admin_row"]

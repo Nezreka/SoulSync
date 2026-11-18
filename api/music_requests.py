@@ -229,15 +229,11 @@ def _quota(db, profile):
         quota = None if profile_can_download(profile) else quota_for(profile)
     if not quota:
         return None
-    try:
-        conn = db._get_connection()
-        try:
-            used = len(db.music_request_asks_since(conn.cursor(), profile["id"], quota["days"]))
-        finally:
-            conn.close()
-        used += db.count_music_video_requests_since(profile["id"], quota["days"])
-    except Exception:  # noqa: BLE001 - fail closed: quota unknown means no asks allowed
-        logger.warning("quota check failed, denying asks", exc_info=True)
+    # one count for every ask, music and video (core/requests/asks.py)
+    from core.requests.asks import asks_used
+    used = asks_used(profile["id"], quota["days"], music_db=db)
+    if used is None:  # fail closed: quota unknown means no asks allowed
+        logger.warning("quota check failed, denying asks")
         return {"limit": quota["limit"], "days": quota["days"], "used": quota["limit"], "remaining": 0}
     return quota_state(quota, used)
 

@@ -24641,7 +24641,7 @@ def _perm_video_db():
     return _gvd()
 
 
-_cfg_perm(get_database=get_database, get_video_db=_perm_video_db)
+_cfg_perm(get_database=get_database, get_video_db=_perm_video_db, config_get=config_manager.get)
 app.register_blueprint(_bp_perm())
 
 # per-profile notes (request approved, issue answered): pushed to the

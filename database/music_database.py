@@ -9396,6 +9396,23 @@ class MusicDatabase:
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _profile_signin(row, columns) -> str:
+        """how this profile signs in, for the people editor's header (#2166):
+        oidc or plex when an account is linked (sign-in lands on it), else a
+        password, a pin, or just the profile picker."""
+        def has(col):
+            return col in columns and row[col] is not None and row[col] != ''
+        if has('oidc_identity'):
+            return 'oidc'
+        if has('plex_account_id'):
+            return 'plex'
+        if has('password_hash'):
+            return 'password'
+        if has('pin_hash'):
+            return 'pin'
+        return 'picker'
+
     def get_all_profiles(self) -> List[Dict[str, Any]]:
         """Get all profiles"""
         try:
@@ -9431,6 +9448,7 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     })
                 return results
         except Exception as e:
@@ -9470,6 +9488,7 @@ class MusicDatabase:
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                         **self._profile_controls(row, columns),
+                        'signin': self._profile_signin(row, columns),
                     }
                 return None
         except Exception as e:
@@ -28996,7 +29015,19 @@ class MusicDatabase:
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])
         if key in asks:
             return False
-        if len(asks) >= quota['limit']:
+        # one limit for every ask (#2166, core/requests/asks.py): music videos
+        # and movie / show requests count too. a count that can't be read is
+        # a full limit
+        from core.requests.asks import video_asks_used
+        try:
+            others = self._music_video_asks_since(cursor, profile_id, quota['days'])
+        except Exception:  # noqa: BLE001
+            logger.warning("music video ask count failed for profile %s", profile_id, exc_info=True)
+            return True
+        video = video_asks_used(profile_id, quota['days'])
+        if video is None:
+            return True
+        if len(asks) + others + video >= quota['limit']:
             return True
         # a new ask: logged in the add's own transaction, so it counts even
         # after the rows it makes are withdrawn or deleted
@@ -29359,19 +29390,23 @@ class MusicDatabase:
         the request rows plus the ask log, so a withdrawn or deleted request
         still counts. One video asked twice in the window is one ask. Raises
         on a db error: the quota check fails closed on it."""
-        window = f"-{int(days)} days"
         with self._get_connection() as conn:
-            cursor = conn.cursor()
-            self._ensure_music_video_request_schema(cursor)
-            cursor.execute(
-                "SELECT COUNT(*) FROM ("
-                "SELECT 'video:' || video_id AS k FROM music_video_requests "
-                "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
-                "UNION SELECT ask_key FROM music_request_ask_log "
-                "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
-                (int(profile_id), window, int(profile_id), window))
-            row = cursor.fetchone()
-            return int(row[0]) if row else 0
+            return self._music_video_asks_since(conn.cursor(), profile_id, days)
+
+    def _music_video_asks_since(self, cursor, profile_id: int, days: int) -> int:
+        """count_music_video_requests_since on a cursor the caller holds (the
+        wishlist add counts inside its own transaction)."""
+        window = f"-{int(days)} days"
+        self._ensure_music_video_request_schema(cursor)
+        cursor.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT 'video:' || video_id AS k FROM music_video_requests "
+            "WHERE profile_id = ? AND created_at >= datetime('now', ?) "
+            "UNION SELECT ask_key FROM music_request_ask_log "
+            "WHERE profile_id = ? AND kind = 'video' AND created_at >= datetime('now', ?))",
+            (int(profile_id), window, int(profile_id), window))
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

@@ -93,7 +93,10 @@ def test_catalogue(member):
 def test_quality_options_always_has_video_default():
     body = _as(1).get("/api/permissions/quality-options").get_json()
     assert body["success"]
-    assert body["movies"][0] == {"id": 0, "name": "Default", "media_type": None, "tags": []}
+    first = dict(body["movies"][0])
+    # each one says what it fetches ("720p to 1080p", #2166 follow-up 3)
+    assert isinstance(first.pop("range"), str)
+    assert first == {"id": 0, "name": "Default", "media_type": None, "tags": []}
     assert body["tv"][0]["id"] == 0
     assert isinstance(body["music"], list)
 

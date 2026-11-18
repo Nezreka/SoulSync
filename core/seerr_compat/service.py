@@ -271,21 +271,23 @@ class SeerrCompat:
             return pick
         return ids[0] if ids else None
 
-    def _asks_ok(self, p: dict, kind: str, q: Optional[dict]) -> bool:
-        """this quality always needs an admin's OK for this profile."""
-        if q is None:
-            return False
-        c = self.ctx(p)
-        if c.get("is_admin"):
-            return False
-        flags = (c.get("perms") or {}).get(_ROWS[kind][0] + ".quality_ask") or []
-        return P.can(c, _ROWS[kind][0] + ".quality_ask", q["id"]) or ("4k" in flags and is_4k(q))
+    def _kind_default(self, kind: str) -> Optional[int]:
+        """the household's default quality for this kind (Settings > Quality)."""
+        try:
+            from core.video.quality_profile import kind_default_id
+            return kind_default_id(self._db(), kind) or 0
+        except Exception:  # noqa: BLE001 - the resolver falls back to the first allowed
+            return None
 
     def resolve_quality(self, p: dict, kind: str, body: Mapping[str, Any]):
         """(quality profile id or None, needs approval) for a request body.
-        overseerr's profileId goes through resolve_request_quality; is4k
-        picks the person's allowed 4K profile (403 when there is none)."""
-        cat, mt = _ROWS[kind]
+        overseerr's profileId goes through resolve_request_quality, the same
+        resolver every other request path uses (#2168), with this install's
+        quality profiles (so an id overseerr only knows from radarr gets the
+        person's default, and "4K always asks" means what it means
+        everywhere); is4k picks the person's allowed 4K profile (403 when
+        there is none). needs approval is the resolver's answer alone."""
+        _cat, mt = _ROWS[kind]
         wanted = _int(body.get("profileId"))
         chosen = None
         if body.get("is4k"):
@@ -298,16 +300,22 @@ class SeerrCompat:
                 default = self.default_quality(p, kind, fours)
                 wanted = default if default in by_id else fours[0]["id"]
             chosen = by_id[wanted]
-        resolver = self._resolver or P.resolve_request_quality
-        d = resolver(p, mt, wanted, perms=self.ctx(p).get("perms"))
+        perms = self.ctx(p).get("perms")
+        if self._resolver is not None:
+            d = self._resolver(p, mt, wanted, perms=perms)
+        else:
+            # an empty list is one that couldn't be read (Default is always
+            # there): then every id in the allowed set counts, as before
+            options = self._all_qualities() or None
+            d = P.resolve_request_quality(p, mt, wanted, perms=perms, options=options,
+                                          kind_default=self._kind_default(kind) if options else None)
         if d.refused:
             raise SeerrError(403, "That quality profile isn't part of your profile.")
         qid = d.profile_id
         if qid is None and chosen is not None:
             # the 4K pick was checked against the allowed set above
             qid = chosen["id"]
-        q = next((x for x in self._all_qualities() if x["id"] == qid), None) if qid is not None else None
-        return qid, bool(d.needs_approval) or self._asks_ok(p, kind, q)
+        return qid, bool(d.needs_approval)
 
     def services(self, p: dict, kind: str, server_id: Optional[int] = None):
         """/service/radarr|sonarr: soulsync's quality profiles this person may
@@ -780,7 +788,9 @@ class SeerrCompat:
         if title_status.blocks_request(kind, got.get("status"), got.get("state")):
             raise SeerrError(409, "Request for this media already exists.")
         quota = self._quota(p)
-        used = db.count_video_requests_since(pid, quota["days"]) if quota else 0
+        # one count for every ask, music and video (core/requests/asks.py)
+        from core.requests.asks import asks_used
+        used = asks_used(pid, quota["days"], video_db=db) if quota else 0
         # a count that can't be read is a full quota, never a free ask
         if quota and over_quota(quota, quota["limit"] if used is None else used):
             raise SeerrError(403, quota_message(quota))

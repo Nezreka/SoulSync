@@ -72,15 +72,14 @@ def get_scan_status() -> Dict[str, Any]:
 
 
 def _profile_may_download(db, profile_id: int) -> bool:
-    """Whether this profile may start downloads. The automation runs as the
-    system (profile 1) but queues for other profiles' watchlists, so the
-    check is per the row's owner, not the session."""
-    try:
-        from core.permissions import download_denied_reason
-        return download_denied_reason(
-            profile_id, lambda pid: db.get_profile(pid)) is None
-    except Exception:  # noqa: BLE001 - fail open like the session check does
-        return True
+    """Whether this profile may get episodes right away. The automation runs
+    as the system (profile 1) but queues for other profiles' watchlists, so
+    the check is per the row's owner, not the session: podcasts.get from
+    their permissions under the global policy, apart from music (#2166).
+    Fails closed (core.permissions.owner_may_get): an owner that can't be
+    read is skipped this pass."""
+    from core.permissions import owner_may_get
+    return owner_may_get(profile_id, "podcasts.get", db=db)
 
 
 # How many missing episodes one show may claim in a single pass.

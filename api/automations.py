@@ -23,7 +23,7 @@ from core.automation import signals as _auto_signals
 from core.automation import progress as _auto_progress
 from core.automation import access as _auto_access
 from core.profile_context import admin_only, get_current_profile_id, is_admin_request
-from core.permissions import requires
+from core.permissions import can, enforcing, refusal, requires_any
 from utils.logging_config import get_logger
 
 logger = get_logger("api.automations")
@@ -45,6 +45,45 @@ def configure(*, get_database_, config_manager_, docker_resolve_path_,
 
 
 bp = Blueprint('automations', __name__)
+
+# who reaches these routes (#2166 follow-up 23): a member with "Their own
+# automations", or one with Playlist sync, whose auto-sync schedules
+# (owned_by "auto_sync", the sync page's board) live here too. each route
+# then holds every row to the permission it needs (_row_refused), so playlist
+# sync alone reaches the auto-sync schedules and nothing else, and turning
+# playlist sync off takes them away even from someone with automations.
+_ROUTE_PERMS = ("automations.personal", "music.playlist_sync")
+
+
+def _row_refused(row):
+    """a 403 when the caller lacks the permission this row (or create /
+    update body) needs (core.automation.access.permission_for), else None.
+    admins pass; a bare app without profiles (unit tests) has no opinion."""
+    if is_admin_request() or not enforcing():
+        return None
+    perm = _auto_access.permission_for(row)
+    return None if can(None, perm) else refusal(perm)
+
+
+def _rows_refused(automation_ids):
+    database = get_database()
+    for automation_id in automation_ids or []:
+        try:
+            row = database.get_automation(int(automation_id))
+        except (TypeError, ValueError):
+            continue
+        refused = _row_refused(row) if row else None
+        if refused:
+            return refused
+    return None
+
+
+def _visible(rows):
+    """the rows the caller may work with: all of them for an admin or with
+    both rows on, only the auto-sync schedules with playlist sync alone."""
+    if is_admin_request() or not enforcing() or not isinstance(rows, list):
+        return rows
+    return [r for r in rows if not isinstance(r, dict) or _row_refused(r) is None]
 
 
 def _refused(automation_ids, check):
@@ -95,19 +134,19 @@ def _owner_refused(data):
 
 
 @bp.route('/api/automations', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def list_automations():
     """List all automations for the current profile."""
     try:
         profile_id = session.get('profile_id', 1)
-        return jsonify(_auto_api.list_automations(get_database(), profile_id))
+        return jsonify(_visible(_auto_api.list_automations(get_database(), profile_id)))
     except Exception as e:
         logger.error(f"Error listing automations: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @bp.route('/api/automations/master', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automations_master():
     """The per-side global pause state ({music: bool, video: bool}).
     It gates whether ANY automation runs on that side — individual enabled
@@ -143,13 +182,14 @@ def set_automations_master():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/automations', methods=['POST'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def create_automation():
     """Create a new automation."""
     try:
         profile_id = session.get('profile_id', 1)
         data = request.get_json(silent=True)
-        refused = _script_refused(data) or _owner_refused(data) or _personal_refused(data)
+        refused = (_script_refused(data) or _owner_refused(data) or _row_refused(data)
+                   or _personal_refused(data))
         if refused:
             return refused
         body, status = _auto_api.create_automation(get_database(), automation_engine, profile_id, request.get_json())
@@ -160,11 +200,11 @@ def create_automation():
 
 
 @bp.route('/api/automations/<int:automation_id>', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automation(automation_id):
     """Get a single automation."""
     try:
-        refused = _refused([automation_id], _auto_access.may_read)
+        refused = _refused([automation_id], _auto_access.may_read) or _rows_refused([automation_id])
         if refused:
             return refused
         auto = _auto_api.get_automation(get_database(), automation_id)
@@ -176,15 +216,17 @@ def get_automation(automation_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/automations/<int:automation_id>', methods=['PUT'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def update_automation_endpoint(automation_id):
     """Update an automation."""
     try:
         data = request.get_json(silent=True)
-        refused = (_refused([automation_id], _auto_access.may_change)
+        refused = (_refused([automation_id], _auto_access.may_change) or _rows_refused([automation_id])
                    or _script_refused(data) or _owner_refused(data))
         if not refused and isinstance(data, dict) and any(k in data for k in _DOING_FIELDS):
-            refused = _personal_refused(_auto_access.merged(get_database().get_automation(automation_id), data))
+            after = _auto_access.merged(get_database().get_automation(automation_id), data)
+            # moving a row in or out of auto-sync needs the permission it lands under too
+            refused = _row_refused(after) or _personal_refused(after)
         if refused:
             return refused
         body, status = _auto_api.update_automation(get_database(), automation_engine, automation_id, request.get_json())
@@ -195,12 +237,13 @@ def update_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/group', methods=['PUT'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def batch_update_automation_group():
     """Batch update group_name for multiple automations."""
     try:
         data = request.get_json()
-        refused = _refused(data.get('automation_ids', []), _auto_access.may_change)
+        refused = (_refused(data.get('automation_ids', []), _auto_access.may_change)
+                   or _rows_refused(data.get('automation_ids', [])))
         if refused:
             return refused
         body, status = _auto_api.batch_update_group(get_database(), data.get('automation_ids', []), data.get('group_name'))
@@ -211,12 +254,13 @@ def batch_update_automation_group():
 
 
 @bp.route('/api/automations/bulk-toggle', methods=['POST'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def bulk_toggle_automations():
     """Bulk enable/disable multiple automations."""
     try:
         data = request.get_json()
-        refused = _refused(data.get('automation_ids', []), _auto_access.may_change)
+        refused = (_refused(data.get('automation_ids', []), _auto_access.may_change)
+                   or _rows_refused(data.get('automation_ids', [])))
         if refused:
             return refused
         body, status = _auto_api.bulk_toggle(get_database(), automation_engine,
@@ -228,11 +272,11 @@ def bulk_toggle_automations():
 
 
 @bp.route('/api/automations/<int:automation_id>', methods=['DELETE'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def delete_automation_endpoint(automation_id):
     """Delete an automation. System automations cannot be deleted."""
     try:
-        refused = _refused([automation_id], _auto_access.may_change)
+        refused = _refused([automation_id], _auto_access.may_change) or _rows_refused([automation_id])
         if refused:
             return refused
         body, status = _auto_api.delete_automation(get_database(), automation_engine, automation_id)
@@ -243,12 +287,12 @@ def delete_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/duplicate', methods=['POST'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def duplicate_automation_endpoint(automation_id):
     """Duplicate an automation. System automations cannot be duplicated."""
     try:
         profile_id = session.get('profile_id', 1)
-        refused = _refused([automation_id], _auto_access.may_read)
+        refused = _refused([automation_id], _auto_access.may_read) or _rows_refused([automation_id])
         if refused:
             return refused
         source = get_database().get_automation(automation_id) or {}
@@ -269,11 +313,11 @@ def duplicate_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/toggle', methods=['POST'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def toggle_automation_endpoint(automation_id):
     """Toggle an automation's enabled state."""
     try:
-        refused = _refused([automation_id], _auto_access.may_change)
+        refused = _refused([automation_id], _auto_access.may_change) or _rows_refused([automation_id])
         if refused:
             return refused
         body, status = _auto_api.toggle_automation(get_database(), automation_engine, automation_id)
@@ -284,11 +328,11 @@ def toggle_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/<int:automation_id>/run', methods=['POST'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def run_automation_endpoint(automation_id):
     """Manually trigger an automation."""
     try:
-        refused = _refused([automation_id], _auto_access.may_run)
+        refused = _refused([automation_id], _auto_access.may_run) or _rows_refused([automation_id])
         if not refused and not is_admin_request():
             row = get_database().get_automation(automation_id)
             refused = _personal_refused(row) if row else None
@@ -302,7 +346,7 @@ def run_automation_endpoint(automation_id):
 
 
 @bp.route('/api/automations/progress', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automation_progress():
     """Get current progress state for all running/recently finished automations."""
     try:
@@ -312,7 +356,7 @@ def get_automation_progress():
 
 
 @bp.route('/api/automations/activity', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automations_activity():
     """The last 24 hours by automation and the last week by day, for one side."""
     try:
@@ -325,10 +369,10 @@ def get_automations_activity():
 
 
 @bp.route('/api/automations/<int:automation_id>/history', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automation_history(automation_id):
     """Get run history for a specific automation."""
-    refused = _refused([automation_id], _auto_access.may_read)
+    refused = _refused([automation_id], _auto_access.may_read) or _rows_refused([automation_id])
     if refused:
         return refused
     try:
@@ -370,7 +414,7 @@ def list_available_scripts():
 
 
 @bp.route('/api/automations/blocks', methods=['GET'])
-@requires("automations.personal")
+@requires_any(*_ROUTE_PERMS)
 def get_automation_blocks():
     """Return available block types for the automation builder sidebar.
 
