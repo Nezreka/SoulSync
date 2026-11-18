@@ -815,6 +815,24 @@ def attach_retag_preview(conn, items: List[dict]) -> None:
             item['preview'] = rows
 
 
+def _duplicate_fix_action(action) -> tuple:
+    """a Keep Best action: 'keep_best' or 'file-<id>', then any of
+    ':confirmed' (the same recording, confirmed) and ':move' / ':nomove'
+    (#2172: move playlist entries to the kept copy, or not; neither follows
+    the job setting). (keeper file id or None, confirmed, move or None)"""
+    base, *flags = str(action or '').split(':')
+    flags = set(flags)
+    if not flags <= {'confirmed', 'move', 'nomove'}:
+        raise ValueError('Choose Keep Best or an exact native file from this review')
+    confirmed = 'confirmed' in flags or base == 'keep_best_confirmed'
+    move = True if 'move' in flags else False if 'nomove' in flags else None
+    if base.startswith('file-'):
+        return int(base.removeprefix('file-')), confirmed, move
+    if base in {'keep_best', 'keep_best_confirmed'}:
+        return None, confirmed, move
+    raise ValueError('Choose Keep Best or an exact native file from this review')
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -3864,21 +3882,29 @@ class RepairWorker:
             members = details.get('tracks') or []
             if native_id not in {int(row['track_id']) for row in members}:
                 raise ValueError('Finding subject is not in this native duplicate review')
-            action = str(details.get('_fix_action') or '')
-            confirm_recording = action.endswith(':confirmed') or action == 'keep_best_confirmed'
-            action = action.removesuffix(':confirmed')
-            keeper = None
-            if action.startswith('file-'):
-                keeper = int(action.removeprefix('file-'))
-            elif action not in {'keep_best', 'keep_best_confirmed'}:
-                raise ValueError('Choose Keep Best or an exact native file from this review')
+            keeper, confirm_recording, move = _duplicate_fix_action(details.get('_fix_action'))
         except (KeyError, TypeError, ValueError) as exc:
             return {'success': False, 'error': str(exc)}
         return apply_keep_best(
             self.db, details, config_manager=self._config_manager,
             transfer_folder=self.transfer_folder, approved=True, keep_file_id=keeper,
-            confirm_recording=confirm_recording,
+            confirm_recording=confirm_recording, move_playlist_entries=move,
         )
+
+    def duplicate_finding_preview(self, finding_id: int, action: str = '') -> Optional[dict]:
+        """#2172: what Keep Best would do for one duplicate finding, changing
+        nothing. ``action`` is the same string a fix sends"""
+        from core.library2.duplicate_review import preview_keep_best
+        details = self._finding_details(finding_id, 'native_duplicate_tracks')
+        if details is None:
+            return None
+        try:
+            keeper, confirm_recording, move = _duplicate_fix_action(action or 'keep_best')
+        except (TypeError, ValueError) as exc:
+            return {'success': False, 'error': str(exc)}
+        return preview_keep_best(
+            self.db, details, config_manager=self._config_manager, keep_file_id=keeper,
+            confirm_recording=confirm_recording, move_playlist_entries=move)
 
     def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
         """A suspect album tag is fixed by picking the right release, which

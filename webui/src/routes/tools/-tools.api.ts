@@ -485,6 +485,44 @@ export async function fetchCoverFindingState(id: number): Promise<CoverFindingSt
   }
 }
 
+/** one copy in a Keep Best preview (#2172) */
+export interface KeepBestCopy {
+  file_id: number;
+  action: 'keep' | 'remove' | 'protected';
+  path: string;
+  playlists: string[];
+  ignored_playlists: string[];
+  playlists_covered: string[];
+  playlist_moves: string[];
+  playlists_blocked: string;
+  protected_reasons: string[];
+}
+
+export interface KeepBestPreview {
+  success: boolean;
+  error?: string;
+  kept_file_id?: number;
+  move_playlist_entries?: boolean;
+  copies?: KeepBestCopy[];
+}
+
+/** what Keep Best would do for a duplicate finding with this fix action,
+ *  nothing changed (#2172). null when the call failed */
+export async function fetchKeepBestPreview(
+  id: number,
+  action: string,
+): Promise<KeepBestPreview | null> {
+  try {
+    const response = await fetch(
+      repairUrl(`/findings/${id}/keep-best-preview?action=${encodeURIComponent(action)}`),
+    );
+    if (response.status >= 500) return null;
+    return (await response.json()) as KeepBestPreview;
+  } catch {
+    return null;
+  }
+}
+
 /** `resolveRepairFinding`. Response ignored by the vanilla. */
 export async function resolveFinding(id: number): Promise<void> {
   await postJson(repairUrl(`/findings/${id}/resolve`));

@@ -802,7 +802,7 @@ export function FindingsSurface({
 
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
-    async (findingId: number, trackId: string) => {
+    async (findingId: number, trackId: string, planned?: string) => {
       const catalogue = trackId.startsWith('merge-');
       const native = trackId.startsWith('file-') || trackId.startsWith('keep_best');
       const confirmed = await window.showConfirmDialog?.({
@@ -810,7 +810,9 @@ export function FindingsSurface({
         message: catalogue
           ? 'Merge these catalogue entries into the selected release? Both provider editions and all physical audio files are preserved.'
           : native
-            ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
+            ? // #2172: the plan for this keeper, when the finding fetched one
+              planned ||
+              'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
             : 'Keep this version and remove the other duplicate(s)?',
         confirmText: catalogue ? 'Merge' : 'Keep',
         destructive: true,
@@ -1735,7 +1737,9 @@ export function FindingsSurface({
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
                   onReidentify={setReidentifyingFinding}
-                  onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
+                  onKeepDuplicate={(findingId, trackId, planned) =>
+                    void keepDuplicate(findingId, trackId, planned)
+                  }
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
                   onChanged={refreshAll}
@@ -2218,7 +2222,7 @@ function FindingCard({
   onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
-  onKeepDuplicate: (findingId: number, trackId: string) => void;
+  onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;

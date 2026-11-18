@@ -342,6 +342,24 @@ def repair_finding_cover_image(finding_id):
         logger.error(f"Error reading cover image for finding {finding_id}: {e}")
         return '', 404
 
+@bp.route('/api/repair/findings/<int:finding_id>/keep-best-preview', methods=['GET'])
+@requires("admin.tools")
+def repair_finding_keep_best_preview(finding_id):
+    """#2172: what Keep Best would do for a duplicate finding, nothing
+    changed. ``action`` is the fix action it would send (keep_best,
+    file-<id>, with :confirmed / :move / :nomove)"""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        preview = _repair_worker().duplicate_finding_preview(
+            finding_id, request.args.get('action') or 'keep_best')
+        if preview is None:
+            return jsonify({'success': False, 'error': 'Not a duplicate finding'}), 404
+        return jsonify(preview), 200
+    except Exception as e:
+        logger.error(f"Error previewing Keep Best for finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/counts', methods=['GET'])
 @requires("admin.tools")
 def repair_findings_counts():

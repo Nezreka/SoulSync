@@ -58,6 +58,7 @@ import {
 // replaced it); the same helper still lives beside the sync server view.
 import { formatDurationMs } from '../../sync/-sync.server';
 import { CoverArtFinding } from './cover-art-finding';
+import { NativeDuplicateReview } from './native-duplicate-review';
 import { TagChangeTable } from './tag-changes';
 
 type Details = Record<string, unknown>;
@@ -419,7 +420,7 @@ function hideParent(event: React.SyntheticEvent<HTMLImageElement>): void {
 export interface FindingDetailProps {
   finding: RepairFinding;
   /** `selectDuplicateToKeep` — click a duplicate to keep that version. */
-  onKeepDuplicate: (findingId: number, trackId: string) => void;
+  onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   /** `applyCoverArtTarget` — per-image apply on a cover-art finding. */
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   /** put back what this finding's fix changed */
@@ -445,125 +446,6 @@ const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
   media_server_reference: 'Referenced by a media server',
   file_unavailable: 'File currently unavailable',
 };
-
-function NativeDuplicateReview({
-  finding,
-  onKeepDuplicate,
-}: Pick<FindingDetailProps, 'finding' | 'onKeepDuplicate'>) {
-  const [confirmedRecording, setConfirmedRecording] = useState(false);
-  const details = finding.details || {};
-  const tracks = list<{
-    file_id: number;
-    track_id: number;
-    title?: string;
-    artist?: string;
-    album?: string;
-    file_path?: string;
-    format?: string;
-    bitrate?: number;
-    duration?: number;
-    playlists?: string[];
-    protected_reasons?: string[];
-  }>(details.tracks);
-  const needsConfirmation = Boolean(details.requires_recording_confirmation);
-  const approvedRecording = !needsConfirmation || confirmedRecording;
-  const choose = (action: string) =>
-    onKeepDuplicate(
-      finding.id,
-      `${action}${needsConfirmation && confirmedRecording ? ':confirmed' : ''}`,
-    );
-  if (details.schema !== 'native_duplicate_review/v1' || !tracks.length) {
-    return <p>This duplicate review needs a fresh native scan before it can be applied.</p>;
-  }
-  return (
-    <>
-      <FindingMedia details={details} />
-      <p>
-        Compare the copies, then keep a file. Redundant copies move to recoverable quarantine;
-        protected files stay.
-      </p>
-      {needsConfirmation ? (
-        <label>
-          <input
-            type="checkbox"
-            checked={confirmedRecording}
-            onChange={(event) => setConfirmedRecording(event.target.checked)}
-          />{' '}
-          I confirm these files contain the same recording
-        </label>
-      ) : null}
-      <div className="repair-detail-sublist">
-        {tracks.map((track) => {
-          const isBest = track.file_id === details.recommended_file_id;
-          const protectedReasons = track.protected_reasons || [];
-          const protectedCopy = protectedReasons.length > 0;
-          return (
-            <div
-              className={`repair-detail-subitem ${isBest ? 'best' : protectedCopy ? 'protected' : 'removable'}`}
-              key={track.file_id}
-            >
-              <div className="repair-subitem-body">
-                <strong>
-                  <span
-                    className={
-                      isBest || protectedCopy ? 'repair-keep-badge' : 'repair-remove-badge'
-                    }
-                  >
-                    {isBest ? 'KEEP' : protectedCopy ? 'PROTECTED' : 'QUARANTINE'}
-                  </span>{' '}
-                  {text(track.title)} by {text(track.artist)}
-                </strong>
-                <span>
-                  Album: {text(track.album) || 'Unknown'}
-                  {track.format ? ` · ${track.format.toUpperCase()}` : ''}
-                  {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
-                  {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
-                </span>
-                {track.file_path ? <span className="mono">{track.file_path}</span> : null}
-                {protectedReasons.length ? (
-                  <span>
-                    Preserved:{' '}
-                    {protectedReasons
-                      .map((reason) => DUPLICATE_PROTECTION_LABELS[reason] || 'Protected copy')
-                      .join(', ')}
-                  </span>
-                ) : null}
-                {track.playlists?.length ? (
-                  <span className="repair-in-playlist">
-                    In playlist: {track.playlists.join(', ')}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="repair-btn repair-btn-fix"
-                  disabled={!approvedRecording || protectedReasons.includes('file_unavailable')}
-                  onClick={() => choose(`file-${track.file_id}`)}
-                >
-                  Keep this file
-                </button>
-              </div>
-              <SubitemPlayButton
-                filePath={track.file_path}
-                trackId={`lib2:${track.track_id}`}
-                title={track.title}
-                artist={track.artist}
-                album={track.album}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <button
-        type="button"
-        className="repair-btn repair-btn-fix"
-        disabled={!approvedRecording}
-        onClick={() => choose('keep_best')}
-      >
-        Keep Best
-      </button>
-    </>
-  );
-}
 
 function CatalogueDuplicateReview({
   finding,
@@ -756,6 +638,17 @@ function FindingDetailBody({
           key={finding.id}
           finding={finding}
           onKeepDuplicate={onKeepDuplicate}
+          protectionLabels={DUPLICATE_PROTECTION_LABELS}
+          media={<FindingMedia details={d} />}
+          renderPlay={(track) => (
+            <SubitemPlayButton
+              filePath={track.file_path}
+              trackId={`lib2:${track.track_id}`}
+              title={track.title}
+              artist={track.artist}
+              album={track.album}
+            />
+          )}
         />
       );
     case 'genre_cleanup': {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepairFinding } from '../-tools.types';
@@ -152,7 +152,12 @@ const nativeFinding = (requiresConfirmation = false): RepairFinding =>
   });
 
 describe('Native duplicate review', () => {
-  it('uses the native recommendation, keeps protected copies, and selects an exact file', () => {
+  it('uses the native recommendation, keeps protected copies, and selects an exact file', async () => {
+    // no plan from the server: the scan's own view stands
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
     const select = vi.fn();
     const { container } = render(
       <FindingDetail
@@ -169,10 +174,15 @@ describe('Native duplicate review', () => {
     expect(rows[2].textContent).toContain('Road Trip');
     expect(container.textContent).not.toContain('REMOVE');
     fireEvent.click(screen.getAllByRole('button', { name: 'Keep this file' })[1]);
-    expect(select).toHaveBeenCalledWith(1, 'file-102');
+    await waitFor(() => expect(select).toHaveBeenCalledWith(1, 'file-102', undefined));
+    vi.unstubAllGlobals();
   });
 
-  it('requires explicit same-recording confirmation before choosing a fuzzy copy', () => {
+  it('requires explicit same-recording confirmation before choosing a fuzzy copy', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
     const select = vi.fn();
     render(
       <FindingDetail
@@ -187,9 +197,12 @@ describe('Native duplicate review', () => {
     expect(select).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: /same recording/i }));
     fireEvent.click(pick);
-    expect(select).toHaveBeenCalledWith(1, 'file-102:confirmed');
+    await waitFor(() => expect(select).toHaveBeenCalledWith(1, 'file-102:confirmed', undefined));
     fireEvent.click(screen.getByRole('button', { name: 'Keep Best' }));
-    expect(select).toHaveBeenLastCalledWith(1, 'keep_best:confirmed');
+    await waitFor(() =>
+      expect(select).toHaveBeenLastCalledWith(1, 'keep_best:confirmed', undefined),
+    );
+    vi.unstubAllGlobals();
   });
 });
 
