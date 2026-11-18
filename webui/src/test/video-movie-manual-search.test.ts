@@ -21,7 +21,8 @@ function run(data: Record<string, unknown>) {
   const fn = new Function(
     'window',
     'VideoDownload',
-    `var data = ${JSON.stringify(data)};\n${extractFunction('manualSearchMovie', SRC)}\nreturn manualSearchMovie;`,
+    // the page's source falls back to currentSource (#2176)
+    `var data = ${JSON.stringify(data)};\nvar currentSource = data.source;\n${extractFunction('_dataSource', SRC)}\n${extractFunction('manualSearchMovie', SRC)}\nreturn manualSearchMovie;`,
   )({ VideoDownload: { manualSearch } }, { manualSearch }) as () => void;
   fn();
   return manualSearch;
