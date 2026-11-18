@@ -314,7 +314,7 @@ A personal front page shaped by your library, your listening and your watchlist.
   - Browse it as a **Nebula** (an orb per artist, grouped by what's stuck: no match found, or downloaded then rejected) or a dense list.
   - Open an artist to see why each track failed in plain words, retry it, or pick a source by hand.
   - Export it as CSV or JSON (the video wishlist too: everything, movies or TV shows).
-- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin approved.
+- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved.
 
 ## Import
 
@@ -446,7 +446,7 @@ Plus a background YouTube upload-date enricher.
 
 - **Watchlist → wishlist → download**: follow shows, people, studios and YouTube channels, with back-catalog policies.
 - **Wishlist**: Movies, TV and YouTube tabs, the same design as the music one. It retries with backoff and groups what's stuck by cause: found but refused by your rules, nothing found, couldn't search, or not posted yet. Open a title to see every release the last search judged and why each was refused.
-- **Requests**: Overseerr-style. Non-admins request, admins approve. Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
+- **Requests**: Overseerr-style. Members ask, admins and moderators approve, with the quality each person may pick. Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
 - **Import lists**: TMDB, IMDb and Plex Watchlist.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.
@@ -546,12 +546,22 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 
 ## Profiles & access
 
-- **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
+- **Profiles** with avatars, PINs and a home page.
+- **People and access** (Settings > People): one place for who can do what.
+  - **Global policy**: the most any member can have. Admins are never limited.
+  - **Templates**: Adult, Teen, Kids, Guest and your own. Change a template and everyone following it changes too.
+  - **Personal changes**: only what differs from someone's template is kept, with reset per row, per category or all at once.
+  - **The editor** shows where every value comes from (their template, a change of their own, or the policy holding it down) and sums it up as "What Maya can do".
+  - **Per media type**: Download right away, Ask first or Can't request for music, movies, TV, audiobooks and podcasts separately, with movies and TV as separate switches (a TV-only profile works everywhere).
+  - **Request quality**: which quality profiles each person can ask for, per movies and TV, which ones always need your OK (4K always asks), and what they start on. One allowed means no menu.
+  - **Moderators**: a member who approves and declines other people's requests and manages issues, never settings, people or tools.
+  - **Members see only what they can use**, with a "What you can do" card on their own account page.
+  - Add person, invites and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
 - **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.
 - **My Account** for non-admins: their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
-- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Admins can set it for a profile, lock it, and choose what new profiles start with.
+- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
-- **Content caps** (video): per-profile G / PG / PG-13 / R limits, enforced across the video side.
+- **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
 
 ### Security
 
@@ -571,7 +581,8 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - A link to a hidden part still opens, with a note that brings it back in one click.
 - First-run setup starts you off with what you said SoulSync is for, and profiles from before ask once, right above the Customize button.
 - Search, library, watchlist, wishlist, downloads and settings never hide.
-- Admins set it per profile in **Profiles**, in the Access step: **What they can open** (sides and pages, refused by the server too), then **What shows in their sidebar**. **Lock it** shows them exactly what you set, drops anything they picked before and takes Customize away from them. **What new profiles see** on the People tab is the starting point for every profile you never set. **Reset to default** goes back to it.
+- What someone can open at all is their permissions (Settings > People). Customize only decides what shows of that.
+- Each template's **Sidebar & look** is what its followers see. Admins can set it for one person in their editor. With **Let them change it** off, they see exactly what you set and Customize goes away for them.
 
 </details>
 
