@@ -56,6 +56,8 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
             body: `
 Management actions are part of the Library page; there is no separate Enhanced toggle.
 
+![Library v2 management view with the track table](lib-enhanced.jpg)
+
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
 
 **Preview Rename / Organize** shows where each file would go under your naming template before anything moves. You don't have to open it to find out: on the artist page an album row shows **N to rename** when some of its files are not where the template puts them, the artist's toolbar shows the total, and the album's track table marks those files in the **File path** column. Click the count to open the preview. The check runs after the page loads and only while file organization is on and the template is valid.
@@ -71,6 +73,8 @@ On an album's track list, a small **flame** next to a title marks the album's mo
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
 The Library exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
+
+![Provider badges on a library artist: MusicBrainz is linked, while Deezer, iTunes, AudioDB and Discogs have no stored ID yet](lib-matching.jpg)
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
@@ -120,6 +124,8 @@ Select tracks across multiple albums using the checkboxes. The bulk bar appears 
             body: `
 From any album card showing missing tracks, click **Download Missing** to open a modal listing every track not in your library. Select tracks, choose a download source, and start the download — progress is tracked per track with status indicators.
 
+![Album with missing tracks and the Download Missing action](lib-missing.jpg)
+
 **Multi-disc albums** are handled automatically: tracks organize into \`Disc N/\` subfolders within the album directory, preventing track number collisions (Disc 1 Track 1 vs Disc 2 Track 1). Disc structure is detected from Spotify or iTunes metadata.
 `
         },
@@ -129,6 +135,8 @@ From any album card showing missing tracks, click **Download Missing** to open a
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
 The Library previews the affected entries and file paths before removal:
+
+![Remove dialog offering database-only removal or deleting the files too](lib-delete.jpg)
 
 - **Remove from library database only** — removes the selected library records and keeps the physical files on disk.
 - **Permanently delete files** — removes the corresponding records and disk files after explicit confirmation. Paths outside configured Music Library Paths, or on unavailable storage, are blocked.
@@ -156,6 +164,8 @@ A 3-step wizard guides you through redownloading a specific track:
             lede: 'Problems people reported by hand — the manual issue tracker.',
             body: `
 The Issues page is the **manual issue tracker**: nothing here is ever written by a scan — every row is a problem reported by a person (profiles can file them from library pages and the player). Automated scan findings live in **Library Maintenance** on the Tools page, a deliberately separate surface.
+
+![Library Issues page with reported problems and status counters](lib-issues.jpg)
 
 Issues are grouped by category — wrong track, wrong metadata, wrong cover, wrong artist, wrong album, duplicate tracks, missing tracks, audio quality, incomplete album, other — each with a status (**open**, **in progress**, **resolved**, **dismissed**) and a priority (**low**, **normal**, **high**). Filter by status and category to work through them, and update issues individually or in bulk.
 

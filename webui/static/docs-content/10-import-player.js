@@ -12,9 +12,11 @@ Set your **import folder path** in Settings → Library → Folders. Drop audio 
 
 You can also **upload from the browser**: drop files or a folder anywhere on the list, or use **Add files** / **Add a folder**. A dropped folder keeps its name, so an album lands as one item.
 
+![Import page header with the import folder path and Add files drop strip](imp-setup.jpg)
+
 The strip under the page header shows the folder, how many items and files are in it, and the auto-import switch.
 
-![Import page](imp-staging.jpg)
+![Import inbox showing the items waiting in the import folder](imp-staging.jpg)
 
 > [!TIP]
 > **Files not showing up?** The page says so when it cannot read a folder. On a bind mount that is nearly always ownership: the folder's owner has to match the container's PUID/PGID (TrueNAS datasets are usually owned by the \`apps\` user, uid 568, while the container defaults to 1000).
@@ -25,6 +27,8 @@ The strip under the page header shows the folder, how many items and files are i
             title: 'The Inbox',
             lede: 'One row per item, with its state and the actions it earns.',
             body: `
+![Import inbox rows with their states and per-item actions](imp-workflow.jpg)
+
 | State | Meaning |
 |-------|---------|
 | **Waiting** | Nobody has looked at it yet. Auto-import will, or you can identify it yourself. |
@@ -48,6 +52,8 @@ The **Import Needs Attention** automation trigger fires whenever the watcher lea
             body: `
 With the switch on, a watcher checks the folder on a timer, identifies each item from its tags, folder name, or AcoustID fingerprint, matches the files to the release's tracklist, and imports anything above the **confidence line** on its own.
 
+![Auto-import switch in the Import page header strip](imp-auto.jpg)
+
 - Between 70% and the confidence line, it **waits for review**
 - Below 70%, it **needs identifying**
 
@@ -69,7 +75,7 @@ Under the table, **before it imports**: where each file will land on your naming
 
 **Import** tags the matched files with the release's metadata (title, artist, album, track number, cover art) and moves them into your library on the standard file template. Files without a track stay in the import folder.
 
-![The matcher](imp-matching.jpg)
+![The matcher pairing release tracks with your files](imp-matching.jpg)
 `
         },
         {
@@ -78,6 +84,8 @@ Under the table, **before it imports**: where each file will land on your naming
             lede: 'Single files get the same matcher with track candidates instead of releases.',
             body: `
 A single file gets the same matcher with track candidates instead of releases. Pick the track it is and import — or pick nothing and it imports from its own tags.
+
+![The matcher in singles mode with track candidates](imp-singles.jpg)
 `
         },
         {
@@ -93,7 +101,7 @@ The sync page's **Import Playlist from File** tab takes a **CSV**, **TSV**, **TX
 3. Preview every parsed row, give the playlist a name (M3U files pre-fill it), and import — the playlist lands in your **mirrored playlists** on the sync page, ready to match and download.
 :::
 
-![Text file import](imp-textfile.jpg)
+![Add a playlist from a CSV, TSV, TXT or M3U file](imp-textfile.jpg)
 `
         },
     ]
@@ -111,11 +119,11 @@ registerDocsSection({
             body: `
 The sidebar media player is always visible when a track is loaded. It shows album art, track info, a seekable progress bar, and playback controls (play/pause, previous, next, volume, repeat, shuffle).
 
-![Sidebar media player](player-sidebar.jpg)
+![Mini-player pill with album art, progress bar and playback controls](player-sidebar.jpg)
 
 Click the sidebar player to open the **Now Playing modal** — a full-screen experience with large album art, ambient glow (dominant color from cover art), a frequency-driven audio visualizer, and expanded controls.
 
-![Now Playing modal](player-nowplaying.jpg)
+![Now Playing view with large album art and ambient glow](player-nowplaying.jpg)
 `
         },
         {
@@ -124,6 +132,8 @@ Click the sidebar player to open the **Now Playing modal** — a full-screen exp
             lede: 'Audio streams the file on SoulSync disk — with a Navidrome fallback when it is not there.',
             body: `
 Playback serves the **local file on SoulSync's disk**: the browser asks \`/api/library/play\` for a track and the audio streams from \`/stream/audio\`.
+
+![Now Playing details pane showing the track's source and format](player-streaming.jpg)
 
 - **Navidrome fallback** — when the file isn't on SoulSync's disk (e.g. the library isn't mounted into the container) and Navidrome is the active media server, playback falls back to streaming via Navidrome's own Subsonic-compatible stream API — no disk mount needed. Plex and Jellyfin have no such fallback, so their files must be reachable on SoulSync's disk.
 
@@ -141,7 +151,7 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
 
 **Repeat modes**: Off → Repeat All (loop queue) → Repeat One. **Shuffle** randomizes the next track from the remaining queue.
 
-![Queue panel](player-queue.jpg)
+![The queue list inside Now Playing](player-queue.jpg)
 `
         },
         {
@@ -149,6 +159,8 @@ Add tracks to the queue from the Enhanced Library Manager or download results. M
             title: 'Keyboard Shortcuts',
             lede: 'Control playback without touching the mouse.',
             body: `
+![The always-available mini-player controlled by these shortcuts](player-sidebar.jpg)
+
 | Key | Action |
 |-----|--------|
 | \`Space\` | Play / Pause |

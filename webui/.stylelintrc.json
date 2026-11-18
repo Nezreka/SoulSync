@@ -267,7 +267,10 @@
     {
       "files": [
         "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/dashboard/-video/video-dashboard.module.css",
         "src/routes/import/-ui/import-page.module.css",
+        "src/routes/library/-ui/library-bulk.module.css",
+        "src/routes/library/-ui/library-collection.module.css",
         "src/routes/library/-ui/library-v2-page.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/search/-ui/search.module.css",

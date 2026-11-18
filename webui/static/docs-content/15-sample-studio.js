@@ -8,6 +8,8 @@ registerDocsSection({
             title: 'Overview',
             lede: 'Sample Studio turns your library into a sample pack: chop any track on a waveform, pitch it, tempo-match it, split it into stems, and save the keepers to your stash.',
             body: `
+![Sample Studio with the library, waveform editor and stash columns](studio-overview.jpg)
+
 ## What it is
 
 Sample Studio lives at **Sample Studio** in the sidebar. It has three columns:
@@ -36,6 +38,8 @@ Press \`?\` in the editor for the full list. The essentials: \`Space\` play/paus
             title: 'Stem Separation',
             lede: 'Split any track into drums, vocals, bass, and everything else with Demucs, then chop from a single stem.',
             body: `
+![Stem separation panel under the waveform editor](studio-stems.jpg)
+
 ## How it works
 
 Open a track, scroll to the **Stems** panel under the editor, and hit **Separate stems**. SoulSync runs Demucs on your server — about a minute for a full song — and caches the four stems permanently. You only ever separate a track once.
@@ -58,6 +62,8 @@ If separation fails, the panel shows the error with a **Try again** button — y
             title: 'The Stash',
             lede: 'Every saved chop keeps its rendered file and a bookmark of how it was made.',
             body: `
+![Sample Studio with the Stash panel on the right, holding the saved chops](studio-overview.jpg)
+
 ## What's stored
 
 Each stash entry has a **name**, **tags**, the source track, the in/out times, pitch and tempo settings, the output format, and — if you chopped from a stem — which stem. The rendered WAV/FLAC file sits next to it on disk.
@@ -76,6 +82,8 @@ Temporary audition previews are cleaned up automatically after an hour; saved ch
             title: 'Sample Folders',
             lede: 'Choose where saved chops live — one folder or many, organized with your track metadata.',
             body: `
+![Save chop dialog with the sample folder selector](studio-folders.jpg)
+
 ## Where chops go
 
 Saved chops are rendered into your **sample folders**, configured under Settings → Library → Folders → Sample Studio Folders. You can have as many as you like — the first is the default, and the save dialog lets you pick a different one per chop (drums here, melodies there, a folder per project).

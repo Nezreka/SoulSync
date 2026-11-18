@@ -4,7 +4,7 @@
 .bar {
   position: sticky;
   top: 8px;
-  z-index: var(--z-sticky, 20);
+  z-index: var(--z-sticky);
   display: flex;
   flex-direction: column;
   gap: 10px;
