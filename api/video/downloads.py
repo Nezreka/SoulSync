@@ -258,16 +258,6 @@ def _parse_text(hit) -> str:
     return title
 
 
-def _default_media_source(body) -> None:
-    """A grab that names its title by ``media_id`` but sends no
-    ``media_source`` is naming a LIBRARY row: the show page's grabs sent the
-    library id with the page's missing ``source`` (#2176). Stored as NULL, the
-    downloads card read the id as a TMDB id and showed another show, and the
-    profile lookup did the same. Say so on the body, so every reader agrees."""
-    if body.get("media_id") not in (None, "") and not body.get("media_source"):
-        body["media_source"] = "library"
-
-
 def _reimport_from_client(db, dl) -> bool:
     """Put an unplaced torrent/usenet download back in the monitor's hands when
     its stored path went stale (the client moved the file after we read it, out
@@ -1831,7 +1821,6 @@ def register_routes(bp):
         from core.video.slskd_download import start_download
 
         body = request.get_json(silent=True) or {}
-        _default_media_source(body)     # before the target/profile reads (#2176)
         source = str(body.get("source") or "soulseek").lower()
         if source not in ("soulseek", "torrent", "usenet", "extto"):
             return jsonify({"ok": False, "error": "Unsupported download source."}), 400
@@ -1934,7 +1923,6 @@ def register_routes(bp):
         context. Shared by a grab and a clients-tab match, so a matched download
         is the same row a grab would have written."""
         import json as _json
-        _default_media_source(body)
         ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
         ctx = {**ctx, "user_initiated": True, "import_policy": "user_replace"}
         _prof, _pid = _profile_for_request(db, body)
@@ -2112,7 +2100,6 @@ def register_routes(bp):
         import os as _os
 
         body = request.get_json(silent=True) or {}
-        _default_media_source(body)     # before the target/owned reads (#2176)
         username = body.get("username")
         files = [f for f in (body.get("files") or []) if isinstance(f, dict) and f.get("filename")]
         if not username or not files:

@@ -185,46 +185,10 @@ def test_manual_import_finds_the_moved_file(api):
 
 
 # ── 2. the wrong show ─────────────────────────────────────────────────────────
-def test_a_grab_with_no_media_source_is_a_library_id():
-    from api.video.downloads import _default_media_source
-    body = {"media_id": 37}
-    _default_media_source(body)
-    assert body["media_source"] == "library"
-    body = {"media_id": 60694, "media_source": "tmdb"}
-    _default_media_source(body)
-    assert body["media_source"] == "tmdb"
-    body = {}
-    _default_media_source(body)
-    assert "media_source" not in body
-
-
-def test_grab_stores_library_when_the_page_sent_no_source(api, monkeypatch):
-    http, db, _dl_id, _final, _stale = api
-    db.set_setting("tv_path", str(_final.rsplit("/", 2)[0]))
-    import core.video.client_grab as cg
-    monkeypatch.setattr(cg, "grab", lambda *a, **k: {"ok": True, "ref": "newhash"})
-    from core.video import disk_guard
-    monkeypatch.setattr(disk_guard, "check_room", lambda *a, **k: {"ok": True})
-    r = http.post("/api/video/downloads/grab", json={
-        "kind": "show", "title": "Last Week Tonight with John Oliver", "source": "torrent",
-        "release_title": "Last.Week.Tonight.S13E30", "download_url": "magnet:?xt=urn:btih:abc",
-        "media_id": 37, "search_ctx": {"scope": "episode", "season": 13, "episode": 30}})
-    body = r.get_json()
-    assert body["ok"], body
-    row = db.get_video_download(body["id"])
-    assert row["media_id"] == "37" and row["media_source"] == "library"
-
-
-def test_title_lock_reads_a_sourceless_id_as_a_library_id():
-    from core.video.importer import title_locked
-
-    class _DB:
-        def is_hands_off(self, kind, item):
-            return (kind, item) == ("show", 37)
-
-        def hands_off_tmdb_ids(self):
-            return {"movie": set(), "show": set()}
-
-    dl = {"kind": "show", "media_id": "37", "search_ctx": '{"scope": "episode"}'}
-    assert title_locked(_DB(), dl) is True
-    assert title_locked(_DB(), {**dl, "media_source": "tmdb"}) is False
+def test_a_grab_with_no_media_source_keeps_the_tmdb_contract():
+    # the api has always read a missing media_source as tmdb, and outside
+    # callers rely on it. the show page now names its source itself instead
+    # (video-detail-grab-source.test.ts), so the server default stays put
+    from api.video.downloads import _title_keys
+    assert _title_keys({"media_id": 37}) == (None, 37)
+    assert _title_keys({"media_id": 37, "media_source": "library"}) == (37, None)
