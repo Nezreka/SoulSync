@@ -806,8 +806,10 @@ class SeerrCompat:
         if not created:
             raise SeerrError(409, "Request for this media already exists.")
         try:
-            self._publish("video_request_created", {"kind": kind, "title": meta["title"],
-                                                    "requester": p.get("name") or ""})
+            from core.video.download_events import owned
+            # the Jellyfin user's profile, not the api key's
+            self._publish("video_request_created", owned({"kind": kind, "title": meta["title"],
+                                                          "requester": p.get("name") or ""}, pid))
         except Exception:  # noqa: BLE001 - events never disturb the request
             logger.exception("seerr compat: request-created event failed")
         return self._created(rid, shapes.REQUEST_PENDING, shapes.STATUS_PENDING, p, kind,

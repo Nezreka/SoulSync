@@ -519,10 +519,10 @@ def file_request(body):
         return jsonify({"success": False, "error": "Could not file the request."}), 500
     if created:
         try:      # 'Request Filed' automation trigger
-            from core.video.download_events import publish
-            publish("video_request_created", {
+            from core.video.download_events import owned, publish
+            publish("video_request_created", owned({
                 "kind": kind, "title": title,
-                "requester": getattr(g, "profile_name", None) or ""})
+                "requester": getattr(g, "profile_name", None) or ""}, _me()))
         except Exception:   # noqa: BLE001 - events never disturb the request
             logger.exception("request-created event publish failed")
     return jsonify({"success": True, "id": rid, "already": not created,
@@ -693,10 +693,12 @@ def register_routes(bp):
         for r in claimed:
             _notify(r["profile_id"], f"{req['title']} was approved, it's on the way", "success")
         try:      # 'Request Approved' automation trigger
-            from core.video.download_events import publish
-            publish("video_request_approved", {
+            from core.video.download_events import owned, publish
+            # everyone who asked, not the one who approved
+            publish("video_request_approved", owned({
                 "kind": req["kind"], "title": req["title"],
-                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))})
+                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))},
+                [r.get("profile_id") for r in claimed]))
         except Exception:   # noqa: BLE001 - events never disturb the approval
             logger.exception("request-approved event publish failed")
         return jsonify({"success": True, "wished": wished, "kind": req["kind"],
@@ -752,10 +754,11 @@ def register_routes(bp):
             _notify(r["profile_id"], f"{req['title']} was declined" + (f": {note}" if note else ""),
                     "warning")
         try:      # 'Request Declined' automation trigger
-            from core.video.download_events import publish
-            publish("video_request_denied", {
+            from core.video.download_events import owned, publish
+            publish("video_request_denied", owned({
                 "kind": req["kind"], "title": req["title"], "reason": note or "",
-                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))})
+                "requester": ", ".join(sorted({r.get("requester_name") or "" for r in claimed} - {""}))},
+                [r.get("profile_id") for r in claimed]))
         except Exception:   # noqa: BLE001 - events never disturb the decision
             logger.exception("request-denied event publish failed")
         return jsonify({"success": True, "denied": len(claimed)})

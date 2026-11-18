@@ -338,8 +338,10 @@ class OwnerGate:
             return "asked"
         logger.info("%s: filed a %s request for profile %s: %r", self.label, kind, self.owner_id, title)
         try:
-            (publish or _publish)("video_request_created", {"kind": kind, "title": title,
-                                                            "requester": self.profile().get("name") or ""})
+            from core.video.download_events import owned
+            (publish or _publish)("video_request_created", owned({
+                "kind": kind, "title": title, "requester": self.profile().get("name") or ""},
+                self.owner_id))
         except Exception:  # noqa: BLE001 - events never disturb the request
             logger.debug("request-created event failed", exc_info=True)
         return "filed"

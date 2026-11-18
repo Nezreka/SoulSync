@@ -43,14 +43,16 @@ _RESOLVED_RECURRENCE_GRACE_DAYS = 7
 _SUPERSEDED_BY_SCAN_ACTION = "superseded by a newer scan"
 
 
-def _publish_video_event(event_type: str, data: dict) -> None:
+def _publish_video_event(event_type: str, data: dict, owner=None) -> None:
     """Relay a library change to the video automation event bus. The DB layer is
     the one spine every wishlist/watchlist write flows through, so publishing
     here means no caller can forget. Lazy import; a missing forwarder (tests,
-    early startup) makes it a no-op — never disturbs the write itself."""
+    early startup) makes it a no-op — never disturbs the write itself.
+    ``owner`` is the profile whose list changed (an admin approving a request
+    writes the requester's wishlist: the event is the requester's)."""
     try:
-        from core.video.download_events import publish
-        publish(event_type, data)
+        from core.video.download_events import owned, publish
+        publish(event_type, owned(data, owner))
     except Exception:   # noqa: BLE001
         logger.debug("video event publish failed for %s", event_type, exc_info=True)
 
@@ -10206,7 +10208,7 @@ class VideoDatabase:
             conn.commit()
             # A refresh-upsert of an existing follow is not a new follow.
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": kind, "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": kind, "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_to_watchlist failed (%s %s)", kind, tmdb_id)
@@ -10327,6 +10329,38 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishing_profile_ids(self, *, kind: str, tmdb_id=None, season_number=None,
+                            episode_number=None, youtube_id=None) -> list:
+        """the profiles whose wishlist wants this title: a movie, one episode
+        (or a whole season with no episode), or a youtube video. whose a
+        download is when nobody grabbed it by hand. [] on any error."""
+        conn = self._get_connection()
+        try:
+            if youtube_id:
+                rows = conn.execute("SELECT DISTINCT profile_id FROM video_wishlist "
+                                    "WHERE kind='video' AND source_id=?", (str(youtube_id),))
+            elif kind == "movie" and tmdb_id:
+                rows = conn.execute("SELECT DISTINCT profile_id FROM video_wishlist "
+                                    "WHERE kind='movie' AND tmdb_id=?", (int(tmdb_id),))
+            elif tmdb_id:
+                sql = "SELECT DISTINCT profile_id FROM video_wishlist WHERE kind='episode' AND tmdb_id=?"
+                args = [int(tmdb_id)]
+                if season_number not in (None, ""):
+                    sql += " AND season_number=?"
+                    args.append(int(season_number))
+                if episode_number not in (None, ""):
+                    sql += " AND episode_number=?"
+                    args.append(int(episode_number))
+                rows = conn.execute(sql, args)
+            else:
+                return []
+            return sorted(int(r[0]) for r in rows if r[0] is not None)
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.debug("wishing_profile_ids failed", exc_info=True)
+            return []
+        finally:
+            conn.close()
+
     def remove_from_watchlist(self, kind: str, tmdb_id: int, profile_id: int = 1) -> bool:
         """Un-follow. Stored as a 'mute' tombstone (not a delete) so an
         actively-airing library show — watched by default — is not silently
@@ -10352,7 +10386,7 @@ class VideoDatabase:
             # (muting something never followed is just a tombstone write).
             if was and was["state"] == "follow":
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": kind, "title": was["title"] or ""})
+                                     {"kind": kind, "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -10657,7 +10691,7 @@ class VideoDatabase:
             conn.commit()
             if not existed:   # a refresh-upsert is not a new wish
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "movie", "title": title, "count": 1})
+                                     {"kind": "movie", "title": title, "count": 1}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_movie_to_wishlist failed (%s)", tmdb_id)
@@ -11064,7 +11098,7 @@ class VideoDatabase:
             conn.commit()
             if new_rows > 0:   # refresh-upserts of already-wished episodes don't fire
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "episode", "title": show_title, "count": new_rows})
+                                     {"kind": "episode", "title": show_title, "count": new_rows}, owner=profile_id)
             return new_rows
         except Exception:
             logger.exception("add_episodes_to_wishlist failed (%s)", show_tmdb_id)
@@ -12696,7 +12730,7 @@ class VideoDatabase:
                 (int(profile_id), youtube_surrogate_id(cid), title, channel.get("avatar_url"), cid))
             conn.commit()
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": "channel", "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": "channel", "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_channel_to_watchlist failed (%s)", cid)
@@ -12719,7 +12753,7 @@ class VideoDatabase:
             conn.commit()
             if was and cur.rowcount:
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": "channel", "title": was["title"] or ""})
+                                     {"kind": "channel", "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -12918,7 +12952,7 @@ class VideoDatabase:
                 (int(profile_id), youtube_surrogate_id(pid), title, (playlist or {}).get("thumbnail_url"), pid))
             conn.commit()
             if not (was and was["state"] == "follow"):
-                _publish_video_event("video_watchlist_added", {"kind": "playlist", "title": title})
+                _publish_video_event("video_watchlist_added", {"kind": "playlist", "title": title}, owner=profile_id)
             return True
         except Exception:
             logger.exception("add_playlist_to_watchlist failed (%s)", pid)
@@ -12939,7 +12973,7 @@ class VideoDatabase:
             conn.commit()
             if was and cur.rowcount:
                 _publish_video_event("video_watchlist_removed",
-                                     {"kind": "playlist", "title": was["title"] or ""})
+                                     {"kind": "playlist", "title": was["title"] or ""}, owner=profile_id)
             return True
         finally:
             conn.close()
@@ -13037,7 +13071,7 @@ class VideoDatabase:
             conn.commit()
             if new_rows > 0:   # refresh-upserts of already-wished videos don't fire
                 _publish_video_event("video_wishlist_item_added",
-                                     {"kind": "youtube", "title": ctitle, "count": new_rows})
+                                     {"kind": "youtube", "title": ctitle, "count": new_rows}, owner=profile_id)
             return n
         except Exception:
             logger.exception("add_videos_to_wishlist failed (%s)", cid)
