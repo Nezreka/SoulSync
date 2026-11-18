@@ -290,7 +290,8 @@ def test_a_manual_wishlist_pass_asks_too():
 def test_the_podcast_download_asks_too():
     api = _read("api/podcasts.py")
     route = api.split('@bp.route("/download"', 1)[1].split("@bp.route", 1)[0]
-    assert "download_permission_error()" in route
+    # the profile's switch, then podcasts.get in its permission map (#2166)
+    assert 'media_download_error("podcasts.get")' in route
 
 
 def test_the_catalogue_stays_open_to_everyone():

@@ -133,3 +133,18 @@ def download_permission_error():
     if reason:
         return jsonify({"success": False, "error": reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None
+
+
+def media_download_error(permission: str):
+    """download_permission_error for one kind of media (#2166): the profile's
+    switch as above, then ``permission`` (books.get, podcasts.get) on
+    "download" in its permission map, under the global policy. the
+    permission names the media, never the profile: that is still the
+    session's."""
+    from core.permissions import map_refuses, refusal
+    denied = download_permission_error()
+    if denied is not None:
+        return denied
+    if map_refuses(permission, "download"):
+        return refusal(permission)
+    return None

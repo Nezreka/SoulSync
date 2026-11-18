@@ -16521,6 +16521,17 @@ class MusicDatabase:
                 )
                 return self._wishlist_outcome("rejected", reason="unknown quality_profile_id")
 
+            # the owner's permissions (#2166): a member who can't request
+            # music, or whose explicit music is hidden, is held to it here,
+            # whichever page, job or scan made the add. an admin's add for
+            # them (request_approved: the Library v2 mirror) is the admin's
+            if not request_approved and isinstance(spotify_track_data, dict):
+                from core.permission_store import wish_refusal
+                _refused = wish_refusal(self, profile_id, spotify_track_data)
+                if _refused:
+                    logger.info("Skipping wishlist add for profile %s: %s", profile_id, _refused)
+                    return self._wishlist_outcome("rejected", spotify_track_data.get('id'), reason=_refused)
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -28955,12 +28966,21 @@ class MusicDatabase:
         return keys
 
     def _music_request_quota_blocks(self, cursor, profile_id, track_data, source_type, track_id) -> bool:
-        from core.permissions import profile_can_download
         from core.requests.music import group_key
-        from core.requests.quota import quota_for
         profile = self.get_profile(profile_id)
-        quota = quota_for(profile)
-        if not quota or profile_can_download(profile):
+        if not profile or int(profile_id) == 1:
+            return False
+        # mode and limit from the profile's permissions (#2166): music.get and
+        # requests.limit, under the global policy. a profile whose rights
+        # can't be read gets no new asks
+        from core.permission_store import music_rights
+        rights = music_rights(self, profile)
+        if rights["mode"] == "download":
+            return False
+        if rights["mode"] == "none":
+            return True
+        quota = rights["quota"]
+        if not quota:
             return False
         # this branch keys a row <track>::<album> from its first insert
         # (core/wishlist/identity.py), so the row an add would refresh -- and
