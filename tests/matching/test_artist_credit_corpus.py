@@ -88,6 +88,7 @@ CORPUS = [
      ["Chase & Status", "Becky Hill"], "#1945"),
     ("Creed, 3 Doors Down & Finger Eleven", {"known": ["3 Doors Down"]},
      ["Creed", "3 Doors Down", "Finger Eleven"], "#2028"),
+    # a known name in the list proves its commas (unlike a guest cut)
     ("Creed, 3 Doors Down & Finger Eleven", {"known": ["Finger Eleven"]},
      ["Creed", "3 Doors Down", "Finger Eleven"], "#2028"),
     ("Creed, 3 Doors Down & Finger Eleven",
@@ -95,10 +96,19 @@ CORPUS = [
      ["Creed", "3 Doors Down", "Finger Eleven"], "#2028: the library vouches for two"),
     ("Johannes Brahms; Joshua Bell", {}, ["Johannes Brahms", "Joshua Bell"], "#2028"),
     ("Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, Robert Schumann; Joshua Bell",
-     {}, ["Пётр Ильич Чайковский", "Henryk Wieniawski", "Johannes Brahms", "Robert Schumann",
-          "Joshua Bell"], "#2028"),
+     {}, ["Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, Robert Schumann",
+          "Joshua Bell"], "#2028: the ; cuts, the commas wait for evidence"),
+    ("Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, Robert Schumann; Joshua Bell",
+     {"evidence": [("spotify credits", ["Пётр Ильич Чайковский", "Henryk Wieniawski",
+                                        "Johannes Brahms", "Robert Schumann", "Joshua Bell"])]},
+     ["Пётр Ильич Чайковский", "Henryk Wieniawski", "Johannes Brahms", "Robert Schumann",
+      "Joshua Bell"], "#2028: the provider's list"),
     ("Samuel Barber; Ruth Golden, David Zinman, Terry Edwards, Donald Barra", {},
-     ["Samuel Barber", "Ruth Golden", "David Zinman", "Terry Edwards", "Donald Barra"], "#2028"),
+     ["Samuel Barber", "Ruth Golden, David Zinman, Terry Edwards, Donald Barra"], "#2028"),
+    ("Samuel Barber; Ruth Golden, David Zinman, Terry Edwards, Donald Barra",
+     {"library": _lib("Ruth Golden", "David Zinman", "Terry Edwards", "Donald Barra")},
+     ["Samuel Barber", "Ruth Golden", "David Zinman", "Terry Edwards", "Donald Barra"],
+     "#2028: the library knows the performers"),
     ("Axwell Λ Ingrosso, Axwell & Sebastian Ingrosso", {"known": ["Axwell & Sebastian Ingrosso"]},
      ["Axwell Λ Ingrosso", "Axwell & Sebastian Ingrosso"], "#2028: the duo keeps its name"),
     ("Artist A / Artist B", {}, ["Artist A", "Artist B"], "#2028: a spaced slash"),
@@ -112,9 +122,25 @@ CORPUS = [
     ("Drake feat. Rihanna", {}, ["Drake", "Rihanna"], "test_importer"),
     ("A ft. B", {}, ["A", "B"], "test_importer"),
     ("A featuring B", {}, ["A", "B"], "test_importer"),
-    ("Odetari w/ 9lives", {}, ["Odetari", "9lives"], "test_importer"),
-    ("Beyoncé with JAY-Z", {}, ["Beyoncé", "JAY-Z"], "test_artist_aliases"),
-    ("Eminem vs. Jay-Z", {}, ["Eminem", "Jay-Z"], "test_artist_aliases"),
+    # with / w/ / vs. / presents / meets sit inside band names as often as
+    # they join artists: evidence decides (Nezreka's review, 1)
+    ("Odetari w/ 9lives", {}, ["Odetari w/ 9lives"], "test_importer"),
+    ("Odetari w/ 9lives", {"library": _lib("Odetari", "9lives")}, ["Odetari", "9lives"],
+     "test_importer"),
+    ("Beyoncé with JAY-Z", {"evidence": [("spotify credits", ["Beyoncé", "JAY-Z"])]},
+     ["Beyoncé", "JAY-Z"], "test_artist_aliases"),
+    ("Eminem vs. Jay-Z", {"library": _lib("Eminem", "Jay-Z")}, ["Eminem", "Jay-Z"],
+     "test_artist_aliases"),
+    ("MAN WITH A MISSION", {}, ["MAN WITH A MISSION"], "Nezreka's review, 1"),
+    ("Sleeping With Sirens", {}, ["Sleeping With Sirens"], "Nezreka's review, 1"),
+    ("Bear vs. Shark", {}, ["Bear vs. Shark"], "Nezreka's review, 1"),
+    ("Boy Meets Girl", {}, ["Boy Meets Girl"], "Nezreka's review, 1"),
+    ("Tyler, The Creator feat. Kali Uchis", {}, ["Tyler, The Creator", "Kali Uchis"],
+     "Nezreka's review, 2"),
+    ("Earth, Wind & Fire feat. The Emotions", {}, ["Earth, Wind & Fire", "The Emotions"],
+     "Nezreka's review, 2"),
+    ("Harry Connick, Jr. feat. Kelly Clarkson", {}, ["Harry Connick, Jr.", "Kelly Clarkson"],
+     "Nezreka's review, 2"),
     ("Artist1; Artist2; Artist3", {}, ["Artist1", "Artist2", "Artist3"], "test_artist_aliases"),
     ("Drake & Rihanna", {"library": _lib("Drake", "Rihanna")}, ["Drake", "Rihanna"],
      "test_importer: every artist already known"),
@@ -227,13 +253,14 @@ def test_leads_a_band():
     ("Drake feat. Rihanna", (), None, ["Drake", "Rihanna"]),
     ("Earth, Wind & Fire", ("Earth",), "Various Artists", ["Earth, Wind & Fire"]),
 ])
-def test_an_imported_credit_is_kept_as_written_and_split_artists_proposes(
+def test_an_imported_credit_is_cut_where_sure_and_split_artists_proposes_the_rest(
         credit, library, album_artist, expected):
-    """The import keeps a credit as written; Split Artists, the one job that
-    splits, proposes the parts from the same context (and splits once a
-    provider credits each part on the track)."""
+    """The import cuts only where the kernel is sure (feat., x, ;, |);
+    Split Artists proposes the rest from the same context and splits once a
+    provider credits each part on the track."""
     from core.library2.importer import _credit_names_for_import
-    assert _credit_names_for_import(credit) == [credit]
+    from core.matching.artist_credit import sure_parts
+    assert _credit_names_for_import(credit) == sure_parts(credit)
     known = {n.casefold() for n in library}
     assert list(decide_credit(credit, known=[album_artist] if album_artist else [],
                               is_act=lambda n: n.casefold() in known,
@@ -243,7 +270,11 @@ def test_an_imported_credit_is_kept_as_written_and_split_artists_proposes(
 @pytest.mark.parametrize("credit,known,library,expected", [
     ("Above & Beyond", (), ("Above", "Beyond", "Above & Beyond"), ""),   # #2131
     ("Nova & Vale", (), ("Nova", "Vale", "Nova & Vale"), ""),
+    ("Creed, 3 Doors Down & Finger Eleven", ("3 Doors Down",), (), "Creed"),
     ("Creed, 3 Doors Down & Finger Eleven", ("Finger Eleven",), (), "Creed"),
+    ("MAN WITH A MISSION", ("MAN WITH A MISSION",), (), ""),
+    ("Bear vs. Shark", ("Bear vs. Shark",), (), ""),
+    ("Tyler, The Creator feat. Kali Uchis", (), (), "Tyler, The Creator"),
     ("Johannes Brahms; Joshua Bell", (), (), "Johannes Brahms"),
     ("K/DA; League Of Legends", (), (), "K/DA"),
     ("Simon & Garfunkel", ("Simon & Garfunkel",), (), ""),
@@ -332,6 +363,9 @@ def test_lazy_evidence_is_read_once_for_the_whole_and_the_pieces():
     ("John Doe, Janet Deer", {"evidence": [("spotify credits", ["John Doe", "Janet Deer"])]},
      ["John Doe", "Janet Deer"], "#215: playlist download, first listed"),
     ("John Doe, Bubba, Billy Jack", {"known": ["John Doe"]},
+     ["John Doe", "Bubba", "Billy Jack"], "#215: a known name proves the list"),
+    ("John Doe, Bubba, Billy Jack",
+     {"evidence": [("spotify credits", ["John Doe", "Bubba", "Billy Jack"])]},
      ["John Doe", "Bubba", "Billy Jack"], "#215"),
     ("A & B", {"evidence": [("musicbrainz credits", ["A", "B"])]}, ["A", "B"],
      "#840: MusicBrainz joins artists with &"),
@@ -360,9 +394,9 @@ def test_the_whole_string_is_checked_before_a_cut():
         "Prince with The New Power Generation",)
     # a provider list naming it as one artist does too
     assert decide_credit("A; B", evidence=[("spotify credits", ["A; B"])]).names == ("A; B",)
-    # without either, the cut stands and each piece is checked after it
+    # without either, "with" proves nothing: it stays as written
     assert decide_credit("Prince with The New Power Generation").names == (
-        "Prince", "The New Power Generation")
+        "Prince with The New Power Generation",)
 
 
 @pytest.mark.parametrize("credit,expected", [
@@ -381,7 +415,7 @@ def test_context_anchor_beats_a_combined_catalogue_row_before_marker_cut():
     from core.imports.collab_artist import split_credit_primary
 
     library = _lib('Drake', 'Drake feat. Rihanna')
-    assert _credit_names_for_import('Drake feat. Rihanna') == ['Drake feat. Rihanna']
+    assert _credit_names_for_import('Drake feat. Rihanna') == ['Drake', 'Rihanna']
     assert decide_credit('Drake feat. Rihanna', known=['Drake'], is_act=library,
                          is_artist=library).names == ('Drake', 'Rihanna')
     assert split_credit_primary('Drake feat. Rihanna', ['Drake'], library) == 'Drake'
@@ -502,3 +536,45 @@ def test_every_name_the_old_list_held_stays_whole_on_the_data(band):
     # a provider list crediting the band never confirms cutting it
     proposed = decide_credit(band, is_artist=every_word_an_artist).names
     assert not credits_confirm(proposed, whole)
+
+
+
+# ── the import cuts where the kernel is sure, nowhere else (Nezreka's review, 3)
+
+@pytest.mark.parametrize("credit, expected", [
+    ("Drake feat. Wizkid", ["Drake", "Wizkid"]),
+    ("Drake ft. Wizkid & Kyla", ["Drake", "Wizkid & Kyla"]),
+    ("A x B", ["A", "B"]),
+    ("A × B", ["A", "B"]),
+    ("K/DA; League Of Legends", ["K/DA", "League Of Legends"]),
+    ("A | B", ["A", "B"]),
+    ("Lil Nas X", ["Lil Nas X"]),
+    ("Earth, Wind & Fire", ["Earth, Wind & Fire"]),
+    ("1788-L, Deathpact", ["1788-L, Deathpact"]),
+    ("Simon & Garfunkel", ["Simon & Garfunkel"]),
+    ("Dan + Shay", ["Dan + Shay"]),
+    ("AC/DC", ["AC/DC"]),
+    ("MAN WITH A MISSION", ["MAN WITH A MISSION"]),
+    ("Bear vs. Shark", ["Bear vs. Shark"]),
+    ("Tyler, The Creator feat. Kali Uchis", ["Tyler, The Creator", "Kali Uchis"]),
+])
+def test_the_import_cuts_only_sure_separators(credit, expected):
+    from core.library2.importer import _credit_names_for_import
+    assert _credit_names_for_import(credit) == expected
+
+
+def test_a_guest_or_a_semicolon_cut_proves_nothing_about_commas():
+    """Nezreka's review, 2: the main act before a feat. or a ; keeps its
+    commas; a known name standing in the list proves them"""
+    assert decide_credit("Tyler, The Creator; Kali Uchis").names == (
+        "Tyler, The Creator", "Kali Uchis")
+    assert decide_credit("Creed, 3 Doors Down & Finger Eleven",
+                         known=["Finger Eleven"]).names == ("Creed", "3 Doors Down", "Finger Eleven")
+
+
+@pytest.mark.parametrize("band", ["MAN WITH A MISSION", "Sleeping With Sirens",
+                                  "Bear vs. Shark", "Boy Meets Girl"])
+def test_a_lookup_searches_a_joining_word_band_whole(band):
+    """Nezreka's review, 1: beatport / musicmap searched the fragment"""
+    from core.matching.artist_credit import lookup_name
+    assert lookup_name(band) == band

@@ -88,11 +88,22 @@ def test_classical_credits_with_semicolons_split(monkeypatch, tmp_path):
     _cfg(monkeypatch, tmp_path)
     assert _path(tmp_path, "Johannes Brahms; Joshua Bell", "Johannes Brahms; Joshua Bell")[0] \
         == "Johannes Brahms"
+    barber = "Samuel Barber; Ruth Golden, David Zinman, Terry Edwards, Donald Barra"
+    assert _path(tmp_path, barber, barber)[0] == "Samuel Barber"
+    # the commas before a ";" are no list on their own: "Tyler, The Creator;
+    # Kali Uchis" reads the same. Nothing known, the group stays one name
+    long_credit = ("Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, "
+                   "Robert Schumann; Joshua Bell")
+    assert _path(tmp_path, long_credit, long_credit)[0] == (
+        "Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, Robert Schumann")
+
+
+def test_classical_composers_the_library_knows_split(monkeypatch, tmp_path):
+    _cfg(monkeypatch, tmp_path, library=("Пётр Ильич Чайковский", "Henryk Wieniawski",
+                                         "Johannes Brahms", "Robert Schumann"))
     long_credit = ("Пётр Ильич Чайковский, Henryk Wieniawski, Johannes Brahms, "
                    "Robert Schumann; Joshua Bell")
     assert _path(tmp_path, long_credit, long_credit)[0] == "Пётр Ильич Чайковский"
-    barber = "Samuel Barber; Ruth Golden, David Zinman, Terry Edwards, Donald Barra"
-    assert _path(tmp_path, barber, barber)[0] == "Samuel Barber"
 
 
 def test_a_duo_named_first_keeps_its_name(monkeypatch, tmp_path):

@@ -88,7 +88,10 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
 
     combined = str(album_artist or "").strip()
     whole = name_key(combined)
-    # a name equal to the whole credit says nothing about splitting it
+    # a name equal to the whole credit says nothing about splitting it: an
+    # album list naming "Creed, 3 Doors Down & Finger Eleven" as one entry is
+    # the very case of #2028. A band stays whole because only a sure
+    # separator cuts without evidence ("MAN WITH A MISSION", "Bear vs. Shark")
     known = [n for n in (_name(e) for e in known_names or ()) if n and name_key(n) != whole]
 
     def in_library(name):

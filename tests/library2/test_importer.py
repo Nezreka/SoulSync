@@ -1920,7 +1920,7 @@ def test_an_ambiguous_credit_is_kept_as_written_and_handed_to_split_artists(lega
     assert ghost in asked
 
 
-def test_a_title_feature_list_is_kept_as_written(legacy_db):
+def test_the_import_cuts_a_feat_and_keeps_an_ampersand_for_split_artists(legacy_db):
     _on_legacy(legacy_db.path, ("UPDATE tracks SET title=?, track_artist=? WHERE id=100", ("One Dance (feat. Wizkid & Kyla)", "Drake feat. Wizkid")))
 
     import_legacy_library(legacy_db, reset=True)
@@ -1928,9 +1928,10 @@ def test_a_title_feature_list_is_kept_as_written(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
     conn.close()
-    # the feat. wrapper says they are guests, not how many artists each is
-    assert {"Drake", "Drake feat. Wizkid", "Wizkid & Kyla"} <= names
-    assert "Kyla" not in names
+    # "feat." is sure: Wizkid is an artist. "Wizkid & Kyla" may be one act,
+    # Split Artists decides that on evidence
+    assert {"Drake", "Wizkid", "Wizkid & Kyla"} <= names
+    assert "Drake feat. Wizkid" not in names and "Kyla" not in names
 
 
 def test_watchlist_import_does_not_watch_a_namesake(imported_conn):

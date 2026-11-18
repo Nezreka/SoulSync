@@ -186,26 +186,25 @@ def featured_from_title(title: str) -> List[str]:
 
 
 def _credit_names_for_import(raw: str) -> List[str]:
-    """A flat legacy credit, as written: one artist.
+    """The artists a flat legacy credit names: cut where the kernel is sure
+    (``feat.``, ``x``, ``;``, ``|``), every piece as written.
 
-    A legacy ``track_artist`` does not say whether it is a list: ``Earth,
-    Wind & Fire`` and ``Hall & Oates`` are complete names, "1788-L, Deathpact"
-    is two. The import does not decide that. Split Artists is the one job
-    that splits an artist: the post-import pass hands it every credit that
-    reads as a list, and it splits what the providers confirm (the 3.6.1
-    credit lists are carried right after the import) and asks the user about
-    the rest. A credit kept whole can still be split; phantom artists made
+    A legacy ``track_artist`` does not say whether ``,`` ``&`` ``and`` ``+``
+    or ``/`` is a list: ``Earth, Wind & Fire`` and ``Hall & Oates`` are
+    complete names, "1788-L, Deathpact" is two. Those pieces stay whole; the
+    post-import pass hands them to Split Artists, which splits what the
+    providers confirm and asks about the rest. "Drake feat. Wizkid" needs
+    nobody: a guest marker never sits inside a name. Phantom artists made
     from a guess cannot be merged back reliably (P2-24).
     """
-    from core.matching.artist_credit import clean_credit
+    from core.matching.artist_credit import sure_parts
 
-    whole = clean_credit(raw)
-    return [whole] if whole else []
+    return sure_parts(raw)
 
 
 def _featured_names_for_import(title: str) -> List[str]:
-    """The credits a title's ``(feat. …)`` names, each as written: the
-    wrapper says they are guests, not how many artists each one is."""
+    """The credits a title's ``(feat. …)`` names, cut where the kernel is
+    sure: the wrapper says they are guests, not whether "A & B" is one."""
     names: List[str] = []
     for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
         names.extend(_credit_names_for_import(match.group(1)))

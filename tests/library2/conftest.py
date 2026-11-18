@@ -221,33 +221,12 @@ def legacy_db_factory(tmp_path):
 
 
 @pytest.fixture
-def imported_only_conn(legacy_db):
-    """The importer's own result, nothing healed after it."""
-    from core.library2.importer import import_legacy_library
-    import_legacy_library(legacy_db)
-    conn = row_conn(legacy_db.path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    yield conn
-    conn.close()
-
-
-@pytest.fixture
 def imported_conn(legacy_db):
-    """Run the importer, then yield an open connection to the resulting DB.
-
-    The import keeps "Drake feat. Wizkid" as written; Split Artists, the one
-    job that splits, heals it once a provider credits both on the track. The
-    library the read-model tests look at is that healed one."""
+    """Run the importer, then yield an open connection to the resulting DB."""
     from core.library2.importer import import_legacy_library
-    from core.library2.native_enrich import heal_combined_artist
     import_legacy_library(legacy_db)
     conn = row_conn(legacy_db.path)
     conn.execute("PRAGMA foreign_keys = ON")
-    ghost = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake feat. Wizkid'").fetchone()
-    if ghost is not None:
-        heal_combined_artist(conn, ghost[0], ["Drake", "Wizkid"], lead="Drake",
-                             reason="Split Artists, confirmed")
-        conn.commit()
     yield conn
     conn.close()
 

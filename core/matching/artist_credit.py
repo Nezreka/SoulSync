@@ -13,13 +13,13 @@ This module is the one place. Three layers:
 
 - ``;``, ``|`` and a spaced `` / `` (and their full-width forms) propose
   boundaries between credits; stored artist names can contain them too
-- ``feat.``, ``ft.``, ``featuring``, ``with``, ``w/``, ``vs.``, ``pres.``,
-  ``presents``, ``meets``, a spaced lowercase ``x`` and ``×`` mark guests:
-  they cut too ("Lil Nas X" has no spaced lowercase x, "Axwell Λ Ingrosso"
-  no separator at all)
-- ``,``, ``、``, ``&``, ``and``, ``+`` and an unspaced ``/`` also sit inside
-  names ("Earth, Wind & Fire", "Florence + the Machine", "AC/DC"): they
-  need evidence
+- ``feat.``, ``ft.``, ``featuring``, a spaced lowercase ``x`` and ``×`` mark
+  guests: they cut too ("Lil Nas X" has no spaced lowercase x, "Axwell Λ
+  Ingrosso" no separator at all)
+- ``,``, ``、``, ``&``, ``and``, ``+``, an unspaced ``/`` and the joining words
+  ``with``, ``w/``, ``vs.``, ``pres.``, ``presents``, ``meets`` also sit
+  inside names ("Earth, Wind & Fire", "AC/DC", "MAN WITH A MISSION", "Bear
+  vs. Shark", "Boy Meets Girl"): they need evidence
 
 A cut is never taken on trust alone: the whole string is checked before it
 (a credit list, a name the caller vouches for, a known act), and every
@@ -56,7 +56,8 @@ that knows:
       and each part of that goes through a-e again
 4. a string with no cutting separator goes through a-e as one piece
 
-Nothing is split on a guess: an unknown "A & B" stays one credit, which a
+Only a sure separator cuts without evidence; nothing else is split on a
+guess: an unknown "A & B" stays one credit, which a
 later match can still split, where a wrong split leaves artists behind that
 nothing can merge reliably (P2-24).
 """
@@ -76,8 +77,10 @@ logger = get_logger("matching.artist_credit")
 
 _SEP_RE = re.compile(
     r"(?P<hard>\s*[;；|]\s*|\s+[/／]\s+)"
-    r"|(?P<marker>\s+(?:feat\.?|ft\.?|featuring|with|w/|vs\.?|pres\.|presents|meets)\s+"
-    r"|\s+(?-i:x)\s+|\s*×\s*)"
+    r"|(?P<marker>\s+(?:feat\.?|ft\.?|featuring)\s+|\s+(?-i:x)\s+|\s*×\s*)"
+    # words that join artists as often as they sit inside a band's name
+    # (MAN WITH A MISSION, Bear vs. Shark, Boy Meets Girl): evidence decides
+    r"|(?P<link>\s+(?:with|w/|vs\.?|pres\.|presents|meets)\s+)"
     r"|(?P<comma>\s*[,，、]\s*)"
     r"|(?P<amp>\s*[&＆]\s*|\s+and\s+|\s*\+\s*)"
     r"|(?P<slash>[/／])",
@@ -116,8 +119,16 @@ def tokens(text: Any) -> Tuple[List[str], List[Tuple[str, str]]]:
     seps: List[Tuple[str, str]] = []
     pos = 0
     pending: Optional[Tuple[str, str]] = None
+    lead = ""      # a "separator" before any name is part of it: "+44", "& Friends"
     for match in _SEP_RE.finditer(text):
         piece = text[pos:match.start()].strip()
+        if not names and not piece:
+            lead += match.group(0)
+            pos = match.end()
+            continue
+        if lead and piece:
+            piece = (lead + piece).strip()
+            lead = ""
         if piece:
             if names and pending is not None:
                 seps.append(pending)
@@ -132,6 +143,8 @@ def tokens(text: Any) -> Tuple[List[str], List[Tuple[str, str]]]:
                 pending = (kind, match.group(0))
         pos = match.end()
     tail = text[pos:].strip()
+    if lead and tail:
+        tail = (lead + tail).strip()
     if tail:
         if names:
             seps.append(pending or ("amp", " "))
@@ -140,7 +153,24 @@ def tokens(text: Any) -> Tuple[List[str], List[Tuple[str, str]]]:
 
 
 def _strength(kind: str) -> int:
-    return {"hard": 4, "marker": 3, "comma": 2, "amp": 1, "slash": 0}.get(kind, 0)
+    return {"hard": 4, "marker": 3, "comma": 2, "amp": 1, "link": 1, "slash": 0}.get(kind, 0)
+
+
+def sure_parts(credit: Any) -> List[str]:
+    """the pieces a credit's sure separators make (feat., ft., featuring, a
+    spaced lowercase x, ×, ;, |, a spaced /), each as written. What only
+    may be a list (",", "&", "and", "+", "with", "vs." ...) stays inside its
+    piece for the evidence to decide."""
+    names, seps = tokens(credit)
+    if not names:
+        return []
+    out, start = [], 0
+    for k, (kind, _raw) in enumerate(seps):
+        if kind in SURE:
+            out.append(_join(names, seps, start, k))
+            start = k + 1
+    out.append(_join(names, seps, start, len(names) - 1))
+    return list(_dedupe(out))
 
 
 def split_names(*credits: Any, conjunctions: bool = True,
@@ -175,7 +205,8 @@ def split_names(*credits: Any, conjunctions: bool = True,
                     merged.append(name)
             names = merged
         for name in names:
-            name = name.strip().strip("-").strip()
+            # a dash left over from "A - B", never one inside a name ("-M-")
+            name = re.sub(r"^-\s+|\s+-$", "", name.strip()).strip()
             key = name_key(name)
             if key and key not in seen:
                 seen.add(key)
@@ -509,7 +540,8 @@ class _Segment:
             if len(pieces) > 1:
                 out, vias = [], []
                 for piece in pieces:
-                    found, via = self.decide(piece, True)
+                    # a guest or ";" cut proves nothing about a piece's commas
+                    found, via = self.decide(piece, False)
                     out.extend(found)
                     vias.append(via)
                 deciding = [v for v in vias if v not in ("single", "whole", "act")]
@@ -531,7 +563,11 @@ class _Segment:
             enough = covered if self.min_runs is None else len(runs) >= self.min_runs
             if runs and (covered or enough) and (len(runs) >= 2 or not covered):
                 return self._cut(names, seps, runs), "artist"
-        # 6. whole, or the commas of a proven list
+        # 6. whole, or the commas of a list a known name proved. What is
+        # left beside a name the caller knows ("Creed, 3 Doors Down" beside
+        # "Finger Eleven", #2028) is the rest of that list. What is left of
+        # a guest or a ";" cut is no such proof: "Tyler, The Creator feat.
+        # Kali Uchis" keeps its main act whole
         if in_list and any(kind == "comma" for kind, _raw in seps):
             out = []
             start = 0
@@ -544,8 +580,9 @@ class _Segment:
         return [clean_credit(text)], "whole"
 
     def _cut(self, names, seps, runs) -> List[str]:
-        """the runs as artists; what lies between them is a proven list's
-        rest, so its commas split and the rest of the chain decides each piece"""
+        """the runs as artists; what lies between them is the rest of the
+        list a known name proved, so its commas split and the rest of the
+        chain decides each piece"""
         out = []
         for piece, is_run in _pieces(names, seps, runs):
             out.extend([piece] if is_run else self.decide(piece, True)[0])
@@ -628,6 +665,6 @@ __all__ = [
     "STORED_SOURCES", "clean_credit", "kept_whole_artist_names",
     "kept_whole_keys", "known_act_keys", "parse_kept_whole_names",
     "remember_kept_whole_names",
-    "credit_verdict", "credits_confirm", "credits_cover", "decide_credit", "leads_a_band", "lookup_name", "name_key",
+    "credit_verdict", "credits_confirm", "credits_cover", "decide_credit", "sure_parts", "leads_a_band", "lookup_name", "name_key",
     "split_names", "stored_track_credits", "tokens", "unwrap_bytes_repr",
 ]
