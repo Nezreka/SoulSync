@@ -256,10 +256,17 @@ describe('floating chrome while the mirrored modal is open', () => {
       '#notif-bell-btn',
       '#helper-float-btn',
       '#activity-float-btn',
-      '.hamburger-btn',
     ]) {
       expect(block).toContain(`body:has(#mirrored-track-modal) ${target}`);
     }
     expect(block).toMatch(/\{\s*display:\s*none\s*!important;\s*\}/);
+  });
+
+  // #2181: from the Playlists page the detail is a page (.mm-as-page) over
+  // the whole screen. hiding the hamburger there left a phone with no menu
+  it('keeps the hamburger when the detail is a page, and clears it', () => {
+    expect(block).toContain('body:has(#mirrored-track-modal:not(.mm-as-page)) .hamburger-btn');
+    expect(block).not.toContain('body:has(#mirrored-track-modal) .hamburger-btn');
+    expect(rule('.mm-as-page .mm-hero', PHONE)).toMatch(/padding-top:\s*76px/);
   });
 });

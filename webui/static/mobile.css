@@ -4360,6 +4360,11 @@ body:has(.artist-map-container) #gsearch-bar {
         max-height: calc(100vh - 20px);
         max-height: calc(100dvh - 20px);
     }
+    /* #2181: the detail as a page keeps the hamburger (style.css), so its
+       hero starts below it: top 16 + 44 tall + 16 */
+    .mm-as-page .mm-hero {
+        padding-top: 76px;
+    }
     /* Track rows: the album column goes (the title needs the room more,
        the same call the download / discover modals made), the fixed
        columns and gaps shrink, and the title takes the remaining space.
