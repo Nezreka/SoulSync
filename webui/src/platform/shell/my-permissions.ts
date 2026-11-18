@@ -17,6 +17,7 @@ import {
   type MyPermissions,
   type PermMedia,
   type PermMode,
+  type LimitKind,
   type RequestLimit,
   fallbackPermissions,
   hasAccess,
@@ -31,7 +32,13 @@ import {
   asksLeftLine,
 } from './my-permissions-core';
 
-export type { MyPermissions, PermMedia, PermMode, RequestLimit } from './my-permissions-core';
+export type {
+  LimitKind,
+  MyPermissions,
+  PermMedia,
+  PermMode,
+  RequestLimit,
+} from './my-permissions-core';
 export {
   GET_OFF_TITLES,
   OFF_TITLES,
@@ -131,8 +138,8 @@ export function useHasAccess(media: PermMedia): boolean {
   return hasAccess(useMyPermissions(), media);
 }
 
-export function useRequestLimit(): RequestLimit | null {
-  return requestLimit(useMyPermissions());
+export function useRequestLimit(kind: LimitKind = 'music'): RequestLimit | null {
+  return requestLimit(useMyPermissions(), kind);
 }
 
 /** what the Requests page may show and do for this profile */
@@ -164,7 +171,7 @@ export function useAdminName(): string {
   return name;
 }
 
-/** "3 of 5 asks left this week" for a profile that asks first for music,
+/** "3 of 5 music asks left this week" for a profile that asks first for music,
  *  '' otherwise (no limit, downloads right away, or can't ask) */
 export function useMusicAsksLeft(): string {
   const mode = usePermMode('music');
@@ -186,11 +193,14 @@ export function useMusicAsksLeft(): string {
           const q = d?.quota;
           setLine(
             q
-              ? asksLeftLine({
-                  limit: Number(q.limit) || 0,
-                  remaining: Number(q.remaining) || 0,
-                  days: Number(q.days) || 7,
-                })
+              ? asksLeftLine(
+                  {
+                    limit: Number(q.limit) || 0,
+                    remaining: Number(q.remaining) || 0,
+                    days: Number(q.days) || 7,
+                  },
+                  'music',
+                )
               : '',
           );
         },

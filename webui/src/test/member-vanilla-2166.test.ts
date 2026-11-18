@@ -163,13 +163,13 @@ describe('core.js', () => {
     );
   }
 
-  it('fills "3 of 5 asks left this week" beside a Request', async () => {
+  it('fills "3 of 5 music asks left this week" beside a Request', async () => {
     stubPerms(TEEN);
     quota({ limit: 5, days: 7, used: 2, remaining: 3 });
     const root = document.createElement('div');
     root.innerHTML = '<span data-asks-left></span>';
     load().fillMusicAsksLeft(root);
-    await vi.waitFor(() => expect(root.textContent).toBe('3 of 5 asks left this week'));
+    await vi.waitFor(() => expect(root.textContent).toBe('3 of 5 music asks left this week'));
   });
 
   it('leaves it empty for a downloader and for can’t request', async () => {

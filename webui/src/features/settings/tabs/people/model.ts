@@ -256,10 +256,23 @@ export interface PersonCells {
   requests: Cell;
 }
 
+/** music, movies and TV each have their own request limit */
+export type LimitKind = 'music' | 'movies' | 'tv';
+const LIMIT_LABEL: Record<LimitKind, string> = { music: 'Music', movies: 'Movies', tv: 'TV' };
+const LIMIT_NOUN: Record<LimitKind, string> = { music: 'music', movies: 'movie', tv: 'TV' };
+
+/** a kind's limit from a map; an older map's one requests.limit reads for every kind */
+export function limitOf(eff: PermMap, kind: LimitKind): { n: number; days: number } | null {
+  const v = eff[`${kind}.request_limit`] ?? eff['requests.limit'];
+  return isCount(v) && v.n ? { n: v.n, days: v.days } : null;
+}
+
+export type AsksByKind = Partial<Record<LimitKind, { used: number; limit: number }>>;
+
 export function personCells(
   eff: PermMap,
   quality: QualityOptions | null,
-  asks: { used: number; limit: number } | null = null,
+  asks: AsksByKind | null = null,
 ): PersonCells {
   const q = quality ?? { music: [], movies: [], tv: [] };
   const sub = (...bits: Array<string | null | false | undefined>) =>
@@ -300,19 +313,48 @@ export function personCells(
     : eff['podcasts.access']
       ? { tone: 'off', text: 'Podcasts only' }
       : off;
-  const limit = eff['requests.limit'];
-  const requests: Cell =
-    isCount(limit) && limit.n
-      ? {
+  // each kind that asks first, on its own: "2 of 5 used" once the server
+  // counted them (downloads right away are never capped)
+  const on: Record<LimitKind, boolean> = {
+    music: !!eff['music.access'] && eff['music.get'] === 'ask',
+    movies: !!eff['movies.access'] && eff['movies.get'] === 'ask',
+    tv: !!eff['tv.access'] && eff['tv.get'] === 'ask',
+  };
+  const limits = (['music', 'movies', 'tv'] as const)
+    .filter((k) => on[k])
+    .map((k) => ({ kind: k, limit: limitOf(eff, k) }))
+    .filter((x): x is { kind: LimitKind; limit: { n: number; days: number } } => !!x.limit);
+  const usedText = (kind: LimitKind, n: number) => {
+    const a = asks?.[kind];
+    return a && a.limit === n ? `${Math.min(a.used, n)} of ${n} used` : null;
+  };
+  let requests: Cell;
+  if (!limits.length) requests = { tone: 'plain', text: 'No limit' };
+  else if (limits.length === 1) {
+    const { kind, limit } = limits[0];
+    const used = usedText(kind, limit.n);
+    requests = used
+      ? { tone: 'plain', text: used, sub: `${LIMIT_NOUN[kind]} asks ${periodWords(limit.days)}` }
+      : {
           tone: 'plain',
-          // "2 of 5 used" once the server counted them (music and video together)
-          text:
-            asks && asks.limit === limit.n
-              ? `${Math.min(asks.used, limit.n)} of ${limit.n} used`
-              : `${limit.n} ${plural(limit.n, 'ask', 'asks')}`,
+          text: `${limit.n} ${LIMIT_NOUN[kind]} ${plural(limit.n, 'ask', 'asks')}`,
           sub: periodWords(limit.days),
-        }
-      : { tone: 'plain', text: 'No limit' };
+        };
+  } else {
+    const sameDays = limits.every((x) => x.limit.days === limits[0].limit.days);
+    requests = {
+      tone: 'plain',
+      text: limits
+        .map(({ kind, limit }) => {
+          const a = asks?.[kind];
+          const count =
+            a && a.limit === limit.n ? `${Math.min(a.used, limit.n)}/${limit.n}` : `${limit.n}`;
+          return `${LIMIT_LABEL[kind]} ${count}${sameDays ? '' : ` ${periodWords(limit.days)}`}`;
+        })
+        .join(' · '),
+      sub: sameDays ? `asks ${periodWords(limits[0].limit.days)}` : undefined,
+    };
+  }
   return { music, movies, tv, books, requests };
 }
 
@@ -321,8 +363,10 @@ export interface PersonRow {
   perms: PersonPerms | null;
   /** the permissions read failed: the row says so instead of guessing */
   failed: boolean;
-  /** asks spent in their window, when they have a limit (/api/permissions/asks-used) */
-  asks?: { used: number; limit: number; days: number; remaining: number } | null;
+  /** asks spent per limited kind in its window (/api/permissions/asks-used) */
+  asks?: Partial<
+    Record<LimitKind, { used: number; limit: number; days: number; remaining: number }>
+  > | null;
 }
 
 export const isAdmin = (r: PersonRow) => r.person.is_admin || r.person.id === 1;

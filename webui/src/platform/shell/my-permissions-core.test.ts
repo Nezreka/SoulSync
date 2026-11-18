@@ -8,6 +8,7 @@ import {
   fallbackPermissions,
   fromResponse,
   isModerator,
+  limitKindFor,
   modeFor,
   offTitle,
   refusalMessage,
@@ -141,17 +142,54 @@ describe('what you can do', () => {
   });
 
   it('an asker hears the limit and what is used', () => {
-    const can = describePermissions(permsOf(TEEN), { used: 2 });
-    expect(can.sentence).toBe('You ask first for music, movies and shows, 5 asks a week.');
+    // one limit for every kind that asks reads once
+    const can = describePermissions(permsOf(TEEN), { used: { movies: 2 } });
+    expect(can.sentence).toBe('You ask first for music, movies and shows, 5 asks a week each.');
     const req = can.rows.find((r) => r.id === 'requests');
-    expect(req?.lead).toBe('5 asks a week');
-    expect(req?.detail).toEqual(['2 used', 'you see only your own']);
-    expect(can.rows.find((r) => r.id === 'movies')?.detail).toEqual(['up to PG-13']);
+    expect(req?.lead).toBe('5 asks a week each');
+    expect(req?.detail).toEqual(['you see only your own']);
+    // each kind's count sits on its own row
+    expect(can.rows.find((r) => r.id === 'movies')?.detail).toEqual([
+      'up to PG-13',
+      '5 asks a week, 2 used',
+    ]);
     // tv follows the movie rating, in tv words
-    expect(can.rows.find((r) => r.id === 'tv')?.detail).toEqual(['up to TV-14']);
+    expect(can.rows.find((r) => r.id === 'tv')?.detail).toEqual(['up to TV-14', '5 asks a week']);
     expect(can.rows.find((r) => r.id === 'books')?.lead).toBe(
       'Audiobooks to browse, podcasts to follow and play',
     );
+  });
+
+  it('each kind has its own limit', () => {
+    const perms = permsOf({
+      ...TEEN,
+      'music.request_limit': { n: 2, days: 1 },
+      'movies.request_limit': { n: 5, days: 7 },
+      'tv.request_limit': { n: 0, days: 7 },
+    });
+    expect(requestLimit(perms, 'music')).toEqual({ n: 2, days: 1 });
+    expect(requestLimit(perms, 'movies')).toEqual({ n: 5, days: 7 });
+    expect(requestLimit(perms, 'tv')).toBeNull();
+    const can = describePermissions(perms);
+    expect(can.sentence).toBe(
+      'You ask first for music, movies and shows, 2 music asks a day and 5 movie asks a week.',
+    );
+    expect(can.rows.find((r) => r.id === 'tv')?.detail).toEqual(['up to TV-14']);
+    // a youtube video rides with TV, or movies without TV
+    expect(limitKindFor(perms, 'youtube')).toBe('tv');
+    expect(limitKindFor(permsOf({ ...TEEN, 'tv.access': false }), 'youtube')).toBe('movies');
+    expect(limitKindFor(perms, 'episode')).toBe('tv');
+    expect(asksLeftLine({ limit: 5, remaining: 3, days: 7, kind: 'movies' })).toBe(
+      '3 of 5 movie asks left this week',
+    );
+    expect(asksLeftLine({ limit: 2, remaining: 0, days: 1 }, 'tv')).toBe('No TV asks left today');
+    // an older map with the one shared requests.limit reads it for every kind
+    const old = permsOf({
+      ...ADULT,
+      'tv.request_limit': undefined,
+      'requests.limit': { n: 3, days: 7 },
+    });
+    expect(requestLimit(old, 'tv')).toEqual({ n: 3, days: 7 });
   });
 
   it('books off says so and offers who to ask', () => {

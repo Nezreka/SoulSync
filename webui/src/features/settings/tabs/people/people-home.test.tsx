@@ -95,7 +95,7 @@ describe('the people home', () => {
     expect(cells[3]).toHaveTextContent('PG-13');
     expect(cells[4]).toHaveTextContent('TV-14');
     expect(cells[5]).toHaveTextContent('Listens');
-    expect(cells[6]).toHaveTextContent('5 asks');
+    expect(cells[6]).toHaveTextContent('5 movie asks');
     expect(cells[6]).toHaveTextContent('a week');
 
     const liam = within(rowOf('Liam')).getAllByRole('cell');

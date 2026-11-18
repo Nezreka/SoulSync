@@ -50,7 +50,8 @@ describe('the table cells', () => {
     expect(cells.music).toEqual({ tone: 'dl', text: 'Downloads', sub: 'Clean' });
     expect(cells.movies).toEqual({ tone: 'ask', text: 'Asks first', sub: 'PG-13' });
     expect(cells.tv).toEqual({ tone: 'ask', text: 'Asks first', sub: 'TV-14' });
-    expect(cells.requests).toEqual({ tone: 'plain', text: '5 asks', sub: 'a week' });
+    // her own change: a movie limit (tv has none, music downloads, never capped)
+    expect(cells.requests).toEqual({ tone: 'plain', text: '5 movie asks', sub: 'a week' });
     const limited = personCells(
       { ...maya.effective, 'movies.quality': [0, 2], 'movies.access': true } as never,
       FIXTURE.quality as never,
@@ -61,15 +62,41 @@ describe('the table cells', () => {
 
   it('says how many asks someone used once the server counted them', () => {
     const maya = FIXTURE.perms['3'] as unknown as { effective: Record<string, never> };
-    const used = personCells(maya.effective, FIXTURE.quality as never, { used: 2, limit: 5 });
-    expect(used.requests).toEqual({ tone: 'plain', text: '2 of 5 used', sub: 'a week' });
+    // one limited kind: the count and whose asks
+    const one = maya.effective as never;
+    expect(personCells(one, FIXTURE.quality as never).requests).toEqual({
+      tone: 'plain',
+      text: '5 movie asks',
+      sub: 'a week',
+    });
+    const used = personCells(one, FIXTURE.quality as never, { movies: { used: 2, limit: 5 } });
+    expect(used.requests).toEqual({ tone: 'plain', text: '2 of 5 used', sub: 'movie asks a week' });
     // a count for an older limit (the limit changed since) shows just the limit
-    const stale = personCells(maya.effective, FIXTURE.quality as never, { used: 2, limit: 3 });
-    expect(stale.requests.text).toBe('5 asks');
+    const stale = personCells(one, FIXTURE.quality as never, { movies: { used: 2, limit: 3 } });
+    expect(stale.requests.text).toBe('5 movie asks');
+    // another kind's count never stands in for this one's
+    expect(
+      personCells(one, FIXTURE.quality as never, { tv: { used: 2, limit: 5 } }).requests.text,
+    ).toBe('5 movie asks');
     // never more used than the limit
     expect(
-      personCells(maya.effective, FIXTURE.quality as never, { used: 9, limit: 5 }).requests.text,
+      personCells(one, FIXTURE.quality as never, { movies: { used: 9, limit: 5 } }).requests.text,
     ).toBe('5 of 5 used');
+    // two kinds: each with its own count
+    const two = { ...maya.effective, 'tv.request_limit': { n: 5, days: 7 } } as never;
+    expect(
+      personCells(two, FIXTURE.quality as never, { movies: { used: 1, limit: 5 } }).requests,
+    ).toEqual({ tone: 'plain', text: 'Movies 1/5 · TV 5', sub: 'asks a week' });
+    // different windows say each
+    const mixed = { ...maya.effective, 'tv.request_limit': { n: 2, days: 1 } } as never;
+    expect(personCells(mixed, FIXTURE.quality as never).requests).toEqual({
+      tone: 'plain',
+      text: 'Movies 5 a week · TV 2 a day',
+      sub: undefined,
+    });
+    // a kind that downloads right away is never capped
+    const dl = { ...maya.effective, 'movies.get': 'download', 'tv.get': 'download' } as never;
+    expect(personCells(dl, FIXTURE.quality as never).requests.text).toBe('No limit');
   });
 
   it('counts people the way the chips filter them', () => {
@@ -99,8 +126,12 @@ describe('the policy over a template', () => {
     expect(aboveCeiling(row('tv.max_rating'), 'follow', 'PG')).toBe(false);
     expect(aboveCeiling(row('chat.use'), true, false)).toBe(true);
     expect(aboveCeiling(row('music.hide_explicit'), false, true)).toBe(true);
-    expect(aboveCeiling(row('requests.limit'), { n: 0, days: 7 }, { n: 10, days: 7 })).toBe(true);
-    expect(aboveCeiling(row('requests.limit'), { n: 5, days: 7 }, { n: 10, days: 7 })).toBe(false);
+    expect(aboveCeiling(row('movies.request_limit'), { n: 0, days: 7 }, { n: 10, days: 7 })).toBe(
+      true,
+    );
+    expect(aboveCeiling(row('movies.request_limit'), { n: 5, days: 7 }, { n: 10, days: 7 })).toBe(
+      false,
+    );
   });
 
   it('says what a row needs first', () => {
@@ -118,7 +149,7 @@ describe('the policy over a template', () => {
   it('says values in words, with Admins only for a ceiling', () => {
     expect(valueText(row('movies.get'), 'none', null, 'P')).toBe('Admins only');
     expect(valueText(row('movies.get'), 'none', null, 'T')).toBe("Can't request");
-    expect(valueText(row('requests.limit'), { n: 3, days: 1 }, null)).toBe('3 asks a day');
+    expect(valueText(row('movies.request_limit'), { n: 3, days: 1 }, null)).toBe('3 asks a day');
     expect(valueText(row('tv.max_rating'), 'PG-13', null)).toBe('TV-14');
     expect(valueText(row('movies.quality'), [3], FIXTURE.quality as never)).toBe(
       'Movie 4K Quality',

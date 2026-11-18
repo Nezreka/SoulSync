@@ -190,25 +190,25 @@ describe('requests helpers', () => {
 describe('quotaLine', () => {
   it('says what is left in the window', () => {
     expect(quotaLine({ limit: 3, days: 7, used: 1, remaining: 2 })).toBe(
-      '2 of 3 requests left this week',
+      '2 of 3 music requests left this week',
     );
     expect(quotaLine({ limit: 1, days: 1, used: 0, remaining: 1 })).toBe(
-      '1 of 1 request left today',
+      '1 of 1 music request left today',
     );
     expect(quotaLine({ limit: 5, days: 30, used: 2, remaining: 3 })).toBe(
-      '3 of 5 requests left this month',
+      '3 of 5 music requests left this month',
     );
     expect(quotaLine({ limit: 4, days: 14, used: 0, remaining: 4 })).toBe(
-      '4 of 4 requests left in the last 14 days',
+      '4 of 4 music requests left in the last 14 days',
     );
   });
 
   it('says when it is used up', () => {
     expect(quotaLine({ limit: 3, days: 7, used: 3, remaining: 0 })).toBe(
-      'You’ve used all 3 requests this week',
+      'You’ve used all 3 music requests this week',
     );
     expect(quotaLine({ limit: 1, days: 1, used: 1, remaining: 0 })).toBe(
-      'You’ve used your request today',
+      'You’ve used your music request today',
     );
   });
 

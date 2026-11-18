@@ -32,6 +32,31 @@ export interface RequestLimit {
   days: number;
 }
 
+/** music, movies and TV each have their own request limit */
+export type LimitKind = 'music' | 'movies' | 'tv';
+export const LIMIT_KINDS: readonly LimitKind[] = ['music', 'movies', 'tv'];
+
+/** "music asks", "movie asks", "TV asks" */
+const LIMIT_NOUN: Record<LimitKind, string> = { music: 'music', movies: 'movie', tv: 'TV' };
+
+export function askNoun(n: number, kind?: LimitKind | null): string {
+  const base = n === 1 ? 'ask' : 'asks';
+  return kind ? `${LIMIT_NOUN[kind]} ${base}` : base;
+}
+
+/** "5 asks a week", "1 ask a day", "3 asks every 10 days" */
+export function limitRate(limit: RequestLimit, kind?: LimitKind | null): string {
+  const span =
+    limit.days === 1
+      ? 'a day'
+      : limit.days === 7
+        ? 'a week'
+        : limit.days === 30
+          ? 'a month'
+          : `every ${limit.days} days`;
+  return `${limit.n} ${askNoun(limit.n, kind)} ${span}`;
+}
+
 export interface MyPermissions {
   profileId: number | null;
   isAdmin: boolean;
@@ -169,13 +194,34 @@ export function hasAccess(perms: MyPermissions | null | undefined, media: PermMe
   return perms.effective[ACCESS_ROW[media]] !== false;
 }
 
-/** the ask limit, or null when there is none (or it's an admin) */
-export function requestLimit(perms: MyPermissions | null | undefined): RequestLimit | null {
+/** one kind's ask limit, or null when there is none (or it's an admin).
+ * an older map with the one shared requests.limit row reads that */
+export function requestLimit(
+  perms: MyPermissions | null | undefined,
+  kind: LimitKind = 'music',
+): RequestLimit | null {
   if (!perms || perms.isAdmin) return null;
-  const raw = perms.effective['requests.limit'] as Partial<RequestLimit> | undefined;
+  const eff = perms.effective;
+  const raw = (eff[`${kind}.request_limit`] ?? eff['requests.limit']) as
+    | Partial<RequestLimit>
+    | undefined;
   const n = Number(raw?.n) || 0;
   if (n <= 0) return null;
   return { n, days: Number(raw?.days) || 7 };
+}
+
+/** the kind an ask counts toward: a youtube video rides with TV, or with
+ * movies for a profile that has no TV (the server's ask_limit_kind) */
+export function limitKindFor(
+  perms: MyPermissions | null | undefined,
+  kind: string | null | undefined,
+): LimitKind {
+  const k = String(kind || '').toLowerCase();
+  if (k === 'movie' || k === 'movies') return 'movies';
+  if (k === 'youtube')
+    return hasAccess(perms, 'tv') || !hasAccess(perms, 'movies') ? 'tv' : 'movies';
+  if (['show', 'tv', 'season', 'episode', 'series'].includes(k)) return 'tv';
+  return 'music';
 }
 
 /** a moderator answers other people's requests (never their own) */
@@ -195,14 +241,21 @@ export function limitSpan(days: number): string {
   return `in the last ${days} days`;
 }
 
-/** "3 of 5 asks left this week", "No asks left this week", or '' */
+/** "3 of 5 movie asks left this week", "No music asks left this week", or ''.
+ * the kind comes from the argument or the server's quota.kind */
 export function asksLeftLine(
-  quota: { limit: number; remaining: number; days: number } | null | undefined,
+  quota:
+    | { limit: number; remaining: number; days: number; kind?: string | null }
+    | null
+    | undefined,
+  kind?: LimitKind | null,
 ): string {
   if (!quota || !(quota.limit > 0)) return '';
+  const k =
+    kind ?? (LIMIT_KINDS.includes(quota.kind as LimitKind) ? (quota.kind as LimitKind) : null);
   const span = limitSpan(quota.days);
-  if (quota.remaining <= 0) return `No asks left ${span}`;
-  return `${quota.remaining} of ${quota.limit} ${quota.limit === 1 ? 'ask' : 'asks'} left ${span}`;
+  if (quota.remaining <= 0) return `No ${askNoun(2, k)} left ${span}`;
+  return `${quota.remaining} of ${quota.limit} ${askNoun(quota.limit, k)} left ${span}`;
 }
 
 /** the server said no anyway (a race with an admin's change): its own words,
@@ -341,7 +394,7 @@ function ratingWords(perms: MyPermissions, media: 'movies' | 'tv'): string {
  */
 export function describePermissions(
   perms: MyPermissions,
-  opts: { used?: number | null } = {},
+  opts: { used?: Partial<Record<LimitKind, number | null>> | null } = {},
 ): CanDo {
   if (perms.isAdmin) {
     return {
@@ -365,11 +418,23 @@ export function describePermissions(
   });
   const modeLead = (mode: PermMode, none: string) =>
     mode === 'download' ? 'Downloads right away' : mode === 'ask' ? 'Asks first' : none;
+  // each kind's own limit, on its own row: "5 asks a week, 2 used"
+  const limits: { kind: LimitKind; limit: RequestLimit }[] = [];
+  const limitDetail = (kind: LimitKind, mode: PermMode): string[] => {
+    const limit = mode === 'ask' ? requestLimit(perms, kind) : null;
+    if (!limit) return [];
+    limits.push({ kind, limit });
+    const used = opts.used?.[kind];
+    return [limitRate(limit) + (used != null ? `, ${Math.max(0, used)} used` : '')];
+  };
 
   // music
   if (hasAccess(perms, 'music')) {
     const mode = modeFor(perms, 'music');
-    const detail = [eff['music.hide_explicit'] === true ? 'clean versions only' : 'explicit shown'];
+    const detail = [
+      eff['music.hide_explicit'] === true ? 'clean versions only' : 'explicit shown',
+      ...limitDetail('music', mode),
+    ];
     rows.push({
       id: 'music',
       label: 'Music',
@@ -397,7 +462,7 @@ export function describePermissions(
       id: media,
       label,
       lead: modeLead(mode, 'Watch only'),
-      detail: rating ? [rating] : [],
+      detail: [...(rating ? [rating] : []), ...limitDetail(media, mode)],
       strong: mode === 'download',
       off: false,
     });
@@ -435,15 +500,18 @@ export function describePermissions(
     });
   }
 
-  // requests
-  const limit = requestLimit(perms);
-  const limitWords = limit
-    ? `${limit.n} ${limit.n === 1 ? 'ask' : 'asks'} ${limit.days === 1 ? 'a day' : limit.days === 7 ? 'a week' : `every ${limit.days} days`}`
-    : '';
+  // requests: each kind's limit is on its own row above; this one names them
+  // one limit for every kind that asks reads once: "5 asks a week each"
+  const same =
+    limits.length > 1 &&
+    limits.length === asks.length &&
+    limits.every((l) => l.limit.n === limits[0].limit.n && l.limit.days === limits[0].limit.days);
+  const limitWords = same
+    ? `${limitRate(limits[0].limit)} each`
+    : joinWords(limits.map((l) => limitRate(l.limit, l.kind)));
   const moderator = isModerator(perms);
   const seeAll = seesAllRequests(perms);
   const reqDetail: string[] = [];
-  if (asks.length && limit && opts.used != null) reqDetail.push(`${Math.max(0, opts.used)} used`);
   if (moderator) reqDetail.push('you answer everyone’s asks but your own');
   else if (seeAll) reqDetail.push('you see everyone’s');
   else if (asks.length) reqDetail.push('you see only your own');

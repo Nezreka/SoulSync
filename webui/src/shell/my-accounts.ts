@@ -25,6 +25,8 @@ import {
   type CanDoRow,
   describePermissions,
   loadAdminName,
+  LIMIT_KINDS,
+  type LimitKind,
   requestLimit,
 } from '@/platform/shell/my-permissions-core';
 import { appURL } from '@/platform/url-base';
@@ -196,8 +198,8 @@ const _ma: {
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
   scrobbling: MaScrobbling | null;
   weather: MaWeather | null;
-  /** asks used in the current window, for "5 a week · 2 used" */
-  asksUsed: number | null;
+  /** asks used in each limited kind's window, for "5 asks a week, 2 used" */
+  asksUsed: Partial<Record<LimitKind, number>> | null;
   adminName: string;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
@@ -370,10 +372,17 @@ async function _maLoadCanDo(): Promise<void> {
   ]);
   _ma.adminName = admin;
   _ma.asksUsed = null;
-  if (requestLimit(perms)) {
-    const q = await _maJson<{ quota?: { used?: number } | null }>('/api/requests/music/quota');
-    const used = q?.quota?.used;
-    _ma.asksUsed = typeof used === 'number' ? used : null;
+  if (LIMIT_KINDS.some((k) => requestLimit(perms, k))) {
+    // music, movies and TV each count on their own (/api/profiles/me/asks)
+    const q = await _maJson<{ asks?: Partial<Record<LimitKind, { used?: number }>> }>(
+      '/api/profiles/me/asks',
+    );
+    const used: Partial<Record<LimitKind, number>> = {};
+    for (const k of LIMIT_KINDS) {
+      const n = q?.asks?.[k]?.used;
+      if (typeof n === 'number') used[k] = n;
+    }
+    _ma.asksUsed = used;
   }
 }
 

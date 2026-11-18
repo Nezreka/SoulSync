@@ -101,15 +101,19 @@ export const getAudit = (limit: number, offset: number, signal?: AbortSignal) =>
 export const getFeatureCatalogue = (signal?: AbortSignal) =>
   call<FeatureCatalogue>('/api/profiles/feature-defaults', { signal });
 
-/** asks spent per member with a request limit, music and video together */
+/** asks spent per member, per limited kind (music, movies, tv each count on their own) */
 export interface AsksUsed {
+  kind?: 'music' | 'movies' | 'tv';
   limit: number;
   days: number;
   used: number;
   remaining: number;
 }
 export const getAsksUsed = (signal?: AbortSignal) =>
-  call<{ used: Record<string, AsksUsed> }>('/api/permissions/asks-used', { signal });
+  call<{ used: Record<string, Partial<Record<'music' | 'movies' | 'tv', AsksUsed>>> }>(
+    '/api/permissions/asks-used',
+    { signal },
+  );
 
 /** requests waiting for an admin: music (and music videos) plus movies & tv.
  *  null when neither answered, so the hero leaves the clause out */

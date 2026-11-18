@@ -46,7 +46,7 @@ function mockAccount({
   >,
   weather = WEATHER_OFF as Record<string, unknown>,
   perms = MEMBER_PERMS as Record<string, unknown>,
-  quota = null as Record<string, unknown> | null,
+  asks = {} as Record<string, unknown>,
 } = {}) {
   server.use(
     http.get('/api/profiles/me/permissions', () =>
@@ -62,7 +62,7 @@ function mockAccount({
     http.get('/api/profiles', () =>
       HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Boulder', is_admin: true }] }),
     ),
-    http.get('/api/requests/music/quota', () => HttpResponse.json({ success: true, quota })),
+    http.get('/api/profiles/me/asks', () => HttpResponse.json({ success: true, asks })),
     http.get('/api/weather', () => HttpResponse.json(weather)),
     http.get('/api/profiles/me/navidrome-libraries', () =>
       HttpResponse.json({ success: true, ...navidromeLibraries }),
@@ -871,18 +871,26 @@ describe('What you can do', () => {
         'movies.get': 'ask',
         'movies.max_rating': 'PG-13',
         'tv.get': 'ask',
-        'requests.limit': { n: 5, days: 7 },
+        'music.request_limit': { n: 5, days: 7 },
+        'movies.request_limit': { n: 3, days: 7 },
+        'tv.request_limit': { n: 0, days: 7 },
       },
-      quota: { limit: 5, days: 7, used: 2, remaining: 3 },
+      asks: {
+        music: { kind: 'music', limit: 5, days: 7, used: 2, remaining: 3 },
+        movies: { kind: 'movies', limit: 3, days: 7, used: 1, remaining: 2 },
+      },
     });
     await opened();
-    await vi.waitFor(() => expect(row('requests')).toContain('2 used'));
+    // each kind counts on its own, on its own row
+    await vi.waitFor(() => expect(row('music')).toContain('5 asks a week, 2 used'));
+    expect(row('movies')).toContain('3 asks a week, 1 used');
     expect(card().textContent).toContain(
-      'You ask first for music, movies and shows, 5 asks a week.',
+      'You ask first for music, movies and shows, 5 music asks a week and 3 movie asks a week.',
     );
-    expect(row('requests')).toContain('5 asks a week');
+    expect(row('requests')).toContain('5 music asks a week and 3 movie asks a week');
     expect(row('movies')).toContain('up to PG-13');
     expect(row('tv')).toContain('up to TV-14');
+    expect(row('tv')).not.toContain('asks a week');
   });
 
   it('books off: says so and who to ask', async () => {

@@ -9,6 +9,7 @@ import {
   hasAccess,
   isOn,
   modeFor,
+  type LimitKind,
   requestLimit,
 } from '@/platform/shell/my-permissions-core';
 
@@ -29,7 +30,9 @@ export const ADULT: Record<string, unknown> = {
   'books.get': 'download',
   'podcasts.access': true,
   'podcasts.get': 'download',
-  'requests.limit': { n: 0, days: 7 },
+  'music.request_limit': { n: 0, days: 7 },
+  'movies.request_limit': { n: 0, days: 7 },
+  'tv.request_limit': { n: 0, days: 7 },
   'requests.see_all': false,
   'requests.moderate': false,
   'account.connect': true,
@@ -49,7 +52,9 @@ export const TEEN: Record<string, unknown> = {
   'tv.get': 'ask',
   'books.get': 'none',
   'podcasts.get': 'none',
-  'requests.limit': { n: 5, days: 7 },
+  'music.request_limit': { n: 5, days: 7 },
+  'movies.request_limit': { n: 5, days: 7 },
+  'tv.request_limit': { n: 5, days: 7 },
 };
 
 /** can't request music at all */
@@ -95,7 +100,7 @@ export function stubPerms(
     mode: (media) => modeFor(perms, media),
     on: (id) => isOn(perms, id),
     access: (media) => hasAccess(perms, media),
-    limit: () => requestLimit(perms),
+    limit: (kind?: LimitKind) => requestLimit(perms, kind),
     live: () => true,
   };
   window.dispatchEvent(new CustomEvent(PERMS_CHANGED_EVENT, { detail: perms }));

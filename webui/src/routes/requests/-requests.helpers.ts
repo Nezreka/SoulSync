@@ -253,15 +253,16 @@ function quotaSpan(days: number): string {
   return `in the last ${days} days`;
 }
 
-/** "2 of 3 requests left this week", or that they're used up. '' with no limit. */
+/** "2 of 3 music requests left this week", or that they're used up. '' with
+ *  no limit. this page's limit is music's (movies and TV have their own). */
 export function quotaLine(quota: RequestQuota | null | undefined): string {
   if (!quota || quota.limit <= 0) return '';
-  const noun = quota.limit === 1 ? 'request' : 'requests';
+  const noun = quota.limit === 1 ? 'music request' : 'music requests';
   const span = quotaSpan(quota.days);
   if (quota.remaining <= 0) {
     return quota.limit === 1
-      ? `You’ve used your request ${span}`
-      : `You’ve used all ${quota.limit} requests ${span}`;
+      ? `You’ve used your music request ${span}`
+      : `You’ve used all ${quota.limit} music requests ${span}`;
   }
   return `${quota.remaining} of ${quota.limit} ${noun} left ${span}`;
 }

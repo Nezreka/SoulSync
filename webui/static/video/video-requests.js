@@ -24,7 +24,7 @@
     'use strict';
 
     var PAGE_ID = 'video-requests';
-    var state = { loaded: false, rows: [], tab: 'pending', quota: null, moderator: false, seeAll: false };
+    var state = { loaded: false, rows: [], tab: 'pending', quota: null, quotas: null, moderator: false, seeAll: false };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -161,13 +161,19 @@
                 '<span class="vreq-ask-soft">You’ll see it in Requests the moment it’s approved.</span></div>'
             : ICONS.down + '<div>Starts downloading right away.</div>';
     }
+    // movies and TV each have their own request limit; the server says
+    // which one a quota is (kind: movies | tv)
+    function kindWord(q) {
+        return q && q.kind === 'movies' ? 'movie ' : q && q.kind === 'tv' ? 'TV ' : '';
+    }
     function quotaHtml(quota, asks) {
         if (!asks) return '<span>No limit on what you get right away</span>';
         if (!quota || !(Number(quota.limit) > 0)) return '';
         var left = Math.max(0, Number(quota.remaining) || 0), lim = Number(quota.limit);
         var span = Number(quota.days) === 1 ? 'today' : Number(quota.days) === 7 ? 'this week'
             : 'in ' + quota.days + ' days';
-        return '<span>' + left + ' of ' + lim + ' ask' + (lim === 1 ? '' : 's') + ' left ' + span + '</span>' +
+        return '<span>' + left + ' of ' + lim + ' ' + kindWord(quota) + 'ask' + (lim === 1 ? '' : 's') +
+            ' left ' + span + '</span>' +
             '<span class="vreq-ask-meter" aria-hidden="true"><i style="width:' +
             Math.round(100 * left / Math.max(1, lim)) + '%"></i></span>';
     }
@@ -581,9 +587,26 @@
         if (!q || !(Number(q.limit) > 0)) return '';
         var limit = Number(q.limit), left = Math.max(0, Number(q.remaining) || 0), days = Number(q.days) || 7;
         var span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : 'in the last ' + days + ' days';
-        var noun = limit === 1 ? 'request' : 'requests';
-        if (left <= 0) return limit === 1 ? 'You’ve used your request ' + span : 'You’ve used all ' + limit + ' requests ' + span;
+        var word = kindWord(q);
+        var noun = word + (limit === 1 ? 'request' : 'requests');
+        if (left <= 0) return limit === 1 ? 'You’ve used your ' + noun + ' ' + span : 'You’ve used all ' + limit + ' ' + noun + ' ' + span;
         return left + ' of ' + limit + ' ' + noun + ' left ' + span;
+    }
+    // every limited kind's line, for the page header ("2 of 5 movie
+    // requests left this week · 1 of 3 TV requests left this week")
+    function quotasLine(qs, fallback) {
+        var lines = ['movies', 'tv'].map(function (k) { return qs && qs[k] ? quotaLine(qs[k]) : ''; })
+            .filter(Boolean);
+        return lines.length ? lines.join(' · ') : quotaLine(fallback);
+    }
+    // the quota an ask of this kind spends (a youtube video rides with TV,
+    // or movies for a profile without TV, like the server's ask_limit_kind)
+    function quotaFor(qs, kind, fallback) {
+        if (!qs) return fallback || null;
+        var perms = window.SoulSyncPerms;
+        var tv = !perms || perms.access('tv') || !perms.access('movies');
+        var k = kind === 'movie' ? 'movies' : kind === 'youtube' ? (tv ? 'tv' : 'movies') : 'tv';
+        return qs[k] || null;
     }
 
     // the header: the quiet quota line for members, approve all for admins
@@ -598,7 +621,7 @@
             head.appendChild(text);
         }
         var quota = text.querySelector('.vreq-quota');
-        var line = isAdmin() ? '' : quotaLine(state.quota);
+        var line = isAdmin() ? '' : quotasLine(state.quotas, state.quota);
         if (line && !quota) {
             quota = document.createElement('p');
             quota.className = 'vreq-quota';
@@ -670,6 +693,7 @@
                 if (!d || !d.success) return;
                 state.rows = d.requests || [];
                 state.quota = d.quota || null;
+                state.quotas = d.quotas || null;
                 state.moderator = !!d.moderator;
                 state.seeAll = !!d.see_all;
                 setBadge(d.pending || 0);
@@ -933,7 +957,8 @@
     }
     function remember(d) {
         var rows = (d && d.requests) || [];
-        mineCache.data = { rows: rows, quota: (d && d.quota) || null, states: cardStates(rows) };
+        mineCache.data = { rows: rows, quota: (d && d.quota) || null, quotas: (d && d.quotas) || null,
+            states: cardStates(rows) };
         mineCache.at = Date.now();
         mineCache.pid = profileId();
         return mineCache.data;
@@ -1039,15 +1064,16 @@
                     ' part of your profile. Ask an admin if you’d like them', 'info');
                 return null;
             }
-            if (m && quotaSpent(m.quota) && !(opts && opts.mode === 'download')) {
-                toast(quotaLine(m.quota) || 'You’ve used your requests for now', 'warning');
+            var spend = m ? quotaFor(m.quotas, item.kind, m.quota) : null;
+            if (quotaSpent(spend) && !(opts && opts.mode === 'download')) {
+                toast(quotaLine(spend) || 'You’ve used your requests for now', 'warning');
                 return null;
             }
             // youtube has no quality profiles and no seasons: no sheet
             var pick = youtube
                 ? Promise.resolve({ monitor: null, quality_profile_id: null, get: false })
                 : askSheet({ kind: item.kind, title: item.title || '', year: item.year, poster: item.poster_url,
-                    opts: opts || { mode: 'ask', qualities: [], quota: m && m.quota } });
+                    opts: opts || { mode: 'ask', qualities: [], quota: spend } });
             return pick.then(function (choice) {
                 if (!choice) return null;
                 var body = { kind: item.kind, title: item.title, year: item.year,
@@ -1075,7 +1101,10 @@
                         var j = out.j;
                         if (out.status === 429) {
                             // request limit used up: the server's own words, calmly
-                            if (mineCache.data && j.quota) mineCache.data.quota = j.quota;
+                            if (mineCache.data && j.quota) {
+                                if (j.quota.kind && mineCache.data.quotas) mineCache.data.quotas[j.quota.kind] = j.quota;
+                                else mineCache.data.quota = j.quota;
+                            }
                             toast(j.error || 'You’ve used your requests for now', 'warning');
                             return null;
                         }

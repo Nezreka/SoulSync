@@ -6,7 +6,7 @@
 
 import type { Count, IdList, PermMap, QualityOption } from './types';
 
-import { ALL, type Model, countWords, daysWord, ratingWord, softLabel, str } from './model';
+import { ALL, type Model, daysWord, ratingWord, softLabel, str } from './model';
 
 export type SummaryIcon = 'music' | 'movies' | 'tv' | 'books' | 'requests';
 
@@ -64,12 +64,20 @@ export function buildSummary(model: Model, eff: PermMap, isAdmin: boolean): Edit
   const musicOn = !!eff['music.access'];
   const moviesOn = !!eff['movies.access'];
   const tvOn = !!eff['tv.access'];
-  const limit = eff['requests.limit'] as Count | undefined;
-  const asks = [
-    musicOn && eff['music.get'],
-    moviesOn && eff['movies.get'],
-    tvOn && eff['tv.get'],
-  ].includes('ask');
+  // music, movies and TV each have their own request limit; a kind's limit
+  // is shown while that kind asks first (downloads are never capped)
+  const limitOf = (kind: 'music' | 'movies' | 'tv'): Count | null => {
+    const on = { music: musicOn, movies: moviesOn, tv: tvOn }[kind];
+    if (!on || eff[`${kind}.get`] !== 'ask') return null;
+    const c = (eff[`${kind}.request_limit`] ?? eff['requests.limit']) as Count | undefined;
+    return c?.n ? c : null;
+  };
+  const NOUN = { music: 'music', movies: 'movie', tv: 'TV' } as const;
+  const limitText = (kind: 'music' | 'movies' | 'tv', c: Count) =>
+    `${c.n} ${NOUN[kind]} ${c.n === 1 ? 'ask' : 'asks'} ${[1, 7, 30, 365].includes(c.days) ? `a ${daysWord(c.days)}` : `every ${c.days} days`}`;
+  const limited = (['music', 'movies', 'tv'] as const)
+    .map((k) => ({ kind: k, c: limitOf(k) }))
+    .filter((x): x is { kind: 'music' | 'movies' | 'tv'; c: Count } => !!x.c);
 
   // the sentence: one clause per side
   if (musicOn) {
@@ -114,15 +122,15 @@ export function buildSummary(model: Model, eff: PermMap, isAdmin: boolean): Edit
         { text: tail },
       );
     }
-    if (asks && limit?.n) {
-      sentence.push(
-        { text: ', ' },
-        { text: `${limit.n} asks a ${daysWord(limit.days)}`, strong: true },
-        { text: '.' },
-      );
-    } else sentence.push({ text: '.' });
-  } else if (asks && limit?.n) {
-    sentence.push({ text: `Up to ${limit.n} asks a ${daysWord(limit.days)}.` });
+    sentence.push({ text: '. ' });
+  }
+  if (limited.length) {
+    sentence.push({ text: 'Up to ' });
+    limited.forEach(({ kind, c }, i) => {
+      if (i) sentence.push({ text: i === limited.length - 1 ? ' and ' : ', ' });
+      sentence.push({ text: limitText(kind, c), strong: true });
+    });
+    sentence.push({ text: '.' });
   }
   if (!musicOn && !what) sentence.push({ text: 'Nothing to use yet: every side is off.' });
 
@@ -137,6 +145,8 @@ export function buildSummary(model: Model, eff: PermMap, isAdmin: boolean): Edit
     ];
     const q = qualityWords(model.quality.music, eff['music.quality']);
     if (q && q !== 'any quality') bits.push({ text: q });
+    const ml = limitOf('music');
+    if (ml) bits.push({ text: limitText('music', ml) });
     lines.push({ icon: 'music', title: 'Music', bits });
   } else lines.push({ icon: 'music', title: 'Music', bits: [{ text: 'Off' }] });
 
@@ -158,6 +168,8 @@ export function buildSummary(model: Model, eff: PermMap, isAdmin: boolean): Edit
       eff[`${key}.quality`],
     );
     if (q && mode !== 'none') bits.push({ text: q });
+    const vl = limitOf(key);
+    if (vl) bits.push({ text: limitText(key, vl) });
     lines.push({ icon, title, bits });
   }
 
@@ -184,7 +196,11 @@ export function buildSummary(model: Model, eff: PermMap, isAdmin: boolean): Edit
   });
 
   const req: Bit[] = [
-    { text: limit?.n ? `${countWords(limit).replace(' per ', ' a ')}` : 'No limit' },
+    {
+      text: limited.length
+        ? limited.map(({ kind, c }) => limitText(kind, c)).join(', ')
+        : 'No limit',
+    },
   ];
   req.push({ text: eff['requests.see_all'] ? "sees everyone's" : 'sees only their own' });
   if (eff['requests.moderate']) req.push({ text: 'moderator', good: true });

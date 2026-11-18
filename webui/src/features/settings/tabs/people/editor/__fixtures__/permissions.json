@@ -17,6 +17,10 @@
    "movies.quality": "*",
    "movies.quality_ask": [],
    "movies.quality_default": null,
+   "movies.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "music.access": true,
    "music.dashboard": true,
    "music.discover": true,
@@ -29,6 +33,10 @@
    "music.playlist_sync": true,
    "music.quality": "*",
    "music.quality_default": null,
+   "music.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "music.sample_studio": true,
    "music.search": true,
    "music.stats": true,
@@ -37,10 +45,6 @@
    "music.wishlist": true,
    "podcasts.access": true,
    "podcasts.get": "download",
-   "requests.limit": {
-    "days": 7,
-    "n": 0
-   },
    "requests.moderate": true,
    "requests.see_all": true,
    "tv.access": true,
@@ -49,6 +53,10 @@
    "tv.quality": "*",
    "tv.quality_ask": [],
    "tv.quality_default": null,
+   "tv.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "video.calendar": true,
    "video.dashboard": true,
    "video.discover": true,
@@ -144,6 +152,23 @@
     "source": "admin",
     "template_value": null,
     "value": "any"
+   },
+   {
+    "capped": false,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "movies.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "admin",
+    "template_value": null,
+    "value": {
+     "days": 7,
+     "n": 0
+    }
    },
    {
     "capped": false,
@@ -318,6 +343,23 @@
    },
    {
     "capped": false,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "tv.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "admin",
+    "template_value": null,
+    "value": {
+     "days": 7,
+     "n": 0
+    }
+   },
+   {
+    "capped": false,
     "ceiling": "*",
     "id": "tv.quality",
     "inert": false,
@@ -381,6 +423,23 @@
     "source": "admin",
     "template_value": null,
     "value": false
+   },
+   {
+    "capped": false,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "music.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "admin",
+    "template_value": null,
+    "value": {
+     "days": 7,
+     "n": 0
+    }
    },
    {
     "capped": false,
@@ -593,23 +652,6 @@
    },
    {
     "capped": false,
-    "ceiling": {
-     "days": 7,
-     "n": 20
-    },
-    "id": "requests.limit",
-    "inert": false,
-    "override": false,
-    "override_value": null,
-    "source": "admin",
-    "template_value": null,
-    "value": {
-     "days": 7,
-     "n": 0
-    }
-   },
-   {
-    "capped": false,
     "ceiling": false,
     "id": "requests.see_all",
     "inert": false,
@@ -739,6 +781,10 @@
    "movies.quality": "*",
    "movies.quality_ask": [],
    "movies.quality_default": null,
+   "movies.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "music.access": true,
    "music.dashboard": true,
    "music.discover": true,
@@ -751,6 +797,10 @@
    "music.playlist_sync": true,
    "music.quality": "*",
    "music.quality_default": null,
+   "music.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "music.sample_studio": true,
    "music.search": true,
    "music.stats": true,
@@ -759,10 +809,6 @@
    "music.wishlist": true,
    "podcasts.access": true,
    "podcasts.get": "download",
-   "requests.limit": {
-    "days": 7,
-    "n": 0
-   },
    "requests.moderate": true,
    "requests.see_all": true,
    "tv.access": true,
@@ -771,6 +817,10 @@
    "tv.quality": "*",
    "tv.quality_ask": [],
    "tv.quality_default": null,
+   "tv.request_limit": {
+    "days": 7,
+    "n": 0
+   },
    "video.calendar": true,
    "video.dashboard": true,
    "video.discover": true,
@@ -968,6 +1018,31 @@
     "stored": true,
     "value_labels": {},
     "values": []
+   },
+   {
+    "id": "movies.request_limit",
+    "kind": "count",
+    "category": "movies",
+    "label": "Request limit",
+    "help": "Movie asks. Movies they get right away are never capped.",
+    "default": {
+     "n": 0,
+     "days": 7
+    },
+    "values": [],
+    "pages": [],
+    "scope": "PTO",
+    "group": "",
+    "also_in": [],
+    "needs": [
+     "movies.access"
+    ],
+    "set_row": null,
+    "media": null,
+    "presentation": false,
+    "stored": true,
+    "legacy": "request_limit",
+    "value_labels": {}
    },
    {
     "also_in": [],
@@ -1355,6 +1430,31 @@
     "values": []
    },
    {
+    "id": "tv.request_limit",
+    "kind": "count",
+    "category": "tv",
+    "label": "Request limit",
+    "help": "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
+    "default": {
+     "n": 0,
+     "days": 7
+    },
+    "values": [],
+    "pages": [],
+    "scope": "PTO",
+    "group": "",
+    "also_in": [],
+    "needs": [
+     "tv.access"
+    ],
+    "set_row": null,
+    "media": null,
+    "presentation": false,
+    "stored": true,
+    "legacy": "request_limit",
+    "value_labels": {}
+   },
+   {
     "also_in": [],
     "category": "tv",
     "default": "*",
@@ -1491,6 +1591,31 @@
     "stored": true,
     "value_labels": {},
     "values": []
+   },
+   {
+    "id": "music.request_limit",
+    "kind": "count",
+    "category": "music",
+    "label": "Request limit",
+    "help": "Album, track and music video asks. Music they get right away is never capped.",
+    "default": {
+     "n": 0,
+     "days": 7
+    },
+    "values": [],
+    "pages": [],
+    "scope": "PTO",
+    "group": "",
+    "also_in": [],
+    "needs": [
+     "music.access"
+    ],
+    "set_row": null,
+    "media": null,
+    "presentation": false,
+    "stored": true,
+    "legacy": "request_limit",
+    "value_labels": {}
    },
    {
     "also_in": [],
@@ -1951,29 +2076,6 @@
    {
     "also_in": [],
     "category": "requests",
-    "default": {
-     "days": 7,
-     "n": 0
-    },
-    "group": "",
-    "help": "Asks only. Downloads they get right away are never capped.",
-    "id": "requests.limit",
-    "kind": "count",
-    "label": "Request limit",
-    "legacy": "request_limit",
-    "media": null,
-    "needs": [],
-    "pages": [],
-    "presentation": false,
-    "scope": "PTO",
-    "set_row": null,
-    "stored": true,
-    "value_labels": {},
-    "values": []
-   },
-   {
-    "also_in": [],
-    "category": "requests",
     "default": false,
     "group": "",
     "help": "Members see only their own unless this is on.",
@@ -2187,7 +2289,9 @@
    "movies.quality_ask",
    "music.import",
    "music.sample_studio",
-   "requests.limit"
+   "music.request_limit",
+   "movies.request_limit",
+   "tv.request_limit"
   ],
   "changed_categories": [],
   "effective": {
@@ -2211,6 +2315,10 @@
     "4k"
    ],
    "movies.quality_default": null,
+   "movies.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "music.access": true,
    "music.dashboard": true,
    "music.discover": true,
@@ -2223,6 +2331,10 @@
    "music.playlist_sync": true,
    "music.quality": "*",
    "music.quality_default": null,
+   "music.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "music.sample_studio": false,
    "music.search": true,
    "music.stats": true,
@@ -2231,10 +2343,6 @@
    "music.wishlist": true,
    "podcasts.access": true,
    "podcasts.get": "none",
-   "requests.limit": {
-    "days": 7,
-    "n": 20
-   },
    "requests.moderate": false,
    "requests.see_all": false,
    "tv.access": true,
@@ -2243,6 +2351,10 @@
    "tv.quality": "*",
    "tv.quality_ask": [],
    "tv.quality_default": null,
+   "tv.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "video.calendar": true,
    "video.dashboard": true,
    "video.discover": true,
@@ -2340,6 +2452,26 @@
     "source": "legacy",
     "template_value": "G",
     "value": "G"
+   },
+   {
+    "capped": true,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "movies.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "legacy",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 20
+    }
    },
    {
     "capped": true,
@@ -2519,6 +2651,26 @@
     "value": "G"
    },
    {
+    "capped": true,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "tv.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "legacy",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 20
+    }
+   },
+   {
     "capped": false,
     "ceiling": "*",
     "id": "tv.quality",
@@ -2583,6 +2735,26 @@
     "source": "legacy",
     "template_value": false,
     "value": false
+   },
+   {
+    "capped": true,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "music.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "legacy",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 20
+    }
    },
    {
     "capped": false,
@@ -2794,26 +2966,6 @@
     "value": "none"
    },
    {
-    "capped": true,
-    "ceiling": {
-     "days": 7,
-     "n": 20
-    },
-    "id": "requests.limit",
-    "inert": false,
-    "override": false,
-    "override_value": null,
-    "source": "legacy",
-    "template_value": {
-     "days": 7,
-     "n": 0
-    },
-    "value": {
-     "days": 7,
-     "n": 20
-    }
-   },
-   {
     "capped": false,
     "ceiling": false,
     "id": "requests.see_all",
@@ -2860,43 +3012,44 @@
   ],
   "success": true,
   "summary": {
+   "sentence": "Odd uses music, movies and TV shows.",
    "lines": [
     {
      "category": "movies",
-     "text": "Movies: asks first, up to G."
+     "text": "Movies: asks first, up to G, 20 movie asks a week."
     },
     {
      "category": "tv",
-     "text": "TV shows: asks first, up to TV-Y7."
+     "text": "TV shows: asks first, up to TV-Y7, 20 TV asks a week."
     },
     {
      "category": "music",
-     "text": "Music: asks first."
+     "text": "Music: asks first, 20 music asks a week."
     },
     {
      "category": "books",
      "text": "Audiobooks: can't request."
     },
     {
-     "category": "requests",
-     "text": "Up to 20 asks a week."
+     "category": "books",
+     "text": "Podcasts: they follow shows, episodes don't download."
     }
    ],
-   "never": [],
-   "sentence": "Odd uses music, movies and TV shows."
+   "never": []
   },
   "template": null
  },
  "maya": {
   "capped": [
    "movies.quality_ask",
+   "tv.request_limit",
+   "music.request_limit",
    "music.import",
    "music.sample_studio"
   ],
   "changed_categories": [
    "movies",
-   "music",
-   "requests"
+   "music"
   ],
   "effective": {
    "account.connect": true,
@@ -2917,6 +3070,10 @@
     "4k"
    ],
    "movies.quality_default": 2,
+   "movies.request_limit": {
+    "days": 7,
+    "n": 5
+   },
    "music.access": true,
    "music.dashboard": true,
    "music.discover": true,
@@ -2929,6 +3086,10 @@
    "music.playlist_sync": true,
    "music.quality": "*",
    "music.quality_default": null,
+   "music.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "music.sample_studio": false,
    "music.search": true,
    "music.stats": true,
@@ -2937,10 +3098,6 @@
    "music.wishlist": true,
    "podcasts.access": true,
    "podcasts.get": "none",
-   "requests.limit": {
-    "days": 7,
-    "n": 5
-   },
    "requests.moderate": false,
    "requests.see_all": false,
    "tv.access": true,
@@ -2949,6 +3106,10 @@
    "tv.quality": "*",
    "tv.quality_ask": [],
    "tv.quality_default": null,
+   "tv.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "video.calendar": true,
    "video.dashboard": true,
    "video.discover": true,
@@ -2966,11 +3127,11 @@
     2
    ],
    "movies.quality_default": 2,
-   "music.get": "download",
-   "requests.limit": {
+   "movies.request_limit": {
     "days": 7,
     "n": 5
-   }
+   },
+   "music.get": "download"
   },
   "profile": {
    "id": 7,
@@ -3054,6 +3215,29 @@
     "source": "template",
     "template_value": "PG-13",
     "value": "PG-13"
+   },
+   {
+    "capped": false,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "movies.request_limit",
+    "inert": false,
+    "override": true,
+    "override_value": {
+     "days": 7,
+     "n": 5
+    },
+    "source": "override",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 5
+    }
    },
    {
     "capped": false,
@@ -3233,6 +3417,26 @@
     "value": "PG-13"
    },
    {
+    "capped": true,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "tv.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "template",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 20
+    }
+   },
+   {
     "capped": false,
     "ceiling": "*",
     "id": "tv.quality",
@@ -3297,6 +3501,26 @@
     "source": "template",
     "template_value": false,
     "value": false
+   },
+   {
+    "capped": true,
+    "ceiling": {
+     "days": 7,
+     "n": 20
+    },
+    "id": "music.request_limit",
+    "inert": false,
+    "override": false,
+    "override_value": null,
+    "source": "template",
+    "template_value": {
+     "days": 7,
+     "n": 0
+    },
+    "value": {
+     "days": 7,
+     "n": 20
+    }
    },
    {
     "capped": false,
@@ -3509,29 +3733,6 @@
    },
    {
     "capped": false,
-    "ceiling": {
-     "days": 7,
-     "n": 20
-    },
-    "id": "requests.limit",
-    "inert": false,
-    "override": true,
-    "override_value": {
-     "days": 7,
-     "n": 5
-    },
-    "source": "override",
-    "template_value": {
-     "days": 7,
-     "n": 0
-    },
-    "value": {
-     "days": 7,
-     "n": 5
-    }
-   },
-   {
-    "capped": false,
     "ceiling": false,
     "id": "requests.see_all",
     "inert": false,
@@ -3577,14 +3778,15 @@
   ],
   "success": true,
   "summary": {
+   "sentence": "Maya uses music, movies and TV shows.",
    "lines": [
     {
      "category": "movies",
-     "text": "Movies: asks first, up to PG-13."
+     "text": "Movies: asks first, up to PG-13, 5 movie asks a week."
     },
     {
      "category": "tv",
-     "text": "TV shows: asks first, up to TV-14."
+     "text": "TV shows: asks first, up to TV-14, 20 TV asks a week."
     },
     {
      "category": "music",
@@ -3595,12 +3797,11 @@
      "text": "Audiobooks: can't request."
     },
     {
-     "category": "requests",
-     "text": "Up to 5 asks a week."
+     "category": "books",
+     "text": "Podcasts: they follow shows, episodes don't download."
     }
    ],
-   "never": [],
-   "sentence": "Maya uses music, movies and TV shows."
+   "never": []
   },
   "template": {
    "id": 2,
@@ -3614,7 +3815,9 @@
    "movies.quality_ask",
    "music.import",
    "music.sample_studio",
-   "requests.limit",
+   "music.request_limit",
+   "movies.request_limit",
+   "tv.request_limit",
    "requests.see_all"
   ],
   "policy": {
@@ -3638,6 +3841,10 @@
     "4k"
    ],
    "movies.quality_default": null,
+   "movies.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "music.access": true,
    "music.dashboard": true,
    "music.discover": true,
@@ -3650,6 +3857,10 @@
    "music.playlist_sync": true,
    "music.quality": "*",
    "music.quality_default": null,
+   "music.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "music.sample_studio": false,
    "music.search": true,
    "music.stats": true,
@@ -3658,10 +3869,6 @@
    "music.wishlist": true,
    "podcasts.access": true,
    "podcasts.get": "download",
-   "requests.limit": {
-    "days": 7,
-    "n": 20
-   },
    "requests.moderate": true,
    "requests.see_all": false,
    "tv.access": true,
@@ -3670,6 +3877,10 @@
    "tv.quality": "*",
    "tv.quality_ask": [],
    "tv.quality_default": null,
+   "tv.request_limit": {
+    "days": 7,
+    "n": 20
+   },
    "video.calendar": true,
    "video.dashboard": true,
    "video.discover": true,
@@ -3766,6 +3977,10 @@
      "movies.quality": "*",
      "movies.quality_ask": [],
      "movies.quality_default": null,
+     "movies.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.access": true,
      "music.dashboard": true,
      "music.discover": true,
@@ -3778,6 +3993,10 @@
      "music.playlist_sync": true,
      "music.quality": "*",
      "music.quality_default": null,
+     "music.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.sample_studio": true,
      "music.search": true,
      "music.stats": true,
@@ -3786,10 +4005,6 @@
      "music.wishlist": true,
      "podcasts.access": true,
      "podcasts.get": "download",
-     "requests.limit": {
-      "days": 7,
-      "n": 0
-     },
      "requests.moderate": false,
      "requests.see_all": false,
      "tv.access": true,
@@ -3798,6 +4013,10 @@
      "tv.quality": "*",
      "tv.quality_ask": [],
      "tv.quality_default": null,
+     "tv.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "video.calendar": true,
      "video.dashboard": true,
      "video.discover": true,
@@ -3843,6 +4062,10 @@
      "movies.quality": "*",
      "movies.quality_ask": [],
      "movies.quality_default": null,
+     "movies.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.access": true,
      "music.dashboard": true,
      "music.discover": true,
@@ -3855,6 +4078,10 @@
      "music.playlist_sync": true,
      "music.quality": "*",
      "music.quality_default": null,
+     "music.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.sample_studio": true,
      "music.search": true,
      "music.stats": true,
@@ -3863,10 +4090,6 @@
      "music.wishlist": true,
      "podcasts.access": true,
      "podcasts.get": "none",
-     "requests.limit": {
-      "days": 7,
-      "n": 0
-     },
      "requests.moderate": false,
      "requests.see_all": false,
      "tv.access": true,
@@ -3875,6 +4098,10 @@
      "tv.quality": "*",
      "tv.quality_ask": [],
      "tv.quality_default": null,
+     "tv.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "video.calendar": true,
      "video.dashboard": true,
      "video.discover": true,
@@ -3915,6 +4142,10 @@
      "movies.quality": "*",
      "movies.quality_ask": [],
      "movies.quality_default": null,
+     "movies.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.access": true,
      "music.dashboard": true,
      "music.discover": true,
@@ -3927,6 +4158,10 @@
      "music.playlist_sync": true,
      "music.quality": "*",
      "music.quality_default": null,
+     "music.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.sample_studio": true,
      "music.search": true,
      "music.stats": true,
@@ -3935,10 +4170,6 @@
      "music.wishlist": true,
      "podcasts.access": true,
      "podcasts.get": "none",
-     "requests.limit": {
-      "days": 7,
-      "n": 0
-     },
      "requests.moderate": false,
      "requests.see_all": false,
      "tv.access": true,
@@ -3947,6 +4178,10 @@
      "tv.quality": "*",
      "tv.quality_ask": [],
      "tv.quality_default": null,
+     "tv.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "video.calendar": true,
      "video.dashboard": true,
      "video.discover": true,
@@ -3987,6 +4222,10 @@
      "movies.quality": "*",
      "movies.quality_ask": [],
      "movies.quality_default": null,
+     "movies.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.access": true,
      "music.dashboard": true,
      "music.discover": true,
@@ -3999,6 +4238,10 @@
      "music.playlist_sync": true,
      "music.quality": "*",
      "music.quality_default": null,
+     "music.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "music.sample_studio": true,
      "music.search": true,
      "music.stats": true,
@@ -4007,10 +4250,6 @@
      "music.wishlist": true,
      "podcasts.access": true,
      "podcasts.get": "none",
-     "requests.limit": {
-      "days": 7,
-      "n": 0
-     },
      "requests.moderate": false,
      "requests.see_all": false,
      "tv.access": false,
@@ -4019,6 +4258,10 @@
      "tv.quality": "*",
      "tv.quality_ask": [],
      "tv.quality_default": null,
+     "tv.request_limit": {
+      "days": 7,
+      "n": 0
+     },
      "video.calendar": true,
      "video.dashboard": true,
      "video.discover": true,

@@ -811,11 +811,12 @@ window.announceWishlistRequest = announceWishlistRequest;
 // resolves true when the add should go ahead (and on any doubt).
 function _requestLimitMessage(quota) {
     const days = Number(quota.days) || 7;
-    const noun = Number(quota.limit) === 1 ? 'request' : 'requests';
+    // music, movies and TV each have their own limit: this one is music's
+    const noun = Number(quota.limit) === 1 ? 'music request' : 'music requests';
     const span = days === 1 ? 'for today' : days === 7 ? 'for this week' : days === 30 ? 'for this month' : `for the last ${days} days`;
     return `You've used your ${quota.limit} ${noun} ${span}`;
 }
-// "3 of 5 asks left this week", or '' with no limit (or on any doubt)
+// "3 of 5 music asks left this week", or '' with no limit (or on any doubt)
 function _musicAsksLeftLine() {
     if (typeof canDownload !== 'function' || canDownload()) return Promise.resolve('');
     return fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } })
@@ -827,8 +828,8 @@ function _musicAsksLeftLine() {
             const days = Number(q.days) || 7;
             const span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : `in the last ${days} days`;
             const left = Math.max(0, Number(q.remaining) || 0);
-            if (left <= 0) return `No asks left ${span}`;
-            return `${left} of ${limit} ${limit === 1 ? 'ask' : 'asks'} left ${span}`;
+            if (left <= 0) return `No music asks left ${span}`;
+            return `${left} of ${limit} ${limit === 1 ? 'music ask' : 'music asks'} left ${span}`;
         })
         .catch(() => '');
 }

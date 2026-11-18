@@ -22,6 +22,7 @@ import {
   type MyPermissions,
   type PermMedia,
   type PermMode,
+  type LimitKind,
   type RequestLimit,
   fallbackPermissions,
   fingerprint,
@@ -151,7 +152,8 @@ export interface SoulSyncPermsApi {
   mode: (media: PermMedia) => PermMode;
   on: (id: string) => boolean;
   access: (media: PermMedia) => boolean;
-  limit: () => RequestLimit | null;
+  /** one kind's request limit (music by default) */
+  limit: (kind?: LimitKind) => RequestLimit | null;
   /** the server's map is in for this profile */
   live: () => boolean;
 }
@@ -171,7 +173,7 @@ export function installMyPermissions(): void {
     mode: (media) => modeFor(state.perms, media),
     on: (id) => isOn(state.perms, id),
     access: (media) => hasAccess(state.perms, media),
-    limit: () => requestLimit(state.perms),
+    limit: (kind?: LimitKind) => requestLimit(state.perms, kind),
     live: () => state.perms.live,
   };
   window.addEventListener(PROFILE_CONTEXT_CHANGED_EVENT, onProfileChanged);

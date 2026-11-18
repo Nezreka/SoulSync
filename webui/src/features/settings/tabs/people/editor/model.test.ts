@@ -64,7 +64,7 @@ describe('the draft resolves like the server', () => {
     expect(Object.keys(d.overrides).sort()).toEqual([
       'movies.quality',
       'movies.quality_default',
-      'requests.limit',
+      'movies.request_limit',
     ]);
     // the server keeps the same three through the switch, so nothing else moves
     expect(saveBody(m, d)).toEqual({ template_id: 1, set: {}, reset: [] });

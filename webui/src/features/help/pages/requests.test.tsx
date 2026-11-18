@@ -130,7 +130,7 @@ describe('requests answers (music)', () => {
     expect(first.textContent).toContain(
       "It's waiting for your admin to say yes. Once they do, it goes on your wishlist and downloads from there, like Low, which is on its way now.",
     );
-    expect(first.textContent).toContain("You've used 2 of your 5 requests in the last 7 days.");
+    expect(first.textContent).toContain("You've used 2 of your 5 music requests in the last 7 days.");
     expect(answer(container, 'onway:Low').textContent).toContain(
       'Your admin said yes 3 hours ago.',
     );
@@ -150,7 +150,7 @@ describe('requests answers (music)', () => {
     const { container } = renderAnswers(useMusicRequestAnswers, { isAdmin: false });
     await waitFor(() => expect(titles(container)).toContain("Why can't I ask for more?"));
     expect(answer(container, 'quota').textContent).toContain(
-      "You've used all 5 requests for the last 7 days.",
+      "You've used all 5 music requests for the last 7 days.",
     );
   });
 
@@ -239,7 +239,7 @@ describe('requests answers (video)', () => {
       "It's waiting for your admin to approve it. Once they do, SoulSync starts looking for it, like Interstellar, which is on its way now.",
     );
     expect(answer(container, 'wait:31').textContent).toContain(
-      "You've used 2 of your 5 requests in the last 7 days.",
+      "You've used 2 of your 5 music requests in the last 7 days.",
     );
     const part = answer(container, 'partial:33');
     expect(part.textContent).toContain(

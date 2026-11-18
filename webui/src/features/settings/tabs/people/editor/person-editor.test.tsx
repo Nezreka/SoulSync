@@ -137,11 +137,12 @@ describe('where each value comes from', () => {
     await open();
     expect(screen.getByRole('dialog', { name: /Maya/ })).toBeInTheDocument();
     expect(count()).toBe('4 changes from Teen');
-    // the rail's green dots: movies, music, requests have changes
-    for (const c of ['movies', 'music', 'requests']) {
+    // the rail's green dots: movies (quality and her movie limit) and music
+    for (const c of ['movies', 'music']) {
       expect(document.querySelector(`[data-dot="${c}"]`)).not.toBeNull();
     }
     expect(document.querySelector('[data-dot="tv"]')).toBeNull();
+    expect(document.querySelector('[data-dot="requests"]')).toBeNull();
 
     fireEvent.click(tab(/^Music/));
     const music = row('music.get');
@@ -198,7 +199,10 @@ describe('editing', () => {
   it('a change marks the row, bumps the count, lights the dot and updates the summary', async () => {
     await open(7, { category: 'tv' });
     expect(document.querySelector('[data-dot="tv"]')).toBeNull();
-    expect(sentence()).toMatch(/Asks you for movies and shows, up to PG-13, 5 asks a week\./);
+    // each kind's own limit: her movie change, and tv held to the policy's 20
+    expect(sentence()).toMatch(
+      /Asks you for movies and shows, up to PG-13\. Up to 5 movie asks a week and 20 TV asks a week\./,
+    );
     const tv = row('tv.get');
     fireEvent.click(within(tv).getByRole('button', { name: 'Download right away' }));
     expect(tv).toHaveAttribute('data-changed');
@@ -206,6 +210,8 @@ describe('editing', () => {
     expect(count()).toBe('5 changes from Teen');
     expect(document.querySelector('[data-dot="tv"]')).not.toBeNull();
     expect(sentence()).toMatch(/Movies: asks first, shows: downloads/);
+    // downloads are never capped: only the movie limit is left
+    expect(sentence()).toMatch(/Up to 5 movie asks a week\.$/);
     const tvLine = document.querySelector('[data-sum="tv"]') as HTMLElement;
     expect(tvLine).toHaveTextContent('Downloads');
     expect(screen.getByTestId('announce')).toHaveTextContent(
@@ -219,9 +225,9 @@ describe('editing', () => {
 
   it('resets one row, one category and everything', async () => {
     await open(7, { category: 'movies' });
-    // category: movies.quality + quality_default go back
+    // category: movies.quality, quality_default and the movie limit go back
     fireEvent.click(screen.getByRole('button', { name: 'Reset Movies' }));
-    expect(count()).toBe('2 changes from Teen');
+    expect(count()).toBe('1 change from Teen');
     expect(document.querySelector('[data-dot="movies"]')).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Movie 4K Quality' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Default' })).toBeChecked();
@@ -229,13 +235,16 @@ describe('editing', () => {
     // row
     fireEvent.click(tab(/^Music/));
     fireEvent.click(screen.getByRole('button', { name: 'Reset Getting music to Teen' }));
-    expect(count()).toBe('1 change from Teen');
+    expect(count()).toBe('Follows Teen exactly');
     expect(within(row('music.get')).getByRole('button', { name: 'Ask first' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
 
-    // all
+    // all: a fresh change, then everything back
+    fireEvent.click(tab(/^TV shows/));
+    fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Download right away' }));
+    expect(count()).toBe('1 change from Teen');
     fireEvent.click(screen.getByRole('button', { name: /Back to Teen/ }));
     expect(count()).toBe('Follows Teen exactly');
     expect(document.querySelector('[data-dot]')).toBeNull();
