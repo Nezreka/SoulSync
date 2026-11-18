@@ -777,6 +777,66 @@ describe('needs attention', () => {
     expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 2]]);
   });
 
+  /** #2177: an old season left unmonitored read as "273 missing" and Get
+   *  missing grabbed all of it. the headline and the grab are the monitored
+   *  gaps; the rest is still said, quieter. */
+  function showWithOffSeason(): ShowLibrary {
+    const d = show();
+    d.summary.missing_unmonitored = 2;
+    d.seasons[1].episodes = [3, 4].map((n) => ({
+      id: 20 + n,
+      episode_number: n,
+      title: `Old ${n}`,
+      air_date: '2009-03-08',
+      has_file: false,
+      monitored: false,
+      watched: false,
+      aired: true,
+      files: [],
+    }));
+    return d;
+  }
+
+  it('get missing leaves unmonitored seasons alone and says how many it left', async () => {
+    routes['/library'] = () => showWithOffSeason();
+    routes['/wishlist/add'] = () => ({ success: true, added: 1 });
+    routes['/wishlist/search'] = () => ({ success: true });
+    const { container } = render(<LibraryTab kind="show" id={445} />);
+    const button = await screen.findByRole('button', { name: 'Get missing' });
+    const issue = container.querySelector('[data-issue="missing"]') as HTMLElement;
+    expect(issue.textContent).toContain('1 aired episode missing');
+    expect(issue.textContent).toContain('2 more in unmonitored seasons are left alone.');
+    expect(container.querySelector('[data-part="unmonitored"]')?.textContent).toBe(
+      '2 in unmonitored seasons',
+    );
+    // the gaps are still aired episodes: 3 owned of 6, not of 4
+    expect(container.textContent).toContain('of 6 aired episodes');
+    fireEvent.click(button);
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/add'))).toBe(true));
+    const add = calls.find((c) => c.url.endsWith('/wishlist/add'))?.body as {
+      episodes: { season_number: number; episode_number: number }[];
+    };
+    expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 2]]);
+  });
+
+  it('an episode unmonitored inside a monitored season is not hunted either', async () => {
+    routes['/library'] = () => {
+      const d = show();
+      d.seasons[0].episodes[1].monitored = false;
+      d.summary.missing = 0;
+      d.summary.missing_unmonitored = 1;
+      return d;
+    };
+    const { container } = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByText('not monitored', { exact: false });
+    // nothing monitored is missing: nothing needs attention, nothing to get
+    expect(container.querySelector('[data-issue="missing"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Get missing' })).toBeNull();
+    expect(container.querySelector('[data-part="unmonitored"]')?.textContent).toBe(
+      '1 not monitored',
+    );
+  });
+
   it('a split show is brought together: plan first, then the move with its progress', async () => {
     let polls = 0;
     routes['/library'] = () => {
