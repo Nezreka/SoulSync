@@ -89,7 +89,7 @@ def test_persisted_cover_repair_writes_only_the_selected_library(legacy_db, tmp_
             if owner == 2:
                 file_id = new_id
         conn.commit()
-    def write_cover(files, metadata, album_info, folder):
+    def write_cover(files, metadata, album_info, folder, image_bytes=None):
         for path in files:
             with open(path, 'ab') as audio:
                 audio.write(b'cover')

@@ -305,6 +305,61 @@ def repair_findings_list():
         logger.error(f"Error getting repair findings: {e}")
         return jsonify({'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/<int:finding_id>/cover', methods=['GET'])
+@requires("admin.tools")
+def repair_finding_cover(finding_id):
+    """#2169: a cover finding's library, files and folder as they are now,
+    the found cover and its source, and what Apply Art would do in each"""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        state = _repair_worker().cover_finding_state(finding_id)
+        if state is None:
+            return jsonify({'success': False, 'error': 'Not a cover finding for an album in the library'}), 404
+        return jsonify({'success': True, **state}), 200
+    except Exception as e:
+        logger.error(f"Error reading cover state for finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@bp.route('/api/repair/findings/<int:finding_id>/cover-image', methods=['GET'])
+@requires("admin.tools")
+def repair_finding_cover_image(finding_id):
+    """the cover in one place (library, files or folder), for the tiles"""
+    from flask import Response
+    try:
+        if _repair_worker() is None:
+            return '', 404
+        data = _repair_worker().cover_finding_image(finding_id, request.args.get('place') or '')
+        if not data:
+            return '', 404
+        mime = ('image/png' if data[:8] == b'\x89PNG\r\n\x1a\n'
+                else 'image/webp' if data[8:12] == b'WEBP' else 'image/jpeg')
+        response = Response(data, mimetype=mime)
+        # what is on disk now: never a cached answer from before an apply
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except Exception as e:
+        logger.error(f"Error reading cover image for finding {finding_id}: {e}")
+        return '', 404
+
+@bp.route('/api/repair/findings/<int:finding_id>/keep-best-preview', methods=['GET'])
+@requires("admin.tools")
+def repair_finding_keep_best_preview(finding_id):
+    """#2172: what Keep Best would do for a duplicate finding, nothing
+    changed. ``action`` is the fix action it would send (keep_best,
+    file-<id>, with :confirmed / :move / :nomove)"""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        preview = _repair_worker().duplicate_finding_preview(
+            finding_id, request.args.get('action') or 'keep_best')
+        if preview is None:
+            return jsonify({'success': False, 'error': 'Not a duplicate finding'}), 404
+        return jsonify(preview), 200
+    except Exception as e:
+        logger.error(f"Error previewing Keep Best for finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/counts', methods=['GET'])
 @requires("admin.tools")
 def repair_findings_counts():

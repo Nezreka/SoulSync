@@ -584,7 +584,14 @@ def finding_verified(conn, finding, files):
             if any(checks.get(k) not in ('correct', 'not_required', 'differs') for k in required):
                 return False
         elif kind == 'missing_cover_art':
-            if any(checks.get(k) not in ('correct', 'not_required') for k in ('artwork_database', 'cover', 'artwork_sidecar')):
+            # #2169: judge only what apply can fill. with no cover in the
+            # library and none found, apply writes the files' own cover to
+            # the folder and has nothing to save, so the finding never closed
+            details = finding.get('details') or {}
+            keys = ('cover', 'artwork_sidecar')
+            if details.get('found_artwork_url') or not details.get('db_missing', True):
+                keys += ('artwork_database',)
+            if any(checks.get(k) not in ('correct', 'not_required') for k in keys):
                 return False
         elif kind == 'track_number_mismatch':
             # Judge only what the fix wrote: requiring a correct disc tag the

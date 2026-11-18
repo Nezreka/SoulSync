@@ -113,6 +113,10 @@ def extract_embedded_art(file_path: str) -> Optional[bytes]:
     return None
 
 
+def _image_mime(data: bytes) -> str:
+    return 'image/png' if data[:8] == b'\x89PNG\r\n\x1a\n' else 'image/jpeg'
+
+
 def album_has_art_on_disk(rep_file_path: str) -> bool:
     """Does this album have art on disk?
 
@@ -135,6 +139,7 @@ def apply_art_to_album_files(
     album_info: dict,
     folder: str = None,
     context: dict = None,
+    image_bytes: Optional[bytes] = None,
 ) -> dict:
     """Embed art into each audio file + write cover.jpg, reusing the standard.
 
@@ -148,6 +153,10 @@ def apply_art_to_album_files(
     (a real EROFS from an actual write — a ':ro' volume, a read-only host/NFS/
     SMB mount, or a read-only underlying fs) so callers can tell the user the
     real cause instead of a generic failure.
+
+    ``image_bytes``: the exact cover to use (#2169). embedded as is instead of
+    a fresh lookup by the art order, and written as cover.jpg when the files
+    carry no cover of their own, so apply puts in the picture it showed.
 
     NOTE: read-only is detected from an ACTUAL write raising EROFS, never from
     statvfs/mount flags — union/FUSE/network filesystems (mergerfs, rclone,
@@ -201,7 +210,12 @@ def apply_art_to_album_files(
             if getattr(audio, "tags", None) is None and hasattr(audio, "add_tags"):
                 with contextlib.suppress(Exception):
                     audio.add_tags()
-            if embed_album_art_metadata(audio, metadata):
+            if image_bytes:
+                from core.metadata.artwork import _write_embedded_art
+                wrote = _write_embedded_art(audio, image_bytes, _image_mime(image_bytes), symbols)
+            else:
+                wrote = embed_album_art_metadata(audio, metadata)
+            if wrote:
                 audio.save()
                 result["embedded"] += 1
             else:
@@ -238,6 +252,7 @@ def apply_art_to_album_files(
             art_bytes = extract_embedded_art(fp)
             if art_bytes:
                 break
+        art_bytes = art_bytes or image_bytes
         if art_bytes:
             try:
                 with open(cover_path, "wb") as handle:
