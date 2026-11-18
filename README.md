@@ -555,6 +555,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - **Per media type**: Download right away, Ask first or Can't request for music, movies, TV, audiobooks and podcasts separately, with movies and TV as separate switches (a TV-only profile works everywhere).
   - **Request quality**: which quality profiles each person can ask for, per movies and TV, which ones always need your OK (4K always asks), and what they start on. One allowed means no menu.
   - **Moderators**: a member who approves and declines other people's requests and manages issues, never settings, people or tools.
+  - **One request limit for every ask**: music, music videos, movies, shows and YouTube count together, and the People list shows asks used per person.
   - **Members see only what they can use**, with a "What you can do" card on their own account page.
   - Add person, invites and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
 - **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.

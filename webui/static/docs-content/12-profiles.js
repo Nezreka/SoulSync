@@ -112,7 +112,7 @@ Saving a template shows who it reaches first, the same way the global policy doe
 
 **New people start as** picks the template for profiles made by **Sign in with Plex** and **Sign in with OIDC**. Change it here, not in Security. The template it points at can't be deleted until you pick another.
 
-When you upgrade, the old sign-up settings (the side new sign-ups start on, their request limit and the "can download" switches under Plex and OIDC) moved here once. If they matched Guest, sign-ups start as Guest. If not, a **New sign-ups** template was made from them.
+When you upgrade, the old sign-up settings (the side new sign-ups start on, their request limit and the "can download" switches under Plex and OIDC) moved here once. If Plex or OIDC sign-in was making profiles, or one of those settings was saved, a **New sign-ups** template was made from them, so new people keep getting exactly what they got before. If neither, new people start as Guest. System > Security now just names this template and opens Templates.
 
 ## Sidebar & look
 
@@ -196,7 +196,7 @@ These are separate from Getting music: someone can ask first for music and still
 
 ## Requests & moderation
 
-- **Request limit**: asks per so many days. Downloads they get right away are never capped. Every ask counts from when it was made, so withdrawing one doesn't hand it back.
+- **Request limit**: asks per so many days. Downloads they get right away are never capped. Every ask counts from when it was made, so withdrawing one doesn't hand it back. Music, music videos, movies, shows and YouTube asks all count toward the same limit, and the People list shows how many each person used.
 - **See everyone's requests**: members see only their own unless this is on
 - **Moderator**: approve, decline and manage other people's requests and issues. Never their own asks, and never settings, people or tools.
 - **Cancel their own downloads** and **Report problems**: always on, for everyone
