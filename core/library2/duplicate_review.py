@@ -375,6 +375,7 @@ def settle_playlists(files: list[dict], keeper: dict, *, move: bool) -> None:
     kept = set(keeper.get("playlists") or [])
     for f in files:
         f["playlists_covered"], f["playlist_moves"], f["playlists_blocked"] = [], [], ""
+        f.pop("playlist_movable", None)
         if f is keeper or "playlist_reference" not in f["protected_reasons"]:
             continue
         own = list(f.get("protecting_playlists") or [])
@@ -387,6 +388,9 @@ def settle_playlists(files: list[dict], keeper: dict, *, move: bool) -> None:
         if missing and not move:
             f["playlists_covered"] = covered
             f["playlists_blocked"] = "not_in_kept"
+            # whether moving the entries could settle it: both copies on
+            # the server (a bulk Keep Best counts what moving would unblock)
+            f["playlist_movable"] = bool(keeper.get("server_item") and f.get("server_item"))
             continue
         if missing and not (keeper.get("server_item") and f.get("server_item")):
             f["playlists_covered"] = covered
@@ -394,6 +398,91 @@ def settle_playlists(files: list[dict], keeper: dict, *, move: bool) -> None:
             continue
         f["playlists_covered"], f["playlist_moves"] = covered, missing
         f["protected_reasons"] = [r for r in f["protected_reasons"] if r != "playlist_reference"]
+
+
+# #2179: why a bulk Keep Best can't act on a duplicate finding by itself.
+# the finding stays open, marked, and the run says how many and why
+NEEDS_SAME_RECORDING = "same_recording"  # titles differ: a person confirms
+NEEDS_PLAYLIST_MOVE = "playlist"  # a copy is in a playlist the kept copy is not in
+NEEDS_PROTECTED = "protected"  # every other copy is protected for another reason
+NEEDS_YOU_WORDS = {
+    NEEDS_SAME_RECORDING: ("Needs you: the copies are named differently, so confirm they are the "
+                           "same recording on this finding, then Keep Best."),
+    NEEDS_PLAYLIST_MOVE: ("Needs you: a copy is in a playlist the kept copy is not in, so it stays. "
+                          "Keep Best with moving playlist entries on, or pick a file on this finding."),
+    NEEDS_PROTECTED: ("Needs you: every other copy is protected, so Keep Best had nothing to "
+                      "remove. Open the finding to see why each copy stays."),
+}
+
+
+class NeedsRecordingConfirmation(ValueError):
+    """weak evidence and no confirmation: a person has to say it's one recording"""
+
+
+def _playlist_movable(copy: dict) -> bool:
+    """protected only by a playlist the kept copy is not in, and moving the
+    entry could settle it. a scan from before #2179 says nothing about the
+    server items, so it counts as movable: the apply checks again"""
+    return (list(copy.get("protected_reasons") or []) == ["playlist_reference"]
+            and copy.get("playlists_blocked") == "not_in_kept"
+            and copy.get("playlist_movable", True) is not False)
+
+
+def keep_best_blockers(details, *, move: bool = False) -> list:
+    """#2179: what stops a bulk Keep Best on this finding, from its stored
+    review. empty when a bulk run can act on it. ``move``: with moving
+    playlist entries on. NEEDS_YOU_SQL is the same test for move=False"""
+    if not isinstance(details, dict):
+        return []
+    reasons = []
+    if details.get("requires_recording_confirmation"):
+        reasons.append(NEEDS_SAME_RECORDING)
+    keeper = details.get("recommended_file_id")
+    others = [t for t in details.get("tracks") or []
+              if isinstance(t, dict) and t.get("file_id", t.get("id")) != keeper]
+    if others and all(t.get("protected_reasons") for t in others):
+        if not any(_playlist_movable(t) for t in others):
+            reasons.append(NEEDS_PROTECTED)
+        elif not move:
+            reasons.append(NEEDS_PLAYLIST_MOVE)
+    return reasons
+
+
+# the same test as keep_best_blockers(move=False) != [], in SQL, so the
+# finding list can sort the ones that need a person first
+NEEDS_YOU_SQL = (
+    "(finding_type = 'native_duplicate_tracks' AND ("
+    "json_extract(details_json, '$.requires_recording_confirmation') = 1 "
+    "OR NOT EXISTS (SELECT 1 FROM json_each(details_json, '$.tracks') AS copy "
+    "WHERE json_extract(copy.value, '$.file_id') IS NOT json_extract(details_json, '$.recommended_file_id') "
+    "AND COALESCE(json_array_length(json_extract(copy.value, '$.protected_reasons')), 0) = 0)))"
+)
+
+
+def keep_best_summary(details_list) -> dict:
+    """#2179: what a bulk Keep Best over these findings would do, before it
+    runs: how many go through, how many need a person and why, with moving
+    playlist entries off and on"""
+    out = {"total": 0, "ready": 0, "ready_with_move": 0,
+           "needs_you": {}, "needs_you_with_move": {}}
+    for details in details_list:
+        out["total"] += 1
+        for move, ready_key, needs_key in ((False, "ready", "needs_you"),
+                                           (True, "ready_with_move", "needs_you_with_move")):
+            reasons = keep_best_blockers(details, move=move)
+            if not reasons:
+                out[ready_key] += 1
+            for reason in reasons:
+                out[needs_key][reason] = out[needs_key].get(reason, 0) + 1
+    return out
+
+
+def _live_blocker(plan: dict) -> str:
+    """why the plan removes nothing, as the run reports it"""
+    others = [f for f in plan["files"] if f is not plan["keeper"]]
+    if not plan["move"] and any(_playlist_movable(f) for f in others):
+        return NEEDS_PLAYLIST_MOVE
+    return NEEDS_PROTECTED
 
 
 def _performer_names(credited: list, track_artist, subject: dict) -> list:
@@ -609,6 +698,7 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
                         "playlists_covered": f.get("playlists_covered") or [],
                         "playlist_moves": f.get("playlist_moves") or [],
                         "playlists_blocked": f.get("playlists_blocked") or "",
+                        **({"playlist_movable": f["playlist_movable"]} if "playlist_movable" in f else {}),
                         "protected_reasons": f["protected_reasons"]} for f in members],
             "artist_id": keeper["artist_id"], "album_thumb_url": keeper.get("album_image"),
             "artist_thumb_url": keeper.get("artist_image"),
@@ -720,7 +810,8 @@ def _keep_best_plan(database, review: dict, *, config_manager, keep_file_id, con
             if not _candidate_pair(a, b, options, companions):
                 raise ValueError("The reviewed copies no longer form a compatible duplicate group")
             if (not _strong_evidence(a, b) or a["norm_title"] != b["norm_title"]) and confirm_recording is not True:
-                raise ValueError("Similar tags are review evidence only; confirm the same recording before Keep Best")
+                raise NeedsRecordingConfirmation(
+                    "Similar tags are review evidence only; confirm the same recording before Keep Best")
     removable = [f for f in files if f["file_id"] != keeper["file_id"] and not f["protected_reasons"]]
     links = _recording_links(database, keeper, removable, confirm_recording)
     return {"files": files, "keeper": keeper, "removable": removable, "links": links,
@@ -832,12 +923,16 @@ def _move_playlist_entries(plan: dict) -> list:
 def apply_keep_best(database, review: dict, *, config_manager=None, transfer_folder: str,
                     approved: bool = False, keep_file_id=None, confirm_recording: bool = False,
                     playlist_membership=None, server_source=None,
-                    move_playlist_entries=None) -> dict:
+                    move_playlist_entries=None, require_removal: bool = False) -> dict:
     """Apply a reviewed native group; legacy IDs and stale payloads fail closed.
 
     ``move_playlist_entries`` (#2172): None follows the job setting. When on,
     a copy in playlists the kept copy is not in has those entries pointed
-    at the kept copy before it goes."""
+    at the kept copy before it goes.
+
+    ``require_removal`` (#2179, bulk runs): a plan that removes nothing is
+    not a success. it returns ``needs_you`` with the reason, so the finding
+    stays open instead of resolving like a dismiss"""
     from core.library.deleted_quarantine import quarantine_mover
     from core.library2.file_delete import delete_files_journaled
 
@@ -848,13 +943,23 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
             database, review, config_manager=config_manager, keep_file_id=keep_file_id,
             confirm_recording=confirm_recording, move=move_playlist_entries,
             playlist_membership=playlist_membership, server_source=server_source)
+    except NeedsRecordingConfirmation as exc:
+        return {"success": False, "error": str(exc), "needs_you": NEEDS_SAME_RECORDING}
     except (KeyError, TypeError, ValueError, DuplicateRelationshipError) as exc:
         return {"success": False, "error": str(exc)}
     files, keeper, load = plan["files"], plan["keeper"], plan["load"]
+    if require_removal and not plan["removable"]:
+        reason = _live_blocker(plan)
+        return {"success": False, "needs_you": reason, "error": NEEDS_YOU_WORDS[reason]}
     moved_entries = _move_playlist_entries(plan)
     if moved_entries:
         _repoint_sync_cache(database, plan, moved_entries)
     removable = plan["removable"]
+    if require_removal and not removable:
+        # every entry move failed: the copies stay, and the finding with them
+        return {"success": False, "needs_you": NEEDS_PROTECTED, "playlist_moves": moved_entries,
+                "error": "Needs you: the playlist entries could not be moved to the kept copy, "
+                         "so every copy stays. Open the finding to see which playlist."}
     try:
         # a copy that stayed (its playlist entries did not move) is not linked
         links = _recording_links(database, keeper, removable, confirm_recording)
@@ -927,4 +1032,5 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
 
 
 __all__ = ["apply_keep_best", "find_duplicate_candidates", "preview_keep_best",
+           "keep_best_blockers", "keep_best_summary", "NEEDS_YOU_SQL", "NEEDS_YOU_WORDS",
            "DEFAULT_SETTINGS", "REVIEW_SCHEMA"]

@@ -360,6 +360,28 @@ def repair_finding_keep_best_preview(finding_id):
         logger.error(f"Error previewing Keep Best for finding {finding_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/keep-best-summary', methods=['GET'])
+@requires("admin.tools")
+def repair_findings_keep_best_summary():
+    """#2179: what a bulk Keep Best over the open duplicate findings would
+    do, before it runs: how many go through and how many need you, why,
+    with moving playlist entries off and on. ``ids`` narrows it to a
+    selection (comma separated)"""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        ids = [int(part) for part in (request.args.get('ids') or '').split(',') if part.strip().isdigit()]
+        summary = _repair_worker().keep_best_summary(
+            job_id=request.args.get('job_id') or None,
+            severity=request.args.get('severity') or None,
+            finding_ids=ids or None)
+        if summary is None:
+            return jsonify({'success': False, 'error': 'Could not read the duplicate findings'}), 500
+        return jsonify({'success': True, **summary}), 200
+    except Exception as e:
+        logger.error(f"Error summarising Keep Best: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/counts', methods=['GET'])
 @requires("admin.tools")
 def repair_findings_counts():

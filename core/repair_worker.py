@@ -26,6 +26,7 @@ from core.metadata_service import (
     get_primary_source,
 )
 from core.library.path_resolver import resolve_library_file_path
+from core.library2.duplicate_review import NEEDS_YOU_SQL as _NEEDS_YOU_SQL
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -813,6 +814,20 @@ def attach_retag_preview(conn, items: List[dict]) -> None:
             rows = None
         if rows is not None:
             item['preview'] = rows
+
+
+def attach_keep_best_needs(items: list) -> None:
+    """#2179: an open duplicate finding a bulk Keep Best can't act on by
+    itself says so on the row: ``needs_you`` holds why, and why with moving
+    playlist entries on (empty there when moving settles it)"""
+    from core.library2.duplicate_review import keep_best_blockers
+    for item in items:
+        if item.get('finding_type') != 'native_duplicate_tracks' or item.get('status') != 'pending':
+            continue
+        reasons = keep_best_blockers(item.get('details'))
+        if reasons:
+            item['needs_you'] = {'reasons': reasons,
+                                 'with_move': keep_best_blockers(item.get('details'), move=True)}
 
 
 def _duplicate_fix_action(action) -> tuple:
@@ -2421,6 +2436,8 @@ class RepairWorker:
         'quality': (_QUALITY_SCORE_SQL + " ASC, created_at DESC"),
         'quality_desc': (_QUALITY_SCORE_SQL + " DESC, created_at DESC"),
         'path': 'file_path IS NULL, file_path ASC, created_at DESC',
+        # #2179: duplicates a bulk Keep Best can't act on by itself first
+        'needs_you': f"CASE WHEN {_NEEDS_YOU_SQL} THEN 0 ELSE 1 END, created_at DESC",
     }
 
     @staticmethod
@@ -2567,6 +2584,7 @@ class RepairWorker:
             attach_finding_art(conn, items)
             attach_retag_preview(conn, items)
             attach_finding_locks(conn, items)
+            attach_keep_best_needs(items)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
         except Exception as e:
@@ -3005,6 +3023,12 @@ class RepairWorker:
             if last_seen and (group['last_seen'] is None or last_seen > group['last_seen']):
                 group['last_seen'] = last_seen
 
+        if groups.get('native_duplicate_tracks', {}).get('pending'):
+            # #2179: how many open duplicates a Keep Best all leaves for a person
+            # counted in sql: the groups load often, and parsing every
+            # finding's details here would grow with the library
+            groups['native_duplicate_tracks']['needs_you'] = self._needs_you_count(
+                job_id=job_id, severity=severity)
         for finding_type, group in groups.items():
             group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
             group['manual_conflicts'] = manual_by_type.get(finding_type, 0)
@@ -3885,11 +3909,20 @@ class RepairWorker:
             keeper, confirm_recording, move = _duplicate_fix_action(details.get('_fix_action'))
         except (KeyError, TypeError, ValueError) as exc:
             return {'success': False, 'error': str(exc)}
-        return apply_keep_best(
+        # #2179: in a bulk run a Keep Best that removes nothing is not a fix.
+        # it resolved the finding like a dismiss; now it stays open, marked
+        # with why, and the run counts it as needing you. a Keep Best on the
+        # finding itself showed its plan first, so it still settles it
+        bulk = not details.get('_explicit_single_fix')
+        result = apply_keep_best(
             self.db, details, config_manager=self._config_manager,
             transfer_folder=self.transfer_folder, approved=True, keep_file_id=keeper,
             confirm_recording=confirm_recording, move_playlist_entries=move,
+            require_removal=bulk,
         )
+        if bulk and result.get('needs_you'):
+            result['skipped_by_design'] = True
+        return result
 
     def duplicate_finding_preview(self, finding_id: int, action: str = '') -> Optional[dict]:
         """#2172: what Keep Best would do for one duplicate finding, changing
@@ -3905,6 +3938,76 @@ class RepairWorker:
         return preview_keep_best(
             self.db, details, config_manager=self._config_manager, keep_file_id=keeper,
             confirm_recording=confirm_recording, move_playlist_entries=move)
+
+    def _needs_you_count(self, job_id: str = None, severity: str = None) -> int:
+        """#2179: open duplicates a Keep Best all leaves for a person, by the
+        sql twin of keep_best_blockers. 0 when it can't be read"""
+        where = ["status = 'pending'", _NEEDS_YOU_SQL]
+        params: List[Any] = []
+        if job_id:
+            where.append("job_id = ?")
+            params.append(job_id)
+        if severity:
+            where.append("severity = ?")
+            params.append(severity)
+        library = _findings_library_clause()
+        if library:
+            where.append(library)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM repair_findings WHERE {' AND '.join(where)}",
+                params).fetchone()
+            return int(row[0] or 0) if row else 0
+        except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+            logger.debug("Keep Best needs-you count unavailable: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def keep_best_summary(self, job_id: str = None, severity: str = None,
+                          finding_ids: List[int] = None) -> Optional[dict]:
+        """#2179: what a bulk Keep Best over the open duplicate findings (in
+        this view, or these ids) would do before it runs: how many go
+        through, how many need you and why, with moving playlist entries off
+        and on. None when they could not be read"""
+        from core.library2.duplicate_review import keep_best_summary
+        where = ["status = 'pending'", "finding_type = 'native_duplicate_tracks'"]
+        params: List[Any] = []
+        if job_id:
+            where.append("job_id = ?")
+            params.append(job_id)
+        if severity:
+            where.append("severity = ?")
+            params.append(severity)
+        if finding_ids:
+            where.append(f"id IN ({_JSON_IDS})")
+            params.append(_json_ids(finding_ids))
+        library = _findings_library_clause()
+        if library:
+            where.append(library)
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                f"SELECT details_json FROM repair_findings WHERE {' AND '.join(where)}",
+                params).fetchall()
+        except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+            logger.debug("Keep Best summary unavailable: %s", e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+        details = []
+        for (raw,) in rows:
+            try:
+                value = json.loads(raw) if raw else {}
+            except (TypeError, ValueError):
+                value = {}
+            details.append(value if isinstance(value, dict) else {})
+        return keep_best_summary(details)
 
     def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
         """A suspect album tag is fixed by picking the right release, which
@@ -8092,6 +8195,7 @@ class RepairWorker:
             skipped = 0
             partial = 0
             other_artist_skipped = 0
+            needs_you: Dict[str, int] = {}
             errors = []
             for fid in ids_to_fix:
                 try:
@@ -8107,6 +8211,9 @@ class RepairWorker:
                 # Tracks the album gate held back, counted even on a
                 # successful finding so a partial gate is never silent.
                 other_artist_skipped += result.get('other_artist_skipped', 0) or 0
+                if result.get('needs_you'):
+                    reason = str(result['needs_you'])
+                    needs_you[reason] = needs_you.get(reason, 0) + 1
                 if result.get('partial'):
                     # blanks filled, differences left: still open, not failed
                     partial += 1
@@ -8125,6 +8232,7 @@ class RepairWorker:
 
             return {'fixed': fixed, 'failed': failed, 'skipped': skipped, 'partial': partial,
                     'other_artist_skipped': other_artist_skipped,
+                    'needs_you': needs_you,
                     'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
@@ -8210,6 +8318,10 @@ class RepairWorker:
                 # for a person: still open, and not a failure
                 'partial': 0,
                 'other_artist_skipped': 0,
+                # #2179: findings a bulk Keep Best left open for a person,
+                # by why ({'same_recording': 3, 'playlist': 2}). replaced
+                # whole on each count, never changed in place
+                'needs_you': {},
                 'stopped': False,
                 'job_id': job_id,
                 'finding_type': finding_type,
@@ -8386,6 +8498,11 @@ class RepairWorker:
                 state['other_artist_skipped'] = (
                     state.get('other_artist_skipped', 0)
                     + (result.get('other_artist_skipped', 0) or 0))
+                if result.get('needs_you'):
+                    reason = str(result['needs_you'])
+                    counts = dict(state.get('needs_you') or {})
+                    counts[reason] = counts.get(reason, 0) + 1
+                    state['needs_you'] = counts
                 skipped_by_design = bool(result.get('skipped_by_design'))
                 if slug and not skipped_by_design:
                     tally = state['per_type'].get(slug)
@@ -8454,6 +8571,7 @@ class RepairWorker:
         with self._bulk_fix_lock:
             state = dict(self._bulk_fix_state)
             state['errors'] = list(state.get('errors', []))
+            state['needs_you'] = dict(state.get('needs_you') or {})
             return state
 
     def stop_bulk_fix(self) -> bool:
