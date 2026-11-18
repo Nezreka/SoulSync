@@ -272,12 +272,13 @@ def test_a_resolver_that_asks_files_a_request_with_the_stored_id(client, h, ctxs
     assert h.db.list_video_requests(profile_id=pid)[0]["quality_profile_id"] == 11
 
 
-def test_the_stub_resolver_drops_a_members_video_pick_like_today(client, h, ctxs):
-    """until piece B fills resolve_request_quality in, a member's profileId
-    lands without a stored quality (the admin picks at approve)."""
-    pid = ctxs(35, member_ctx(profile_id=35, **{"movies.get": "ask"}))
+def test_a_members_allowed_pick_is_stored_on_the_request(client, h, ctxs):
+    """#2168: a member's profileId inside what they may pick is kept on the
+    request, so the admin sees and approves what was asked for."""
+    pid = ctxs(35, member_ctx(profile_id=35, **{"movies.get": "ask", "movies.quality": [3, 7],
+                                                "movies.quality_default": 3}))
     _post(client, pid, {"mediaType": "movie", "mediaId": NEW_MOVIE, "profileId": 3})
-    assert h.db.list_video_requests(profile_id=pid)[0]["quality_profile_id"] is None
+    assert h.db.list_video_requests(profile_id=pid)[0]["quality_profile_id"] == 3
 
 
 def test_service_lists_only_the_profiles_a_person_may_pick(client, h, ctxs):

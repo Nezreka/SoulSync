@@ -149,11 +149,16 @@ def test_no_quality_at_all_adds_nothing():
     assert gate(resolver=refuse).want("movie", quality_id=4).skip
 
 
-def test_the_p0_stub_keeps_todays_quality():
-    """until piece B, music picks are taken and member video picks dropped."""
+def test_a_source_quality_is_held_to_what_the_owner_may_pick():
+    """the real resolver (#2168): a pick in the owner's set is kept, one
+    outside it falls to their default, no pick uses their default."""
     g = gate()
     assert g.want("music", quality_id=4).quality_profile_id == 4
-    assert g.want("movie", quality_id=4).quality_profile_id is None
+    assert g.want("movie", quality_id=4).quality_profile_id == 4        # open set
+    limited = gate(member_ctx(profile_id=OWNER, **{"movies.quality": [3, 4], "movies.quality_default": 3}))
+    assert limited.want("movie", quality_id=4).quality_profile_id == 4
+    assert limited.want("movie", quality_id=9).quality_profile_id == 3  # not theirs: default
+    assert limited.want("movie").quality_profile_id == 3
 
 
 def test_rights_are_read_again_during_a_long_scan():
