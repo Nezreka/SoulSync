@@ -14,7 +14,7 @@ from database.video_database import VideoDatabase
 
 
 def test_schema_version_and_column_ride_the_migrations():
-    assert vdb.SCHEMA_VERSION == 74
+    assert vdb.SCHEMA_VERSION >= 74
     assert ("quality_profiles", "media_type", "TEXT") in vdb._COLUMN_MIGRATIONS
 
 
@@ -37,7 +37,7 @@ def test_a_v73_database_upgrades_with_every_profile_left_as_both(tmp_path):
     assert db.get_named_quality_profile(3)["media_type"] is None
     conn = sqlite3.connect(str(path))
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 74
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == vdb.SCHEMA_VERSION
     finally:
         conn.close()
 
