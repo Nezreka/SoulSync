@@ -45,8 +45,24 @@ function mockAccount({
     unknown
   >,
   weather = WEATHER_OFF as Record<string, unknown>,
+  perms = MEMBER_PERMS as Record<string, unknown>,
+  quota = null as Record<string, unknown> | null,
 } = {}) {
   server.use(
+    http.get('/api/profiles/me/permissions', () =>
+      HttpResponse.json({
+        success: true,
+        profile_id: 7,
+        is_admin: isAdmin,
+        source: 'template',
+        effective: perms,
+        summary: { sentence: 'You use music.', lines: [], never: [] },
+      }),
+    ),
+    http.get('/api/profiles', () =>
+      HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Boulder', is_admin: true }] }),
+    ),
+    http.get('/api/requests/music/quota', () => HttpResponse.json({ success: true, quota })),
     http.get('/api/weather', () => HttpResponse.json(weather)),
     http.get('/api/profiles/me/navidrome-libraries', () =>
       HttpResponse.json({ success: true, ...navidromeLibraries }),
@@ -69,6 +85,29 @@ function mockAccount({
     ),
   );
 }
+
+// a member on Adult: everything on, downloads right away, no limit
+const MEMBER_PERMS: Record<string, unknown> = {
+  'music.access': true,
+  'music.get': 'download',
+  'music.hide_explicit': false,
+  'movies.access': true,
+  'movies.get': 'download',
+  'movies.max_rating': 'any',
+  'tv.access': true,
+  'tv.get': 'download',
+  'tv.max_rating': 'follow',
+  'books.access': true,
+  'books.get': 'download',
+  'podcasts.access': true,
+  'podcasts.get': 'download',
+  'requests.limit': { n: 0, days: 7 },
+  'requests.see_all': false,
+  'requests.moderate': false,
+  'account.connect': true,
+  'chat.use': true,
+  'automations.personal': true,
+};
 
 // what /api/weather answers a member with no place of their own (#2163)
 const WEATHER_OFF = {
@@ -160,7 +199,12 @@ describe('My Account', () => {
     expect(modal().getAttribute('role')).toBe('dialog');
     expect(modal().textContent).toContain('Kim');
     const titles = [...body().querySelectorAll('.ma-section-title')].map((h) => h.textContent);
-    expect(titles).toEqual(['Media server', 'Music services', 'Sidebar weather']);
+    expect(titles).toEqual([
+      'What you can do',
+      'Media server',
+      'Music services',
+      'Sidebar weather',
+    ]);
     expect(body().textContent).toContain(
       'Signed in as kim. Your playlists sync to your own account.',
     );
@@ -795,5 +839,74 @@ describe('My Account: your own sidebar weather (#2163)', () => {
     openMyAccountsModal();
     await vi.waitFor(() => expect(body().querySelector('.ma-empty')).not.toBeNull());
     expect(document.getElementById('ma-sub-weather')).toBeNull();
+  });
+});
+
+// what you can do (#2166): the member's own summary, read-only, from the
+// server's map. no switches, and who to ask when something is off
+describe('What you can do', () => {
+  const card = () => document.getElementById('ma-cando') as HTMLElement;
+  const row = (id: string) =>
+    (document.querySelector(`#ma-cando [data-can="${id}"]`) as HTMLElement).textContent || '';
+
+  it('a downloader: everything right away, nothing to ask about', async () => {
+    mockAccount({});
+    await opened();
+    await vi.waitFor(() => expect(card()).not.toBeNull());
+    expect(card().textContent).toContain(
+      'You get music, movies, shows, audiobooks and podcast episodes right away.',
+    );
+    expect(row('music')).toContain('Downloads right away');
+    expect(row('requests')).toContain('Nothing to ask: it comes right away');
+    expect(card().textContent).not.toContain('Ask Boulder');
+    // read-only: nothing in it can be pressed or switched
+    expect(card().querySelector('button, input, select')).toBeNull();
+  });
+
+  it('asks first, with the limit and how many are used', async () => {
+    mockAccount({
+      perms: {
+        ...MEMBER_PERMS,
+        'music.get': 'ask',
+        'movies.get': 'ask',
+        'movies.max_rating': 'PG-13',
+        'tv.get': 'ask',
+        'requests.limit': { n: 5, days: 7 },
+      },
+      quota: { limit: 5, days: 7, used: 2, remaining: 3 },
+    });
+    await opened();
+    await vi.waitFor(() => expect(row('requests')).toContain('2 used'));
+    expect(card().textContent).toContain(
+      'You ask first for music, movies and shows, 5 asks a week.',
+    );
+    expect(row('requests')).toContain('5 asks a week');
+    expect(row('movies')).toContain('up to PG-13');
+    expect(row('tv')).toContain('up to TV-14');
+  });
+
+  it('books off: says so and who to ask', async () => {
+    mockAccount({
+      perms: { ...MEMBER_PERMS, 'books.access': false, 'podcasts.access': false },
+    });
+    await opened();
+    await vi.waitFor(() => expect(row('books')).toContain('Not part of your profile'));
+    expect(card().textContent).toContain('Ask Boulder');
+  });
+
+  it('a moderator is told what they answer', async () => {
+    mockAccount({
+      perms: { ...MEMBER_PERMS, 'requests.moderate': true, 'requests.see_all': true },
+    });
+    await opened();
+    await vi.waitFor(() => expect(row('requests')).toContain('moderator'));
+    expect(row('requests')).toContain('you answer everyone’s asks but your own');
+  });
+
+  it('see everyone’s, without answering', async () => {
+    mockAccount({ perms: { ...MEMBER_PERMS, 'requests.see_all': true } });
+    await opened();
+    await vi.waitFor(() => expect(row('requests')).toContain('you see everyone’s'));
+    expect(row('requests')).not.toContain('moderator');
   });
 });

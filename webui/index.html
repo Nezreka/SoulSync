@@ -3797,15 +3797,16 @@
                             <option value="">Loading&hellip;</option>
                         </select>
                     </label>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. Ask your admin if you'd like it.</p>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary" onclick="closeAddToWishlistModal()">
                             Close
                         </button>
-                        <button class="btn btn--download" id="wishlist-download-now-btn"
+                        <button class="btn btn--download" id="wishlist-download-now-btn" data-download-action
                             onclick="handleWishlistDownloadNow()">
                             Download Now
                         </button>
-                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn">
+                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn" data-request-action>
                             Add to Wishlist
                         </button>
                     </div>

@@ -187,8 +187,8 @@ export function AudiobookPeopleRow({ results, roles, max = 6 }: AudiobookPeopleR
                     }`}
                     data-unwatched={watched.has(person.name) ? undefined : '1'}
                     // following wishlists their new books to download: hidden
-                    // for a profile with downloads off (unwatching stays)
-                    data-download-action={watched.has(person.name) ? undefined : ''}
+                    // for a profile that can't get books (unwatching stays)
+                    data-books-action={watched.has(person.name) ? undefined : ''}
                     style={watched.has(person.name) ? undefined : { opacity: 0.4 }}
                     title={
                       watched.has(person.name)

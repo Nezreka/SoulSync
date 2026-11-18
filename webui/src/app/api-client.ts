@@ -50,6 +50,12 @@ function getHttpErrorMessage(data: unknown, fallback: string): string {
   if (!data || typeof data !== 'object') return fallback;
 
   const payload = data as JsonErrorPayload;
+  // a permission refusal (#2166) carries a code and plain words: the words
+  // are what a person should read ("Audiobooks aren't part of your profile")
+  if (payload.error === 'not_allowed') {
+    const words = nonEmptyString(payload.message);
+    if (words) return words;
+  }
   const error = nonEmptyString(payload.error);
   if (error) return error;
   if (payload.error && typeof payload.error === 'object') {

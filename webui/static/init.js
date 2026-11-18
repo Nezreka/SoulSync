@@ -465,6 +465,15 @@ function notifyProfileContextChanged() {
     window.dispatchEvent(new CustomEvent(PROFILE_CONTEXT_CHANGED_EVENT));
 }
 
+// an admin changed what this profile may do (src/shell/my-permissions.ts):
+// the sidebar follows without a reload (Requests for a new moderator, and
+// the body classes the download buttons hide on)
+window.addEventListener('ss:perms-changed', () => {
+    if (!currentProfile) return;
+    window.SoulSyncProfileNav?.apply(currentProfile);
+    window.SoulSyncFeatures?.apply();
+});
+
 function setCurrentProfile(profile) {
     currentProfile = profile;
     // Script-scoped let — unreachable from React modules, so the name is
@@ -495,6 +504,18 @@ const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? win
             // 403 restricted. one quiet toast every few seconds, not one per call
             if (res && res.status === 403) {
                 res.clone().json().then((body) => {
+                    // a permission the page thought they had (an admin just
+                    // changed it): the server's own words, and the map
+                    // refreshes so the control goes away
+                    if (body && body.error === 'not_allowed') {
+                        if (window.SoulSyncPerms) window.SoulSyncPerms.load({ force: true });
+                        if (Date.now() - restrictedToastAt < 4000) return;
+                        restrictedToastAt = Date.now();
+                        if (typeof showToast === 'function') {
+                            showToast(body.message || "That isn't part of your profile. Ask an admin if you'd like it.", 'info');
+                        }
+                        return;
+                    }
                     if (!body || body.restricted !== true) return;
                     if (Date.now() - restrictedToastAt < 4000) return;
                     restrictedToastAt = Date.now();
@@ -571,7 +592,12 @@ function isPageAllowed(pageId) {
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
     // requests: admins answer them, profiles without download rights make them
-    if (normalizedPageId === 'requests') return !!currentProfile.is_admin || !canDownload();
+    // (and moderators answer them, #2166: profile-nav.js holds the rule)
+    if (normalizedPageId === 'requests') {
+        const nav = window.SoulSyncProfileNav;
+        return nav && nav.requestsVisible ? nav.requestsVisible(currentProfile, 'music')
+            : (!!currentProfile.is_admin || !canDownload());
+    }
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -592,6 +618,13 @@ function isPageAllowed(pageId) {
 function canDownload() {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
+    // the server's permission map once it's in for this profile, so an
+    // admin's change reaches an open page (src/shell/my-permissions.ts).
+    // the profile's own column until then
+    const perms = window.SoulSyncPerms;
+    if (perms && perms.live() && perms.get().profileId === currentProfile.id) {
+        return perms.mode('music') === 'download';
+    }
     return currentProfile.can_download !== false && currentProfile.can_download !== 0;
 }
 
