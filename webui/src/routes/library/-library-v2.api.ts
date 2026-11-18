@@ -1075,6 +1075,7 @@ export async function updateLibraryV2ArtistSettings(
     | 'include_compilations'
     | 'include_instrumentals'
     | 'include_other_artists'
+    | 'release_statuses'
     | 'auto_download'
     | 'lookback_days'
     | 'preferred_metadata_source'
@@ -1100,6 +1101,8 @@ export async function updateLibraryV2ArtistSettings(
         include_compilations: settings.include_compilations,
         include_instrumentals: settings.include_instrumentals,
         include_other_artists: settings.include_other_artists,
+        // #2175: null follows the library-wide statuses
+        release_statuses: settings.release_statuses ?? null,
         auto_download: settings.auto_download,
         lookback_days: settings.lookback_days,
         preferred_metadata_source: settings.preferred_metadata_source,

@@ -438,8 +438,18 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "include_compilations": bool(d.get("include_compilations", False)),
         # #1822: true = the release rules come from the watchlist defaults
         "follow_defaults": bool(d.get("follow_defaults", False)),
+        # #2175: the artist's own MusicBrainz release statuses, null = the
+        # library-wide ones
+        "release_statuses": release_statuses_out(d.get("allowed_release_statuses")),
     }
     return filter_fields(result, fields)
+
+
+def release_statuses_out(stored):
+    """#2175: a stored status list as a list, None when it follows the library."""
+    from core.release_statuses import parse_statuses
+    statuses = parse_statuses(stored)
+    return list(statuses) if statuses else None
 
 
 def serialize_wishlist_track(obj, fields: Optional[Set[str]] = None) -> dict:

@@ -1648,7 +1648,7 @@ def watchlist_artist_config(artist_id):
                        lookback_days, discogs_artist_id, preferred_metadata_source,
                        amazon_artist_id, musicbrainz_artist_id, auto_download,
                        quality_profile_id, auto_download_pref, include_other_artists,
-                       follow_defaults, include_live_tracks
+                       follow_defaults, include_live_tracks, allowed_release_statuses
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1803,6 +1803,8 @@ def watchlist_artist_config(artist_id):
                 # then show the defaults, the rules a scan actually applies.
                 'follow_defaults': bool(result[24]) if len(result) > 24 and result[24] is not None else False,
                 'defaults': defaults,
+                # #2175: null follows the library-wide statuses
+                **_release_status_config(result[26] if len(result) > 26 else None),
             }
             if config['follow_defaults']:
                 config.update(defaults)
@@ -1888,7 +1890,7 @@ def watchlist_artist_config(artist_id):
                        include_remixes, include_acoustic, include_compilations,
                        include_instrumentals, include_other_artists, lookback_days, preferred_metadata_source,
                        auto_download, quality_profile_id, auto_download_pref, follow_defaults,
-                       include_live_tracks
+                       include_live_tracks, allowed_release_statuses
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -2041,6 +2043,21 @@ def watchlist_artist_config(artist_id):
                 conn.close()
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
 
+            # #2175: null follows the library-wide statuses, a list is its own.
+            # absent keeps what is stored
+            if 'release_statuses' in data:
+                from core.release_statuses import ReleaseStatusError, encode, validate_allowed
+                if data.get('release_statuses') is None:
+                    allowed_release_statuses = None
+                else:
+                    try:
+                        allowed_release_statuses = encode(validate_allowed(data.get('release_statuses')))
+                    except ReleaseStatusError as exc:
+                        conn.close()
+                        return jsonify({"success": False, "error": str(exc)}), 400
+            else:
+                allowed_release_statuses = old_row['allowed_release_statuses']
+
             # lookback_days changed — clear last_scan_timestamp to force rescan
             lookback_changed = old_row['lookback_days'] != lookback_days
 
@@ -2050,7 +2067,7 @@ def watchlist_artist_config(artist_id):
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, include_other_artists = ?, lookback_days = ?, preferred_metadata_source = ?,
                     auto_download = ?, auto_download_pref = ?, quality_profile_id = ?,
-                    follow_defaults = ?, include_live_tracks = ?,
+                    follow_defaults = ?, include_live_tracks = ?, allowed_release_statuses = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE profile_id = ? AND (
@@ -2062,6 +2079,7 @@ def watchlist_artist_config(artist_id):
                   int(include_instrumentals), int(include_other_artists), lookback_days, preferred_metadata_source, int(auto_download),
                   auto_download_pref, quality_profile_id, int(bool(follow_defaults)),
                   None if include_live_tracks is None else int(bool(include_live_tracks)),
+                  allowed_release_statuses,
                   lookback_changed, active_profile_id,
                   artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
@@ -2094,6 +2112,7 @@ def watchlist_artist_config(artist_id):
                     'auto_download_pref': auto_download_pref,
                     'quality_profile_id': quality_profile_id,
                     'follow_defaults': bool(follow_defaults),
+                    **_release_status_config(allowed_release_statuses),
                 }
             })
 
@@ -2189,9 +2208,13 @@ def watchlist_artist_link_provider(artist_id):
 def _custom_artist_count(database, profile_id) -> int:
     conn = database._get_connection()
     try:
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(watchlist_artists)")}
+        # #2175: its own release statuses count as its own rules too
+        own_statuses = (" OR allowed_release_statuses IS NOT NULL"
+                        if 'allowed_release_statuses' in columns else "")
         row = conn.execute(
             "SELECT COUNT(*) FROM watchlist_artists WHERE profile_id = ? "
-            "AND COALESCE(follow_defaults, 0) = 0", (int(profile_id),)).fetchone()
+            f"AND (COALESCE(follow_defaults, 0) = 0{own_statuses})", (int(profile_id),)).fetchone()
         return int(row[0] or 0)
     finally:
         conn.close()
@@ -2209,6 +2232,35 @@ def watchlist_reset_to_defaults():
     except Exception as e:
         logger.error(f"Error resetting watchlist artists to defaults: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _release_status_config(stored):
+    """#2175: an artist's own statuses (None = the library's), the library's,
+    and the ones a scan applies."""
+    from core.release_statuses import parse_statuses
+    own = parse_statuses(stored) or None
+    library = _library_release_statuses()
+    return {
+        'release_statuses': list(own) if own else None,
+        'library_release_statuses': list(library),
+        'effective_release_statuses': list(own or library),
+    }
+
+
+def _posted_release_statuses(data):
+    """#2175: (statuses, None), (None, None) when not sent, or (None, error)."""
+    if data.get('release_statuses') is None:
+        return None, None
+    from core.release_statuses import ReleaseStatusError, validate_allowed
+    try:
+        return list(validate_allowed(data.get('release_statuses'))), None
+    except ReleaseStatusError as exc:
+        return None, str(exc)
+
+
+def _library_release_statuses():
+    from core.release_statuses import library_statuses
+    return library_statuses(config_manager)
 
 
 @bp.route('/api/watchlist/global-config', methods=['GET', 'POST'])
@@ -2250,6 +2302,7 @@ def watchlist_global_config():
                     'watchlist.prefer_explicit_edition', True),
                 # #1822: how many artists have their own rules instead
                 'custom_artist_count': _custom_artist_count(_db, get_current_profile_id()),
+                'release_statuses': list(_library_release_statuses()),  # #2175
             }
             return jsonify({"success": True, "config": config})
 
@@ -2281,6 +2334,9 @@ def watchlist_global_config():
             # always need a release type (#1822)
             if not (include_albums or include_eps or include_singles):
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
+            release_statuses, bad = _posted_release_statuses(data)  # #2175
+            if bad:
+                return jsonify({"success": False, "error": bad}), 400
 
             config_manager.set('watchlist.global_override_enabled', global_override_enabled)
             config_manager.set('watchlist.global_include_albums', include_albums)
@@ -2297,6 +2353,8 @@ def watchlist_global_config():
             config_manager.set('watchlist.exclude_terms', exclude_terms)
             global_auto_download = bool(data.get('global_auto_download', True))
             config_manager.set('watchlist.global_auto_download', global_auto_download)
+            if release_statuses is not None:
+                config_manager.set('watchlist.global_release_statuses', release_statuses)
             # #1450: validate against the enum; anything else falls back to
             # "all" (today's behaviour) rather than persisting a bad value.
             edition_preference = data.get('edition_preference', _EDITION_PREFERENCE_ALL)
@@ -2336,6 +2394,7 @@ def watchlist_global_config():
                     'global_auto_download': global_auto_download,
                     'edition_preference': edition_preference,
                     'prefer_explicit_edition': prefer_explicit_edition,
+                    'release_statuses': list(_library_release_statuses()),
                 }
             })
 

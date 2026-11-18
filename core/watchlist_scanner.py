@@ -678,6 +678,48 @@ def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicate
     return _albums_likely_match(wanted_album, library_album)
 
 
+def _watchlist_release_statuses(artist, source, source_artist_id, source_provider):
+    """#2175: (allowed statuses, {group id: statuses} or None) for one artist.
+
+    Only a MusicBrainz catalogue has statuses. Any other source, or every
+    status allowed, asks nothing and keeps nothing out."""
+    from core.release_statuses import effective_statuses, fetch_group_statuses, is_restrictive
+    try:
+        from core.settings import config_manager
+    except Exception:  # noqa: BLE001
+        config_manager = None
+    allowed = effective_statuses(artist, config_manager)
+    if not is_restrictive(allowed):
+        return allowed, None
+    if str(source or source_provider or '').strip().lower() != 'musicbrainz':
+        return allowed, None
+    mbid = (source_artist_id if str(source_provider or source or '').strip().lower() == 'musicbrainz'
+            else None) or getattr(artist, 'musicbrainz_artist_id', None)
+    if not mbid:
+        return allowed, None
+    return allowed, fetch_group_statuses(str(mbid))
+
+
+def _album_statuses_pass(album, album_data, group_statuses, allowed) -> bool:
+    """Does this album's release group get through the status filter? A
+    group the lookup doesn't know passes."""
+    if not group_statuses:
+        return True
+    from core.release_statuses import statuses_pass
+
+    def read(obj, key):
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    for obj in (album, album_data):
+        for key in ('release_group_id', 'id'):
+            value = str(read(obj, key) or '').strip().lower()
+            if value and value in group_statuses:
+                return statuses_pass(group_statuses[value], allowed)
+    return True
+
+
 def _resolve_edition_preference(explicit_value=None) -> str:
     """Validate a ``watchlist.edition_preference`` value.
 
@@ -1915,6 +1957,13 @@ class WatchlistScanner:
                 # and only it runs the normal per-track flow. For "all" each
                 # unit is one album, so the loop below behaves exactly as
                 # before.
+                # #2175: the MusicBrainz statuses this artist lets through, and
+                # each release group's, asked once per artist and only when a
+                # status is kept out and the catalogue is MusicBrainz's
+                allowed_statuses, group_statuses = _watchlist_release_statuses(
+                    artist, source if not isinstance(discography_result, list) else None,
+                    source_artist_id, source_provider)
+
                 if edition_preference != EDITION_PREFERENCE_ALL:
                     album_units = _group_albums_by_edition(albums)
                 else:
@@ -2008,6 +2057,12 @@ class WatchlistScanner:
                                 getattr(artist, 'include_albums', True),
                                 getattr(artist, 'include_eps', True),
                                 getattr(artist, 'include_singles', True))
+                            continue
+                        if not _album_statuses_pass(album, album_data, group_statuses,
+                                                    allowed_statuses):
+                            logger.info(
+                                "Skipping '%s': MusicBrainz release status filter (%s) excludes it",
+                                album_name, ', '.join(allowed_statuses or ()))
                             continue
 
                         if edition_preference == EDITION_PREFERENCE_ONE_STANDARD and \

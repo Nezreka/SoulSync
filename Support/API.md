@@ -1232,6 +1232,7 @@ List all watched artists for the current profile.
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
 | `follow_defaults` | bool | The artist uses the watchlist defaults. The `include_*` fields then show the defaults, which are the rules a scan applies |
+| `release_statuses` | string[]? | The MusicBrainz release statuses this artist lets through (`official`, `promotion`, `bootleg`, `pseudo-release`, `withdrawn`, `expunged`, `cancelled`). `null` = the library-wide list from the watchlist defaults |
 
 #### `POST /api/v1/watchlist`
 
@@ -1256,7 +1257,9 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_live_tracks`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`, `release_statuses`.
+
+`release_statuses` is a list of MusicBrainz statuses the artist lets through, or `null` to follow the library-wide list. A release group passes when any of its releases has one of them; a release from another source, or with no status, always passes. An empty list or an unknown status is a 400.
 
 Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 

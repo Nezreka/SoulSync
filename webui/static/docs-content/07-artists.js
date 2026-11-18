@@ -147,6 +147,14 @@ Live albums and Live tracks are two rules, so you can keep live bonus tracks out
 
 **Edition Preference** in the defaults decides what happens when an album exists in several editions. **Standard** is the original release: the edition with the fewest tracks, and among those the one that is not a remaster or reissue, then the earliest. With **Prefer explicit edition** on, the clean copy of an album that is also listed uncensored is never added, in any mode.
 
+## Release status
+
+MusicBrainz gives every release a status: Official, Promotion, Bootleg, Pseudo-Release, Withdrawn, Expunged or Cancelled. **Release Status** in the defaults picks the ones to grab, for the whole library. Every status is on until you change it, so nothing changes on its own.
+
+To give one artist its own, open it and set **Release status** on the **Rules** tab to **Pick for this artist** (or turn off **Use the library's statuses** in the library's Artist Settings). Set it back to the default to follow the library again.
+
+A status belongs to a release, not to the album as a whole, so an album is grabbed when any of its releases has a status you picked. An album with no status on MusicBrainz, and every release from Spotify, Deezer or another source that has no statuses, always gets through. The filter applies to new releases the watchlist finds and to the missing releases the Discography Refresh reports. SoulSync only asks MusicBrainz for statuses when your pick keeps something out.
+
 > [!TIP]
 > If you generally only want studio albums, set the defaults to Albums only and your wishlist stays focused.
 `

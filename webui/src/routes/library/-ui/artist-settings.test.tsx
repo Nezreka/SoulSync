@@ -242,4 +242,67 @@ describe('Library v2 Artist Settings', () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(submitted).toEqual([{ scope: 'missing', monitored: true }]));
   });
+
+  // #2175: MusicBrainz release statuses, inherited from the library or its own
+  function statusHandlers(own: string[] | null) {
+    handlers();
+    const submitted: unknown[] = [];
+    const withStatuses = {
+      ...settings,
+      release_statuses: own,
+      library_release_statuses: ['official', 'promotion'],
+    };
+    server.use(
+      http.get('/api/library/v2/artists/7/settings', () =>
+        HttpResponse.json({
+          success: true,
+          settings: withStatuses,
+          metadata_sources: ['spotify'],
+          global_metadata_source: 'spotify',
+        }),
+      ),
+      http.put('/api/library/v2/artists/7/settings', async ({ request }) => {
+        submitted.push(await request.json());
+        return HttpResponse.json({ success: true, settings: withStatuses });
+      }),
+    );
+    return submitted;
+  }
+
+  it("follows the library's release statuses until it picks its own", async () => {
+    const submitted = statusHandlers(null);
+    renderModal();
+
+    const follow = await screen.findByRole('checkbox', { name: /Use the library's statuses/ });
+    expect(follow).toBeChecked();
+    expect(screen.getByText(/Grabbing Official, Promotion\./)).toBeInTheDocument();
+    // the library's shown, but they are not this artist's to change
+    expect(screen.getByRole('checkbox', { name: 'Official' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Bootleg' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Bootleg' })).toBeDisabled();
+
+    fireEvent.click(follow);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Bootleg' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save future-release settings' }));
+
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]).toMatchObject({ release_statuses: ['official', 'promotion', 'bootleg'] });
+  });
+
+  it('puts an artist with its own statuses back on the library with null', async () => {
+    const submitted = statusHandlers(['bootleg']);
+    renderModal();
+
+    const follow = await screen.findByRole('checkbox', { name: /Use the library's statuses/ });
+    expect(follow).not.toBeChecked();
+    // the last one on can't be turned off
+    expect(screen.getByRole('checkbox', { name: 'Bootleg' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Bootleg' })).toBeDisabled();
+
+    fireEvent.click(follow);
+    fireEvent.click(screen.getByRole('button', { name: 'Save future-release settings' }));
+
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]).toMatchObject({ release_statuses: null });
+  });
 });
