@@ -14,7 +14,7 @@ import { installRealDocs } from './docs.test-utils';
 import { RECENT_KEY } from './rank';
 
 beforeAll(async () => {
-  installRealDocs();
+  installRealDocs({ readAs: 'admin' });
   await loadDocs();
 });
 

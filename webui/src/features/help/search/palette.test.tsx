@@ -30,7 +30,7 @@ function sidebar() {
 }
 
 beforeAll(async () => {
-  installRealDocs();
+  installRealDocs({ readAs: 'admin' });
   await loadDocs();
 });
 

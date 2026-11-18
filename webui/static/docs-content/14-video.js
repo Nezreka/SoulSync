@@ -5,6 +5,7 @@
 // Video: Overview — what the video side is, switching sides, servers, sources, access.
 registerDocsSection({
     id: 'video-overview',
+    needs: 'video',
     title: 'Video: Overview',
     icon: '🎬',
     pages: [
@@ -51,6 +52,7 @@ A handful of pages are **shared** across both sides — **Chat**, **Issues**, an
         },
         {
             id: 'vid-server',
+            needs: 'admin',
             title: 'Connecting a Media Server',
             lede: 'Point the video side at Plex or Jellyfin, pick your libraries, and scan them in.',
             body: `
@@ -74,6 +76,7 @@ SoulSync stores a lightweight copy of every movie/show/episode row and enriches 
         },
         {
             id: 'vid-sources',
+            needs: 'admin',
             title: 'Download Sources',
             lede: 'Indexers, download clients, and library paths — what the video side shares with music and what it keeps to itself.',
             body: `
@@ -155,6 +158,7 @@ A new title files into, first match wins:
         },
         {
             id: 'vid-access',
+            needs: 'admin',
             title: 'Per-Profile Side Access',
             lede: 'Control which profiles can see the video side at all — enforced server-side, not just hidden in the UI.',
             body: `
@@ -172,6 +176,7 @@ See [Video: Settings](#video-settings) and [Multi-Profile](#profiles) for how to
 // Video: Dashboard: overview, continue watching, this week and the rail.
 registerDocsSection({
     id: 'video-dashboard',
+    needs: 'video.dashboard',
     title: 'Video: Dashboard',
     icon: '🎬',
     pages: [
@@ -221,6 +226,7 @@ The rail also has the next **video automations** to run, your **watchlist** and 
 // Video: Search & Studios — searching, trending, studios.
 registerDocsSection({
     id: 'video-search',
+    needs: 'video.search',
     title: 'Video: Search & Studios',
     icon: '🎬',
     pages: [
@@ -304,6 +310,7 @@ The board is **browse-only**. Grabbing goes through the **identify modal** — c
 // Video: Discover — cinematic hero, For You & taste, More Like This & gaps, genres, preferences.
 registerDocsSection({
     id: 'video-discover',
+    needs: 'video.discover',
     title: 'Video: Discover',
     icon: '🎬',
     pages: [
@@ -349,6 +356,7 @@ Genre browsing respects your [preferences](#vdisc-prefs) — ignored titles stay
         },
         {
             id: 'vdisc-prefs',
+            needs: 'admin',
             title: 'Preferences',
             lede: 'Tune Discover to your region and services — these preferences are global.',
             body: `
@@ -367,6 +375,7 @@ These preferences are **global**, not per profile — one shared set for the who
 // Video: Library — browsing & filters, manage panel, bulk operations.
 registerDocsSection({
     id: 'video-library',
+    needs: 'video.library',
     title: 'Video: Library',
     icon: '🎬',
     pages: [
@@ -392,6 +401,7 @@ For a profile that is not an admin the page stays a plain poster wall.
         },
         {
             id: 'vlib-manage',
+            needs: 'admin',
             title: 'Manage Panel',
             lede: 'Per-title control: metadata, locks, quality profiles, monitoring, issues, and re-scans.',
             body: `
@@ -408,6 +418,7 @@ Locked fields are respected by every future enrichment pass — your corrections
         },
         {
             id: 'vlib-bulk',
+            needs: 'admin',
             title: 'Bulk Operations',
             lede: 'Act on a selection, or on everything a filter matches: rename, move, upgrade, fetch subtitles, edit details, delete.',
             body: `
@@ -460,6 +471,7 @@ New episodes of a locked show still arrive: that is what **monitored** controls.
 // Video: Detail Pages — layout, watch state, metadata edit & lock, quality & series type, people & studios.
 registerDocsSection({
     id: 'video-detail',
+    needs: 'video',
     title: 'Video: Detail Pages',
     icon: '🎬',
     pages: [
@@ -492,6 +504,7 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
         },
         {
             id: 'vdet-library',
+            needs: 'admin',
             title: 'Your Library on a Title',
             lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
             body: `
@@ -585,6 +598,7 @@ The **acquisition history** at the bottom of the title's page ([your library on 
         },
         {
             id: 'vdet-meta',
+            needs: 'admin',
             title: 'Metadata Edit & Lock',
             lede: 'Fix any field and lock it — enrichment will never overwrite your corrections.',
             body: `
@@ -602,6 +616,7 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
         },
         {
             id: 'vdet-quality',
+            needs: 'admin',
             title: 'Per-Title Quality & Series Type',
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
@@ -640,6 +655,7 @@ From either, you can **follow** them straight into your [watchlist](#vwatch-foll
 // Video: Watchlist — following people & studios, per-follow settings, release scanning.
 registerDocsSection({
     id: 'video-watchlist',
+    needs: 'video.watchlist',
     title: 'Video: Watchlist',
     icon: '🎬',
     pages: [
@@ -698,6 +714,7 @@ You can also trigger a check on demand when you're impatient about a specific re
 // Video: Wishlist — wanted & cutoff-unmet, search now & status, upgrade until cutoff.
 registerDocsSection({
     id: 'video-wishlist',
+    needs: 'video.wishlist',
     title: 'Video: Wishlist',
     icon: '🎬',
     pages: [
@@ -747,6 +764,7 @@ Status is shown honestly — searching, found, grabbed, failed with an attempt c
         },
         {
             id: 'vwish-upgrade',
+            needs: 'admin',
             title: 'Upgrade Until Cutoff',
             lede: 'Below-cutoff titles stay wanted until a strictly better release appears — then upgrade in place.',
             body: `
@@ -760,6 +778,7 @@ When an upgrade lands, it **replaces the file in place** in the real library fol
 
 registerDocsSection({
     id: 'video-downloads',
+    needs: 'video.downloads',
     title: 'Video: Downloads',
     icon: '🎬',
     pages: [
@@ -797,6 +816,7 @@ The **Clients** view (Torrents / Usenet / Soulseek tabs) shows per-client health
         },
         {
             id: 'vdl-quality',
+            needs: 'admin',
             title: 'Quality Profiles & Formats',
             lede: 'Radarr-class quality ladders with cutoffs, plus scored custom formats that steer the ranker.',
             body: `
@@ -849,6 +869,7 @@ YouTube grabs use their own separate quality selector rather than the movie/TV l
         },
         {
             id: 'vdl-lists',
+            needs: 'admin',
             title: 'Import Lists',
             lede: 'Turn lists you curate elsewhere — TMDB, IMDb, Plex Watchlist — into titles SoulSync goes and gets.',
             body: `
@@ -877,6 +898,7 @@ There's no per-list schedule — syncing runs through the **Sync Import Lists** 
         },
         {
             id: 'vdl-blocklist',
+            needs: 'admin',
             title: 'Blocklist & Recycle Bin',
             lede: 'Bad releases get quarantined automatically — and replaced files are kept, not destroyed.',
             body: `
@@ -917,6 +939,7 @@ After a download completes, a lightweight post-download scan probes your media s
         },
         {
             id: 'vdl-organize',
+            needs: 'admin',
             title: 'Organization & Rename',
             lede: 'Naming schemes, folder layout, and mass rename with a preview before you commit.',
             body: `
@@ -940,6 +963,7 @@ Sometimes a completed download can't be placed automatically — ambiguous match
 
 registerDocsSection({
     id: 'video-requests',
+    needs: 'video',
     title: 'Video: Requests',
     icon: '🎬',
     pages: [
@@ -987,6 +1011,7 @@ Asking for something already on its way is refused, so the queue never gets a du
 
 registerDocsSection({
     id: 'video-calendar',
+    needs: 'video.calendar',
     title: 'Video: Calendar',
     icon: '🎬',
     pages: [
@@ -1029,6 +1054,7 @@ The line at the right says when air dates were last refreshed from TMDB and when
         },
         {
             id: 'vcal-auto',
+            needs: 'admin',
             title: 'Auto-Wishlist for Airings',
             lede: 'How aired episodes reach your wishlist without you.',
             body: `
@@ -1064,6 +1090,7 @@ The feed covers the next 14 days; add \`days=60\` to the link for up to 60. Epis
 
 registerDocsSection({
     id: 'video-automations',
+    needs: 'admin',
     title: 'Video: Automations',
     icon: '🎬',
     pages: [
@@ -1212,6 +1239,7 @@ See [Automations](#auto-overview) for the full builder reference.
 
 registerDocsSection({
     id: 'video-youtube',
+    needs: 'video.youtube',
     title: 'Video: YouTube Channels',
     icon: '🎬',
     pages: [
@@ -1279,6 +1307,7 @@ To avoid mismatches between YouTube's ever-shifting metadata and your files, the
 
 registerDocsSection({
     id: 'video-tools',
+    needs: 'admin',
     title: 'Video: Tools',
     icon: '🎬',
     pages: [
@@ -1395,6 +1424,7 @@ Take **on-demand or scheduled backups** of the video database, then restore or d
 
 registerDocsSection({
     id: 'video-import',
+    needs: 'admin',
     title: 'Video: Import',
     icon: '🎬',
     pages: [
@@ -1441,6 +1471,7 @@ When a completed download (or an import folder file) can't be placed into the li
 
 registerDocsSection({
     id: 'video-settings',
+    needs: 'admin',
     title: 'Video: Settings',
     icon: '🎬',
     pages: [
@@ -1504,6 +1535,7 @@ Wire up event **notifications** — Discord, webhook, Telegram — for grabs, im
 
 registerDocsSection({
     id: 'video-api',
+    needs: 'admin',
     title: 'Video: API Reference',
     icon: '🎬',
     pages: [

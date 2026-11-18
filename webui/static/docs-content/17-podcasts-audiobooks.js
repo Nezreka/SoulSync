@@ -5,6 +5,7 @@
 // Podcasts: Overview — RSS-based podcasts, the watchlist model, what lives where.
 registerDocsSection({
     id: 'podcasts',
+    needs: 'podcasts.access',
     title: 'Podcasts',
     icon: '🎙️',
     pages: [
@@ -232,6 +233,7 @@ The **Podcast Media Format** setting (Settings → Library → Organization) cho
         },
         {
             id: 'pod-settings',
+            needs: 'admin',
             title: 'Podcast Settings',
             lede: 'Every podcast setting, where it lives, and the config-only flags.',
             body: `
@@ -265,6 +267,7 @@ These live in \`core/settings.py\` defaults under \`podcasts.*\`:
         },
         {
             id: 'pod-api',
+            needs: 'admin',
             title: 'Podcast API Reference',
             lede: 'Every podcast endpoint: search, shows, downloads, watchlist, and OPML.',
             body: `
@@ -296,6 +299,7 @@ Base path: \`/api/podcasts\`. No per-route auth decorators — access follows th
 // Audiobooks: Overview — the Audible/Apple catalogue side, what "owned" means.
 registerDocsSection({
     id: 'audiobooks',
+    needs: 'books.access',
     title: 'Audiobooks',
     icon: '📚',
     pages: [
@@ -581,6 +585,7 @@ Post-processing is best-effort (mutagen): narrator → COMPOSER tag, embedded co
         },
         {
             id: 'abk-bin',
+            needs: 'admin',
             title: 'Recycle Bin & Blocklist',
             lede: 'Soft deletes with restore, expiring bins, and per-release blocks.',
             body: `
@@ -603,6 +608,7 @@ The **Bin** button in the browse header opens the **Removed & refused** review m
         },
         {
             id: 'abk-settings',
+            needs: 'admin',
             title: 'Audiobook Settings',
             lede: 'Quality, folders, path templates, download sources, and import behaviour — every control.',
             body: `
@@ -669,6 +675,7 @@ The **Audiobooks** subsection carries its own chain, separate from music on purp
         },
         {
             id: 'abk-automations',
+            needs: 'admin',
             title: 'Audiobook Automations',
             lede: 'The four system automations that run the audiobook side: wishlist, authors, bin, library.',
             body: `
@@ -686,6 +693,7 @@ All four are schedule-triggered system automations: pausable, reschedulable, and
         },
         {
             id: 'abk-api',
+            needs: 'admin',
             title: 'Audiobook API Reference',
             lede: 'Every audiobook endpoint: catalogue, wishlist, watchlist, releases, library, and downloads.',
             body: `

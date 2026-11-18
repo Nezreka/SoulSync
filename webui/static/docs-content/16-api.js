@@ -10,6 +10,7 @@
 
     register({
         id: 'api',
+        needs: 'admin',
         title: 'API Reference',
         icon: '🔌',
         pages: [

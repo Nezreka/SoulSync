@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'getting-started',
+    needs: 'admin',
     title: 'Getting Started',
     icon: '🚀',
     pages: [
         {
             id: 'gs-overview',
+            needs: 'everyone',
             title: 'Overview',
             lede: 'SoulSync is a self-hosted platform that downloads, syncs, and manages your music and video libraries — all from one app.',
             body: `
@@ -138,6 +140,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
         },
         {
             id: 'gs-interface',
+            needs: 'everyone',
             title: 'Understanding the Interface',
             lede: 'How SoulSync is laid out and where everything lives.',
             body: `

@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'profiles',
+    needs: 'admin',
     title: 'Multi-Profile',
     icon: '👥',
     pages: [
         {
             id: 'prof-overview',
+            needs: 'everyone',
             title: 'How Profiles Work',
             lede: 'Everyone in the household gets their own profile, with their own lists and their own access.',
             body: `
@@ -243,6 +245,7 @@ You can change a request's quality when you approve it. Admins can pick anything
         },
         {
             id: 'prof-members',
+            needs: 'everyone',
             title: 'What Members See',
             lede: 'Things they can not use are gone, not greyed out.',
             body: `
@@ -318,6 +321,7 @@ The old profile settings are still written as well, so an older SoulSync reading
         },
         {
             id: 'prof-accounts',
+            needs: 'account.connect',
             title: 'Your Accounts',
             lede: 'Each profile connects its own music services and media-server identity.',
             body: `
@@ -364,6 +368,7 @@ Your plays never go to the admin's accounts, and the admin's never go to yours.
         },
         {
             id: 'prof-security',
+            needs: 'everyone',
             title: 'PIN, Password & Recovery',
             lede: 'Quick-switch PINs, login passwords, and the way back in when someone forgets.',
             body: `
@@ -408,6 +413,7 @@ Passwords aren't deleted. They just aren't used, and work again when the switch 
         },
         {
             id: 'prof-requests',
+            needs: 'everyone',
             title: 'Requests',
             lede: 'Members ask, admins and moderators answer, and everyone watches the request arrive.',
             body: `
@@ -440,6 +446,7 @@ Admins and moderators hear about new asks, and the requester hears when theirs i
         },
         {
             id: 'prof-home',
+            needs: 'everyone',
             title: 'Home Pages',
             lede: 'Each profile lands on the home that suits them.',
             body: `
@@ -455,6 +462,7 @@ With no home page (or one they can't open), a profile lands on Discover, or the 
         },
         {
             id: 'prof-features',
+            needs: 'everyone',
             title: 'Show Only What You Use',
             lede: 'Every profile hides the parts of SoulSync it does not need.',
             body: `

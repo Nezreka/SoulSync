@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'dashboard',
+    needs: 'admin',
     title: 'Dashboard',
     icon: '📊',
     pages: [
         {
             id: 'dash-overview',
+            needs: 'music.dashboard',
             title: 'Overview & Stats',
             lede: 'Your command center: library stats, alerts, and sync pipelines — all updating live.',
             body: `
@@ -51,6 +53,7 @@ Each history entry is expandable — click to reveal source provenance details:
         },
         {
             id: 'dash-global-search',
+            needs: 'everyone',
             title: 'Global Search',
             lede: 'The floating global search bar was retired — here is what replaced it.',
             body: `
@@ -126,6 +129,7 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
         },
         {
             id: 'dash-tools',
+            needs: 'music.dashboard',
             title: 'Dashboard Sidebar',
             lede: 'Live cards for your week, sync pipelines, automations, and quick navigation.',
             body: `
@@ -288,6 +292,7 @@ An upgrade from 3.6.1 merges each release your older media servers listed twice 
         },
         {
             id: 'dash-activity',
+            needs: 'music.dashboard',
             title: 'Recent Activity',
             lede: 'The dashboard has no dedicated activity feed — here is where recent events actually surface.',
             body: `
@@ -305,6 +310,7 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
         },
         {
             id: 'dash-notifications',
+            needs: 'everyone',
             title: 'Notifications',
             lede: 'The bell in the corner: what just happened, what is running, and whether anything needs you.',
             body: `
@@ -334,6 +340,7 @@ The clock button opens the journal the server keeps for your profile: search, th
         },
         {
             id: 'dash-stats-deep',
+            needs: 'music.stats',
             title: 'Stats in Depth',
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',
             body: `

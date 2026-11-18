@@ -18,30 +18,128 @@
     'use strict';
 
     /* ── Registry ─────────────────────────────────────────────────── */
-    const _sections = [];
-    const _pageIndex = new Map();   // pageId -> { section, page }
-    const _flatPages = [];          // [{ section, page }] in nav order
+    // every section as registered, and the part of it this viewer may read.
+    // the page, its search and the help sheet only ever see the second.
+    const _registry = [];
+    let _sections = [];
+    let _pageIndex = new Map();     // pageId -> { section, page }
+    let _flatPages = [];            // [{ section, page }] in nav order
+    let _audienceKey = null;
+    let _searchIndex = null;        // the search's index, rebuilt when the audience changes
+
+    /* ── Who may read what (#2174) ─────────────────────────────────── */
+    // a section says who it is for with `needs`, and a page can say its own
+    // (else it follows its section). a need is 'everyone', 'admin', 'video'
+    // (movies or TV), a permission row ('music.playlist_sync'), a getting row
+    // with the least mode it needs ('music.get' asks at least,
+    // 'music.get=download' gets right away), or a list of them (any one). a
+    // section that says nothing is the admin's: a new page is hidden from
+    // members until someone decides who it is for. admins read everything.
+    // presentation only: docs are no secret, the server holds every action
+    // and diagnostic to the same rights on its own.
+    const _SIDE_ROW = { music: 'music.access', movies: 'movies.access', tv: 'tv.access',
+        books: 'books.access', podcasts: 'podcasts.access' };
+
+    function _docsViewer() {
+        let ctx = null;
+        try {
+            ctx = typeof window.getCurrentProfileContext === 'function' ? window.getCurrentProfileContext() : null;
+        } catch (e) { ctx = null; }
+        const perms = window.SoulSyncPerms;
+        let live = null;
+        try { live = perms && typeof perms.get === 'function' ? perms.get() : null; } catch (e) { live = null; }
+        const isAdmin = (!!ctx && (ctx.isAdmin === true || ctx.profileId === 1))
+            || !!(live && live.live && live.isAdmin);
+        return {
+            isAdmin,
+            on: (id) => { try { return !!(perms && perms.on && perms.on(id)); } catch (e) { return false; } },
+            mode: (media) => { try { return (perms && perms.mode && perms.mode(media)) || 'none'; } catch (e) { return 'none'; } },
+        };
+    }
+
+    function _docsAllowsOne(need, v) {
+        if (need === 'everyone') return true;
+        if (typeof need !== 'string' || need === 'admin') return false;
+        const video = () => v.on('movies.access') || v.on('tv.access');
+        if (need === 'video') return video();
+        const get = /^([a-z]+)\.get(?:=(ask|download))?$/.exec(need);
+        if (get) {
+            const mode = v.mode(get[1]);
+            return get[2] === 'download' ? mode === 'download' : mode !== 'none';
+        }
+        const side = need.split('.')[0];
+        if (side === 'video' && !video()) return false;
+        if (_SIDE_ROW[side] && need !== _SIDE_ROW[side] && !v.on(_SIDE_ROW[side])) return false;
+        return v.on(need);
+    }
+
+    function docsAllows(needs, viewer) {
+        const v = viewer || _docsViewer();
+        if (v.isAdmin) return true;
+        if (needs == null) return false;
+        return (Array.isArray(needs) ? needs : [needs]).some((n) => _docsAllowsOne(n, v));
+    }
+
+    function _visibleSection(section, v) {
+        const pages = section.pages.filter((p) => p && docsAllows(p.needs !== undefined ? p.needs : section.needs, v));
+        return pages.length ? Object.assign({}, section, { pages }) : null;
+    }
+
+    /** rebuild what this viewer may read. true when it changed. */
+    function _applyAudience() {
+        const v = _docsViewer();
+        const sections = _registry.map((s) => _visibleSection(s, v)).filter(Boolean);
+        const key = sections.map((s) => s.id + ':' + s.pages.map((p) => p.id).join(',')).join('|');
+        if (key === _audienceKey) return false;
+        _audienceKey = key;
+        _sections = sections;
+        _pageIndex = new Map();
+        _flatPages = [];
+        sections.forEach((section) => {
+            section.pages.forEach((page) => {
+                _pageIndex.set(page.id, { section, page });
+                _flatPages.push({ section, page });
+                // Section landing id also resolves (compat with old anchors)
+                if (!_pageIndex.has(section.id)) _pageIndex.set(section.id, { section, page: section.pages[0] });
+            });
+        });
+        _searchIndex = null;
+        return true;
+    }
 
     function registerDocsSection(section) {
         if (!section || !section.id || !Array.isArray(section.pages)) return;
-        _sections.push(section);
-        section.pages.forEach((page) => {
-            _pageIndex.set(page.id, { section, page });
-            _flatPages.push({ section, page });
-            // Section landing id also resolves (compat with old anchors)
-            if (!_pageIndex.has(section.id)) _pageIndex.set(section.id, { section, page: section.pages[0] });
-        });
+        _registry.push(section);
+        _applyAudience();
     }
     // Expose globally for docs-content/*.js
     window.registerDocsSection = registerDocsSection;
 
+    /** a page someone else may read but this viewer may not */
+    function _hiddenFromViewer(id) {
+        if (findEntry(id)) return false;
+        return _registry.some((s) => s.id === id || s.pages.some((p) => p && p.id === id));
+    }
+
     // The help sheet reads the same registry (features/help/search/docs.ts):
-    // every section in page order, as copies so a reader can't reorder ours.
+    // the sections this viewer may read, in page order, as copies so a reader
+    // can't reorder ours.
     window.SoulSyncDocs = {
         sections: function () {
+            _applyAudience();
             return _sections.map(function (s) {
-                return { id: s.id, title: s.title, pages: s.pages.slice() };
+                return { id: s.id, title: s.title, needs: s.needs, pages: s.pages.slice() };
             });
+        },
+        /** true when a guide exists but isn't for this viewer (the sheet says so) */
+        hidden: function (id) {
+            _applyAudience();
+            return _hiddenFromViewer(id);
+        },
+        /** may this viewer read this guide */
+        visible: function (id) {
+            _applyAudience();
+            return !!findEntry(id);
         },
     };
 
@@ -533,7 +631,6 @@
             .trim();
     }
 
-    let _searchIndex = null;
     function buildSearchIndex() {
         _searchIndex = [];
         _flatPages.forEach(({ section, page }) => {
@@ -737,7 +834,12 @@
     // the sheet's home, which says where their reports go.
     function initDebugPanel() {
         const header = document.querySelector('.docs-sidebar-header');
-        if (!header || header.querySelector('.dd-debug-wrap')) return;
+        if (!header) return;
+        // diagnostics are the admin's (#2174): a member reports a problem from
+        // Issues, which the help sheet's home points to
+        const existing = header.querySelector('.dd-debug-wrap');
+        if (!_docsViewer().isAdmin) { if (existing) existing.remove(); return; }
+        if (existing) return;
 
         const wrap = document.createElement('div');
         wrap.className = 'dd-debug-wrap';
@@ -1383,6 +1485,19 @@
 
     // Expose globally (init.js calls this; downloads.js calls navigateToDocsSection)
     window.initializeDocsPage = initializeDocsPage;
+
+    // an admin's change to this profile, or a profile switch, changes what it
+    // may read: the menu, the search and the open page follow without a reload
+    function _onAudienceChanged() {
+        if (!_applyAudience() || !_docsInitialized) return;
+        buildSidebar();
+        initDebugPanel();
+        const still = _activePageId && findEntry(_activePageId);
+        if (still) { syncNav(_activePageId); return; }
+        if (_flatPages.length) renderPage(_flatPages[0].page.id);
+    }
+    window.addEventListener('ss:perms-changed', _onAudienceChanged);
+    window.addEventListener('ss:webui-profile-context-changed', _onAudienceChanged);
 
     window.navigateToDocsSection = function (sectionId) {
         if (!sectionId) return;

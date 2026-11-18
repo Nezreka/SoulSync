@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'sync',
+    needs: 'music.playlist_sync',
     title: 'Playlist Sync',
     icon: '🔄',
     pages: [
@@ -316,6 +317,7 @@ A track identification couldn't find is skipped by a download too. **Download Mi
         },
         {
             id: 'sync-explorer',
+            needs: 'music.explorer',
             title: 'Playlist Explorer',
             lede: 'Browse every playlist across all sources in one visual tree.',
             body: `
