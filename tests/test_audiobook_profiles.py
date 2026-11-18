@@ -307,13 +307,27 @@ def test_the_download_buttons_carry_the_hook_the_css_hides():
     """The music and video sides hide download buttons by class name. React
     hashes its class names, so both pages need the attribute the stylesheet
     was taught to look for — otherwise the button stays visible and only the
-    API refuses, which reads as a broken button."""
+    API refuses, which reads as a broken button.
+
+    books and podcasts follow their own permission now (books.get,
+    podcasts.get), not the music one, so the hook is per kind: the shell sets
+    body[data-books-get] / body[data-podcasts-get] and the css hides the
+    matching action attribute when the mode is none."""
     css = _read("webui/static/style.css")
-    assert "body.downloads-disabled [data-download-action]" in css
-    for rel in ("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx",
-                "webui/src/routes/podcasts/-ui/podcast-episode-list.tsx",
-                "webui/src/routes/podcasts/-ui/podcast-show-notes-modal.tsx"):
-        assert "data-download-action" in _read(rel), rel
+    assert 'body[data-books-get="none"] [data-books-action]' in css
+    assert 'body[data-podcasts-get="none"] [data-podcasts-action]' in css
+    shell = _read("webui/src/shell/my-permissions.ts")
+    assert "body.dataset.booksGet" in shell
+    assert "body.dataset.podcastsGet" in shell
+    for rel, hook in (
+            ("webui/src/routes/audiobooks/-ui/audiobook-releases-modal.tsx", "data-books-action"),
+            ("webui/src/routes/podcasts/-ui/podcast-episode-list.tsx", "data-podcasts-action"),
+            ("webui/src/routes/podcasts/-ui/podcast-show-notes-modal.tsx", "data-podcasts-action")):
+        src = _read(rel)
+        assert hook in src, rel
+        # the music hook would hide a book button for a profile that can't
+        # download music but can get books
+        assert "data-download-action" not in src, rel
 
 
 def test_the_permission_label_names_what_it_covers():
