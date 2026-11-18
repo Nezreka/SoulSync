@@ -93,7 +93,7 @@ describe('the version modal’s sections', () => {
   it('lead with the release in the modal’s style, then one Earlier in section', () => {
     const sections = modalSections('3.6.7');
     expect(sections).toHaveLength(2);
-    expect(sections[0].title).toBe('3.6.7: settings in React, Seerr and other versions');
+    expect(sections[0].title).toBe('3.6.7: people and permissions, Settings in React and Seerr');
     expect(sections[0].description).toBe(release.summary);
     expect(sections[0].features).toEqual(release.features);
     expect(sections[1]).toEqual({

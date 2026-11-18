@@ -1,12 +1,33 @@
 # soulsync 3.6.7: `dev` → `main`
 
-the settings page is react now, soulsync can answer as seerr for litefin and other seerr apps, an album can switch to another version of itself, and popular tracks get a flame. plus band names with an "&" stay one artist, numbered releases like group therapy stop crossing, and a long list of reported fixes.
+settings, people is one place for who can do what, with templates, moderators and request quality. the settings page is react now, soulsync can answer as seerr for litefin and other seerr apps, an album can switch to another version of itself, and popular tracks get a flame. plus band names with an "&" stay one artist, numbered releases like group therapy stop crossing, and a long list of reported fixes.
 
 ## security
 
 - **only the admin can make the first api key.** while an install had no api key yet, anyone who could reach the server could create an admin key, signed in or not, because `/api/v1` skips the login screen. that was in 3.6.6 too, so this release is worth taking soon.
 - **members can only do what their profile allows.** with login on or an admin pin, a member could still download with downloads off (playlist start missing, audiobooks, youtube follows), edit shared library metadata including the explicit flag, reorganize anyone's files, run the duplicate cleaner and other tools, cancel someone else's video download, rebind the install's spotify, tidal, deezer, last.fm or qobuz accounts, change the media server setup, read live server logs, claim another jellyfin user, and get around request limits and rating caps. all of those are refused now, and the buttons are gone for them. found while planning the people and permissions work (#2166, #2167, #2168).
 - members see their own downloads and toasts, not everyone's. past download history is admin only for now, since old rows don't say who started them.
+
+## people and permissions
+
+- **settings > people is one place for who can do what (thanks SeadogsBooty, #2166, #2167, #2168).** people, global policy, templates, invites and activity, all on one tab. manage profiles opens it too.
+- **global policy** is the most any member can have. nothing below it goes higher, and saving shows who it reaches and what they lose before anything changes. admins are never limited.
+- **templates.** adult, teen, kids and guest are real templates now, and you can make your own. change a template and everyone following it changes with it.
+- **personal changes** keep only what differs from someone's template, so a template change still reaches them. reset one row, one category, or the whole person back to their template.
+- **the editor** is a wide sheet: a rail of categories, every row saying where it comes from (from teen, changed for maya, or held down by the policy), and a what maya can do card in plain words.
+- **getting things is per media type.** download right away, ask first or can't request, separately for music, movies, tv, audiobooks and podcasts. asking first for music no longer stops someone getting books.
+- **movies and tv are separate switches**, so a tv only profile works everywhere: search, discover, detail pages, the calendar, requests and seerr apps.
+- **request quality (#2168).** pick which quality profiles each person can ask for, per movies and tv, which ones always need your ok (4k always asks covers every 4k profile), and what they start on. the request sheet only offers those: one allowed is a line ("comes in movie 1080p"), two or more a short list with asks first tags, and the button says get it or ask for it. the server holds every path to the same rules: the sheet, direct adds, manual search, watchlist and collection adds, import lists, automations and seerr.
+- **moderators.** a member who approves, declines and manages other people's requests and issues. never their own asks, never settings, people or tools. see everyone's requests is its own switch for reading only.
+- **a request limit per kind.** music, movies and tv each have their own limit, under their own category in the editor and the global policy. albums, tracks and music videos count toward music, movies toward movies, shows, seasons, episodes and youtube toward tv. "3 of 5 movie asks left" is the same number on every page, in seerr and in the background scans, and the people list shows asks used per person, per kind. on upgrade each kind starts from the old limit, so nobody's music allowance shrinks and movies and tv each get what video had.
+- **members see only what they can use.** no request button for what they can't ask for, a calm "isn't part of your profile" note instead of an error, asks left on the request sheet, and a what you can do card on their own account page.
+- **seerr apps act as the person.** a jellyfin user's requests follow their own permissions, quality and limit. unknown users are refused on new installs; upgrades keep the profile they acted as, shown in settings > system.
+- **sign-ups start from a template.** plex and oidc sign-ins start as the template in new people start as. the old system > security sign-up settings moved there once, as a new sign-ups template when sign-in was making profiles or one of them was set. an install that never used them starts new people as guest.
+- **add person and invites start from a template** too. the admin switch saves in the same call as everything else, and the editor says how someone signs in (plex, oidc, a password, a pin or the picker).
+- **sidebar & look belongs to each template.** it replaces what new profiles see, and can still be set for one person.
+- **member automations are personal**: playlist pulls, their own watchlist scans, listening imports and notes to themselves. they run only on their own events: their downloads finishing or failing, their wishlist and watchlist finds, their playlists syncing, their requests being answered or arriving, their issues getting a reply. someone else's events and install-wide ones (scans, database updates, maintenance) never reach them, and an admin's automations hear everything. their notifications only go to public addresses. playlist auto-sync follows playlist sync.
+- **nothing changes on upgrade.** every member is matched to the template they already equal, with the real differences kept as their changes. anyone who can't be matched exactly keeps their old settings and shows as needs a look.
+- every route on the server declares who may call it, and a test fails when a new one forgets.
 
 ## help
 
@@ -45,6 +66,11 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **numbered releases never cross (thanks SeadogsBooty, #2134).** group therapy 699 was taken for 696, pt. 1 for pt. 4, and their metadata swapped. numbers in a title now have to agree for downloads, imports, library ownership and enrichment.
 - **artist.nfo lands in the artist folder (thanks Ericsson, #2138)**, also when the template nests the album deeper, and the same switch saves poster.jpg and background.jpg where the folder has no artist art yet.
 
+## tools
+
+- **cover art findings explain themselves (thanks Vidariondr, #2169).** a missing cover art finding shows the library, the audio files, the album folder and the cover it found side by side, with the source, and says what apply art writes in each. change cover opens the album page's picker so you can apply the art you want. apply now embeds the exact cover it shows, keeps a cover saved since the scan, and a finding with no cover anywhere can close. the artist photo is only suggested for an artist with none, in its own section, and apply art never uses it.
+- **keep best works when duplicates share playlists (thanks Storm, #2172).** a copy was protected whenever it sat in any playlist, so with both copies in playlists keep best did nothing. it's only protected now when a playlist would lose the song. a new setting names playlists that never protect a copy, like a smart "unsorted" one, and an option (off by default) moves the removed copy's entry to the kept copy in the same place, on navidrome, plex and jellyfin, checked after every write. smart and read only playlists are never written, and the finding shows exactly what each playlist gets before you apply.
+
 ## downloads and review
 
 - **asked for and got are the right way round in review (thanks makiel).** files held for acoustid review showed them swapped, and wrong song put the wrong file's name back on the wishlist.
@@ -76,6 +102,9 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 - **a lock shows what the admin set (thanks SeadogsBooty, #2164).** what the person hid before no longer wins once you lock them, and customize goes away for them. the profile editor's access step reads top to bottom: what they can open, then what shows in their sidebar, then the lock, and it says when they picked their own. a profile you set and locked on dev keeps what it showed.
 - **members only see themselves (thanks SeadogsBooty, #2162).** with login on, a member's profile menu has no switch to list, and the server only hands them their own profile. the household picker is unchanged.
 - **sidebar weather is per profile (thanks SeadogsBooty, #2163).** members never see the admin's town, temperature or clock. each can set their own under profile & account, sidebar weather, and the admin's stays in settings as it is.
+- **a member's notifications are their own (thanks SeadogsBooty, #2170).** the panel showed everyone the server's health, uptime, memory, scans and every job. a member sees their own notes, downloads and automations, and the feeds behind the rest refuse them.
+- **download buttons only show for who can download (thanks SeadogsBooty, #2173).** automatic search, interactive search, enhance quality and upgrade were drawn for members who ask first, and only refused after they picked tracks. they're gone for them now, and the wishlist is their way in.
+- **help & docs shows each person their own guides (thanks SeadogsBooty, #2174).** members see the docs for what they can use, search follows, and setup, server and diagnostics guides and report a problem stay with the admin.
 - **server activity is the admin's (thanks SeadogsBooty, #2155).** the live view, history, stats and the live feed refuse anyone else, direct urls included, its image proxy only fetches artwork, service status is hidden from members, and seven other diagnostic routes that answered anyone are admin only.
 
 ## video
@@ -91,6 +120,7 @@ the settings page is react now, soulsync can answer as seerr for litefin and oth
 
 ## also
 
+- **every help & docs screenshot is new**, taken on the current ui, and most pages that had none have one now (#1988).
 - the ? help button opens again on every page. it did nothing on the react pages. replaygain analyses files with non utf-8 tags (#2118), re-identify remembers the move-the-file choice (#2114), and the tools findings filter speaks the list's names (#2113).
 
 tested: the full suite passes on windows python with every failure rechecked on linux (only the known drive permission tests on a windows disk fail), the frontend suite passes, and each fix carries its own test.

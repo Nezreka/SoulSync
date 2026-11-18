@@ -67,10 +67,12 @@ export const RELEASES: Release[] = [
   {
     version: '3.6.7',
     month: 'November 2026',
-    headline: 'Settings in React, Seerr and other versions',
+    headline: 'People and permissions, Settings in React and Seerr',
     summary:
-      'The Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, Server Activity is rebuilt with its own history and stats, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
+      'Settings, People is one place for who can do what, the Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, Server Activity is rebuilt with its own history and stats, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
     features: [
+      'Settings, People: templates, personal changes, a global policy, moderators, separate movie and TV access, request quality and a request limit per kind (thanks SeadogsBooty, #2166 to #2168).',
+      'Members see only their own things: their notifications, the download actions they may use, and the help guides for what they can open (thanks SeadogsBooty, #2170, #2173, #2174).',
       'Settings rebuilt in React: it looks and works the same, loads its tabs once and saves only what you changed.',
       'A Seerr compatible API at /seerr, so Litefin and other Seerr apps can discover and request through the video side (thanks Thibs, #2151).',
       'Server Activity rebuilt for Plex and Jellyfin: now playing and why it converts, stop with a message, and SoulSync’s own play history and stats.',
@@ -83,6 +85,25 @@ export const RELEASES: Release[] = [
       'Contributions from nstrelow (#2140), PapaBearDoes (#2152) and ginevra-70 (#2115): AcoustID scans past an unreadable file, a video table that keeps its columns in view, and Music Assistant scans that follow their task.',
     ],
     items: [
+      {
+        title: 'People and permissions',
+        desc: 'Settings, People holds everyone, a global policy, templates and invites. Each person follows a template with their own changes on top, getting things is set per media type, movies and TV are separate, quality and a request limit are set per kind, and moderators answer requests. Nothing changes on upgrade (thanks SeadogsBooty, #2166 to #2168).',
+        page: 'settings',
+      },
+      {
+        title: 'Members see their own',
+        desc: 'A member’s notifications show their own notes, downloads and automations, search and Enhance Quality only show for profiles that may download, and Help & Docs shows only the guides for what they can use (thanks SeadogsBooty, #2170, #2173, #2174).',
+      },
+      {
+        title: 'Cover art findings explain themselves',
+        desc: 'A Missing Cover Art finding shows the library, the audio files, the album folder and the cover found side by side, says what Apply Art writes, and Change cover lets you pick your own (thanks Vidariondr, #2169).',
+        page: 'tools',
+      },
+      {
+        title: 'Keep Best and playlists',
+        desc: 'Duplicates in the same playlists can go, playlists you name never protect a copy, and an option moves a removed copy’s playlist entries to the kept one (thanks Storm, #2172).',
+        page: 'tools',
+      },
       {
         title: 'Settings, rebuilt',
         desc: 'The Settings page is React now, every tab on the music and video side. It looks and works the same, loads its tabs once and saves only what you changed.',
