@@ -220,8 +220,17 @@ def signup_not_moved(db):
     from core import permission_store as PS
     keys = (PS.SIGNUP_MOVED_KEY, "perm_signup_template")
     saved = {k: db.get_metadata(k) for k in keys}
-    before = {int(t["id"]) for t in db.list_permission_templates()}
     guest = next((t["id"] for t in db.list_permission_templates() if t.get("slug") == "guest"), None)
+    # start clean: a sign-in in an earlier test (one without this fixture)
+    # can leave its "New sign-ups" template behind, and a later move reuses
+    # it by name instead of building one from this test's settings
+    if guest is not None:
+        for t in db.list_permission_templates():
+            if (t.get("name") or "").lower() == PS.SIGNUP_TEMPLATE_NAME.lower():
+                db.delete_permission_template(int(t["id"]), reassign_to=guest)
+        if saved.get("perm_signup_template") and not db.get_permission_template(int(saved["perm_signup_template"])):
+            saved["perm_signup_template"] = str(guest)
+    before = {int(t["id"]) for t in db.list_permission_templates()}
     db.delete_metadata(PS.SIGNUP_MOVED_KEY)
     if guest is not None:
         db.set_metadata("perm_signup_template", str(guest))

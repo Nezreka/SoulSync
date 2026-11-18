@@ -26,7 +26,7 @@ Profiles give everyone their own space inside one SoulSync. Each profile has its
 
 Admins manage everyone from **Settings > People**. See [People and access](#docs/prof-people).
 
-![Profile picker](profiles-picker.jpg)
+![The profile picker: Admin, Mags and the PIN-protected Guest profile](profiles-picker.jpg)
 `
         },
         {
@@ -330,6 +330,8 @@ The old profile settings are still written as well, so an older SoulSync reading
             body: `
 Service credentials are **not** shared: every profile connects its own accounts from the **My Account** modal in the sidebar. Connecting your own account only changes your playlists and stats. The admin's accounts in Settings are untouched.
 
+![The My Account modal: your media server identity (none set up for Mags here) and your own Spotify, Tidal, ListenBrainz and Last.fm connections](profiles-accounts.jpg)
+
 ## Music services
 
 - **Spotify**: connect your own Spotify via OAuth to sync your playlists
@@ -377,6 +379,8 @@ Your plays never go to the admin's accounts, and the admin's never go to yours.
             body: `
 A profile has two separate secrets, don't mix them up:
 
+![The PIN entry dialog shown when opening a PIN-protected profile](profiles-security.jpg)
+
 ## PIN
 
 A short (4 to 20 digits) code asked **when anyone opens the profile**, for privacy within the household. Admins can set or clear anyone's PIN from the profile editor. Clearing a PIN only turns off the launch lock for profile 1 (the admin profile). Clearing anyone else's PIN leaves the launch lock as it was.
@@ -422,6 +426,8 @@ Passwords aren't deleted. They just aren't used, and work again when the switch 
             body: `
 Someone who **asks first** doesn't download: what they add becomes a **request**. The **Requests** page shows admins and moderators the queue, and shows members their own asks. A badge on the nav item counts what's waiting.
 
+![The Requests page: status tabs for waiting, on the way, available and declined requests](profiles-requests.jpg)
+
 ## How asking works
 
 Music requests are grouped the way a person thinks of them: an **album** or a single **track**. Movies and shows ask through the request sheet (see [Request quality](#docs/prof-quality)). Asks land in **Waiting**, newest first, with the asks they have left.
@@ -461,6 +467,8 @@ Every profile can choose its own home page:
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be a page they can use. One they lose access to stops counting, and they land as below. Admins set it as **Opens on** under Sidebar & look in the person's editor.
 
 With no home page (or one they can't open), a profile lands on Discover, or the first page it has if Discover is off or hidden. The same goes for the video side, and for any page a profile opens that it isn't allowed on.
+
+![A member profile's home: Mags' dashboard with her week in listening, playlist sync and recently played](profiles-home.jpg)
 `
         },
         {
@@ -470,6 +478,8 @@ With no home page (or one they can't open), a profile lands on Discover, or the 
             lede: 'Every profile hides the parts of SoulSync it does not need.',
             body: `
 SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours** (admins also find it under Settings > Appearance).
+
+![Make SoulSync yours: the Everything and Simple presets, the parts that are always here, and a switch for every optional part. All 13 extras are on for Admin here](prof-features.jpg)
 
 - **Simple** keeps the music core plus Discover, playlist sync and Import (where downloads that need a hand wait).
 - **Everything** is SoulSync the way it ships.

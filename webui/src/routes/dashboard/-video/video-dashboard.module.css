@@ -650,7 +650,7 @@ button.day:focus-visible {
   width: 38cqw;
   aspect-ratio: 2 / 3;
   margin-right: -7cqw;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--white-a08);
   box-shadow: 0 6px 14px var(--black-a45);
   object-fit: cover;
@@ -682,7 +682,7 @@ button.day:focus-visible {
   display: flex;
   overflow: hidden;
   height: 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
   background: var(--white-a08);
 }
 
@@ -797,7 +797,7 @@ button.day:focus-visible {
 .splitRow i {
   overflow: hidden;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--white-a08);
 }
 
@@ -865,15 +865,12 @@ button.day:focus-visible {
     justify-content: flex-start;
     gap: 22px;
     width: 100%;
+    padding-block: 14px;
   }
 
   :global(#dashboard-page) .tiles[data-rail] .tile.tile + .tile {
     border-top: 1px solid var(--white-a08);
     border-left: 0;
-  }
-
-  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
-    padding-block: 14px;
   }
 
   /* a smaller hand of posters: the number is beside its parts here, and
@@ -913,15 +910,12 @@ button.day:focus-visible {
     justify-content: flex-start;
     gap: 22px;
     width: 100%;
+    padding-block: 14px;
   }
 
   :global(#dashboard-page) .tiles[data-rail] .tile.tile + .tile {
     border-top: 1px solid var(--white-a08);
     border-left: 0;
-  }
-
-  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
-    padding-block: 14px;
   }
 
   /* a smaller hand of posters: the number is beside its parts here, and
@@ -943,14 +937,11 @@ button.day:focus-visible {
   .split {
     justify-content: center;
     margin-top: 0;
+    max-width: 460px;
   }
 
   .splitNote {
     padding-left: 0;
-  }
-
-  .split {
-    max-width: 460px;
   }
 }
 

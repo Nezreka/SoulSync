@@ -171,7 +171,7 @@
   display: grid;
   overflow: hidden;
   border: 1px solid var(--white-a06);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
 }
 
@@ -398,7 +398,7 @@
 .strip {
   overflow-x: auto;
   border: 1px solid rgba(var(--accent-rgb), 0.22);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background:
     linear-gradient(180deg, rgba(var(--accent-rgb), 0.07), transparent 70%), var(--white-a03);
 }
@@ -435,7 +435,7 @@
   display: inline-flex;
   gap: 6px;
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--white-a10);
   color: var(--text-1);
   font-size: 11px;
@@ -449,7 +449,7 @@
   height: 18px;
   margin-right: 3px;
   padding: 0 5px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--white-a10);
   font-size: 10px;
   font-weight: 700;
@@ -468,7 +468,7 @@
   align-content: start;
   padding: 12px;
   border: 1px solid var(--white-a08);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
   cursor: pointer;
   transition:
@@ -516,13 +516,13 @@
   gap: 6px;
   height: 62px;
   padding: 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: var(--black-a35);
 }
 
 .pic i {
   display: block;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--white-a18);
 }
 
@@ -555,7 +555,7 @@
 .picRich span i:first-child {
   width: 60%;
   height: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* compact: a slim bar over a row of releases */
@@ -594,7 +594,7 @@
   width: 46%;
   height: 9px;
   border-bottom: 2px solid rgb(var(--accent-rgb));
-  border-radius: 3px 3px 0 0;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
   background: var(--white-a60);
 }
 
@@ -709,7 +709,7 @@ label.chip input[type='checkbox']:checked {
   gap: 8px;
   padding: 14px;
   border: 1px solid var(--white-a06);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
 }
 
@@ -884,7 +884,7 @@ label.chip input[type='checkbox']:checked {
 .empty {
   padding: 16px;
   border: 1px dashed var(--white-a14);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   color: var(--white-a60);
   font-size: 13px;
   line-height: 1.5;
@@ -901,7 +901,7 @@ label.chip input[type='checkbox']:checked {
   gap: 10px;
   padding: 14px 16px;
   border: 1px solid var(--white-a06);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
 }
 
@@ -971,7 +971,7 @@ label.chip input[type='checkbox']:checked {
   gap: 8px;
   min-width: 0;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a05);
   color: var(--white-a70);
   font-family: var(--font-mono);
@@ -1020,7 +1020,7 @@ label.chip input[type='checkbox']:checked {
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--white-a12);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a05);
   color: var(--text-1);
   font-size: 14px;
