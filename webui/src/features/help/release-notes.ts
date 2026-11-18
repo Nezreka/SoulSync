@@ -103,7 +103,7 @@ export const RELEASES: Release[] = [
       },
       {
         title: 'Keep Best and playlists',
-        desc: 'Duplicates in the same playlists can go, playlists you name never protect a copy, and an option moves a removed copy’s playlist entries to the kept one (thanks Storm, #2172).',
+        desc: 'Duplicates in the same playlists can go, playlists you name never protect a copy, and an option moves a removed copy’s playlist entries to the kept one. Keep Best on the whole list says which findings need you and why, and can move playlist entries too (thanks Storm, #2172, #2179).',
         page: 'tools',
       },
       {

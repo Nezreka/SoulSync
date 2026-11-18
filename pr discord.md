@@ -10,11 +10,11 @@ The ? is a real help panel: answers for the page you're on, Ctrl K search, Healt
 
 Server Activity is rebuilt for Plex and Jellyfin: what is playing and why it transcodes, stop with a message, and its own history and stats.
 
-Albums get an Other versions picker (thanks wolf39us, #2145), popular tracks get a flame (#2144), and band names like Above & Beyond stay one artist (thanks SeadogsBooty, #2131 to #2136).
+Albums get an Other versions picker that also merges an album split in two (thanks wolf39us, #2145, #2178), a MusicBrainz release status filter (thanks Ericsson, #2175), popular tracks get a flame (#2144), and band names like Above & Beyond stay one artist (thanks SeadogsBooty, #2131 to #2136).
 
-Tools: cover art findings show the library, files, folder and found cover side by side with Change cover (thanks Vidariondr, #2169), and Keep Best works when duplicates share playlists (thanks Storm, #2172).
+Tools: cover art findings show the library, files, folder and found cover side by side with Change cover (thanks Vidariondr, #2169), and Keep Best works when duplicates share playlists and says which ones need you (thanks Storm, #2172, #2179).
 
-For request users, video posters show where a title stands and Discover always loads (#2158 to #2160).
+On video, missing episodes count only monitored seasons, and torrent imports wait for qBittorrent to finish moving the file (thanks hilburn, #2176, #2177). For request users, posters show where a title stands and Discover always loads (#2158 to #2160).
 
 Thanks to nstrelow, PapaBearDoes and ginevra-70 for their contributions.
 
