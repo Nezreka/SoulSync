@@ -1,10 +1,13 @@
 """route inventory (#2166, plan 4.5): every Flask rule declares who may call
-it: @requires(perm), @admin_only / @admin_or_api_key, @self_only or @public
-(core.permissions). report-only for now: the routes that don't declare yet
-are listed in route_permissions_allowlist.txt, and that list may only
-shrink. a new undeclared route fails here; declaring one is the fix, adding
-it to the list is not. at the end of P1 the list is empty and this test
-fails on any undeclared rule.
+it: @requires(perm), @admin_only / @admin_or_api_key, @self_only,
+@own_or_admin, @signed_in, @api_key_only or @public (core.permissions).
+
+everything outside the video side and the seerr shim declares already (piece
+A), and fails here the moment it doesn't. the video and seerr routes that
+don't declare yet are listed in route_permissions_allowlist.txt (pieces B and
+C), and that list may only shrink: declaring a route is the fix, adding it to
+the list is not, and the list can't hold a route outside those two. at the
+end of P1 the list is empty and this test fails on any undeclared rule.
 
 regenerate the list (after declaring routes, never to add one):
     SOULSYNC_WRITE_ROUTE_ALLOWLIST=1 python -m pytest tests/test_route_permissions.py
@@ -126,6 +129,32 @@ def test_no_new_undeclared_routes():
           % (len(inv), ", ".join("%s %d" % kv for kv in sorted(counts.items())), len(allowed), len(stale)))
     assert not new, ("these routes don't declare who may call them; add @requires(perm), "
                      "@admin_only, @self_only or @public (core.permissions):\n  " + "\n  ".join(new))
+
+
+# the only routes the allowlist may still excuse (pieces B and C)
+STILL_LISTED_PREFIXES = ("/api/video/", "/seerr/")
+
+
+def outside_the_listed_sides(rows) -> list:
+    return sorted(r for r in rows if not r.split(" ", 1)[1].startswith(STILL_LISTED_PREFIXES))
+
+
+def test_everything_outside_video_and_seerr_declares():
+    """no allowlist for these: an undeclared music, shell, profile or api
+    route fails right here."""
+    missing = outside_the_listed_sides(undeclared(web_server.app))
+    assert not missing, ("these routes don't declare who may call them; add @requires(perm), "
+                         "@admin_only, @self_only, @signed_in or @public (core.permissions):\n  "
+                         + "\n  ".join(missing))
+
+
+def test_the_allowlist_only_excuses_video_and_seerr():
+    assert outside_the_listed_sides(read_allowlist()) == []
+
+
+def test_a_listed_route_outside_video_and_seerr_is_caught():
+    assert outside_the_listed_sides({"GET /api/video/x", "GET /seerr/api/v1/y"}) == []
+    assert outside_the_listed_sides({"GET /api/video/x", "POST /api/discover/z"}) == ["POST /api/discover/z"]
 
 
 def test_the_allowlist_is_sorted_and_unique():
