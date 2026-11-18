@@ -1,6 +1,11 @@
 import { browserSafeImageUrl } from '@/platform/artwork-thumb';
 
-import type { ArtistInfo, Discography, DiscographyBucket } from './-artist-detail.types';
+import type {
+  ArtistAboutSource,
+  ArtistInfo,
+  Discography,
+  DiscographyBucket,
+} from './-artist-detail.types';
 
 /**
  * Hero derivations from updateArtistHeroSection / updateCategoryStats /
@@ -176,15 +181,13 @@ export function totalReleaseCount(discography: Discography | undefined): number 
  */
 export interface GenreChip {
   label: string;
-  /** Last.fm tags render dimmed; the artist's own genres do not. */
-  fromLastfm: boolean;
+  /** where a tag chip came from; tag chips render dimmed, the artist's own
+   *  genres ('genre') do not. musicbrainz only when last.fm has no tags. */
+  source: 'genre' | 'lastfm' | 'musicbrainz';
 }
 
-export function buildGenreChips(artist: ArtistInfo): GenreChip[] {
-  const genres = Array.isArray(artist.genres) ? artist.genres : [];
-  const chips: GenreChip[] = genres.map((label) => ({ label: String(label), fromLastfm: false }));
-
-  let tags: unknown = artist.lastfm_tags;
+function parseTags(raw: unknown): unknown[] {
+  let tags = raw;
   if (typeof tags === 'string') {
     try {
       tags = JSON.parse(tags);
@@ -194,16 +197,110 @@ export function buildGenreChips(artist: ArtistInfo): GenreChip[] {
       tags = null;
     }
   }
-  if (!Array.isArray(tags) || tags.length === 0) return chips;
+  return Array.isArray(tags) ? tags : [];
+}
+
+/** the tags to show and where they came from: last.fm's, else the free
+ *  source's (musicbrainz) from `about`. */
+export function artistTags(artist: ArtistInfo): {
+  tags: unknown[];
+  source: 'lastfm' | 'musicbrainz' | null;
+} {
+  const lastfm = parseTags(artist.lastfm_tags);
+  if (lastfm.length) return { tags: lastfm, source: 'lastfm' };
+  const about = artist.about;
+  if (about?.tags?.length && about.tags_source) {
+    return {
+      tags: about.tags,
+      source: about.tags_source === 'lastfm' ? 'lastfm' : 'musicbrainz',
+    };
+  }
+  return { tags: [], source: null };
+}
+
+export function buildGenreChips(artist: ArtistInfo): GenreChip[] {
+  const genres = Array.isArray(artist.genres) ? artist.genres : [];
+  const chips: GenreChip[] = genres.map((label) => ({ label: String(label), source: 'genre' }));
+
+  const { tags, source } = artistTags(artist);
+  if (!source || tags.length === 0) return chips;
 
   const existing = new Set(genres.map((g) => String(g).toLowerCase()));
   for (const tag of tags) {
-    if (chips.filter((c) => c.fromLastfm).length >= 5) break;
+    if (chips.filter((c) => c.source !== 'genre').length >= 5) break;
     const label = String(tag);
     if (existing.has(label.toLowerCase())) continue;
-    chips.push({ label, fromLastfm: true });
+    chips.push({ label, source });
   }
   return chips;
+}
+
+/** the names the source notes use */
+export const ABOUT_SOURCE_NAMES: Record<ArtistAboutSource, string> = {
+  lastfm: 'Last.fm',
+  audiodb: 'TheAudioDB',
+  wikipedia: 'Wikipedia',
+  musicbrainz: 'MusicBrainz',
+  listenbrainz: 'ListenBrainz',
+  deezer: 'Deezer',
+};
+
+export interface ArtistBio {
+  text: string;
+  /** null for last.fm and the media server's own summary: those carry no note */
+  source: ArtistAboutSource | null;
+  url: string | null;
+}
+
+/**
+ * the bio and where it came from: last.fm, then the media server's summary,
+ * then the free sources (theaudiodb, wikipedia). only a free source gets a
+ * note, so a last.fm user's hero looks exactly as before.
+ */
+export function pickArtistBio(artist: ArtistInfo): ArtistBio | null {
+  const lastfm = cleanArtistBio(artist.lastfm_bio);
+  if (lastfm) return { text: lastfm, source: null, url: null };
+  const summary = cleanArtistBio(artist.bio);
+  if (summary) return { text: summary, source: null, url: null };
+  const about = artist.about;
+  const text = cleanArtistBio(about?.bio);
+  if (!text) return null;
+  const source = about?.bio_source && about.bio_source !== 'lastfm' ? about.bio_source : null;
+  return { text, source, url: source ? (about?.bio_url ?? null) : null };
+}
+
+export interface HeroNumber {
+  id: string;
+  value: number;
+  label: string;
+}
+
+/**
+ * the hero's numbers, each labelled as what it is. last.fm listeners/plays
+ * keep their old labels; listenbrainz numbers say listenbrainz, deezer fans
+ * say fans. never one source's number under another's name.
+ */
+export function heroNumbers(artist: ArtistInfo): HeroNumber[] {
+  const out: HeroNumber[] = [];
+  const listeners = Number(artist.lastfm_listeners) || 0;
+  const plays = Number(artist.lastfm_playcount) || 0;
+  const about = artist.about;
+  if (listeners || plays) {
+    if (listeners) out.push({ id: 'listeners', value: listeners, label: 'listeners' });
+    if (plays) out.push({ id: 'playcount', value: plays, label: 'plays' });
+  } else if (about?.popularity_source === 'lastfm') {
+    if (about.listeners) out.push({ id: 'listeners', value: about.listeners, label: 'listeners' });
+    if (about.plays) out.push({ id: 'playcount', value: about.plays, label: 'plays' });
+  } else if (about?.popularity_source === 'listenbrainz') {
+    if (about.listeners)
+      out.push({ id: 'listeners', value: about.listeners, label: 'ListenBrainz listeners' });
+    if (about.plays)
+      out.push({ id: 'playcount', value: about.plays, label: 'ListenBrainz listens' });
+  }
+  if (about?.fans && about.fans_source === 'deezer') {
+    out.push({ id: 'fans', value: about.fans, label: 'Deezer fans' });
+  }
+  return out;
 }
 
 /**

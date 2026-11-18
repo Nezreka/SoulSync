@@ -53,6 +53,13 @@ class LastFMWorker:
         # Name matching threshold
         self.name_similarity_threshold = 0.80
 
+        # free sources for artists last.fm has nothing for (or no key at all).
+        # the sweep walks artist ids and rests an hour after a full pass
+        self._fallback = None
+        self._fallback_cursor = 0
+        self._fallback_rest_until = 0.0
+        self.fallback_rest_seconds = 3600
+
         logger.info("Last.fm background worker initialized")
 
     def _init_client(self):
@@ -133,16 +140,25 @@ class LastFMWorker:
                     continue
 
                 # Check if API key is configured
-                if not self.client.api_key:
+                if not self._lastfm_usable():
                     self._init_client()
-                    if not self.client.api_key:
-                        interruptible_sleep(self._stop_event, 30)
+                    if not self._lastfm_usable():
+                        # no last.fm: the free sources still fill bios, tags
+                        # and numbers
+                        self.current_item = None
+                        if self._fallback_step():
+                            interruptible_sleep(self._stop_event, 1)
+                        else:
+                            interruptible_sleep(self._stop_event, 30)
                         continue
 
                 self.current_item = None
                 item = self._get_next_item()
 
                 if not item:
+                    if self._fallback_step():
+                        interruptible_sleep(self._stop_event, 1)
+                        continue
                     logger.debug("No pending items, sleeping...")
                     interruptible_sleep(self._stop_event, 10)
                     continue
@@ -170,6 +186,63 @@ class LastFMWorker:
                 interruptible_sleep(self._stop_event, 5)
 
         logger.info("Last.fm worker thread finished")
+
+    def _lastfm_usable(self) -> bool:
+        """a key is set and last.fm has not turned it away. ``key_rejected``
+        is read softly: the client may not track it."""
+        client = self.client
+        if not client or not getattr(client, 'api_key', None):
+            return False
+        return not bool(getattr(client, 'key_rejected', False))
+
+    def _fallback_fetcher(self):
+        if self._fallback is None:
+            from core.enrichment.lastfm_fallback import ArtistAboutFallback
+            self._fallback = ArtistAboutFallback()
+        return self._fallback
+
+    def _fill_fallbacks(self, artist_id: int) -> bool:
+        """the free sources for one artist, when last.fm left a field empty
+        and they were not asked in the last 30 days. never touches the
+        last.fm data itself."""
+        try:
+            from core.enrichment.lastfm_fallback import fill_artist
+            return fill_artist(self.db._get_connection, artist_id, self._fallback_fetcher())
+        except Exception as e:
+            logger.debug(f"fallback fill failed for artist #{artist_id}: {e}")
+            return False
+
+    def _fallback_step(self) -> bool:
+        """one artist of the fallback sweep. False when there was nothing to
+        do (resting after a full pass), so the caller sleeps."""
+        if time.time() < self._fallback_rest_until:
+            return False
+        conn = None
+        try:
+            from core.enrichment.lastfm_fallback import next_due_artist
+
+            conn = self.db._get_connection()
+            row, cursor = next_due_artist(conn, self._fallback_cursor)
+        except Exception as e:
+            logger.debug(f"fallback sweep failed: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+        if cursor is None:
+            self._fallback_cursor = 0
+            self._fallback_rest_until = time.time() + self.fallback_rest_seconds
+            return False
+        self._fallback_cursor = cursor
+        if row is None:
+            return True
+        self.current_item = {'type': 'artist', 'id': row['id'], 'name': row['name'],
+                             'fallback': True}
+        try:
+            self._fill_fallbacks(int(row['id']))
+        finally:
+            self.current_item = None
+        return True
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
         """Get next item to process from the Library-v2 catalogue.
@@ -301,6 +374,10 @@ class LastFMWorker:
             self._mark_status('artist', artist_id, 'not_found')
             self.stats['not_found'] += 1
             logger.debug(f"No match for artist '{artist_name}'")
+
+        # whatever last.fm left empty (all of it on a miss) the free sources
+        # fill now, not on the next sweep
+        self._fill_fallbacks(artist_id)
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str):
         """Process an album: get full info from Last.fm"""

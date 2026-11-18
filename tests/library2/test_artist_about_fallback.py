@@ -1,0 +1,430 @@
+"""free sources for an artist's bio, tags and numbers when last.fm has none.
+
+last.fm keys need a pro subscription from december 2026. last.fm stays first
+for anyone whose key works; theaudiodb/wikipedia/musicbrainz/listenbrainz/
+deezer only fill a field last.fm left empty, and never write the lastfm
+bucket. no network here: every client is a stub.
+"""
+
+from __future__ import annotations
+
+import json
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from core.enrichment import lastfm_fallback as fb
+from core.library2.artist_about import (
+    CHECK_KEY, check_stamp, fallback_due, lastfm_gaps, resolve_artist_about,
+)
+from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import RowDb, row_conn
+
+from .conftest import own_every_track
+
+MBID = "8f6bd1e4-fbe1-4f50-aa9b-94c450ec0f11"
+NOW = datetime(2026, 12, 5, tzinfo=timezone.utc)
+FULL_LASTFM = {"bio": "From Bristol.", "tags": ["trip-hop"], "listeners": 10, "playcount": 99}
+
+
+# ── which source wins, per field ─────────────────────────────────────────────
+
+class TestResolve:
+    def test_lastfm_wins_every_field_it_has(self):
+        about = resolve_artist_about({
+            "lastfm": FULL_LASTFM,
+            "audiodb": {"bio": "audiodb bio"},
+            "wikipedia": {"bio": "wiki bio", "url": "https://en.wikipedia.org/wiki/X"},
+            "musicbrainz": {"genres": ["electronic"]},
+            "listenbrainz": {"listeners": 5, "listens": 50},
+        })
+        assert (about["bio"], about["bio_source"]) == ("From Bristol.", "lastfm")
+        assert (about["tags"], about["tags_source"]) == (["trip-hop"], "lastfm")
+        assert (about["listeners"], about["plays"], about["popularity_source"]) == (10, 99, "lastfm")
+
+    def test_bio_falls_to_theaudiodb_then_wikipedia(self):
+        both = {"audiodb": {"bio": "audiodb bio"},
+                "wikipedia": {"bio": "wiki bio", "url": "https://en.wikipedia.org/wiki/X"}}
+        assert resolve_artist_about(both)["bio_source"] == "audiodb"
+        wiki = resolve_artist_about({"lastfm": {"bio": "  "}, "wikipedia": both["wikipedia"]})
+        assert (wiki["bio"], wiki["bio_source"], wiki["bio_url"]) == (
+            "wiki bio", "wikipedia", "https://en.wikipedia.org/wiki/X")
+
+    def test_tags_fall_to_musicbrainz_genres_then_tags(self):
+        about = resolve_artist_about(json.dumps(
+            {"musicbrainz": {"genres": ["trip hop"], "tags": ["bristol"]}}))
+        assert (about["tags"], about["tags_source"]) == (["trip hop"], "musicbrainz")
+        about = resolve_artist_about({"musicbrainz": {"tags": ["bristol"]}})
+        assert about["tags"] == ["bristol"]
+
+    def test_listenbrainz_numbers_are_labelled_listenbrainz_not_lastfm(self):
+        about = resolve_artist_about({"listenbrainz": {"listeners": 5, "listens": 50},
+                                      "deezer": {"fans": 7}})
+        assert (about["listeners"], about["plays"], about["popularity_source"]) == (5, 50, "listenbrainz")
+        # fans are their own number, never folded into listeners
+        assert (about["fans"], about["fans_source"]) == (7, "deezer")
+
+    def test_nothing_stored_is_nothing_shown(self):
+        about = resolve_artist_about("{not json")
+        assert about["bio"] is None and about["tags"] == [] and about["popularity_source"] is None
+
+
+# ── when the free sources are asked ──────────────────────────────────────────
+
+class TestDue:
+    def test_never_when_lastfm_has_everything(self):
+        assert lastfm_gaps({"lastfm": FULL_LASTFM}) == set()
+        assert fallback_due({"lastfm": FULL_LASTFM}, MBID, NOW) == set()
+
+    def test_only_the_fields_lastfm_left_empty(self):
+        assert fallback_due({"lastfm": {**FULL_LASTFM, "tags": []}}, MBID, NOW) == {"tags"}
+
+    def test_not_again_within_30_days(self):
+        stored = {CHECK_KEY: check_stamp(MBID, NOW - timedelta(days=29))}
+        assert fallback_due(stored, MBID, NOW) == set()
+
+    def test_again_after_30_days(self):
+        stored = {CHECK_KEY: check_stamp(MBID, NOW - timedelta(days=30))}
+        assert fallback_due(stored, MBID, NOW) == {"bio", "tags", "popularity"}
+
+    def test_again_when_the_artist_got_an_mbid_since(self):
+        stored = {CHECK_KEY: check_stamp(None, NOW - timedelta(days=1))}
+        assert fallback_due(stored, None, NOW) == set()
+        assert fallback_due(stored, MBID, NOW) == {"bio", "tags", "popularity"}
+
+
+# ── the fetcher, sources stubbed ─────────────────────────────────────────────
+
+class _MB:
+    def __init__(self, artist=None, error=None):
+        self.artist, self.error, self.calls = artist, error, 0
+
+    def get_artist(self, mbid, includes=None, raise_on_error=False):
+        self.calls += 1
+        assert set(includes) >= {"genres", "tags", "url-rels"}
+        if self.error:
+            raise self.error
+        return self.artist
+
+
+class _AudioDB:
+    def __init__(self, bio=None):
+        self.bio, self.calls = bio, []
+
+    def lookup_artist_by_id(self, artist_id):
+        self.calls.append(("id", artist_id))
+        return {"strBiographyEN": self.bio} if self.bio else None
+
+    def lookup_artist_by_mbid(self, mbid):
+        self.calls.append(("mbid", mbid))
+        return {"strBiographyEN": self.bio} if self.bio else None
+
+
+class _Deezer:
+    def get_artist_info(self, artist_id):
+        return {"id": artist_id, "followers": {"total": 4321}}
+
+
+class _Http:
+    """wikidata, wikipedia and listenbrainz answers by url."""
+
+    def __init__(self, answers):
+        self.answers, self.calls = answers, []
+
+    def __call__(self, method, url, *, params=None, json_body=None, host=""):
+        self.calls.append(url)
+        for prefix, answer in self.answers.items():
+            if url.startswith(prefix):
+                if isinstance(answer, Exception):
+                    raise answer
+                if callable(answer):
+                    return answer(params)
+                return answer
+        raise AssertionError(f"unexpected request {url}")
+
+
+MB_ARTIST = {
+    "genres": [{"name": "electronic", "count": 3}, {"name": "trip hop", "count": 9}],
+    "tags": [{"name": "bristol", "count": 2}, {"name": "seen live", "count": 0}],
+    "relations": [{"type": "wikidata",
+                   "url": {"resource": "https://www.wikidata.org/wiki/Q11880"}}],
+}
+def WIKIDATA(params):
+    """wikidata answers only what it was asked: the entity's english sitelink."""
+    if params.get("action") != "wbgetentities" or params.get("sitefilter") != "enwiki":
+        return {"entities": {}}
+    return {"entities": {params["ids"]: {"sitelinks": {
+        "enwiki": {"title": "Massive Attack"}}}}}
+WIKI_PAGE = {"type": "standard", "title": "Massive Attack",
+             "extract": "Massive Attack are an English trip hop collective.",
+             "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Massive_Attack"}}}
+LB = [{"artist_mbid": MBID, "total_listen_count": 812345, "total_user_count": 23456}]
+
+
+def _http(**over):
+    answers = {fb.WIKIDATA_API: WIKIDATA, fb.WIKIPEDIA_SUMMARY: WIKI_PAGE,
+               fb.LISTENBRAINZ_POPULARITY: LB}
+    answers.update(over)
+    return _Http(answers)
+
+
+class TestFetch:
+    def test_wikipedia_through_musicbrainz_and_wikidata(self):
+        http = _http()
+        buckets, failed = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), http=http,
+        ).fetch(needs={"bio"}, mbid=MBID)
+        assert not failed
+        assert buckets["wikipedia"] == {
+            "bio": "Massive Attack are an English trip hop collective.",
+            "url": "https://en.wikipedia.org/wiki/Massive_Attack", "title": "Massive Attack"}
+        assert http.calls[0] == fb.WIKIDATA_API
+        assert http.calls[1] == fb.WIKIPEDIA_SUMMARY + "Massive_Attack"
+
+    def test_a_direct_english_wikipedia_link_skips_wikidata(self):
+        artist = {"relations": [{"type": "wikipedia", "url": {
+            "resource": "https://en.wikipedia.org/wiki/Portishead_(band)"}}]}
+        http = _http()
+        buckets, _ = fb.ArtistAboutFallback(
+            mb_client=_MB(artist), audiodb_client=_AudioDB(), http=http,
+        ).fetch(needs={"bio"}, mbid=MBID)
+        assert http.calls == [fb.WIKIPEDIA_SUMMARY + "Portishead_%28band%29"]
+        assert buckets["wikipedia"]["bio"]
+
+    def test_a_disambiguation_page_is_no_bio(self):
+        buckets, _ = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+            http=_http(**{fb.WIKIPEDIA_SUMMARY: {**WIKI_PAGE, "type": "disambiguation"}}),
+        ).fetch(needs={"bio"}, mbid=MBID)
+        assert "wikipedia" not in buckets
+
+    def test_theaudiodb_bio_comes_first_and_saves_the_wikipedia_calls(self):
+        http = _http()
+        audiodb = _AudioDB("AudioDB says hi.")
+        buckets, _ = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=audiodb, http=http,
+        ).fetch(needs={"bio"}, mbid=MBID, audiodb_id="111")
+        assert buckets == {"audiodb": {"bio": "AudioDB says hi."}}
+        assert audiodb.calls == [("id", "111")]
+        assert http.calls == []
+
+    def test_musicbrainz_genres_by_votes_and_tags_without_zero_votes(self):
+        buckets, _ = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), http=_http(),
+        ).fetch(needs={"tags"}, mbid=MBID)
+        assert buckets == {"musicbrainz": {"genres": ["trip hop", "electronic"],
+                                           "tags": ["bristol"]}}
+
+    def test_popularity_from_listenbrainz_and_deezer_fans(self):
+        mb = _MB(MB_ARTIST)
+        buckets, failed = fb.ArtistAboutFallback(
+            mb_client=mb, deezer_client=_Deezer(), http=_http(),
+        ).fetch(needs={"popularity"}, mbid=MBID, deezer_id="123")
+        assert not failed
+        assert buckets == {"listenbrainz": {"listeners": 23456, "listens": 812345},
+                           "deezer": {"fans": 4321}}
+        assert mb.calls == 0  # numbers alone never ask musicbrainz
+
+    def test_a_source_down_is_a_failure_not_an_empty_answer(self):
+        buckets, failed = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), http=_http(**{fb.LISTENBRAINZ_POPULARITY: fb.SourceError("503")}),
+        ).fetch(needs={"tags", "popularity"}, mbid=MBID)
+        assert failed
+        assert "musicbrainz" in buckets  # one source down costs only its field
+
+    def test_no_ids_no_requests(self):
+        http = _http()
+        buckets, failed = fb.ArtistAboutFallback(
+            mb_client=_MB(error=AssertionError("asked")), audiodb_client=_AudioDB(), http=http,
+        ).fetch(needs={"bio", "tags", "popularity"})
+        assert (buckets, failed, http.calls) == ({}, False, [])
+
+
+# ── storing it on the catalogue ──────────────────────────────────────────────
+
+@pytest.fixture
+def db(tmp_path):
+    path = str(tmp_path / "lib2.db")
+    conn = row_conn(path)
+    ensure_library_v2_schema(conn)
+    own_every_track(conn)
+    artist = conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, musicbrainz_id) "
+        "VALUES('Massive Attack','Massive Attack',?)", (MBID,)).lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+        "VALUES(?,'Mezzanine','album')", (artist,)).lastrowid
+    conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Angel')", (album,))
+    conn.commit()
+    conn.close()
+    return RowDb(path)
+
+
+def _enrichment(db, artist_id=1):
+    with closing(db._get_connection()) as conn:
+        return json.loads(conn.execute(
+            "SELECT enrichment FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0])
+
+
+def _set_enrichment(db, value, artist_id=1):
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_artists SET enrichment=? WHERE id=?",
+                     (json.dumps(value), artist_id))
+        conn.commit()
+
+
+class _CountingFetcher(fb.ArtistAboutFallback):
+    def __init__(self, **kw):
+        super().__init__(mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+                         deezer_client=_Deezer(), http=_http(), **kw)
+        self.asked = []
+
+    def fetch(self, **kw):
+        self.asked.append(kw["needs"])
+        return super().fetch(**kw)
+
+
+class TestFill:
+    def test_fills_every_field_with_its_source_when_lastfm_has_nothing(self, db):
+        assert fb.fill_artist(db._get_connection, 1, _CountingFetcher())
+        stored = _enrichment(db)
+        assert "lastfm" not in stored
+        about = resolve_artist_about(stored)
+        assert about["bio_source"] == "wikipedia"
+        assert about["tags_source"] == "musicbrainz"
+        assert about["popularity_source"] == "listenbrainz"
+        assert stored[CHECK_KEY]["mbid"] == MBID
+
+    def test_never_touches_stored_lastfm_data(self, db):
+        lastfm = {"bio": "Last.fm bio", "listeners": 10, "playcount": 99,
+                  "url": "https://www.last.fm/music/Massive+Attack"}
+        _set_enrichment(db, {"lastfm": lastfm})
+        fetcher = _CountingFetcher()
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        stored = _enrichment(db)
+        assert stored["lastfm"] == lastfm
+        assert fetcher.asked == [{"tags"}]  # only what last.fm left empty
+        assert "wikipedia" not in stored and "listenbrainz" not in stored
+        about = resolve_artist_about(stored)
+        assert (about["bio_source"], about["tags_source"]) == ("lastfm", "musicbrainz")
+
+    def test_lastfm_data_that_lands_later_takes_over(self, db):
+        fb.fill_artist(db._get_connection, 1, _CountingFetcher())
+        stored = _enrichment(db)
+        stored["lastfm"] = FULL_LASTFM  # the user subscribed; the worker wrote
+        _set_enrichment(db, stored)
+        about = resolve_artist_about(_enrichment(db))
+        assert {about["bio_source"], about["tags_source"], about["popularity_source"]} == {"lastfm"}
+
+    def test_not_asked_again_within_the_ttl(self, db):
+        fetcher = _CountingFetcher()
+        assert fb.fill_artist(db._get_connection, 1, fetcher)
+        assert not fb.fill_artist(db._get_connection, 1, fetcher)
+        assert len(fetcher.asked) == 1
+
+    def test_a_failed_source_leaves_it_due(self, db):
+        fetcher = fb.ArtistAboutFallback(
+            mb_client=_MB(error=RuntimeError("down")), audiodb_client=_AudioDB(),
+            deezer_client=_Deezer(), http=_http())
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        stored = _enrichment(db)
+        assert CHECK_KEY not in stored
+        assert "listenbrainz" in stored  # what did answer is kept
+
+    def test_a_miss_does_not_blank_an_earlier_answer(self, db):
+        _set_enrichment(db, {"wikipedia": {"bio": "kept", "url": "u"},
+                             CHECK_KEY: check_stamp(MBID, NOW - timedelta(days=40))})
+        fetcher = fb.ArtistAboutFallback(
+            mb_client=_MB({"relations": []}), audiodb_client=_AudioDB(),
+            deezer_client=_Deezer(), http=_http())
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        assert _enrichment(db)["wikipedia"]["bio"] == "kept"
+
+    def test_the_sweep_walks_due_artists_then_ends(self, db):
+        with closing(db._get_connection()) as conn:
+            row, cursor = fb.next_due_artist(conn, 0)
+            assert (row["id"], cursor) == (1, 1)
+            assert fb.next_due_artist(conn, cursor) == (None, None)
+        fb.fill_artist(db._get_connection, 1, _CountingFetcher())
+        with closing(db._get_connection()) as conn:
+            assert fb.next_due_artist(conn, 0) == (None, None)
+
+
+# ── the last.fm worker drives it ─────────────────────────────────────────────
+
+class _NoKeyClient:
+    api_key = ""
+
+
+class _MissClient:
+    api_key = "k"
+
+    def get_artist_info(self, name):
+        return None
+
+
+@pytest.fixture
+def worker(db, monkeypatch):
+    import database.music_database as music_database
+    monkeypatch.setattr(music_database, "MusicDatabase", lambda: db)
+    from core.lastfm_worker import LastFMWorker
+
+    instance = LastFMWorker(db)
+    instance._fallback = _CountingFetcher()
+    return instance
+
+
+class TestWorker:
+    def test_no_key_the_sweep_fills_artists(self, worker):
+        worker.client = _NoKeyClient()
+        assert not worker._lastfm_usable()
+        assert worker._fallback_step() is True
+        assert resolve_artist_about(_enrichment(worker.db))["bio_source"] == "wikipedia"
+        # a full pass with nothing left: rest, and say so
+        assert worker._fallback_step() is False
+        assert worker._fallback_rest_until > 0
+
+    def test_a_rejected_key_counts_as_no_key(self, worker):
+        client = _MissClient()
+        client.key_rejected = True
+        worker.client = client
+        assert not worker._lastfm_usable()
+
+    def test_a_lastfm_miss_fills_straight_away(self, worker):
+        worker.client = _MissClient()
+        worker._process_artist(1, "Massive Attack")
+        assert worker._fallback.asked == [{"bio", "tags", "popularity"}]
+        assert "lastfm" not in _enrichment(worker.db)
+
+
+# ── the existing workers keep what the page needs ────────────────────────────
+
+def test_theaudiodb_worker_keeps_the_biography():
+    from core.audiodb_worker import AudioDBWorker
+
+    worker = AudioDBWorker.__new__(AudioDBWorker)
+    seen = {}
+    worker._write = lambda *a, **kw: seen.update(kw)
+    worker._update_artist(1, {"idArtist": "111", "strBiographyEN": " A bio. "})
+    assert seen["payload"] == {"bio": "A bio."}
+
+
+def test_deezer_worker_keeps_the_fan_count():
+    from core.deezer_worker import DeezerWorker
+
+    worker = DeezerWorker.__new__(DeezerWorker)
+    seen = {}
+    worker._write = lambda *a, **kw: seen.update(kw)
+    worker._update_artist(1, {"id": "123", "followers": {"total": 4321}})
+    assert seen["payload"] == {"fans": 4321}
+
+
+def test_the_library_artist_payload_carries_about(db):
+    from core.library2.queries import get_artist
+
+    _set_enrichment(db, {"musicbrainz": {"genres": ["trip hop"]},
+                         "wikipedia": {"bio": "wiki", "url": "u"}})
+    with closing(db._get_connection()) as conn:
+        about = get_artist(conn, 1)["about"]
+    assert (about["bio_source"], about["tags_source"]) == ("wikipedia", "musicbrainz")

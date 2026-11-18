@@ -49,10 +49,14 @@ import { useMusicGet } from '@/platform/shell/download-rights';
 import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { ArtistDetailResponse } from '../../artist-detail/-artist-detail.types';
+import type {
+  ArtistAboutSource,
+  ArtistDetailResponse,
+} from '../../artist-detail/-artist-detail.types';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
 import { bitrateKbps, formatBitrate, formatQuality, qualityParts } from '../-bitrate';
+import { catalogueAbout } from '../-library-v2.about';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -206,6 +210,7 @@ import {
   checkWatchlistRequest,
   toggleWatchlistRequest,
 } from '../../artist-detail/-artist-detail.watchlist-button';
+import { AboutSourceNote } from '../../artist-detail/-ui/about-source-note';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
@@ -7854,9 +7859,13 @@ function LegacyArtistHero({
   remoteImageUrl,
   genres,
   bio,
+  bioSource,
+  bioUrl,
   listeners,
   playcount,
+  numbersSource,
   followers,
+  fans,
   sections,
   providerId,
   source,
@@ -7884,12 +7893,21 @@ function LegacyArtistHero({
   remoteImageUrl?: string | null;
   genres: string[];
   bio: string | null;
+  /** a free source the bio came from (wikipedia, theaudiodb): a quiet note
+   *  under it says so. null for last.fm and the media server's summary */
+  bioSource?: ArtistAboutSource | null;
+  bioUrl?: string | null;
   listeners: number | null;
   playcount: number | null;
+  /** whose listeners/plays these are. listenbrainz numbers say so in their
+   *  labels; last.fm's keep the plain ones */
+  numbersSource?: ArtistAboutSource | null;
   /** Provider follower count — the one figure that still resolves on an
    *  instance with no Last.fm key. Shares the existing stat row, so the
    *  header does not grow vertically. */
   followers?: number | null;
+  /** deezer fans stored by enrichment, when no live follower count came */
+  fans?: number | null;
   sections: Array<{ label: string; owned: number; total: number }>;
   providerId: string | null;
   source: string;
@@ -7955,7 +7973,8 @@ function LegacyArtistHero({
     return () => observer.disconnect();
   }, [cleanBio]);
   const backdrop = imageUrl || remoteImageUrl || '';
-  const hasNumbers = Boolean(listeners || playcount || followers);
+  const hasNumbers = Boolean(listeners || playcount || followers || fans);
+  const fromListenBrainz = numbersSource === 'listenbrainz';
   return (
     <>
       <section className={`artist-hero-section ${styles.premierHero}`}>
@@ -8028,6 +8047,7 @@ function LegacyArtistHero({
                 )}
               </div>
             ) : null}
+            {cleanBio ? <AboutSourceNote bioSource={bioSource} bioUrl={bioUrl} /> : null}
           </div>
         </div>
       </section>
@@ -8063,19 +8083,28 @@ function LegacyArtistHero({
               {listeners ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(listeners)}</span>
-                  <span className="hero-stat-label">listeners</span>
+                  <span className="hero-stat-label">
+                    {fromListenBrainz ? 'ListenBrainz listeners' : 'listeners'}
+                  </span>
                 </div>
               ) : null}
               {playcount ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(playcount)}</span>
-                  <span className="hero-stat-label">plays</span>
+                  <span className="hero-stat-label">
+                    {fromListenBrainz ? 'ListenBrainz listens' : 'plays'}
+                  </span>
                 </div>
               ) : null}
               {followers ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(followers)}</span>
                   <span className="hero-stat-label">followers</span>
+                </div>
+              ) : fans ? (
+                <div className="artist-hero-stat">
+                  <span className="hero-stat-value">{formatCompactNumber(fans)}</span>
+                  <span className="hero-stat-label">Deezer fans</span>
                 </div>
               ) : null}
             </div>
@@ -8212,10 +8241,7 @@ function CatalogueArtistHero({
       imageUrl={artist.image_url ?? ''}
       remoteImageUrl={artist.remote_image_url}
       genres={artist.genres}
-      bio={artist.summary || info.data?.bio || null}
-      listeners={info.data?.listeners ?? null}
-      playcount={info.data?.playcount ?? null}
-      followers={info.data?.followers ?? null}
+      {...catalogueAbout(artist, info.data)}
       sections={[
         countOwned('Albums', artist.albums, otherSourceCounts?.album),
         countOwned('EPs', artist.eps ?? [], otherSourceCounts?.ep),
@@ -8271,6 +8297,7 @@ function CatalogueArtistHero({
             artistId={artist.id}
             artistName={artist.name}
             genres={artist.genres}
+            about={artist.about}
           />
         </>
       }

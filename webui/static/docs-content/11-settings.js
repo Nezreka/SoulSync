@@ -20,7 +20,7 @@ Settings save themselves a moment after you change them. The status at the top r
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).
 - **slskd** — slskd URL and API key, entered on the Soulseek source panel (Downloads / Sources tabs). Powers Soulseek downloading.
 - **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
-- **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
+- **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import. From December 2026 Last.fm only accepts keys on a Pro subscription. Without a working key, artist pages still get a bio, tags and numbers from free sources: the bio from TheAudioDB or Wikipedia, tags from MusicBrainz, ListenBrainz listeners and Deezer fans. A small note under the bio says where it came from. Last.fm data you already have is kept, and a working key puts Last.fm first again.
 - **Genius** — Client access token for lyrics.
 - **Pollinations** — Optional API key for playlist cover art. Works without one (one image every 45 seconds, with their mark).
 - **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.

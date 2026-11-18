@@ -196,6 +196,49 @@ describe('genres and bio', () => {
     renderHero({ name: 'A', lastfm_bio: '<a href="x">Read more on Last.fm</a>' });
     expect(document.getElementById('artist-hero-bio')).toBeNull();
   });
+
+  // last.fm keys need pro from december 2026: the free sources fill in
+  const fallbackAbout = {
+    bio: 'Massive Attack are a trip hop collective.',
+    bio_source: 'wikipedia' as const,
+    bio_url: 'https://en.wikipedia.org/wiki/Massive_Attack',
+    tags: ['trip hop'],
+    tags_source: 'musicbrainz' as const,
+    listeners: 23456,
+    plays: 812345,
+    popularity_source: 'listenbrainz' as const,
+    fans: 4321,
+    fans_source: 'deezer' as const,
+  };
+
+  it('without last.fm, shows the free sources with a quiet note and honest labels', () => {
+    renderHero({ name: 'A', genres: ['IDM'], about: fallbackAbout });
+    expect(document.querySelector('.bio-text')?.textContent).toBe(fallbackAbout.bio);
+    const note = document.querySelector('.artist-about-source');
+    expect(note?.textContent).toBe('Bio from Wikipedia · Tags from MusicBrainz');
+    expect(note?.querySelector('a')?.getAttribute('href')).toBe(fallbackAbout.bio_url);
+    const tags = document.querySelectorAll('.genre-tag');
+    expect(tags[1]?.textContent).toBe('trip hop');
+    expect((tags[1] as HTMLElement).style.opacity).toBe('0.6');
+    const labels = [...document.querySelectorAll('.hero-stat-label')].map((l) => l.textContent);
+    expect(labels).toEqual(['ListenBrainz listeners', 'ListenBrainz listens', 'Deezer fans']);
+  });
+
+  it('with last.fm data, looks exactly as before: no note, plain labels', () => {
+    renderHero({
+      name: 'A',
+      lastfm_bio: 'From Bristol.',
+      lastfm_tags: ['electronic'],
+      lastfm_listeners: 10,
+      about: { ...fallbackAbout, fans: null, fans_source: null },
+    });
+    expect(document.querySelector('.bio-text')?.textContent).toBe('From Bristol.');
+    expect(document.querySelector('.artist-about-source')).toBeNull();
+    expect(document.getElementById('artist-hero-listeners')?.textContent).toContain('listeners');
+    expect(document.getElementById('artist-hero-listeners')?.textContent).not.toContain(
+      'ListenBrainz',
+    );
+  });
 });
 
 describe('stats and actions', () => {

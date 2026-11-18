@@ -98,7 +98,7 @@ Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
 Apple Music IDs and preview links.
 ### 🔴 Last.fm
-Listener and play counts, bios, tags, similar artists.
+Listener and play counts, bios, tags, similar artists. For an artist Last.fm has nothing for, or with no working key, it fills the bio from TheAudioDB or Wikipedia, tags from MusicBrainz, and ListenBrainz listeners and Deezer fans instead, asked again every 30 days. Last.fm's own data always comes first and is never overwritten.
 ### 🟡 Genius
 Lyrics, descriptions, alternate names, song artwork.
 ### 🌊 Bandcamp
