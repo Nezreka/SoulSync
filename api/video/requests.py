@@ -55,22 +55,48 @@ def _server():
         return None
 
 
-def _profile_row(pid):
-    """the quota fields (requests.limit) for core.requests.quota. a member
+def _quota(kind):
+    """{limit, days} for this profile's limit on ``kind`` (movies, or tv for
+    a show, episode or youtube video), None when it isn't limited. a member
     whose limit can't be read raises, and the caller refuses the ask rather
     than wave it through uncounted."""
     from . import access
-    return access.quota_row(pid)
+    return access.quota_row(_me(), kind)
 
 
-def _used(db, quota) -> int:
-    """asks spent in the quota's window, music asks included (one limit for
-    every ask). a count that can't be read is a full quota: refuse the ask
-    rather than let it through uncounted."""
-    # one count for every ask, music and video (core/requests/asks.py)
+def _used(db, quota, kind) -> int:
+    """asks spent toward ``kind``'s limit in the quota's window (each kind
+    counts on its own, core/requests/asks.py). a count that can't be read is
+    a full quota: refuse the ask rather than let it through uncounted."""
     from core.requests.asks import asks_used
-    used = asks_used(_me(), quota["days"], video_db=db)
+
+    from . import access
+    perms = access.ctx().get("perms")
+    used = asks_used(_me(), quota["days"], access.limit_kind(kind),
+                     perms=perms if isinstance(perms, dict) else None, video_db=db)
     return quota["limit"] if used is None else int(used)
+
+
+def _quota_states(db) -> dict:
+    """{"movies": state, "tv": state} for the kinds this profile can ask for
+    that are limited (state: {kind, limit, days, used, remaining})."""
+    from core.requests.quota import quota_state
+
+    from . import access
+    out = {}
+    for kind, probe in (("movies", "movie"), ("tv", "show")):
+        if not access.has_kind(probe):
+            continue
+        quota = _quota(probe)
+        if quota:
+            out[kind] = dict(quota_state(quota, _used(db, quota, probe)), kind=kind)
+    return out
+
+
+def _tightest(states: dict):
+    """the one quota line an older caller reads: the kind with the fewest
+    asks left."""
+    return min(states.values(), key=lambda q: q["remaining"]) if states else None
 
 
 def _already_pending(db, kind, tmdb_id, season, episode, youtube_id) -> bool:
@@ -464,19 +490,22 @@ def file_request(body):
         _stamp_quality(db, req, [_me()], quality)
         return jsonify({"success": True, "got": True, "wished": wished, "quality_profile_id": quality})
     # a limited profile's quota (asks per window, any outcome counts)
-    from core.requests.quota import over_quota, quota_for, quota_message, quota_state
+    # each kind has its own: a movie spends the movie limit, a show, an
+    # episode or a youtube video the TV one
+    from core.requests.quota import over_quota, quota_message, quota_state
     try:
-        quota = quota_for(_profile_row(_me()))
+        quota = _quota(kind)
     except Exception:  # noqa: BLE001 - can't read the limit, so no ask goes through uncounted
         logger.warning("request limit lookup failed for profile %s", _me(), exc_info=True)
         return jsonify({"success": False,
                         "error": "Couldn't check your request limit. Try again in a moment."}), 503
     if quota:
-        used = _used(db, quota)
+        used = _used(db, quota, kind)
         if over_quota(quota, used) and not joining and not _already_pending(
                 db, kind, tmdb_id, season, episode, youtube_id):
-            return jsonify({"success": False, "error": quota_message(quota),
-                            "quota": quota_state(quota, used)}), 429
+            limit_kind = access.limit_kind(kind)
+            return jsonify({"success": False, "error": quota_message(quota, limit_kind),
+                            "quota": dict(quota_state(quota, used), kind=limit_kind)}), 429
     qp = quality
     rid, created = db.add_video_request(
         profile_id=_me(), requester_name=getattr(g, "profile_name", None),
@@ -533,10 +562,11 @@ def register_routes(bp):
             out["kind"] = kind
             out["mode"] = modes[kind]
             out["qualities"] = access.allowed_qualities(db, kind) if modes[kind] != "none" else []
-            from core.requests.quota import quota_for, quota_state
+            from core.requests.quota import quota_state
             try:
-                quota = quota_for(_profile_row(_me())) if not _is_admin() else None
-                out["quota"] = quota_state(quota, _used(db, quota)) if quota else None
+                quota = _quota(kind) if not _is_admin() else None
+                out["quota"] = (dict(quota_state(quota, _used(db, quota, kind)), kind=access.limit_kind(kind))
+                                if quota else None)
             except Exception:  # noqa: BLE001 - the dialog still opens without the quota line
                 logger.debug("request limit lookup failed for profile %s", _me(), exc_info=True)
                 out["quota"] = None
@@ -573,16 +603,15 @@ def register_routes(bp):
             # their own (the page shows Approve / Decline from this)
             r["can_decide"] = bool(r.get("status") == "pending" and (
                 _is_admin() or (moderator and int(r.get("profile_id") or 0) != me)))
-        from core.requests.quota import quota_for, quota_state
         try:
-            quota = quota_for(_profile_row(_me())) if not _is_admin() else None
+            quotas = _quota_states(db) if not _is_admin() else {}
         except Exception:  # noqa: BLE001 - the list still loads without the quota line
             logger.warning("request limit lookup failed for profile %s", _me(), exc_info=True)
-            quota = None
+            quotas = {}
         return jsonify({"success": True, "requests": rows,
                         "counts": counts, "pending": counts.get("pending", 0),
                         "moderator": moderator, "see_all": scope is None,
-                        "quota": quota_state(quota, _used(db, quota)) if quota else None})
+                        "quotas": quotas, "quota": _tightest(quotas)})
 
     @bp.route("/requests/counts", methods=["GET"])
     def video_request_counts():

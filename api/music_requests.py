@@ -220,7 +220,8 @@ def list_music_requests():
 
 def _quota(db, profile):
     """{limit, days, used, remaining} for a limited asking profile, else None.
-    video asks count the same as track asks: an ask is an ask."""
+    the music limit: album, track and music video asks (movies and TV have
+    their own)."""
     from core.requests.quota import quota_for, quota_state
     if hasattr(db, "get_permission_inputs") and profile:
         from core.permission_store import music_rights
@@ -229,9 +230,8 @@ def _quota(db, profile):
         quota = None if profile_can_download(profile) else quota_for(profile)
     if not quota:
         return None
-    # one count for every ask, music and video (core/requests/asks.py)
     from core.requests.asks import asks_used
-    used = asks_used(profile["id"], quota["days"], music_db=db)
+    used = asks_used(profile["id"], quota["days"], "music", music_db=db)
     if used is None:  # fail closed: quota unknown means no asks allowed
         logger.warning("quota check failed, denying asks")
         return {"limit": quota["limit"], "days": quota["days"], "used": quota["limit"], "remaining": 0}
@@ -502,8 +502,8 @@ def file_music_video_request():
         return jsonify({"success": False, "in_library": True}), 409
     quota = _quota(db, me)
     if quota and quota["remaining"] <= 0:
-        from core.requests.quota import quota_for, quota_message
-        return jsonify({"success": False, "error": quota_message(quota_for(me)),
+        from core.requests.quota import quota_message
+        return jsonify({"success": False, "error": quota_message(quota, "music"),
                         "quota": True}), 429
     from core.downloads.music_video import parse_artist_title
     artist, _parsed_title = parse_artist_title(title, channel or "")

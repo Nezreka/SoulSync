@@ -205,13 +205,17 @@ def put_signup_template():
 @admin_only
 def asks_used():
     """the People list's Requests column (#2166 follow-up 10): for every
-    member with a request limit, the asks spent in its window, music and
-    video together (core/requests/asks.py, the same count every limit check
-    uses). {"used": {"<id>": {limit, days, used, remaining}}}; a member
-    whose count can't be read is left out (the row shows just the limit)."""
-    from core.requests.asks import asks_used as count
-    from core.requests.quota import quota_state
+    member with a request limit, the asks spent in each limited kind's
+    window (core/requests/asks.py, the same count every limit check uses).
+    {"used": {"<id>": {"music"|"movies"|"tv": {kind, limit, days, used,
+    remaining}}}}; a kind whose count can't be read is left out (the row
+    shows just the limit)."""
+    from core.requests import asks
     db = get_database()
+    try:
+        video_db = get_video_db() if get_video_db is not None else None
+    except Exception:  # noqa: BLE001 - the video kinds are left out below
+        video_db = None
     out = {}
     for prof in db.get_all_profiles():
         if P.is_admin_row(prof):
@@ -220,21 +224,18 @@ def asks_used():
             eff, _source = store.effective_for(db, prof)
         except store.PermissionsUnavailable:
             continue
-        limit = eff.get("requests.limit") or {}
-        try:
-            n, days = int(limit.get("n") or 0), int(limit.get("days") or 7)
-        except (TypeError, ValueError):
-            continue
-        if n <= 0:
-            continue
-        try:
-            video_db = get_video_db() if get_video_db is not None else None
-        except Exception:  # noqa: BLE001 - counted as unreadable below
-            video_db = None
-        used = count(prof["id"], days, music_db=db, video_db=video_db) if video_db is not None else None
-        if used is None:
-            continue
-        out[str(prof["id"])] = quota_state({"limit": n, "days": max(1, days)}, used)
+        kinds = {}
+        for kind in asks.KINDS:
+            quota = asks.quota_for(eff, kind)
+            if quota is None or (kind != "music" and video_db is None):
+                continue
+            used = asks.asks_used(prof["id"], quota["days"], kind, perms=eff, music_db=db, video_db=video_db)
+            if used is None:
+                continue
+            kinds[kind] = {"kind": kind, "limit": quota["limit"], "days": quota["days"], "used": int(used),
+                           "remaining": max(0, quota["limit"] - int(used))}
+        if kinds:
+            out[str(prof["id"])] = kinds
     return jsonify({"success": True, "used": out})
 
 
@@ -276,6 +277,47 @@ def put_profile_permissions(profile_id):
         return _err(exc)
     except store.PermissionsUnavailable as exc:
         return _unavailable(exc)
+
+
+@bp.route("/api/profiles/me/asks", methods=["GET"])
+@self_only
+def my_asks():
+    """the caller's own asks per limited kind, for Profile & account's
+    "5 asks a week, 2 used": {"asks": {"music"|"movies"|"tv": {kind, limit,
+    days, used, remaining}}}. only kinds with a limit; admins have none. a
+    count that can't be read reads as the limit spent (the same answer the
+    ask itself gets)."""
+    from core.requests import asks
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required", "profile_required": True}), 401
+    db = get_database()
+    try:
+        prof = db.get_profile(int(pid), raise_errors=True)
+        if not prof:
+            return jsonify({"success": False, "error": "profile_required", "profile_required": True}), 401
+        if P.is_admin_row(prof):
+            return jsonify({"success": True, "asks": {}})
+        eff, _source = store.effective_for(db, prof)
+    except Exception as exc:  # noqa: BLE001 - PermissionsUnavailable or a db that can't answer
+        return _unavailable(exc)
+    out = {}
+    for kind in asks.KINDS:
+        if asks.quota_for(eff, kind) is None:
+            continue
+        video_db = None
+        if kind != "music":
+            try:
+                video_db = get_video_db() if get_video_db is not None else None
+            except Exception:  # noqa: BLE001 - counted as unreadable
+                video_db = None
+            if video_db is None:
+                q = asks.quota_for(eff, kind)
+                out[kind] = {"kind": kind, "limit": q["limit"], "days": q["days"], "used": q["limit"],
+                             "remaining": 0}
+                continue
+        out[kind] = asks.status(int(pid), eff, kind, music_db=db, video_db=video_db)
+    return jsonify({"success": True, "asks": out})
 
 
 @bp.route("/api/profiles/me/permissions", methods=["GET"])

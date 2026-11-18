@@ -291,25 +291,25 @@ class OwnerGate:
             return False
         return any(r.get("kind") == "show" and str(r.get("tmdb_id")) == str(tmdb_id) for r in rows)
 
-    def under_limit(self, video_db) -> bool:
-        """may the owner file one more request (requests.limit)? a count that
+    def under_limit(self, video_db, kind: str = "movie") -> bool:
+        """may the owner file one more ``kind`` request (that kind's request
+        limit: movies, or tv for a show, season or episode)? a count that
         can't be read is a full limit."""
         ctx = self.ctx()
         if ctx.get("is_admin"):
             return True
-        limit = (ctx.get("perms") or {}).get("requests.limit") or {}
-        try:
-            n, days = int(limit.get("n") or 0), int(limit.get("days") or 7)
-        except (TypeError, ValueError):
+        perms = ctx.get("perms")
+        if not isinstance(perms, dict):
             return False
-        if n <= 0:
+        limit_kind = P.ask_limit_kind(kind, perms) or "movies"
+        lim = P.limit_of(perms, limit_kind)
+        if lim["n"] <= 0:
             return True
-        # one count for every ask, music and video (core/requests/asks.py)
         from core.requests.asks import asks_used
-        used = asks_used(self.owner_id, days, video_db=video_db)
+        used = asks_used(self.owner_id, lim["days"], limit_kind, perms=perms, video_db=video_db)
         if used is None:
             return False
-        return P.can(ctx, "requests.limit", used)
+        return P.can(ctx, P.LIMIT_ROWS[limit_kind], used)
 
     def file_video_request(self, video_db, *, kind: str, tmdb_id, title: str, year=None,
                            poster_url=None, quality_profile_id=None, monitor: str = "future",
@@ -318,7 +318,7 @@ class OwnerGate:
         """file a request for the owner. returns filed | asked | over_limit | failed."""
         if self.asked_before(video_db, kind, tmdb_id, season_number, episode_number):
             return "asked"
-        if not self.under_limit(video_db):
+        if not self.under_limit(video_db, kind):
             self._once("requests", "over the request limit")
             return "over_limit"
         try:

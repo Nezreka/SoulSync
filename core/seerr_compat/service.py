@@ -761,14 +761,13 @@ class SeerrCompat:
         return self._created(0, shapes.REQUEST_APPROVED, shapes.STATUS_PROCESSING, p, kind,
                              tmdb_id, wanted, quality)
 
-    def _quota(self, p) -> Optional[Dict[str, int]]:
-        """{limit, days} from the acting profile's request limit, or None."""
+    def _quota(self, p, kind) -> Optional[Dict[str, int]]:
+        """{limit, days} from the acting profile's limit for this kind
+        (movies, or tv for a show), or None."""
+        from core.requests.asks import quota_for
         c = self.ctx(p)
-        if c.get("is_admin"):
-            return None
-        lim = (c.get("perms") or {}).get("requests.limit") or {}
-        n, days = _int(lim.get("n"), 0), _int(lim.get("days"), 7)
-        return {"limit": n, "days": max(1, days)} if n and n > 0 else None
+        return quota_for(c.get("perms"), P.ask_limit_kind(kind, c.get("perms")) or "movies",
+                         is_admin=bool(c.get("is_admin")))
 
     def _file_request(self, p, kind, tmdb_id, meta, real, seasons, quality=None) -> dict:
         """ask first (or a quality that needs an OK): a video request an admin approves."""
@@ -787,13 +786,14 @@ class SeerrCompat:
                                  today=self._today()).get(int(tmdb_id)) or {}
         if title_status.blocks_request(kind, got.get("status"), got.get("state")):
             raise SeerrError(409, "Request for this media already exists.")
-        quota = self._quota(p)
-        # one count for every ask, music and video (core/requests/asks.py)
+        quota = self._quota(p, kind)
         from core.requests.asks import asks_used
-        used = asks_used(pid, quota["days"], video_db=db) if quota else 0
+        perms = self.ctx(p).get("perms")
+        limit_kind = P.ask_limit_kind(kind, perms) or "movies"
+        used = asks_used(pid, quota["days"], limit_kind, perms=perms, video_db=db) if quota else 0
         # a count that can't be read is a full quota, never a free ask
         if quota and over_quota(quota, quota["limit"] if used is None else used):
-            raise SeerrError(403, quota_message(quota))
+            raise SeerrError(403, quota_message(quota, limit_kind))
         monitor, note = ("future", None)
         if kind == "show":
             monitor, note = monitor_for_seasons(real, seasons)

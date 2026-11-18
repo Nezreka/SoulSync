@@ -8,7 +8,8 @@ the video blueprint reads the same effective permissions as everything else
                               kids layer, a direct hit gets the calm refusal)
   movies.get / tv.get         download right away / ask first / can't request
   movies.max_rating, tv.max_rating (tv follows the movie one by default)
-  requests.limit, requests.see_all, requests.moderate
+  movies.request_limit, tv.request_limit (youtube asks count toward tv),
+  requests.see_all, requests.moderate
   movies.quality*, tv.quality* through resolve_request_quality
 
 a request with no ``g.perms`` at all (a caller that skipped web_server's
@@ -164,23 +165,32 @@ def may_moderate(owner_profile_id) -> bool:
     return P.may_moderate(ctx(), owner_profile_id)
 
 
-def quota_row(pid) -> Dict[str, Any]:
-    """the profile shape core.requests.quota reads, from requests.limit. a
-    member with no map raises: an ask is never let through uncounted."""
+def limit_kind(kind) -> str:
+    """the request limit an ask of ``kind`` counts toward: 'movies' or 'tv'
+    (a youtube video rides with TV, or movies for a profile with no TV)."""
+    perms = ctx().get("perms")
+    return P.ask_limit_kind(kind, perms if isinstance(perms, dict) else None) or "movies"
+
+
+def quota_row(pid, kind="movie") -> Optional[Dict[str, int]]:
+    """{limit, days} for this profile's limit on ``kind`` (movies, or tv for
+    a show, episode or youtube), None when that kind isn't limited (or for
+    admins). a member with no map raises: an ask is never let through
+    uncounted."""
     c = ctx()
     if c.get("is_admin"):
-        return {"id": pid, "is_admin": True}
+        return None
     g = _g()
     if not stamped() and (g is None or not hasattr(g, "request_limit")):
         # a member's request with no stamp came through a path that skipped
         # web_server: that is not "no limit"
         raise LookupError("no request limit on record for profile %s" % pid)
     perms = c.get("perms")
-    if not isinstance(perms, dict) or not isinstance(perms.get("requests.limit"), dict):
+    row = P.LIMIT_ROWS[limit_kind(kind)]
+    if not isinstance(perms, dict) or not isinstance(perms.get(row, perms.get(P.OLD_LIMIT)), dict):
         raise LookupError("no request limit on record for profile %s" % pid)
-    lim = perms["requests.limit"]
-    return {"id": pid, "is_admin": False, "request_limit": int(lim.get("n") or 0),
-            "request_limit_days": int(lim.get("days") or 7)}
+    from core.requests.asks import quota_for
+    return quota_for(perms, limit_kind(kind))
 
 
 # ── refusals ─────────────────────────────────────────────────────────────
@@ -458,7 +468,7 @@ def member_quality(db, kind):
 
 
 __all__ = ["row_for", "title_kind", "ctx", "can", "is_admin", "any_side", "has_kind", "allowed_kinds",
-           "mode", "may_get", "may_see_all_requests", "is_moderator", "may_moderate", "quota_row",
+           "mode", "may_get", "may_see_all_requests", "is_moderator", "may_moderate", "quota_row", "limit_kind",
            "refusal", "kind_refusal", "get_refusal", "quality_refusal", "quality_options", "resolve",
            "allowed_qualities", "route_access", "kind_in_path", "body_kind", "is_get_action",
            "stamped", "VIDEO_SIDE", "path_kind", "member_quality"]
