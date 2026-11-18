@@ -901,11 +901,14 @@
         if (d.wikidata_url) out += moreLink('Official site', d.wikidata_url);
         return out;
     }
+    // #2177: what SoulSync hunts, like sonarr: an episode in a season you
+    // unmonitored is not "missing" (a tmdb preview has no flag: all wanted)
     function missingAiredCount(d) {
         var today = new Date().toISOString().slice(0, 10), n = 0;
         (d.seasons || []).forEach(function (s) {
             if (s.season_number === 0) return;
             (s.episodes || []).forEach(function (ep) {
+                if (ep.monitored === false) return;
                 if (!ep.owned && (!ep.air_date || ep.air_date <= today)) n++;
             });
         });
@@ -1904,7 +1907,9 @@
         var live = (Number(c.queued) || 0) + (Number(c.downloading) || 0);
         var failed = Number(c.failed) || 0;
         var ignored = Number(c.ignored) || 0;
-        var outstanding = total > 0 ? Math.max(0, total - owned) : 0;
+        // #2177: ignored (aired, unmonitored) is in total but nothing hunts
+        // it, so it is its own chip, not part of the "N missing" headline
+        var outstanding = total > 0 ? Math.max(0, total - owned - ignored) : 0;
         if (!failed && !live && !ignored && !outstanding) return '';
         var shown = _ACQ_STATES.filter(function (s) {
             if (s[0] === 'owned' && !owned) return false;
@@ -1932,6 +1937,8 @@
                     '<span class="vd-acq-k">' + esc(s[1]) + '</span></span>';
             }).join('') + '</div>' + bar +
             (live ? '<div class="vd-acq-note">Queued and downloading are part of wanted, not extra to it.</div>' : '') +
+            (ignored && outstanding ? '<div class="vd-acq-note">' + ignored + ' more ' + (ignored === 1 ? 'isn’t' : 'aren’t') +
+                ' monitored, so nothing is looking for ' + (ignored === 1 ? 'it' : 'them') + '.</div>' : '') +
             '</div>';
     }
     function loadAcquisition(kind, id) {
@@ -4649,6 +4656,7 @@
         (data.seasons || []).forEach(function (s) {
             (s.episodes || []).forEach(function (ep) {
                 if (ep.owned) return;
+                if (ep.monitored === false) return;     // #2177: unmonitored is left alone
                 if (ep.air_date && ep.air_date > today) return;
                 var still = (data.source === 'tmdb')
                     ? (ep.still_url || null)

@@ -353,15 +353,18 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
     for ep in db.library_show_episodes(show_id, watcher=watcher):
         sn = ep.get("season_number")
         s = seasons.setdefault(sn, {"season_number": sn, "owned": 0, "total": 0, "missing": 0,
-                                    "upcoming": 0, "size_bytes": 0, "monitored": True,
-                                    "episodes": [], "_files": []})
+                                    "missing_unmonitored": 0, "upcoming": 0, "size_bytes": 0,
+                                    "monitored": True, "episodes": [], "_files": []})
         files = files_by_ep.get(ep["id"], [])
         aired = _aired(ep, today)
         s["total"] += 1
         if ep.get("has_file"):
             s["owned"] += 1
         elif aired:
-            s["missing"] += 1
+            # #2177: missing is what SoulSync is hunting, like sonarr's. an aired
+            # gap nobody monitors is counted on its own so the page can say it
+            # quietly instead of folding it into "273 missing"
+            s["missing" if ep.get("monitored", 1) else "missing_unmonitored"] += 1
         else:
             s["upcoming"] += 1
         s["size_bytes"] += sum(f["size_bytes"] for f in files)
@@ -404,6 +407,7 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
             "owned": sum(s["owned"] for s in real_seasons),
             "total": sum(s["total"] for s in real_seasons),
             "missing": sum(s["missing"] for s in real_seasons),
+            "missing_unmonitored": sum(s["missing_unmonitored"] for s in real_seasons),
             "upcoming": sum(s["upcoming"] for s in real_seasons),
             "specials_owned": sum(s["owned"] for s in season_list if s["season_number"] == 0),
             "files": len(all_files),
