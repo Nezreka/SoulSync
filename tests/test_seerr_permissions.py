@@ -198,13 +198,14 @@ def test_movie_and_tv_ratings_are_capped_separately(client, h, ctxs):
 # ---- request limit from the effective map ----------------------------------------
 
 def test_the_request_limit_comes_from_permissions_not_the_old_column(client, h, ctxs):
-    pid = ctxs(27, member_ctx(profile_id=27, **{"movies.get": "ask", "requests.limit": {"n": 1, "days": 7}}),
+    pid = ctxs(27, member_ctx(profile_id=27, **{"movies.get": "ask", "movies.request_limit": {"n": 1, "days": 7},
+                                                "tv.request_limit": {"n": 0, "days": 7}}),
                request_limit=0)
     assert _post(client, pid, {"mediaType": "movie", "mediaId": NEW_MOVIE}).status_code == 201
     over = _post(client, pid, {"mediaType": "movie", "mediaId": 555})
-    assert over.status_code == 403 and "used your 1 request" in over.get_json()["message"]
+    assert over.status_code == 403 and "used your 1 movie request" in over.get_json()["message"]
     # downloads right away are never capped
-    pid2 = ctxs(28, member_ctx(profile_id=28, **{"requests.limit": {"n": 1, "days": 7}}))
+    pid2 = ctxs(28, member_ctx(profile_id=28, **{"movies.request_limit": {"n": 1, "days": 7}}))
     assert _post(client, pid2, {"mediaType": "movie", "mediaId": NEW_MOVIE}).status_code == 201
     assert _post(client, pid2, {"mediaType": "movie", "mediaId": 555}).status_code == 201
 

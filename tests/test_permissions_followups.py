@@ -303,7 +303,9 @@ def test_the_old_signup_settings_become_the_signup_template_once(fresh_signup):
     assert row['name'] == PS.SIGNUP_TEMPLATE_NAME
     perms = json.loads(row['perms'])
     assert perms['movies.access'] is True and perms['music.access'] is True
-    assert perms['requests.limit'] == {'n': 3, 'days': 7}
+    # the one old sign-up limit becomes each kind's (music, movies, tv)
+    for row in P.LIMIT_ROWS.values():
+        assert perms[row] == {'n': 3, 'days': 7}, row
     assert perms['music.get'] == 'download' and perms['books.get'] == 'download'
     assert perms['music.playlist_sync'] is False             # sign-ups never got the machinery
     # once: a later change to the settings doesn't move anything again
@@ -478,47 +480,111 @@ def test_podcasts_read_follow_only_and_the_summary_speaks_to_you():
     assert 'Their own automations' in them['never']
 
 
-# ── 15, 10: one count of asks ────────────────────────────────────────────
+# ── 15, 10: each kind counts its own asks ────────────────────────────────
 
 
 class _VideoCount:
-    def __init__(self, n):
-        self.n = n
+    """a video db that answers per request kind: {kind: n} (an unknown
+    kind, a log row from before v75, is under None)."""
 
-    def count_video_requests_since(self, pid, days):
-        return self.n
+    def __init__(self, by_kind):
+        self.by_kind = by_kind
+        self.asked = []
+
+    def count_video_requests_since(self, pid, days, kinds=None):
+        self.asked.append(tuple(kinds) if kinds is not None else None)
+        if self.by_kind is None:
+            return None
+        ks = list(self.by_kind) if kinds is None else list(kinds) + [None]
+        return sum(n for k, n in self.by_kind.items() if k in ks)
 
 
-def test_one_count_of_asks_for_music_and_video(made):
+def test_each_kind_counts_only_its_own_asks(made):
     from core.requests.asks import asks_used
     db = _db()
     pid = made()
-    assert asks_used(pid, 7, music_db=db, video_db=_VideoCount(2)) == 2
-    assert asks_used(pid, 7, music_db=db, video_db=_VideoCount(None)) is None    # unreadable: full
+    v = _VideoCount({'movie': 2, 'show': 1, 'episode': 3, 'youtube': 4})
+    both = {'movies.access': True, 'tv.access': True}
+    assert asks_used(pid, 7, 'movies', perms=both, music_db=db, video_db=v) == 2
+    assert asks_used(pid, 7, 'tv', perms=both, music_db=db, video_db=v) == 8      # show, episode, youtube
+    assert asks_used(pid, 7, 'music', perms=both, music_db=db, video_db=v) == 0   # no movie or show ever
+    # a profile with no TV: youtube rides with movies, never a limit it can't see
+    movies_only = {'movies.access': True, 'tv.access': False}
+    assert asks_used(pid, 7, 'movies', perms=movies_only, music_db=db, video_db=v) == 6
+    # a logged ask whose kind isn't known counts toward both video limits
+    old = _VideoCount({'movie': 1, None: 2})
+    assert asks_used(pid, 7, 'movies', perms=both, video_db=old) == 3
+    assert asks_used(pid, 7, 'tv', perms=both, video_db=old) == 2
+    assert asks_used(pid, 7, 'movies', music_db=db, video_db=_VideoCount(None)) is None    # unreadable: full
+    with pytest.raises(ValueError):
+        asks_used(pid, 7, 'books', video_db=v)
 
 
-def test_a_music_ask_counts_the_members_video_asks_too(made, monkeypatch):
+def test_a_music_ask_never_spends_on_movies_or_tv(made, monkeypatch):
     import core.requests.asks as asks
     db = _db()
-    pid = made('teen', **{'requests.limit': {'n': 2, 'days': 7}})
-    monkeypatch.setattr(asks, '_video_db', lambda db=None: db or _VideoCount(2))
+    pid = made('teen', **{'music.request_limit': {'n': 1, 'days': 7}})
+    # plenty of movie and show asks this week: none of them is music's
+    monkeypatch.setattr(asks, '_video_db', lambda db=None: db or _VideoCount({'movie': 5, 'show': 5}))
     track = {'id': 'fu%s' % uuid4().hex[:6], 'name': 'song', 'artists': [{'name': 'A'}],
              'album': {'id': 'al%s' % uuid4().hex[:6], 'name': 'Al', 'album_type': 'album', 'images': []}}
     out = db.add_to_wishlist_detailed(spotify_track_data=track, profile_id=pid, source_type='manual',
                                       user_initiated=True)
-    assert not out.get('created'), out          # two movie asks already spent the limit
-    monkeypatch.setattr(asks, '_video_db', lambda db=None: db or _VideoCount(0))
-    out = db.add_to_wishlist_detailed(spotify_track_data=track, profile_id=pid, source_type='manual',
-                                      user_initiated=True)
     assert out.get('created'), out
+    # and the one music ask is spent now
+    track2 = dict(track, id='fv%s' % uuid4().hex[:6],
+                  album={'id': 'am%s' % uuid4().hex[:6], 'name': 'Bl', 'album_type': 'album', 'images': []})
+    out = db.add_to_wishlist_detailed(spotify_track_data=track2, profile_id=pid, source_type='manual',
+                                      user_initiated=True)
+    assert out.get('status') == 'rejected' and out.get('reason') == 'request_limit', out
+    db.clear_wishlist(profile_id=pid)
 
 
-def test_the_admin_sees_asks_used_per_person(made, monkeypatch):
+def test_the_admin_sees_asks_used_per_person_per_kind(made, monkeypatch):
     import api.permissions_routes as routes
-    monkeypatch.setattr(routes, 'get_video_db', lambda: _VideoCount(1))
-    limited = made('teen', **{'requests.limit': {'n': 5, 'days': 7}})
+    monkeypatch.setattr(routes, 'get_video_db', lambda: _VideoCount({'movie': 1, 'show': 2}))
+    limited = made('teen', **{'movies.request_limit': {'n': 5, 'days': 7}, 'tv.request_limit': {'n': 3, 'days': 1}})
     free = made()
     body = _as(1).get('/api/permissions/asks-used').get_json()
-    assert body['used'][str(limited)] == {'limit': 5, 'days': 7, 'used': 1, 'remaining': 4}
+    assert body['used'][str(limited)] == {
+        'movies': {'kind': 'movies', 'limit': 5, 'days': 7, 'used': 1, 'remaining': 4},
+        'tv': {'kind': 'tv', 'limit': 3, 'days': 1, 'used': 2, 'remaining': 1}}
     assert str(free) not in body['used']
     assert _as(limited).get('/api/permissions/asks-used').status_code == 403
+
+
+def test_a_member_reads_their_own_asks_per_kind(made, monkeypatch):
+    import api.permissions_routes as routes
+    monkeypatch.setattr(routes, 'get_video_db', lambda: _VideoCount({'movie': 2}))
+    pid = made('teen', **{'movies.request_limit': {'n': 2, 'days': 7}})
+    body = _as(pid).get('/api/profiles/me/asks').get_json()
+    assert body['asks'] == {'movies': {'kind': 'movies', 'limit': 2, 'days': 7, 'used': 2, 'remaining': 0}}
+    assert _as(1).get('/api/profiles/me/asks').get_json()['asks'] == {}     # admins have no limit
+
+
+def test_the_old_shared_limit_still_reads_as_every_kind():
+    # an older caller that sets requests.limit sets all three, and can()
+    # on it is held to the strictest
+    layer = P.clean_layer({'requests.limit': {'n': 4, 'days': 7}, 'tv.request_limit': {'n': 1, 'days': 7}})
+    assert layer == {'music.request_limit': {'n': 4, 'days': 7}, 'movies.request_limit': {'n': 4, 'days': 7},
+                     'tv.request_limit': {'n': 1, 'days': 7}}
+    ctx = P.make_context(9, perms=dict(P.TEMPLATE_DEFAULTS, **layer))
+    assert P.can(ctx, 'requests.limit', 0) and not P.can(ctx, 'requests.limit', 1)
+    assert P.can(ctx, 'music.request_limit', 3) and not P.can(ctx, 'music.request_limit', 4)
+
+
+def test_the_old_columns_start_every_kind():
+    perms, reasons = P.perms_from_legacy({'allowed_sides': 'both', 'can_download': False,
+                                          'request_limit': 5, 'request_limit_days': 30})
+    assert reasons == []
+    for row in P.LIMIT_ROWS.values():
+        assert perms[row] == {'n': 5, 'days': 30}
+    # the columns cache the music limit
+    eff = dict(perms, **{'music.request_limit': {'n': 2, 'days': 7}})
+    assert P.legacy_from_perms(eff)['request_limit'] == 2
+    # the migration's verify step holds movies and tv to the old column too
+    old = {'allowed_sides': 'both', 'can_download': False, 'request_limit': 5, 'request_limit_days': 30}
+    assert not {'music.request_limit', 'movies.request_limit', 'tv.request_limit'} & set(
+        P.cache_matches(old, perms, strict=True))
+    moved = P.cache_matches(old, dict(perms, **{'tv.request_limit': {'n': 1, 'days': 30}}), strict=True)
+    assert 'tv.request_limit' in moved and 'movies.request_limit' not in moved

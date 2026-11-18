@@ -381,14 +381,18 @@ def test_a_members_personal_automation_runs_for_them_only(made):
     assert handled and handled[0]['_profile_id'] == member
 
 
-# ── music.get, requests.limit and the wishlist ───────────────────────────
+# ── music.get, music.request_limit and the wishlist ───────────────────────────
 
 
 def test_music_rights_follow_the_map_and_the_policy(made):
     db = _db()
-    asks = made('teen', **{'requests.limit': {'n': 3, 'days': 7}})
+    asks = made('teen', **{'music.request_limit': {'n': 3, 'days': 7}})
     rights = PS.music_rights(db, db.get_profile(asks))
     assert rights == {'mode': 'ask', 'quota': {'limit': 3, 'days': 7}, 'hide_explicit': False}
+    # a movie or TV limit is never the music one
+    video_limited = made('teen', **{'movies.request_limit': {'n': 1, 'days': 7},
+                                    'tv.request_limit': {'n': 1, 'days': 7}})
+    assert PS.music_rights(db, db.get_profile(video_limited))['quota'] is None
     downloads = made()
     assert PS.music_rights(db, db.get_profile(downloads))['mode'] == 'download'
     none = made(**{'music.get': 'none'})
@@ -429,7 +433,7 @@ def test_the_wishlist_holds_every_add_to_the_owners_rights(made):
 
 def test_the_request_limit_comes_from_the_permission_map(made):
     db = _db()
-    pid = made('teen', **{'requests.limit': {'n': 1, 'days': 7}})
+    pid = made('teen', **{'music.request_limit': {'n': 1, 'days': 7}})
     tag = uuid4().hex[:6]
     try:
         first = db.add_to_wishlist_detailed(spotify_track_data=_track(tag + '1', album='x' + tag), profile_id=pid,

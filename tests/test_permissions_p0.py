@@ -123,8 +123,8 @@ def test_catalogue_payload_is_plain_json():
 
 @pytest.mark.parametrize("pid,bad", [
     ("music.access", "yes"), ("music.get", "maybe"), ("books.get", "ask"), ("movies.max_rating", "NC-17"),
-    ("movies.max_rating", "follow"), ("requests.limit", {"n": -1}), ("requests.limit", {"n": 2, "days": 0}),
-    ("requests.limit", {"n": 2000}), ("requests.limit", 5), ("movies.quality", "everything"),
+    ("movies.max_rating", "follow"), ("movies.request_limit", {"n": -1}), ("movies.request_limit", {"n": 2, "days": 0}),
+    ("movies.request_limit", {"n": 2000}), ("movies.request_limit", 5), ("movies.quality", "everything"),
     ("movies.quality", ["x"]), ("movies.quality_default", "x"), ("movies.quality_ask", ["8k"]),
     ("ui.sidebar", {"off": []}), ("requests.cancel_own", True), ("account.admin", True), ("nope.nope", True),
 ])
@@ -136,7 +136,7 @@ def test_coerce_refuses_what_a_row_cant_hold(pid, bad):
 def test_coerce_cleans_what_it_can():
     assert P.coerce("movies.quality", [3, "2", 3]) == [2, 3]
     assert P.coerce("movies.quality_ask", ["4k", 5]) == [5, "4k"]
-    assert P.coerce("requests.limit", {"n": "3"}) == {"n": 3, "days": 7}
+    assert P.coerce("music.request_limit", {"n": "3"}) == {"n": 3, "days": 7}
     assert P.coerce("tv.max_rating", "follow") == "follow"
     assert P.coerce("music.access", 1) is True
 
@@ -150,10 +150,10 @@ def test_clamp_per_kind():
     assert P.clamp("movies.get", "none", "download") == "none"
     assert P.clamp("movies.max_rating", "any", "PG-13") == "PG-13"
     assert P.clamp("movies.max_rating", "PG", "R") == "PG"
-    assert P.clamp("requests.limit", {"n": 0, "days": 7}, {"n": 20, "days": 7}) == {"n": 20, "days": 7}
-    assert P.clamp("requests.limit", {"n": 5, "days": 1}, {"n": 20, "days": 7}) == {"n": 20, "days": 7}
-    assert P.clamp("requests.limit", {"n": 2, "days": 7}, {"n": 20, "days": 7}) == {"n": 2, "days": 7}
-    assert P.clamp("requests.limit", {"n": 9, "days": 1}, {"n": 0, "days": 7}) == {"n": 9, "days": 1}
+    assert P.clamp("tv.request_limit", {"n": 0, "days": 7}, {"n": 20, "days": 7}) == {"n": 20, "days": 7}
+    assert P.clamp("tv.request_limit", {"n": 5, "days": 1}, {"n": 20, "days": 7}) == {"n": 20, "days": 7}
+    assert P.clamp("tv.request_limit", {"n": 2, "days": 7}, {"n": 20, "days": 7}) == {"n": 2, "days": 7}
+    assert P.clamp("tv.request_limit", {"n": 9, "days": 1}, {"n": 0, "days": 7}) == {"n": 9, "days": 1}
     assert P.clamp("movies.quality", P.ALL, [1, 2]) == [1, 2]
     assert P.clamp("movies.quality", [2, 3], [1, 2]) == [2]
     assert P.clamp("movies.quality", [2, 3], P.ALL) == [2, 3]
@@ -458,11 +458,14 @@ def test_signup_overrides_reproduce_what_signup_gives_today():
 
 
 def test_summary_is_built_from_the_map():
-    s = P.summarize(member_perms("teen", **{"requests.limit": {"n": 3, "days": 7}}), name="Maya")
+    s = P.summarize(member_perms("teen", **{"movies.request_limit": {"n": 3, "days": 7},
+                                            "music.request_limit": {"n": 1, "days": 1}}), name="Maya")
     texts = " ".join(line["text"] for line in s["lines"])
-    assert "Movies: asks first, up to PG-13." in texts
+    # each kind's limit sits on its own line; tv has none here
+    assert "Movies: asks first, up to PG-13, 3 movie asks a week." in texts
     assert "TV shows: asks first, up to TV-14." in texts
-    assert "Up to 3 asks a week." in texts
+    assert "Music: asks first, 1 music ask a day." in texts
+    assert "asks a" not in [x["text"] for x in s["lines"] if x["category"] == "tv"][0]
     assert s["sentence"] == "Maya uses music, movies and TV shows."
     assert P.summarize({}, is_admin=True)["lines"] == []
     assert "Audiobooks" in P.summarize(member_perms("guest", **{"books.access": False}))["never"]
@@ -703,10 +706,10 @@ def test_change_profile_resets_rows_categories_and_all(tmp_path):
 
 def test_change_profile_switches_template_and_keeps_personal_changes(tmp_path):
     db, ids = build_install(tmp_path, "household")
-    out = S.change_profile(db, db.get_profile(ids["Teen"]), {"set": {"requests.limit": {"n": 2, "days": 7}}})
+    out = S.change_profile(db, db.get_profile(ids["Teen"]), {"set": {"movies.request_limit": {"n": 2, "days": 7}}})
     adult = next(t["id"] for t in db.list_permission_templates() if t["slug"] == "adult")
     out = S.change_profile(db, db.get_profile(ids["Teen"]), {"template_id": adult})
-    assert out["template"]["slug"] == "adult" and out["overrides"] == {"requests.limit": {"n": 2, "days": 7}}
+    assert out["template"]["slug"] == "adult" and out["overrides"] == {"movies.request_limit": {"n": 2, "days": 7}}
     assert db.get_profile(ids["Teen"])["can_download"] is True
     with pytest.raises(S.PermissionRequestError):
         S.change_profile(db, db.get_profile(1), {"set": {"music.get": "ask"}})

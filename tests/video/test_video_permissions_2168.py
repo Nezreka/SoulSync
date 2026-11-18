@@ -251,12 +251,14 @@ def test_request_dialog_quality(env):
 def test_options_endpoint_is_what_the_dialog_shows(env):
     client, _db, q, _a, as_member, _app = env
     as_member(**{"tv.quality": [q["tv"], q["tvx"]], "tv.quality_default": q["tv"],
-                 "tv.quality_ask": [q["tvx"]], "requests.limit": {"n": 5, "days": 7}})
+                 "tv.quality_ask": [q["tvx"]], "tv.request_limit": {"n": 5, "days": 7},
+                 "movies.request_limit": {"n": 1, "days": 1}})
     d = client.get("/api/video/requests/options?kind=show").get_json()
     assert d["mode"] == "download" and d["asks_who"] == "Sam"
     assert [(x["id"], x["default"], x["asks"]) for x in d["qualities"]] == [
         (q["tv"], True, False), (q["tvx"], False, True)]
-    assert d["quota"] == {"limit": 5, "days": 7, "used": 0, "remaining": 5}
+    # the show dialog shows the TV limit, never the movie one
+    assert d["quota"] == {"kind": "tv", "limit": 5, "days": 7, "used": 0, "remaining": 5}
     assert all("profile" not in x for x in d["qualities"])
     one = client.get("/api/video/requests/options").get_json()
     assert one["modes"] == {"movie": "download", "show": "download", "youtube": "download"}
@@ -412,10 +414,29 @@ def test_see_all_without_moderating(env):
 
 def test_request_limit_reads_the_permission(env):
     client, _db, _q, _a, as_member, _app = env
-    as_member(**{"movies.get": "ask", "requests.limit": {"n": 1, "days": 7}})
+    as_member(**{"movies.get": "ask", "tv.get": "ask", "movies.request_limit": {"n": 1, "days": 7},
+                 "tv.request_limit": {"n": 1, "days": 7}})
     assert _movie(client).status_code == 200
     r = _movie(client, tmdb=604)
-    assert r.status_code == 429 and r.get_json()["quota"]["remaining"] == 0
+    assert r.status_code == 429 and r.get_json()["quota"] == {
+        "kind": "movies", "limit": 1, "days": 7, "used": 1, "remaining": 0}
+    assert "movie request" in r.get_json()["error"]
+    # the movie limit is spent; TV has its own
+    ok = client.post("/api/video/requests", json={"kind": "show", "tmdb_id": 9, "title": "Severance"})
+    assert ok.status_code == 200, ok.get_json()
+    lst = client.get("/api/video/requests").get_json()
+    assert lst["quotas"]["movies"]["remaining"] == 0 and lst["quotas"]["tv"]["remaining"] == 0
+    # a youtube video rides with TV: spent too
+    yt = client.post("/api/video/requests", json={"kind": "youtube", "youtube_id": "dQw4w9WgXcQ", "title": "v"})
+    assert yt.status_code == 429 and yt.get_json()["quota"]["kind"] == "tv"
+
+
+def test_the_old_shared_limit_still_caps_every_video_kind(env):
+    """an older map with the one requests.limit row: every kind reads it."""
+    client, _db, _q, _a, as_member, _app = env
+    as_member(**{"movies.get": "ask", "requests.limit": {"n": 1, "days": 7}})
+    assert _movie(client).status_code == 200
+    assert _movie(client, tmdb=604).status_code == 429
 
 
 def test_youtube_follows_need_their_own_row(env):
