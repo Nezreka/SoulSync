@@ -80,14 +80,21 @@
 
     /* --- Phase 0: Foundation --- */
 
+    /* #2182: the page scrolls inside .main-content, so the shell has to be
+       the screen as it is. 100vh is the screen with the browser's bars
+       hidden, taller than what a phone shows with them up, and the end of
+       every page sat under the bottom bar with nothing left to scroll.
+       dvh tracks the bars; 100vh stays as the fallback. */
     body {
         overflow: hidden;
         height: 100vh;
+        height: 100dvh;
     }
 
     .main-container {
         flex-direction: column;
         height: 100vh;
+        height: 100dvh;
         width: 100%;
     }
 
@@ -1667,7 +1674,7 @@
     /* Spacing reductions */
     /* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
     .page {
-        padding: 70px 16px 72px 16px;
+        padding: 70px 16px calc(72px + env(safe-area-inset-bottom, 0px)) 16px;
     }
 
     /* Nested wrappers each add horizontal padding, which compounds on a phone
@@ -1770,7 +1777,7 @@
 @media (max-width: 480px) {
 
     .page {
-        padding: 70px 12px 72px 12px;
+        padding: 70px 12px calc(72px + env(safe-area-inset-bottom, 0px)) 12px;
     }
 
     /* Even tighter card gutters on the smallest phones (X4). */
@@ -2647,9 +2654,12 @@
    ====================================== */
 
 @media (max-width: 768px) {
+    /* #2182: the floating row (search, activity, bell, help), its panels and
+       the toasts sit above the home indicator in the installed app; the
+       pages' bottom padding clears the same band */
     /* Toast */
     .toast-container {
-        bottom: 72px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px));
         right: 12px;
         left: 12px;
     }
@@ -2663,7 +2673,7 @@
 
     /* Bell button */
     .notif-bell-btn {
-        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         right: 60px;
         width: 38px;
         height: 38px;
@@ -2685,7 +2695,7 @@
         right: 12px !important;
         width: auto !important;
         max-width: none !important;
-        bottom: 62px !important;
+        bottom: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
         max-height: 55vh;
         border-radius: var(--radius-card);
     }
@@ -2700,7 +2710,7 @@
 
     /* Helper button */
     .helper-float-btn {
-        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         right: 12px;
         width: 38px;
         height: 38px;
@@ -2711,7 +2721,7 @@
        44px @ bottom 24 / right 136, so it floated bigger and higher than the
        other two on phones). Same size, same baseline, next slot leftward. */
     .activity-float-btn {
-        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         right: 108px;
         width: 38px;
         height: 38px;
@@ -2730,7 +2740,7 @@
     /* Global search bar */
     .gsearch-bar {
         width: calc(100vw - 160px);
-        bottom: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         height: 38px;
     }
 
@@ -2748,7 +2758,7 @@
         left: 12px;
         right: 12px;
         transform: none;
-        bottom: 60px;
+        bottom: calc(60px + env(safe-area-inset-bottom, 0px));
     }
 
     .gsearch-item {
@@ -2771,21 +2781,21 @@
 
 @media (max-width: 480px) {
     .notif-bell-btn {
-        bottom: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         right: 54px;
         width: 34px;
         height: 34px;
     }
 
     .helper-float-btn {
-        bottom: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         right: 10px;
         width: 34px;
         height: 34px;
     }
 
     .activity-float-btn {
-        bottom: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         right: 96px;
         width: 34px;
         height: 34px;
@@ -2797,7 +2807,7 @@
 
     .gsearch-bar {
         width: calc(100vw - 130px);
-        bottom: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         height: 34px;
     }
 
@@ -2806,7 +2816,7 @@
     }
 
     .toast-container {
-        bottom: 56px;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
         right: 8px;
         left: 8px;
     }
@@ -2815,7 +2825,7 @@
         left: 8px !important;
         right: 8px !important;
         width: auto !important;
-        bottom: 54px !important;
+        bottom: calc(54px + env(safe-area-inset-bottom, 0px)) !important;
     }
 }
 
