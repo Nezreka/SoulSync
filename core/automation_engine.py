@@ -1144,11 +1144,26 @@ class AutomationEngine:
             return None
 
     def emit(self, event_type, data):
-        """Called from web_server.py when events occur. Non-blocking."""
+        """Called from web_server.py when events occur. Non-blocking.
+
+        whose event it is (core/automation/owners.py): a site that knows
+        names it (one id, or a list for several people); otherwise whoever
+        is acting (the request's profile, the background job's owner) is
+        stamped. install-wide events (scans, database updates, maintenance)
+        never carry an owner, so only admins' automations hear them."""
         if not self._running:
             return
+        from core.automation.owners import INSTALL_EVENTS, owner_value
         data = dict(data or {})
-        if self.EVENT_OWNER_KEY not in data:
+        if event_type in INSTALL_EVENTS:
+            data.pop(self.EVENT_OWNER_KEY, None)
+        elif self.EVENT_OWNER_KEY in data:
+            value = owner_value(data[self.EVENT_OWNER_KEY])
+            if value is None:
+                data.pop(self.EVENT_OWNER_KEY, None)
+            else:
+                data[self.EVENT_OWNER_KEY] = value
+        else:
             owner = self._event_owner()
             if owner is not None:
                 data[self.EVENT_OWNER_KEY] = owner
@@ -1371,11 +1386,8 @@ class AutomationEngine:
             return None
         if str(auto.get('trigger_type') or '') in self.OWNERLESS_EVENTS:
             return None
-        try:
-            stamped = int((event_data or {}).get(self.EVENT_OWNER_KEY))
-        except (TypeError, ValueError):
-            stamped = None
-        if stamped == owner:
+        from core.automation.owners import owners_of
+        if owner in owners_of(event_data):
             return None
         return "the event isn't its owner's"
 
@@ -1484,12 +1496,18 @@ class AutomationEngine:
                             self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
                         except Exception as e:
                             logger.debug("event progress init: %s", e)
+                    # act as the automation's owner, like a scheduled run:
+                    # what the handler emits is that owner's, not nobody's
+                    from core.profile_context import set_background_profile, reset_background_profile
+                    _bg_token = set_background_profile(auto.get('profile_id') or 1)
                     try:
                         result = handler_info['handler'](action_config) or {}
                         logger.info(f"Event automation '{auto.get('name')}' executed: {result.get('status', 'ok')}")
                     except Exception as e:
                         result = {'status': 'error', 'error': str(e)}
                         logger.error(f"Event automation '{auto.get('name')}' action failed: {e}")
+                    finally:
+                        reset_background_profile(_bg_token)
                     # Finalize progress tracking
                     if self._progress_finish_fn:
                         try:
@@ -2005,6 +2023,9 @@ class AutomationEngine:
                         emit_data = {k: v for k, v in action_result.items() if not k.startswith('_')}
                         emit_data['_chain_depth'] = chain_depth + 1
                         emit_data['signal_name'] = sig
+                        # a signal is its automation's owner's: a member's
+                        # signal starts only their own automations
+                        emit_data[self.EVENT_OWNER_KEY] = automation.get('profile_id') or 1
                         logger.info(f"Automation '{automation.get('name')}' firing signal: {sig} (depth={chain_depth + 1})")
                         self.emit('signal:' + sig, emit_data)
                 elif t == 'run_script':
