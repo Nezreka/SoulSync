@@ -213,6 +213,49 @@ describe('the order, read back', () => {
   });
 });
 
+describe('the order, drawn', () => {
+  // what the old chain markup tests were for: the place number on each row
+  // (the "then try" of the old arrows), and a logo that reads the same in the
+  // order and in the list under it
+  it('each row carries its place, the first is marked, and a dark logo is drawn white in both lists', async () => {
+    music();
+    view();
+    await act(() => model.loadChain());
+    // the grip's icon is aria-hidden too, so read the rank span by its number
+    expect(
+      rows().map((id) =>
+        [...row(id!).querySelectorAll('span[aria-hidden="true"]')]
+          .map((el) => el.textContent)
+          .find((text) => /^\d+$/.test(text ?? '')),
+      ),
+    ).toEqual(['1', '2', '3']);
+    expect(row('soulseek').hasAttribute('data-first')).toBe(true);
+    expect(row('youtube').hasAttribute('data-first')).toBe(false);
+    // tidal is in the order, qobuz is not: both are dark marks
+    const inverted = (el: HTMLElement) => el.querySelector('[class*="markInv"]') !== null;
+    expect(inverted(row('tidal'))).toBe(true);
+    expect(inverted(poolRow('qobuz'))).toBe(true);
+    expect(inverted(row('soulseek'))).toBe(false);
+  });
+
+  it('a logo keeps a well of its own, never shrunk into the text line', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/features/settings/ui/settings.module.css', 'utf-8');
+    const rules = [...css.matchAll(/(?:^|\n)\s*([^{}\n]*\.mark)\s*\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, sel, body] of rules) {
+      for (const prop of ['width', 'height']) {
+        const px = Number(new RegExp(`(?:^|[^-])${prop}:\\s*(\\d+)px`).exec(body)?.[1] ?? 40);
+        expect(px, `${sel} ${prop}`).toBeGreaterThanOrEqual(28);
+      }
+    }
+    const base = rules.find(([, sel]) => sel.trim() === '.mark')![2];
+    expect(base).toMatch(/border-radius:/);
+    expect(base).toMatch(/background:/);
+    expect(base).toMatch(/flex: none/);
+  });
+});
+
 describe('the model', () => {
   it('loads the chain as loadHybridSourceOrder did', () => {
     expect(
@@ -446,6 +489,21 @@ describe('Test all sources', () => {
       'Tested sources 3✓ / 1✗, connections 2✓',
       'error',
     );
+  });
+
+  it('the Indexers row redraws from the same run: Prowlarr is in no order, so nothing else would', async () => {
+    model.load({ download_source: { mode: 'soulseek' } });
+    view();
+    await act(() => model.loadChain());
+    const prowlarr = () =>
+      screen.getByRole('button', { name: 'Prowlarr settings' }).parentElement!.textContent;
+    expect(prowlarr()).toContain('Not tested yet');
+    routes['POST /api/test-connection'] = (body) =>
+      (body as { service: string }).service === 'prowlarr'
+        ? { success: false, error: 'Prowlarr said 401' }
+        : { success: true };
+    await act(() => model.testAll({ silent: true }));
+    expect(prowlarr()).toContain('Prowlarr said 401');
   });
 
   it('the quiet run when the pill opens: no toast, no connections, once', async () => {

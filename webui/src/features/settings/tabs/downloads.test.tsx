@@ -102,6 +102,48 @@ describe('the values', () => {
   });
 });
 
+describe('the words that name each setting', () => {
+  // the frozen markup fixtures pinned these labels; the guard pins the ids and
+  // keys, this pins that each control is still called what it is
+  it('every control on Behaviour and Filtering is labelled by its name, without a colon', () => {
+    render(
+      <>
+        <MusicBehaviour store={store} />
+        <FilteringView store={store} />
+      </>,
+    );
+    const names: Record<string, RegExp> = {
+      'stream-source': /^Stream and preview source/,
+      'max-concurrent-downloads': /^Concurrent downloads/,
+      'source-search-timeout': /^Source search timeout/,
+      'retry-next-candidate': /^Retry next-best candidate on mismatch/,
+      'retry-exhaustive': /^Exhaustive retry/,
+      'retries-per-query': /^Retries per query/,
+      'accept-version-mismatch-fallback': /^Accept best version mismatch as last resort/,
+      'version-mismatch-min-count': /^Minimum matching mismatches before accepting/,
+      'album-atomic-publish': /^Publish albums only when complete/,
+      'album-atomic-recover': /^Recover interrupted albums on startup/,
+      'allow-explicit': /^Allow explicit content in downloads/,
+      'prefer-explicit': /^Prefer explicit versions when matching/,
+      'exclude-clean': /^Never download clean versions/,
+      'music-max-mb-per-minute': /^Maximum music download size/,
+      'preferred-version': /^Prefer a version when one exists/,
+      'genre-whitelist-enabled': /^Enable strict genre filtering/,
+    };
+    for (const [id, name] of Object.entries(names)) {
+      const el = document.getElementById(id) as HTMLElement;
+      expect(el, id).not.toBeNull();
+      const label =
+        [...(el as HTMLInputElement).labels!].map((l) => l.textContent).join(' ') ||
+        document.getElementById(el.getAttribute('aria-labelledby') ?? '')?.textContent ||
+        el.getAttribute('aria-label') ||
+        '';
+      expect(label.trim(), id).toMatch(name);
+      expect(label.trim(), id).not.toMatch(/:\s*$/);
+    }
+  });
+});
+
 describe('Download Behaviour', () => {
   it('saves each of its keys', async () => {
     part('behaviour');
