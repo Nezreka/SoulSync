@@ -1254,9 +1254,12 @@ def test_a_twin_playing_now_holds_the_title(db, worker, monkeypatch):
     uhd = _twin(db, "Twin", tmdb=77)
     _run(worker)
     fid = _pending(db)[0]["id"]
+    # checked by a batch a moment ago, so only the check right before the delete stands
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
     # the finding names the lower row; the other copy is the one playing
     monkeypatch.setattr(job_module, "_playing_now", lambda db_: {("movie", uhd)})
-    res = worker.fix_finding(fid, "Twin")
+    res = worker.fix_finding(fid, actions[fid])
     assert res["success"] is False and "playing it right now" in res["error"] and calls == []
     assert hd
 
@@ -1270,9 +1273,11 @@ def test_a_padlock_or_resume_point_on_one_copy_holds_the_title(db, worker, monke
     _sql(db, "UPDATE movies SET view_offset_ms=0 WHERE id=?", (uhd,))
     _run(worker)
     fid = _pending(db)[0]["id"]
-    db.set_hands_off("movie", uhd, True)            # the other copy locked behind the finding's back
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
+    db.set_hands_off("movie", uhd, True)            # the other copy locked behind the batch's back
     calls = _capture_delete(monkeypatch)
-    res = worker.fix_finding(fid, "Twin")
+    res = worker.fix_finding(fid, actions[fid])
     assert res["success"] is False and "locked" in res["error"] and calls == []
 
 
