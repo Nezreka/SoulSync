@@ -32,6 +32,12 @@ Acquisition (all scoped to the audiobook subsystem):
   - DELETE /api/audiobooks/watchlist/<name>:  stop following them.
   - POST   /api/audiobooks/watchlist/scan:    check followed authors now.
 
+Who may (#2198 #2201, held by tests/test_member_audiobook_routes.py): browsing,
+the wishlist and follows are books.access. anything that searches indexers, grabs
+or reads the download list is books.get on download. the library's files,
+matching, delete and the recycle bin are the admin's, and a member's library
+read comes back without paths, provenance or match details.
+
 Purely additive. Every route lives under /api/audiobooks, every write goes to the
 audiobook subsystem's OWN database file, and nothing here touches the music worker pool,
 the music wishlist, the music download batches, or any music table.
@@ -64,6 +70,7 @@ from core.audiobook_client import (
 from core.audiobook_database import get_audiobook_db
 from utils.logging_config import get_logger
 from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 
 logger = get_logger("audiobooks.api")
 
@@ -246,6 +253,24 @@ def _mark_owned(payloads: List[Dict[str, Any]], owned: Optional[set] = None) -> 
     for payload in payloads:
         payload["owned"] = str(payload.get("asin") or "") in owned
     return payloads
+
+
+_MEMBER_LIBRARY_FIELDS = ("asin", "title", "author", "narrator", "series_title",
+                          "series_sequence", "runtime_minutes", "imported_at")
+_SETTLED_MATCHES = ("identifier", "automatic", "confirmed")
+
+
+def _member_library_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """one library book as a member sees it (#2201): an allowlist, so a column
+    added later stays the admin's until someone decides otherwise. the
+    catalogue asin only rides along once the match is settled, as the link
+    to the book's page."""
+    out = {key: row.get(key) for key in _MEMBER_LIBRARY_FIELDS}
+    settled = row.get("match_status") in _SETTLED_MATCHES
+    out["catalog_asin"] = str(row.get("catalog_asin") or "") if settled else ""
+    out["cover_url"] = (row.get("cover_url") or (row.get("catalog_book") or {}).get("cover_url")
+                        or url_for("audiobooks_api.library_cover", asin=row["asin"]))
+    return out
 
 
 def _items(items: List[AudiobookItem]) -> List[Dict[str, Any]]:
@@ -731,7 +756,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "removed": removed, "wishlisted": False})
 
     @bp.route("/wishlist/search", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def wishlist_search():
         """Run a wishlist pass right now.
 
@@ -759,7 +784,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "summary": summary})
 
     @bp.route("/wishlist/<asin>/search", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def wishlist_search_book(asin: str):
         """Search and attempt to grab one specific wishlisted book immediately."""
         from core.audiobook_wishlist_worker import search_single_book
@@ -870,7 +895,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "removed": removed, "watching": False})
 
     @bp.route("/watchlist/scan", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def watchlist_scan():
         """Check followed authors right now.
 
@@ -892,7 +917,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/releases/<asin>", methods=["GET"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def releases(asin: str):
         """What the configured indexers actually have for this book.
 
@@ -940,7 +965,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return (stored or {}).get("narrator_mode") or "exact"
 
     @bp.route("/releases/<asin>/start", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def releases_start(asin: str):
         """Begin a search and hand back an id to poll.
 
@@ -975,7 +1000,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/releases/poll", methods=["GET"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def releases_poll():
         """The ranked pool so far for an in-flight search.
 
@@ -993,7 +1018,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, **state})
 
     @bp.route("/releases/poll", methods=["DELETE"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def releases_cancel():
         """Stop caring about a search the user walked away from."""
         from core.audiobook_search_job import forget
@@ -1001,7 +1026,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "dropped": forget(request.args.get("id") or "")})
 
     @bp.route("/releases/contents", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def release_contents():
         """What is inside one release, before committing to it.
 
@@ -1035,12 +1060,19 @@ def create_audiobooks_blueprint() -> Blueprint:
     @bp.route("/library", methods=["GET"])
     @requires("books.access")
     def library():
-        """Indexed local books and the most recent folder scan."""
+        """Indexed local books and the most recent folder scan.
+
+        a member gets the shelf, not the plumbing (#2201): title, people,
+        series, cover and runtime. paths, files, where a book came from, how
+        it was matched and the scan are the admin's, stripped here so the
+        page can't leak what it doesn't draw."""
         from core.audiobook_library_scan import scan_status
         from core.audiobook_organizer import library_root
 
         db = get_audiobook_db()
         rows = db.get_library()
+        if not is_admin_request():
+            return jsonify({"success": True, "books": [_member_library_row(r) for r in rows]})
         history = db.library_download_history()
         for row in rows:
             row["download"] = history.get(row.get("download_id"))
@@ -1056,7 +1088,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/library/<asin>/matches", methods=["GET"])
-    @requires("books.access")
+    @admin_only
     def library_matches(asin: str):
         from core.audiobook_library_matching import candidates_for, score_candidate
         from core.audiobook_library_metadata import ASIN_RE
@@ -1079,7 +1111,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 503
 
     @bp.route("/library/<asin>/match", methods=["PATCH"])
-    @requires("books.access")
+    @admin_only
     def library_match(asin: str):
         from core.audiobook_library_matching import compact
         from core.audiobook_library_metadata import ASIN_RE
@@ -1142,7 +1174,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": False, "error": "No local cover"}), 404
 
     @bp.route("/library/<asin>", methods=["DELETE"])
-    @requires("books.access")
+    @admin_only
     def library_delete(asin: str):
         """Remove one book from disk and from the record.
 
@@ -1184,7 +1216,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/library/recycle", methods=["GET"])
-    @requires("books.access")
+    @admin_only
     def library_recycle():
         """What is still recoverable, and for how long."""
         from core.audiobook_recycle import keep_days, list_bin
@@ -1192,7 +1224,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "entries": list_bin(), "keep_days": keep_days()})
 
     @bp.route("/library/recycle/<path:name>", methods=["POST"])
-    @requires("books.access")
+    @admin_only
     def library_restore(name: str):
         from core.audiobook_recycle import restore
 
@@ -1203,7 +1235,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "error": outcome.get("error", "")}), status
 
     @bp.route("/library/recycle/<path:name>", methods=["DELETE"])
-    @requires("books.access")
+    @admin_only
     def library_purge_one(name: str):
         """Erase one recycled book now, without waiting for the keep window."""
         from core.audiobook_recycle import purge_entry
@@ -1214,7 +1246,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "error": outcome.get("error", "")}), status
 
     @bp.route("/library/recycle", methods=["DELETE"])
-    @requires("books.access")
+    @admin_only
     def library_empty_bin():
         """Erase everything in the bin now."""
         from core.audiobook_recycle import empty_bin
@@ -1234,7 +1266,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "blocked": get_audiobook_db().get_blocklist(_profile())})
 
     @bp.route("/blocklist", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def blocklist_add():
         """Block one release.
 
@@ -1268,7 +1300,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "removed": get_audiobook_db().clear_blocklist(_profile())})
 
     @bp.route("/grab", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def grab():
         """Send one chosen release to the download client.
 
@@ -1357,7 +1389,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             return False
 
     @bp.route("/adopt", methods=["POST"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def adopt():
         """Match & import from the clients tab: follow a torrent or NZB that is
         already in the download client, as if it had been grabbed here.
@@ -1441,7 +1473,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "ref": ref})
 
     @bp.route("/downloads", methods=["GET"])
-    @requires("books.access")
+    @requires("books.get", "download")
     def downloads():
         """Everything grabbed, in flight or finished.
 
