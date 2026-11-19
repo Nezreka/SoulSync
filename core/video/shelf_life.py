@@ -20,7 +20,10 @@ Five signals, each 0-100 (higher = keep), mixed by the preset's weights:
 - replaceability: on how few streaming services it is in the region (none is
   the hardest to get back), and how hard it was to grab.
 - cultural: blended critic and audience ratings, weighted by how many votes
-  stand behind them, plus awards and age.
+  stand behind them, plus awards and age, plus a lift for a devoted
+  following: a title on more Trakt lists for the size of its audience (lists
+  per vote) than the library's median, once it's two years old and has 50
+  votes. a following never lowers it.
 - size: gigabytes per hour of runtime against the library's median for that
   kind; a bloated copy scores low.
 - requests: asked for and watched by the asker scores up; asked for and never
@@ -231,9 +234,69 @@ def replaceability_signal(facts: Dict[str, Any]):
     return value, ", ".join(parts) or "easy to get again"
 
 
+FOLLOWING_LIFT = 0.5
+# a following builds after release: a new title's lists are mostly people
+# meaning to watch it. and under a few dozen votes the ratio is noise
+FOLLOWING_MIN_AGE_YEARS = 2
+FOLLOWING_MIN_VOTES = 50
+
+
+def votes_confidence(votes: Optional[float]) -> float:
+    """how far a figure resting on this many Trakt votes stands on its own:
+    0.5 at none, 1.0 from ~10k (log scale)."""
+    conf = min(1.0, math.log10(1 + max(votes or 0.0, 0.0)) / 4)
+    return 0.5 + 0.5 * conf
+
+
+def following_lift(facts: Dict[str, Any], now: datetime):
+    """how much a devoted following lifts cultural value: the title's Trakt
+    lists per vote against the library's median, pulled toward the median when
+    few votes stand behind it, as 50 at the median, 80 at four times it; half
+    of whatever is over 50. a following at or under the median lifts nothing,
+    and neither does one on a title under two years old or with under 50
+    votes. (0, None) when there's nothing to lift."""
+    f = facts.get("following") or {}
+    lists, votes, median = _num(f.get("lists")), _num(f.get("votes")), _num(f.get("median_ratio"))
+    if lists is None or lists < 0 or not votes or votes < FOLLOWING_MIN_VOTES or not median or median <= 0:
+        return 0.0, None
+    try:
+        age = now.year - int(facts.get("year"))
+    except (TypeError, ValueError):
+        return 0.0, None
+    if age < FOLLOWING_MIN_AGE_YEARS:
+        return 0.0, None
+    ratio = lists / votes
+    shrunk = median + (ratio - median) * (2 * votes_confidence(votes) - 1)
+    q = max(shrunk, 0.0) / median
+    lift = max(0.0, 100.0 * q / (1.0 + q) - NEUTRAL) * FOLLOWING_LIFT
+    if lift <= 0:
+        return 0.0, None
+    return lift, "on more Trakt lists for its audience than most of the library"
+
+
+def median_lists_per_vote(rows: List[Dict[str, Any]]) -> Optional[float]:
+    """the median Trakt lists per vote over rows that have both; None when none do."""
+    vals = sorted(lists / votes for lists, votes in
+                  ((_num(r.get("trakt_lists")), _num(r.get("trakt_votes"))) for r in rows)
+                  if lists is not None and lists >= 0 and votes and votes > 0)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def following_facts(row: Dict[str, Any], median_ratio: Optional[float]) -> Optional[Dict[str, Any]]:
+    """the title's list count, vote count and the library's median ratio, or
+    None when it has no list count or the library no median."""
+    if row.get("trakt_lists") is None or median_ratio is None:
+        return None
+    return {"lists": row.get("trakt_lists"), "votes": row.get("trakt_votes"), "median_ratio": median_ratio}
+
+
 def cultural_signal(facts: Dict[str, Any], now: datetime):
     """ratings on a 0-100 scale (IMDb/TMDB x10, RT, Metacritic, AniList), the
-    Trakt vote count as confidence, awards ('oscar' > 'winner'), age."""
+    Trakt vote count as confidence, awards ('oscar' > 'winner'), age, and a lift
+    for a devoted following."""
     r = facts.get("ratings") or {}
     scaled = []
     for key, mult in (("imdb", 10), ("tmdb", 10), ("rt", 1), ("metacritic", 1), ("anilist", 1)):
@@ -247,8 +310,7 @@ def cultural_signal(facts: Dict[str, Any], now: datetime):
     votes = _num(r.get("trakt_votes"))
     if votes is not None and votes >= 0:
         # few votes pull a rating toward neutral; ~10k votes stand on their own
-        conf = min(1.0, math.log10(1 + votes) / 4)
-        base = NEUTRAL + (base - NEUTRAL) * (0.5 + 0.5 * conf)
+        base = NEUTRAL + (base - NEUTRAL) * votes_confidence(votes)
     bonus, notes = 0.0, []
     if awards == "oscar":
         bonus, notes = 20.0, ["Oscar winner"]
@@ -262,6 +324,10 @@ def cultural_signal(facts: Dict[str, Any], now: datetime):
     if age is not None and age >= CLASSIC_YEARS and base >= 60:
         bonus += 10.0
         notes.append("a %d-year-old title still well rated" % age)
+    lift, lift_note = following_lift(facts, now)
+    if lift_note:
+        bonus += lift
+        notes.append(lift_note)
     rated = "rated %d/100" % round(base) if scaled else "no ratings"
     return _clamp(base + bonus), ", ".join([rated] + notes)
 

@@ -224,6 +224,82 @@ def test_cultural_no_data_but_award_alone_answers():
     assert sl.cultural_signal(_facts(awards="winner"), NOW)[0] == pytest.approx(60.0)
 
 
+# ── following (a lift inside cultural) ───────────────────────────────────────
+def _follow(lists, votes=20000, median_ratio=1.65):
+    return {"lists": lists, "votes": votes, "median_ratio": median_ratio}
+
+
+def _old(**over):
+    over.setdefault("year", 2015)
+    return _facts(**over)
+
+
+def test_following_lifts_a_devoted_audience():
+    # lists per vote at four times the median: 80 on the following scale, half of the 30 over 50
+    lift, note = sl.following_lift(_old(following=_follow(4 * 1.65 * 20000)), NOW)
+    assert lift == pytest.approx(15.0) and "Trakt lists for its audience" in note
+
+
+def test_following_never_lowers_and_needs_its_numbers():
+    assert sl.following_lift(_old(following=_follow(1.65 * 20000)), NOW) == (0.0, None)   # at the median
+    assert sl.following_lift(_old(following=_follow(100)), NOW) == (0.0, None)            # far under it
+    assert sl.following_lift(_old(), NOW) == (0.0, None)
+    assert sl.following_lift(_old(following=_follow(500, votes=0)), NOW) == (0.0, None)
+    assert sl.following_lift(_old(following=_follow(500, median_ratio=None)), NOW) == (0.0, None)
+
+
+def test_few_votes_pull_the_ratio_toward_the_median():
+    # the same lists per vote counts for less behind 90 votes than behind 20,000
+    thin, _ = sl.following_lift(_old(following=_follow(3.3 * 90, votes=90)), NOW)
+    solid, _ = sl.following_lift(_old(following=_follow(3.3 * 20000)), NOW)
+    assert 0 < thin < solid
+
+
+def test_cultural_takes_the_lift_and_nothing_else_moves():
+    plain, _ = sl.cultural_signal(_facts(ratings={"imdb": 7.0}, year=2020), NOW)
+    under, _ = sl.cultural_signal(_facts(ratings={"imdb": 7.0}, year=2020, following=_follow(100)), NOW)
+    devoted, text = sl.cultural_signal(
+        _facts(ratings={"imdb": 7.0}, year=2020, following=_follow(4 * 1.65 * 20000)), NOW)
+    assert plain == pytest.approx(70.0) and under == pytest.approx(70.0)
+    assert devoted == pytest.approx(85.0) and "Trakt lists for its audience" in text
+    # a following doesn't stand in for ratings
+    assert sl.cultural_signal(_old(following=_follow(4 * 1.65 * 20000)), NOW)[0] is None
+
+
+def test_a_cult_flop_gains_and_a_panned_hit_does_not():
+    # live numbers, 18 Nov: Labyrinth 15,232 lists / 7,197 votes; Kraven the Hunter 22,438 / 15,846
+    labyrinth = _facts(ratings={"imdb": 7.3, "trakt_votes": 7197}, year=1986,
+                       following=_follow(15232, votes=7197))
+    kraven = _facts(ratings={"imdb": 5.5, "trakt_votes": 15846}, year=2024,
+                    following=_follow(22438, votes=15846))
+    assert sl.following_lift(labyrinth, NOW)[0] > 2
+    assert sl.following_lift(kraven, NOW) == (0.0, None)
+
+
+def test_no_lift_for_a_new_release_or_a_handful_of_votes():
+    # live numbers, 18 Nov: Practical Magic 2 (2026) 10,046 lists / 1,249 votes, lists
+    # from people meaning to watch it; Run Like Hell 46 lists / 2 votes
+    devoted = _follow(8 * 1.65 * 20000)
+    assert sl.following_lift(_facts(year=2026, following=devoted), NOW) == (0.0, None)
+    assert sl.following_lift(_facts(year=2025, following=devoted), NOW) == (0.0, None)
+    assert sl.following_lift(_facts(year=2024, following=devoted), NOW)[0] > 0      # two years old
+    assert sl.following_lift(_old(following=_follow(46, votes=2)), NOW) == (0.0, None)
+    assert sl.following_lift(_old(following=_follow(1000, votes=49)), NOW) == (0.0, None)
+    assert sl.following_lift(_old(following=_follow(1000, votes=50)), NOW)[0] > 0
+    assert sl.following_lift(_facts(year=None, following=devoted), NOW) == (0.0, None)
+
+
+def test_median_lists_per_vote():
+    rows = [{"trakt_lists": 10, "trakt_votes": 10}, {"trakt_lists": 30, "trakt_votes": 10},
+            {"trakt_lists": 20, "trakt_votes": 10}, {"trakt_lists": 5, "trakt_votes": 0},
+            {"trakt_lists": None, "trakt_votes": 10}]
+    assert sl.median_lists_per_vote(rows) == pytest.approx(2.0)
+    assert sl.median_lists_per_vote([]) is None
+    assert sl.following_facts(rows[0], 2.0) == {"lists": 10, "votes": 10, "median_ratio": 2.0}
+    assert sl.following_facts(rows[4], 2.0) is None
+    assert sl.following_facts(rows[0], None) is None
+
+
 # ── size ─────────────────────────────────────────────────────────────────────
 def test_size_at_median_is_neutral_and_bloat_scores_low():
     at = sl.size_signal(_facts(size_bytes=8 * GB, runtime_minutes=120))[0]       # 4 GB/h

@@ -9411,7 +9411,7 @@ class VideoDatabase:
 
     # ── Shelf Life (core/video/shelf_life.py, repair/shelf_life.py) ──────────
     _SL_RATING_COLS = ("rating", "imdb_rating", "rt_rating", "metacritic", "anilist_score",
-                       "trakt_votes", "awards", "streaming_status", "streaming_count")
+                       "trakt_votes", "trakt_lists", "awards", "streaming_status", "streaming_count")
 
     def shelf_life_movies(self, trust_after_days: int = 90) -> list:
         """every owned movie with what Shelf Life scores it on: ratings,

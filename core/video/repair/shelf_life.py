@@ -355,6 +355,7 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     for kind, rows, members_by in (("movie", db.shelf_life_movies(trust_after) or [], movie_members),
                                    ("show", db.shelf_life_shows(trust_after) or [], show_members)):
         median = sl.median_gb_per_hour(rows)
+        median_ratio = sl.median_lists_per_vote(rows)
         for row in rows:
             members = members_by.get(row["id"]) or {}
             if kind == "movie":
@@ -404,6 +405,7 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
                             "rt": row.get("rt_rating"), "metacritic": row.get("metacritic"),
                             "anilist": row.get("anilist_score"), "trakt_votes": row.get("trakt_votes")},
                 "awards": row.get("awards"),
+                "following": sl.following_facts(row, median_ratio),
                 "size_bytes": row.get("size_bytes"),
                 "runtime_minutes": row.get("runtime_minutes"),
                 "median_gb_per_hour": median,
@@ -564,7 +566,13 @@ class ShelfLifeJob(VideoRepairJob):
         "- Hard To Replace: how few streaming services carry it in your region (on none at all scores 100), and "
         "how many grabs failed before it landed.\n"
         "- Cultural Value: critic and audience ratings, trusted more the more votes stand behind them, plus "
-        "awards, and a lift for a well rated title 25 or more years old.\n"
+        "awards, a lift for a well rated title 25 or more years old, and a lift for a devoted following: a "
+        "title on more Trakt user lists for the size of its audience (lists per vote) than your library's "
+        "median, pulled toward the median when few votes stand behind it. It only counts once a title is two "
+        "years old (a new release's lists are mostly people meaning to watch it) and has 50 Trakt votes. "
+        "It adds half of how far that "
+        "following sits above the median on the same 0-100 scale (at most 25), and never lowers the value, "
+        "so a cult classic that flopped is helped and nothing else is pulled down.\n"
         "- Size For Its Runtime: gigabytes per hour of runtime against your library's median. At the median it "
         "scores 50; a copy twice as heavy scores 33, half as heavy 67.\n"
         "- Requests: asked for and watched by whoever asked scores 80. Asked for and never watched by them "

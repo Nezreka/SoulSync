@@ -974,3 +974,20 @@ def test_fix_asks_the_server_again_right_before_deleting(db, worker, monkeypatch
     assert res["success"] is False and error in res["error"]
     assert calls == []
     assert db.repair_get_finding(fid)["status"] == "pending"
+
+
+def test_following_is_measured_in_lists_per_vote_against_the_library(db, worker):
+    # the library's median lists per vote is the yardstick; a title with no
+    # list count has no following and scores as before
+    a = _movie(db, "Cult", tmdb=1, imdb=7.0)
+    b = _movie(db, "Plain", tmdb=2, imdb=7.0)
+    c = _movie(db, "Mid", tmdb=3, imdb=7.0)
+    d = _movie(db, "Nothing", tmdb=4, imdb=7.0)
+    for mid, lists, votes in ((a, 60000, 10000), (b, 10000, 10000), (c, 20000, 10000), (d, None, 10000)):
+        _sql(db, "UPDATE movies SET trakt_lists=?, trakt_votes=? WHERE id=?", (lists, votes, mid))
+    movies = _facts(db, "movie")
+    assert movies[a]["following"] == {"lists": 60000, "votes": 10000, "median_ratio": 2.0}
+    assert movies[d]["following"] is None
+    _run(worker)
+    stored = _stored(db, "movie", [a, b, c, d])
+    assert stored[a]["score"] > stored[c]["score"] == stored[b]["score"] == stored[d]["score"]
