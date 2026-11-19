@@ -826,9 +826,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(href.searchParams.get('artist')).toBe('1');
 
     // a modified click is the browser's (new tab): the page stays, the row stays shut
-    const ctrlClick = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
-    title.dispatchEvent(ctrlClick);
-    expect(ctrlClick.defaultPrevented).toBe(false);
+    // (fireEvent answers false when the default was prevented)
+    expect(fireEvent.click(title, { ctrlKey: true })).toBe(true);
     expect(router.state.location.search).not.toHaveProperty('album');
     expect(screen.getByRole('button', { name: 'Show the tracks of Dummy' })).toHaveAttribute(
       'aria-expanded',
@@ -836,7 +835,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
 
     // a plain click opens the album page in place, without toggling the row
-    fireEvent.click(title);
+    expect(fireEvent.click(title)).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Hide the tracks of Dummy' })).toBeNull();
     await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 1 }));
   });
 
