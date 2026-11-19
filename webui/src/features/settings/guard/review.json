@@ -1,0 +1,226 @@
+{
+  "probes": [
+    {
+      "match": "^#(download-path|transfer-path|staging-path|music-videos-path|playlists-materialize-path|m3u-entry-base-path|audiobooks-path|podcasts-path|video-download-path|video-import-folder-path|video-movies-path|video-tv-path|video-anime-path|video-youtube-path|video-movies-4k-path|video-tv-4k-path)$",
+      "before": ["Unlock"],
+      "why": "a path field is read-only until its Unlock button is clicked"
+    },
+    {
+      "match": "^#metadata-fallback-source$",
+      "value": "itunes",
+      "why": "the driver's pick (Spotify) is locked without a Spotify sign-in"
+    },
+    {
+      "match": "^#concerts-country$",
+      "value": "US",
+      "why": "the field upper-cases what is typed"
+    },
+    {
+      "match": "^#audiobook-prowlarr-categories$",
+      "value": "3030, 3040",
+      "why": "a list of numbers"
+    },
+    {
+      "match": "^#vo-sub-langs$",
+      "value": "en,fr",
+      "why": "language codes, a bad one is put back"
+    },
+    {
+      "match": "^#qobuz-connection-email$",
+      "also": {
+        "#qobuz-connection-password": "guard-secret"
+      },
+      "click": ["#qobuz-connection-login-btn"]
+    },
+    {
+      "match": "^#qobuz-connection-password$",
+      "also": {
+        "#qobuz-connection-email": "guard@guard.example"
+      },
+      "click": ["#qobuz-connection-login-btn"]
+    },
+    {
+      "match": "^#qobuz-connection-token$",
+      "click": ["#qobuz-token-login-btn"]
+    },
+    {
+      "match": "^#qobuz-email$",
+      "also": {
+        "#qobuz-password": "guard-secret"
+      },
+      "click": ["#qobuz-login-btn"]
+    },
+    {
+      "match": "^#qobuz-password$",
+      "also": {
+        "#qobuz-email": "guard@guard.example"
+      },
+      "click": ["#qobuz-login-btn"]
+    },
+    {
+      "match": "^#qobuz-download-token$",
+      "click": ["#qobuz-download-token-btn"]
+    },
+    {
+      "match": "^#navidrome-playlist-username$",
+      "also": {
+        "#navidrome-playlist-password": "guard-secret"
+      },
+      "click": ["Save playlist account"]
+    },
+    {
+      "match": "^#navidrome-playlist-password$",
+      "click": ["Save playlist account"]
+    },
+    {
+      "match": "^#sa-preset-new$",
+      "click": ["Add"]
+    },
+    {
+      "match": "^#hifi-new-instance$",
+      "click": ["Add"]
+    },
+    {
+      "match": "^#rt-add-",
+      "click": ["+ Add target"]
+    },
+    {
+      "match": "^#vo-whisper-model$",
+      "click": ["#vo-whisper-dl"]
+    },
+    {
+      "match": "^#security-new-pin$",
+      "value": "1234",
+      "also": {
+        "#security-confirm-pin": "1234"
+      },
+      "click": ["#security-save-pin-btn"]
+    },
+    {
+      "match": "^#security-confirm-pin$",
+      "value": "1234",
+      "also": {
+        "#security-new-pin": "1234"
+      },
+      "click": ["#security-save-pin-btn"]
+    },
+    {
+      "match": "^#security-login-password$",
+      "also": {
+        "#security-login-password-confirm": "guard-secret"
+      },
+      "click": ["Save Password"]
+    },
+    {
+      "match": "^#security-login-password-confirm$",
+      "also": {
+        "#security-login-password": "guard-secret"
+      },
+      "click": ["Save Password"]
+    },
+    {
+      "match": "^#security-recovery-question$",
+      "also": {
+        "#security-recovery-answer": "guard-probe"
+      },
+      "click": ["Save Recovery Question"]
+    },
+    {
+      "match": "^#security-recovery-custom$",
+      "also": {
+        "#security-recovery-question": "__custom__",
+        "#security-recovery-answer": "guard-probe"
+      },
+      "click": ["Save Recovery Question"]
+    },
+    {
+      "match": "^#security-recovery-answer$",
+      "also": {
+        "#security-recovery-question": "What was the name of your first pet?"
+      },
+      "click": ["Save Recovery Question"]
+    },
+    {
+      "match": "^#api-key-(label|scope)$",
+      "click": ["🔑 Generate API Key"]
+    },
+    {
+      "match": "^#dev-mode-password$",
+      "click": ["Activate"]
+    },
+    {
+      "match": "^#sw-location$",
+      "click": ["Save"]
+    },
+    {
+      "match": "^#metasync-(node-url|local-key|pool-url|pool-key)$",
+      "click": ["Save"]
+    },
+    {
+      "match": "^#experimental-bandcamp-enabled$",
+      "click": ["#experimental-enable-ack-checkbox", "#experimental-enable-confirm-btn"]
+    },
+    {
+      "match": "data-library-id=",
+      "click": ["Save"]
+    },
+    {
+      "match": "data-folder-label=\"Stand-Up library\"",
+      "click": ["Save"]
+    }
+  ],
+  "noSave": [
+    {
+      "match": "^#stg-search-input$",
+      "why": "the settings search box: it filters the page and saves nothing"
+    },
+    {
+      "match": "^#(dlchain-filter|genre-whitelist-search)$|Find someone",
+      "why": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
+    },
+    {
+      "match": "^#log-viewer-",
+      "why": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
+    },
+    {
+      "match": "^#ytdlp-channel$",
+      "why": "local state: which yt-dlp channel the status line and the Update button are for"
+    },
+    {
+      "match": "^#(sw|ob)-preview-",
+      "why": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    {
+      "match": "data-vq-profile-select",
+      "why": "picks which video quality profile is on screen: saves nothing"
+    }
+  ],
+  "unshownKeys": {
+    "_environment.windows": "a fact about the server, not a setting: the tabs read it to pick default folders and the cookie browser list",
+    "_source_status.qobuz": "a fact about the server, not a setting: which chain sources are not ready, read by the Sources tiles",
+    "acoustid.require_verified": "the Quality tab's switch (#acoustid-require-verified) saves and shows this through the active quality profile (/api/quality-profile), the payload key is only its starting value",
+    "lossy_copy.enabled": "saved and shown through the active quality profile (#lossy-copy-enabled posts /api/quality-profile/custom/<id>/update)",
+    "lossy_copy.codec": "saved and shown through the active quality profile (#lossy-copy-codec)",
+    "lossy_copy.bitrate": "saved and shown through the active quality profile (#lossy-copy-bitrate)",
+    "lossy_copy.downsample_hires": "saved and shown through the active quality profile (#downsample-hires)",
+    "post_processing.audio_completeness_check": "saved and shown through the active quality profile (#audio-completeness-check)",
+    "image_cache.max_cache_mb": "#imgcache-max-mb saves this key but shows GET /api/image-cache/status (max_bytes), not the payload",
+    "image_cache.thumbnails": "#imgcache-thumbnails saves this key but shows GET /api/image-cache/status (thumbnails), not the payload",
+    "lastfm.session_key": "never shown: the Last.fm card only reads whether it is set (authorized or not)",
+    "logging.level": "#log-level-select reads and writes /api/settings/log-level, not this key",
+    "logging.path": "shown read-only (#log-path-display), there is no control for it",
+    "security.signup_request_limit": "a legacy key: sign-ups follow the sign-up template under People > Templates since #2166, no Settings control reads or writes it",
+    "security.signup_sides": "a legacy key: sign-ups follow the sign-up template under People > Templates since #2166, no Settings control reads or writes it",
+    "youtube.cookies_file": "shown read-only as the name of the saved cookies file; the paste box (#youtube-cookies-paste) writes cookies_paste and is never filled from the payload"
+  },
+  "auditOnly": {
+    "vq-used-for": "a chip picker (buttons, not a form control) that only shows for a named video quality profile; the recorded page is on Default",
+    "data-vq-used-for-pick": "the chips of #vq-used-for: buttons, shown for a named video quality profile only",
+    "qp-profile-new-input": "drawn by the New profile button and gone on blur; what it sends is pinned by the musicProfiles composite",
+    "qp-governed-badge": "a badge, not a control: shown only while a custom music profile is being edited",
+    "lvl-debug": "a css class of the log level buttons (.log-filter-btn.lvl-debug), not an id",
+    "h3": "a tag name in the audit's hooks table, not an id",
+    "ranked-targets": "a name in the audit's backend tests table, not an id on the page",
+    "Filtering": "a heading named in the audit's search anchors, not an id"
+  }
+}
