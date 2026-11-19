@@ -80,7 +80,7 @@ function ConcertsCard({ store }: { store: SettingsStore }) {
         set up either, both, or neither.
       </div>
       <div className="form-group">
-        <label>Ticketmaster API Key:</label>
+        <label>Ticketmaster API Key</label>
         <input
           type="text"
           id="concerts-ticketmaster-api-key"
@@ -94,7 +94,7 @@ function ConcertsCard({ store }: { store: SettingsStore }) {
         </div>
       </div>
       <div className="form-group">
-        <label>Concerts near you (country):</label>
+        <label>Concerts near you (country)</label>
         <input
           type="text"
           id="concerts-country"
@@ -111,7 +111,7 @@ function ConcertsCard({ store }: { store: SettingsStore }) {
         </div>
       </div>
       <div className="form-group">
-        <label>Setlist.fm API Key:</label>
+        <label>Setlist.fm API Key</label>
         <input
           type="text"
           id="concerts-setlistfm-api-key"
@@ -198,10 +198,10 @@ function LastfmCard({ store }: { store: SettingsStore }) {
           {keyStatus.message}
         </div>
       ) : null}
-      <Field label="API Key:">
+      <Field label="API Key">
         <SecretInput id="lastfm-api-key" placeholder="Last.fm API Key" {...key} />
       </Field>
-      <Field label="API Secret:">
+      <Field label="API Secret">
         <SecretInput
           id="lastfm-api-secret"
           placeholder="Last.fm API Secret (required for scrobbling)"
@@ -209,7 +209,7 @@ function LastfmCard({ store }: { store: SettingsStore }) {
         />
       </Field>
       <div className="form-group">
-        <label htmlFor="lastfm-username">Username:</label>
+        <label htmlFor="lastfm-username">Username</label>
         <input
           type="text"
           id="lastfm-username"
@@ -270,7 +270,7 @@ function GeniusCard({ store }: { store: SettingsStore }) {
   const token = useText(store, 'genius', 'access_token');
   return (
     <ServiceCard service="genius" colour="#ffff64" title="Genius" titleClass="genius-title">
-      <Field label="Client Access Token:">
+      <Field label="Client Access Token">
         <SecretInput id="genius-access-token" placeholder="Genius Client Access Token" {...token} />
       </Field>
       <div className="callback-info">
@@ -305,7 +305,7 @@ function OptionalKey({
 }) {
   const key = useTrimmed(store, section, 'api_key');
   return (
-    <Field label="API Key (optional):">
+    <Field label="API Key (optional)">
       <SecretInput id={id} placeholder={placeholder} autoComplete="off" {...key} />
     </Field>
   );
@@ -444,7 +444,7 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
           it yourself.
         </div>
       </div>
-      <Field label="Application API Key:">
+      <Field label="Application API Key">
         <SecretInput id="acoustid-api-key" placeholder="AcoustID Application API Key" {...key} />
       </Field>
       <div className="callback-info">
@@ -477,7 +477,12 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
           flexWrap: 'wrap',
         }}
       >
-        <button className="test-button" onClick={() => void testService(store, 'acoustid')}>
+        <button
+          data-svc-test=""
+          hidden
+          className="test-button"
+          onClick={() => void testService(store, 'acoustid')}
+        >
           Test Connection
         </button>{' '}
         <button
@@ -510,7 +515,7 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
       title="ListenBrainz"
       titleClass="listenbrainz-title"
     >
-      <Field label="API Base URL:">
+      <Field label="API Base URL">
         <input
           type="text"
           id="listenbrainz-base-url"
@@ -519,10 +524,10 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
           onChange={(event) => base.onChange(event.target.value)}
         />
       </Field>
-      <Field label="User Token:">
+      <Field label="User Token">
         <SecretInput id="listenbrainz-token" placeholder="ListenBrainz User Token" {...token} />
       </Field>
-      <Field label="Username (optional):">
+      <Field label="Username (optional)">
         <input
           type="text"
           id="listenbrainz-username"

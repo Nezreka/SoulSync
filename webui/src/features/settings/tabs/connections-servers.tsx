@@ -13,11 +13,15 @@
  * server is active is the top-level active_media_server, saved on its own.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { SettingsStore } from '../settings-store';
 
 import { settingsStore } from '../settings-store';
+import { Btn, Card, StatusWords, type Tone } from '../ui';
+import s from '../ui/settings.module.css';
+import { statusFrames } from './connections';
 import { useLoadedDraft } from './library-card';
 import { SecretInput } from './parts';
 import { text, useSettings } from './source-panels';
@@ -47,6 +51,35 @@ const post = (body?: unknown): RequestInit => ({
 function useLoads(store: SettingsStore) {
   return useSyncExternalStore(store.subscribe, () => store.getState().loads);
 }
+
+// ── what each service's last Test said (the tiles and the sheets read it) ──
+
+export interface TestResult {
+  tone: Tone;
+  text: string;
+  at: number;
+}
+let results: Record<string, TestResult> = {};
+const resultListeners = new Set<() => void>();
+export const testResults = {
+  subscribe: (listener: () => void) => {
+    resultListeners.add(listener);
+    return () => {
+      resultListeners.delete(listener);
+    };
+  },
+  get: () => results,
+  set: (service: string, result: Omit<TestResult, 'at'>) => {
+    results = { ...results, [service]: { ...result, at: Date.now() } };
+    for (const listener of resultListeners) listener();
+  },
+  /** for tests */
+  reset: () => {
+    results = {};
+    for (const listener of resultListeners) listener();
+  },
+};
+export const useTestResults = () => useSyncExternalStore(testResults.subscribe, testResults.get);
 
 // ── the library pickers hear a good test ──
 
@@ -78,12 +111,18 @@ export async function testConnection(service: string, store: SettingsStore = set
         .trim()
         .startsWith('⚠');
       toast(result.message || `${service} connection successful`, warned ? 'warning' : 'success');
+      testResults.set(service, {
+        tone: warned ? 'warn' : 'ok',
+        text: String(result.message || 'Connected').replace(/^⚠\s*/, ''),
+      });
       for (const reload of reloads) reload(service);
     } else {
       toast(`${service} connection failed: ${result.error}`, 'error', 'gs-connecting');
+      testResults.set(service, { tone: 'bad', text: result.error || 'Connection failed' });
     }
   } catch (error) {
     console.error(`Error testing ${service} connection:`, error);
+    testResults.set(service, { tone: 'bad', text: 'Could not reach SoulSync to test it' });
     toast(`Failed to test ${service} connection`, 'error', 'gs-connecting');
   } finally {
     w.hideLoadingOverlay?.();
@@ -93,7 +132,36 @@ export async function testConnection(service: string, store: SettingsStore = set
 // ── the servers ──
 
 const SERVERS = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'] as const;
-type Server = (typeof SERVERS)[number];
+export type Server = (typeof SERVERS)[number];
+
+/** the five servers as the pick-one row shows them */
+export const SERVER_LOOK: Record<Server, { name: string; logo: string }> = {
+  plex: { name: 'Plex', logo: '/static/img/brands/plex.png' },
+  jellyfin: { name: 'Jellyfin', logo: '/static/img/brands/jellyfin.png' },
+  navidrome: { name: 'Navidrome', logo: '/static/img/brands/navidrome.png' },
+  music_assistant: { name: 'Music Assistant', logo: '/static/img/brands/music-assistant.png' },
+  soulsync: { name: 'Standalone', logo: '/static/trans2.png' },
+};
+
+export const serverName = (server: string) =>
+  (SERVER_LOOK as Record<string, { name: string }>)[server]?.name || server;
+
+/** what SoulSync knows about the active server, in words: the last Test
+ *  Server, else the server poll (/status media_server), else nothing yet */
+export function serverState(
+  server: string,
+  frame: { media_server?: { connected?: boolean; type?: string | null } | null } | null,
+  tested: TestResult | undefined,
+): { tone: Tone; text: string } {
+  if (server === 'soulsync') return { tone: 'ok', text: 'Standalone: no media server' };
+  if (tested) return { tone: tested.tone, text: tested.text };
+  const polled = frame?.media_server;
+  if (polled && polled.type === server)
+    return polled.connected
+      ? { tone: 'ok', text: 'Connected' }
+      : { tone: 'bad', text: 'Not connected' };
+  return { tone: 'idle', text: 'Not tested yet' };
+}
 
 /** a picker filled from its server: hidden until it has something */
 interface Picker {
@@ -787,7 +855,19 @@ async function loadMaSources(quiet: boolean): Promise<Picker> {
 
 // ── the section ──
 
-export function ServerConnections({ store }: { store: SettingsStore }) {
+export function ServerConnections({
+  store,
+  host,
+  onView,
+}: {
+  store: SettingsStore;
+  /** the sheet body the open server's panel shows in; hidden home otherwise */
+  host?: HTMLElement | null;
+  /** View Configuration: open the sheet */
+  onView?: (server: Server) => void;
+}) {
+  const frame = useSyncExternalStore(statusFrames.subscribe, statusFrames.get);
+  const tests = useTestResults();
   const settings = useSettings(store);
   const loads = useLoads(store);
   const saved = text((settings as Section_).active_media_server) || 'plex';
@@ -859,53 +939,15 @@ export function ServerConnections({ store }: { store: SettingsStore }) {
 
   const hidden = (server: Server) =>
     server === active ? 'server-config-container' : 'server-config-container hidden';
-  const toggleClass = (server: Server) =>
-    server === active ? 'server-toggle-btn active' : 'server-toggle-btn';
+  // the one in use: on the music side the one last picked (its panel is the
+  // one shown, and it saves through active_media_server); the video side
+  // only ever looks, so there it is the saved one
+  const savedServer = (SERVERS as readonly string[]).includes(saved) ? (saved as Server) : 'plex';
+  const chosen = document.body.getAttribute('data-side') === 'video' ? savedServer : active;
+  const state = serverState(chosen, frame as never, tests.server);
 
-  return (
-    <div className="settings-group" data-stg="connections" data-svc-side="music">
-      <h3>Server Connections</h3>
-
-      <div className="server-toggle-container">
-        <button className={toggleClass('plex')} id="plex-toggle" onClick={() => toggle('plex')}>
-          <img src="/static/img/brands/plex.png" alt="Plex" className="server-logo" />
-        </button>{' '}
-        <button
-          className={toggleClass('jellyfin')}
-          id="jellyfin-toggle"
-          onClick={() => toggle('jellyfin')}
-        >
-          <img src="/static/img/brands/jellyfin.png" alt="Jellyfin" className="server-logo" />
-        </button>{' '}
-        <button
-          className={toggleClass('navidrome')}
-          id="navidrome-toggle"
-          onClick={() => toggle('navidrome')}
-        >
-          <img src="/static/img/brands/navidrome.png" alt="Navidrome" className="server-logo" />{' '}
-          Navidrome
-        </button>{' '}
-        <button
-          className={toggleClass('music_assistant')}
-          id="music_assistant-toggle"
-          onClick={() => toggle('music_assistant')}
-        >
-          <img
-            src="/static/img/brands/music-assistant.png"
-            alt="Music Assistant"
-            className="server-logo"
-          />{' '}
-          Music Assistant
-        </button>{' '}
-        <button
-          className={toggleClass('soulsync')}
-          id="soulsync-toggle"
-          onClick={() => toggle('soulsync')}
-        >
-          <img src="/static/trans2.png" alt="SoulSync" className="server-logo" /> Standalone
-        </button>
-      </div>
-
+  const panels: ReactNode = (
+    <div className="server-panels" data-server-panels="">
       <PlexServer
         hidden={hidden('plex')}
         store={store}
@@ -1128,16 +1170,56 @@ export function ServerConnections({ store }: { store: SettingsStore }) {
           </button>
         </div>
       </div>
-
-      <div className="server-test-section">
-        <button
-          className="test-button server-test-btn"
-          onClick={() => void testConnection('server', store)}
-        >
-          Test Server
-        </button>
-      </div>
     </div>
+  );
+
+  return (
+    <>
+      <Card
+        title="Server Connections"
+        hint="Pick one. Picking a server makes it the active one."
+        id="stg-server-card"
+        data-svc-side="music"
+        actions={
+          <>
+            <StatusWords tone={state.tone}>{`${serverName(chosen)}: ${state.text}`}</StatusWords>
+            <Btn small onClick={() => void testConnection('server', store)}>
+              Test Server
+            </Btn>
+            <Btn
+              small
+              icon="gear"
+              onClick={() => {
+                onView?.(active);
+                // a configured Plex opens on its fields, not its setup buttons
+                const plex = document.getElementById('plex-view-config-button');
+                if (active === 'plex' && plex && plex.style.display !== 'none') plex.click();
+              }}
+            >
+              View Configuration
+            </Btn>
+          </>
+        }
+      >
+        <div className={s.servers} role="radiogroup" aria-label="Media server">
+          {SERVERS.map((server) => (
+            <button
+              key={server}
+              type="button"
+              role="radio"
+              aria-checked={server === chosen}
+              id={`${server}-toggle`}
+              className={server === chosen ? `${s.server} ${s.serverOn}` : s.server}
+              onClick={() => toggle(server)}
+            >
+              <img src={SERVER_LOOK[server].logo} alt="" className={s.serverLogo} />
+              <span className={s.serverName}>{SERVER_LOOK[server].name}</span>
+            </button>
+          ))}
+        </div>
+      </Card>
+      {host ? createPortal(panels, host) : <div hidden>{panels}</div>}
+    </>
   );
 }
 

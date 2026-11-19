@@ -219,7 +219,10 @@ const hifi = {
   add: (url: string) => {
     type(one('#hifi-new-instance'), url, 'the new instance');
     press(
-      button(one('#hifi-new-instance')?.closest('[data-field]') ?? null, (words) => words === 'Add'),
+      button(
+        one('#hifi-new-instance')?.closest('[data-field]') ?? null,
+        (words) => words === 'Add',
+      ),
       'add an instance',
     );
   },
@@ -285,8 +288,9 @@ const genres = {
 const SERVERS = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'];
 const server = {
   root: () => one('#plex-toggle'),
-  /** the active one */
-  readOrder: () => SERVERS.filter((id) => one(`#${id}-toggle`)?.classList.contains('active')),
+  /** the active one (phase 2: the pick-one row says it as a radio) */
+  readOrder: () =>
+    SERVERS.filter((id) => one(`#${id}-toggle`)?.getAttribute('aria-checked') === 'true'),
   pick: (id: string) => press(one(`#${id}-toggle`), `make ${id} the server`),
 };
 

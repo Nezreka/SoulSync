@@ -193,6 +193,14 @@
     {
       "match": "data-vq-profile-select",
       "why": "picks which video quality profile is on screen: saves nothing"
+    },
+    {
+      "match": "^#svc-tabs$",
+      "why": "the Connections services switch (Music, Video): which side's tiles are shown, saves nothing"
+    },
+    {
+      "match": "aria-label=\"Media server\"",
+      "why": "the media server row as a whole (a radiogroup): each server in it is a button, pinned by the activeServer composite and the buttons"
     }
   ],
   "unshownKeys": {

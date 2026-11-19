@@ -473,7 +473,7 @@ export function Select({
   children,
   options,
   ...rest
-}: { options?: Option[] } & SelectHTMLAttributes<HTMLSelectElement>) {
+}: { options?: Option[]; ref?: Ref<HTMLSelectElement> } & SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className={clsx(s.field, s.fieldSelect, rest.disabled && s.fieldDisabled, className)}>
       <select {...rest} className={s.select}>

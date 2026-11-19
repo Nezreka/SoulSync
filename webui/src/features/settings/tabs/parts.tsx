@@ -16,11 +16,13 @@ import type React from 'react';
 
 import {
   Children,
+  createContext,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
   isValidElement,
   useCallback,
+  useContext,
   useState,
 } from 'react';
 
@@ -43,6 +45,11 @@ function sideAttrs(side: Side) {
   if (side === 'video') return { 'data-video-only': '' };
   return {};
 }
+
+/** a Section drawn flat: its body only, open, no folding header. A tab
+ *  rebuilt on pills (Connections > MetaSync, Notifications) puts its old
+ *  sections on a pill of their own this way */
+export const SectionFlat = createContext(false);
 
 export function Section({
   tab,
@@ -72,6 +79,13 @@ export function Section({
   children: ReactNode;
 }) {
   const live = !!summaryKey && !!summary;
+  const flat = useContext(SectionFlat);
+  if (flat)
+    return (
+      <div data-stg={tab} data-stg-flat="" {...sideAttrs(side)}>
+        {children}
+      </div>
+    );
   return (
     <>
       <div

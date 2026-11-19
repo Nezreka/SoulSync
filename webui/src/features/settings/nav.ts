@@ -53,8 +53,12 @@ export const TABS: TabDef[] = [
     label: 'Connections',
     icon: 'plug',
     title: 'Connections',
-    sub: 'Media servers, accounts, MetaSync and notifications',
-    views: ONE,
+    sub: 'Your media server, and the accounts and API keys SoulSync connects to',
+    views: [
+      { key: 'services', label: 'Servers and services' },
+      { key: 'metasync', label: 'MetaSync', side: 'music' },
+      { key: 'notifications', label: 'Notifications', side: 'video' },
+    ],
   },
   {
     key: 'downloads',

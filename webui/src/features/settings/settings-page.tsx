@@ -398,22 +398,16 @@ export function SettingsPage({
         ) : null}
 
         {/* rebuilt tabs: their own pages, one panel per pill */}
+        {slot('connections', 'page')}
         {slot('downloads', 'page')}
 
         {/* the tabs not rebuilt yet: the blocks they always rendered, in the
             order the old columns gave them */}
         <div className="settings-columns">
           <div className="settings-left-column">
-            {slot('connections', 'metadata')}
-            <div className="stg-cardgroup" data-stg="connections">
-              <span className="stg-cardgroup-label">Services</span>
-              <span className="stg-cardgroup-sub">Accounts and API keys SoulSync connects to</span>
-            </div>
-            {slot('connections', 'services')}
+            {/* the service cards' hidden homes: a tile opens one in its sheet */}
             {slot('connections', 'api-music')}
             {slot('connections', 'api-video')}
-            {slot('connections', 'video-server')}
-            {slot('connections', 'servers')}
           </div>
           <div className="settings-right-column">
             {slot('quality', 'video')}
@@ -432,9 +426,7 @@ export function SettingsPage({
             {slot('advanced', 'database')}
             {slot('advanced', 'tools')}
             {slot('appearance', 'weather')}
-            {slot('connections', 'metasync')}
             {slot('advanced', 'developer')}
-            {slot('connections', 'notifications')}
             {slot('discovery', 'import-lists')}
             {slot('advanced', 'experimental')}
           </div>

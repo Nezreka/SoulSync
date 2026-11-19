@@ -26,6 +26,7 @@ import {
   LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS,
   normalizeLibraryDiscographySource,
 } from '../library-discography-source';
+import { Card, Row, SectionLabel, Select } from '../ui';
 import {
   checkQobuzAuthStatus,
   hydrabaseLink,
@@ -112,8 +113,6 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
   const shown = savedSource(settings);
   const lastValid = useRef(shown);
   const select = useRef<HTMLSelectElement>(null);
-  const help = useHelp();
-  const bits = helpBits(HELP_BODY, help);
 
   /** settings.js sanitizeMetadataSourceSelection: a source that cannot be
    *  picked goes back to the last one that could, else Deezer */
@@ -155,9 +154,14 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <div className="form-group">
-      <label>Primary metadata source:</label>
-      <select
+    <Row
+      field
+      label="Primary metadata source"
+      htmlFor="metadata-fallback-source"
+      help="Spotify and Discogs need their account connected below before they can be picked."
+      more={HELP_BODY}
+    >
+      <Select
         id="metadata-fallback-source"
         ref={select}
         value={shown}
@@ -168,35 +172,42 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
             {o.label}
           </option>
         ))}
-      </select>
-      {bits.icon}
-      <div className="setting-help-text setting-help-body" hidden={!help.open}>
-        {HELP_BODY}
-      </div>
-      {bits.line}
-    </div>
+      </Select>
+    </Row>
   );
 }
 
 const HELP_BODY = (
   <>
-    Where artist, album, and track metadata comes from:
-    <br />• <strong>Spotify</strong> — official Spotify; connect your account with the Spotify tile
-    under Services.
-    <br />• <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed.
-    It's unofficial and best-effort (may break if Spotify changes its site) and can't read your
-    personal library or playlists.
-    <br />• <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.
-    <br />• <strong>MusicBrainz</strong> — free; the public server is limited to 1 request/sec.
-    Configure a self-hosted server in the MusicBrainz tile under Services.
-    <br />• <strong>Discogs</strong> — needs a personal access token.
-    <br />• <strong>JioSaavn</strong> — opt in under Advanced → Experimental. Strong for Indian and
-    Bollywood catalogs.
-    <br />
-    <br />
-    Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it
-    uses the official account normally and only falls back to no-auth while Spotify is rate-limited
-    — then switches back automatically.
+    Where artist, album and track metadata comes from:
+    <ul>
+      <li>
+        <strong>Spotify</strong>: official Spotify; connect your account with the Spotify tile under
+        Services.
+      </li>
+      <li>
+        <strong>Spotify (no auth)</strong>: the same Spotify catalog with no account needed. It is
+        unofficial and best-effort (it may break if Spotify changes its site) and cannot read your
+        own library or playlists.
+      </li>
+      <li>
+        <strong>Deezer</strong> and <strong>iTunes</strong>: free, no account.
+      </li>
+      <li>
+        <strong>MusicBrainz</strong>: free; the public server allows 1 request a second. Set up a
+        self-hosted server in the MusicBrainz tile under Services.
+      </li>
+      <li>
+        <strong>Discogs</strong>: needs a personal access token.
+      </li>
+      <li>
+        <strong>JioSaavn</strong>: opt in under System, Experimental. Strong for Indian and
+        Bollywood catalogs.
+      </li>
+    </ul>
+    Tip: pick <strong>Spotify (no auth)</strong> and connect a real Spotify account later, and the
+    official account is used normally; no-auth is only used while Spotify is rate-limited, then it
+    switches back by itself.
   </>
 );
 
@@ -235,39 +246,38 @@ function DiscographyPicker({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <div id="library-discography-source-group" className="form-group">
-      <label htmlFor="library-discography-source">Library discography source:</label>
-      <select
+    <Row
+      field
+      id="library-discography-source-group"
+      label="Library discography source"
+      htmlFor="library-discography-source"
+      help="Controls album, EP and single catalogues shown in Library artist views. Automatic tries iTunes, then Deezer."
+    >
+      <Select
         id="library-discography-source"
-        className="form-select"
         value={value}
         disabled={busy}
         onChange={(event) => void change(event.target.value)}
-      >
-        {LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <small className="settings-hint">
-        Controls album, EP and single catalogues shown in Library artist views. Automatic tries
-        iTunes, then Deezer.
-      </small>
-    </div>
+        options={LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS.map((o) => ({
+          value: o.value,
+          label: o.label,
+        }))}
+      />
+    </Row>
   );
 }
 
 export function MetadataSourceGroup({ store }: { store: SettingsStore }) {
   return (
-    <div className="settings-group" data-stg="connections" data-music-only="">
-      <div className="api-service-frame">
-        <h4 className="service-title" style={{ color: '#e8e8e8' }}>
-          Metadata Source
-        </h4>
+    <div data-ui="" data-music-only="">
+      <SectionLabel
+        title="Metadata source"
+        hint="Where artist, album and track details come from"
+      />
+      <Card id="stg-metadata-source">
         <MetadataPicker store={store} />
         <DiscographyPicker store={store} />
-      </div>
+      </Card>
     </div>
   );
 }
@@ -342,15 +352,18 @@ const CARD_ORDER = [
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="form-group">
-      <label>{label}</label>
+      {/* a label never ends in a colon (the cards still pass one) */}
+      <label>{label.replace(/:\s*$/, '')}</label>
       {children}
     </div>
   );
 }
 
+/** a card's Test: the sheet's foot presses it (one Test per sheet), so it
+ *  stays in the card, out of sight, and sends what it always sent */
 export function TestButton({ onClick }: { onClick: () => void }) {
   return (
-    <button className="test-button" type="button" onClick={onClick}>
+    <button className="test-button" type="button" data-svc-test="" hidden onClick={onClick}>
       Test Connection
     </button>
   );
@@ -477,7 +490,7 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
       title="Spotify"
       titleClass="spotify-title"
     >
-      <Field label="Client ID:">
+      <Field label="Client ID">
         <input
           type="text"
           id="spotify-client-id"
@@ -486,7 +499,7 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
           onChange={(event) => id.onChange(event.target.value)}
         />
       </Field>
-      <Field label="Client Secret:">
+      <Field label="Client Secret">
         <SecretInput
           id="spotify-client-secret"
           placeholder="Spotify Client Secret"
@@ -494,7 +507,7 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
           onChange={secret.onChange}
         />
       </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
+      <Field label="Redirect URI">{redirect.input}</Field>
       <div className="callback-info">
         <div className="callback-label">Current Redirect URI:</div>
         <div className="callback-url" id="spotify-callback-display">
@@ -512,19 +525,23 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
           className="auth-button"
           onClick={() => void authenticate('Spotify', '/auth/spotify', 'gs-connecting')}
         >
-          🔐 Authenticate
+          Authenticate
         </button>{' '}
         <button
           className="auth-button disconnect-button"
           id="spotify-disconnect-btn"
-          style={{ display: 'none' }}
+          // shown while /status says Spotify is signed in: the old page's
+          // syncSpotifySettingsAuthState did this, and the port lost it
+          hidden={spotify?.authenticated !== true}
           onClick={() => void disconnect()}
         >
-          🔌 Disconnect
+          Disconnect
         </button>{' '}
         <button
           className="test-button"
           type="button"
+          data-svc-test=""
+          hidden
           onClick={() => void testService(store, 'spotify')}
         >
           Test Connection
@@ -609,7 +626,7 @@ function ItunesCard({ store }: { store: SettingsStore }) {
       title="iTunes / Apple Music"
       titleClass="itunes-title"
     >
-      <Field label="Storefront Country:">
+      <Field label="Storefront Country">
         <select
           id="itunes-country"
           value={country}
@@ -690,7 +707,7 @@ function DeezerCard({ store }: { store: SettingsStore }) {
       title="Deezer (Favorites & Playlists)"
       titleClass="deezer-title"
     >
-      <Field label="App ID:">
+      <Field label="App ID">
         <input
           type="text"
           id="deezer-app-id"
@@ -699,7 +716,7 @@ function DeezerCard({ store }: { store: SettingsStore }) {
           onChange={(event) => appId.onChange(event.target.value)}
         />
       </Field>
-      <Field label="App Secret:">
+      <Field label="App Secret">
         <SecretInput
           id="deezer-app-secret"
           placeholder="Deezer App Secret"
@@ -707,7 +724,7 @@ function DeezerCard({ store }: { store: SettingsStore }) {
           onChange={appSecret.onChange}
         />
       </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
+      <Field label="Redirect URI">{redirect.input}</Field>
       <div className="callback-info">
         <div className="callback-label">Current Redirect URI:</div>
         <div className="callback-url" id="deezer-callback-display">
@@ -719,7 +736,7 @@ function DeezerCard({ store }: { store: SettingsStore }) {
       </div>
       <div className="form-actions">
         <button className="auth-button" onClick={() => void authenticate('Deezer', '/auth/deezer')}>
-          🔐 Authenticate
+          Authenticate
         </button>
       </div>
       <div
@@ -735,7 +752,7 @@ function DeezerCard({ store }: { store: SettingsStore }) {
           needed):
         </div>
       </div>
-      <Field label="ARL Token:">
+      <Field label="ARL Token">
         <SecretInput
           id="deezer-connection-arl"
           placeholder="Paste your ARL cookie token here"
@@ -764,7 +781,7 @@ function DiscogsCard({ store }: { store: SettingsStore }) {
   const token = useText(store, 'discogs', 'token');
   return (
     <ServiceCard service="discogs" colour="#e0d4b8" title="Discogs">
-      <Field label="Personal Access Token:">
+      <Field label="Personal Access Token">
         <SecretInput
           id="discogs-token"
           placeholder="Discogs Personal Access Token"
@@ -837,7 +854,7 @@ function TidalCard({ store }: { store: SettingsStore }) {
       title="Tidal (Playlists & Metadata)"
       titleClass="tidal-title"
     >
-      <Field label="Client ID:">
+      <Field label="Client ID">
         <input
           type="text"
           id="tidal-client-id"
@@ -846,7 +863,7 @@ function TidalCard({ store }: { store: SettingsStore }) {
           onChange={(event) => id.onChange(event.target.value)}
         />
       </Field>
-      <Field label="Client Secret:">
+      <Field label="Client Secret">
         <SecretInput
           id="tidal-client-secret"
           placeholder="Tidal Client Secret"
@@ -854,7 +871,7 @@ function TidalCard({ store }: { store: SettingsStore }) {
           onChange={secret.onChange}
         />
       </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
+      <Field label="Redirect URI">{redirect.input}</Field>
       <div className="callback-info">
         <div className="callback-label">Current Redirect URI:</div>
         <div className="callback-url" id="tidal-callback-display">
@@ -864,7 +881,7 @@ function TidalCard({ store }: { store: SettingsStore }) {
       </div>
       <div className="form-actions">
         <button className="auth-button" onClick={() => void authenticate('Tidal', '/auth/tidal')}>
-          🔐 Authenticate
+          Authenticate
         </button>{' '}
         <button
           className="auth-button"
@@ -1006,7 +1023,7 @@ function QobuzCard({ store }: { store: SettingsStore }) {
         id="qobuz-connection-form"
         style={auth ? { display: loggedIn ? 'none' : 'block' } : undefined}
       >
-        <Field label="Email:">
+        <Field label="Email">
           <input
             type="email"
             id="qobuz-connection-email"
@@ -1017,7 +1034,7 @@ function QobuzCard({ store }: { store: SettingsStore }) {
             onChange={(event) => setEmail(event.target.value)}
           />
         </Field>
-        <Field label="Password:">
+        <Field label="Password">
           <input
             type="password"
             id="qobuz-connection-password"
@@ -1063,7 +1080,7 @@ function QobuzCard({ store }: { store: SettingsStore }) {
           your token directly:
         </div>
       </div>
-      <Field label="Auth Token:">
+      <Field label="Auth Token">
         <input
           type="password"
           id="qobuz-connection-token"
@@ -1292,7 +1309,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
       extra={{ 'data-stg': 'connections' }}
     >
       <input type="hidden" id="hydrabase-enabled" value="false" />
-      <Field label="WebSocket URL:">
+      <Field label="WebSocket URL">
         <input
           type="text"
           id="hydrabase-url"
@@ -1301,7 +1318,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
           onChange={(event) => store.set('hydrabase', 'url', event.target.value)}
         />
       </Field>
-      <Field label="API Key:">
+      <Field label="API Key">
         <SecretInput
           id="hydrabase-api-key"
           placeholder="Hydrabase API Key"

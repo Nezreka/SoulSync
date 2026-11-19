@@ -623,8 +623,10 @@
 
 .cardActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
   margin-left: auto;
 }
 
@@ -1601,6 +1603,70 @@ button.chip:hover:not(:disabled) {
   margin-top: 6px;
 }
 
+/* ── the media server: pick one ── */
+
+.servers {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 4px 20px 20px;
+}
+
+.server {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 104px;
+  padding: 14px 8px;
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-card);
+  background: var(--white-a02);
+  color: var(--white-a80);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast),
+    background var(--dur-fast);
+}
+
+.server:hover {
+  border-color: var(--white-a14);
+  background: var(--white-a04);
+}
+
+.serverOn {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--text-bright);
+}
+
+.serverOn::after {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+  content: '';
+}
+
+.serverLogo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.serverName {
+  text-align: center;
+}
+
 /* ── a list of things (HiFi instances, indexers) ── */
 
 .items {
@@ -2249,6 +2315,11 @@ button.chip:hover:not(:disabled) {
     padding: 14px 16px 12px;
   }
 
+  .cardActions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
   .row {
     gap: 10px 14px;
     min-height: 64px;
@@ -2330,6 +2401,15 @@ button.chip:hover:not(:disabled) {
 
   .tiles {
     grid-template-columns: 1fr;
+  }
+
+  .servers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 4px 16px 16px;
+  }
+
+  .server {
+    min-height: 88px;
   }
 
   .sheet {

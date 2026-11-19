@@ -34,6 +34,553 @@
       "asked": "guard-probe",
       "noSave": "the settings search box: it filters the page and saves nothing"
     },
+    "div[role=\"radiogroup\"][aria-label=\"Media server\"]": {
+      "sel": "div[role=\"radiogroup\"][aria-label=\"Media server\"]",
+      "weak": "context",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "Plex",
+      "to": "Jellyfin",
+      "saves": {
+        "settings": {
+          "active_media_server": "jellyfin"
+        }
+      },
+      "asked": "Jellyfin",
+      "shows": ["active_media_server"]
+    },
+    "#sa-upload-mbps": {
+      "sel": "#sa-upload-mbps",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "40",
+      "to": "41",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"upload_mbps\":41}"
+          }
+        ]
+      },
+      "asked": "41",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-geo-lookup": {
+      "sel": "#sa-geo-lookup",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"geo_lookup\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-retention": {
+      "sel": "#sa-retention",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "0",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"retention_days\":0}"
+          }
+        ]
+      },
+      "asked": "0",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-preset-new": {
+      "sel": "#sa-preset-new",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "click": ["Add"]
+    },
+    "#metadata-fallback-source": {
+      "sel": "#metadata-fallback-source",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "deezer",
+      "to": "itunes",
+      "saves": {
+        "settings": {
+          "metadata": {
+            "fallback_source": "itunes",
+            "spotify_free": false
+          }
+        }
+      },
+      "asked": "itunes",
+      "shows": ["metadata.fallback_source", "metadata.spotify_free"]
+    },
+    "#library-discography-source": {
+      "sel": "#library-discography-source",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "itunes",
+      "to": "primary",
+      "saves": {
+        "settings": {
+          "metadata": {
+            "library_discography_source": "primary"
+          }
+        }
+      },
+      "asked": "primary",
+      "shows": ["metadata.library_discography_source"]
+    },
+    "#svc-tabs": {
+      "sel": "#svc-tabs",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "music",
+      "to": "video",
+      "saves": null,
+      "asked": "video",
+      "noSave": "the Connections services switch (Music, Video): which side's tiles are shown, saves nothing"
+    },
+    "#plex-url": {
+      "sel": "#plex-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://plex:32400",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "plex": {
+            "base_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["plex.base_url"]
+    },
+    "#plex-token": {
+      "sel": "#plex-token",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "plex": {
+            "token": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["plex.token"]
+    },
+    "#plex-music-library": {
+      "sel": "#plex-music-library",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "Music",
+      "to": "Podcasts",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/plex/select-music-library",
+            "body": "{\"library_name\":\"Podcasts\"}"
+          }
+        ]
+      },
+      "asked": "Podcasts",
+      "showsEndpoint": "/api/plex/music-libraries"
+    },
+    "#jellyfin-url": {
+      "sel": "#jellyfin-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://jf:8096",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "jellyfin": {
+            "base_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["jellyfin.base_url"]
+    },
+    "#jellyfin-api-key": {
+      "sel": "#jellyfin-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "jellyfin": {
+            "api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["jellyfin.api_key"]
+    },
+    "#jellyfin-timeout": {
+      "sel": "#jellyfin-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "91",
+      "saves": {
+        "settings": {
+          "jellyfin": {
+            "api_timeout": 91
+          }
+        }
+      },
+      "asked": "91",
+      "shows": ["jellyfin.api_timeout"]
+    },
+    "#jellyfin-user": {
+      "sel": "#jellyfin-user",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": "bob",
+      "to": "ann",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/jellyfin/select-user",
+            "body": "{\"username\":\"ann\"}"
+          }
+        ]
+      },
+      "asked": "ann",
+      "showsEndpoint": "/api/jellyfin/users"
+    },
+    "#jellyfin-music-library": {
+      "sel": "#jellyfin-music-library",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": "Live",
+      "to": "Music",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/jellyfin/select-music-library",
+            "body": "{\"library_name\":\"Music\"}"
+          }
+        ]
+      },
+      "asked": "Music",
+      "showsEndpoint": "/api/jellyfin/music-libraries"
+    },
+    "#navidrome-url": {
+      "sel": "#navidrome-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://nd:4533",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "navidrome": {
+            "base_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["navidrome.base_url"]
+    },
+    "#navidrome-username": {
+      "sel": "#navidrome-username",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "nd",
+      "to": "nd-guard",
+      "saves": {
+        "settings": {
+          "navidrome": {
+            "username": "nd-guard"
+          }
+        }
+      },
+      "asked": "nd-guard",
+      "shows": ["navidrome.username"]
+    },
+    "#navidrome-password": {
+      "sel": "#navidrome-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "navidrome": {
+            "password": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["navidrome.password"]
+    },
+    "#navidrome-playlist-username": {
+      "sel": "#navidrome-playlist-username",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "listener",
+      "to": "listener-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/me/navidrome-login",
+            "body": "{\"username\":\"listener-guard\",\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "listener-guard",
+      "also": {
+        "#navidrome-playlist-password": "guard-secret"
+      },
+      "click": ["Save playlist account"]
+    },
+    "#navidrome-playlist-password": {
+      "sel": "#navidrome-playlist-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/me/navidrome-login",
+            "body": "{\"username\":\"listener\",\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "click": ["Save playlist account"]
+    },
+    "#navidrome-music-folder": {
+      "sel": "#navidrome-music-folder",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "navidrome",
+      "from": "B",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/navidrome/select-music-folder",
+            "body": "{\"folder_name\":\"\"}"
+          }
+        ]
+      },
+      "asked": "",
+      "showsEndpoint": "/api/navidrome/music-folders"
+    },
+    "#music_assistant-url": {
+      "sel": "#music_assistant-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://ma:8095",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "music_assistant": {
+            "base_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["music_assistant.base_url"]
+    },
+    "#music_assistant-token": {
+      "sel": "#music_assistant-token",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "music_assistant": {
+            "token": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["music_assistant.token"]
+    },
+    "#music_assistant-source": {
+      "sel": "#music_assistant-source",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "b",
+      "to": "a",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/music-assistant/select-source",
+            "body": "{\"instance_id\":\"a\"}"
+          }
+        ],
+        "settings": {
+          "music_assistant": {
+            "source_instance": "a"
+          }
+        }
+      },
+      "asked": "a",
+      "shows": ["music_assistant.source_instance"],
+      "showsEndpoint": "/api/music-assistant/sources"
+    },
+    "#music_assistant-source-folder": {
+      "sel": "#music_assistant-source-folder",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "/media",
+      "to": "/media-guard",
+      "saves": {
+        "settings": {
+          "music_assistant": {
+            "source_folder": "/media-guard"
+          }
+        }
+      },
+      "asked": "/media-guard",
+      "shows": ["music_assistant.source_folder"]
+    },
+    "#metasync-node-url": {
+      "sel": "#metasync-node-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://ms:8790",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/metasync/settings",
+            "body": "{\"node_url\":\"http://guard.example:4321\",\"pool_url\":\"https://pool\"}"
+          }
+        ]
+      },
+      "asked": "http://guard.example:4321",
+      "click": ["Save"],
+      "showsEndpoint": "/api/metasync"
+    },
+    "#metasync-local-key": {
+      "sel": "#metasync-local-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/metasync/settings",
+            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"https://pool\",\"local_api_key\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "click": ["Save"]
+    },
+    "#metasync-pool-url": {
+      "sel": "#metasync-pool-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "https://pool",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/metasync/settings",
+            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"http://guard.example:4321\"}"
+          }
+        ]
+      },
+      "asked": "http://guard.example:4321",
+      "click": ["Save"],
+      "showsEndpoint": "/api/metasync"
+    },
+    "#metasync-pool-key": {
+      "sel": "#metasync-pool-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/metasync/settings",
+            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"https://pool\",\"pool_key\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "click": ["Save"]
+    },
     "#stream-source": {
       "sel": "#stream-source",
       "kind": "select",
@@ -1391,43 +1938,6 @@
       "asked": "off",
       "showsEndpoint": "/api/video/downloads/config"
     },
-    "#metadata-fallback-source": {
-      "sel": "#metadata-fallback-source",
-      "kind": "select",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "deezer",
-      "to": "itunes",
-      "saves": {
-        "settings": {
-          "metadata": {
-            "fallback_source": "itunes",
-            "spotify_free": false
-          }
-        }
-      },
-      "asked": "itunes",
-      "shows": ["metadata.fallback_source", "metadata.spotify_free"]
-    },
-    "#library-discography-source": {
-      "sel": "#library-discography-source",
-      "kind": "select",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "itunes",
-      "to": "primary",
-      "saves": {
-        "settings": {
-          "metadata": {
-            "library_discography_source": "primary"
-          }
-        }
-      },
-      "asked": "primary",
-      "shows": ["metadata.library_discography_source"]
-    },
     "#spotify-client-id": {
       "sel": "#spotify-client-id",
       "kind": "text",
@@ -2137,426 +2647,22 @@
       "asked": false,
       "shows": ["hydrabase.auto_connect"]
     },
-    "#plex-url": {
-      "sel": "#plex-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://plex:32400",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "plex": {
-            "base_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["plex.base_url"]
-    },
-    "#plex-token": {
-      "sel": "#plex-token",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "plex": {
-            "token": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["plex.token"]
-    },
-    "#plex-music-library": {
-      "sel": "#plex-music-library",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "Music",
-      "to": "Podcasts",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/plex/select-music-library",
-            "body": "{\"library_name\":\"Podcasts\"}"
-          }
-        ]
-      },
-      "asked": "Podcasts",
-      "showsEndpoint": "/api/plex/music-libraries"
-    },
-    "#jellyfin-url": {
-      "sel": "#jellyfin-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://jf:8096",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "jellyfin": {
-            "base_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["jellyfin.base_url"]
-    },
-    "#jellyfin-api-key": {
-      "sel": "#jellyfin-api-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "jellyfin": {
-            "api_key": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["jellyfin.api_key"]
-    },
-    "#jellyfin-timeout": {
-      "sel": "#jellyfin-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "91",
-      "saves": {
-        "settings": {
-          "jellyfin": {
-            "api_timeout": 91
-          }
-        }
-      },
-      "asked": "91",
-      "shows": ["jellyfin.api_timeout"]
-    },
-    "#jellyfin-user": {
-      "sel": "#jellyfin-user",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": "bob",
-      "to": "ann",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/jellyfin/select-user",
-            "body": "{\"username\":\"ann\"}"
-          }
-        ]
-      },
-      "asked": "ann",
-      "showsEndpoint": "/api/jellyfin/users"
-    },
-    "#jellyfin-music-library": {
-      "sel": "#jellyfin-music-library",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": "Live",
-      "to": "Music",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/jellyfin/select-music-library",
-            "body": "{\"library_name\":\"Music\"}"
-          }
-        ]
-      },
-      "asked": "Music",
-      "showsEndpoint": "/api/jellyfin/music-libraries"
-    },
-    "#navidrome-url": {
-      "sel": "#navidrome-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://nd:4533",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "navidrome": {
-            "base_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["navidrome.base_url"]
-    },
-    "#navidrome-username": {
-      "sel": "#navidrome-username",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "nd",
-      "to": "nd-guard",
-      "saves": {
-        "settings": {
-          "navidrome": {
-            "username": "nd-guard"
-          }
-        }
-      },
-      "asked": "nd-guard",
-      "shows": ["navidrome.username"]
-    },
-    "#navidrome-password": {
-      "sel": "#navidrome-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "navidrome": {
-            "password": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["navidrome.password"]
-    },
-    "#navidrome-playlist-username": {
-      "sel": "#navidrome-playlist-username",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "listener",
-      "to": "listener-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/me/navidrome-login",
-            "body": "{\"username\":\"listener-guard\",\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "listener-guard",
-      "also": {
-        "#navidrome-playlist-password": "guard-secret"
-      },
-      "click": ["Save playlist account"]
-    },
-    "#navidrome-playlist-password": {
-      "sel": "#navidrome-playlist-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/me/navidrome-login",
-            "body": "{\"username\":\"listener\",\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "click": ["Save playlist account"]
-    },
-    "#navidrome-music-folder": {
-      "sel": "#navidrome-music-folder",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "navidrome",
-      "from": "B",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/navidrome/select-music-folder",
-            "body": "{\"folder_name\":\"\"}"
-          }
-        ]
-      },
-      "asked": "",
-      "showsEndpoint": "/api/navidrome/music-folders"
-    },
-    "#music_assistant-url": {
-      "sel": "#music_assistant-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://ma:8095",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "music_assistant": {
-            "base_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["music_assistant.base_url"]
-    },
-    "#music_assistant-token": {
-      "sel": "#music_assistant-token",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "music_assistant": {
-            "token": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["music_assistant.token"]
-    },
-    "#music_assistant-source": {
-      "sel": "#music_assistant-source",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "b",
-      "to": "a",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/music-assistant/select-source",
-            "body": "{\"instance_id\":\"a\"}"
-          }
-        ],
-        "settings": {
-          "music_assistant": {
-            "source_instance": "a"
-          }
-        }
-      },
-      "asked": "a",
-      "shows": ["music_assistant.source_instance"],
-      "showsEndpoint": "/api/music-assistant/sources"
-    },
-    "#music_assistant-source-folder": {
-      "sel": "#music_assistant-source-folder",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "/media",
-      "to": "/media-guard",
-      "saves": {
-        "settings": {
-          "music_assistant": {
-            "source_folder": "/media-guard"
-          }
-        }
-      },
-      "asked": "/media-guard",
-      "shows": ["music_assistant.source_folder"]
-    },
-    "#sa-upload-mbps": {
-      "sel": "#sa-upload-mbps",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "40",
-      "to": "41",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"upload_mbps\":41}"
-          }
-        ]
-      },
-      "asked": "41",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-geo-lookup": {
-      "sel": "#sa-geo-lookup",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"geo_lookup\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-retention": {
-      "sel": "#sa-retention",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "0",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"retention_days\":0}"
-          }
-        ]
-      },
-      "asked": "0",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-preset-new": {
-      "sel": "#sa-preset-new",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "click": ["Add"]
-    },
     "select[data-vq-profile-select]": {
       "sel": "select[data-vq-profile-select]",
       "kind": "select",
       "sides": ["music", "video"],
       "scenario": "music",
       "from": "0",
-      "to": null,
+      "to": "3",
       "saves": null,
+      "asked": "3",
       "noSave": "picks which video quality profile is on screen: saves nothing"
     },
     "input[data-vq-profile-name]": {
       "sel": "input[data-vq-profile-name]",
       "kind": "text",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "",
       "to": "guard-probe",
       "saves": {
@@ -2574,7 +2680,7 @@
       "sel": "select[data-vq-kind-default=\"movie\"]",
       "kind": "select",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "0",
       "to": "3",
       "saves": {
@@ -2593,7 +2699,7 @@
       "sel": "select[data-vq-kind-default=\"show\"]",
       "kind": "select",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "3",
       "to": "0",
       "saves": {
@@ -2612,7 +2718,7 @@
       "sel": "#vq-cutoff",
       "kind": "select",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "1080p",
       "to": "2160p",
       "saves": {
@@ -2631,7 +2737,7 @@
       "sel": "#vq-prefer-repack",
       "kind": "checkbox",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": false,
       "to": true,
       "saves": {
@@ -2650,7 +2756,7 @@
       "sel": "#vq-movie-size",
       "kind": "range",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "40",
       "to": "41",
       "saves": {
@@ -2669,7 +2775,7 @@
       "sel": "#vq-episode-size",
       "kind": "range",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "0",
       "to": "1",
       "saves": {
@@ -2688,7 +2794,7 @@
       "sel": "#vq-movie-pref",
       "kind": "range",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "0",
       "to": "0.5",
       "saves": {
@@ -2707,7 +2813,7 @@
       "sel": "#vq-episode-pref",
       "kind": "range",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "2.5",
       "to": "2.6",
       "saves": {
@@ -2726,7 +2832,7 @@
       "sel": "#vq-min-seeders",
       "kind": "range",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "1",
       "to": "2",
       "saves": {
@@ -2745,7 +2851,7 @@
       "sel": "#vq-min-format-score",
       "kind": "number",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "5",
       "to": "6",
       "saves": {
@@ -2764,7 +2870,7 @@
       "sel": "#yq-resolution",
       "kind": "select",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": "1440p",
       "to": "best",
       "saves": {
@@ -2783,7 +2889,7 @@
       "sel": "#yq-60fps",
       "kind": "checkbox",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": true,
       "to": false,
       "saves": {
@@ -2802,7 +2908,7 @@
       "sel": "#yq-hdr",
       "kind": "checkbox",
       "sides": ["music", "video"],
-      "scenario": "video",
+      "scenario": "music",
       "from": false,
       "to": true,
       "saves": {
@@ -8690,84 +8796,6 @@
       "asked": true,
       "showsEndpoint": "/api/weather"
     },
-    "#metasync-node-url": {
-      "sel": "#metasync-node-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://ms:8790",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/metasync/settings",
-            "body": "{\"node_url\":\"http://guard.example:4321\",\"pool_url\":\"https://pool\"}"
-          }
-        ]
-      },
-      "asked": "http://guard.example:4321",
-      "click": ["Save"],
-      "showsEndpoint": "/api/metasync"
-    },
-    "#metasync-local-key": {
-      "sel": "#metasync-local-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/metasync/settings",
-            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"https://pool\",\"local_api_key\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "click": ["Save"]
-    },
-    "#metasync-pool-url": {
-      "sel": "#metasync-pool-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "https://pool",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/metasync/settings",
-            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"http://guard.example:4321\"}"
-          }
-        ]
-      },
-      "asked": "http://guard.example:4321",
-      "click": ["Save"],
-      "showsEndpoint": "/api/metasync"
-    },
-    "#metasync-pool-key": {
-      "sel": "#metasync-pool-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/metasync/settings",
-            "body": "{\"node_url\":\"http://ms:8790\",\"pool_url\":\"https://pool\",\"pool_key\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "click": ["Save"]
-    },
     "#sw-preview-preset": {
       "sel": "#sw-preview-preset",
       "kind": "select",
@@ -8903,306 +8931,6 @@
       "saves": null,
       "asked": false,
       "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
-    },
-    "#tmdb-api-key": {
-      "sel": "#tmdb-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "tmdbkey",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"guard-secret\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#tvdb-api-key": {
-      "sel": "#tvdb-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"guard-secret\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#omdb-api-key": {
-      "sel": "#omdb-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "omdbkey",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"guard-secret\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#fanart-api-key": {
-      "sel": "#fanart-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"guard-secret\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#opensubtitles-api-key": {
-      "sel": "#opensubtitles-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"guard-secret\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#subdl-api-key": {
-      "sel": "#subdl-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"guard-secret\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#subsource-api-key": {
-      "sel": "#subsource-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"guard-secret\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#trakt-api-key": {
-      "sel": "#trakt-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"guard-secret\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#mdblist-api-key": {
-      "sel": "#mdblist-api-key",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"guard-secret\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-tvmaze-enabled": {
-      "sel": "#video-tvmaze-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":false,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-anilist-enabled": {
-      "sel": "#video-anilist-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": false,
-      "to": true,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":true,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": true,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-wikidata-enabled": {
-      "sel": "#video-wikidata-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":false,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-ryd-enabled": {
-      "sel": "#video-ryd-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":false,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-sponsorblock-enabled": {
-      "sel": "#video-sponsorblock-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":false,\"dearrow_enabled\":true}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-dearrow-enabled": {
-      "sel": "#video-dearrow-enabled",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
     },
     "input[data-video-conn=\"plex-url\"]": {
       "sel": "input[data-video-conn=\"plex-url\"]",
@@ -9421,158 +9149,6 @@
       },
       "asked": true,
       "showsEndpoint": "/api/video/libraries"
-    },
-    "input[data-vq-tier-toggle=\"bluray-1080p\"]": {
-      "sel": "input[data-vq-tier-toggle=\"bluray-1080p\"]",
-      "kind": "checkbox",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality",
-            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":false,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}]}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/downloads/quality/profiles"
-    },
-    "input[data-vq-tier-toggle=\"web-1080p\"]": {
-      "sel": "input[data-vq-tier-toggle=\"web-1080p\"]",
-      "kind": "checkbox",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality",
-            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":false,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}]}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/downloads/quality/profiles"
-    },
-    "input[data-vq-tier-toggle=\"hdtv-720p\"]": {
-      "sel": "input[data-vq-tier-toggle=\"hdtv-720p\"]",
-      "kind": "checkbox",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": false,
-      "to": true,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality",
-            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":true,\"key\":\"hdtv-720p\"}]}"
-          }
-        ]
-      },
-      "asked": true,
-      "showsEndpoint": "/api/video/downloads/quality/profiles"
-    },
-    "input[data-vq-fmt-f=\"name\"]": {
-      "sel": "input[data-vq-fmt-f=\"name\"]",
-      "kind": "text",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "Trusted",
-      "to": "Trusted-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality/formats",
-            "body": "{\"id\":7,\"name\":\"Trusted-guard\",\"include\":[\"FLUX\"],\"exclude\":[],\"score\":20}"
-          }
-        ]
-      },
-      "asked": "Trusted-guard",
-      "showsEndpoint": "/api/video/downloads/quality/formats"
-    },
-    "input[data-vq-fmt-f=\"include\"]": {
-      "sel": "input[data-vq-fmt-f=\"include\"]",
-      "kind": "text",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "FLUX",
-      "to": "FLUX-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality/formats",
-            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX-guard\"],\"exclude\":[],\"score\":20}"
-          }
-        ]
-      },
-      "asked": "FLUX-guard",
-      "showsEndpoint": "/api/video/downloads/quality/formats"
-    },
-    "input[data-vq-fmt-f=\"exclude\"]": {
-      "sel": "input[data-vq-fmt-f=\"exclude\"]",
-      "kind": "text",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality/formats",
-            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX\"],\"exclude\":[\"guard-probe\"],\"score\":20}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "showsEndpoint": "/api/video/downloads/quality/formats"
-    },
-    "input[data-vq-fmt-f=\"score\"]": {
-      "sel": "input[data-vq-fmt-f=\"score\"]",
-      "kind": "number",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "20",
-      "to": "21",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality/formats",
-            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX\"],\"exclude\":[],\"score\":21}"
-          }
-        ]
-      },
-      "asked": "21",
-      "showsEndpoint": "/api/video/downloads/quality/formats"
-    },
-    "input[data-vq-fmt-f=\"override\"]": {
-      "sel": "input[data-vq-fmt-f=\"override\"]",
-      "kind": "number",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "50",
-      "to": "51",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/quality",
-            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":51},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}],\"prefer_repack\":false,\"max_episode_gb\":0,\"preferred_movie_gb\":0,\"min_seeders\":1}"
-          }
-        ]
-      },
-      "asked": "51",
-      "showsEndpoint": "/api/video/downloads/quality/profiles"
     },
     "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"name\"]": {
       "sel": "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"name\"]",
@@ -9993,6 +9569,458 @@
       },
       "asked": true,
       "showsEndpoint": "/api/video/notifications"
+    },
+    "#tmdb-api-key": {
+      "sel": "#tmdb-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "tmdbkey",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"guard-secret\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#tvdb-api-key": {
+      "sel": "#tvdb-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"guard-secret\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#omdb-api-key": {
+      "sel": "#omdb-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "omdbkey",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"guard-secret\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#fanart-api-key": {
+      "sel": "#fanart-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"guard-secret\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#opensubtitles-api-key": {
+      "sel": "#opensubtitles-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"guard-secret\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#subdl-api-key": {
+      "sel": "#subdl-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"guard-secret\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#subsource-api-key": {
+      "sel": "#subsource-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"guard-secret\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#trakt-api-key": {
+      "sel": "#trakt-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"guard-secret\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#mdblist-api-key": {
+      "sel": "#mdblist-api-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"guard-secret\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-tvmaze-enabled": {
+      "sel": "#video-tvmaze-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":false,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-anilist-enabled": {
+      "sel": "#video-anilist-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":true,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": true,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-wikidata-enabled": {
+      "sel": "#video-wikidata-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":false,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-ryd-enabled": {
+      "sel": "#video-ryd-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":false,\"sponsorblock_enabled\":true,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-sponsorblock-enabled": {
+      "sel": "#video-sponsorblock-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":false,\"dearrow_enabled\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-dearrow-enabled": {
+      "sel": "#video-dearrow-enabled",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"tmdb_api_key\":\"tmdbkey\",\"tvdb_api_key\":\"\",\"omdb_api_key\":\"omdbkey\",\"fanart_api_key\":\"\",\"opensubtitles_api_key\":\"\",\"subdl_api_key\":\"\",\"subsource_api_key\":\"\",\"trakt_api_key\":\"\",\"mdblist_api_key\":\"\",\"tvmaze_enabled\":true,\"anilist_enabled\":false,\"wikidata_enabled\":true,\"ryd_enabled\":true,\"sponsorblock_enabled\":true,\"dearrow_enabled\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "input[data-vq-tier-toggle=\"bluray-1080p\"]": {
+      "sel": "input[data-vq-tier-toggle=\"bluray-1080p\"]",
+      "kind": "checkbox",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality",
+            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":false,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}]}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/downloads/quality/profiles"
+    },
+    "input[data-vq-tier-toggle=\"web-1080p\"]": {
+      "sel": "input[data-vq-tier-toggle=\"web-1080p\"]",
+      "kind": "checkbox",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality",
+            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":false,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}]}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/downloads/quality/profiles"
+    },
+    "input[data-vq-tier-toggle=\"hdtv-720p\"]": {
+      "sel": "input[data-vq-tier-toggle=\"hdtv-720p\"]",
+      "kind": "checkbox",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality",
+            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":50},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":true,\"key\":\"hdtv-720p\"}]}"
+          }
+        ]
+      },
+      "asked": true,
+      "showsEndpoint": "/api/video/downloads/quality/profiles"
+    },
+    "input[data-vq-fmt-f=\"name\"]": {
+      "sel": "input[data-vq-fmt-f=\"name\"]",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "Trusted",
+      "to": "Trusted-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality/formats",
+            "body": "{\"id\":7,\"name\":\"Trusted-guard\",\"include\":[\"FLUX\"],\"exclude\":[],\"score\":20}"
+          }
+        ]
+      },
+      "asked": "Trusted-guard",
+      "showsEndpoint": "/api/video/downloads/quality/formats"
+    },
+    "input[data-vq-fmt-f=\"include\"]": {
+      "sel": "input[data-vq-fmt-f=\"include\"]",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "FLUX",
+      "to": "FLUX-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality/formats",
+            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX-guard\"],\"exclude\":[],\"score\":20}"
+          }
+        ]
+      },
+      "asked": "FLUX-guard",
+      "showsEndpoint": "/api/video/downloads/quality/formats"
+    },
+    "input[data-vq-fmt-f=\"exclude\"]": {
+      "sel": "input[data-vq-fmt-f=\"exclude\"]",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality/formats",
+            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX\"],\"exclude\":[\"guard-probe\"],\"score\":20}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "showsEndpoint": "/api/video/downloads/quality/formats"
+    },
+    "input[data-vq-fmt-f=\"score\"]": {
+      "sel": "input[data-vq-fmt-f=\"score\"]",
+      "kind": "number",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "20",
+      "to": "21",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality/formats",
+            "body": "{\"id\":7,\"name\":\"Trusted\",\"include\":[\"FLUX\"],\"exclude\":[],\"score\":21}"
+          }
+        ]
+      },
+      "asked": "21",
+      "showsEndpoint": "/api/video/downloads/quality/formats"
+    },
+    "input[data-vq-fmt-f=\"override\"]": {
+      "sel": "input[data-vq-fmt-f=\"override\"]",
+      "kind": "number",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "50",
+      "to": "51",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/quality",
+            "body": "{\"audio_language_mode\":\"prefer\",\"audio_languages\":[\"fr\"],\"cutoff_resolution\":\"1080p\",\"format_scores\":{\"7\":51},\"max_movie_gb\":40,\"min_format_score\":5,\"prefer_audio\":\"any\",\"prefer_codec\":\"hevc\",\"prefer_hdr\":\"off\",\"preferred_episode_gb\":2.5,\"rejects\":[\"cam\"],\"tiers\":[{\"enabled\":true,\"key\":\"bluray-1080p\"},{\"enabled\":true,\"key\":\"web-1080p\"},{\"enabled\":false,\"key\":\"hdtv-720p\"}]}"
+          }
+        ]
+      },
+      "asked": "51",
+      "showsEndpoint": "/api/video/downloads/quality/profiles"
     },
     "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]": {
       "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]",
@@ -10867,6 +10895,424 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#stg-pill-connections-services": {
+      "id": "stg-pill-connections-services",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-pill-connections-metasync": {
+      "id": "stg-pill-connections-metasync",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#stg-server-card \"Test Server\"": {
+      "label": "Test Server",
+      "anchor": "stg-server-card",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-server-card \"View Configuration\"": {
+      "label": "View Configuration",
+      "anchor": "stg-server-card",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-toggle": {
+      "id": "plex-toggle",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#jellyfin-toggle": {
+      "id": "jellyfin-toggle",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-toggle": {
+      "id": "navidrome-toggle",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music_assistant-toggle": {
+      "id": "music_assistant-toggle",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soulsync-toggle": {
+      "id": "soulsync-toggle",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-services \"Clear play log\"": {
+      "label": "Clear play log",
+      "anchor": "stg-view-connections-services",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-services \"Remove \"Server maintenance, back soon.\"\"": {
+      "label": "Remove \"Server maintenance, back soon.\"",
+      "anchor": "stg-view-connections-services",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-services \"Add\"": {
+      "label": "Add",
+      "anchor": "stg-view-connections-services",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-services \"\"": {
+      "label": "",
+      "anchor": "stg-view-connections-services",
+      "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-services \"Test Connection\"": {
+      "label": "Test Connection",
+      "anchor": "stg-view-connections-services",
+      "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-metadata-source \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-metadata-source",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#library-discography-source-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "library-discography-source-group",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#svc-tabs \"Music\"": {
+      "label": "Music",
+      "anchor": "svc-tabs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#svc-tabs \"Video\"": {
+      "label": "Video",
+      "anchor": "svc-tabs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"MusicBrainz: No key needed. Settings\"": {
+      "label": "MusicBrainz: No key needed. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Spotify: Not set up. Settings\"": {
+      "label": "Spotify: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"iTunes / Apple Music: No key needed. Settings\"": {
+      "label": "iTunes / Apple Music: No key needed. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Deezer: No key needed. Settings\"": {
+      "label": "Deezer: No key needed. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Discogs: Not tested yet. Settings\"": {
+      "label": "Discogs: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Tidal: Not tested yet. Settings\"": {
+      "label": "Tidal: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Qobuz: Not tested yet. Settings\"": {
+      "label": "Qobuz: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Hydrabase: Connected. Settings\"": {
+      "label": "Hydrabase: Connected. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Last.fm: Not tested yet. Settings\"": {
+      "label": "Last.fm: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"ListenBrainz: Not tested yet. Settings\"": {
+      "label": "ListenBrainz: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Genius: Not tested yet. Settings\"": {
+      "label": "Genius: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Concerts: Key saved. Settings\"": {
+      "label": "Concerts: Key saved. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"AcoustID Verification: Not tested yet. Settings\"": {
+      "label": "AcoustID Verification: Not tested yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"Pollinations: Not set up. Settings\"": {
+      "label": "Pollinations: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-tile-grid \"fanart.tv: Key saved. Settings\"": {
+      "label": "fanart.tv: Key saved. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#service-config-modal \"Close\"": {
+      "label": "Close",
+      "anchor": "service-config-modal",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#service-config-modal \"Done\"": {
+      "label": "Done",
+      "anchor": "service-config-modal",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#server-config-sheet \"Close\"": {
+      "label": "Close",
+      "anchor": "server-config-sheet",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-autodetect-button": {
+      "id": "plex-autodetect-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-connect-button": {
+      "id": "plex-connect-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-config-action-button": {
+      "id": "plex-config-action-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-relink-button": {
+      "id": "plex-relink-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-link-to-plex-button": {
+      "id": "plex-link-to-plex-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-manual-config-button": {
+      "id": "plex-manual-config-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-view-config-button": {
+      "id": "plex-view-config-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-pin-refresh-button": {
+      "id": "plex-pin-refresh-button",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-pin-auth-flow \"Cancel\"": {
+      "label": "Cancel",
+      "anchor": "plex-pin-auth-flow",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#jellyfin-container \"Auto-detect\"": {
+      "label": "Auto-detect",
+      "anchor": "jellyfin-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#jellyfin-container \"Test\"": {
+      "label": "Test",
+      "anchor": "jellyfin-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-playlist-login \"Save playlist account\"": {
+      "label": "Save playlist account",
+      "anchor": "navidrome-playlist-login",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-playlist-clear": {
+      "id": "navidrome-playlist-clear",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-container \"Auto-detect\"": {
+      "label": "Auto-detect",
+      "anchor": "navidrome-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-container \"Test\"": {
+      "label": "Test",
+      "anchor": "navidrome-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music_assistant-container \"Auto-detect\"": {
+      "label": "Auto-detect",
+      "anchor": "music_assistant-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music_assistant-container \"Load sources\"": {
+      "label": "Load sources",
+      "anchor": "music_assistant-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soulsync-container \"Verify Music Library Folder\"": {
+      "label": "Verify Music Library Folder",
+      "anchor": "soulsync-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#server-config-sheet \"Done\"": {
+      "label": "Done",
+      "anchor": "server-config-sheet",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Connect\"": {
+      "label": "Connect",
+      "anchor": "stg-view-connections-metasync",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#metasync-pair-box \"I've approved it — finish connecting\"": {
+      "label": "I've approved it — finish connecting",
+      "anchor": "metasync-pair-box",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Send pool key to MetaSync\"": {
+      "label": "Send pool key to MetaSync",
+      "anchor": "stg-view-connections-metasync",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Save\"": {
+      "label": "Save",
+      "anchor": "stg-view-connections-metasync",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Refresh status\"": {
+      "label": "Refresh status",
+      "anchor": "stg-view-connections-metasync",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Disconnect\"": {
+      "label": "Disconnect",
+      "anchor": "stg-view-connections-metasync",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-notifications \"+ Add connection\"": {
+      "label": "+ Add connection",
+      "anchor": "video-notifications",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#dlchain-tabs \"Music\"": {
       "label": "Music",
       "anchor": "dlchain-tabs",
@@ -11483,132 +11929,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#svc-tabs \"Music\"": {
-      "label": "Music",
-      "anchor": "svc-tabs",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#svc-tabs \"Video\"": {
-      "label": "Video",
-      "anchor": "svc-tabs",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"MusicBrainzno key needed\"": {
-      "label": "MusicBrainzno key needed",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Spotifyconfigured\"": {
-      "label": "Spotifyconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"iTunes / Apple Musicno key needed\"": {
-      "label": "iTunes / Apple Musicno key needed",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Deezerconfigured\"": {
-      "label": "Deezerconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Discogsnot set up\"": {
-      "label": "Discogsnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Tidalconfigured\"": {
-      "label": "Tidalconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Qobuznot set up\"": {
-      "label": "Qobuznot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"HHydrabaseconfigured\"": {
-      "label": "HHydrabaseconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Last.fmconfigured\"": {
-      "label": "Last.fmconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"ListenBrainznot set up\"": {
-      "label": "ListenBrainznot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"Geniusnot set up\"": {
-      "label": "Geniusnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"CConcertsconfigured\"": {
-      "label": "CConcertsconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"AAcoustID Verificationnot set up\"": {
-      "label": "AAcoustID Verificationnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"PPollinationsnot set up\"": {
-      "label": "PPollinationsnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-tile-grid \"🎨fanart.tvconfigured\"": {
-      "label": "🎨fanart.tvconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#service-config-modal \"Close\"": {
-      "label": "Close",
-      "anchor": "service-config-modal",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "\"Expand All\"": {
       "label": "Expand All",
       "anchor": "",
@@ -11616,8 +11936,8 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"🔐 Authenticate\"": {
-      "label": "🔐 Authenticate",
+    "\"Authenticate\"": {
+      "label": "Authenticate",
       "anchor": "",
       "count": 3,
       "sides": ["music", "video"],
@@ -11632,14 +11952,14 @@
     "\"Test Connection\"": {
       "label": "Test Connection",
       "anchor": "",
-      "count": 15,
+      "count": 13,
       "sides": ["music", "video"],
       "scenario": "music"
     },
     "\"Disconnect\"": {
       "label": "Disconnect",
       "anchor": "",
-      "count": 2,
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -11798,188 +12118,6 @@
       "label": "Test Connections",
       "anchor": "",
       "count": 2,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"\"": {
-      "label": "",
-      "anchor": "",
-      "count": 2,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-toggle": {
-      "id": "plex-toggle",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#jellyfin-toggle": {
-      "id": "jellyfin-toggle",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-toggle": {
-      "id": "navidrome-toggle",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#music_assistant-toggle": {
-      "id": "music_assistant-toggle",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#soulsync-toggle": {
-      "id": "soulsync-toggle",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-autodetect-button": {
-      "id": "plex-autodetect-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-connect-button": {
-      "id": "plex-connect-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-config-action-button": {
-      "id": "plex-config-action-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-relink-button": {
-      "id": "plex-relink-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-link-to-plex-button": {
-      "id": "plex-link-to-plex-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-manual-config-button": {
-      "id": "plex-manual-config-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-view-config-button": {
-      "id": "plex-view-config-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-pin-refresh-button": {
-      "id": "plex-pin-refresh-button",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#plex-pin-auth-flow \"Cancel\"": {
-      "label": "Cancel",
-      "anchor": "plex-pin-auth-flow",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#jellyfin-container \"Auto-detect\"": {
-      "label": "Auto-detect",
-      "anchor": "jellyfin-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#jellyfin-container \"Test\"": {
-      "label": "Test",
-      "anchor": "jellyfin-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-playlist-login \"Save playlist account\"": {
-      "label": "Save playlist account",
-      "anchor": "navidrome-playlist-login",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-playlist-clear": {
-      "id": "navidrome-playlist-clear",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-container \"Auto-detect\"": {
-      "label": "Auto-detect",
-      "anchor": "navidrome-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-container \"Test\"": {
-      "label": "Test",
-      "anchor": "navidrome-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#music_assistant-container \"Auto-detect\"": {
-      "label": "Auto-detect",
-      "anchor": "music_assistant-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#music_assistant-container \"Load sources\"": {
-      "label": "Load sources",
-      "anchor": "music_assistant-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#soulsync-container \"Verify Music Library Folder\"": {
-      "label": "Verify Music Library Folder",
-      "anchor": "soulsync-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Server\"": {
-      "label": "Test Server",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Clear play log\"": {
-      "label": "Clear play log",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Remove \"Server maintenance, back soon.\"\"": {
-      "label": "Remove \"Server maintenance, back soon.\"",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Add\"": {
-      "label": "Add",
-      "anchor": "",
-      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12691,7 +12829,7 @@
     "\"Save\"": {
       "label": "Save",
       "anchor": "",
-      "count": 2,
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12699,34 +12837,6 @@
       "label": "Clear",
       "anchor": "",
       "count": 2,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Connect\"": {
-      "label": "Connect",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#metasync-pair-box \"I've approved it — finish connecting\"": {
-      "label": "I've approved it — finish connecting",
-      "anchor": "metasync-pair-box",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Send pool key to MetaSync\"": {
-      "label": "Send pool key to MetaSync",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Refresh status\"": {
-      "label": "Refresh status",
-      "anchor": "",
-      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12738,13 +12848,6 @@
     },
     "#ob-preview-open": {
       "id": "ob-preview-open",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#video-notifications \"+ Add connection\"": {
-      "label": "+ Add connection",
-      "anchor": "video-notifications",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -12884,6 +12987,103 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#stg-pill-connections-notifications": {
+      "id": "stg-pill-connections-notifications",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"TMDB: Key saved. Settings\"": {
+      "label": "TMDB: Key saved. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"TVDB: Required: no key yet. Settings\"": {
+      "label": "TVDB: Required: no key yet. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"Community Data: 2 of 3 on. Settings\"": {
+      "label": "Community Data: 2 of 3 on. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"OMDb: Key saved. Settings\"": {
+      "label": "OMDb: Key saved. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"Trakt: Not set up. Settings\"": {
+      "label": "Trakt: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"MDBList: Not set up. Settings\"": {
+      "label": "MDBList: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"OpenSubtitles: Not set up. Settings\"": {
+      "label": "OpenSubtitles: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"SubDL: Not set up. Settings\"": {
+      "label": "SubDL: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"SubSource: Not set up. Settings\"": {
+      "label": "SubSource: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"fanart.tv: Not set up. Settings\"": {
+      "label": "fanart.tv: Not set up. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#service-tile-grid \"YouTube Extras: 3 of 3 on. Settings\"": {
+      "label": "YouTube Extras: 3 of 3 on. Settings",
+      "anchor": "service-tile-grid",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#vq-notify-rows \"Test\"": {
+      "label": "Test",
+      "anchor": "vq-notify-rows",
+      "count": 2,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#vq-notify-rows \"✕\"": {
+      "label": "✕",
+      "anchor": "vq-notify-rows",
+      "count": 2,
+      "sides": ["video"],
+      "scenario": "video"
+    },
     "#dlchain-panel \"Reorder Torrent, 1 of 1\"": {
       "label": "Reorder Torrent, 1 of 1",
       "anchor": "dlchain-panel",
@@ -12908,83 +13108,6 @@
     "#dlchain-panel \"Use External\"": {
       "label": "Use External",
       "anchor": "dlchain-panel",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"TMDBconfigured\"": {
-      "label": "TMDBconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"TVDBrequired\"": {
-      "label": "TVDBrequired",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"📺Community Dataconfigured\"": {
-      "label": "📺Community Dataconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"★OMDbconfigured\"": {
-      "label": "★OMDbconfigured",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"★Traktnot set up\"": {
-      "label": "★Traktnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"MMDBListnot set up\"": {
-      "label": "MMDBListnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"💬OpenSubtitlesnot set up\"": {
-      "label": "💬OpenSubtitlesnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"SSubDLnot set up\"": {
-      "label": "SSubDLnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"SSubSourcenot set up\"": {
-      "label": "SSubSourcenot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"🎨fanart.tvnot set up\"": {
-      "label": "🎨fanart.tvnot set up",
-      "anchor": "service-tile-grid",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#service-tile-grid \"YouTube Extrasconfigured\"": {
-      "label": "YouTube Extrasconfigured",
-      "anchor": "service-tile-grid",
       "count": 1,
       "sides": ["video"],
       "scenario": "video"
@@ -13199,20 +13322,6 @@
       "sides": ["video"],
       "scenario": "video"
     },
-    "#vq-notify-rows \"Test\"": {
-      "label": "Test",
-      "anchor": "vq-notify-rows",
-      "count": 2,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#vq-notify-rows \"✕\"": {
-      "label": "✕",
-      "anchor": "vq-notify-rows",
-      "count": 2,
-      "sides": ["video"],
-      "scenario": "video"
-    },
     "#vq-implist-rows \"✕\"": {
       "label": "✕",
       "anchor": "vq-implist-rows",
@@ -13243,6 +13352,7 @@
     "controls": [
       "metadata-fallback-source",
       "library-discography-source",
+      "svc-tabs",
       "spotify-client-id",
       "spotify-client-secret",
       "spotify-redirect-uri",
@@ -13631,7 +13741,6 @@
     ],
     "auditOnly": {
       "library-discography-source-group": "not a form control: a <div> on the page",
-      "svc-tabs": "not a form control: a <div> on the page",
       "service-tile-grid": "not a form control: a <div> on the page",
       "spotify-disconnect-btn": "a button, held in `buttons`",
       "qobuz-connection-logged-in": "not a form control: a <div> on the page",

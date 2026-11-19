@@ -87,7 +87,7 @@ function Key({
   const left = useCommit<HTMLInputElement>(() => void videoKeys.save());
   return (
     <div className="form-group">
-      <label>{label}</label>
+      <label>{label.replace(/:\s*$/, '')}</label>
       <input
         type="password"
         id={`${field}-api-key`}
@@ -121,6 +121,8 @@ function Test({ spec, children }: { spec: string; children: ReactNode }) {
       className="test-button"
       type="button"
       data-video-test-service={spec}
+      data-svc-test=""
+      hidden
       onClick={() => void testVideoServices(spec)}
     >
       {children}
@@ -262,7 +264,7 @@ function Cards() {
         <Test spec="subsource">Test SubSource</Test>
       </Card>
       <Card service="trakt" colour="#ed1c24" title="Trakt (Audience Rating)">
-        <Key field="trakt" label="API Key (Client ID):" placeholder="Trakt Client ID" />
+        <Key field="trakt" label="API Key (Client ID)" placeholder="Trakt Client ID" />
         <div className="callback-info">
           <Help>
             Create a free API app at{' '}

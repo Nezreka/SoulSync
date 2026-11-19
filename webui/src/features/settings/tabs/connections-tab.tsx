@@ -14,10 +14,14 @@ import { ServerConnections } from './connections-servers';
 import { ServicesPart } from './connections-services';
 import { VideoApiGroup } from './connections-video-api';
 import { VideoServerConnection } from './connections-video-server';
+import { ConnectionsPage } from './connections/connections-page';
 import { ServerActivitySettingsCard } from './server-activity-settings';
 import { NotificationsSection } from './video-row-lists';
 
-export function ConnectionsTab({ store, part, opened }: SettingsTabProps) {
+export function ConnectionsTab(props: SettingsTabProps) {
+  const { store, part, opened } = props;
+  // settings-bic: the tab's own page (pills, hero, server, services)
+  if (part === 'page') return <ConnectionsPage {...props} />;
   if (part === 'metadata') return <MetadataSourceGroup store={store} />;
   if (part === 'services') return <ServicesPart opened={opened} />;
   if (part === 'api-music') return <MusicApiGroup store={store} />;
