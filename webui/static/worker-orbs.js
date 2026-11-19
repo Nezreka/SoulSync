@@ -108,7 +108,9 @@
         dashboardHeader = document.querySelector('#dashboard-page .orb-stage:not([data-foreign-orbs])')
             || document.querySelector('#dashboard-page .dashboard-header:not([data-foreign-orbs])');
         headerActions = dashboardHeader && dashboardHeader.querySelector('.header-actions');
-        if (!dashboardHeader || !headerActions) return;
+        // a member's hero has no orbs (#2196): nothing to anchor, and the
+        // retry must not read a header with no orbs as anchored
+        if (!dashboardHeader || !headerActions) { dashboardHeader = null; headerActions = null; return; }
 
         if (!hubImage) {
             hubImage = new Image();

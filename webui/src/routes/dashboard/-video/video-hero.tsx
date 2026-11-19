@@ -259,14 +259,18 @@ export interface HeroNumberView {
   value: string;
 }
 
+/** `workers` (the orb stage, its sheet and Manage Workers) is the admins'
+ *  (#2196): a member's hero is the greeting, the numbers and the library. */
 export function VideoHero({
   numbers,
   onNumber,
   library,
+  workers,
 }: {
   numbers: HeroNumberView[];
   onNumber: () => void;
   library: ReactNode;
+  workers: boolean;
 }) {
   const profileName = useProfileName();
   const greeting = greetingForHour(new Date().getHours());
@@ -278,7 +282,13 @@ export function VideoHero({
   const question = greeting.endsWith('?');
   const lead = question ? greeting.slice(0, -1) : greeting;
   return (
-    <div className="dashboard-header dash-hero" data-video-hero="" data-foreign-orbs="">
+    <div
+      className={
+        workers ? 'dashboard-header dash-hero' : 'dashboard-header dash-hero dash-hero--solo'
+      }
+      data-video-hero=""
+      data-foreign-orbs=""
+    >
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
@@ -316,7 +326,7 @@ export function VideoHero({
         ) : null}
         {library}
       </div>
-      <OrbStage />
+      {workers ? <OrbStage /> : null}
     </div>
   );
 }

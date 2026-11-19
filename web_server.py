@@ -22883,7 +22883,7 @@ except Exception as e:
 # --- Hydrabase Worker API Endpoints ---
 
 @app.route('/api/hydrabase-worker/status', methods=['GET'])
-@signed_in
+@admin_only   # a worker's status is the admins' (#2196)
 def hydrabase_worker_status():
     """Get Hydrabase P2P mirror worker status for UI polling"""
     try:
@@ -22959,7 +22959,7 @@ except Exception as e:
     soulid_worker = None
 
 @app.route('/api/soulid/status', methods=['GET'])
-@signed_in
+@admin_only   # a worker's status is the admins' (#2196)
 def soulid_status():
     """Get SoulID worker status for UI polling."""
     try:
@@ -25319,6 +25319,15 @@ from core.enrichment.status_cache import WorkerStatsCache as _WorkerStatsCache  
 _enrich_stats = _WorkerStatsCache()
 
 
+def _enrichment_status_room(name):
+    """who hears a worker's status push (#2196): the admins, they run the
+    workers. repair is the one every socket still gets: the Tools page can be
+    granted to a member and its maintenance header reads that frame (its
+    /api/repair/status twin is music.access). the jobs and their progress
+    stay admin only."""
+    return None if name == 'repair' else ADMIN_SOCKET_ROOM
+
+
 def _emit_enrichment_status_loop():
     """Background thread that pushes all enrichment worker statuses every 2 seconds.
     Also auto-pauses rate-limited enrichment workers during active downloads."""
@@ -25415,7 +25424,7 @@ def _emit_enrichment_status_loop():
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
                 else:
                     status.pop('yield_reason', None)
-                socketio.emit(f'enrichment:{name}', status)
+                socketio.emit(f'enrichment:{name}', status, to=_enrichment_status_room(name))
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
 
@@ -25442,7 +25451,8 @@ def _emit_video_enrichment_status_loop():
         # wiring here.
         for svc, w in (eng.workers or {}).items():
             try:
-                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w))
+                # the workers are the admins' (#2196)
+                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w), to=ADMIN_SOCKET_ROOM)
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")
         # The YouTube date enricher is a standalone daemon (not an engine worker),
@@ -25450,7 +25460,7 @@ def _emit_video_enrichment_status_loop():
         # dashboard orb listens like the others (no /enrichment/youtube/status poll).
         try:
             from core.video.youtube_enrichment import get_youtube_date_enricher
-            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats())
+            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats(), to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting video youtube status: {e}")
 

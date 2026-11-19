@@ -82,7 +82,7 @@ The floating **"Search everything…"** bar that used to sit above the media pla
             body: `
 ## Worker orbs
 
-The dashboard header shows a **worker orb** for each of 17 background workers. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
+The dashboard header shows a **worker orb** for each of 17 background workers. The orbs, **Manage Workers** and everything behind them are the admin's: a member's dashboard has no orbs, and the server refuses them the workers' status and controls. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
 
 ::: cards
 ### 🟣 MusicBrainz

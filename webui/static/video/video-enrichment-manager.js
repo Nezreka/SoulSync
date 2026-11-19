@@ -585,7 +585,18 @@
         }
     }
 
+    // the workers are the admins' (#2196): a stray open never shows a member
+    // the modal (its routes refuse them anyway)
+    function viewerIsAdmin() {
+        var ctx = null;
+        try {
+            ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+        } catch (e) { ctx = null; }
+        return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+    }
+
     function open() {
+        if (!viewerIsAdmin()) return;
         var overlay = ensureOverlay();
         overlay.classList.remove('hidden', 'em-closing');
         // Re-trigger the music modal's entrance animation even on reuse. Drop the

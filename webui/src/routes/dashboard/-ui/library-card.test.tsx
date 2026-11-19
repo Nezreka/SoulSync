@@ -51,10 +51,10 @@ afterEach(() => {
   Reflect.deleteProperty(window, 'showConfirmDialog');
 });
 
-async function mountCard() {
+async function mountCard(workers = true) {
   let view: ReturnType<typeof render>;
   await act(async () => {
-    view = render(<LibraryCard />);
+    view = render(<LibraryCard workers={workers} />);
   });
   return view!;
 }
@@ -114,6 +114,13 @@ describe('the hero status line', () => {
     for (const id of ['deep', 'browse', 'verify', 'repair', 'backup', 'review']) {
       expect(menu.querySelector(`#library-status-${id}-btn`)).not.toBeNull();
     }
+  });
+
+  it("a member's menu has no Verify matches: the enrichment manager is the admins' (#2196)", async () => {
+    const view = await mountCard(false);
+    const menu = view.container.querySelector('.library-status-menu')!;
+    expect(menu.querySelector('#library-status-verify-btn')).toBeNull();
+    expect(menu.querySelector('#library-status-browse-btn')).not.toBeNull();
   });
 
   it('the ⋯ button opens the menu, and Escape or a pick closes it', async () => {

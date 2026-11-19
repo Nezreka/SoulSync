@@ -671,30 +671,38 @@ function HeroBackdrop() {
 }
 
 /** The hero. The page owns the header hook (its counts also feed the rail's
- * watchlist/wishlist tiles), so this is a view over that state. */
+ * watchlist/wishlist tiles), so this is a view over that state. The orb
+ * stage, its sheet and Manage Workers are the admins' (#2196): a member's
+ * hero is the greeting and the library on their own. */
 export function DashboardHeaderView({
   header,
   library,
+  workers,
 }: {
   header: DashboardHeaderState;
   library?: ReactNode;
+  workers: boolean;
 }) {
   return (
-    <div className="dashboard-header dash-hero">
+    <div
+      className={
+        workers ? 'dashboard-header dash-hero' : 'dashboard-header dash-hero dash-hero--solo'
+      }
+    >
       <HeroBackdrop />
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
       <HeroIntro library={library} />
-      <OrbStage header={header} />
+      {workers ? <OrbStage header={header} /> : null}
     </div>
   );
 }
 
 /** The hero on its own, owning the hook. */
-export function DashboardHeader({ library }: { library?: ReactNode }) {
-  const header = useDashboardHeader();
-  return <DashboardHeaderView header={header} library={library} />;
+export function DashboardHeader({ library, workers }: { library?: ReactNode; workers: boolean }) {
+  const header = useDashboardHeader({ workers });
+  return <DashboardHeaderView header={header} library={library} workers={workers} />;
 }
 
 /** A few of what a count tile counts: round faces for watched artists,

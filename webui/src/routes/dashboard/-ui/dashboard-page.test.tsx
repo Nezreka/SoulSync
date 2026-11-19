@@ -30,7 +30,7 @@ describe('the page shell', () => {
   it('keeps the id, drops the .page class, hero then music and the system rail', async () => {
     let view!: ReturnType<typeof render>;
     await act(async () => {
-      view = render(<DashboardPage />);
+      view = render(<DashboardPage isAdmin />);
     });
     const root = view.container.firstElementChild!;
     expect(root.id).toBe('dashboard-page');
@@ -87,7 +87,7 @@ describe('the page shell', () => {
     const setPage = vi.fn();
     window.workerOrbs = { setPage, onStatus: vi.fn() } as never;
     await act(async () => {
-      render(<DashboardPage />);
+      render(<DashboardPage isAdmin />);
     });
     expect(setPage).toHaveBeenCalledWith('dashboard');
   });
@@ -97,7 +97,7 @@ describe('the page shell', () => {
     window.SoulSyncFeatures = { isOn: (id: string) => !off.has(id) } as never;
     let view!: ReturnType<typeof render>;
     await act(async () => {
-      view = render(<DashboardPage />);
+      view = render(<DashboardPage isAdmin />);
     });
     delete window.SoulSyncFeatures;
     const board = Array.from(view.container.querySelectorAll('.room-board > [data-card]')).map(
@@ -106,5 +106,65 @@ describe('the page shell', () => {
     expect(board).toEqual([]);
     // watchlist and wishlist are the core, they stay
     expect(view.container.querySelector('.room-board #watchlist-button')).not.toBeNull();
+  });
+});
+
+// #2196: the enrichment workers are the admins'. a member's dashboard has no
+// orbs, no worker sheet, no Manage Workers, and never asks the worker routes
+// (they refuse a member, so a poll would only make 403s).
+const WORKER_URLS = /\/api\/(enrichment|hydrabase-worker|soulid|dev-mode|repair\/status)/;
+
+function urlsAsked(): string[] {
+  return fetchMock.mock.calls.map((call) => String(call[0]));
+}
+
+describe('the workers are the admins (#2196)', () => {
+  it('a member sees no orbs, no Manage Workers, and the hero is the greeting alone', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin={false} />);
+    });
+    const hero = view.container.querySelector('.dashboard-header.dash-hero')!;
+    expect(hero).not.toBeNull();
+    expect(hero.classList.contains('dash-hero--solo')).toBe(true);
+    expect(view.container.querySelector('.orb-stage')).toBeNull();
+    expect(view.container.querySelector('.header-actions')).toBeNull();
+    expect(view.container.querySelector('#manage-enrichment-btn')).toBeNull();
+    expect(view.container.querySelector('.orb-stage-caption')).toBeNull();
+    expect(view.container.querySelector('#library-status-verify-btn')).toBeNull();
+    // the greeting, the library and the board are still theirs
+    expect(hero.querySelector('.dash-hero-main [data-card="library"]')).not.toBeNull();
+    expect(view.container.querySelector('.room-board #watchlist-button')).not.toBeNull();
+  });
+
+  it("a member's dashboard never asks the workers, and the orb layer is not pinged", async () => {
+    const setPage = vi.fn();
+    window.workerOrbs = { setPage, onStatus: vi.fn() } as never;
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        render(<DashboardPage isAdmin={false} />);
+      });
+      // past the 10s fallback poll
+      await act(async () => {
+        vi.advanceTimersByTime(25000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(urlsAsked().filter((url) => WORKER_URLS.test(url))).toEqual([]);
+    expect(setPage).not.toHaveBeenCalled();
+  });
+
+  it('an admin keeps the orbs, Manage Workers and the status poll', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin />);
+    });
+    expect(view.container.querySelector('.dash-hero--solo')).toBeNull();
+    expect(view.container.querySelector('.orb-stage .header-actions')).not.toBeNull();
+    expect(view.container.querySelector('#manage-enrichment-btn')).not.toBeNull();
+    expect(view.container.querySelector('#library-status-verify-btn')).not.toBeNull();
+    expect(urlsAsked()).toContain('/api/enrichment/status-all');
   });
 });

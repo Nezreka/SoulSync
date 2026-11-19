@@ -8,7 +8,9 @@ and dispatches:
     POST /api/enrichment/<service_id>/pause
     POST /api/enrichment/<service_id>/resume
 
-A 404 is returned for unknown service ids. Per-service quirks (Spotify
+A 404 is returned for unknown service ids. every route here is admin only
+(#2196): the workers, what they matched and the controls are server
+maintenance, and nothing a member uses reads them. Per-service quirks (Spotify
 rate-limit guard, auto-pause token cleanup, persisted-pause config keys)
 are encoded as data on the ``EnrichmentService`` descriptor — there is
 no branching on service id inside this module.
@@ -29,7 +31,6 @@ from core.enrichment.unmatched import (
     supported_entity_types,
 )
 from utils.logging_config import get_logger
-from core.permissions import requires
 from core.profile_context import admin_only
 
 
@@ -153,7 +154,7 @@ def create_blueprint() -> Blueprint:
     bp = Blueprint('enrichment_api', __name__)
 
     @bp.route('/api/enrichment/status-all', methods=['GET'])
-    @requires("music.access")
+    @admin_only
     def enrichment_status_all():
         """Every service's status in ONE response — the page-load hydrate
         (replaces ~13 individual /status requests). Collected CONCURRENTLY:
@@ -179,7 +180,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({'services': out}), 200
 
     @bp.route('/api/enrichment/<service_id>/status', methods=['GET'])
-    @requires("music.access")
+    @admin_only
     def enrichment_status(service_id: str):
         service = get_service(service_id)
         if service is None:
@@ -250,7 +251,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({'error': str(e)}), 500
 
     @bp.route('/api/enrichment/<service_id>/breakdown', methods=['GET'])
-    @requires("music.access")
+    @admin_only
     def enrichment_breakdown(service_id: str):
         """matched / not_found / pending tallies per entity type for the modal."""
         if service_id not in SERVICE_ENTITY_SUPPORT:
@@ -282,7 +283,7 @@ def create_blueprint() -> Blueprint:
             return jsonify({'error': str(e)}), 500
 
     @bp.route('/api/enrichment/<service_id>/unmatched', methods=['GET'])
-    @requires("music.access")
+    @admin_only
     def enrichment_unmatched(service_id: str):
         """Paginated list of items this source hasn't matched (for manual match).
 
@@ -432,7 +433,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({'success': True, 'services': per_service, **totals}), 200
 
     @bp.route('/api/enrichment/<service_id>/priority', methods=['GET'])
-    @requires("music.access")
+    @admin_only
     def enrichment_get_priority(service_id: str):
         """Return the pinned 'process this group first' entity for a worker."""
         if service_id not in SERVICE_ENTITY_SUPPORT:

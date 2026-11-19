@@ -493,3 +493,59 @@ describe('the card styles the bands reuse', () => {
     expect(body).toContain('min-width: 0');
   });
 });
+
+// #2196: the video workers are the admins'. a member's hero has no orb stage,
+// no Manage Workers, and the page never primes the worker buttons (the
+// status routes refuse a member).
+describe('the workers are the admins (#2196)', () => {
+  afterEach(() => {
+    delete window.videoWorkerOrbs;
+    delete window.videoEnrichmentPrime;
+  });
+
+  function spyVanilla() {
+    const refresh = vi.fn();
+    const prime = vi.fn();
+    window.videoWorkerOrbs = { refresh } as never;
+    window.videoEnrichmentPrime = prime;
+    return { refresh, prime };
+  }
+
+  it('a member gets no orbs, no Manage Workers and no worker calls', async () => {
+    stub();
+    const asked: string[] = [];
+    const listen = ({ request }: { request: Request }) => {
+      asked.push(new URL(request.url).pathname);
+    };
+    server.events.on('request:start', listen);
+    const { refresh, prime } = spyVanilla();
+    const { container } = mount({ isAdmin: false });
+    expect(await screen.findByText('8,873')).toBeTruthy();
+    const hero = container.querySelector('[data-video-hero]')!;
+    expect(hero.classList.contains('dash-hero--solo')).toBe(true);
+    expect(container.querySelector('[data-video-orb-stage]')).toBeNull();
+    expect(container.querySelector('[data-video-enrich]')).toBeNull();
+    expect(container.querySelector('[data-video-manage-workers]')).toBeNull();
+    expect(screen.queryByText('Workers resting')).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(prime).not.toHaveBeenCalled();
+    server.events.removeListener('request:start', listen);
+    // the listener heard the page (so an empty list below means something)
+    expect(asked).toContain('/api/video/dashboard');
+    expect(asked.filter((path) => path.startsWith('/api/video/enrichment'))).toEqual([]);
+  });
+
+  it('an admin keeps the stage and primes it', async () => {
+    stub();
+    const { refresh, prime } = spyVanilla();
+    const { container } = mount();
+    expect(
+      container.querySelector('[data-video-hero]')!.classList.contains('dash-hero--solo'),
+    ).toBe(false);
+    expect(
+      container.querySelector('[data-video-orb-stage] [data-video-manage-workers]'),
+    ).not.toBeNull();
+    expect(refresh).toHaveBeenCalled();
+    expect(prime).toHaveBeenCalled();
+  });
+});
