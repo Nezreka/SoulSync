@@ -142,7 +142,8 @@ def test_enrichment_status_loop_emits_with_a_connected_client(monkeypatch):
     _run_one_tick(web_server._emit_enrichment_status_loop)
 
     fake_worker.get_stats.assert_called()
-    fake_emit.assert_any_call("enrichment:musicbrainz", {})
+    # #2196: worker status is the admins', sent to their room only
+    fake_emit.assert_any_call("enrichment:musicbrainz", {}, to=web_server.ADMIN_SOCKET_ROOM)
 
 
 def test_tool_progress_loop_self_heal_runs_with_no_clients(monkeypatch):
