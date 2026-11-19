@@ -363,7 +363,7 @@ _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'auto_import_approve_all',
     'auto_import_toggle', 'hydrabase_worker_resume',
     'cleanup_wishlist', 'backup_database_endpoint', 'restore_backup_endpoint',
-    'database_vacuum', 'enable_incremental_vacuum', 'metadata_cache_evict',
+    'database_vacuum', 'enable_incremental_vacuum', 'database_optimize', 'metadata_cache_evict',
     'metadata_cache_save_mb_match', 'server_playlist_align',
     'server_playlist_replace_track', 'server_playlist_add_track',
     'server_playlist_remove_track', 'start_playlist_export_listenbrainz',
@@ -26072,6 +26072,15 @@ def start_runtime_services():
         # to fire at module import, which started the 30s loop in every
         # importer — tests, workers, CLI tools.)
         start_batch_healing_timer()
+
+        # #2205: fold the wal back in every few minutes, so a busy install
+        # can't sit on a multi-GB wal file (SOULSYNC_DB_CHECKPOINT_MINUTES=0
+        # turns it off)
+        try:
+            from core.db_housekeeping import start_checkpoint_thread
+            start_checkpoint_thread(str(get_database().database_path))
+        except Exception as _ckpt_err:
+            logger.debug(f"could not start the wal checkpoint thread: {_ckpt_err}")
 
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the
