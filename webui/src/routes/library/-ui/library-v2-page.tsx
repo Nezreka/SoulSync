@@ -10227,6 +10227,8 @@ function AlbumBlock({
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
+  const router = useRouter();
+  const pageSearch = Route.useSearch();
   const openTrackArtist = useOpenTrackArtist();
   const lockedIds = useLockedIds();
   const rename = useRenameCheck(artistId);
@@ -10245,6 +10247,12 @@ function AlbumBlock({
       search: (previous) => ({ ...previous, album: album.id }),
     });
   };
+  // #2204: the title is a real link to the album page, so a middle click or
+  // "open in new tab" works; the rest of the row still expands
+  const albumHref = router.buildLocation({
+    to: '/library',
+    search: { ...pageSearch, album: album.id },
+  }).href;
   const handleAlbumClick = () => {
     const now = Date.now();
     const previous = lastAlbumClickAt.current;
@@ -10272,18 +10280,28 @@ function AlbumBlock({
           thumb
         />
         <div className={styles.albumHeadMeta}>
-          <button
-            type="button"
+          <a
+            href={albumHref}
             className={styles.albumHeadTitleButton}
-            title="Click to expand or collapse · Double-click to open the album page"
-            aria-expanded={open}
+            title="Open the album page"
             onClick={(event) => {
               event.stopPropagation();
-              handleAlbumClick();
+              // a modified or non-primary click is the browser's: new tab, new window
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return;
+              }
+              event.preventDefault();
+              openAlbumDetail();
             }}
           >
             {album.title}
-          </button>
+          </a>
           <AlbumQueuePill rollup={queueRollup} />
           <div className={styles.albumHeadFacts}>
             <AlbumSizeBadge bytes={album.total_size_bytes} />
@@ -10304,9 +10322,21 @@ function AlbumBlock({
         </div>
         {/* Sonarr's season toggle: in the middle of the row, out of the way of
             the wishlist heart at its start */}
-        <span className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}>
+        <button
+          type="button"
+          className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}
+          aria-expanded={open}
+          aria-label={
+            open ? `Hide the tracks of ${album.title}` : `Show the tracks of ${album.title}`
+          }
+          title={open ? 'Hide tracks' : 'Show tracks'}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen((current) => !current);
+          }}
+        >
           <SvgIcon name="chevronDown" />
-        </span>
+        </button>
         <TrackPresence
           className={styles.albumTrackCount}
           present={album.tracks_present}
