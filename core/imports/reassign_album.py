@@ -126,7 +126,26 @@ def titles_conflict(a: Any, b: Any) -> bool:
         return False
     if left.startswith(right) or right.startswith(left):
         return False
+    # a shared remaster tail is no likeness: "Let It Be - Remastered 2009"
+    # and "Dig It - Remastered 2009" share half their words (#2206)
+    left_core, right_core = _without_edition_words(left), _without_edition_words(right)
+    if left_core and right_core:
+        if left_core.startswith(right_core) or right_core.startswith(left_core):
+            return False
+        return title_similarity(left_core, right_core) < 0.5
     return title_similarity(left, right) < 0.5
+
+
+# words that say which pressing, never which song
+_EDITION_WORDS = frozenset({
+    "remaster", "remastered", "digital", "digitally", "version", "mono", "stereo",
+    "deluxe", "edition", "bonus", "explicit", "clean",
+})
+_YEAR = re.compile(r"^(?:19|20)\d\d$")
+
+
+def _without_edition_words(key: str) -> str:
+    return " ".join(w for w in key.split() if w not in _EDITION_WORDS and not _YEAR.match(w))
 
 
 def durations_disagree(a_ms: Any, b_ms: Any) -> bool:

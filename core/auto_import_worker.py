@@ -122,24 +122,43 @@ def _summarize_names(names: List[str], limit: int = 10) -> str:
     return f"{', '.join(names[:limit])} … and {len(names) - limit} more"
 
 
-def _hinted_track_match(candidate, identification: Dict, tracks: List) -> List[Dict]:
-    """A re-identify names the exact track the user picked (#889). When the
-    tracklist matcher turns the file down (its length differs from the
-    release's track, a live take, an extended cut), the user's pick still
-    stands: the file is matched to that track. Only for a hint, and only
-    for the one file a re-identify stages."""
+def _hinted_track_match(candidate, identification: Dict, tracks: List,
+                        file_tags: Optional[Dict] = None) -> List[Dict]:
+    """A re-identify names the exact track the user picked (#889), so the
+    file is filed as that track before the tracklist matcher gets a say. the
+    matcher read "Let It Be (Remastered 2015)", track 26 of "1", against the
+    Let It Be album: the real song ran 13s longer (the album cut), so it took
+    "Dig a Pony" on length and a shared "Remastered" instead (#2206). Only
+    for a hint, and only for the one file a re-identify stages."""
     if identification.get('method') != 'rematch_hint' or len(candidate.audio_files or []) != 1:
         return []
-    chosen = str(identification.get('track_id') or '')
-    if not chosen:
+    from core.imports.rematch_hints import pick_hinted_track
+    tags = (file_tags or {}).get(candidate.audio_files[0]) or {}
+    track = pick_hinted_track(
+        tracks,
+        track_id=identification.get('track_id'),
+        title=identification.get('track_name'),
+        track_number=identification.get('hint_track_number'),
+        disc_number=identification.get('hint_disc_number'),
+        file_title=tags.get('title'),
+        file_duration_ms=tags.get('duration_ms'),
+    )
+    if track is None:
         return []
-    for track in tracks:
-        track_id = track.get('id') if isinstance(track, dict) else getattr(track, 'id', None)
-        if str(track_id or '') == chosen:
-            logger.info("[Auto-Import] Re-identify: '%s' filed as the chosen track %s "
-                        "though the tracklist match turned it down", candidate.name, chosen)
-            return [{'track': track, 'file': candidate.audio_files[0], 'confidence': 1.0}]
-    return []
+    logger.info("[Auto-Import] Re-identify: '%s' filed as the chosen track %s",
+                candidate.name,
+                track.get('name') if isinstance(track, dict) else getattr(track, 'name', '?'))
+    return [{'track': track, 'file': candidate.audio_files[0], 'confidence': 1.0}]
+
+
+def _hint_title_conflicts(identification: Dict, track: Any) -> bool:
+    """a re-identify the pick couldn't place still never lands on a song its
+    title says it isn't (#2206)"""
+    if identification.get('method') != 'rematch_hint':
+        return False
+    from core.imports.reassign_album import titles_conflict
+    name = track.get('name') if isinstance(track, dict) else getattr(track, 'name', '')
+    return titles_conflict(identification.get('track_name'), name)
 
 
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
@@ -2093,19 +2112,25 @@ class AutoImportWorker:
             # metadata fetch; the helper is a pure function over dicts.
             from core.imports.album_matching import default_quality_rank, match_files_to_tracks
             target_album = identification.get('album_name', '')
-            match_result = match_files_to_tracks(
-                candidate.audio_files,
-                file_tags,
-                tracks,
-                target_album=target_album,
-                quality_rank=default_quality_rank,
-            )
-            matches = match_result['matches']
-            unmatched_files = match_result['unmatched_files']
-
+            # a re-identify's pick goes first: the user already said which
+            # track this is, the fuzzy matcher only guesses (#2206)
+            matches = _hinted_track_match(candidate, identification, tracks, file_tags)
+            unmatched_files = []
             if not matches:
-                matches = _hinted_track_match(candidate, identification, tracks)
-                unmatched_files = []
+                match_result = match_files_to_tracks(
+                    candidate.audio_files,
+                    file_tags,
+                    tracks,
+                    target_album=target_album,
+                    quality_rank=default_quality_rank,
+                )
+                matches = []
+                unmatched_files = list(match_result['unmatched_files'])
+                for m in match_result['matches']:
+                    if _hint_title_conflicts(identification, m['track']):
+                        unmatched_files.append(m['file'])
+                    else:
+                        matches.append(m)
             if not matches:
                 return None
 
@@ -2411,6 +2436,12 @@ class AutoImportWorker:
                     'has_clean_spotify_data': True,
                     'has_full_spotify_metadata': True,
                 }
+                # a re-identify stages the user's own library file, not a
+                # transfer, so its length isn't held to the pick's. "Let It
+                # Be" from "1" is the 3:50 single cut and the album lists
+                # 4:03: the right pick still went to quarantine (#2206, #804)
+                if identification.get('method') == 'rematch_hint':
+                    context['is_local_import'] = True
                 # Thread the assigned profile into the import pipeline —
                 # everything profile-specific (quality gate, AcoustID
                 # strictness, downsample/lossy-copy) is resolved LIVE from
