@@ -334,18 +334,6 @@ export function AudiobookFoldersPanel({
 
 // ── Organization > Audiobooks ──
 
-const FORMATS: Array<[string, string]> = [
-  ['m4b', 'M4B'],
-  ['m4a', 'M4A'],
-  ['mp3', 'MP3'],
-  ['opus', 'Opus'],
-  ['ogg', 'OGG'],
-  ['flac', 'FLAC'],
-];
-const LAYOUTS: Array<[string, string]> = [
-  ['single', 'Single file (whole book)'],
-  ['multiple', 'Multiple files (chapters or parts)'],
-];
 const MARKETS: Array<[string, string]> = [
   ['us', 'United States (audible.com)'],
   ['uk', 'United Kingdom (audible.co.uk)'],
@@ -359,18 +347,8 @@ const MARKETS: Array<[string, string]> = [
   ['jp', 'Japan (audible.co.jp)'],
 ];
 
-/** the format and layout switches as loadSettingsData set them: an empty
- *  allowed list is every format; "any" layout is both switches */
-export function qualitySwitches(quality: Section) {
-  const allowed = Array.isArray(quality.allowed_formats)
-    ? (quality.allowed_formats as unknown[]).map((f) => text(f))
-    : [];
-  const layout = text(quality.file_layout) || 'any';
-  return {
-    formats: FORMATS.map(([v]) => v).filter((v) => !allowed.length || allowed.includes(v)),
-    layouts: LAYOUTS.map(([v]) => v).filter((v) => layout === 'any' || layout === v),
-  };
-}
+/** the format and layout switches: Quality > Audiobooks has them now */
+export { qualitySwitches } from './quality/audiobooks-view';
 
 export function AudiobookOrganizationPanel({
   store,
@@ -386,45 +364,12 @@ export function AudiobookOrganizationPanel({
   const loads = useLoads(store);
   const ab = (settings.audiobooks || {}) as Section;
   const source = (ab.download_source || {}) as Section;
-  const quality = (ab.quality || {}) as Section;
   const mode = text(source.mode) || 'hybrid';
   const set = (key: string, value: unknown) => store.set('audiobooks', key, value);
   const on = (value: unknown) => value !== false;
 
-  const order =
-    Array.isArray(quality.format_order) && quality.format_order.length
-      ? (quality.format_order as unknown[]).map((f) => text(f))
-      : FORMATS.map(([v]) => v);
-
-  // the switches keep what was clicked (every box off is allowed, and means
-  // all), and save what it means; a load puts the saved state back
-  const [switches, setSwitches] = useState(() => qualitySwitches(quality));
-  useEffect(() => setSwitches(qualitySwitches(quality)), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
-  function toggleFormat(value: string, checked: boolean) {
-    const formats = FORMATS.map(([v]) => v).filter((v) =>
-      v === value ? checked : switches.formats.includes(v),
-    );
-    setSwitches({ ...switches, formats });
-    // every format on is stored as [] ("no restriction")
-    set('quality.allowed_formats', formats.length === FORMATS.length ? [] : formats);
-  }
-  function toggleLayout(value: string, checked: boolean) {
-    const layouts = LAYOUTS.map(([v]) => v).filter((v) =>
-      v === value ? checked : switches.layouts.includes(v),
-    );
-    setSwitches({ ...switches, layouts });
-    // exactly one on picks it; both on, or both off, means either
-    set('quality.file_layout', layouts.length === 1 ? layouts[0] : 'any');
-  }
-
   const keepDays = useLoadedDraft(store, text(ab.recycle_keep_days ?? 7), (raw) =>
     set('recycle_keep_days', Math.min(365, Math.max(0, int(raw, 0)))),
-  );
-  const minRate = useLoadedDraft(store, text(quality.min_bitrate_kbps ?? 0), (raw) =>
-    set('quality.min_bitrate_kbps', Math.max(0, int(raw, 0))),
-  );
-  const maxRate = useLoadedDraft(store, text(quality.max_bitrate_kbps ?? 0), (raw) =>
-    set('quality.max_bitrate_kbps', Math.max(0, int(raw, 0))),
   );
   const category = useLoadedDraft(store, text(ab.torrent_category) || 'audiobooks', (raw) => {
     // one category covers both clients, as before
@@ -565,147 +510,7 @@ export function AudiobookOrganizationPanel({
           {unit('days')}
         </HintGroup>
 
-        <h4 className="settings-subheading">Audiobook Quality</h4>
-        {hint(
-          <>
-            What counts as a good file. One profile for every audiobook &mdash; the per-author card
-            carries the settings that differ by author.
-          </>,
-        )}
-
-        <HintGroup
-          help={
-            <>
-              Ranked first when several releases are otherwise equal; the rest keep their usual
-              order behind it. <strong>M4B</strong> is the only format built for audiobooks &mdash;
-              chapters, bookmarks, and one file instead of ninety. Pick <strong>MP3</strong> if your
-              player cannot read M4B. Format never outweighs having the right book and the right
-              narrator.
-            </>
-          }
-        >
-          <label>Preferred Format:</label>
-          <select
-            id="audiobook-format-first"
-            className="form-select"
-            value={order[0] || 'm4b'}
-            onChange={(event) => {
-              // the chosen format leads; the default order follows behind it
-              const first = event.target.value;
-              set('quality.format_order', [
-                first,
-                ...FORMATS.map(([v]) => v).filter((f) => f !== first),
-              ]);
-            }}
-          >
-            {FORMATS.map(([v, label]) => (
-              <option key={v} value={v}>
-                {v === 'm4b' ? 'M4B (recommended)' : label}
-              </option>
-            ))}
-          </select>
-        </HintGroup>
-
-        <HintGroup help="Releases in a format that is switched off are never shown or downloaded. Preferred Format only ranks, so with M4B preferred an MP3 is still grabbed when no M4B turns up; switch MP3 off here to wait for an M4B instead. A release whose format cannot be told from its title is still allowed. Switching every format off is the same as allowing them all.">
-          <label>Allowed Formats:</label>
-          <div
-            id="audiobook-allowed-formats"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, max-content))',
-              gap: '0 24px',
-            }}
-          >
-            {FORMATS.map(([v, label]) => (
-              <label className="checkbox-label" key={v}>
-                <input
-                  type="checkbox"
-                  value={v}
-                  checked={loads ? switches.formats.includes(v) : false}
-                  onChange={(event) => toggleFormat(v, event.target.checked)}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              Whether a book should arrive as <strong>one file</strong> or as{' '}
-              <strong>several smaller files</strong>, usually one per chapter. Switch one off and
-              releases laid out that way are skipped; leave both on (or both off) for either. Only
-              Soulseek says how many files a release has before it is downloaded; torrents and
-              usenet do not, so they are always allowed.
-            </>
-          }
-        >
-          <label>File Layout:</label>
-          <div
-            id="audiobook-file-layout"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, max-content))',
-              gap: '0 24px',
-            }}
-          >
-            {LAYOUTS.map(([v, label]) => (
-              <label className="checkbox-label" key={v}>
-                <input
-                  type="checkbox"
-                  value={v}
-                  checked={loads ? switches.layouts.includes(v) : false}
-                  onChange={(event) => toggleLayout(v, event.target.checked)}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              Hides releases below this bitrate. <strong>0 means no opinion.</strong> This is taste,
-              and separate from the completeness floor above: that one asks whether a release could
-              be the whole book at all, this one asks whether you want it. Audible's own files are
-              32 kbps mono and 64 kbps stereo, so 32 is a reasonable floor and anything above 128 is
-              more than speech needs.
-            </>
-          }
-        >
-          <label>Reject Below:</label>
-          {number('audiobook-min-bitrate', minRate, { min: '0', max: '512', placeholder: '0' })}
-          {unit('kbps')}
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              Hides releases above this bitrate, for when disk space matters more than headroom.{' '}
-              <strong>0 means no opinion.</strong> Speech gains nothing audible above about 128
-              kbps, so a 45-hour book at 240 kbps is roughly 4GB for no benefit.
-            </>
-          }
-        >
-          <label>Reject Above:</label>
-          {number('audiobook-max-bitrate', maxRate, { min: '0', max: '2000', placeholder: '0' })}
-          {unit('kbps')}
-        </HintGroup>
-
-        {check(
-          'audiobook-allow-dramatized',
-          on(quality.allow_dramatized),
-          (v) => set('quality.allow_dramatized', v),
-          'Show dramatised adaptations',
-          <>
-            GraphicAudio and similar full-cast productions with music and sound effects. They are a
-            different product from the audiobook &mdash; different cast, different running time,
-            usually sold in several separately-downloaded parts. Left on they are shown but ranked
-            below real readings and clearly labelled; turned off they are hidden entirely.
-          </>,
-        )}
+        {/* Audiobook Quality moved to Quality > Audiobooks (settings-bic phase 3) */}
 
         <h4 className="settings-subheading">Downloads &amp; Import</h4>
         {hint(

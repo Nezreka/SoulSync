@@ -407,6 +407,7 @@ export function Segmented({
   onChange,
   disabled,
   panel,
+  itemAttr,
 }: {
   id?: string;
   /** read to a screen reader; the row's label when it has one */
@@ -415,6 +416,9 @@ export function Segmented({
   options: Option[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** a data attribute each option carries, set to its value (a hook other
+   *  code finds the option by: `data-vq-codec`) */
+  itemAttr?: `data-${string}`;
   /** it switches what a panel shows: a tablist, each tab controlling the
    *  panel this names (one id, or one per value) */
   panel?: string | ((value: string) => string);
@@ -456,6 +460,7 @@ export function Segmented({
           aria-controls={typeof panel === 'function' ? panel(option.value) : panel}
           tabIndex={option.value === value ? 0 : -1}
           data-value={option.value}
+          {...(itemAttr ? { [itemAttr]: option.value } : {})}
           disabled={disabled || option.disabled}
           className={clsx(s.segItem, option.value === value && s.segOn)}
           onClick={() => onChange(option.value)}
@@ -768,15 +773,22 @@ export function Chips({
   value,
   onToggle,
   disabled,
+  id,
+  hidden,
+  itemAttr,
 }: {
   label: string;
   options: Array<{ key: string; label: string; id?: string }>;
   value: string[];
   onToggle: (key: string, on: boolean) => void;
   disabled?: boolean;
+  id?: string;
+  hidden?: boolean;
+  /** a data attribute each chip carries, set to its key (`data-vq-reject`) */
+  itemAttr?: `data-${string}`;
 }) {
   return (
-    <div className={s.chips} role="group" aria-label={label}>
+    <div className={s.chips} role="group" aria-label={label} id={id} hidden={hidden}>
       {options.map((option) => {
         const on = value.includes(option.key);
         return (
@@ -787,6 +799,7 @@ export function Chips({
             role="checkbox"
             aria-checked={on}
             data-key={option.key}
+            {...(itemAttr ? { [itemAttr]: option.key } : {})}
             disabled={disabled}
             className={clsx(s.chip, on && s.chipOn)}
             onClick={() => onToggle(option.key, !on)}
@@ -805,6 +818,49 @@ export function Chips({
 }
 
 /** a list of words that can each be taken off (genres) */
+/**
+ * Chips that are real tick boxes underneath: for a set of switches that save
+ * as a form control does (its change event, `checked`), drawn as chips.
+ */
+export function CheckChips({
+  id,
+  label,
+  options,
+  value,
+  onToggle,
+}: {
+  id?: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  value: string[];
+  onToggle: (value: string, on: boolean) => void;
+}) {
+  return (
+    <div className={s.chips} role="group" aria-label={label} id={id}>
+      {options.map((option) => {
+        const on = value.includes(option.value);
+        return (
+          <label key={option.value} className={clsx(s.chip, s.chipCheck, on && s.chipOn)}>
+            <input
+              type="checkbox"
+              className={s.chipInput}
+              value={option.value}
+              checked={on}
+              onChange={(event) => onToggle(option.value, event.target.checked)}
+            />
+            {on ? (
+              <span className={s.chipTick}>
+                <Icon name="check" size={12} />
+              </span>
+            ) : null}
+            {option.label}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ChipList({
   id,
   items,
@@ -921,8 +977,19 @@ export function ListEditor({
   );
 }
 
-export function Tag({ accent, children }: { accent?: boolean; children: ReactNode }) {
-  return <span className={clsx(s.tag, accent && s.tagAccent)}>{children}</span>;
+export function Tag({
+  accent,
+  danger,
+  children,
+}: {
+  accent?: boolean;
+  /** it says what deletes */
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <span className={clsx(s.tag, accent && s.tagAccent, danger && s.tagDanger)}>{children}</span>
+  );
 }
 
 // ── status, marks, notes ──

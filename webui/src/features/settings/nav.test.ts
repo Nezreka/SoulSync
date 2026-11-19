@@ -2,7 +2,16 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { TABS, legacyKey, nav, navFromSearch, navToSearch, resolveTab } from './nav';
+import {
+  TABS,
+  legacyKey,
+  nav,
+  navFromSearch,
+  navToSearch,
+  resolveTab,
+  tabDef,
+  viewsFor,
+} from './nav';
 
 beforeEach(() => nav.reset());
 
@@ -37,6 +46,30 @@ describe('the tabs', () => {
       tab: 'system',
       view: 'activity',
     });
+  });
+  it('Quality has a pill per kind; the video side shows its own first and opens on it', () => {
+    const quality = tabDef('quality');
+    expect(viewsFor(quality, 'music').map((v) => v.label)).toEqual([
+      'Music',
+      'Audiobooks',
+      'Movies and TV',
+      'YouTube',
+    ]);
+    expect(viewsFor(quality, 'video').map((v) => v.label)).toEqual([
+      'Movies and TV',
+      'YouTube',
+      'Music',
+      'Audiobooks',
+    ]);
+    expect(resolveTab('quality')).toEqual({ tab: 'quality', view: 'music' });
+    document.body.setAttribute('data-side', 'video');
+    try {
+      expect(resolveTab('quality')).toEqual({ tab: 'quality', view: 'video' });
+      // a pill named outright still wins
+      expect(resolveTab('quality', 'music')).toEqual({ tab: 'quality', view: 'music' });
+    } finally {
+      document.body.removeAttribute('data-side');
+    }
   });
   it('the tabs not rebuilt yet still answer to their old key', () => {
     expect(legacyKey({ tab: 'advanced', view: 'system' })).toBe('advanced');

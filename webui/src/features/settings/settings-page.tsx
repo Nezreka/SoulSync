@@ -27,7 +27,7 @@ import {
 import type { SettingsTabProps } from './host';
 
 import { SETTINGS_TABS } from './host';
-import { type NavState, TABS, type TabDef, legacyKey, nav, tabDef, useNav } from './nav';
+import { type NavState, TABS, type TabDef, legacyKey, nav, tabDef, useNav, viewsFor } from './nav';
 import { pageTabs, usePageTabs } from './page-tabs';
 import { type SettingsStore, settingsStore } from './settings-store';
 import { SettingsSearch } from './shell/search';
@@ -290,7 +290,9 @@ function LoadFailed() {
 
 /** the pills of the open tab that this side shows (the open one always) */
 function pillsOf(def: TabDef, state: NavState, side: 'music' | 'video') {
-  return def.views.filter((view) => !view.side || view.side === side || view.key === state.view);
+  return viewsFor(def, side).filter(
+    (view) => !view.side || view.side === side || view.key === state.view,
+  );
 }
 
 export function SettingsPage({
@@ -402,6 +404,7 @@ export function SettingsPage({
         {/* rebuilt tabs: their own pages, one panel per pill */}
         {slot('connections', 'page')}
         {slot('downloads', 'page')}
+        {slot('quality', 'page')}
 
         {/* the tabs not rebuilt yet: the blocks they always rendered, in the
             order the old columns gave them */}
@@ -412,8 +415,6 @@ export function SettingsPage({
             {slot('connections', 'api-video')}
           </div>
           <div className="settings-right-column">
-            {slot('quality', 'video')}
-            {slot('quality', 'profiles')}
             {slot('library', 'folders')}
             {slot('library', 'organization')}
             {slot('library', 'processing')}

@@ -55,7 +55,7 @@ describe('Library settings media cards', () => {
       ['vo-movie-template', 'organization-video-panel'],
       ['template-audiobook-path', 'organization-audiobooks-panel'],
       ['audiobook-recycle-deletes', 'organization-audiobooks-panel'],
-      ['audiobook-format-first', 'organization-audiobooks-panel'],
+      // audiobook-format-first moved to Quality > Audiobooks (settings-bic phase 3)
       ['audiobook-marketplace', 'organization-audiobooks-panel'],
       ['audiobook-write-nfo', 'organization-audiobooks-panel'],
       ['template-podcast-path', 'organization-podcasts-panel'],

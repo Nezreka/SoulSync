@@ -123,11 +123,16 @@ def settings_js():
 _TABS = _ROOT / "webui/src/features/settings/tabs"
 
 
+_QUALITY_VIEW = _TABS / "quality" / "audiobooks-view.tsx"
+
+
 @pytest.fixture(scope="module")
 def panel():
     """the Library tab's two Audiobooks panels, React since SETTINGS_PORT.md
-    step 8c: what index.html and settings.js held for them"""
-    return (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8")
+    step 8c: what index.html and settings.js held for them; and Quality >
+    Audiobooks, where Audiobook Quality moved in the settings-bic rebuild"""
+    return (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8") + (
+        _QUALITY_VIEW.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -285,7 +290,15 @@ def test_every_audiobook_knob_explains_itself():
     assert "'.setting-help-body, .stg-help-text, .settings-hint, label'" in test
     fixture = (_TABS / "__fixtures__/library-audiobook-organization.vanilla.html").read_text(
         encoding="utf-8")
-    for element_id in _EXPOSED.values():
+    # the quality knobs moved to Quality > Audiobooks: each is a Row there
+    # with its one line of help and the rest behind the "i"
+    view = _QUALITY_VIEW.read_text(encoding="utf-8")
+    for key, element_id in _EXPOSED.items():
+        if key.startswith("quality."):
+            at = view.index(f'id="{element_id}"')
+            row = view[view.rindex("<Row", 0, at):at]
+            assert "help=" in row and "more=" in row, f"{element_id} has no help text"
+            continue
         tail = fixture.split(f'id="{element_id}"', 1)[1][:2000]
         assert "setting-help-body" in tail, f"{element_id} has no help text"
 
@@ -657,8 +670,8 @@ def test_the_quality_profile_is_one_for_the_whole_side():
 
 def test_the_preferred_format_choice_keeps_the_others_behind_it():
     # Picking MP3 must not silently discard every other format.
-    # the Organization card's Audiobooks panel is React (step 8c)
-    panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
+    # Quality > Audiobooks has it since the settings-bic rebuild
+    panel = _read("webui/src/features/settings/tabs/quality/audiobooks-view.tsx")
     block = panel.split("set('quality.format_order', [", 1)[1].split("]);", 1)[0]
     assert "first," in block
     assert ".filter((f) => f !== first)" in block
@@ -668,6 +681,8 @@ def test_the_quality_floor_is_separate_from_the_completeness_floor():
     # They answer different questions: could this be the whole book at all,
     # versus do I want it. Sharing one number would conflate fact with taste.
     panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
-    assert "'audiobook-min-bitrate'," in panel
+    quality = _read("webui/src/features/settings/tabs/quality/audiobooks-view.tsx")
+    # two fields, on two pages: Quality > Audiobooks and Library
+    assert 'id="audiobook-min-bitrate"' in quality
     assert "'audiobook-completeness-tolerance'," in panel
-    assert "min_complete_kbps" not in panel
+    assert "min_complete_kbps" not in panel + quality

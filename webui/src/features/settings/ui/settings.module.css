@@ -14,7 +14,9 @@
 .item[hidden],
 .items[hidden],
 .say[hidden],
-.pre[hidden] {
+.pre[hidden],
+.rtAddFields[hidden],
+.chips[hidden] {
   display: none;
 }
 
@@ -1156,6 +1158,26 @@ button.chip:hover:not(:disabled) {
   color: var(--text-bright);
 }
 
+/* a chip that is a tick box underneath */
+.chipCheck {
+  position: relative;
+  cursor: pointer;
+}
+
+.chipCheck:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chipInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .chipTick {
   display: inline-flex;
   color: var(--accent-light);
@@ -1215,6 +1237,11 @@ button.chip:hover:not(:disabled) {
 .tagAccent {
   background: rgba(var(--accent-rgb), 0.16);
   color: var(--accent-light);
+}
+
+.tagDanger {
+  background: rgba(var(--danger-rgb), 0.14);
+  color: var(--danger-light);
 }
 
 /* ── status words: a dot and plain words, never a dot alone ── */
@@ -1854,6 +1881,174 @@ button.chip:hover:not(:disabled) {
   list-style: none;
 }
 
+/* ── Quality > Music: the profiles as cards ── */
+
+.qpCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.qpCard {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-card);
+  background: var(--white-a03);
+  transition: border-color var(--dur-fast);
+}
+
+.qpCard:hover {
+  border-color: var(--white-a12);
+}
+
+.qpCardOn,
+.qpCardOn:hover {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.qpCardMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 4px 14px 16px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.qpCardName {
+  overflow: hidden;
+  color: var(--text-bright);
+  font-size: 14.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qpCardSub {
+  color: var(--white-a55);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.qpCardTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.qpCardMore {
+  position: relative;
+  flex: none;
+  padding: 8px 8px 0 0;
+}
+
+.qpCardNew {
+  display: grid;
+  place-items: center;
+  min-height: 86px;
+  padding: 10px 14px;
+  border: 1px dashed var(--white-a10);
+  border-radius: var(--radius-card);
+}
+
+.qpNewBtn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--white-a70);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.qpNewBtn:hover {
+  background: var(--white-a06);
+  color: var(--text-bright);
+}
+
+.qpRename {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: var(--radius-control);
+  background: var(--white-a04);
+}
+
+/* the target to add: its format, its floor, the button */
+.rtAdd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 14px 20px;
+  border-top: 1px solid var(--white-a06);
+}
+
+.rtAddLabel {
+  margin-right: 4px;
+  color: var(--white-a55);
+  font-size: 12.5px;
+}
+
+.rtAddFields {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* a slider with its value in words before it (sizes, seeders) */
+.rangeLine {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.rangeSay {
+  min-width: 96px;
+  color: var(--white-a70);
+  font-size: 12.5px;
+  text-align: right;
+}
+
+.range {
+  width: 220px;
+  accent-color: var(--accent);
+}
+
+/* the custom formats: one row of fields each */
+.fmtHead,
+.fmtRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 1.3fr) 84px 96px 30px;
+  gap: 8px;
+  align-items: center;
+}
+
+.fmtHead {
+  color: var(--white-a45);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
 /* a value to copy somewhere else (a callback address) */
 .copy {
   margin: 10px 0 4px;
@@ -2086,6 +2281,28 @@ button.chip:hover:not(:disabled) {
 }
 
 /* where the row in the hand will land, and what that means */
+/* a line between two rows of an order, with its words (the upgrade cutoff) */
+.marker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 2px 4px;
+  color: var(--accent-light);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.marker::before,
+.marker::after {
+  flex: 1;
+  height: 1px;
+  background: rgba(var(--accent-rgb), 0.45);
+  content: '';
+}
+
 .gap {
   display: grid;
   place-items: center;
@@ -2503,6 +2720,30 @@ button.chip:hover:not(:disabled) {
 
   .tiles {
     grid-template-columns: 1fr;
+  }
+
+  .fmtHead {
+    display: none;
+  }
+
+  .fmtRow {
+    grid-template-columns: 1fr 1fr;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--white-a06);
+  }
+
+  .rangeLine {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .range {
+    width: 100%;
+  }
+
+  .rangeSay {
+    text-align: left;
   }
 
   .servers {

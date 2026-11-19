@@ -82,7 +82,7 @@
     },
     {
       "match": "^#rt-add-",
-      "click": ["+ Add target"]
+      "click": ["Add target"]
     },
     {
       "match": "^#vo-whisper-model$",
@@ -191,7 +191,7 @@
       "why": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
     },
     {
-      "match": "data-vq-profile-select",
+      "match": "^#vq-profile-select$|data-vq-profile-select",
       "why": "picks which video quality profile is on screen: saves nothing"
     },
     {
@@ -238,6 +238,7 @@
     "dlchain-slot": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
     "dlchain-filter": "the old chain's filter box over at most seven tiles, which saved nothing: gone with the pool (settings-bic phase 1). the 'Not used' list shows every source at once",
     "src-modal-meta": "the source sheet's status words, drawn only while a sheet is open",
+    "data-vq-tier-move": "the video ladder's ▲ ▼ buttons went in settings-bic phase 3: the ladder is the shared order list, moved by its row menu, the keyboard or a drag (the videoLadder composite moves it by the menu and sends the same POST of the whole profile)",
     "plex-connect-button": "Plex's own Connect went in settings-bic phase 3: it sent testConnection('plex'), the same POST /api/test-connection the server sheet's foot Test (#server-sheet-test) sends for the server it shows",
     "lidarr-test-btn": "the panel's own Test Connection went in settings-bic phase 2: it sent the same POST /api/test-connection as the sheet's foot Test (#src-modal-test), which saves what is typed first and shows the answer; the panel's connection light follows that test",
     "torrent-client-test-btn": "the panel's own Test Connection went in settings-bic phase 2: it sent the same POST /api/test-connection as the sheet's foot Test (#src-modal-test), which saves what is typed first and shows the answer; the panel's connection light follows that test",

@@ -723,7 +723,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Music quality profile',
     tab: 'quality',
-    anchor: heading('Music Quality'),
+    anchor: heading('Quality profiles'),
     file: 'quality-tab.tsx',
     hint: 'formats, bit depth, bitrate',
     keywords: 'flac mp3 lossless hires bitrate profile quality',
@@ -787,7 +787,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Video quality profiles',
     tab: 'quality',
-    anchor: heading('Video Quality'),
+    anchor: id('vq-profile-select'),
     file: 'video-quality.tsx',
     hint: 'resolutions, sources, custom formats',
     keywords: '1080p 2160p 4k remux bluray web quality profile movies tv',
@@ -795,7 +795,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Custom formats',
     tab: 'quality',
-    anchor: heading('Custom Formats'),
+    anchor: heading('Custom formats'),
     file: 'video-quality.tsx',
     hint: 'scores for release tags',
     keywords: 'custom formats score hdr dolby vision x265',
@@ -803,7 +803,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'YouTube quality',
     tab: 'quality',
-    anchor: heading('YouTube Quality'),
+    anchor: id('yq-resolution'),
     file: 'video-quality.tsx',
     hint: 'channel downloads',
     keywords: 'youtube resolution',

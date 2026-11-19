@@ -103,6 +103,8 @@ export interface OrderListProps {
   /** on <body> while a row's menu is open: on a phone the menu is a sheet
    *  from the bottom, and the page's floating buttons must step aside */
   menuBodyClass?: string;
+  /** a line drawn after the row at this place (the upgrade cutoff): its words */
+  marker?: { after: number; text: string } | null;
 }
 
 interface Drag {
@@ -159,6 +161,7 @@ export function OrderList({
   removeLabel = 'Stop using',
   addLabel = 'Use',
   menuBodyClass,
+  marker,
 }: OrderListProps) {
   const ids = items.map((item) => item.id);
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -759,6 +762,16 @@ export function OrderList({
             </li>
           );
         })}
+        {marker && marker.after >= 0 && marker.after < ids.length - 1 ? (
+          <li
+            className={s.marker}
+            data-marker=""
+            role="presentation"
+            style={{ order: marker.after * 2 + 1 }}
+          >
+            <span>{marker.text}</span>
+          </li>
+        ) : null}
         {slotAt >= 0 && dragging ? (
           <li
             className={s.gap}

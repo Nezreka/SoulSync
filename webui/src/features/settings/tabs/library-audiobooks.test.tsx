@@ -84,6 +84,8 @@ describe('the panels are the markup they replaced', () => {
     expect(shape(container)).toEqual(want);
   });
 
+  // Audiobook Quality moved to Quality > Audiobooks (settings-bic phase 3): the
+  // fixture lost that block, and quality/audiobooks-view.test.tsx has it
   it('Organization > Audiobooks, its words and tick boxes with their spaces', () => {
     const { container } = render(
       <AudiobookOrganizationPanel
@@ -103,7 +105,7 @@ describe('the panels are the markup they replaced', () => {
       [...root.querySelectorAll('label:has(> input[type="checkbox"][id])')].map((el) =>
         (el.textContent || '').replace(/\s+/g, ' ').trimEnd(),
       );
-    expect(ticks(old)).toHaveLength(9);
+    expect(ticks(old)).toHaveLength(8);
     expect(ticks(old).every((t) => t.startsWith(' '))).toBe(true);
     expect(ticks(container)).toEqual(ticks(old));
   });
@@ -197,13 +199,8 @@ describe('Organization > Audiobooks', () => {
     expect(input('template-audiobook-path').value).toBe('$author/$series/$seriespos - $title');
     expect(input('audiobook-recycle-deletes').checked).toBe(true);
     expect(input('audiobook-recycle-keep-days').value).toBe('7');
-    expect(input('audiobook-format-first').value).toBe('m4b');
-    expect(
-      [...document.querySelectorAll<HTMLInputElement>('#audiobook-allowed-formats input')].every(
-        (b) => b.checked,
-      ),
-    ).toBe(true);
-    expect(input('audiobook-min-bitrate').value).toBe('0');
+    // the quality fields are on Quality > Audiobooks now
+    expect(input('audiobook-format-first')).toBeNull();
     expect(input('audiobook-marketplace').value).toBe('us');
     expect(input('audiobook-download-mode').value).toBe('hybrid');
     expect(input('audiobook-torrent-category').value).toBe('audiobooks');
@@ -224,16 +221,6 @@ describe('Organization > Audiobooks', () => {
     organization();
     fireEvent.change(input('template-audiobook-path'), { target: { value: '$author/$title' } });
     fireEvent.change(input('audiobook-recycle-keep-days'), { target: { value: '' } });
-    fireEvent.change(input('audiobook-format-first'), { target: { value: 'mp3' } });
-    const format = (v: string) =>
-      document.querySelector<HTMLInputElement>(`#audiobook-allowed-formats input[value="${v}"]`)!;
-    fireEvent.click(format('flac'));
-    fireEvent.click(format('ogg'));
-    const layout = (v: string) =>
-      document.querySelector<HTMLInputElement>(`#audiobook-file-layout input[value="${v}"]`)!;
-    fireEvent.click(layout('multiple'));
-    fireEvent.change(input('audiobook-max-bitrate'), { target: { value: '-5' } });
-    fireEvent.click(input('audiobook-allow-dramatized'));
     fireEvent.change(input('audiobook-marketplace'), { target: { value: 'uk' } });
     fireEvent.change(input('audiobook-torrent-category'), { target: { value: '  ' } });
     expect(input('audiobook-torrent-category').value).toBe('  ');
@@ -249,11 +236,6 @@ describe('Organization > Audiobooks', () => {
       file_organization: { 'templates.audiobook_path': '$author/$title' },
       audiobooks: {
         recycle_keep_days: 0,
-        'quality.format_order': ['mp3', 'm4b', 'm4a', 'opus', 'ogg', 'flac'],
-        'quality.allowed_formats': ['m4b', 'm4a', 'mp3', 'opus'],
-        'quality.file_layout': 'single',
-        'quality.max_bitrate_kbps': 0,
-        'quality.allow_dramatized': false,
         marketplace: 'uk',
         torrent_category: 'audiobooks',
         usenet_category: 'audiobooks',
@@ -266,21 +248,5 @@ describe('Organization > Audiobooks', () => {
     });
     // the rest of the quality dict is the server's still
     expect(store.getState().settings.audiobooks?.quality).toMatchObject({ min_bitrate_kbps: 32 });
-  });
-
-  it('every format switched off stays off on screen, and saves as all allowed', async () => {
-    act(() => store.hydrate({ audiobooks: { quality: { allowed_formats: ['mp3'] } } }));
-    organization();
-    const mp3 = document.querySelector<HTMLInputElement>(
-      '#audiobook-allowed-formats input[value="mp3"]',
-    )!;
-    fireEvent.click(mp3);
-    expect(
-      [...document.querySelectorAll<HTMLInputElement>('#audiobook-allowed-formats input')].some(
-        (b) => b.checked,
-      ),
-    ).toBe(false);
-    await waitFor(() => expect(store.hasPending()).toBe(false));
-    expect(saved().audiobooks).toEqual({ 'quality.allowed_formats': [] });
   });
 });

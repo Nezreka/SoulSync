@@ -1,14 +1,14 @@
 /**
- * The Quality tab, ported from the vanilla Settings page (SETTINGS_PORT.md,
- * step 6): the same markup as the frozen fixture after settings.js's help
- * lines, the rows settings.js drew, and the same saves to the same routes.
+ * Quality > Music (settings-bic phase 3 on the state SETTINGS_PORT.md step 6
+ * ported): the page reads the profile back, the profiles are cards with a ⋯
+ * menu, the priority list is the shared order list with the cutoff drawn in
+ * it, and every control saves to the same routes as before.
  */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import {
   type Ladder,
   EMPTY_ADD,
@@ -22,7 +22,7 @@ import {
   rtLabel,
   withTargets,
 } from './quality';
-import { QualityTab } from './quality-tab';
+import { MusicQualityTab } from './quality-tab';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -145,77 +145,130 @@ afterEach(async () => {
   delete shell._settingsAutosaveOff;
 });
 
-const tab = () => render(<QualityTab store={store} opened={1} active />);
+const tab = () => render(<MusicQualityTab store={store} opened={1} active />);
 const box = (id: string) => document.getElementById(id) as HTMLInputElement;
 const select = (id: string) => document.getElementById(id) as HTMLSelectElement;
 const saves = (url: string) => calls.filter((c) => c.method === 'POST' && c.url === url);
+/** a choice of a segmented control, by its value */
+const pick = (id: string, value: string) =>
+  fireEvent.click(document.querySelector(`#${id} [data-value="${value}"]`)!);
+const picked = (id: string) => document.getElementById(id)!.getAttribute('data-value');
+const cards = () => [
+  ...document.querySelectorAll<HTMLElement>('#qp-profile-list [data-profile-id]'),
+];
+const card = (name: string) =>
+  cards().find((c) => c.querySelector('[data-profile-name]')?.textContent === name)!;
+/** a profile card opened: what it holds goes on the page */
+const open = (name: string) => fireEvent.click(card(name).querySelector('button')!);
+/** a profile card's ⋯ menu, then one of its entries */
+function menu(name: string, entry: string) {
+  fireEvent.click(screen.getByRole('button', { name: `More for ${name}` }));
+  fireEvent.click(within(card(name)).getByRole('menuitem', { name: entry }));
+}
+const labels = () =>
+  [...document.querySelectorAll('#ranked-targets-list li[data-id] [class*="srcName"]')].map(
+    (n) => n.textContent,
+  );
+/** a target row's ⋯ menu entry */
+function targetMenu(label: string, entry: string) {
+  fireEvent.click(screen.getByRole('button', { name: `More for ${label}` }));
+  fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${entry}`) }));
+}
 
 /** the page as it is once Settings has loaded: the settings, the default
  *  profile and the profile list */
 async function loaded(settings: SettingsPayload = {}) {
   const view = tab();
   act(() => store.hydrate(settings));
-  await waitFor(() => expect(document.querySelectorAll('.qp-profile-row')).toHaveLength(2));
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  await waitFor(() => expect(labels()).toHaveLength(3));
   return view;
 }
 
-describe('the Quality tab is the same page it replaced', () => {
-  it('the same elements, ids, classes, help lines and words', () => {
-    const { container } = tab();
-    const want = shape(vanilla('quality.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-});
-
-describe('the rows settings.js drew', () => {
-  it('the target list and the cutoff options', async () => {
+describe('the page', () => {
+  it('reads the profile on screen back in one sentence, with its numbers', async () => {
     await loaded();
-    const want = vanilla('quality-targets.vanilla.html');
-    const got = document.createElement('div');
-    got.append(
-      document.getElementById('ranked-targets-list')!.cloneNode(true),
-      document.getElementById('quality-upgrade-cutoff')!.cloneNode(true),
+    const hero = document.querySelector('[data-music-quality] p')!;
+    expect(hero.textContent).toBe(
+      'Balanced takes FLAC 24-bit, then FLAC, then MP3 at 320 or better. When none of them turns up it takes what there is. It keeps upgrading until it has FLAC.',
     );
-    expect(shape(got)).toEqual(shape(want));
+    expect(document.querySelector('[data-music-quality]')!.textContent).toContain('2Profiles');
+    expect(document.querySelector('[data-music-quality]')!.textContent).toContain('3Targets');
+  });
+
+  it('every control it had is there once, named without a colon, no emoji; the Manage modal went', async () => {
+    const { container } = await loaded();
+    for (const id of [
+      'ranked-targets-list',
+      'rt-add-format',
+      'rt-add-bitdepth',
+      'rt-add-samplerate',
+      'rt-add-bitrate',
+      'rt-add-bitrate-custom',
+      'quality-upgrade-policy',
+      'quality-upgrade-cutoff',
+      'quality-search-mode',
+      'quality-rank-candidates',
+      'quality-fallback-enabled',
+      'import-replace-lower-quality',
+      'quality-release-import-mode',
+      'downsample-hires',
+      'lossy-copy-enabled',
+      'lossy-copy-codec',
+      'lossy-copy-bitrate',
+      'lossy-copy-delete-original',
+      'acoustid-require-verified',
+      'audio-completeness-check',
+      'verify-flac-decode',
+      'qp-profile-list',
+      'qp-profile-new-btn',
+    ])
+      expect(container.querySelectorAll(`#${id}`), id).toHaveLength(1);
+    for (const l of container.querySelectorAll('label'))
+      expect(l.textContent, l.textContent ?? '').not.toMatch(/:\s*$/);
+    for (const b of container.querySelectorAll('button'))
+      expect(b.textContent).not.toMatch(/[\u{1F300}-\u{1FAFF}⇩✏✎●]/u);
+    expect(screen.queryByText('Manage')).toBeNull();
+    expect(document.getElementById('qp-manager-overlay')).toBeNull();
+    // the rare checks are behind More, which says how many and which
+    const more = screen.getByRole('button', { name: /Checks and imports/ });
+    expect(more.textContent).toContain('· 5');
+    expect(box('verify-flac-decode').closest('[data-more-body]')).not.toBeNull();
+  });
+
+  it('the targets are the order list, the cutoff drawn in it and offered by place', async () => {
+    await loaded();
+    expect(labels()).toEqual(['FLAC 24-bit', 'FLAC', 'MP3 ≥320kbps']);
+    const marker = document.querySelector('#ranked-targets-list [data-marker]') as HTMLElement;
+    expect(marker.textContent).toBe('Upgrades stop here');
+    // after the second row (the cutoff is the second target)
+    expect(marker.style.order).toBe('3');
     expect(select('quality-upgrade-cutoff').value).toBe('1');
+    expect([...select('quality-upgrade-cutoff').options].map((o) => o.textContent)).toEqual([
+      '1. FLAC 24-bit',
+      '2. FLAC',
+      '3. MP3 ≥320kbps',
+    ]);
+    // no cutoff line unless upgrades stop at a target
+    pick('quality-upgrade-policy', 'acceptable');
+    expect(document.querySelector('#ranked-targets-list [data-marker]')).toBeNull();
   });
 
-  it('the profile rows, with one open and one on Auto-Import', async () => {
+  it('the profiles are cards: the default says Downloads, opening one marks it and says so', async () => {
     routes['GET /api/auto-import/settings'] = () => ({ quality_profile_id: 2 });
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
+    expect(card('Balanced').textContent).toContain('Downloads');
+    await waitFor(() => expect(card('Strict').textContent).toContain('Auto-Import'));
+    expect(card('Balanced').querySelector('[aria-pressed="true"]')).not.toBeNull();
+    expect(document.getElementById('qp-editing-banner')!.hidden).toBe(true);
+    open('Strict');
     await waitFor(() =>
-      expect(document.querySelector('.qp-profile-row.editing .qp-profile-name')?.textContent).toBe(
-        'Strict',
-      ),
+      expect(card('Strict').querySelector('[aria-pressed="true"]')).not.toBeNull(),
     );
-    const want = vanilla('quality-profiles.vanilla.html');
-    const got = document.createElement('div');
-    got.append(document.getElementById('qp-profile-list')!.cloneNode(true));
-    expect(shape(got)).toEqual(shape(want));
-    // the banner names the profile on screen
     const banner = document.getElementById('qp-editing-banner')!;
-    expect(banner.style.display).toBe('');
-    expect(banner.querySelector('.qp-editing-banner-name')?.textContent).toBe('Strict');
-  });
-
-  it('the Manage overview', async () => {
-    routes['GET /api/auto-import/settings'] = () => ({ quality_profile_id: 2 });
-    await loaded();
-    fireEvent.click(screen.getByText('Manage'));
-    await waitFor(() => expect(document.getElementById('qp-manager-overlay')).not.toBeNull());
-    const overlay = document.getElementById('qp-manager-overlay')!;
-    expect(overlay.classList.contains('hidden')).toBe(false);
-    const got = document.createElement('div');
-    got.append(overlay.cloneNode(true));
-    // frozen as settings.js built it, before openQualityProfileManager showed it
-    const want = vanilla('quality-manager.vanilla.html');
-    want.querySelector('#qp-manager-overlay')!.classList.remove('hidden');
-    expect(shape(got)).toEqual(shape(want));
-    fireEvent.click(overlay.querySelector('.enhanced-bulk-modal-close')!);
-    expect(overlay.classList.contains('hidden')).toBe(true);
+    expect(banner.hidden).toBe(false);
+    expect(banner.querySelector('strong')?.textContent).toBe('Strict');
+    expect(document.querySelector('[data-card="What Strict accepts"]')).not.toBeNull();
   });
 });
 
@@ -344,7 +397,7 @@ describe('saving', () => {
   it('an edit saves the whole profile to the default, never to /api/settings', async () => {
     await loaded();
     fireEvent.click(box('acoustid-require-verified'));
-    fireEvent.change(select('quality-search-mode'), { target: { value: 'best_quality' } });
+    pick('quality-search-mode', 'best_quality');
     await waitFor(() => expect(store.hasPending()).toBe(false));
     const sent = saves('/api/quality-profile/custom/1/update');
     expect(sent.length).toBeGreaterThan(0);
@@ -369,13 +422,13 @@ describe('saving', () => {
   it('an edit to an opened profile goes to that profile, even after another is opened', async () => {
     shell._settingsAutosaveOff = true;
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
+    open('Strict');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
     fireEvent.click(box('quality-fallback-enabled'));
     // back to the default before anything saved
-    fireEvent.click(screen.getByText('Balanced'));
+    open('Balanced');
     routes['GET /api/quality-profile/custom/1'] = () => ({ success: true, profile: DEFAULT });
-    fireEvent.click(screen.getByText('Balanced'));
+    open('Balanced');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(false));
     // autosave is off: nothing went out yet
     expect(saves('/api/quality-profile/custom/2/update')).toEqual([]);
@@ -394,7 +447,7 @@ describe('saving', () => {
     routes['GET /api/quality-profile'] = () => ({ success: false, error: 'db down' });
     tab();
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelectorAll('.qp-profile-row')).toHaveLength(2));
+    await waitFor(() => expect(cards()).toHaveLength(2));
     fireEvent.click(box('quality-fallback-enabled'));
     expect(store.hasPending()).toBe(false);
   });
@@ -404,8 +457,8 @@ describe('saving', () => {
     routes['GET /api/quality-profile'] = () => ({ success: false, error: 'db down' });
     tab();
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelectorAll('.qp-profile-row')).toHaveLength(2));
-    fireEvent.click(screen.getByText('Strict'));
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    open('Strict');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
     fireEvent.click(box('quality-fallback-enabled'));
     expect(store.hasPending()).toBe(true);
@@ -438,51 +491,54 @@ describe('the controls', () => {
     await loaded();
     const group = document.getElementById('quality-rank-candidates-group')!;
     const cutoff = document.getElementById('quality-upgrade-cutoff-group')!;
-    expect(group.style.display).toBe('');
-    expect(cutoff.style.display).toBe('');
-    fireEvent.change(select('quality-search-mode'), { target: { value: 'best_quality' } });
-    fireEvent.change(select('quality-upgrade-policy'), { target: { value: 'none' } });
-    expect(group.style.display).toBe('none');
-    expect(cutoff.style.display).toBe('none');
+    expect(group.hidden).toBe(false);
+    expect(cutoff.hidden).toBe(false);
+    pick('quality-search-mode', 'best_quality');
+    pick('quality-upgrade-policy', 'none');
+    expect(group.hidden).toBe(true);
+    expect(cutoff.hidden).toBe(true);
+    expect(picked('quality-search-mode')).toBe('best_quality');
   });
 
   it('Opus greys out 320 kbps and drops to 256', async () => {
     await loaded({ lossy_copy: { enabled: false } });
     const options = document.getElementById('lossy-copy-options')!;
-    expect(options.style.display).toBe('none');
+    expect(options.hidden).toBe(true);
     fireEvent.click(box('lossy-copy-enabled'));
-    expect(options.style.display).toBe('block');
-    fireEvent.change(select('lossy-copy-codec'), { target: { value: 'opus' } });
-    expect(select('lossy-copy-bitrate').value).toBe('256');
+    expect(options.hidden).toBe(false);
+    pick('lossy-copy-codec', 'opus');
+    expect(picked('lossy-copy-bitrate')).toBe('256');
     expect(
-      (select('lossy-copy-bitrate').querySelector('option[value="320"]') as HTMLOptionElement)
+      (document.querySelector('#lossy-copy-bitrate [data-value="320"]') as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    // the switch that deletes says so beside its name
+    expect(
+      document.getElementById('lossy-copy-delete-original')!.closest('[data-row]')!.textContent,
+    ).toContain('deletes the lossless source');
   });
 
-  it('adds, moves, reorders by drag and removes targets', async () => {
+  it('adds, moves by its menu and by the keyboard, and removes targets', async () => {
     await loaded();
-    const labels = () => [...document.querySelectorAll('.rt-label')].map((n) => n.textContent);
-    expect(document.querySelector('.rt-lossy-fields')!.getAttribute('style')).toContain('none');
+    const lossyFields = document.getElementById('rt-add-bitrate')!.closest('[hidden], span')!;
+    expect(document.getElementById('rt-add-bitrate')!.closest('[hidden]')).not.toBeNull();
     fireEvent.change(select('rt-add-format'), { target: { value: 'opus' } });
-    expect(document.querySelector('.rt-lossless-fields')!.getAttribute('style')).toContain('none');
+    expect(document.getElementById('rt-add-bitdepth')!.closest('[hidden]')).not.toBeNull();
+    expect(lossyFields.closest('[hidden]')).toBeNull();
     fireEvent.change(select('rt-add-bitrate'), { target: { value: 'custom' } });
-    expect(document.getElementById('rt-add-bitrate-custom-wrap')!.style.display).toBe('');
+    expect(document.getElementById('rt-add-bitrate-custom-wrap')!.hidden).toBe(false);
     fireEvent.change(box('rt-add-bitrate-custom'), { target: { value: '160' } });
-    fireEvent.click(screen.getByText('+ Add target'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add target' }));
     expect(labels()).toEqual(['FLAC 24-bit', 'FLAC', 'MP3 ≥320kbps', 'OPUS ≥160kbps']);
-    fireEvent.click(screen.getAllByTitle('Move up')[3]);
+    targetMenu('OPUS ≥160kbps', 'Move up');
     expect(labels()).toEqual(['FLAC 24-bit', 'FLAC', 'OPUS ≥160kbps', 'MP3 ≥320kbps']);
-    const rows = document.querySelectorAll('.ranked-target-row');
-    const data = new Map<string, string>();
-    const dataTransfer = {
-      setData: (k: string, v: string) => data.set(k, v),
-      getData: (k: string) => data.get(k) ?? '',
-    };
-    fireEvent.dragStart(rows[3], { dataTransfer });
-    fireEvent.drop(rows[0], { dataTransfer });
+    // the handle with the keyboard: Space picks it up, the arrows move it, Space drops it
+    const grip = screen.getByRole('button', { name: /^Reorder MP3 ≥320kbps/ });
+    fireEvent.keyDown(grip, { key: ' ' });
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grip, { key: 'ArrowUp' });
+    fireEvent.keyDown(grip, { key: ' ' });
     expect(labels()).toEqual(['MP3 ≥320kbps', 'FLAC 24-bit', 'FLAC', 'OPUS ≥160kbps']);
-    fireEvent.click(screen.getAllByTitle('Remove')[0]);
+    targetMenu('MP3 ≥320kbps', 'Remove');
     expect(labels()).toEqual(['FLAC 24-bit', 'FLAC', 'OPUS ≥160kbps']);
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saves('/api/quality-profile/custom/1/update').at(-1)!.body).toMatchObject({
@@ -496,10 +552,8 @@ describe('the controls', () => {
 
   it('every target gone shows the empty note and a single cutoff option', async () => {
     await loaded();
-    for (let i = 0; i < 3; i += 1) fireEvent.click(screen.getAllByTitle('Remove')[0]);
-    expect(document.querySelector('.ranked-targets-empty')?.textContent).toContain(
-      'No targets yet',
-    );
+    for (const label of ['FLAC 24-bit', 'FLAC', 'MP3 ≥320kbps']) targetMenu(label, 'Remove');
+    expect(document.getElementById('ranked-targets-list')!.textContent).toContain('No targets yet');
     expect([...select('quality-upgrade-cutoff').options].map((o) => o.textContent)).toEqual([
       'Top ranked target',
     ]);
@@ -520,13 +574,15 @@ describe('presets', () => {
     await loaded();
     fireEvent.click(box('quality-fallback-enabled'));
     expect(store.hasPending()).toBe(true);
-    fireEvent.click(screen.getByText(/Audiophile/));
+    fireEvent.click(screen.getByRole('button', { name: 'Audiophile' }));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith("Switched to 'Audiophile'", 'success'),
     );
     expect(store.hasPending()).toBe(false);
-    expect(document.querySelector('.preset-button.active')?.textContent).toContain('Audiophile');
-    expect([...document.querySelectorAll('.rt-label')].map((n) => n.textContent)).toEqual(['FLAC']);
+    expect(screen.getByRole('button', { name: 'Audiophile' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(labels()).toEqual(['FLAC']);
     await act(() => store.flush());
     expect(saves('/api/quality-profile/custom/1/update').map((c) => c.body)).toEqual([]);
   });
@@ -545,10 +601,10 @@ describe('presets', () => {
       },
     });
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
+    open('Strict');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
-    fireEvent.change(select('quality-search-mode'), { target: { value: 'best_quality' } });
-    fireEvent.click(screen.getByText(/Space Saver/));
+    pick('quality-search-mode', 'best_quality');
+    fireEvent.click(screen.getByRole('button', { name: 'Space Saver' }));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
         "Applied 'Space Saver' to this profile",
@@ -571,7 +627,7 @@ describe('presets', () => {
       profile: DEFAULT,
     });
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
+    open('Strict');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
     fireEvent.click(screen.getByText(/Reset to/));
     expect(shell.showToast).toHaveBeenCalledWith(
@@ -579,7 +635,7 @@ describe('presets', () => {
       'info',
     );
     routes['GET /api/quality-profile/custom/1'] = () => ({ success: true, profile: DEFAULT });
-    fireEvent.click(screen.getByText('Balanced'));
+    open('Balanced');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(false));
     fireEvent.click(screen.getByText(/Reset to/));
     await waitFor(() =>
@@ -588,7 +644,7 @@ describe('presets', () => {
   });
 });
 
-describe('the profile panel', () => {
+describe('the profile cards and their menu', () => {
   it('sets the default only after the confirm, and shows it', async () => {
     routes['POST /api/quality-profile/custom/2/apply'] = () => ({
       success: true,
@@ -596,10 +652,15 @@ describe('the profile panel', () => {
     });
     await loaded();
     (shell.showConfirmDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
-    fireEvent.click(document.querySelectorAll('.qp-profile-dot')[1]);
+    // the default's own entry says it is the default and does nothing
+    fireEvent.click(screen.getByRole('button', { name: 'More for Balanced' }));
+    expect(
+      within(card('Balanced')).getByRole('menuitem', { name: 'The active default' }),
+    ).toHaveProperty('disabled', true);
+    menu('Strict', 'Set as default');
     await waitFor(() => expect(shell.showConfirmDialog).toHaveBeenCalledTimes(1));
     expect(calls.some((c) => c.url.endsWith('/apply'))).toBe(false);
-    fireEvent.click(document.querySelectorAll('.qp-profile-dot')[1]);
+    menu('Strict', 'Set as default');
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
         "Now using 'Strict' (all Quality-page settings updated)",
@@ -607,7 +668,7 @@ describe('the profile panel', () => {
       ),
     );
     expect(box('acoustid-require-verified').checked).toBe(true);
-    expect(document.getElementById('qp-editing-banner')!.style.display).toBe('none');
+    expect(document.getElementById('qp-editing-banner')!.hidden).toBe(true);
   });
 
   it('renames in place: Enter saves, Escape cancels', async () => {
@@ -616,16 +677,16 @@ describe('the profile panel', () => {
       profiles: [ROWS[0], { ...ROWS[1], name: (body as { name: string }).name }],
     });
     await loaded();
-    fireEvent.click(screen.getAllByTitle(/^Rename/)[1]);
-    const input = document.querySelector('.qp-profile-name-input') as HTMLInputElement;
+    menu('Strict', 'Rename');
+    const input = screen.getByRole('textbox', { name: 'New name' }) as HTMLInputElement;
     expect(input.value).toBe('Strict');
     fireEvent.change(input, { target: { value: 'Stricter' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(screen.getByText('Stricter')).toBeTruthy());
     expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ name: 'Stricter' });
-    fireEvent.click(screen.getAllByTitle(/^Rename/)[0]);
-    fireEvent.keyDown(document.querySelector('.qp-profile-name-input')!, { key: 'Escape' });
-    expect(document.querySelector('.qp-profile-name-input')).toBeNull();
+    menu('Balanced', 'Rename');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'New name' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: 'New name' })).toBeNull();
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
   });
 
@@ -636,11 +697,11 @@ describe('the profile panel', () => {
       profiles: [...ROWS, { id: 3, name: 'Mine' }],
     });
     await loaded();
-    fireEvent.click(screen.getByText('+ New profile'));
+    fireEvent.click(screen.getByText('New profile'));
     const input = document.getElementById('qp-profile-new-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '  Mine ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(screen.getByText('+ New profile')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('New profile')).toBeTruthy());
     const sent = calls.find((c) => c.method === 'POST' && c.url === '/api/quality-profile/custom')!;
     expect(sent.body).toMatchObject({
       name: 'Mine',
@@ -649,14 +710,14 @@ describe('the profile panel', () => {
     });
     expect(document.getElementById('qp-editing-banner')!.textContent).toContain('Mine');
     // an empty name just closes the box
-    fireEvent.click(screen.getByText('+ New profile'));
+    fireEvent.click(screen.getByText('New profile'));
     fireEvent.keyDown(document.getElementById('qp-profile-new-input')!, { key: 'Enter' });
     expect(document.getElementById('qp-profile-new-input')).toBeNull();
   });
 
   it('save now asks first, then writes the page to that row', async () => {
     await loaded();
-    fireEvent.click(screen.getAllByTitle(/^Save the current/)[1]);
+    menu('Strict', 'Save this page to it now');
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith("Updated 'Strict'", 'success'),
     );
@@ -668,33 +729,33 @@ describe('the profile panel', () => {
   it('delete asks first; deleting the open profile goes back to the default', async () => {
     routes['DELETE /api/quality-profile/custom/2'] = () => ({ success: true, profiles: [ROWS[0]] });
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
-    await waitFor(() =>
-      expect(document.getElementById('qp-editing-banner')!.style.display).toBe(''),
-    );
+    open('Strict');
+    await waitFor(() => expect(document.getElementById('qp-editing-banner')!.hidden).toBe(false));
     routes['GET /api/quality-profile/custom'] = () => ({ success: true, profiles: [ROWS[0]] });
-    fireEvent.click(screen.getAllByTitle(/^Delete/)[1]);
+    menu('Strict', 'Delete');
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith("Deleted 'Strict'", 'success'),
     );
     expect((shell.showConfirmDialog as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
       destructive: true,
     });
-    expect(document.getElementById('qp-editing-banner')!.style.display).toBe('none');
+    expect(document.getElementById('qp-editing-banner')!.hidden).toBe(true);
     // the last profile cannot be deleted
-    expect(screen.queryAllByTitle(/^Delete/)).toHaveLength(0);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'More for Balanced' }));
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull();
   });
 
   it('deleting a profile drops its edit not saved yet, so nothing is stuck retrying', async () => {
     shell._settingsAutosaveOff = true;
     routes['DELETE /api/quality-profile/custom/2'] = () => ({ success: true, profiles: [ROWS[0]] });
     await loaded();
-    fireEvent.click(screen.getByText('Strict'));
+    open('Strict');
     await waitFor(() => expect(box('acoustid-require-verified').checked).toBe(true));
     fireEvent.click(box('quality-fallback-enabled'));
     expect(store.hasPending()).toBe(true);
     routes['GET /api/quality-profile/custom'] = () => ({ success: true, profiles: [ROWS[0]] });
-    fireEvent.click(screen.getAllByTitle(/^Delete/)[1]);
+    menu('Strict', 'Delete');
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith("Deleted 'Strict'", 'success'),
     );
@@ -712,11 +773,11 @@ describe('the profile panel', () => {
   it('Auto-Import toggles on and back off', async () => {
     routes['POST /api/auto-import/settings'] = () => ({ success: true });
     await loaded();
-    fireEvent.click(screen.getAllByTitle(/for Auto-Import$/)[1]);
-    await waitFor(() => expect(document.querySelector('.qp-tag-autoimport')).not.toBeNull());
+    menu('Strict', 'Use for Auto-Import');
+    await waitFor(() => expect(card('Strict').textContent).toContain('Auto-Import'));
     expect(calls.at(-1)!.body).toEqual({ quality_profile_id: 2 });
-    fireEvent.click(screen.getByTitle(/^Stop using 'Strict'/));
-    await waitFor(() => expect(document.querySelector('.qp-tag-autoimport')).toBeNull());
+    menu('Strict', 'Stop using for Auto-Import');
+    await waitFor(() => expect(card('Strict').textContent).not.toContain('Auto-Import'));
     expect(calls.at(-1)!.body).toEqual({ quality_profile_id: null });
     expect(shell.showToast).toHaveBeenLastCalledWith(
       'Auto-Import now uses the default profile',

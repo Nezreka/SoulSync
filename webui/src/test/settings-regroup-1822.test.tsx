@@ -31,14 +31,14 @@ describe('where sections live', () => {
     expect(tabDef('connections').views.map((v) => v.key)).toContain('metasync');
   });
 
-  it('Video Quality is on quality (React, SETTINGS_PORT.md video pass V1)', () => {
-    const section = readFileSync(
-      resolve(process.cwd(), 'src/features/settings/tabs/video-quality.tsx'),
+  it('Video Quality is on quality, its own pill (settings-bic phase 3)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/quality/quality-page.tsx'),
       'utf8',
     );
-    expect(section).toContain("const TAB = 'quality';");
-    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Quality"/);
-    expect(html).toContain('<div data-stg-react="quality" data-stg-part="video"');
+    expect(page).toMatch(/<ViewPanel tab=\{TAB\} view="video"[^>]*>\s*<VideoQualitySections \/>/);
+    expect(html).toContain('<div data-stg-react="quality" data-stg-part="page"');
+    expect(tabDef('quality').views.map((v) => v.label)).toContain('Movies and TV');
   });
 
   it('Video Preferences is on library (React, SETTINGS_PORT.md video pass V2c)', () => {

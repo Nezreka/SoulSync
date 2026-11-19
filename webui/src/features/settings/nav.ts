@@ -41,6 +41,8 @@ export interface TabDef {
   sub: string;
   /** its pills; a tab with one view shows none */
   views: ViewDef[];
+  /** on the video side these pills come first, and the first is the default */
+  videoFirst?: string[];
 }
 
 const ONE: ViewDef[] = [{ key: 'all', label: 'All' }];
@@ -77,8 +79,14 @@ export const TABS: TabDef[] = [
     label: 'Quality',
     icon: 'sliders',
     title: 'Quality',
-    sub: 'Audio and video formats, release profiles and ladders',
-    views: ONE,
+    sub: 'What SoulSync is allowed to download, what it prefers, and what it keeps',
+    views: [
+      { key: 'music', label: 'Music' },
+      { key: 'audiobooks', label: 'Audiobooks' },
+      { key: 'video', label: 'Movies and TV' },
+      { key: 'youtube', label: 'YouTube' },
+    ],
+    videoFirst: ['video', 'youtube'],
   },
   {
     key: 'library',
@@ -129,6 +137,18 @@ export const TABS: TabDef[] = [
 
 export const tabDef = (key: TabKey): TabDef => TABS.find((tab) => tab.key === key) ?? TABS[0];
 
+const onVideoSide = () =>
+  typeof document !== 'undefined' && document.body?.getAttribute('data-side') === 'video';
+
+/** a tab's pills in the order this side shows them: the video side's own first */
+export function viewsFor(def: TabDef, side: 'music' | 'video'): ViewDef[] {
+  if (side !== 'video' || !def.videoFirst) return def.views;
+  const first = def.videoFirst
+    .map((key) => def.views.find((v) => v.key === key))
+    .filter((v): v is ViewDef => !!v);
+  return [...first, ...def.views.filter((v) => !def.videoFirst!.includes(v.key))];
+}
+
 export interface NavState {
   tab: TabKey;
   view: string;
@@ -157,7 +177,9 @@ export function resolveTab(key: unknown, view?: unknown): { tab: TabKey; view: s
   const want = named ?? alias?.view ?? '';
   return {
     tab: def.key,
-    view: def.views.some((v) => v.key === want) ? want : def.views[0].key,
+    view: def.views.some((v) => v.key === want)
+      ? want
+      : viewsFor(def, onVideoSide() ? 'video' : 'music')[0].key,
   };
 }
 

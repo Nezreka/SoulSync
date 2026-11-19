@@ -151,24 +151,27 @@ const subtitles = {
 
 // ── the music quality profile's ranked targets (Quality) ──
 
+// repointed for the order list (settings-bic phase 3): rows are li[data-id],
+// the moves and the removal are entries of the row's menu
 const targets = {
   root: () => one('#ranked-targets-list'),
-  rows: () => all('#ranked-targets-list [data-index]'),
-  readOrder: () => targets.rows().map((row) => one('.rt-label', row)?.textContent ?? ''),
+  rows: () => all('#ranked-targets-list ul[aria-label] > li[data-id]'),
+  readOrder: () => targets.rows().map((row) => one('[class*="srcName"]', row)?.textContent ?? ''),
+  menu: (index: number, entry: string, what: string) => {
+    const row = targets.rows()[index];
+    press(row?.querySelector('[data-more]'), `the menu of target ${index}`);
+    press(
+      button(one('#ranked-targets-list [role="menu"]'), (words) => words.startsWith(entry)),
+      what,
+    );
+  },
   move: (index: number, delta: -1 | 1) =>
-    press(
-      button(targets.rows()[index], (words) => words === (delta < 0 ? 'Move up' : 'Move down')),
-      `move target ${index}`,
-    ),
-  remove: (index: number) =>
-    press(
-      button(targets.rows()[index], (words) => words === 'Remove'),
-      `remove target ${index}`,
-    ),
+    targets.menu(index, delta < 0 ? 'Move up' : 'Move down', `move target ${index}`),
+  remove: (index: number) => targets.menu(index, 'Remove', `remove target ${index}`),
   add: (format: string) => {
     type(one('#rt-add-format'), format, 'the format to add');
     press(
-      button(one('#quality-profile-section'), (words) => words === '+ Add target'),
+      button(one('#quality-profile-section'), (words) => words === 'Add target'),
       'add a target',
     );
   },
@@ -176,12 +179,21 @@ const targets = {
 
 // ── the video quality ladder (Quality > Video Quality) ──
 
+// repointed for the order list (settings-bic phase 3): a tier moves by its
+// row's menu; its switch keeps data-vq-tier-toggle
 const ladder = {
   root: () => one('#vq-tier-rows'),
   readOrder: () =>
-    all('#vq-tier-rows [data-vq-tier-toggle]').map((box) => box.dataset.vqTierToggle ?? ''),
-  move: (key: string, delta: -1 | 1) =>
-    press(one(`#vq-tier-rows [data-vq-tier-move="${key}"][data-dir="${delta}"]`), `move ${key}`),
+    all('#vq-tier-rows ul[aria-label] > li[data-id]').map((row) => row.dataset.id ?? ''),
+  move: (key: string, delta: -1 | 1) => {
+    press(one(`#vq-tier-rows [data-more="${CSS.escape(key)}"]`), `the menu of ${key}`);
+    press(
+      button(one('#vq-tier-rows [role="menu"]'), (words) =>
+        words.startsWith(delta < 0 ? 'Move up' : 'Move down'),
+      ),
+      `move ${key}`,
+    );
+  },
 };
 
 // ── the album art sources (Library > Post-processing) ──
@@ -298,9 +310,13 @@ const server = {
 
 const profiles = {
   root: () => one('#qp-profile-list'),
+  // repointed for the profile cards (settings-bic phase 3): name and summary,
+  // as the old row's text read
   readOrder: () =>
-    all('#qp-profile-list .qp-profile-text').map((row) =>
-      (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    all('#qp-profile-list [data-profile-id]').map((card) =>
+      `${one('[data-profile-name]', card)?.textContent ?? ''}${one('[class*="qpCardSub"]', card)?.textContent ?? ''}`
+        .replace(/\s+/g, ' ')
+        .trim(),
     ),
   create: (name: string) => {
     press(one('#qp-profile-new-btn'), 'new profile');

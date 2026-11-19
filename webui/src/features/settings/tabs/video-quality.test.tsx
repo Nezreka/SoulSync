@@ -1,16 +1,28 @@
 /**
- * The Quality tab's video sections (SETTINGS_PORT.md, video pass V1): the
- * markup they replaced, loading when the video settings page is shown, every
+ * Quality > Movies and TV and Quality > YouTube (SETTINGS_PORT.md, video pass
+ * V1; on the settings parts in settings-bic phase 3): the page read back,
+ * loading when the video settings page is shown, every
  * edit saved to the profile on screen (the Default or a named one), the
  * custom formats, the kind defaults, YouTube Quality, and the video side's
  * save button.
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
-import { VideoQualitySections } from './video-quality';
+import { VideoQualitySections as Sections, YoutubeQuality } from './video-quality';
+import { useVideoShown } from './video-shown';
+
+/** both pills, as the Quality page has them */
+function VideoQualitySections() {
+  const shown = useVideoShown();
+  return (
+    <>
+      <Sections />
+      <YoutubeQuality shown={shown} />
+    </>
+  );
+}
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -83,6 +95,9 @@ afterEach(() => {
 const el = <T extends HTMLElement = HTMLInputElement>(id: string) =>
   document.getElementById(id) as T;
 const q = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
+const tierRows = () => [...el('vq-tier-rows').querySelectorAll<HTMLElement>('li[data-id]')];
+const on = (sel: string) =>
+  q(sel).getAttribute('aria-checked') === 'true' || q(sel).getAttribute('aria-selected') === 'true';
 const sent = (method: string, url: string) =>
   calls.filter((c) => c.method === method && c.url === url).map((c) => c.body);
 
@@ -92,16 +107,63 @@ async function shown() {
       new CustomEvent('soulsync:video-page-shown', { detail: 'video-settings' }),
     );
   });
-  await waitFor(() => expect(el('vq-tier-rows').children).toHaveLength(3));
+  await waitFor(() => expect(tierRows()).toHaveLength(3));
   await waitFor(() =>
     expect(el('vq-format-rows').querySelectorAll('[data-vq-fmt]')).toHaveLength(1),
   );
 }
 
-describe('the markup they replaced', () => {
-  it('before the video settings page is shown', () => {
+describe('the pages', () => {
+  it('before the video settings page is shown: waiting, every control there, no colon', () => {
     const { container } = render(<VideoQualitySections />);
-    expect(shape(container)).toEqual(shape(vanilla('video-quality.vanilla.html')));
+    expect(container.textContent).toContain('Loading the video quality profiles.');
+    expect(container.textContent).toContain('Loading the YouTube profile.');
+    for (const id of [
+      'vq-profile-select',
+      'vq-profile-name',
+      'vq-cutoff',
+      'vq-rejects',
+      'vq-codec',
+      'vq-hdr',
+      'vq-audio',
+      'vq-prefer-repack',
+      'vq-lang-mode',
+      'vq-library',
+      'vq-movie-size',
+      'vq-episode-size',
+      'vq-movie-pref',
+      'vq-episode-pref',
+      'vq-min-seeders',
+      'vq-min-format-score',
+      'yq-resolution',
+      'yq-codec',
+      'yq-container',
+      'yq-60fps',
+      'yq-hdr',
+    ])
+      expect(container.querySelectorAll(`#${id}`), id).toHaveLength(1);
+    for (const l of container.querySelectorAll('label'))
+      expect(l.textContent, l.textContent ?? '').not.toMatch(/:\s*$/);
+    expect(container.textContent).not.toMatch(/—/);
+  });
+
+  it('reads the profile and the YouTube profile back in words', async () => {
+    render(<VideoQualitySections />);
+    await shown();
+    const heroes = [
+      ...document.querySelectorAll('[data-video-quality] p, [data-youtube-quality] p'),
+    ];
+    expect(heroes[0].textContent).toBe(
+      'Default takes BluRay · 1080p, then WEB-DL · 1080p. It stops upgrading at 1080p.',
+    );
+    await waitFor(() =>
+      expect(document.querySelector('[data-youtube-quality] p')!.textContent).toBe(
+        'Followed channels download up to 1440p, as MKV, preferring VP9.',
+      ),
+    );
+    expect(document.querySelector('[data-video-quality]')!.textContent).toContain(
+      '2 of 3Qualities on',
+    );
   });
 });
 
@@ -109,19 +171,20 @@ describe('Video Quality', () => {
   it('shows the Default profile once the video page is shown', async () => {
     render(<VideoQualitySections />);
     await shown();
-    expect(
-      [...el('vq-tier-rows').querySelectorAll('.hybrid-source-name')].map((n) => n.textContent),
-    ).toEqual(['BluRay · 1080p', 'WEB-DL · 1080p', 'HDTV · 720p']);
-    expect(el('vq-tier-rows').children[2].className).toBe('hybrid-source-item disabled');
+    expect(tierRows().map((r) => r.dataset.id)).toEqual(['bluray-1080p', 'web-1080p', 'hdtv-720p']);
+    expect(tierRows()[0].textContent).toContain('BluRay · 1080p');
+    // a quality switched off says so, and its switch is off
+    expect(tierRows()[2].textContent).toContain('Switched off');
+    expect(q<HTMLInputElement>('[data-vq-tier-toggle="hdtv-720p"]').checked).toBe(false);
     expect(el<HTMLSelectElement>('vq-cutoff').value).toBe('1080p');
-    expect(q('[data-vq-reject="cam"]').className).toBe('vq-chip on');
-    expect(q('[data-vq-codec="hevc"]').className).toBe('active');
-    expect(el('vq-langs').hidden).toBe(false);
-    expect(q('[data-vq-lang="fr"]').getAttribute('aria-pressed')).toBe('true');
+    expect(on('[data-vq-reject="cam"]')).toBe(true);
+    expect(on('[data-vq-codec="hevc"]')).toBe(true);
+    expect(el('vq-langs').closest('[hidden]')).toBeNull();
+    expect(on('[data-vq-lang="fr"]')).toBe(true);
     expect(el('vq-movie-label').textContent).toBe('40 GB');
     expect(el('vq-seeders-label').textContent).toBe('At least 1 seeder');
     expect(q<HTMLSelectElement>('[data-vq-kind-default="show"]').value).toBe('3');
-    expect(q('[data-vq-profile-name]').className).toBe('hidden');
+    expect(q('[data-vq-profile-name]').closest('[hidden]')).not.toBeNull();
     expect(q<HTMLInputElement>('[data-vq-fmt-f="override"]').value).toBe('50');
     expect(el('vq-min-format-score').value).toBe('5');
   });
@@ -129,7 +192,9 @@ describe('Video Quality', () => {
   it('each edit saves the Default profile at once', async () => {
     render(<VideoQualitySections />);
     await shown();
-    fireEvent.click(q('[data-vq-tier-move="web-1080p"][data-dir="-1"]'));
+    // the ladder is the order list: its row menu moves it
+    fireEvent.click(screen.getByRole('button', { name: 'More for WEB-DL · 1080p' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Move up/ }));
     expect(sent('POST', Q).at(-1)).toMatchObject({
       tiers: [
         { key: 'web-1080p', enabled: true },
@@ -139,8 +204,16 @@ describe('Video Quality', () => {
     });
     fireEvent.click(q('[data-vq-reject="x264"]'));
     expect(sent('POST', Q).at(-1)).toMatchObject({ rejects: ['cam', 'x264'] });
+    fireEvent.click(q('[data-vq-tier-toggle="hdtv-720p"]'));
+    expect(sent('POST', Q).at(-1)).toMatchObject({
+      tiers: [
+        { key: 'web-1080p', enabled: true },
+        { key: 'bluray-1080p', enabled: true },
+        { key: 'hdtv-720p', enabled: true },
+      ],
+    });
     fireEvent.click(q('[data-vq-lang-mode="off"]'));
-    expect(el('vq-langs').hidden).toBe(true);
+    expect(el('vq-langs').closest('[hidden]')).not.toBeNull();
     fireEvent.click(q('[data-vq-library="4k"]'));
     expect(sent('POST', Q).at(-1)).toMatchObject({ audio_language_mode: 'off', library: '4k' });
     expect(shell.showToast).not.toHaveBeenCalled();
@@ -164,9 +237,9 @@ describe('Video Quality', () => {
     render(<VideoQualitySections />);
     await shown();
     fireEvent.change(q('[data-vq-profile-select]'), { target: { value: '3' } });
-    expect(q('[data-vq-codec="av1"]').className).toBe('active');
+    expect(on('[data-vq-codec="av1"]')).toBe(true);
     expect(q<HTMLInputElement>('[data-vq-profile-name]').value).toBe('Anime');
-    expect(q('[data-vq-profile-delete]').className).toBe('test-button');
+    expect(q('[data-vq-profile-delete]').closest('[hidden]')).toBeNull();
     fireEvent.click(q('[data-vq-hdr="prefer"]'));
     await waitFor(() => expect(sent('POST', `${Q}/profiles`)).toHaveLength(1));
     expect(sent('POST', `${Q}/profiles`)[0]).toMatchObject({
@@ -190,13 +263,13 @@ describe('Video Quality', () => {
     await shown();
     expect(q('[data-vq-used-for]')).toBeNull();
     fireEvent.change(q('[data-vq-profile-select]'), { target: { value: '3' } });
-    expect(q('[data-vq-used-for-pick="both"]').className).toBe('active');
+    expect(on('[data-vq-used-for-pick="both"]')).toBe(true);
     fireEvent.click(q('[data-vq-used-for-pick="tv"]'));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith('Offered only for TV', 'success'),
     );
     expect(sent('PUT', `${Q}/profiles/3/media-type`)[0]).toEqual({ media_type: 'tv' });
-    expect(q('[data-vq-used-for-pick="tv"]').className).toBe('active');
+    expect(on('[data-vq-used-for-pick="tv"]')).toBe(true);
     answers[`PUT ${Q}/profiles/3/media-type`] = { success: true, id: 3, media_type: null };
     fireEvent.click(q('[data-vq-used-for-pick="both"]'));
     await waitFor(() =>
@@ -278,7 +351,7 @@ describe('YouTube Quality and the save button', () => {
     render(<VideoQualitySections />);
     await shown();
     await waitFor(() => expect(el<HTMLSelectElement>('yq-resolution').value).toBe('1440p'));
-    expect(q('[data-yq-codec="vp9"]').className).toBe('active');
+    expect(on('[data-yq-codec="vp9"]')).toBe(true);
     expect(el('yq-60fps').checked).toBe(true);
     fireEvent.click(q('[data-yq-container="mp4"]'));
     expect(sent('POST', '/api/video/downloads/youtube-quality').at(-1)).toMatchObject({
