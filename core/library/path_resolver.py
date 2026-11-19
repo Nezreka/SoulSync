@@ -454,10 +454,6 @@ def _resolve_via_sibling_album_folder(
     artist_segment = path_parts[-3]
     if not basename or not artist_segment or artist_segment in (".", ".."):
         return None
-    if _own_album_folders(path_parts, base_dirs):
-        # the album folder is right, so the file isn't in another one
-        return None
-
     matches: List[str] = []
     for base in base_dirs:
         artist_dir = os.path.join(base, artist_segment)
@@ -495,6 +491,16 @@ _LEADING_TRACK_NUM = re.compile(
     r"^\d{1,3}[-_.]\d{1,3}[\s._-]+"   # disc-track: "01-01 - ", "1-01 ", "01-01. "
     r"|^\d{1,3}\s*[-_.]\s*"           # track + a real separator: "01 - ", "01.", "01_"
 )
+
+
+def _leading_track(basename: str) -> Optional[int]:
+    """the track number a filename starts with ("15 - x" 15, "01-01 - x" 1),
+    None without one"""
+    m = _LEADING_TRACK_NUM.match(basename or "")
+    if not m:
+        return None
+    digits = re.findall(r"\d{1,3}", m.group(0))
+    return int(digits[-1]) if digits else None
 
 
 def _strip_track_number(basename: str) -> str:
@@ -590,9 +596,13 @@ def _resolve_via_synthesized_filename(
         return None
     synth = _SYNTH_NAME.match(wanted_base)
     album_segment = path_parts[-2]
-    # the album folder is there: only the filename can be wrong, so only that
-    # folder is searched, never the artist's other albums
+    # the album folder is there, so a same-titled file in ANOTHER album folder
+    # is only this one when its track number agrees too: wolf39us deleted
+    # `2014 - V/15 - Lost Stars.flac` and this found the single's
+    # `01 - Lost Stars.flac`. a renamed folder (#1127, numbering 01-01 vs 01)
+    # keeps its number, so it still resolves
     own_folders = {os.path.normcase(f) for f in _own_album_folders(path_parts, base_dirs)}
+    wanted_track = _leading_track(wanted_base)
 
     matches: List[str] = []
     prefixed: List[str] = []
@@ -614,9 +624,8 @@ def _resolve_via_synthesized_filename(
                     album_dirs.append(e)
             except OSError:
                 continue
-        if own_folders:
-            album_dirs = [d for d in album_dirs if os.path.normcase(d.path) in own_folders]
         for album_dir in album_dirs:
+            elsewhere = bool(own_folders) and os.path.normcase(album_dir.path) not in own_folders
             try:
                 entries = list(os.scandir(album_dir.path))
             except OSError:
@@ -629,6 +638,9 @@ def _resolve_via_synthesized_filename(
                     continue
                 entry_base, entry_ext = os.path.splitext(entry.name)
                 if entry_ext.lower() != wanted_ext.lower():
+                    continue
+                if elsewhere and (wanted_track is None
+                                  or _leading_track(entry_base) != wanted_track):
                     continue
                 if _strip_track_number(entry_base) == wanted_stem:
                     if entry.path not in matches:

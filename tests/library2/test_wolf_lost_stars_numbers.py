@@ -220,6 +220,36 @@ def test_a_wrong_album_folder_still_finds_the_file(disk):
     assert found and os.path.samefile(found, disk["single"])
 
 
+def test_tracks_moved_to_a_new_folder_still_resolve_while_the_old_one_stays(tmp_path):
+    """a reorganize or a hand rename moved the album, but the old folder is
+    still there (a cover left behind): the exact filename in the new folder
+    is the same file, not a deleted one"""
+    from core.library.path_resolver import resolve_library_file_path
+    root = tmp_path / "music"
+    old = root / "Maroon 5" / "V"
+    old.mkdir(parents=True)
+    (old / "cover.jpg").write_bytes(b"jpg")
+    new = root / "Maroon 5" / "2014 - V"
+    new.mkdir(parents=True)
+    (new / "05 - Sugar.flac").write_bytes(b"sugar")
+    found = resolve_library_file_path(str(old / "05 - Sugar.flac"), config_manager=_Config(str(root)))
+    assert found and os.path.samefile(found, new / "05 - Sugar.flac")
+
+
+def test_a_numbering_drift_in_another_folder_resolves_when_the_number_agrees(tmp_path):
+    """#1127's navidrome case with the stated folder still on disk: 01-01 vs 01
+    is the same track 1, so it is still found"""
+    from core.library.path_resolver import resolve_library_file_path
+    root = tmp_path / "music"
+    (root / "Beck" / "Guero").mkdir(parents=True)
+    real = root / "Beck" / "Beck - Guero"
+    real.mkdir(parents=True)
+    (real / "01 - E-Pro.flac").write_bytes(b"epro")
+    found = resolve_library_file_path(str(root / "Beck" / "Guero" / "01-01 - E-Pro.flac"),
+                                      config_manager=_Config(str(root)))
+    assert found and os.path.samefile(found, real / "01 - E-Pro.flac")
+
+
 def test_refresh_and_scan_marks_the_deleted_file_missing(disk, tmp_path, monkeypatch):
     from core.library2 import paths, scan
     from database.music_database import MusicDatabase
