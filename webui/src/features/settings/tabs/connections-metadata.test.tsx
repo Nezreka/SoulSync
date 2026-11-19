@@ -15,6 +15,7 @@ import {
   musicbrainzError,
   syncMetadataSourceSelection,
 } from './connections-metadata';
+import { serviceActions } from './connections-services';
 import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
@@ -123,7 +124,7 @@ describe('each part is the markup it replaced', () => {
     ).toEqual(['primary', 'automatic', 'itunes', 'deezer', 'musicbrainz', 'spotify']);
   });
 
-  it('the music API Configuration group: every card, its Test kept for the sheet, no emoji, no colon', () => {
+  it('the music API Configuration group: every card on the parts, its Test for the sheet, no emoji, no colon', () => {
     const { container } = part('api-music');
     const cards = [...unwrapped(container).querySelectorAll<HTMLElement>('[data-service]')];
     expect(cards.map((c) => c.getAttribute('data-service'))).toEqual([
@@ -165,14 +166,20 @@ describe('each part is the markup it replaced', () => {
       'listenbrainz-username',
     ])
       expect(document.getElementById(id), id).not.toBeNull();
-    // the cards that had a Test keep it, out of sight: the sheet's foot presses it
-    const tests = [...container.querySelectorAll<HTMLButtonElement>('[data-svc-test]')];
-    expect(tests.length).toBeGreaterThanOrEqual(13);
-    expect(tests.every((t) => t.hidden)).toBe(true);
+    // every card but Hydrabase (its Connect is its check) gives the sheet a Test;
+    // none keeps a button of its own for it
+    const tested = cards
+      .map((c) => c.getAttribute('data-service')!)
+      .filter((id) => serviceActions.get(`music:${id}`)?.test);
+    expect(tested).toHaveLength(14);
+    expect(serviceActions.get('music:hydrabase')?.test).toBeUndefined();
+    expect(container.querySelector('[data-svc-test], .test-button, .form-group')).toBeNull();
+    // the old page's look is gone: every card's fields are the parts'
+    for (const c of cards) expect(c.querySelector('[data-ui]'), c.dataset.service).not.toBeNull();
     for (const b of container.querySelectorAll('button'))
       expect(b.textContent, b.textContent ?? '').not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
-    for (const l of container.querySelectorAll('.form-group > label'))
-      expect(l.textContent).not.toMatch(/:\s*$/);
+    for (const l of container.querySelectorAll('label'))
+      expect(l.textContent, l.textContent ?? '').not.toMatch(/:\s*$/);
   });
 
   it("Spotify's Disconnect shows while /status says it is signed in (it never could before)", () => {
@@ -385,24 +392,46 @@ describe('the service cards', () => {
     });
   });
 
-  it('the Spotify dot turns amber when it needs attention (the tiles read it)', () => {
+  it('sign-in is the sheet’s main action: it saves first, then opens the sign-in', async () => {
     part('api-music');
-    const dot = () =>
-      document.querySelector<HTMLElement>('[data-service="spotify"] .stg-service-dot')!;
-    expect(dot().style.color).toBe('rgb(29, 185, 84)');
-    status({ spotify: { authenticated: true, post_ban_cooldown: 30 } });
-    expect(dot().style.color).toBe('rgb(241, 196, 15)');
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    for (const [id, path] of [
+      ['spotify', '/auth/spotify'],
+      ['tidal', '/auth/tidal'],
+      ['deezer', '/auth/deezer'],
+    ]) {
+      const primary = serviceActions.get(`music:${id}`)!.primary!;
+      expect(primary.label).toBe('Authenticate');
+      await act(async () => {
+        await primary.onClick();
+      });
+      expect(open).toHaveBeenLastCalledWith(path, '_blank');
+    }
+    expect(shell.saveSettings).toHaveBeenCalledTimes(3);
+    // signed in, Spotify's says so
     status({ spotify: { authenticated: true } });
-    expect(dot().style.color).toBe('rgb(29, 185, 84)');
+    expect(serviceActions.get('music:spotify')!.primary!.label).toBe('Sign in again');
+    open.mockRestore();
+  });
+
+  it('a callback address is a quiet line to copy, following the field', async () => {
+    part('api-music');
+    loaded({ spotify: {}, deezer: {}, tidal: {} });
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const line = el('tidal-callback-display').closest<HTMLElement>('[data-copy]')!;
+    fireEvent.click(line.querySelector('button')!);
+    expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:8889/tidal/callback');
+    await waitFor(() =>
+      expect(line.querySelector('button')!.getAttribute('aria-label')).toBe('Copied'),
+    );
   });
 
   it('a test saves what is waiting first', async () => {
     part('api-music');
     loaded({ discogs: {} });
     store.set('discogs', 'token', 'x');
-    fireEvent.click(
-      document.querySelector('[data-service="discogs"] .test-button') as HTMLButtonElement,
-    );
+    void serviceActions.get('music:discogs')!.test!();
     await waitFor(() => expect(shell.testConnection).toHaveBeenCalledWith('discogs'));
     expect(saved().discogs).toEqual({ token: 'x' });
   });
@@ -412,9 +441,7 @@ describe('the service cards', () => {
     loaded({ deezer_download: { arl: '__redacted_unchanged__' } });
     answers['/api/test-connection'] = { success: true, message: 'Deezer ok' };
     answers['/api/deezer-download/test'] = { success: true, user: 'me', tier: 'Premium' };
-    fireEvent.click(
-      document.querySelector('[data-service="deezer"] .test-button') as HTMLButtonElement,
-    );
+    void serviceActions.get('music:deezer')!.test!();
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
         'Deezer ok · ARL: me (Premium)',
@@ -435,19 +462,19 @@ describe('the service cards', () => {
         }),
       );
     });
-    expect(el('qobuz-connection-logged-in').style.display).toBe('flex');
-    expect(el('qobuz-connection-form').style.display).toBe('none');
+    expect(el('qobuz-connection-logged-in').hidden).toBe(false);
+    expect(el('qobuz-connection-form').hidden).toBe(true);
     expect(el('qobuz-connection-user-info').textContent).toBe('Connected: Ann (Studio)');
     act(() => {
       window.dispatchEvent(new CustomEvent('soulsync:qobuz-auth', { detail: {} }));
     });
-    expect(el('qobuz-connection-form').style.display).toBe('block');
+    expect(el('qobuz-connection-form').hidden).toBe(false);
     answers['/api/qobuz/auth/token'] = { success: false, error: 'bad token' };
     fireEvent.change(el('qobuz-connection-token'), { target: { value: ' tk ' } });
     fireEvent.click(el('qobuz-token-login-btn'));
     await waitFor(() => expect(el('qobuz-token-status').textContent).toBe('bad token'));
     expect(calls.find((c) => c.url === '/api/qobuz/auth/token')?.body).toEqual({ token: 'tk' });
-    expect(el('qobuz-token-status').style.color).toBe('rgb(255, 85, 85)');
+    expect(el('qobuz-token-status').getAttribute('data-tone')).toBe('bad');
   });
 });
 

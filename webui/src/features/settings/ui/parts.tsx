@@ -1249,3 +1249,39 @@ export function KindBar({ children }: { children: ReactNode }) {
 export function KindSay({ children }: { children: ReactNode }) {
   return <span className={s.kindSay}>{children}</span>;
 }
+
+/**
+ * A value to copy somewhere else (a callback address): quiet, mono, with a
+ * copy button. `label` says where it goes.
+ */
+export function CopyValue({ id, label, value }: { id?: string; label?: ReactNode; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard
+      ?.writeText(value)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+  return (
+    <div className={s.copy} data-copy="">
+      {label ? <div className={s.copyLabel}>{label}</div> : null}
+      <div className={s.copyLine}>
+        <code id={id} className={s.copyText}>
+          {value}
+        </code>
+        <button
+          type="button"
+          className={s.fieldBtn}
+          aria-label={copied ? 'Copied' : 'Copy'}
+          title={copied ? 'Copied' : 'Copy'}
+          onClick={copy}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}

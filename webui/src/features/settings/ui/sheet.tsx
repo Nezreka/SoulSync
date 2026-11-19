@@ -42,7 +42,8 @@ export function Sheet({
   foot,
   bodyId,
   bodyClass,
-  focusFirst = 'input:not([type=hidden]), select, textarea',
+  // not a saved secret: focusing one empties it for a new one (SecretField)
+  focusFirst = 'input:not([type=hidden]):not([type=password]), select, textarea',
   children,
 }: {
   open: boolean;

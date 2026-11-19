@@ -31,8 +31,10 @@ import { type NavState, TABS, type TabDef, legacyKey, nav, tabDef, useNav } from
 import { pageTabs, usePageTabs } from './page-tabs';
 import { type SettingsStore, settingsStore } from './settings-store';
 import { SettingsSearch } from './shell/search';
+import { ViewPanel } from './tabs/downloads/downloads-page';
 import { useSourcesAttention } from './tabs/downloads/sources-view';
 import { useViewer } from './tabs/people/data';
+import { ServerActivitySettingsCard } from './tabs/server-activity-settings';
 import { Btn, Icon, Note, Pills } from './ui';
 import s from './ui/settings.module.css';
 
@@ -432,6 +434,16 @@ export function SettingsPage({
           </div>
         </div>
         {slot('people')}
+        {/* System > Server Activity: its own pill */}
+        <ViewPanel
+          tab="advanced"
+          view="activity"
+          open={state.tab === 'advanced' && state.view === 'activity'}
+        >
+          <ServerActivitySettingsCard
+            denied={<Note info>Only an admin can change Server Activity.</Note>}
+          />
+        </ViewPanel>
         {slot('logs')}
       </div>
     </div>

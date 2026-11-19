@@ -50,82 +50,6 @@
       "asked": "Jellyfin",
       "shows": ["active_media_server"]
     },
-    "#sa-upload-mbps": {
-      "sel": "#sa-upload-mbps",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "40",
-      "to": "41",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"upload_mbps\":41}"
-          }
-        ]
-      },
-      "asked": "41",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-geo-lookup": {
-      "sel": "#sa-geo-lookup",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"geo_lookup\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-retention": {
-      "sel": "#sa-retention",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "0",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"retention_days\":0}"
-          }
-        ]
-      },
-      "asked": "0",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-preset-new": {
-      "sel": "#sa-preset-new",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "click": ["Add"]
-    },
     "#metadata-fallback-source": {
       "sel": "#metadata-fallback-source",
       "kind": "select",
@@ -261,23 +185,6 @@
       "asked": "guard-secret",
       "shows": ["jellyfin.api_key"]
     },
-    "#jellyfin-timeout": {
-      "sel": "#jellyfin-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "91",
-      "saves": {
-        "settings": {
-          "jellyfin": {
-            "api_timeout": 91
-          }
-        }
-      },
-      "asked": "91",
-      "shows": ["jellyfin.api_timeout"]
-    },
     "#jellyfin-user": {
       "sel": "#jellyfin-user",
       "kind": "select",
@@ -315,6 +222,23 @@
       },
       "asked": "Music",
       "showsEndpoint": "/api/jellyfin/music-libraries"
+    },
+    "#jellyfin-timeout": {
+      "sel": "#jellyfin-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "91",
+      "saves": {
+        "settings": {
+          "jellyfin": {
+            "api_timeout": 91
+          }
+        }
+      },
+      "asked": "91",
+      "shows": ["jellyfin.api_timeout"]
     },
     "#navidrome-url": {
       "sel": "#navidrome-url",
@@ -367,6 +291,25 @@
       "asked": "guard-secret",
       "shows": ["navidrome.password"]
     },
+    "#navidrome-music-folder": {
+      "sel": "#navidrome-music-folder",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "navidrome",
+      "from": "B",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/navidrome/select-music-folder",
+            "body": "{\"folder_name\":\"\"}"
+          }
+        ]
+      },
+      "asked": "",
+      "showsEndpoint": "/api/navidrome/music-folders"
+    },
     "#navidrome-playlist-username": {
       "sel": "#navidrome-playlist-username",
       "kind": "text",
@@ -407,25 +350,6 @@
       },
       "asked": "guard-secret",
       "click": ["Save playlist account"]
-    },
-    "#navidrome-music-folder": {
-      "sel": "#navidrome-music-folder",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "navidrome",
-      "from": "B",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/navidrome/select-music-folder",
-            "body": "{\"folder_name\":\"\"}"
-          }
-        ]
-      },
-      "asked": "",
-      "showsEndpoint": "/api/navidrome/music-folders"
     },
     "#music_assistant-url": {
       "sel": "#music_assistant-url",
@@ -2475,24 +2399,6 @@
       "asked": "11",
       "shows": ["musicbrainz.base_url", "musicbrainz.request_interval"]
     },
-    "#acoustid-enabled": {
-      "sel": "#acoustid-enabled",
-      "kind": "checkbox",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "acoustid": {
-            "enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["acoustid.enabled"]
-    },
     "#acoustid-api-key": {
       "sel": "#acoustid-api-key",
       "kind": "text",
@@ -2511,23 +2417,23 @@
       "asked": "guard-secret",
       "shows": ["acoustid.api_key"]
     },
-    "#listenbrainz-base-url": {
-      "sel": "#listenbrainz-base-url",
-      "kind": "text",
+    "#acoustid-enabled": {
+      "sel": "#acoustid-enabled",
+      "kind": "checkbox",
       "only": "music",
       "sides": ["music", "video"],
       "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
+      "from": true,
+      "to": false,
       "saves": {
         "settings": {
-          "listenbrainz": {
-            "base_url": "guard-probe"
+          "acoustid": {
+            "enabled": false
           }
         }
       },
-      "asked": "guard-probe",
-      "shows": ["listenbrainz.base_url"]
+      "asked": false,
+      "shows": ["acoustid.enabled"]
     },
     "#listenbrainz-token": {
       "sel": "#listenbrainz-token",
@@ -2582,6 +2488,24 @@
       },
       "asked": true,
       "shows": ["listenbrainz.scrobble_enabled"]
+    },
+    "#listenbrainz-base-url": {
+      "sel": "#listenbrainz-base-url",
+      "kind": "text",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "listenbrainz": {
+            "base_url": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["listenbrainz.base_url"]
     },
     "#hydrabase-enabled": {
       "sel": "#hydrabase-enabled",
@@ -8916,6 +8840,82 @@
       "asked": "guard-probe",
       "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
     },
+    "#sa-upload-mbps": {
+      "sel": "#sa-upload-mbps",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "40",
+      "to": "41",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"upload_mbps\":41}"
+          }
+        ]
+      },
+      "asked": "41",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-geo-lookup": {
+      "sel": "#sa-geo-lookup",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"geo_lookup\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-retention": {
+      "sel": "#sa-retention",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "0",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"retention_days\":0}"
+          }
+        ]
+      },
+      "asked": "0",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-preset-new": {
+      "sel": "#sa-preset-new",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "click": ["Add"]
+    },
     "#log-viewer-source": {
       "sel": "#log-viewer-source",
       "kind": "select",
@@ -8949,106 +8949,28 @@
       "asked": false,
       "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
     },
-    "input[data-video-conn=\"plex-url\"]": {
-      "sel": "input[data-video-conn=\"plex-url\"]",
-      "kind": "text",
+    "#video-server-pick": {
+      "sel": "#video-server-pick",
+      "kind": "radiogroup",
       "only": "video",
       "sides": ["music", "video"],
       "scenario": "video",
-      "from": "http://plex:32400",
-      "to": "http://guard.example:4321",
+      "from": "Jellyfin",
+      "to": "Plex",
       "saves": {
         "requests": [
           {
             "method": "POST",
-            "url": "/api/video/server-config",
-            "body": "{\"plex\":{\"base_url\":\"http://guard.example:4321\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"\"}}"
+            "url": "/api/video/server",
+            "body": "{\"server\":\"plex\"}"
           }
         ]
       },
-      "asked": "http://guard.example:4321",
-      "showsEndpoint": "/api/video/server-config"
+      "asked": "Plex",
+      "showsEndpoint": "/api/video/server"
     },
-    "input[data-video-conn=\"plex-token\"]": {
-      "sel": "input[data-video-conn=\"plex-token\"]",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "************",
-      "to": "************",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/server-config",
-            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"guard-secret\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"\"}}"
-          }
-        ]
-      },
-      "asked": "guard-secret"
-    },
-    "input[data-video-conn=\"jellyfin-url\"]": {
-      "sel": "input[data-video-conn=\"jellyfin-url\"]",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "http://jf:8096",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/server-config",
-            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://guard.example:4321\",\"api_key\":\"\"}}"
-          }
-        ]
-      },
-      "asked": "http://guard.example:4321",
-      "showsEndpoint": "/api/video/server-config"
-    },
-    "input[data-video-conn=\"jellyfin-key\"]": {
-      "sel": "input[data-video-conn=\"jellyfin-key\"]",
-      "kind": "text",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/server-config",
-            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"guard-secret\"}}"
-          }
-        ]
-      },
-      "asked": "guard-secret"
-    },
-    "select[data-video-jellyfin-user]": {
-      "sel": "select[data-video-jellyfin-user]",
-      "kind": "select",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "u2",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/jellyfin/user",
-            "body": "{\"user\":\"\"}"
-          }
-        ]
-      },
-      "asked": "",
-      "showsEndpoint": "/api/video/jellyfin/users"
-    },
-    "select[data-video-lib-select=\"movies\"]": {
-      "sel": "select[data-video-lib-select=\"movies\"]",
+    "#video-lib-movies": {
+      "sel": "#video-lib-movies",
       "kind": "select",
       "only": "video",
       "sides": ["music", "video"],
@@ -9067,8 +8989,8 @@
       "asked": "",
       "showsEndpoint": "/api/video/libraries"
     },
-    "select[data-video-lib-select=\"tv\"]": {
-      "sel": "select[data-video-lib-select=\"tv\"]",
+    "#video-lib-tv": {
+      "sel": "#video-lib-tv",
       "kind": "select",
       "only": "video",
       "sides": ["music", "video"],
@@ -9166,6 +9088,104 @@
       },
       "asked": true,
       "showsEndpoint": "/api/video/libraries"
+    },
+    "#video-conn-plex-url": {
+      "sel": "#video-conn-plex-url",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "http://plex:32400",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/server-config",
+            "body": "{\"plex\":{\"base_url\":\"http://guard.example:4321\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"\"}}"
+          }
+        ]
+      },
+      "asked": "http://guard.example:4321",
+      "showsEndpoint": "/api/video/server-config"
+    },
+    "#video-conn-plex-token": {
+      "sel": "#video-conn-plex-token",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "************",
+      "to": "************",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/server-config",
+            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"guard-secret\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"\"}}"
+          }
+        ]
+      },
+      "asked": "guard-secret"
+    },
+    "#video-conn-jellyfin-url": {
+      "sel": "#video-conn-jellyfin-url",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "http://jf:8096",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/server-config",
+            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://guard.example:4321\",\"api_key\":\"\"}}"
+          }
+        ]
+      },
+      "asked": "http://guard.example:4321",
+      "showsEndpoint": "/api/video/server-config"
+    },
+    "#video-conn-jellyfin-key": {
+      "sel": "#video-conn-jellyfin-key",
+      "kind": "text",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/server-config",
+            "body": "{\"plex\":{\"base_url\":\"http://plex:32400\",\"token\":\"************\"},\"jellyfin\":{\"base_url\":\"http://jf:8096\",\"api_key\":\"guard-secret\"}}"
+          }
+        ]
+      },
+      "asked": "guard-secret"
+    },
+    "#video-jellyfin-user": {
+      "sel": "#video-jellyfin-user",
+      "kind": "select",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "u2",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/jellyfin/user",
+            "body": "{\"user\":\"\"}"
+          }
+        ]
+      },
+      "asked": "",
+      "showsEndpoint": "/api/video/jellyfin/users"
     },
     "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"name\"]": {
       "sel": "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"name\"]",
@@ -10968,38 +10988,59 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-view-connections-services \"Clear play log\"": {
-      "label": "Clear play log",
-      "anchor": "stg-view-connections-services",
+    "#stg-video-server-card \"Test Server\"": {
+      "label": "Test Server",
+      "anchor": "stg-video-server-card",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-view-connections-services \"Remove \"Server maintenance, back soon.\"\"": {
-      "label": "Remove \"Server maintenance, back soon.\"",
-      "anchor": "stg-view-connections-services",
+    "#stg-video-server-card \"View Configuration\"": {
+      "label": "View Configuration",
+      "anchor": "stg-video-server-card",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-view-connections-services \"Add\"": {
-      "label": "Add",
-      "anchor": "stg-view-connections-services",
+    "#video-server-pick \"Plex\"": {
+      "label": "Plex",
+      "anchor": "video-server-pick",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-view-connections-services \"\"": {
-      "label": "",
-      "anchor": "stg-view-connections-services",
-      "count": 2,
+    "#video-server-pick \"Jellyfin\"": {
+      "label": "Jellyfin",
+      "anchor": "video-server-pick",
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-view-connections-services \"Test Connection\"": {
-      "label": "Test Connection",
-      "anchor": "stg-view-connections-services",
-      "count": 2,
+    "#video-server-sheet \"Close\"": {
+      "label": "Close",
+      "anchor": "video-server-sheet",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-server-sheet \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-server-sheet",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-server-sheet \"Test connection\"": {
+      "label": "Test connection",
+      "anchor": "video-server-sheet",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-server-sheet \"Done\"": {
+      "label": "Done",
+      "anchor": "video-server-sheet",
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -11163,8 +11204,22 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#plex-connect-button": {
-      "id": "plex-connect-button",
+    "#plex-library-selector-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "plex-library-selector-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-configuration \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "plex-configuration",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#plex-relink-button": {
+      "id": "plex-relink-button",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11175,8 +11230,9 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#plex-relink-button": {
-      "id": "plex-relink-button",
+    "#plex-setup-buttons \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "plex-setup-buttons",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11219,22 +11275,23 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#jellyfin-container \"Test\"": {
-      "label": "Test",
+    "#jellyfin-library-selector-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "jellyfin-library-selector-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#jellyfin-container \"More options· 1 · API timeout\"": {
+      "label": "More options· 1 · API timeout",
       "anchor": "jellyfin-container",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#navidrome-playlist-login \"Save playlist account\"": {
-      "label": "Save playlist account",
-      "anchor": "navidrome-playlist-login",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#navidrome-playlist-clear": {
-      "id": "navidrome-playlist-clear",
+    "#jellyfin-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "jellyfin-container",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11246,9 +11303,15 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#navidrome-container \"Test\"": {
-      "label": "Test",
-      "anchor": "navidrome-container",
+    "#navidrome-playlist-clear": {
+      "id": "navidrome-playlist-clear",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#navidrome-playlist-login \"Save playlist account\"": {
+      "label": "Save playlist account",
+      "anchor": "navidrome-playlist-login",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11267,9 +11330,16 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#soulsync-container \"Verify Music Library Folder\"": {
-      "label": "Verify Music Library Folder",
-      "anchor": "soulsync-container",
+    "#music_assistant-container \"More options· 1 · source folder\"": {
+      "label": "More options· 1 · source folder",
+      "anchor": "music_assistant-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music_assistant-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "music_assistant-container",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11946,17 +12016,17 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Expand All\"": {
-      "label": "Expand All",
+    "\"Copy\"": {
+      "label": "Copy",
       "anchor": "",
-      "count": 2,
+      "count": 4,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Authenticate\"": {
-      "label": "Authenticate",
+    "\"On a NAS or remote server?· Spotify needs HTTPS there\"": {
+      "label": "On a NAS or remote server?· Spotify needs HTTPS there",
       "anchor": "",
-      "count": 3,
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -11966,16 +12036,15 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Test Connection\"": {
-      "label": "Test Connection",
+    "\"More about this setting\"": {
+      "label": "More about this setting",
       "anchor": "",
-      "count": 13,
+      "count": 20,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Disconnect\"": {
-      "label": "Disconnect",
-      "anchor": "",
+    "#tidal-disconnect-btn": {
+      "id": "tidal-disconnect-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11993,23 +12062,37 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "\"Sign in with a token instead· when the email sign-in asks for a CAPTCHA\"": {
+      "label": "Sign in with a token instead· when the email sign-in asks for a CAPTCHA",
+      "anchor": "",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#qobuz-token-login-btn": {
       "id": "qobuz-token-login-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#lastfm-scrobble-actions \"Authorize Scrobbling\"": {
-      "label": "Authorize Scrobbling",
+    "#lastfm-scrobble-actions \"Authorize scrobbling\"": {
+      "label": "Authorize scrobbling",
       "anchor": "lastfm-scrobble-actions",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#musicbrainz-server-settings \"Test Connection\"": {
-      "label": "Test Connection",
-      "anchor": "musicbrainz-server-settings",
+    "\"Show what you typed\"": {
+      "label": "Show what you typed",
+      "anchor": "",
       "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#musicbrainz-server-settings \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "musicbrainz-server-settings",
+      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12020,121 +12103,16 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "\"More options· 1 · your own server or Maloja\"": {
+      "label": "More options· 1 · your own server or Maloja",
+      "anchor": "",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#hydrabase-connect-btn": {
       "id": "hydrabase-connect-btn",
       "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Spotify\"": {
-      "label": "Test Spotify",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Tidal\"": {
-      "label": "Test Tidal",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test ListenBrainz\"": {
-      "label": "Test ListenBrainz",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test AcoustID\"": {
-      "label": "Test AcoustID",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Last.fm\"": {
-      "label": "Test Last.fm",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Genius\"": {
-      "label": "Test Genius",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test TMDB\"": {
-      "label": "Test TMDB",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test TVDB\"": {
-      "label": "Test TVDB",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test OMDb\"": {
-      "label": "Test OMDb",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test fanart.tv\"": {
-      "label": "Test fanart.tv",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test OpenSubtitles\"": {
-      "label": "Test OpenSubtitles",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test SubDL\"": {
-      "label": "Test SubDL",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test SubSource\"": {
-      "label": "Test SubSource",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Trakt\"": {
-      "label": "Test Trakt",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test MDBList\"": {
-      "label": "Test MDBList",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Test Connections\"": {
-      "label": "Test Connections",
-      "anchor": "",
-      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12967,6 +12945,34 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#stg-view-advanced-activity \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-activity",
+      "count": 3,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Clear play log\"": {
+      "label": "Clear play log",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Remove \"Server maintenance, back soon.\"\"": {
+      "label": "Remove \"Server maintenance, back soon.\"",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Add\"": {
+      "label": "Add",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "\"All\"": {
       "label": "All",
       "anchor": "",
@@ -12997,13 +13003,6 @@
     },
     "\"Error\"": {
       "label": "Error",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Copy\"": {
-      "label": "Copy",
       "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
@@ -13786,7 +13785,7 @@
       "plex-manual-config-button": "a button, held in `buttons`",
       "plex-view-config-button": "a button, held in `buttons`",
       "plex-autodetect-button": "a button, held in `buttons`",
-      "plex-connect-button": "a button, held in `buttons`",
+      "plex-connect-button": "Plex's own Connect went in settings-bic phase 3: it sent testConnection('plex'), the same POST /api/test-connection the server sheet's foot Test (#server-sheet-test) sends for the server it shows",
       "plex-library-selector-container": "not a form control: a <div> on the page",
       "plex-config-action-button": "a button, held in `buttons`",
       "plex-relink-button": "a button, held in `buttons`",

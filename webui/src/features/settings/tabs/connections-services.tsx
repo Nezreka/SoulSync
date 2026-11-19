@@ -3,12 +3,12 @@
  * tabs, the tile grid and the modal a tile opens. settings.js
  * buildServiceTiles, switchServiceKind, openServiceModal, closeServiceModal.
  *
- * The forms are the service cards in the hidden API Configuration groups. A
- * tile opens the real card in the modal, never a copy, so every id stays one
- * element. A React card portals into a wrapper of its own and the wrapper is
- * what moves (React hears a portal's events wherever its wrapper sits); a
- * card still vanilla (the video side's) is moved itself and put back in the
- * exact slot it came from.
+ * The forms are the service cards (ServiceFrame), kept in the hidden API
+ * Configuration groups. A tile opens the real card in the side sheet, never a
+ * copy, so every id stays one element: a card portals into a wrapper of its
+ * own and the wrapper is what moves (React hears a portal's events wherever
+ * its wrapper sits). The sheet's foot calls the card's own Test and main
+ * action (serviceActions), so the request and its answer are the card's.
  *
  * A tile's name and logo come from its card; its status comes from what
  * SoulSync knows (serviceStatus): the server's config check
@@ -20,12 +20,14 @@
 
 import {
   createContext,
+  type ReactNode,
   useContext,
   useEffect,
   useLayoutEffect,
   useState,
   useSyncExternalStore,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { SettingsPayload } from '../settings-store';
 
@@ -43,6 +45,7 @@ import {
   Tiles,
   type Tone,
 } from '../ui';
+import s from '../ui/settings.module.css';
 import {
   hydrabaseLink,
   onQobuzAuth,
@@ -229,6 +232,81 @@ export function useServicePlace(service: string, order: number, kind: Kind = 'mu
   return { wrap, open: isOpen };
 }
 
+// ── a card ──
+
+/** what the sheet's foot does for a card: its Test, and its main action
+ *  (Authenticate) in place of Done */
+export interface CardActions {
+  test?: () => unknown;
+  primary?: { label: string; onClick: () => unknown; id?: string };
+}
+
+/** by `${kind}:${service}`; a card keeps its own entry current */
+export const serviceActions = new Map<string, CardActions>();
+export const actionKey = (kind: Kind, service: string) => `${kind}:${service}`;
+
+/**
+ * One service's card: its fields on the parts, kept at home while closed and
+ * in the service sheet while its tile is open. The tile reads its name,
+ * colour, logo and whether it is required from the data attributes.
+ */
+export function ServiceFrame({
+  kind = 'music',
+  service,
+  order,
+  title,
+  colour,
+  logo,
+  required,
+  id,
+  extra,
+  test,
+  primary,
+  children,
+}: {
+  kind?: Kind;
+  service: string;
+  order: number;
+  /** "Deezer (Favorites & Playlists)": the tile shows the name, the sheet the rest */
+  title: string;
+  colour: string;
+  logo?: string;
+  required?: boolean;
+  id?: string;
+  extra?: Record<string, string>;
+  test?: () => unknown;
+  primary?: CardActions['primary'];
+  children: ReactNode;
+}) {
+  const { wrap } = useServicePlace(service, order, kind);
+  const key = actionKey(kind, service);
+  // every render: the actions read what is on screen now
+  useEffect(() => {
+    serviceActions.set(key, { test, primary });
+  });
+  useEffect(() => () => void serviceActions.delete(key), [key]);
+  const attr = SERVICE_KINDS[kind].attr;
+  return createPortal(
+    <div
+      className="stg-service"
+      data-svc-frame=""
+      data-react-panel=""
+      id={id}
+      {...{ [attr]: service }}
+      data-svc-title={title}
+      data-svc-colour={colour}
+      data-svc-logo={logo}
+      data-svc-required={required ? '' : undefined}
+      {...extra}
+    >
+      <div className={s.svcBody} data-ui="" data-svc-body="">
+        {children}
+      </div>
+    </div>,
+    wrap,
+  );
+}
+
 // ── reading the cards ──
 
 function frames(kind: Kind): HTMLElement[] {
@@ -236,7 +314,7 @@ function frames(kind: Kind): HTMLElement[] {
   // the Connections tab only: Detail Pages, on the Library tab, is a video
   // preferences panel, not a service
   return [
-    ...document.querySelectorAll<HTMLElement>(`#settings-page .api-service-frame[${attr}]`),
+    ...document.querySelectorAll<HTMLElement>(`#settings-page [data-svc-frame][${attr}]`),
   ].filter((f) => f.closest('[data-stg="connections"]'));
 }
 
@@ -253,11 +331,10 @@ export interface ServiceMeta {
 }
 
 export function serviceMeta(frame: HTMLElement): ServiceMeta {
-  const title = frame.querySelector('.service-title')?.textContent?.trim() || '';
+  const title = frame.dataset.svcTitle || '';
   const id = frame.getAttribute('data-service') || frame.getAttribute('data-video-service') || '';
-  const logo =
-    SERVICE_LOGOS[id] || frame.querySelector('.video-svc-logo')?.getAttribute('src') || null;
-  const colour = frame.querySelector<HTMLElement>('.stg-service-dot')?.style.color || '';
+  const logo = SERVICE_LOGOS[id] || frame.dataset.svcLogo || null;
+  const colour = frame.dataset.svcColour || '';
   // "Deezer (Favorites & Playlists)": the tile shows the name, the modal the rest
   const paren = title.indexOf('(');
   const name = (paren > 0 ? title.slice(0, paren) : title).trim();
@@ -273,7 +350,7 @@ export function serviceMeta(frame: HTMLElement): ServiceMeta {
         : '',
     logo,
     colour,
-    required: !!frame.querySelector('.stg-req-pill'),
+    required: frame.hasAttribute('data-svc-required'),
     inverted: INVERT_SERVICE_MARKS.has(id),
     glyph: SERVICE_GLYPHS[id] || null,
     monogram: (name.replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase(),
@@ -506,20 +583,12 @@ function brandRgb(colour: string): string | undefined {
 
 // ── the switch, the tiles, the sheet ──
 
-/** where an opened vanilla card came from, to put it back exactly there */
-let lifted: { frame: HTMLElement; parent: Node | null; next: Node | null } | null = null;
-
 function frameOf(open: { id: string; kind: Kind }) {
   const attr = SERVICE_KINDS[open.kind].attr;
   return document.querySelector<HTMLElement>(
-    `#settings-page .api-service-frame[${attr}="${CSS.escape(open.id)}"]`,
+    `#settings-page [data-svc-frame][${attr}="${CSS.escape(open.id)}"]`,
   );
 }
-
-/** the service tests that are a card's own button, by card: the sheet's Test
- *  presses it, so it is the same request with the same answer */
-const pressCardTest = (body: HTMLElement | null) =>
-  body?.querySelector<HTMLButtonElement>('[data-svc-test]')?.click();
 
 export function ServicesPart({
   model = servicesModel,
@@ -576,7 +645,7 @@ export function ServicesPart({
     onCounts({ set, keyless, unset, total });
   }, [countKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // open: the card's name over it, a vanilla card lifted in by hand
+  // open: the card's name over it (the card moves in by its wrapper)
   useLayoutEffect(() => {
     const open = state.open;
     if (!open) {
@@ -584,26 +653,11 @@ export function ServicesPart({
       return;
     }
     const frame = frameOf(open);
-    const body = document.getElementById('svc-modal-body');
-    if (!frame || !body) {
+    if (!frame) {
       model.close();
       return;
     }
     setMeta(serviceMeta(frame));
-    if (!frame.hasAttribute('data-react-panel')) {
-      lifted = { frame, parent: frame.parentNode, next: frame.nextSibling };
-      body.appendChild(frame);
-      // collapsed by default as an accordion; in the sheet it is the content
-      frame.querySelector<HTMLElement>('.stg-service-body')?.style.setProperty('display', 'block');
-    }
-    return () => {
-      // home before the sheet hides, so its ids never sit in a hidden sheet
-      if (lifted && lifted.frame === frame) {
-        frame.querySelector<HTMLElement>('.stg-service-body')?.style.removeProperty('display');
-        lifted.parent?.insertBefore(frame, lifted.next);
-        lifted = null;
-      }
-    };
   }, [state.open, model]);
 
   function close() {
@@ -621,9 +675,7 @@ export function ServicesPart({
   const open = state.open;
   const openState = open ? serviceStatus(open.kind, open.id, inputs) : null;
   const lastTest = open ? inputs.tests[open.id] : undefined;
-  const hasTest = open
-    ? !!document.getElementById('svc-modal-body')?.querySelector('[data-svc-test]')
-    : false;
+  const actions = open ? serviceActions.get(actionKey(open.kind, open.id)) : undefined;
 
   return (
     <>
@@ -702,11 +754,14 @@ export function ServicesPart({
         bodyClass="src-modal-open"
         foot={
           <>
-            {hasTest ? (
+            {actions?.test ? (
               <Btn
                 icon="refresh"
                 id="svc-modal-test"
-                onClick={() => pressCardTest(document.getElementById('svc-modal-body'))}
+                onClick={() => {
+                  // the card's own, read now: what is typed is what it tests
+                  if (open) void serviceActions.get(actionKey(open.kind, open.id))?.test?.();
+                }}
               >
                 Test connection
               </Btn>
@@ -716,9 +771,22 @@ export function ServicesPart({
                 {lastTest?.text || ''}
               </StatusWords>
             </SheetFootSay>
-            <Btn kind="primary" onClick={close}>
-              Done
-            </Btn>
+            {actions?.primary ? (
+              <Btn
+                kind="primary"
+                id={actions.primary.id}
+                onClick={() => {
+                  if (open)
+                    void serviceActions.get(actionKey(open.kind, open.id))?.primary?.onClick();
+                }}
+              >
+                {actions.primary.label}
+              </Btn>
+            ) : (
+              <Btn kind="primary" onClick={close}>
+                Done
+              </Btn>
+            )}
           </>
         }
       />

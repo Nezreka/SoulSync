@@ -1784,6 +1784,108 @@ button.chip:hover:not(:disabled) {
   white-space: pre-wrap;
 }
 
+.fieldCode {
+  width: 90px;
+}
+
+/* a two-letter code (a country): typed in capitals */
+.fieldCode .input {
+  text-transform: uppercase;
+}
+
+/* a service card's fields, in the service sheet */
+.svcBody {
+  display: block;
+}
+
+.svcBody > .sfield:first-child,
+.svcBody > .grp:first-child {
+  margin-top: 6px;
+}
+
+.pinCode {
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+/* the video side's two servers: the same tiles, not stretched over five places */
+.servers[data-count='2'] {
+  grid-template-columns: repeat(2, minmax(0, 200px));
+}
+
+/* rows under something else in a card (the video libraries under the servers) */
+.cardRows > .row:first-child {
+  border-top: 1px solid var(--white-a06);
+}
+
+/* a quiet line at the foot of a card */
+.cardFoot {
+  margin: 0;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--white-a06);
+  color: var(--white-a55);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* a switch with its word before it, two to a row (Scan, Anime) */
+.inlineSwitch {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 14px;
+  color: var(--white-a70);
+  font-size: 12.5px;
+}
+
+/* a card's content that is not rows */
+.cardPad {
+  display: grid;
+  gap: 10px;
+  padding: 16px 20px;
+}
+
+.cardPad > .items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* a value to copy somewhere else (a callback address) */
+.copy {
+  margin: 10px 0 4px;
+}
+
+.copyLabel {
+  margin-bottom: 6px;
+  color: var(--white-a55);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.copyLine {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 6px 0 12px;
+  border: 1px dashed var(--white-a08);
+  border-radius: var(--radius-control);
+  background: var(--white-a03);
+}
+
+.copyText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--white-a80);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
 .sheetBody .note {
   margin: 12px 0 4px;
 }

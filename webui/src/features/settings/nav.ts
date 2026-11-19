@@ -121,6 +121,7 @@ export const TABS: TabDef[] = [
     sub: 'Security, the database, caches, the API, developer tools and logs',
     views: [
       { key: 'system', label: 'Settings' },
+      { key: 'activity', label: 'Server Activity' },
       { key: 'logs', label: 'Logs' },
     ],
   },
@@ -139,6 +140,8 @@ export interface NavState {
 const ALIASES: Record<string, { tab: TabKey; view?: string }> = {
   sources: { tab: 'downloads', view: 'sources' },
   logs: { tab: 'advanced', view: 'logs' },
+  // it was under the media server on Connections until settings-bic phase 3
+  'server-activity': { tab: 'advanced', view: 'activity' },
   // the old System tab had no logs: asked for by key, it is the settings
   advanced: { tab: 'advanced', view: 'system' },
   system: { tab: 'advanced', view: 'system' },
@@ -183,7 +186,12 @@ export function navToSearch(state: NavState): Record<string, string> {
 /** the old pages' key for what is on screen: the tabs not rebuilt yet still
  *  render under it, and their blocks carry it (data-stg) */
 export function legacyKey(state: Pick<NavState, 'tab' | 'view'>): string {
-  if (state.tab === 'advanced') return state.view === 'logs' ? 'logs' : 'advanced';
+  if (state.tab === 'advanced')
+    return state.view === 'logs'
+      ? 'logs'
+      : state.view === 'activity'
+        ? 'server-activity'
+        : 'advanced';
   return state.tab;
 }
 

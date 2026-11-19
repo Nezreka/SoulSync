@@ -30,10 +30,19 @@ describe('the tabs', () => {
     // Connections has its pills now (settings-bic phase 2)
     expect(resolveTab('connections', 'metasync')).toEqual({ tab: 'connections', view: 'metasync' });
     expect(resolveTab('downloads', 'nope')).toEqual({ tab: 'downloads', view: 'sources' });
+    // Server Activity moved from Connections to its own System pill (phase 3)
+    expect(resolveTab('server-activity')).toEqual({ tab: 'advanced', view: 'activity' });
+    expect(resolveTab('system', 'activity')).toEqual({ tab: 'advanced', view: 'activity' });
+    expect(navToSearch({ tab: 'advanced', view: 'activity', kind: null, open: null })).toEqual({
+      tab: 'system',
+      view: 'activity',
+    });
   });
   it('the tabs not rebuilt yet still answer to their old key', () => {
     expect(legacyKey({ tab: 'advanced', view: 'system' })).toBe('advanced');
     expect(legacyKey({ tab: 'advanced', view: 'logs' })).toBe('logs');
+    // its own pill: none of System's old blocks show on it
+    expect(legacyKey({ tab: 'advanced', view: 'activity' })).toBe('server-activity');
     expect(legacyKey({ tab: 'library', view: 'all' })).toBe('library');
   });
 });

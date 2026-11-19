@@ -1,16 +1,35 @@
 /**
- * Connections > the video side's Server Connection (SETTINGS_PORT.md, video
- * pass V3b): the Plex / Jellyfin toggle (it picks the server and shows its
- * fields), each server's own URL and secret with a note on what is missing,
- * Test, the Jellyfin user, and which Movies, TV and other TV libraries the
- * scan reads. Was index.html and video-settings.js; the state is
- * video-server.ts. A field saves when it is left, a pick or a tick at once.
+ * Connections > the video side's media server (SETTINGS_PORT.md, video pass
+ * V3b; on the settings parts in settings-bic phase 3, the same card pattern
+ * as the music side's): Plex or Jellyfin as a pick-one row with its state in
+ * words, Test and View Configuration in the card's head, and which Movies, TV
+ * and other TV libraries the scan reads as rows under it. View Configuration
+ * opens the server's fields (URL, token or key, the Jellyfin user) in the
+ * side sheet (VideoServerFields). The state is video-server.ts. A field saves
+ * when it is left, a pick or a switch at once.
  */
 
-import type { ReactNode } from 'react';
-
+import {
+  Btn,
+  Card,
+  Row,
+  Select,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  Switch,
+  TextField,
+} from '../ui';
+import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
 import { type ConnField, type Server, otherTv, useVideoServer, videoServer } from './video-server';
+
+export const VIDEO_SERVERS: Array<{ id: Server; name: string; logo: string }> = [
+  { id: 'plex', name: 'Plex', logo: '/static/img/brands/plex.png' },
+  { id: 'jellyfin', name: 'Jellyfin', logo: '/static/img/brands/jellyfin.png' },
+];
+export const videoServerName = (server: Server | null) =>
+  VIDEO_SERVERS.find((v) => v.id === server)?.name ?? 'Media server';
 
 function ConnInput({
   field,
@@ -24,10 +43,14 @@ function ConnInput({
   const { conn } = useVideoServer();
   const left = useCommit<HTMLInputElement>(() => void videoServer.saveConn());
   return (
-    <input
+    <TextField
+      full
+      mono={type !== 'password'}
       type={type}
+      id={`video-conn-${field}`}
       data-video-conn={field}
       placeholder={placeholder}
+      autoComplete="off"
       ref={left}
       value={conn[field]}
       onChange={(event) => videoServer.type(field, event.target.value)}
@@ -35,72 +58,59 @@ function ConnInput({
   );
 }
 
-function Config({ server, children }: { server: Server; children: ReactNode }) {
-  const { active } = useVideoServer();
-  return (
-    <div
-      className={active === server ? 'server-config-container' : 'server-config-container hidden'}
-      data-video-server-config={server}
-    >
-      {children}
-    </div>
-  );
+/** the chosen server's state in words: its last Test, else what is missing */
+export function useVideoServerState(): { tone: 'ok' | 'bad' | 'warn' | 'idle'; text: string } {
+  const { active, said, notes } = useVideoServer();
+  if (!active) return { tone: 'idle', text: 'Loading' };
+  const tested = said[active];
+  if (tested) return tested;
+  const note = notes[active] || '';
+  if (/^Not connected|^Add the/.test(note)) return { tone: 'warn', text: 'Not set up' };
+  return { tone: 'idle', text: 'Not tested yet' };
 }
 
-function Note({ server }: { server: Server }) {
-  const { notes } = useVideoServer();
-  return (
-    <div className="setting-help-text" data-video-conn-note={server}>
-      {notes[server]}
-    </div>
-  );
-}
-
-function TestRow({ server }: { server: Server }) {
-  return (
-    <div className="form-actions">
-      <button
-        className="test-button"
-        type="button"
-        data-video-conn-test={server}
-        onClick={() => void videoServer.test(server)}
-      >
-        Test Connection
-      </button>
-    </div>
-  );
-}
-
-function LibrarySelect({ kind }: { kind: 'movies' | 'tv' }) {
+/** which library on the chosen server the video side scans for movies or TV */
+function LibraryRow({ kind }: { kind: 'movies' | 'tv' }) {
   const { libs } = useVideoServer();
+  const label = kind === 'movies' ? 'Movies library' : 'TV shows library';
   if (!libs)
     return (
-      <select data-video-lib-select={kind} value="" onChange={() => undefined}>
-        <option value="">Loading...</option>
-      </select>
+      <Row label={label} htmlFor={`video-lib-${kind}`} field>
+        <Select
+          id={`video-lib-${kind}`}
+          data-video-lib-select={kind}
+          value=""
+          onChange={() => undefined}
+        >
+          <option value="">Loading...</option>
+        </Select>
+      </Row>
     );
   const list = kind === 'movies' ? libs.movies : libs.tv;
   return (
-    <select
-      data-video-lib-select={kind}
-      value={kind === 'movies' ? libs.movie : libs.show}
-      onChange={(event) =>
-        void videoServer.setLibs(
-          kind === 'movies' ? { movie: event.target.value } : { show: event.target.value },
-        )
-      }
-    >
-      <option value="">— None —</option>
-      {list.map((l) => (
-        <option key={l.title} value={l.title}>
-          {l.title}
-        </option>
-      ))}
-    </select>
+    <Row label={label} htmlFor={`video-lib-${kind}`} field>
+      <Select
+        id={`video-lib-${kind}`}
+        data-video-lib-select={kind}
+        value={kind === 'movies' ? libs.movie : libs.show}
+        onChange={(event) =>
+          void videoServer.setLibs(
+            kind === 'movies' ? { movie: event.target.value } : { show: event.target.value },
+          )
+        }
+      >
+        <option value="">None</option>
+        {list.map((l) => (
+          <option key={l.title} value={l.title}>
+            {l.title}
+          </option>
+        ))}
+      </Select>
+    </Row>
   );
 }
 
-/** the other TV libraries, each with a Scan and an Anime tick */
+/** the other TV libraries, each with a Scan and an Anime switch */
 function OtherTv() {
   const { libs } = useVideoServer();
   const others = libs ? otherTv(libs) : [];
@@ -108,7 +118,7 @@ function OtherTv() {
     if (!libs) return;
     const has = (list: string[]) =>
       on ? [...list.filter((t) => t !== title), title] : list.filter((t) => t !== title);
-    // a library ticked Anime is one you want scanned: Scan is ticked with it
+    // a library switched to Anime is one you want scanned: Scan comes on with it
     if (kind === 'anime')
       void videoServer.setLibs({
         anime: has(libs.anime),
@@ -117,133 +127,151 @@ function OtherTv() {
     else void videoServer.setLibs({ tvMore: has(libs.tvMore) });
   };
   return (
-    <div
-      className="form-group video-library-selectors video-library-tv-more"
-      data-video-lib-tv-more-row=""
-      hidden={!others.length}
-    >
-      <label>Other TV Libraries:</label>
-      <div className="video-library-tv-more-list" data-video-lib-tv-more="">
+    <div data-video-lib-tv-more-row="" hidden={!others.length}>
+      <div data-video-lib-tv-more="">
         {others.map((l) => (
-          <div key={l.title} className="video-library-tv-more-item">
-            <span>{l.title}</span>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
+          <Row key={l.title} sub label={l.title} help="Another TV library on this server.">
+            <label className={s.inlineSwitch}>
+              Scan
+              <Switch
                 data-video-lib-tv-scan={l.title}
+                aria-label={`Scan ${l.title}`}
                 checked={libs!.tvMore.includes(l.title)}
                 onChange={(event) => tick(l.title, 'scan', event.target.checked)}
               />
-              {' Scan'}
             </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
+            <label className={s.inlineSwitch}>
+              Anime
+              <Switch
                 data-video-lib-tv-anime={l.title}
+                aria-label={`${l.title} is anime`}
                 checked={libs!.anime.includes(l.title)}
                 onChange={(event) => tick(l.title, 'anime', event.target.checked)}
               />
-              {' Anime'}
             </label>
-          </div>
+          </Row>
         ))}
       </div>
     </div>
   );
 }
 
-export function VideoServerConnection() {
-  const { active, users, status } = useVideoServer();
+/** the card on the Connections page (video side) */
+export function VideoServerConnection({ onView }: { onView?: () => void }) {
+  const { active, status } = useVideoServer();
+  const state = useVideoServerState();
   return (
-    <div className="settings-group" data-stg="connections" data-video-only="" data-svc-side="video">
-      <h3>Server Connection</h3>
-      <p className="setting-help-text" style={{ margin: '-4px 0 14px' }}>
-        Pick the server the video side uses. Fields are pre-filled from your Music settings — edit
-        them to point video at a different server without touching Music.
-      </p>
-
-      <div className="server-toggle-container">
-        <button
-          className={active === 'plex' ? 'server-toggle-btn active' : 'server-toggle-btn'}
-          type="button"
-          data-video-server-toggle="plex"
-          onClick={() => void videoServer.pick('plex')}
-        >
-          <img src="/static/img/brands/plex.png" alt="Plex" className="server-logo" />
-        </button>{' '}
-        <button
-          className={active === 'jellyfin' ? 'server-toggle-btn active' : 'server-toggle-btn'}
-          type="button"
-          data-video-server-toggle="jellyfin"
-          onClick={() => void videoServer.pick('jellyfin')}
-        >
-          <img src="/static/img/brands/jellyfin.png" alt="Jellyfin" className="server-logo" />
-        </button>
-      </div>
-
-      <Config server="plex">
-        <div className="form-group">
-          <label>Plex Server URL:</label>
-          <ConnInput field="plex-url" type="text" placeholder="http://localhost:32400" />
-        </div>
-        <div className="form-group">
-          <label>Plex Token:</label>
-          <ConnInput field="plex-token" type="password" placeholder="X-Plex-Token" />
-        </div>
-        <Note server="plex" />
-        <TestRow server="plex" />
-      </Config>
-
-      <Config server="jellyfin">
-        <div className="form-group">
-          <label>Jellyfin Server URL:</label>
-          <ConnInput field="jellyfin-url" type="text" placeholder="http://localhost:8096" />
-        </div>
-        <div className="form-group">
-          <label>API Key:</label>
-          <ConnInput field="jellyfin-key" type="password" placeholder="Jellyfin API Key" />
-        </div>
-        <Note server="jellyfin" />
-        <TestRow server="jellyfin" />
-        <div
-          className="form-group"
-          data-video-jellyfin-user-wrap=""
-          style={{ display: users ? 'block' : 'none', marginTop: '14px' }}
-        >
-          <label>Jellyfin User</label>
-          <select
-            data-video-jellyfin-user=""
-            value={users?.selected ?? ''}
-            onChange={(event) => void videoServer.pickUser(event.target.value)}
+    <Card
+      title="Server Connections"
+      hint="Pick one. Its fields start as your music side's: change them to point video at another server."
+      id="stg-video-server-card"
+      data-video-only=""
+      data-svc-side="video"
+      actions={
+        <>
+          <StatusWords tone={state.tone}>{`${videoServerName(active)}: ${state.text}`}</StatusWords>
+          <Btn
+            small
+            data-video-conn-test={active ?? ''}
+            disabled={!active}
+            onClick={() => active && void videoServer.test(active)}
           >
-            <option value="">Select User</option>
-            {users?.list.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name + (u.admin ? ' (admin)' : '')}
-              </option>
-            ))}
-          </select>
-          <small style={{ color: '#999', fontSize: '0.9em', display: 'block', marginTop: '5px' }}>
-            Which user&apos;s libraries to scan. The Movies/TV lists below reflect this user — pick
-            an admin to see everything.
-          </small>
-        </div>
-      </Config>
-
-      {/* which libraries on the chosen server the video side scans, one row each */}
-      <div className="form-group video-library-selectors">
-        <label>Movies Library:</label>
-        <LibrarySelect kind="movies" />
+            Test Server
+          </Btn>
+          <Btn small icon="gear" disabled={!active} onClick={() => onView?.()}>
+            View Configuration
+          </Btn>
+        </>
+      }
+    >
+      <div
+        id="video-server-pick"
+        className={s.servers}
+        data-count="2"
+        role="radiogroup"
+        aria-label="Video media server"
+      >
+        {VIDEO_SERVERS.map((server) => (
+          <button
+            key={server.id}
+            type="button"
+            role="radio"
+            aria-checked={server.id === active}
+            data-video-server-toggle={server.id}
+            className={server.id === active ? `${s.server} ${s.serverOn}` : s.server}
+            onClick={() => void videoServer.pick(server.id)}
+          >
+            <img src={server.logo} alt="" className={s.serverLogo} />
+            <span className={s.serverName}>{server.name}</span>
+          </button>
+        ))}
       </div>
-      <div className="form-group video-library-selectors">
-        <label>TV Shows Library:</label>
-        <LibrarySelect kind="tv" />
+      <div className={s.cardRows}>
+        <LibraryRow kind="movies" />
+        <LibraryRow kind="tv" />
+        <OtherTv />
       </div>
-      <OtherTv />
-      <div className="setting-help-text video-library-note">
-        Which libraries the video side scans. A library ticked Anime files its shows&apos; new
-        episodes in the Anime folder (Settings &gt; Library).{' '}
+      <p className={s.cardFoot}>
+        Which libraries the video side scans. A library switched to Anime files its shows' new
+        episodes in the Anime folder (Settings, Library).{' '}
         <span data-video-lib-save-status="">{status}</span>
+      </p>
+    </Card>
+  );
+}
+
+/** the chosen server's fields, for the side sheet */
+export function VideoServerFields() {
+  const { active, users, notes } = useVideoServer();
+  return (
+    <div data-ui="" data-video-only="" data-video-server-fields="">
+      <div data-video-server-config="plex" hidden={active !== 'plex'}>
+        <SheetGroup title="Connection" />
+        <SheetField label="Plex server URL" htmlFor="video-conn-plex-url">
+          <ConnInput field="plex-url" type="text" placeholder="http://localhost:32400" />
+        </SheetField>
+        <SheetField
+          label="Plex token"
+          htmlFor="video-conn-plex-token"
+          help={<span data-video-conn-note="plex">{notes.plex}</span>}
+        >
+          <ConnInput field="plex-token" type="password" placeholder="X-Plex-Token" />
+        </SheetField>
+      </div>
+      <div data-video-server-config="jellyfin" hidden={active !== 'jellyfin'}>
+        <SheetGroup title="Connection" />
+        <SheetField label="Jellyfin server URL" htmlFor="video-conn-jellyfin-url">
+          <ConnInput field="jellyfin-url" type="text" placeholder="http://localhost:8096" />
+        </SheetField>
+        <SheetField
+          label="API key"
+          htmlFor="video-conn-jellyfin-key"
+          help={<span data-video-conn-note="jellyfin">{notes.jellyfin}</span>}
+        >
+          <ConnInput field="jellyfin-key" type="password" placeholder="Jellyfin API Key" />
+        </SheetField>
+        <div data-video-jellyfin-user-wrap="" hidden={!users}>
+          <Row
+            label="Jellyfin user"
+            htmlFor="video-jellyfin-user"
+            field
+            help="Whose libraries are scanned. The library lists follow this user: pick an admin to see everything."
+          >
+            <Select
+              id="video-jellyfin-user"
+              data-video-jellyfin-user=""
+              value={users?.selected ?? ''}
+              onChange={(event) => void videoServer.pickUser(event.target.value)}
+            >
+              <option value="">Select User</option>
+              {users?.list.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name + (u.admin ? ' (admin)' : '')}
+                </option>
+              ))}
+            </Select>
+          </Row>
+        </div>
       </div>
     </div>
   );

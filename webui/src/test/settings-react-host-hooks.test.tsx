@@ -143,11 +143,14 @@ describe('the shell hands over to the React tabs', () => {
       .getElementById('stg-search-input')!
       .dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 0));
-    expect(fetcher).not.toHaveBeenCalled();
+    // the page's own reads (System > Server Activity asks for its settings)
+    // are not saves: nothing is posted
+    const posts = () => fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(posts()).toEqual([]);
     // nothing changed: the status stays at rest (#2187)
     expect(document.getElementById('save-settings')!.dataset.state).toBe('rest');
     document.getElementById('save-settings')!.click();
-    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
   });
 });
 

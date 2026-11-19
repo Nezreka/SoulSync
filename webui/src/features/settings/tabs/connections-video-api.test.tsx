@@ -9,7 +9,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { servicesModel, ServicesPart } from './connections-services';
+import { serviceActions, servicesModel, ServicesPart } from './connections-services';
 import { VideoApiGroup } from './connections-video-api';
 import { testVideoServices, videoKeys } from './video-keys';
 
@@ -70,7 +70,7 @@ function shown() {
 }
 
 describe('the video API Configuration', () => {
-  it('every card and its key or switches; its Test kept for the sheet, out of sight', () => {
+  it('every card and its key or switches, on the parts; its Test for the sheet', () => {
     const { container } = render(<VideoApiGroup />);
     expect(
       [...container.querySelectorAll('[data-video-service]')].map((f) =>
@@ -103,11 +103,22 @@ describe('the video API Configuration', () => {
       expect(el(`${k}-api-key`), k).not.toBeNull();
     for (const k of ['tvmaze', 'anilist', 'wikidata', 'ryd', 'sponsorblock', 'dearrow'])
       expect(el(`video-${k}-enabled`), k).not.toBeNull();
-    const tests = [...container.querySelectorAll<HTMLButtonElement>('[data-video-test-service]')];
-    expect(tests).toHaveLength(11);
-    expect(tests.every((t) => t.hidden && t.hasAttribute('data-svc-test'))).toBe(true);
-    for (const l of container.querySelectorAll('.form-group > label'))
-      expect(l.textContent).not.toMatch(/:\s*$/);
+    const frames = [...container.querySelectorAll<HTMLElement>('[data-video-service]')];
+    // each says what its Test tests, and gives the sheet that Test
+    expect(frames.every((f) => f.dataset.videoTestService)).toBe(true);
+    expect(frames.every((f) => serviceActions.get(`video:${f.dataset.videoService}`)?.test)).toBe(
+      true,
+    );
+    // no Test of their own: the sheet's foot has the one
+    expect(container.querySelector('.form-group, .test-button')).toBeNull();
+    expect(
+      [...container.querySelectorAll('button')].filter((b) => /test/i.test(b.textContent ?? '')),
+    ).toEqual([]);
+    for (const l of container.querySelectorAll('label')) expect(l.textContent).not.toMatch(/:\s*$/);
+    // TMDB and TVDB say they are required
+    expect(
+      frames.filter((f) => f.hasAttribute('data-svc-required')).map((f) => f.dataset.videoService),
+    ).toEqual(['tmdb', 'tvdb']);
   });
 
   it('loads each time the video settings page is shown', async () => {
@@ -158,7 +169,7 @@ describe('the video API Configuration', () => {
     answers['POST /api/video/enrichment/tmdb/test'] = { success: true, message: 'TMDB ok' };
     answers['POST /api/video/enrichment/wikidata/test'] = { success: false, error: 'down' };
     render(<VideoApiGroup />);
-    fireEvent.click(document.querySelector('[data-video-test-service="tmdb"]')!);
+    void serviceActions.get('video:tmdb')!.test!();
     await waitFor(() => expect(shell.showToast).toHaveBeenCalledWith('TMDB ok', 'success'));
     expect(shell.showToast).not.toHaveBeenCalledWith('API keys saved', 'success');
     fireEvent.click(el('video-anilist-enabled'));
@@ -211,7 +222,6 @@ describe('the video API Configuration', () => {
     fireEvent.click(document.querySelector('[data-service-tile="trakt"]')!);
     const frame = document.querySelector<HTMLElement>('[data-video-service="trakt"]')!;
     expect(frame.closest('#svc-modal-body')).not.toBeNull();
-    expect(frame.querySelector<HTMLElement>('.stg-service-body')!.style.display).toBe('block');
     fireEvent.input(el('trakt-api-key'), { target: { value: 'tr' } });
     el('trakt-api-key').dispatchEvent(new Event('change', { bubbles: true }));
     await waitFor(() => expect(posts().at(-1)?.trakt_api_key).toBe('tr'));

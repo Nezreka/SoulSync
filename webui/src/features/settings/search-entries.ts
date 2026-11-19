@@ -207,7 +207,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Video server',
     tab: 'connections',
-    anchor: heading('Server Connection'),
+    anchor: id('stg-video-server-card'),
     file: 'connections-video-server.tsx',
     hint: 'Plex or Jellyfin for movies and TV',
     keywords: 'plex jellyfin emby movies tv shows server connect',
@@ -215,15 +215,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Server Activity',
-    tab: 'connections',
-    anchor: heading('Server Activity'),
+    tab: 'advanced',
+    anchor: heading('Now playing'),
     file: 'server-activity-settings.tsx',
     hint: 'who is playing what, upload speed',
     keywords: 'tautulli streams now playing bandwidth',
   },
   {
     label: 'Server Activity upload speed',
-    tab: 'connections',
+    tab: 'advanced',
     anchor: id('sa-upload-mbps'),
     file: 'server-activity-settings.tsx',
     hint: 'Mbps',
@@ -231,7 +231,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Keep play history for',
-    tab: 'connections',
+    tab: 'advanced',
     anchor: id('sa-retention'),
     file: 'server-activity-settings.tsx',
     hint: 'Server Activity',

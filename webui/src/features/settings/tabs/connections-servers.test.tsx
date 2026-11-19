@@ -68,7 +68,19 @@ afterEach(async () => {
 const section = () => render(<ServerConnections store={store} />);
 const el = <T extends HTMLElement = HTMLInputElement>(id: string) =>
   document.getElementById(id) as T;
-const shown = (id: string) => el(id).style.display !== 'none';
+/** shown: nothing inside the panels hides it (the rebuilt panels use
+ *  `hidden`; without the sheet they all sit in a hidden home) */
+const shown = (id: string) => {
+  for (
+    let n: HTMLElement | null = el(id);
+    n && !n.hasAttribute('data-server-panels');
+    n = n.parentElement
+  )
+    if (n.hidden) return false;
+  return true;
+};
+const button = (within: HTMLElement, words: string) =>
+  [...within.querySelectorAll('button')].find((b) => b.textContent === words)!;
 const sent = (url: string) => calls.filter((c) => c.url === url);
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
@@ -308,7 +320,7 @@ describe('Plex', () => {
     expect(sent('/api/plex/verify-token')[0].body).toEqual({ url: 'http://mine', token: 'new' });
     expect(posted).toEqual([]);
     // Cancel goes back to the configured view
-    fireEvent.click(el('plex-pin-auth-flow').querySelector('.test-button')!);
+    fireEvent.click(button(el('plex-pin-auth-flow'), 'Cancel'));
     expect(shown('plex-setup')).toBe(false);
     expect(shown('plex-configuration')).toBe(true);
   });
@@ -331,7 +343,7 @@ describe('Navidrome and Music Assistant', () => {
     expect(shown('navidrome-playlist-clear')).toBe(true);
     await waitFor(() => expect(el<HTMLSelectElement>('navidrome-music-folder').value).toBe('A'));
     fireEvent.change(el('navidrome-playlist-username'), { target: { value: ' you ' } });
-    fireEvent.click(el('navidrome-playlist-login').querySelector('.test-button')!);
+    fireEvent.click(button(el('navidrome-playlist-login'), 'Save playlist account'));
     expect(shell.showToast).toHaveBeenCalledWith(
       'Enter the playlist account username and password',
       'warning',
@@ -339,7 +351,7 @@ describe('Navidrome and Music Assistant', () => {
     );
     fireEvent.change(el('navidrome-playlist-password'), { target: { value: 'pw' } });
     answers['/api/profiles/me/navidrome-login'] = { success: true, username: 'you' };
-    fireEvent.click(el('navidrome-playlist-login').querySelector('.test-button')!);
+    fireEvent.click(button(el('navidrome-playlist-login'), 'Save playlist account'));
     await waitFor(() =>
       expect(el('navidrome-playlist-status').textContent).toBe('Your synced playlists go to you.'),
     );
@@ -424,7 +436,8 @@ describe('the library pickers (were static/settings.js, before that beatport-ui.
     });
     await waitFor(() => expect(plex().value).toBe('Music'));
     expect([...plex().options].map((o) => o.textContent)).toEqual(['Podcasts', 'Music']);
-    expect(el('plex-library-selector-container').style.display).toBe('block');
+    // the picker itself is shown (its panel opens on the setup until asked)
+    expect(el('plex-library-selector-container').hidden).toBe(false);
   });
 
   it('prefers value over title, for the All Libraries sentinel', async () => {
@@ -439,12 +452,12 @@ describe('the library pickers (were static/settings.js, before that beatport-ui.
 
   it('hides the picker when the server has nothing, or does not answer', async () => {
     await plexWith({ success: true, libraries: [] });
-    expect(el('plex-library-selector-container').style.display).toBe('none');
+    expect(el('plex-library-selector-container').hidden).toBe(true);
     answers['/api/plex/music-libraries'] = () => {
       throw new Error('plex down');
     };
     await act(() => testConnection('plex', store));
-    expect(el('plex-library-selector-container').style.display).toBe('none');
+    expect(el('plex-library-selector-container').hidden).toBe(true);
   });
 
   it('a failed switch is a toast, never an alert', async () => {

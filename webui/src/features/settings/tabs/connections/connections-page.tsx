@@ -27,15 +27,20 @@ import {
   ServerConnections,
   serverName,
   serverState,
+  testConnection,
   useTestResults,
 } from '../connections-servers';
 import { ServicesPart, servicesModel } from '../connections-services';
-import { VideoServerConnection } from '../connections-video-server';
+import {
+  VideoServerConnection,
+  VideoServerFields,
+  useVideoServerState,
+  videoServerName,
+} from '../connections-video-server';
 import { ViewPanel } from '../downloads/downloads-page';
 import { SectionFlat } from '../parts';
-import { ServerActivitySettingsCard } from '../server-activity-settings';
 import { NotificationsSection } from '../video-row-lists';
-import { useVideoServer } from '../video-server';
+import { useVideoServer, videoServer } from '../video-server';
 
 const TAB = 'connections';
 
@@ -123,22 +128,17 @@ export function ConnectionsPage(props: SettingsTabProps) {
   const tests = useTestResults();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [viewing, setViewing] = useState<Server | null>(null);
+  const [videoSheet, setVideoSheet] = useState(false);
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   // the server panels live in the server sheet's body (hidden while closed)
   useEffect(() => setHost(document.getElementById('server-sheet-body')), []);
 
-  // the video side's server section is the old group: shown on its side
-  useEffect(() => {
-    for (const g of document.querySelectorAll<HTMLElement>(
-      '#settings-page .settings-group[data-svc-side="video"]',
-    ))
-      g.classList.toggle('svc-side-active', side === 'video');
-  });
-
   const saved = (settings as Record<string, unknown>).active_media_server;
   const server = typeof saved === 'string' && saved ? saved : 'plex';
-  const videoServerNow = useVideoServer().active;
+  const video = useVideoServer();
+  const videoServerNow = video.active;
+  const videoState = useVideoServerState();
   const meta = (settings.metadata || {}) as Record<string, unknown>;
   const source =
     meta.spotify_free === true && meta.fallback_source === 'spotify'
@@ -147,6 +147,17 @@ export function ConnectionsPage(props: SettingsTabProps) {
         ? meta.fallback_source
         : 'deezer';
   const serverNow = serverState(server, frame as never, tests.server);
+  // the sheet's answer: its own Test, else Test Server's while it is the active one
+  const viewingNow = viewing
+    ? serverState(
+        viewing,
+        frame as never,
+        viewing === server ? (tests[viewing] ?? tests.server) : tests[viewing],
+      )
+    : null;
+  const sheetSaid = viewing
+    ? (tests[viewing] ?? (viewing === server ? tests.server : undefined))
+    : undefined;
 
   const close = () => {
     setViewing(null);
@@ -179,12 +190,50 @@ export function ConnectionsPage(props: SettingsTabProps) {
         <div hidden={side === 'video'} data-media-server="music">
           <SectionLabel title="Media server" hint="Where your library is played from" />
           <ServerConnections store={store} host={host} onView={(s) => setViewing(s)} />
-          {/* next to the media server it reports on (Plex and Jellyfin) */}
-          <ServerActivitySettingsCard />
         </div>
         <div hidden={side !== 'video'} data-media-server="video">
           <SectionLabel title="Media server" hint="The server your movies and shows play from" />
-          <VideoServerConnection />
+          <VideoServerConnection onView={() => setVideoSheet(true)} />
+          <Sheet
+            open={videoSheet && side === 'video'}
+            onClose={() => setVideoSheet(false)}
+            id="video-server-sheet"
+            bodyClass="src-modal-open"
+            title={videoServerName(video.active)}
+            titleId="video-server-sheet-title"
+            sub="The video side's media server"
+            mark={
+              video.active ? (
+                <img src={SERVER_LOOK[video.active].logo} alt="" width={40} height={40} />
+              ) : null
+            }
+            status={<StatusWords tone={videoState.tone}>{videoState.text}</StatusWords>}
+            foot={
+              <>
+                <Btn
+                  icon="refresh"
+                  data-video-conn-test={video.active ?? ''}
+                  disabled={!video.active}
+                  onClick={() => video.active && void videoServer.test(video.active)}
+                >
+                  Test connection
+                </Btn>
+                <SheetFootSay>
+                  <StatusWords
+                    tone={video.active ? video.said[video.active]?.tone : undefined}
+                    live
+                  >
+                    {(video.active && video.said[video.active]?.text) || ''}
+                  </StatusWords>
+                </SheetFootSay>
+                <Btn kind="primary" onClick={() => setVideoSheet(false)}>
+                  Done
+                </Btn>
+              </>
+            }
+          >
+            <VideoServerFields />
+          </Sheet>
         </div>
 
         <div hidden={side === 'video'}>
@@ -204,16 +253,25 @@ export function ConnectionsPage(props: SettingsTabProps) {
             viewing ? <img src={SERVER_LOOK[viewing].logo} alt="" width={40} height={40} /> : null
           }
           status={
-            viewing === server ? (
-              <StatusWords tone={serverNow.tone}>{serverNow.text}</StatusWords>
-            ) : null
+            viewingNow ? <StatusWords tone={viewingNow.tone}>{viewingNow.text}</StatusWords> : null
           }
           bodyId="server-sheet-body"
           bodyClass="src-modal-open"
           foot={
             <>
+              {viewing ? (
+                <Btn
+                  icon="refresh"
+                  id="server-sheet-test"
+                  onClick={() => void testConnection(viewing, store)}
+                >
+                  {viewing === 'soulsync' ? 'Verify music library folder' : 'Test connection'}
+                </Btn>
+              ) : null}
               <SheetFootSay>
-                <StatusWords tone={tests.server?.tone}>{tests.server?.text || ''}</StatusWords>
+                <StatusWords id="server-sheet-result" tone={sheetSaid?.tone} live>
+                  {sheetSaid?.text || ''}
+                </StatusWords>
               </SheetFootSay>
               <Btn kind="primary" onClick={close}>
                 Done

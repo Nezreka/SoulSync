@@ -173,7 +173,8 @@ def _video_cards():
 def test_subdl_and_subsource_have_test_buttons():
     cards = _video_cards()
     for svc in ("subdl", "subsource", "opensubtitles", "fanart"):
-        assert f'<Test spec="{svc}">' in cards, svc
+        # (settings-bic phase 3) the card says what the service sheet's one Test tests
+        assert re.search(rf'service="{svc}"[^>]*test="{svc}"', cards, re.S), svc
 
 
 def test_autosync_toggle_wired(panel, org_src):
@@ -218,7 +219,7 @@ def test_provider_api_keys_have_fields_and_endpoints(panel):
     # each key field is id="<field>-api-key"
     assert 'id={`${field}-api-key`}' in cards
     for field in ("opensubtitles", "subdl", "subsource"):
-        assert f'<Key field="{field}"' in cards, field
+        assert re.search(rf'<Key\s+field="{field}"', cards), field
         assert f"'{field}'," in cards.split("export const KEY_FIELDS", 1)[1].split("]", 1)[0], field
     # keys save through the enrichment config endpoint, as <field>_api_key
     assert "export const CONFIG_URL = '/api/video/enrichment/config';" in cards

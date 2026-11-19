@@ -19,12 +19,28 @@ import { createPortal } from 'react-dom';
 import type { SettingsStore } from '../settings-store';
 
 import { settingsStore } from '../settings-store';
-import { Btn, Card, StatusWords, type Tone } from '../ui';
+import {
+  ActionRow,
+  Btn,
+  Card,
+  FieldLine,
+  More,
+  Note,
+  NumberField,
+  Row,
+  Say,
+  SecretField,
+  Select,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  TextField,
+  type Tone,
+} from '../ui';
 import s from '../ui/settings.module.css';
 import { statusFrames } from './connections';
 import { useLoadedDraft } from './library-card';
-import { SecretInput } from './parts';
-import { text, useSettings } from './source-panels';
+import { secretNote, text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
 type Shell = Window & {
@@ -324,8 +340,6 @@ async function detect(server: string, name: string, set: (url: string) => void, 
 // ── Plex ──
 
 const PIN_POLL_MS = 5000;
-const SHOW = undefined;
-const HIDE = { display: 'none' } as const;
 
 interface PlexView {
   /** #plex-configuration and #plex-setup shown */
@@ -531,45 +545,44 @@ function PlexServer({
     toast('Plex configuration cleared', 'success');
   }
 
-  const actionsStyle = {
-    justifyContent: 'flex-end',
-    width: '100%',
-    flexBasis: '100%',
-    marginTop: '8px',
-    display: configured ? 'none' : 'flex',
-  };
-
   return (
-    <div className={hidden} id="plex-container">
-      <div id="plex-configuration" style={view.config ? SHOW : HIDE}>
-        <div className="form-group">
-          <label>Plex Server URL:</label>
-          <input
-            type="url"
-            id="plex-url"
-            placeholder="http://localhost:32400"
-            disabled={view.locked}
-            value={url.value}
-            onChange={(event) => {
-              url.onChange(event.target.value);
-              edited();
-            }}
-          />
-          <div className="form-actions" id="plex-url-actions" style={actionsStyle}>
-            <button
-              id="plex-autodetect-button"
-              className="detect-button"
-              onClick={() =>
-                void detect('plex', 'Plex', (found) => store.set('plex', 'base_url', found))
-              }
-            >
-              Auto-detect
-            </button>
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Plex Token:</label>
-          <SecretInput
+    <div className={hidden} id="plex-container" data-ui="">
+      <div id="plex-configuration" hidden={!view.config}>
+        <SheetGroup title="Connection" />
+        <SheetField
+          label="Plex server URL"
+          htmlFor="plex-url"
+          help={view.locked ? 'Linked through plex.tv. Clear it to type another one.' : undefined}
+        >
+          <FieldLine>
+            <TextField
+              full
+              mono
+              type="url"
+              id="plex-url"
+              placeholder="http://localhost:32400"
+              disabled={view.locked}
+              value={url.value}
+              onChange={(event) => {
+                url.onChange(event.target.value);
+                edited();
+              }}
+            />
+            <span id="plex-url-actions" hidden={configured}>
+              <Btn
+                small
+                id="plex-autodetect-button"
+                onClick={() =>
+                  void detect('plex', 'Plex', (found) => store.set('plex', 'base_url', found))
+                }
+              >
+                Auto-detect
+              </Btn>
+            </span>
+          </FieldLine>
+        </SheetField>
+        <SheetField label="Plex token" htmlFor="plex-token" help={secretNote(token.value)}>
+          <SecretField
             id="plex-token"
             placeholder="X-Plex-Token"
             disabled={view.locked}
@@ -579,23 +592,16 @@ function PlexServer({
               edited();
             }}
           />
-          <div className="form-actions" id="plex-token-actions" style={actionsStyle}>
-            <button
-              id="plex-connect-button"
-              className="test-button"
-              onClick={() => void testConnection('plex', store)}
-            >
-              Connect
-            </button>
-          </div>
-        </div>
-        <div
-          className="form-group"
+        </SheetField>
+        <Row
           id="plex-library-selector-container"
-          style={{ display: libraries.shown ? 'block' : 'none' }}
+          hidden={!libraries.shown}
+          label="Music library"
+          htmlFor="plex-music-library"
+          field
+          help="Which Plex library SoulSync reads. Saved on its own, not in the settings file."
         >
-          <label>Music Library:</label>
-          <select
+          <Select
             id="plex-music-library"
             value={libraries.value}
             onChange={(event) => {
@@ -604,24 +610,31 @@ function PlexServer({
               if (value)
                 void choose('/api/plex/select-music-library', { library_name: value }, 'library');
             }}
-          >
-            {(libraries.options.length
-              ? libraries.options
-              : [{ value: '', label: 'Loading...' }]
-            ).map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <small style={{ color: '#999', fontSize: '0.9em', display: 'block', marginTop: '5px' }}>
-            Select which music library to use (doesn't affect config file)
-          </small>
-        </div>
-        <div className="form-actions">
-          <button
+            options={
+              libraries.options.length ? libraries.options : [{ value: '', label: 'Loading...' }]
+            }
+          />
+        </Row>
+        <ActionRow
+          label="Sign in again"
+          help="A fresh token through plex.tv/link. Your server URL stays as it is."
+        >
+          <Btn small id="plex-relink-button" onClick={startRelink}>
+            Re-link with Plex
+          </Btn>
+        </ActionRow>
+        <ActionRow
+          label={view.manual ? 'Stop setting it up by hand' : 'Forget this server'}
+          help={
+            view.manual
+              ? 'Back to linking through plex.tv.'
+              : 'Forgets this Plex server and its token.'
+          }
+        >
+          <Btn
+            small
+            kind={view.manual ? undefined : 'danger'}
             id="plex-config-action-button"
-            className="detect-button"
             title={
               view.manual
                 ? 'Cancel manual Plex configuration'
@@ -632,83 +645,78 @@ function PlexServer({
             onClick={() => (view.manual ? showSetup() : void clear())}
           >
             {view.manual ? 'Cancel' : 'Clear Configuration'}
-          </button>{' '}
-          <button
-            id="plex-relink-button"
-            className="detect-button"
-            onClick={startRelink}
-            title="Get a fresh token through plex.tv/link. Your server URL stays as it is."
-          >
-            Re-link with Plex
-          </button>
-        </div>
+          </Btn>
+        </ActionRow>
       </div>
-      <div id="plex-setup" style={view.setup ? SHOW : HIDE}>
-        <div id="plex-setup-buttons" className="form-actions" style={view.buttons ? SHOW : HIDE}>
-          <button
-            id="plex-link-to-plex-button"
-            className="detect-button"
-            style={configured ? HIDE : SHOW}
-            onClick={() => void startPin()}
+      <div id="plex-setup" hidden={!view.setup}>
+        <div id="plex-setup-buttons" hidden={!view.buttons}>
+          <ActionRow
+            label="Link to Plex"
+            help="Sign in at plex.tv/link with a code. SoulSync finds your server and saves its token."
+            hidden={configured}
           >
-            Link to Plex (OAuth)
-          </button>{' '}
-          <button
-            id="plex-manual-config-button"
-            className="detect-button"
-            style={configured ? HIDE : SHOW}
-            onClick={() => showConfiguration(false, true)}
+            <Btn
+              small
+              kind="primary"
+              id="plex-link-to-plex-button"
+              hidden={configured}
+              onClick={() => void startPin()}
+            >
+              Link to Plex
+            </Btn>
+          </ActionRow>
+          <ActionRow
+            label="Set it up by hand"
+            help="Type the server URL and a token yourself."
+            hidden={configured}
           >
-            Manually Configure Plex
-          </button>{' '}
-          <button
-            id="plex-view-config-button"
-            className="detect-button view-config-button"
-            style={configured ? SHOW : HIDE}
-            onClick={() => showConfiguration()}
+            <Btn
+              small
+              id="plex-manual-config-button"
+              hidden={configured}
+              onClick={() => showConfiguration(false, true)}
+            >
+              Manually Configure Plex
+            </Btn>
+          </ActionRow>
+          <ActionRow
+            label="Your Plex server"
+            help="The address and token SoulSync uses."
+            hidden={!configured}
           >
-            View Configuration
-          </button>
+            <Btn
+              small
+              id="plex-view-config-button"
+              hidden={!configured}
+              onClick={() => showConfiguration()}
+            >
+              View Configuration
+            </Btn>
+          </ActionRow>
         </div>
-        <div
-          id="plex-pin-auth-flow"
-          style={{
-            display: view.pin ? undefined : 'none',
-            padding: '16px',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '12px',
-            marginTop: '12px',
-          }}
-        >
-          <div className="form-group">
-            <label>Plex PIN Code</label>
-            <div
-              id="plex-pin-code"
-              style={{ fontSize: '1.4em', fontWeight: 700, marginTop: '8px' }}
-            >
+        <div id="plex-pin-auth-flow" hidden={!view.pin}>
+          <SheetGroup title="Link to Plex" />
+          <Row
+            label="Plex PIN code"
+            help={
+              <span id="plex-pin-instructions">
+                Go to <strong>https://plex.tv/link</strong> and enter this code.
+              </span>
+            }
+          >
+            <b id="plex-pin-code" className={s.pinCode}>
               {pin.code}
-            </div>
-          </div>
-          <div className="form-group">
-            <div
-              id="plex-pin-instructions"
-              className="setting-help-text"
-              style={{ marginBottom: '8px' }}
-            >
-              Go to <strong>https://plex.tv/link</strong> and enter the code shown above.
-            </div>
-            <div id="plex-pin-status" className="setting-help-text" style={{ color: '#ccc' }}>
-              {pin.status}
-            </div>
-          </div>
-          <div className="form-actions" style={{ gap: '10px' }}>
-            <button className="detect-button" id="plex-pin-refresh-button" onClick={restartPin}>
+            </b>
+          </Row>
+          <Say id="plex-pin-status">{pin.status}</Say>
+          <ActionRow label="Not working?" help="A new code, or stop linking.">
+            <Btn small id="plex-pin-refresh-button" onClick={restartPin}>
               Generate New Code
-            </button>{' '}
-            <button className="test-button" onClick={cancelPin}>
+            </Btn>
+            <Btn small kind="ghost" onClick={cancelPin}>
               Cancel
-            </button>
-          </div>
+            </Btn>
+          </ActionRow>
         </div>
       </div>
     </div>
@@ -783,42 +791,51 @@ function PlaylistLogin({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <div className="form-group" id="navidrome-playlist-login">
-      <label>Playlist account (optional):</label>
-      <input
-        type="text"
-        id="navidrome-playlist-username"
-        placeholder="Same as above"
-        autoComplete="off"
-        value={user}
-        onChange={(event) => setUser(event.target.value)}
-      />
-      <input
-        type="password"
-        id="navidrome-playlist-password"
-        placeholder="Password"
-        autoComplete="new-password"
-        style={{ marginTop: '6px' }}
-        value={pass}
-        onChange={(event) => setPass(event.target.value)}
-      />
-      <div className="setting-help-text" id="navidrome-playlist-status">
-        {saved ? `Your synced playlists go to ${saved}.` : PLAYLIST_HELP}
-      </div>
-      <div className="form-actions">
-        <button className="test-button" type="button" onClick={() => void save()}>
-          Save playlist account
-        </button>{' '}
-        <button
-          className="detect-button"
-          type="button"
+    <div id="navidrome-playlist-login">
+      <SheetGroup title="Playlist account (optional)" />
+      <SheetField
+        label="Username"
+        htmlFor="navidrome-playlist-username"
+        help={
+          <span id="navidrome-playlist-status">
+            {saved ? `Your synced playlists go to ${saved}.` : PLAYLIST_HELP}
+          </span>
+        }
+      >
+        <TextField
+          full
+          id="navidrome-playlist-username"
+          placeholder="Same as above"
+          autoComplete="off"
+          value={user}
+          onChange={(event) => setUser(event.target.value)}
+        />
+      </SheetField>
+      <SheetField label="Password" htmlFor="navidrome-playlist-password">
+        <TextField
+          full
+          type="password"
+          id="navidrome-playlist-password"
+          placeholder="Password"
+          autoComplete="new-password"
+          value={pass}
+          onChange={(event) => setPass(event.target.value)}
+        />
+      </SheetField>
+      <ActionRow label="Playlist account" help="Saved for your profile, on its own.">
+        <Btn
+          small
+          kind="ghost"
           id="navidrome-playlist-clear"
-          style={saved ? SHOW : HIDE}
+          hidden={!saved}
           onClick={() => void clear()}
         >
           Use the account above
-        </button>
-      </div>
+        </Btn>
+        <Btn small onClick={() => void save()}>
+          Save playlist account
+        </Btn>
+      </ActionRow>
     </div>
   );
 }
@@ -947,7 +964,7 @@ export function ServerConnections({
   const state = serverState(chosen, frame as never, tests.server);
 
   const panels: ReactNode = (
-    <div className="server-panels" data-server-panels="">
+    <div className="server-panels" data-server-panels="" data-ui="">
       <PlexServer
         hidden={hidden('plex')}
         store={store}
@@ -967,42 +984,55 @@ export function ServerConnections({
         libraries={jfLibs}
       />
       <div className={hidden('navidrome')} id="navidrome-container">
-        <div className="setting-help-text">
-          Navidrome users should enable <strong>Real Path</strong> in the Navidrome player/settings
-          so SoulSync can resolve imported and synced files correctly.
-        </div>
-        <div className="form-group">
-          <label>Navidrome Server URL:</label>
-          <input
-            type="url"
-            id="navidrome-url"
-            placeholder="http://localhost:4533"
-            value={ndUrl.value}
-            onChange={(event) => ndUrl.onChange(event.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label>Username:</label>
-          <input
-            type="text"
+        <Note info>
+          Turn on <strong>Real Path</strong> in Navidrome's player settings so SoulSync can find
+          imported and synced files.
+        </Note>
+        <SheetGroup title="Connection" />
+        <SheetField label="Navidrome server URL" htmlFor="navidrome-url">
+          <FieldLine>
+            <TextField
+              full
+              mono
+              type="url"
+              id="navidrome-url"
+              placeholder="http://localhost:4533"
+              value={ndUrl.value}
+              onChange={(event) => ndUrl.onChange(event.target.value)}
+            />
+            <Btn
+              small
+              onClick={() =>
+                void detect('navidrome', 'Navidrome', (found) =>
+                  store.set('navidrome', 'base_url', found),
+                )
+              }
+            >
+              Auto-detect
+            </Btn>
+          </FieldLine>
+        </SheetField>
+        <SheetField label="Username" htmlFor="navidrome-username">
+          <TextField
+            full
             id="navidrome-username"
             placeholder="Username"
             value={ndUser.value}
             onChange={(event) => ndUser.onChange(event.target.value)}
           />
-        </div>
-        <div className="form-group">
-          <label>Password:</label>
-          <SecretInput id="navidrome-password" placeholder="Password" {...ndPass} />
-        </div>
-        <PlaylistLogin store={store} />
-        <div
-          className="form-group"
+        </SheetField>
+        <SheetField label="Password" htmlFor="navidrome-password" help={secretNote(ndPass.value)}>
+          <SecretField id="navidrome-password" placeholder="Password" {...ndPass} />
+        </SheetField>
+        <Row
           id="navidrome-folder-selector-container"
-          style={{ display: ndFolders.picker.shown ? 'block' : 'none' }}
+          hidden={!ndFolders.picker.shown}
+          label="Music library"
+          htmlFor="navidrome-music-folder"
+          field
+          help="Which music library to import from."
         >
-          <label>Music Library</label>
-          <select
+          <Select
             id="navidrome-music-folder"
             value={ndFolders.picker.value}
             onChange={(event) => {
@@ -1015,54 +1045,36 @@ export function ServerConnections({
                 false,
               );
             }}
-          >
-            {(ndFolders.picker.options.length
-              ? ndFolders.picker.options
-              : [{ value: '', label: 'All Libraries' }]
-            ).map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <small>Select which music library to import from</small>
-        </div>
-        <div className="form-actions">
-          <button
-            className="detect-button"
-            onClick={() =>
-              void detect('navidrome', 'Navidrome', (found) =>
-                store.set('navidrome', 'base_url', found),
-              )
+            options={
+              ndFolders.picker.options.length
+                ? ndFolders.picker.options
+                : [{ value: '', label: 'All Libraries' }]
             }
-          >
-            Auto-detect
-          </button>{' '}
-          <button className="test-button" onClick={() => void testConnection('navidrome', store)}>
-            Test
-          </button>
-        </div>
+          />
+        </Row>
+        <PlaylistLogin store={store} />
       </div>
 
       <div className={hidden('music_assistant')} id="music_assistant-container">
-        <div className="setting-help-text">
+        <Note info>
           SoulSync reads one <strong>Local files</strong> (or SMB) music source of your Music
-          Assistant library, so every track has a file path. Create a long-lived token in Music
+          Assistant library, so every track has a file path. Make a long-lived token in Music
           Assistant under Settings, Users.
-        </div>
-        <div className="form-group">
-          <label>Music Assistant URL:</label>
-          <input
-            type="url"
-            id="music_assistant-url"
-            placeholder="http://localhost:8095"
-            value={maUrl.value}
-            onChange={(event) => maUrl.onChange(event.target.value)}
-          />
-          <div className="form-actions">
-            <button
-              className="detect-button"
-              type="button"
+        </Note>
+        <SheetGroup title="Connection" />
+        <SheetField label="Music Assistant URL" htmlFor="music_assistant-url">
+          <FieldLine>
+            <TextField
+              full
+              mono
+              type="url"
+              id="music_assistant-url"
+              placeholder="http://localhost:8095"
+              value={maUrl.value}
+              onChange={(event) => maUrl.onChange(event.target.value)}
+            />
+            <Btn
+              small
               onClick={() =>
                 void detect(
                   'music_assistant',
@@ -1073,20 +1085,34 @@ export function ServerConnections({
               }
             >
               Auto-detect
-            </button>
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Long-lived token:</label>
-          <SecretInput id="music_assistant-token" placeholder="Token" {...maToken} />
-        </div>
-        <div
-          className="form-group"
-          id="music_assistant-source-selector-container"
-          style={{ display: maSources.shown ? undefined : 'none' }}
+            </Btn>
+          </FieldLine>
+        </SheetField>
+        <SheetField
+          label="Long-lived token"
+          htmlFor="music_assistant-token"
+          help={secretNote(maToken.value)}
         >
-          <label>Music source</label>
-          <select
+          <SecretField id="music_assistant-token" placeholder="Token" {...maToken} />
+        </SheetField>
+        <SheetGroup title="Music source" />
+        <ActionRow
+          label="Sources"
+          help="Save the URL and token first, then load the sources to pick one."
+        >
+          <Btn small onClick={() => void loadMaSources(false).then(setMaSources)}>
+            Load sources
+          </Btn>
+        </ActionRow>
+        <Row
+          id="music_assistant-source-selector-container"
+          hidden={!maSources.shown}
+          label="Music source"
+          htmlFor="music_assistant-source"
+          field
+          help="The Local files source whose tracks SoulSync scans."
+        >
+          <Select
             id="music_assistant-source"
             value={maSources.value}
             onChange={(event) => {
@@ -1115,60 +1141,33 @@ export function ServerConnections({
                   ),
                 );
             }}
-          >
-            {maSources.options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <div className="setting-help-text">
-            The Local files source whose tracks SoulSync scans. Save the URL and token first, then
-            pick one.
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Source folder:</label>
-          <input
-            type="text"
-            id="music_assistant-source-folder"
-            placeholder="/media/music"
-            value={maFolder.value}
-            onChange={(event) => maFolder.onChange(event.target.value)}
+            options={maSources.options}
           />
-          <div className="setting-help-text">
-            Only needed when Music Assistant doesn't share it (2.10.9 doesn't). The folder your
-            source reads, as Music Assistant sees it.
-          </div>
-        </div>
-        <div className="form-actions">
-          <button
-            className="test-button"
-            type="button"
-            onClick={() => void loadMaSources(false).then(setMaSources)}
+        </Row>
+        <More label="More options" count={1} names="source folder">
+          <SheetField
+            label="Source folder"
+            htmlFor="music_assistant-source-folder"
+            help="Only needed when Music Assistant does not share it (2.10.9 does not). The folder your source reads, as Music Assistant sees it."
           >
-            Load sources
-          </button>
-        </div>
+            <TextField
+              full
+              mono
+              id="music_assistant-source-folder"
+              placeholder="/media/music"
+              value={maFolder.value}
+              onChange={(event) => maFolder.onChange(event.target.value)}
+            />
+          </SheetField>
+        </More>
       </div>
 
       <div className={hidden('soulsync')} id="soulsync-container">
-        <div className="soulsync-standalone-info">
-          <img src="/static/trans2.png" alt="SoulSync" className="soulsync-standalone-logo" />
-          <div className="soulsync-standalone-text">
-            <h4>Standalone Mode</h4>
-            <p>
-              SoulSync manages your library directly without an external media server. Import your
-              existing music first: move files into the import folder, then use a separate music
-              library folder for the processed library SoulSync creates.
-            </p>
-          </div>
-        </div>
-        <div className="form-actions">
-          <button className="test-button" onClick={() => void testConnection('soulsync', store)}>
-            Verify Music Library Folder
-          </button>
-        </div>
+        <Note info>
+          <strong>Standalone.</strong> SoulSync manages your library itself, with no media server.
+          Import your existing music first: move files into the import folder, and keep a separate
+          music library folder for the library SoulSync builds.
+        </Note>
       </div>
     </div>
   );
@@ -1244,58 +1243,42 @@ function JellyfinServer({
 }) {
   return (
     <div className={hidden} id="jellyfin-container">
-      <div className="form-group">
-        <label>Jellyfin Server URL:</label>
-        <input
-          type="url"
-          id="jellyfin-url"
-          placeholder="http://localhost:8096"
-          value={url.value}
-          onChange={(event) => url.onChange(event.target.value)}
-        />
-      </div>
-      <div className="form-group">
-        <label>API Key:</label>
-        <SecretInput id="jellyfin-api-key" placeholder="Jellyfin API Key" {...apiKey} />
-      </div>
-      <div className="form-actions">
-        <button
-          className="detect-button"
-          onClick={() =>
-            void detect('jellyfin', 'Jellyfin', (found) => store.set('jellyfin', 'base_url', found))
-          }
-        >
-          Auto-detect
-        </button>{' '}
-        <button className="test-button" onClick={() => void testConnection('jellyfin', store)}>
-          Test
-        </button>
-      </div>
-
-      <div className="form-group">
-        <label>API Timeout (seconds):</label>
-        <input
-          type="number"
-          id="jellyfin-timeout"
-          placeholder="120"
-          min="15"
-          max="300"
-          value={loaded ? timeout.value : '120'}
-          onChange={(event) => timeout.onChange(event.target.value)}
-        />
-        <small className="settings-hint">
-          Timeout for bulk API requests during database sync (15-300s). Increase if your Jellyfin
-          server is slow to respond.
-        </small>
-      </div>
-
-      <div
-        className="form-group"
+      <SheetGroup title="Connection" />
+      <SheetField label="Jellyfin server URL" htmlFor="jellyfin-url">
+        <FieldLine>
+          <TextField
+            full
+            mono
+            type="url"
+            id="jellyfin-url"
+            placeholder="http://localhost:8096"
+            value={url.value}
+            onChange={(event) => url.onChange(event.target.value)}
+          />
+          <Btn
+            small
+            onClick={() =>
+              void detect('jellyfin', 'Jellyfin', (found) =>
+                store.set('jellyfin', 'base_url', found),
+              )
+            }
+          >
+            Auto-detect
+          </Btn>
+        </FieldLine>
+      </SheetField>
+      <SheetField label="API key" htmlFor="jellyfin-api-key" help={secretNote(apiKey.value)}>
+        <SecretField id="jellyfin-api-key" placeholder="Jellyfin API Key" {...apiKey} />
+      </SheetField>
+      <Row
         id="jellyfin-user-selector-container"
-        style={{ display: users.picker.shown ? 'block' : 'none' }}
+        hidden={!users.picker.shown}
+        label="Jellyfin user"
+        htmlFor="jellyfin-user"
+        field
+        help="Whose music library is scanned."
       >
-        <label>Jellyfin User</label>
-        <select
+        <Select
           id="jellyfin-user"
           value={users.picker.value}
           onChange={(event) => {
@@ -1307,26 +1290,22 @@ function JellyfinServer({
               if (ok) void libraries.reload();
             });
           }}
-        >
-          {(users.picker.options.length
-            ? users.picker.options
-            : [{ value: '', label: 'Select User' }]
-          ).map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <small>Select which user's music library to scan</small>
-      </div>
-
-      <div
-        className="form-group"
+          options={
+            users.picker.options.length
+              ? users.picker.options
+              : [{ value: '', label: 'Select User' }]
+          }
+        />
+      </Row>
+      <Row
         id="jellyfin-library-selector-container"
-        style={{ display: libraries.picker.shown ? 'block' : 'none' }}
+        hidden={!libraries.picker.shown}
+        label="Music library"
+        htmlFor="jellyfin-music-library"
+        field
+        help="Which music library SoulSync reads. Saved on its own, not in the settings file."
       >
-        <label>Music Library</label>
-        <select
+        <Select
           id="jellyfin-music-library"
           value={libraries.picker.value}
           onChange={(event) => {
@@ -1335,18 +1314,31 @@ function JellyfinServer({
             if (value)
               void choose('/api/jellyfin/select-music-library', { library_name: value }, 'library');
           }}
+          options={
+            libraries.picker.options.length
+              ? libraries.picker.options
+              : [{ value: '', label: 'Select Library' }]
+          }
+        />
+      </Row>
+      <More label="More options" count={1} names="API timeout">
+        <Row
+          label="API timeout"
+          htmlFor="jellyfin-timeout"
+          field
+          help="For bulk requests during a database sync (15 to 300). Raise it if your Jellyfin server is slow to answer."
         >
-          {(libraries.picker.options.length
-            ? libraries.picker.options
-            : [{ value: '', label: 'Select Library' }]
-          ).map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <small>Select which music library to use (doesn't affect config file)</small>
-      </div>
+          <NumberField
+            id="jellyfin-timeout"
+            placeholder="120"
+            min="15"
+            max="300"
+            unit="seconds"
+            value={loaded ? timeout.value : '120'}
+            onChange={(event) => timeout.onChange(event.target.value)}
+          />
+        </Row>
+      </More>
     </div>
   );
 }

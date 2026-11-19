@@ -91,7 +91,7 @@ function placeOf(el: HTMLElement): Pick<Hit, 'tab' | 'view' | 'open'> & { trail:
   } else if (service?.dataset.service) {
     open = { service: service.dataset.service };
     trail.push(
-      tidy(service.querySelector('.service-title')?.textContent) || service.dataset.service,
+      tidy((service.dataset.svcTitle || '').replace(/\s*\(.*$/, '')) || service.dataset.service,
     );
   } else {
     // the card or the folded section it sits in

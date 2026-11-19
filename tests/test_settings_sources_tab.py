@@ -958,9 +958,13 @@ def _fn(src, name):
 
 def _video_cards():
     """the React video cards' ids (SETTINGS_PORT.md video pass V3a), each a
-    <Card service="..."> whose frame carries data-video-service={service}"""
+    <Card service="..."> drawn by ServiceFrame kind="video", whose frame carries
+    data-video-service (the services' attr for the video kind)"""
     cards = _read(_TABS + "connections-video-api.tsx")
-    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    assert '<ServiceFrame\n      kind="video"' in cards
+    services = _read(_TABS + "connections-services.tsx")
+    assert "video: { label: 'Video', attr: 'data-video-service' }" in services
+    assert "{...{ [attr]: service }}" in _fn(services, "ServiceFrame")
     return re.findall(r'<Card\s+service="([^"]+)"', cards)
 
 
@@ -1002,18 +1006,18 @@ def test_opening_a_service_moves_the_panel_and_never_clones_it(tiles):
     The panel also has to go home to the EXACT slot it came from, or the
     accordion groups silently reorder themselves as services get opened.
     """
-    part = _fn(tiles, "ServicesPart")
-    assert 'body.appendChild(frame)' in part, "the panel is not moved into the modal"
+    # (settings-bic) every card is React now: what moves is the card's
+    # wrapper (React keeps hearing a portal wherever its wrapper sits), into
+    # the sheet's body while open, and home in page order after
     assert 'cloneNode' not in tiles, "cloning would duplicate every id in the panel"
-    assert 'parent: frame.parentNode' in part and 'next: frame.nextSibling' in part, (
-        "the panel's original slot is not recorded - it cannot go back where it was"
-    )
-    # home in the effect's cleanup: it runs before the closed modal is drawn
-    cleanup = part[part.index('return () => {', part.index('body.appendChild(frame)')):]
-    assert 'insertBefore(frame, lifted.next)' in cleanup, "the panel is not restored to its slot"
-    # a React card is never moved itself: its wrapper is (React keeps hearing it)
+    assert 'innerHTML' not in tiles
     place = _fn(tiles, "useServicePlace")
     assert 'body.appendChild(wrap)' in place and 'placeHome(home, wrap)' in place
+    home = _fn(tiles, "placeHome")
+    assert "Number((a as HTMLElement).dataset.order) - Number((b as HTMLElement).dataset.order)" in home, (
+        "the cards do not go back in page order"
+    )
+    assert "createPortal(" in _fn(tiles, "ServiceFrame")
 
 
 def test_closing_a_service_lands_a_pending_key(tiles):
@@ -1121,7 +1125,9 @@ def test_a_service_without_artwork_still_looks_deliberate(tiles):
     The colour comes off the card (its dot) rather than out of a stylesheet map,
     so a service added later picks its hue up with no CSS change."""
     meta = _fn(tiles, "serviceMeta")
-    assert "querySelector<HTMLElement>('.stg-service-dot')?.style.color" in meta
+    # (settings-bic phase 3) the card's colour is its frame's data attribute
+    assert "frame.dataset.svcColour" in meta
+    assert "data-svc-colour={colour}" in _fn(tiles, "ServiceFrame")
     mark = _fn(tiles, "ServiceMark")
     assert "brand={meta.colour ? brandRgb(meta.colour) : undefined}" in mark, (
         "the brand colour never reaches the mark"
@@ -1167,8 +1173,9 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     page = _read(_TABS + "connections/connections-page.tsx")
     assert '<div hidden={side === \'video\'} data-media-server="music">' in page
     assert '<div hidden={side !== \'video\'} data-media-server="video">' in page
-    # the video section keeps the class its own stylesheet shows it by
-    assert "g.classList.toggle('svc-side-active', side === 'video')" in page
+    # (settings-bic phase 3) the video server is a card on the parts in its
+    # own section: no old group to switch on with svc-side-active
+    assert '<VideoServerConnection onView={() => setVideoSheet(true)} />' in page
     build = _fn(tiles, "ServicesPart")
     assert "title={state.kind === 'video' ? 'Video services' : 'Services'}" in build
 
@@ -1216,7 +1223,11 @@ def test_both_server_sections_use_the_same_copy_style(index):
     assert 'className="callback-help"' not in seg, (
         "the video server copy is back on the off-scale italic class"
     )
-    assert '<p className="setting-help-text"' in seg
+    # (settings-bic phase 3) both are the parts' Card with a one-line hint,
+    # and the closing note is the card's quiet foot line
+    servers = _read(_TABS + "connections-servers.tsx")
+    assert 'title="Server Connections"' in seg and 'title="Server Connections"' in servers
+    assert '<p className={s.cardFoot}>' in seg
 
 
 def test_the_server_toggles_are_one_control_on_both_sides():
@@ -1271,14 +1282,13 @@ def test_a_server_row_is_one_setting_per_row(index):
     """
     # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
     src = _read(_TABS + "connections-video-server.tsx")
-    rows = re.findall(r'<div className="form-group video-library-selectors">(.*?)</div>', src, re.S)
-    assert len(rows) == 2, rows
-    # each select sits in its OWN form-group
-    assert [re.findall(r'<LibrarySelect kind="(\w+)"', r) for r in rows] == [["movies"], ["tv"]]
-    assert 'data-video-lib-select={kind}' in src
+    # (settings-bic phase 3) each library is its own Row of the parts
+    assert re.findall(r'<LibraryRow kind="(\w+)" />', src) == ["movies", "tv"]
+    row = _fn(src, "LibraryRow")
+    assert row.count("<Row ") == 2 and 'data-video-lib-select={kind}' in row
 
-    # the caption is help text, not a row
-    assert 'className="setting-help-text video-library-note"' in src
+    # the caption is the card's foot line, not a row
+    assert '<p className={s.cardFoot}>' in src
 
 
 def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):

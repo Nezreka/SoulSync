@@ -1,9 +1,9 @@
 /**
  * Connections > Services on the settings parts: the Music / Video switch, the
  * tiles with their status from what SoulSync knows (never from a text box
- * having something in it), and the side sheet a tile opens: a React card
- * moved in by its wrapper (and still heard), a vanilla card lifted in and put
- * back where it was, one Test in the sheet's foot.
+ * having something in it), and the side sheet a tile opens: a card moved in
+ * by its wrapper (and still heard), put back in page order; one Test in the
+ * sheet's foot that calls the card's own, and a sign-in as its main action.
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -52,29 +52,23 @@ afterEach(() => {
   delete shell.landPendingSettingsSave;
 });
 
-/** the page around the parts: the settings page, the hidden group the cards
- *  live in, a vanilla video card and the two server sections */
+/** the page around the parts: the settings page and the hidden groups the
+ *  music and video cards live in */
 function page() {
   const root = document.createElement('div');
   root.id = 'settings-page';
   root.innerHTML = `
     <div data-stg-react="connections" data-stg-part="services" style="display: contents"></div>
     <div data-stg-react="connections" data-stg-part="api-music" style="display: contents"></div>
-    <div class="settings-group" data-stg="connections" data-svc-legacy>
-      <div class="api-service-frame stg-service" data-video-service="omdb">
-        <div class="stg-service-header"><span class="stg-service-dot" style="color: #f5c518;"></span>
-          <h4 class="service-title">OMDb (Ratings)</h4></div>
-        <div class="stg-service-body"><input type="text" id="omdb-key" value=""></div>
-      </div>
-      <span id="after-omdb"></span>
-    </div>
-    <div class="settings-group" data-svc-side="music"></div>
-    <div class="settings-group" data-svc-side="video"></div>`;
+    <div data-stg-react="connections" data-stg-part="api-video" style="display: contents"></div>`;
   document.body.append(root);
   const slot = (part: string) => root.querySelector<HTMLElement>(`[data-stg-part="${part}"]`)!;
   render(<ServicesPart />, { container: slot('services') });
   render(<ConnectionsTab store={settingsStore} part="api-music" opened={0} active={false} />, {
     container: slot('api-music'),
+  });
+  render(<ConnectionsTab store={settingsStore} part="api-video" opened={0} active={false} />, {
+    container: slot('api-video'),
   });
   return root;
 }
@@ -210,8 +204,9 @@ describe('the sheet', () => {
     expect(document.getElementById('svc-modal-title')!.textContent).toBe('Deezer');
     expect(document.getElementById('svc-modal-sub')!.textContent).toBe('Favorites & Playlists');
     expect(document.body.classList.contains('src-modal-open')).toBe(true);
-    // the body shows as the content, not a collapsed accordion
-    expect(body.querySelector<HTMLElement>('.stg-service-body')!.style.display).toBe('block');
+    // the card is on the parts: fields, not the old page's form groups
+    expect(body.querySelector('[data-svc-body][data-ui]')).not.toBeNull();
+    expect(body.querySelector('.form-group')).toBeNull();
     // typing in it still saves (the bug a moved React node had)
     fireEvent.change(document.getElementById('deezer-app-id')!, { target: { value: 'dz' } });
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -240,25 +235,25 @@ describe('the sheet', () => {
       'listenbrainz',
       'hydrabase',
     ]);
-    // and the test row stays last
-    expect(home.lastElementChild!.className).toBe('api-test-buttons');
   });
 
-  it('has one Test, in its foot: it presses the card’s own, so it sends what it always sent', async () => {
+  it('has one Test, in its foot: it calls the card’s own test, so it sends what it always sent', async () => {
     // the page's own testConnection, as host.tsx puts it on the window
-    shell.testConnection = (service: string) => testConnection(service);
+    shell.testConnection = vi.fn((service: string) => testConnection(service));
     page();
     act(() => settingsStore.hydrate({ spotify: {} }));
     await waitFor(() => expect(tile('discogs')).not.toBeNull());
     fireEvent.click(tile('discogs'));
     const card = document.querySelector<HTMLElement>('#svc-modal-body [data-service="discogs"]')!;
-    // the card's own button is there, out of sight
-    const own = card.querySelector<HTMLButtonElement>('[data-svc-test]')!;
-    expect(own.hidden).toBe(true);
-    const pressed = vi.fn();
-    own.addEventListener('click', pressed);
+    // no button of its own for it: one Test per sheet
+    expect(card.querySelector('[data-svc-test], .test-button')).toBeNull();
+    expect(
+      [...document.querySelectorAll('#service-config-modal button')].filter((b) =>
+        /test/i.test(b.textContent ?? ''),
+      ),
+    ).toHaveLength(1);
     fireEvent.click(document.getElementById('svc-modal-test')!);
-    expect(pressed).toHaveBeenCalledOnce();
+    await waitFor(() => expect(shell.testConnection).toHaveBeenCalledWith('discogs'));
     await waitFor(() =>
       expect(calls.some((c) => c.includes('/api/test-connection') && c.includes('discogs'))).toBe(
         true,
@@ -271,17 +266,32 @@ describe('the sheet', () => {
     delete shell.testConnection;
   });
 
-  it('a vanilla card is lifted in and put back exactly where it was', () => {
+  it('a card with a sign-in has it as the main action; the others have Done', async () => {
+    page();
+    act(() => settingsStore.hydrate({ spotify: {} }));
+    await waitFor(() => expect(tile('spotify')).not.toBeNull());
+    const foot = () =>
+      [...document.querySelectorAll('#service-config-modal button')].map((b) => b.textContent);
+    fireEvent.click(tile('spotify'));
+    expect(foot()).toContain('Authenticate');
+    expect(foot()).not.toContain('Done');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(tile('genius'));
+    expect(foot()).toContain('Done');
+    expect(foot()).not.toContain('Authenticate');
+  });
+
+  it('a video card moves in, and goes home when the sheet closes', () => {
     page();
     act(() => servicesModel.switchKind('video'));
     fireEvent.click(tile('omdb'));
     const frame = document.querySelector<HTMLElement>('[data-video-service="omdb"]')!;
-    expect(frame.parentElement!.id).toBe('svc-modal-body');
-    expect(frame.querySelector<HTMLElement>('.stg-service-body')!.style.display).toBe('block');
+    expect(frame.closest('#svc-modal-body')).not.toBeNull();
     expect(document.getElementById('svc-modal-title')!.textContent).toBe('OMDb');
+    expect(document.getElementById('svc-modal-sub')!.textContent).toBe('Ratings');
     fireEvent.click(document.querySelector('#service-config-modal button[aria-label="Close"]')!);
-    expect(frame.nextElementSibling!.id).toBe('after-omdb');
-    expect(frame.querySelector<HTMLElement>('.stg-service-body')!.style.display).toBe('');
+    expect(frame.closest('#svc-modal-body')).toBeNull();
+    expect(frame.closest('[data-svc-legacy]')).not.toBeNull();
     expect(document.body.classList.contains('src-modal-open')).toBe(false);
   });
 
