@@ -9431,7 +9431,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT m.id, m.tmdb_id, m.title, m.year, "
+                "SELECT m.id, m.tmdb_id, m.server_source, m.title, m.year, "
                 f"CASE WHEN {trusted} THEN m.server_added_at ELSE m.added_at END AS added_at, "
                 f"CASE WHEN {trusted} THEN 'server' ELSE 'first_seen' END AS added_from, "
                 "m.runtime_minutes, m.hands_off, "
@@ -9460,7 +9460,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT s.id, s.tmdb_id, s.title, s.year, s.status, s.series_type, s.hands_off, "
+                "SELECT s.id, s.tmdb_id, s.server_source, s.title, s.year, s.status, s.series_type, s.hands_off, "
                 f"COALESCE({trusted}, s.added_at) AS added_at, "
                 f"CASE WHEN {trusted} IS NULL THEN 'first_seen' ELSE 'server' END AS added_from, "
                 + cols + ", "

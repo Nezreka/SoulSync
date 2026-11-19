@@ -121,29 +121,30 @@ def _play_log_watch(db):
         where = _locate(r, index, movie_ids, ep_ids, ep_shows)
         if where is None:
             continue          # not a title the library holds
-        kind, lid, eid = where
+        kind, places = where
         when = _stamp(r.get("last_seen"))
         finished = r.get("source") == "plex_history" or int(r.get("percent") or 0) >= FINISHED_PERCENT
         part_way = not finished and int(r.get("max_position_ms") or 0) > 0
         if when and (out["last"].get(acct) or "") < when:
             out["last"][acct] = when
-        if kind == "movie":
-            st = out["movie"].setdefault(lid, {}).setdefault(
-                acct, {"plays": 0, "last": None, "in_progress_at": None})
-        else:
-            st = out["show"].setdefault(lid, {}).setdefault(
-                acct, {"episodes": set(), "plays": 0, "last": None, "in_progress_at": None})
-        if finished:
-            st["plays"] += 1
-            st["last"] = when or st["last"]
-            if kind == "show":
-                st["episodes"].add(eid)
-            if kind == "movie" or st.get("_open") == eid:
-                st["in_progress_at"] = None      # finished since: no longer part-way
-        elif part_way:
-            st["in_progress_at"] = when
-            if kind == "show":
-                st["_open"] = eid
+        for lid, eid in places:
+            if kind == "movie":
+                st = out["movie"].setdefault(lid, {}).setdefault(
+                    acct, {"plays": 0, "last": None, "in_progress_at": None})
+            else:
+                st = out["show"].setdefault(lid, {}).setdefault(
+                    acct, {"episodes": set(), "plays": 0, "last": None, "in_progress_at": None})
+            if finished:
+                st["plays"] += 1
+                st["last"] = when or st["last"]
+                if kind == "show":
+                    st["episodes"].add(eid)
+                if kind == "movie" or st.get("_open") == eid:
+                    st["in_progress_at"] = None      # finished since: no longer part-way
+            elif part_way:
+                st["in_progress_at"] = when
+                if kind == "show":
+                    st["_open"] = eid
     for kind in ("movie", "show"):
         for accts in out[kind].values():
             for st in accts.values():
@@ -152,7 +153,9 @@ def _play_log_watch(db):
 
 
 def _locate(r, index, movie_ids, ep_ids, ep_shows):
-    """(kind, library id, episode id) for one logged play, or None."""
+    """(kind, [(library id, episode id)]) for one logged play, or None. a play
+    the log can only place by its TMDB id goes to every row holding that id:
+    which copy was played isn't known, and Delete Title takes them together."""
     import json
     link = r.get("link")
     if isinstance(link, str):
@@ -164,24 +167,27 @@ def _locate(r, index, movie_ids, ep_ids, ep_shows):
     if r["kind"] == "movie":
         if link.get("kind") == "movie" and link.get("id"):
             if link.get("source") == "library":
-                return ("movie", int(link["id"]), None)
+                return ("movie", [(int(link["id"]), None)])
             ids = index["movie"].get(int(link["id"]), []) if link.get("source") == "tmdb" else []
             if ids:
-                return ("movie", ids[0], None)
+                return ("movie", [(i, None) for i in ids])
         mid = movie_ids.get(str(r.get("rating_key") or ""))
-        return ("movie", mid, None) if mid is not None else None
+        return ("movie", [(mid, None)]) if mid is not None else None
     eid = ep_ids.get(str(r.get("rating_key") or ""))
     if eid is not None and ep_shows.get(eid) is not None:
-        return ("show", ep_shows[eid], eid)
+        return ("show", [(ep_shows[eid], eid)])
     if link.get("kind") == "show" and link.get("id") and r.get("season") is not None and r.get("episode") is not None:
         if link.get("source") == "library":
             shows = [int(link["id"])]
         else:
             shows = index["show"].get(("tmdb", int(link["id"])), [])
+        hits = []
         for sid in shows:
             eid = index["episode"].get((sid, int(r["season"]), int(r["episode"])))
             if eid is not None:
-                return ("show", sid, eid)
+                hits.append((sid, eid))
+        if hits:
+            return ("show", hits)
     return None
 
 
@@ -242,6 +248,55 @@ def _merge_history(people: dict, plays: dict, person, owned=None) -> None:
             p["in_progress_at"] = h["in_progress_at"]
 
 
+def _merge_people(into: dict, people: dict) -> None:
+    """fold one copy's watchers into its title's: each person keeps the larger
+    of each count and the latest of each date, so a watch on any copy counts
+    for the title."""
+    for key, p in people.items():
+        q = into.get(key)
+        if q is None:
+            into[key] = dict(p)
+            continue
+        for n in ("plays", "frac", "offset"):
+            q[n] = max(q.get(n) or 0, p.get(n) or 0)
+        for n in ("last", "in_progress_at"):
+            if p.get(n) and (q.get(n) or "") < p[n]:
+                q[n] = p[n]
+
+
+def _title_groups(rows) -> list:
+    """the library rows as titles: every row with the same TMDB id on the same
+    server is one title, the rows Delete Title removes together
+    (title_delete_rows), lowest id first. a row with no TMDB id is its own."""
+    groups: dict = {}
+    for r in sorted(rows, key=lambda r: r["id"]):
+        key = (int(r["tmdb_id"]), r.get("server_source")) if r.get("tmdb_id") else ("row", r["id"])
+        groups.setdefault(key, []).append(r)
+    return list(groups.values())
+
+
+def _title_row(group) -> dict:
+    """one row standing for a title's copies: the lowest id's, with the size
+    of every copy (what a delete frees), the padlock if any copy has it, the
+    newest add date (a copy that just arrived is a new arrival) and any data a
+    copy lacks taken from another. ``group_ids`` lists every copy."""
+    row = dict(group[0])
+    row["group_ids"] = [r["id"] for r in group]
+    if len(group) == 1:
+        return row
+    for r in group[1:]:
+        for k, v in r.items():
+            if row.get(k) is None and v is not None:
+                row[k] = v
+    row["size_bytes"] = sum(int(r.get("size_bytes") or 0) for r in group)
+    runtimes = [r["runtime_minutes"] for r in group if r.get("runtime_minutes")]
+    row["runtime_minutes"] = max(runtimes) if runtimes else None
+    row["hands_off"] = int(any(r.get("hands_off") for r in group))
+    newest = max(group, key=lambda r: r.get("added_at") or "")
+    row["added_at"], row["added_from"] = newest.get("added_at"), newest.get("added_from")
+    return row
+
+
 def _active(activity: dict, now: datetime, active_days: int) -> int:
     """how many people watched anything lately. the owner alone always counts:
     with nobody else to compare, an idle owner still decides."""
@@ -299,7 +354,7 @@ def _requester_watched(req, admins, known, people):
 
 
 def _failed_grabs(kind, row, failed, history):
-    keys = [(kind, "library", str(row["id"]))]
+    keys = [(kind, "library", str(i)) for i in row.get("group_ids") or [row["id"]]]
     if row.get("tmdb_id"):
         keys.append((kind, "tmdb", str(int(row["tmdb_id"]))))
     if not any(k in history for k in keys):
@@ -356,24 +411,34 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     out = {"movie": [], "show": []}
     for kind, rows, members_by in (("movie", db.shelf_life_movies(trust_after) or [], movie_members),
                                    ("show", db.shelf_life_shows(trust_after) or [], show_members)):
-        median = sl.median_gb_per_hour(rows)
-        median_ratio = sl.median_lists_per_vote(rows)
-        for row in rows:
-            members = members_by.get(row["id"]) or {}
+        # a title is all its copies: scored, gated and sized as the rows
+        # Delete Title removes together, so a watch, a play or a padlock on
+        # any copy holds them all
+        groups = _title_groups(rows)
+        titles = [_title_row(g) for g in groups]
+        median = sl.median_gb_per_hour(titles)
+        median_ratio = sl.median_lists_per_vote(titles)
+        for group, row in zip(groups, titles, strict=True):
+            people = {}
+            for copy in group:
+                members = members_by.get(copy["id"]) or {}
+                if kind == "movie":
+                    mine = _movie_people(copy, members)
+                    if server_plays:
+                        _merge_history(mine, server_plays["movie"].get(copy["id"]), person)
+                else:
+                    mine = _show_people(copy, members)
+                    if server_plays:
+                        _merge_history(mine, server_plays["show"].get(copy["id"]), person,
+                                       owned=int(copy.get("owned_episodes") or 0))
+                _merge_people(people, mine)
             if kind == "movie":
-                people = _movie_people(row, members)
-                if server_plays:
-                    _merge_history(people, server_plays["movie"].get(row["id"]), person)
                 # anyone part-way through holds it: the library's own resume
                 # points whenever they're from, the log's within active days
                 in_progress = any(p.get("offset", 0) > 0 or _recent(p.get("in_progress_at"), now, active_days)
                                   for p in people.values())
                 watching = False
             else:
-                people = _show_people(row, members)
-                if server_plays:
-                    _merge_history(people, server_plays["show"].get(row["id"]), person,
-                                   owned=int(row.get("owned_episodes") or 0))
                 # an episode left part-way long ago doesn't hold a whole show forever
                 in_progress = any(_recent(p.get("in_progress_at"), now, active_days) for p in people.values())
                 # someone watching a show finishes an episode every so often
@@ -390,7 +455,7 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
                 "kind": kind, "title": row.get("title"), "year": row.get("year"),
                 "added_at": row.get("added_at"),
                 "added_from": row.get("added_from"),
-                "playing": (kind, row["id"]) in playing,
+                "playing": any((kind, i) in playing for i in row["group_ids"]),
                 "in_progress": in_progress,
                 "watching": watching,
                 # the padlock: reviewed and locked, automation leaves it alone
@@ -772,13 +837,15 @@ class ShelfLifeJob(VideoRepairJob):
                 result.scanned += 1
                 context.report(processed=done, current_item=row.get("title"))
                 r = sl.score(facts, settings, now)
-                stored.append({"item_id": row["id"], "score": r["score"], "gate": r["gate"],
+                copies = row.get("group_ids") or [row["id"]]
+                stored.extend({"item_id": i, "score": r["score"], "gate": r["gate"],
                                "signals": r["signals"], "reasons": r["reasons"],
-                               "size_bytes": row.get("size_bytes")})
+                               "size_bytes": row.get("size_bytes")} for i in copies)
                 if not r["candidate"]:
                     continue
-                entity_id = ("m:%d" if kind == "movie" else "s:%d") % row["id"]
-                if kind == "movie" and entity_id in held:
+                prefix = "m:%d" if kind == "movie" else "s:%d"
+                entity_id = prefix % row["id"]
+                if kind == "movie" and any(prefix % i in held for i in copies):
                     result.skipped += 1          # Watched Cleanup already has it
                     continue
                 valid.append(entity_id)
@@ -786,16 +853,20 @@ class ShelfLifeJob(VideoRepairJob):
                 if row.get("year"):
                     name = "%s (%s)" % (name, row["year"])
                 said = [x["text"] for x in r["reasons"] if x["signal"] in sl.SIGNALS]
+                size = _gb(row.get("size_bytes"))
+                if len(copies) > 1:
+                    size = "%s in %d copies" % (size, len(copies))
                 context.create_finding(
                     finding_type=FINDING_TYPE, severity="info",
                     entity_type=kind, entity_id=entity_id,
-                    title="%s: Shelf Life %d, %s" % (name, r["score"], _gb(row.get("size_bytes"))),
+                    title="%s: Shelf Life %d, %s" % (name, r["score"], size),
                     description="; ".join(said[:3]),
                     # library_id + kind is what the findings page reads for the poster
                     details={"kind": kind, "item_id": row["id"], "library_id": row["id"], "tmdb_id": row.get("tmdb_id"),
                              "title": row.get("title"), "year": row.get("year"),
                              "score": r["score"], "signals": r["signals"], "reasons": r["reasons"],
-                             "size_bytes": row.get("size_bytes"), "preset": settings.get("preset")})
+                             "size_bytes": row.get("size_bytes"), "item_ids": copies,
+                             "preset": settings.get("preset")})
             context.db.shelf_life_save(kind, stored)
         logger.info("Shelf Life: scored %d title(s), %d candidate(s), %d left to Watched Cleanup",
                     result.scanned, len(valid), result.skipped)
@@ -810,7 +881,9 @@ class ShelfLifeJob(VideoRepairJob):
         kind, item_id = d.get("kind"), d.get("item_id")
         if kind not in ("movie", "show") or not item_id:
             return {"success": False, "error": "finding has no title to delete"}
-        if context.db.is_hands_off(kind, item_id):
+        # Delete Title takes every copy (same TMDB id, same server): each one is checked
+        copies = context.db.title_delete_rows(kind, item_id) or [int(item_id)]
+        if any(context.db.is_hands_off(kind, i) for i in copies):
             return {"success": False,
                     "error": "This title is locked, so maintenance leaves it alone. Nothing was deleted."}
         tmdb = d.get("tmdb_id")
@@ -827,7 +900,7 @@ class ShelfLifeJob(VideoRepairJob):
         if playing is None:
             return {"success": False,
                     "error": "Couldn't ask the server whether anyone is playing it. Nothing was deleted."}
-        if (kind, int(item_id)) in playing:
+        if any((kind, i) in playing for i in copies):
             return {"success": False, "error": "Someone is playing it right now. Nothing was deleted."}
         # the finding may be a day old: everything it was flagged on is checked
         # again, with the settings as they are now. a batch did that for all

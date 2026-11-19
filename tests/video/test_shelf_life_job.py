@@ -1130,3 +1130,90 @@ def test_a_batch_gathers_the_library_once(db, worker, monkeypatch):
     for fid in ids:
         assert worker.fix_finding(fid, actions[fid])["success"] is True
     assert len(gathers) == 1 and len(calls) == 2
+
+
+# ── a title is all its copies (review of #2211, B2) ─────────────────────────
+def _twin(db, title, *, tmdb, size=80 * GB, added=1000):
+    """a second row for the same TMDB title on the same server (a 4K library
+    copy, or a stale twin after a re-key): what Delete Title takes with it."""
+    uhd = db.upsert_movie("plex", {"server_id": "m-%s-4k" % title, "title": title, "year": 2015,
+                                   "tmdb_id": tmdb, "play_count": 0})
+    _sql(db, "INSERT INTO media_files (movie_id, relative_path, size_bytes) VALUES (?, ?, ?)",
+         (uhd, "/m4k/%s.mkv" % title, size))
+    _sql(db, "UPDATE movies SET has_file=1, added_at=?, runtime_minutes=120, imdb_rating=7.0, "
+             "streaming_status='ok', streaming_count=5 WHERE id=?", (_ago(added), uhd))
+    return uhd
+
+
+def test_a_copy_watched_last_week_protects_its_unwatched_twin(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, plays=5, last=_ago(7), size=10 * GB, imdb=7.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    stored = _stored(db, "movie", [hd, uhd])
+    assert stored[hd]["score"] == stored[uhd]["score"] >= 30
+    assert stored[hd]["size_bytes"] == stored[uhd]["size_bytes"] == 90 * GB
+    assert _pending(db) == [] and calls == []
+
+
+def test_a_flagged_title_is_sized_and_deleted_as_all_its_copies(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    items = _pending(db)
+    assert len(items) == 1
+    f = items[0]
+    assert f["details"]["item_id"] == hd and f["details"]["item_ids"] == [hd, uhd]
+    assert f["details"]["size_bytes"] == 90 * GB and "90.0 GB in 2 copies" in f["title"]
+    plan = job_module.plan_cleanup(db)
+    assert plan["items"][0]["size_bytes"] == plan["total_bytes"] == 90 * GB
+    assert worker.fix_finding(f["id"], "Twin")["success"] is True
+    assert set(calls[0][3]) == {hd, uhd}
+
+
+def test_a_twin_playing_now_holds_the_title(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    # the finding names the lower row; the other copy is the one playing
+    monkeypatch.setattr(job_module, "_playing_now", lambda db_: {("movie", uhd)})
+    res = worker.fix_finding(fid, "Twin")
+    assert res["success"] is False and "playing it right now" in res["error"] and calls == []
+    assert hd
+
+
+def test_a_padlock_or_resume_point_on_one_copy_holds_the_title(db, worker, monkeypatch):
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _sql(db, "UPDATE movies SET view_offset_ms=5000 WHERE id=?", (uhd,))
+    _run(worker)
+    assert {s["gate"] for s in _stored(db, "movie", [hd, uhd]).values()} == {"in_progress"}
+    _sql(db, "UPDATE movies SET view_offset_ms=0 WHERE id=?", (uhd,))
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    db.set_hands_off("movie", uhd, True)            # the other copy locked behind the finding's back
+    calls = _capture_delete(monkeypatch)
+    res = worker.fix_finding(fid, "Twin")
+    assert res["success"] is False and "locked" in res["error"] and calls == []
+
+
+def test_copies_on_another_server_are_their_own_title(db, worker):
+    # Delete Title only takes rows on the same server, so neither does the score
+    a = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    b = db.upsert_movie("jellyfin", {"server_id": "j-Twin", "title": "Twin", "year": 2015, "tmdb_id": 77})
+    _sql(db, "UPDATE movies SET has_file=1, added_at=? WHERE id=?", (_ago(1000), b))
+    rows = {r["id"]: r for r, _f in job_module.gather(db, dict(job_module.ShelfLifeJob.default_settings))["movie"]}
+    assert rows[a]["group_ids"] == [a] and rows[b]["group_ids"] == [b]
+
+
+def test_a_play_known_only_by_tmdb_counts_for_every_copy(db, play_log):
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB)
+    uhd = _twin(db, "Twin", tmdb=77)
+    play_log([_p("jellyfin", "abc", "movie", 5, link={"kind": "movie", "id": 77, "source": "tmdb"})])
+    log = job_module._play_log_watch(db)
+    assert set(log["movie"]) == {hd, uhd}
+    facts = _facts(db, "movie")
+    assert facts[hd]["watch"]["watched"] == 1 and set(facts) == {hd}
