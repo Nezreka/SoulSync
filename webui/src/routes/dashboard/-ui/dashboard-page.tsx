@@ -60,7 +60,7 @@ export function DashboardPage({ isAdmin }: { isAdmin: boolean }) {
     <div className="page-shell dashboard-container dash-room" id="dashboard-page">
       <DashboardHeaderView
         header={header}
-        library={<LibraryCard workers={isAdmin} />}
+        library={<LibraryCard admin={isAdmin} />}
         workers={isAdmin}
       />
       {/* The exception surface: renders NOTHING while every core connection

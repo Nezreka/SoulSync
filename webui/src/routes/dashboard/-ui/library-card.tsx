@@ -26,6 +26,7 @@ import type { RefObject } from 'react';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getShellBridge } from '@/platform/shell/bridge';
 import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
 
 import type { ServiceStatusPayload } from '../-dash.api';
@@ -364,7 +365,9 @@ export function useDismiss(open: boolean, close: () => void, ref: RefObject<HTML
  * Every id the state machine and the scan flows write into is kept; the menu
  * stays mounted (just hidden) so those ids always resolve.
  */
-export function LibraryCard({ workers }: { workers: boolean }) {
+export function LibraryCard({ admin }: { admin: boolean }) {
+  // the Repair item opens Tools, which an admin can give a member
+  const toolsAllowed = admin || (getShellBridge()?.isPageAllowed('tools') ?? false);
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
@@ -393,10 +396,11 @@ export function LibraryCard({ workers }: { workers: boolean }) {
             </p>
           </div>
           <div className="library-status-actions" id="library-status-actions" ref={menuRef}>
+            {/* scans and backups are the admin's: the server refuses a member */}
             <button
               className={view.scanScanning ? 'library-status-btn scanning' : 'library-status-btn'}
               id="library-status-scan-btn"
-              style={view.scanVisible ? undefined : { display: 'none' }}
+              style={admin && view.scanVisible ? undefined : { display: 'none' }}
               onClick={() => void scan(false)}
             >
               <svg
@@ -431,7 +435,7 @@ export function LibraryCard({ workers }: { workers: boolean }) {
                 role="menuitem"
                 className="library-status-menu-item"
                 id="library-status-deep-btn"
-                style={view.deepVisible ? undefined : { display: 'none' }}
+                style={admin && view.deepVisible ? undefined : { display: 'none' }}
                 onClick={pick(() => void deepScan())}
               >
                 Deep scan
@@ -446,7 +450,7 @@ export function LibraryCard({ workers }: { workers: boolean }) {
                 Browse library
               </button>
               {/* the enrichment manager is the admins' (#2196) */}
-              {workers ? (
+              {admin ? (
                 <button
                   role="menuitem"
                   className="library-status-menu-item"
@@ -457,24 +461,28 @@ export function LibraryCard({ workers }: { workers: boolean }) {
                   Verify matches
                 </button>
               ) : null}
-              <button
-                role="menuitem"
-                className="library-status-menu-item"
-                id="library-status-repair-btn"
-                title="Open the Tools maintenance center"
-                onClick={pick(() => void window.navigateToPage?.('tools'))}
-              >
-                Repair
-              </button>
-              <button
-                role="menuitem"
-                className="library-status-menu-item"
-                id="library-status-backup-btn"
-                title="Back up the SoulSync database now"
-                onClick={pick(() => void backupNow())}
-              >
-                Back up now
-              </button>
+              {toolsAllowed ? (
+                <button
+                  role="menuitem"
+                  className="library-status-menu-item"
+                  id="library-status-repair-btn"
+                  title="Open the Tools maintenance center"
+                  onClick={pick(() => void window.navigateToPage?.('tools'))}
+                >
+                  Repair
+                </button>
+              ) : null}
+              {admin ? (
+                <button
+                  role="menuitem"
+                  className="library-status-menu-item"
+                  id="library-status-backup-btn"
+                  title="Back up the SoulSync database now"
+                  onClick={pick(() => void backupNow())}
+                >
+                  Back up now
+                </button>
+              ) : null}
               <button
                 role="menuitem"
                 className={

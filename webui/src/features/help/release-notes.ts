@@ -103,7 +103,7 @@ export const RELEASES: Release[] = [
       },
       {
         title: 'A member’s notifications',
-        desc: 'Chat messages only reach people allowed to chat, refusals and progress notes no longer pile up in a member’s notifications, and the enrichment workers, their status and Manage Workers are for admins only (thanks SeadogsBooty, #2191, #2196).',
+        desc: 'Chat messages only reach people allowed to chat, refusals and progress notes no longer pile up in a member’s notifications, and the enrichment workers, their status, Manage Workers and the Library card’s scan and backup are for admins only (thanks SeadogsBooty, #2191, #2196).',
       },
       {
         title: 'Titles before track numbers',

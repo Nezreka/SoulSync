@@ -54,7 +54,7 @@ afterEach(() => {
 async function mountCard(workers = true) {
   let view: ReturnType<typeof render>;
   await act(async () => {
-    view = render(<LibraryCard workers={workers} />);
+    view = render(<LibraryCard admin={workers} />);
   });
   return view!;
 }
@@ -121,6 +121,31 @@ describe('the hero status line', () => {
     const menu = view.container.querySelector('.library-status-menu')!;
     expect(menu.querySelector('#library-status-verify-btn')).toBeNull();
     expect(menu.querySelector('#library-status-browse-btn')).not.toBeNull();
+  });
+
+  it('a member gets no scan, deep scan, backup or Repair: the server refuses them', async () => {
+    const view = await mountCard(false);
+    fireStatus(CONNECTED);
+    const scanBtn = view.container.querySelector<HTMLElement>('#library-status-scan-btn')!;
+    expect(scanBtn.style.display).toBe('none');
+    const deep = view.container.querySelector<HTMLElement>('#library-status-deep-btn')!;
+    expect(deep.style.display).toBe('none');
+    const menu = view.container.querySelector('.library-status-menu')!;
+    expect(menu.querySelector('#library-status-backup-btn')).toBeNull();
+    expect(menu.querySelector('#library-status-repair-btn')).toBeNull();
+    expect(menu.querySelector('#library-status-review-btn')).not.toBeNull();
+  });
+
+  it('a member an admin gave Tools keeps Repair', async () => {
+    window.SoulSyncWebShellBridge = { isPageAllowed: (id: string) => id === 'tools' } as never;
+    try {
+      const view = await mountCard(false);
+      const menu = view.container.querySelector('.library-status-menu')!;
+      expect(menu.querySelector('#library-status-repair-btn')).not.toBeNull();
+      expect(menu.querySelector('#library-status-backup-btn')).toBeNull();
+    } finally {
+      Reflect.deleteProperty(window, 'SoulSyncWebShellBridge');
+    }
   });
 
   it('the ⋯ button opens the menu, and Escape or a pick closes it', async () => {
