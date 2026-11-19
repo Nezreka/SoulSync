@@ -661,6 +661,10 @@ def _emit_activity_toast(event, item):
 # sockets of admin profiles sit in this room, every other profile's in
 # member:<id>; a socket is in exactly one of them (see _ws_join_role_room)
 ADMIN_SOCKET_ROOM = 'role:admin'
+# and every member socket is in this one too: a push every member hears in
+# the same trimmed form (the service status, #2208) goes here once instead
+# of once per member room
+MEMBER_SOCKET_ROOM = 'role:member'
 # sockets of profiles that have Chat & Arcade (chat.use). the room chat's
 # live push goes to: a member without it never got the messages' content
 # on the wire, and the page it can't open stopped asking /api/chat for its
@@ -3887,6 +3891,9 @@ def get_status():
             status_data['_experimental'] = experimental_status()
         except Exception:
             status_data['_experimental'] = {}
+        if not is_admin_request():
+            # the spotify ban and the workers are the admin's (#2208)
+            status_data = _status_payload_for_member(status_data)
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -6500,7 +6507,7 @@ def spotify_disconnect():
 
 
 @app.route('/api/spotify/rate-limit-status', methods=['GET'])
-@signed_in
+@admin_only  # the ban's details are the admin's (#2208)
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
@@ -22349,7 +22356,7 @@ except Exception as e:
 # --- API Rate Monitor Endpoints ---
 
 @app.route('/api/rate-monitor/history/<service_key>', methods=['GET'])
-@requires("music.dashboard")
+@admin_only  # the API graph lives in the admins' Manage Workers (#2196, #2208)
 def get_rate_monitor_history(service_key):
     """Get 24-hour minute-bucketed call history for a service. Used by the detail modal graph."""
     try:
@@ -23328,6 +23335,33 @@ def _build_status_payload():
         'quarantined': quarantined,
     }
 
+def _status_payload_for_member(payload):
+    """the service status a member gets (#2208): the same payload without
+    the spotify ban. the ban, its countdown, the endpoint that tripped it and
+    the cooldown after are the server's operational state, the admin's to
+    hear about. a member's search and pages already fall back on their own,
+    so the modal only told them about a backend they can't act on. the
+    workers' states go the same way."""
+    out = dict(payload or {})
+    sp = out.get('spotify')
+    if isinstance(sp, dict):
+        sp = dict(sp)
+        sp['rate_limited'] = False
+        sp['rate_limit'] = None
+        sp['post_ban_cooldown'] = 0
+        out['spotify'] = sp
+    # the enrichment workers' states and errors are the admins' (#2196)
+    if 'enrichment' in out:
+        out['enrichment'] = {}
+    return out
+
+
+def _emit_status_update(payload):
+    """status:update to the admins whole, to every member trimmed (#2208)"""
+    socketio.emit('status:update', payload, to=ADMIN_SOCKET_ROOM)
+    socketio.emit('status:update', _status_payload_for_member(payload), to=MEMBER_SOCKET_ROOM)
+
+
 def _build_watchlist_count_payload(profile_id=1):
     """Build the same payload used by GET /api/watchlist/count."""
     try:
@@ -23418,7 +23452,7 @@ def _emit_service_status_loop():
         if not _has_connected_clients():
             continue
         try:
-            socketio.emit('status:update', _build_status_payload())
+            _emit_status_update(_build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
@@ -24039,6 +24073,7 @@ def _ws_join_role_room():
         logger.debug("role room: %s", e)
         return
     leave_room(ADMIN_SOCKET_ROOM)
+    leave_room(MEMBER_SOCKET_ROOM)
     leave_room(CHAT_SOCKET_ROOM)
     if pid is None:
         return
@@ -24047,6 +24082,7 @@ def _ws_join_role_room():
         join_room(ADMIN_SOCKET_ROOM)
     else:
         join_room(f'member:{pid}')
+        join_room(MEMBER_SOCKET_ROOM)
     if is_admin or _ws_profile_may_chat(pid):
         join_room(CHAT_SOCKET_ROOM)
 
@@ -24145,7 +24181,10 @@ def _emit_db_stats_loop():
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
-            socketio.emit('dashboard:db_stats', stats)
+            # the database's size and path and the scan times are the
+            # admins' (#2207). its http twin, /api/database/stats, gives a
+            # member the counts of their own library instead
+            socketio.emit('dashboard:db_stats', stats, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting db stats: {e}")
 
@@ -25405,7 +25444,9 @@ def _emit_rate_monitor_loop():
             except Exception as e:
                 logger.debug("spotify rate-limit status read failed: %s", e)
 
-            socketio.emit('rate-monitor:update', payload)
+            # api call rates, worker states and the spotify ban: the
+            # admins' Manage Workers reads it, nobody else (#2208)
+            socketio.emit('rate-monitor:update', payload, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting rate monitor: {e}")
 
