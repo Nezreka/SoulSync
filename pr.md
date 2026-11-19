@@ -1,131 +1,46 @@
-# soulsync 3.6.7: `dev` → `main`
+# soulsync 3.6.8: `dev` → `main`
 
-settings, people is one place for who can do what, with templates, moderators and request quality. the settings page is react now, soulsync can answer as seerr for litefin and other seerr apps, an album can switch to another version of itself, and popular tracks get a flame. plus band names with an "&" stay one artist, numbered releases like group therapy stop crossing, and a long list of reported fixes.
+last.fm api keys need a paid pro subscription from 1 december 2026, so everything soulsync used last.fm for now falls back to free sources when the key stops working, and keeps what it already knew. phones get a pass over the worker status, menus, dialogs and pages. audiobooks and podcast episodes can require approval, the permission screens show what's really in force, and one set of words covers requests everywhere. plus track numbers stop beating titles, and the transfer folder is called the music library folder everywhere you read it.
 
-## security
+## last.fm without pro
 
-- **only the admin can make the first api key.** while an install had no api key yet, anyone who could reach the server could create an admin key, signed in or not, because `/api/v1` skips the login screen. that was in 3.6.6 too, so this release is worth taking soon.
-- **members can only do what their profile allows.** with login on or an admin pin, a member could still download with downloads off (playlist start missing, audiobooks, youtube follows), edit shared library metadata including the explicit flag, reorganize anyone's files, run the duplicate cleaner and other tools, cancel someone else's video download, rebind the install's spotify, tidal, deezer, last.fm or qobuz accounts, change the media server setup, read live server logs, claim another jellyfin user, and get around request limits and rating caps. all of those are refused now, and the buttons are gone for them. found while planning the people and permissions work (#2166, #2167, #2168).
-- members see their own downloads and toasts, not everyone's. past download history is admin only for now, since old rows don't say who started them.
+- **from 1 december 2026 a last.fm api key needs last.fm pro.** soulsync users each enter their own key, so most keys will stop working that day. with a working key nothing changes: last.fm stays first. without one:
+  - artist page top tracks come from listenbrainz, then deezer, and the heading says which.
+  - similar artists come from listenbrainz or deezer, similar tracks and radio from deezer, and your artists on discover from listenbrainz or your own plays.
+  - chat and seasonal vibes find artists through deezer genres when last.fm tags aren't there.
+  - artist bios come from theaudiodb, then wikipedia (linked), tags from musicbrainz, and listener numbers from listenbrainz with deezer fans shown apart. a quiet line under the bio says where it came from. last.fm data you already have is never overwritten.
+- **a refused key is noticed and not hammered.** soulsync remembers it for a few hours and tries again after, or as soon as the key changes, so subscribing brings last.fm back on its own. the last.fm card says what happened in plain words.
+- **answers are cached**, 30 days for catalogue data and a few hours for your own, so a key that lapses doesn't empty pages overnight.
+- **scrobbles wait.** while the key is refused nothing is posted and nothing is lost, they go out once it works. history import has no free stand-in, so it says to use the listenbrainz import, and listenbrainz is marked the recommended scrobbler.
+- we can't know the exact error last.fm will send a refused key until 1 december, so soulsync treats the likely ones (invalid or suspended key, 401/403) as a refusal.
+
+## phones
+
+- **worker status opens on a tap (thanks Thibs, #2180).** status only showed on hover, so a tap paused a worker or did nothing. a tap now opens a sheet with its status and pause or resume, on the music and video dashboards.
+- **the menu button stays on an open playlist (thanks c5pie, #2181).** a rule from when playlists opened as a popup hid it, so the x was the only way out.
+- **every page reaches its end (thanks wolf39us, #2182).** pages were sized to the screen with the browser's bars hidden, so the bottom sat under the bottom bar.
+- **the album menu stays on screen (thanks wolf39us, #2183)** and scrolls when it's tall, and enrich opens on a tap instead of closing again.
+- **get show draws its arrow (thanks Thibs, #2184).** it was a character android's fonts don't have. every download arrow is drawn now.
+- **import cards fit (thanks Thibs, #2185)** and **long confirm boxes keep their buttons (thanks c5pie, #2186).** the confirm box is shared, so every long one is fixed, keep best's too.
+- **settings says saved only after a save (thanks c5pie, #2187)**, and the status no longer sits on the section title.
 
 ## people and permissions
 
-- **settings > people is one place for who can do what (thanks SeadogsBooty, #2166, #2167, #2168).** people, global policy, templates, invites and activity, all on one tab. manage profiles opens it too.
-- **global policy** is the most any member can have. nothing below it goes higher, and saving shows who it reaches and what they lose before anything changes. admins are never limited.
-- **templates.** adult, teen, kids and guest are real templates now, and you can make your own. change a template and everyone following it changes with it.
-- **personal changes** keep only what differs from someone's template, so a template change still reaches them. reset one row, one category, or the whole person back to their template.
-- **the editor** is a wide sheet: a rail of categories, every row saying where it comes from (from teen, changed for maya, or held down by the policy), and a what maya can do card in plain words.
-- **getting things is per media type.** download right away, ask first or can't request, separately for music, movies, tv, audiobooks and podcasts. asking first for music no longer stops someone getting books.
-- **movies and tv are separate switches**, so a tv only profile works everywhere: search, discover, detail pages, the calendar, requests and seerr apps.
-- **request quality (#2168).** pick which quality profiles each person can ask for, per movies and tv, which ones always need your ok (4k always asks covers every 4k profile), and what they start on. the request sheet only offers those: one allowed is a line ("comes in movie 1080p"), two or more a short list with asks first tags, and the button says get it or ask for it. the server holds every path to the same rules: the sheet, direct adds, manual search, watchlist and collection adds, import lists, automations and seerr.
-- **moderators.** a member who approves, declines and manages other people's requests and issues. never their own asks, never settings, people or tools. see everyone's requests is its own switch for reading only.
-- **a request limit per kind.** music, movies and tv each have their own limit, under their own category in the editor and the global policy. albums, tracks and music videos count toward music, movies toward movies, shows, seasons, episodes and youtube toward tv. "3 of 5 movie asks left" is the same number on every page, in seerr and in the background scans, and the people list shows asks used per person, per kind. on upgrade each kind starts from the old limit, so nobody's music allowance shrinks and movies and tv each get what video had.
-- **members see only what they can use.** no request button for what they can't ask for, a calm "isn't part of your profile" note instead of an error, asks left on the request sheet, and a what you can do card on their own account page.
-- **seerr apps act as the person.** a jellyfin user's requests follow their own permissions, quality and limit. unknown users are refused on new installs; upgrades keep the profile they acted as, shown in settings > system.
-- **sign-ups start from a template.** plex and oidc sign-ins start as the template in new people start as. the old system > security sign-up settings moved there once, as a new sign-ups template when sign-in was making profiles or one of them was set. an install that never used them starts new people as guest.
-- **add person and invites start from a template** too. the admin switch saves in the same call as everything else, and the editor says how someone signs in (plex, oidc, a password, a pin or the picker).
-- **sidebar & look belongs to each template.** it replaces what new profiles see, and can still be set for one person.
-- **member automations are personal**: playlist pulls, their own watchlist scans, listening imports and notes to themselves. they run only on their own events: their downloads finishing or failing, their wishlist and watchlist finds, their playlists syncing, their requests being answered or arriving, their issues getting a reply. someone else's events and install-wide ones (scans, database updates, maintenance) never reach them, and an admin's automations hear everything. their notifications only go to public addresses. playlist auto-sync follows playlist sync.
-- **nothing changes on upgrade.** every member is matched to the template they already equal, with the real differences kept as their changes. anyone who can't be matched exactly keeps their old settings and shows as needs a look.
-- every route on the server declares who may call it, and a test fails when a new one forgets.
-
-## help
-
-- **the ? is a real help panel now.** it knows the page you're on and answers from what's actually happening there: why three downloads sit in queued (the uploader has 41 people ahead of you), why a song wasn't found, when your request will arrive, why a folder can't be written.
-- **ctrl k (cmd k) searches everything**: help articles, settings, pages and actions, from anywhere. settings' own search moved to `/`.
-- **health** checks your servers, download sources, folders, free disk space, workers, review queue, automations and updates, with a fix button for each problem. the ? gets an amber dot when something is actually broken (admins only).
-- **report a problem** builds a diagnostics bundle you can read before it goes anywhere, secrets removed, each part switchable, then opens a prefilled github issue, copies a short version for discord, or downloads it. copy debug info used to send log lines unredacted.
-- **download your logs**: one log, a log with its backups, or everything as a zip, secrets removed by default.
-- what's new, shortcuts and three tours (getting around, your first download, your first video request) that a test keeps from pointing at things that moved. the old click-anything hints, troubleshoot and setup progress are gone; they had gone stale.
-
-## settings
-
-- **the settings page is react.** every tab, music and video, the shell and the page itself. it looks and works the same, it just loads its tabs once and saves only what you changed.
-- typing in the settings search no longer queues a save, an emptied folder or redirect field stays empty while you type the new one, and autosaves refresh the sidebar's server dots straight away again.
-- **playlist folders say where organize by playlist is turned on (#2112)**, and an empty rebuild links to it.
+- **audiobook and podcast episode requests can require approval (thanks SeadogsBooty, #2188).** there was no request flow for them at all. a request now lands on the requests page next to music and video ones, and approving it gets the book or the episode. auto-approve stays the default, so nothing changes on upgrade.
+- **controls show the value in force (thanks SeadogsBooty, #2189).** a template held by the global policy showed its own saved value. it shows what the policy allows now, and says separately what the template has.
+- **back to template only shows with personal changes to drop (thanks SeadogsBooty, #2190).**
+- **a member's notifications (thanks SeadogsBooty, #2191).** live chat messages went to every browser, including members without chat, which is what kept showing "chat & arcade isn't part of your profile". chat now only reaches people allowed to chat. refusals and progress notes don't pile up in a member's notifications, and switching profile clears the panel.
+- **one set of words (thanks SeadogsBooty, #2192).** movie requests, tv show requests, music requests, audiobook requests, podcast episode requests, with auto-approve, require approval and requests off everywhere. maximum content rating, maximum request limit, allowed quality profiles, default quality profile. nothing behaves differently.
+- **the admin menu no longer flashes after signing back in (thanks SeadogsBooty, #2156).** the page knew who you were, so it skipped the wait, and the script that trims the menu loads after it. a member's menu starts hidden now until their own profile trims it.
 
 ## library
 
-- **other versions (thanks wolf39us, #2145).** an album's ⋯ menu lists the release's other editions from musicbrainz and your primary source, with track count, year, country and label, plus a search for that artist. pick one and it shows what changes before it switches. fixing the manual match on the way: it kept the old release's cached tracklist.
-- **one album split over two rows merges back (thanks wolf39us, #2178).** picking the edition another album of yours already is used to move the id over and leave the files split. other versions now offers to merge the two, a song both had becomes one track with both files, and nothing on disk is touched until you rename / organize. switching also brings the edition's title, type and date along, so the row stops reading like the old match and sitting under eps. a hand-set type and a locked album still win.
-- **a musicbrainz release status filter (thanks Ericsson, #2175).** keep promos, bootlegs, pseudo-releases and the rest off the wishlist: release status in the watchlist defaults for the whole library, and per artist in artist settings or the watchlist panel. a release group passes when any of its releases has a status you allow, releases with no status and every non-musicbrainz source always pass, and everything stays allowed until you pick.
-- **popular tracks get a flame (thanks wolf39us, #2144)**, up to three of an album's most played on last.fm that clearly stand out, like plexamp. nothing is fetched for it, it reads the play counts soulsync already has.
-- **the artist page shows what a rename would move (thanks wolf39us, #2141).** albums whose files don't match your naming template read "N to rename", and clicking opens preview rename.
-- **an artist keeps their folder when the source renames them (thanks nstrelow, #2165).** deezer still says machine gun kelly while your library says mgk, so new downloads made a second folder. a download now takes the name your library has for that artist by id, and artist settings has a folder and tag name section to set your own spelling, with preview rename and retag for the files you already have.
-- **locking an album from the artist page stays on the artist page (thanks wolf39us, #2143)**, so you can lock one after another.
-- **collection completeness on the cards and table (thanks SeadogsBooty, #2106, #2107, #2108, #2109)**, with sorts, a featured filter, card size and multi-select. for an artist you don't watch it counts every track of the releases you own something of, so a single track off a 14 track album reads 1 of 14, not complete.
-- **guests stop filling the artists list (thanks Ericsson, #2142).** an album artist credit a guest picked up on someone else's album no longer makes them a library artist. the list and the artist page now go by the same rule.
-- **release type goes by length too (thanks wolf39us).** 4 to 6 tracks only made an ep when it runs under 30 minutes, so wish you were here is an album again. a provider's own word (deezer's type, apple's "- EP") wins, and a one time repair retypes the long releases a count guess got wrong when a provider agrees.
-- **leftover rows fold on every scan (thanks Ktzenjammer, #2094).** the fix in 3.6.6 only ran during the one time library upgrade. scans, refresh & scan and update discography fold them now, and a row with no file gets a remove this row option.
-- same-named albums of one artist no longer merge into one (#2110), a split album keeps each profile's watch choice, a locked album reads as finished (#2119), and a recycle bin button sits at the top of the music and video library (#2128).
-- **the library upgrade no longer stops at an old track with no id.** a few old installs had track rows with an empty id, and the first one failed the whole upgrade, pausing downloads. those files come across now and a restart finishes it.
-
-## artists and tags
-
-- **a band with "&" in its name stays one artist (thanks SeadogsBooty and wolf39us, #2136, #2131).** above & beyond became "above (feat. beyond)", kyau & albert became "kyau", and a rename folder dropped to "above". a name the library or the metadata source knows as one artist is never split now, and the stray split credits are taken back off your tracks on the next start.
-- **split artists keeps K/DA whole (thanks Vidariondr, #2150)**, and a finding can be corrected by hand: edit split, or one artist, which is remembered.
-- **a release stays under its album artist (thanks SeadogsBooty, #2133, #2135).** reorganize scattered a compilation into a folder per track artist while its preview showed the right one, and manual downloads tagged a track's own artist as the album artist.
-- **numbered releases never cross (thanks SeadogsBooty, #2134).** group therapy 699 was taken for 696, pt. 1 for pt. 4, and their metadata swapped. numbers in a title now have to agree for downloads, imports, library ownership and enrichment.
-- **artist.nfo lands in the artist folder (thanks Ericsson, #2138)**, also when the template nests the album deeper, and the same switch saves poster.jpg and background.jpg where the folder has no artist art yet.
-
-## tools
-
-- **cover art findings explain themselves (thanks Vidariondr, #2169).** a missing cover art finding shows the library, the audio files, the album folder and the cover it found side by side, with the source, and says what apply art writes in each. change cover opens the album page's picker so you can apply the art you want. apply now embeds the exact cover it shows, keeps a cover saved since the scan, and a finding with no cover anywhere can close. the artist photo is only suggested for an artist with none, in its own section, and apply art never uses it.
-- **keep best works when duplicates share playlists (thanks Storm, #2172).** a copy was protected whenever it sat in any playlist, so with both copies in playlists keep best did nothing. it's only protected now when a playlist would lose the song. a new setting names playlists that never protect a copy, like a smart "unsorted" one, and an option (off by default) moves the removed copy's entry to the kept copy in the same place, on navidrome, plex and jellyfin, checked after every write. smart and read only playlists are never written, and the finding shows exactly what each playlist gets before you apply.
-- **bulk keep best never quietly does nothing (thanks Storm, #2179).** keep best on the collapsed report or the full list skipped findings that need the same-recording tick or have a protected copy, and when only a playlist was in the way it marked the finding fixed with nothing removed, which is a dismiss. those stay open now, get a "needs you" badge with the reason, a count on the duplicates row and a "needs you first" sort, and the run says "kept best on N, M need you". keep best on many opens a box first with the counts and a move playlist entries tick (off by default, same rules as on one finding). the same-recording tick is never done for the whole list: a selection shows the pairs side by side for you to confirm.
-
-## downloads and review
-
-- **asked for and got are the right way round in review (thanks makiel).** files held for acoustid review showed them swapped, and wrong song put the wrong file's name back on the wishlist.
-- **an unfingerprintable file no longer reads as a bad acoustid key (thanks @nstrelow, #2140).** one file with no audio stopped every acoustid scan at the same spot.
-- a soulseek folder naming the artist by an alias counts (thanks Storm, #2105), live albums stay out with live albums off (#2117), and the releases tab searches every prowlarr torrent indexer (#2127).
-- **reorganize takes the cover along (thanks QT3496, #2010)** when you apply its findings from tools, and a cover already in the new folder no longer keeps the old one.
-- **a pair that can't be merged says why (thanks redbeardymcgee, #2146)** instead of buttons that look live and do nothing.
-- torrent rows name their tracker (#2123), and pausing a finished torrent shows paused with resume (#2125).
-- a free soundcloud account gets the uploader's original file when downloads are on (#2116).
-
-## playlists and servers
-
-- **jellyfin playlists are private (thanks Darkcere, #2148)** to the account they sync to. ones soulsync already made stay public until you change them in jellyfin.
-- **apple music mirrors refresh again (thanks NeskireDK, #2147)**, and a refresh that gets nothing back counts as a failure, not completed.
-- **copy mode playlists stay owned after a drive remounts (thanks NeskireDK, #2137).**
-- **music assistant scans follow their own task (thanks @ginevra-70, #2115)** before the database updates, and sync, scans and playlists reach music assistant (#2111).
-
-## server activity
-
-- **server activity is rebuilt, for plex and jellyfin.** the activity button opens one drawer. now playing shows streams, bandwidth against your upload, transcoders and cpu, then a card per stream: who, what, which device, from where, and direct play, direct stream or transcode. open a card for the file next to what is sent, the reason it converts in plain words, stop with a message (plex pass on plex) and send a message on jellyfin. music shows audio quality and audiobooks the chapter.
-- **history and stats of its own.** soulsync keeps its own play log (forever by default, with a setting and a clear button), folds back to back episodes and album tracks into one row with a timeline, and fills the time before it from plex's history. stats covers 7 days to a year: hours, how things played and why they converted, when, players, places, people and the most played.
-- settings, connections, server activity holds your upload speed, the location lookup for remote viewers and the stop messages. it is admin only (#2155). checked against recorded plex and jellyfin answers, not tried on a live server yet.
-
-## profiles
-
-- **a member lands on a page they can open (thanks SeadogsBooty, #2154).** a profile without the video dashboard was sent to it after signing in, turned away, and left on a black page. you land on your own home page, else discover, else your first page, and a refused page sends you there too.
-- **the admin menu never flashes (thanks SeadogsBooty, #2156).** the page arrives already knowing who you are, so the sidebar only ever shows your sections, from the first frame.
-- **an admin sets what each profile shows (thanks SeadogsBooty, #2157).** in profiles, a profile's parts can be set, locked so customize is read only for that person, or reset, and new profiles start from a default. switching a part back on brings it back right away, and a video only profile can't hide its only side.
-- **a lock shows what the admin set (thanks SeadogsBooty, #2164).** what the person hid before no longer wins once you lock them, and customize goes away for them. the profile editor's access step reads top to bottom: what they can open, then what shows in their sidebar, then the lock, and it says when they picked their own. a profile you set and locked on dev keeps what it showed.
-- **members only see themselves (thanks SeadogsBooty, #2162).** with login on, a member's profile menu has no switch to list, and the server only hands them their own profile. the household picker is unchanged.
-- **sidebar weather is per profile (thanks SeadogsBooty, #2163).** members never see the admin's town, temperature or clock. each can set their own under profile & account, sidebar weather, and the admin's stays in settings as it is.
-- **a member's notifications are their own (thanks SeadogsBooty, #2170).** the panel showed everyone the server's health, uptime, memory, scans and every job. a member sees their own notes, downloads and automations, and the feeds behind the rest refuse them.
-- **download buttons only show for who can download (thanks SeadogsBooty, #2173).** automatic search, interactive search, enhance quality and upgrade were drawn for members who ask first, and only refused after they picked tracks. they're gone for them now, and the wishlist is their way in.
-- **help & docs shows each person their own guides (thanks SeadogsBooty, #2174).** members see the docs for what they can use, search follows, and setup, server and diagnostics guides and report a problem stay with the admin.
-- **server activity is the admin's (thanks SeadogsBooty, #2155).** the live view, history, stats and the live feed refuse anyone else, direct urls included, its image proxy only fetches artwork, service status is hidden from members, and seven other diagnostic routes that answered anyone are admin only.
-
-## video
-
-- **where a title stands, on every poster (thanks SeadogsBooty, #2160).** in library, partial, requested, approved, searching, downloading or failed, following a download as it moves, and the detail page shows progress, each season and who asked. a request for something already on its way is refused, and you can ask too when someone else already did. it is the same answer the seerr api gives.
-- **discover rows always finish (thanks SeadogsBooty, #2158).** a row that never answered kept its placeholder forever. each row fills, hides when it's honestly empty, or offers try again, and one slow row never holds the page.
-- **discover looks the part (thanks SeadogsBooty, #2159).** the top 10 numbers sit beside the posters, one poster size and heading style everywhere, even spacing, and a jump bar that follows you.
-- **soulsync can answer as seerr (thanks Thibs, #2151).** turn it on under settings, system, soulsync api, and point litefin's seerr plugin (or another seerr app) at /seerr with an admin key. discover, search, details and requests go through the video side, requests land on the right profile's wishlist or approval queue. not tried against a real litefin yet.
-- **missing means monitored (thanks hilburn, #2177).** a show's missing count and get missing took every aired gap, unmonitored seasons too, so "273 missing" was really 2. they cover monitored episodes now, the rest is shown apart as "271 in unmonitored seasons" and left alone. the get window still lists them, unticked.
-- **torrent imports find the moved file (thanks hilburn, #2176).** qbittorrent says 100% while it's still moving the file out of its incomplete folder, so the import went looking there and failed for good. it waits for the move now, a file that moves mid-import is looked up again, and retry or manual import on a stuck row asks the client where the file is. show-page grabs also stopped showing another show on the downloads card: they sent the library's id without saying so.
-- **an import folder (#2129)**, like the music side's import page.
-- manual search opens with an editable query (#2121) and is on a movie's menu, owned or not (#2122), video download rows show the release's languages (#2120), and manual subtitle search says when the file already has the language (#2126).
-- **long titles and language lists give way in the library table (thanks @PapaBearDoes, #2152)** instead of pushing columns out of view.
-- the more menu on a detail page always fits on screen (#2124).
+- **titles beat track numbers (thanks wolf39us).** other versions and reassign lined tracks up by number first, so "1. lost stars" landed on "1. maps". the title wins now, with length as the tiebreak, and a tracklist refresh follows the same rule.
+- **a song's number heals from its file.** a track that came over from a single kept the single's number. when two different songs share a number, the one whose file says otherwise moves to its own, on refresh & scan, update discography and the other versions merge. a number set by hand stays.
+- **a deleted file is gone.** when a file went missing, the lookup found the same song title in another album folder and treated it as the deleted one. a file elsewhere only counts now if it has the same file name or the same track number, so a moved album still resolves.
+- **rename / organize keeps $quality (thanks Maegfea, #2195).** the planner never read the file's quality, so the rename dropped it. it reads it the way a download does, only when a template uses $quality.
+- **preview rename skips an album you removed (thanks wolf39us, #2194)** instead of failing every album with "no tracks found".
 
 ## also
 
-- **every help & docs screenshot is new**, taken on the current ui, and most pages that had none have one now (#1988).
-- the ? help button opens again on every page. it did nothing on the react pages. replaygain analyses files with non utf-8 tags (#2118), re-identify remembers the move-the-file choice (#2114), and the tools findings filter speaks the list's names (#2113).
-
-tested: the full suite passes on windows python with every failure rechecked on linux (only the known drive permission tests on a windows disk fail), the frontend suite passes, and each fix carries its own test.
+- **the music library folder.** what was called the transfer folder reads as the music library folder everywhere: settings search, help, docs, health and tools. in docker it's still the `/app/Transfer` mount and the default is still `./Transfer`, so nothing about your setup changes.

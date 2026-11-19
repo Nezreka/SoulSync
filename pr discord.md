@@ -1,21 +1,13 @@
-**SoulSync 3.6.7 is out** :musical_note:
+**SoulSync 3.6.8 is out** :musical_note:
 
-**People and permissions.** Settings, People is one place for who can do what: templates, personal changes, a global policy, moderators, separate movie and TV access, request quality and a request limit per kind. Members only see their own notifications, download actions and help guides. Nothing changes on upgrade (thanks SeadogsBooty, #2166 to #2168, #2170, #2173, #2174).
+**Last.fm without Pro.** From 1 December 2026 a Last.fm API key needs a Last.fm Pro subscription. With a working key nothing changes. Without one, top tracks, similar artists, radio and Your Artists come from ListenBrainz and Deezer, and artist bios and tags from TheAudioDB, Wikipedia and MusicBrainz. Answers are cached, scrobbles wait for a working key, and ListenBrainz is the recommended scrobbler.
 
-Security: only the admin can make the first API key now, and members can only do what their profile allows. Worth updating soon.
+**Phones.** Worker status opens on a tap, the menu button stays on an open playlist, every page reaches its end, and menus, import cards and long confirm boxes fit the screen (thanks Thibs, c5pie and wolf39us, #2180 to #2187).
 
-The Settings page is rebuilt in React, and SoulSync can answer as a Seerr server for Litefin and other Seerr apps (thanks Thibs, #2151).
+**People and permissions.** Audiobook and podcast episode requests can require approval, controls show the value the policy keeps them at, chat only reaches people allowed to chat, and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2188 to #2192). The admin menu no longer flashes after signing back in (#2156).
 
-The ? is a real help panel: answers for the page you're on, Ctrl K search, Health with fixes, Report a problem with secrets removed, log downloads, and every docs screenshot is new.
+**Library.** Titles beat track numbers when lining up a tracklist, a song's number heals from its file, and a deleted file stops borrowing another album's (thanks wolf39us). Rename / Organize keeps $quality (thanks Maegfea, #2195) and skips a removed album (#2194).
 
-Server Activity is rebuilt for Plex and Jellyfin: what is playing and why it transcodes, stop with a message, and its own history and stats.
-
-Albums get an Other versions picker that also merges an album split in two (thanks wolf39us, #2145, #2178), a MusicBrainz release status filter (thanks Ericsson, #2175), popular tracks get a flame (#2144), and band names like Above & Beyond stay one artist (thanks SeadogsBooty, #2131 to #2136).
-
-Tools: cover art findings show the library, files, folder and found cover side by side with Change cover (thanks Vidariondr, #2169), and Keep Best works when duplicates share playlists and says which ones need you (thanks Storm, #2172, #2179).
-
-On video, missing episodes count only monitored seasons, and torrent imports wait for qBittorrent to finish moving the file (thanks hilburn, #2176, #2177). For request users, posters show where a title stands and Discover always loads (#2158 to #2160).
-
-Thanks to nstrelow, PapaBearDoes and ginevra-70 for their contributions.
+The transfer folder is now called the music library folder everywhere. In Docker it is still the /app/Transfer mount, so your setup doesn't change.
 
 Full notes on GitHub.
