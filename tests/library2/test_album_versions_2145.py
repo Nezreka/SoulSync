@@ -204,3 +204,28 @@ def test_routes_list_preview_and_apply(api, monkeypatch):  # noqa: F811
     again = client.post(f"/api/library/v2/albums/{ids['views']}/versions/preview", json=body)
     assert again.get_json()["already_current"]
     assert client.get("/api/library/v2/albums/999999/versions").status_code == 404
+
+
+def test_a_pasted_release_link_is_looked_up_not_searched(imported_conn, legacy_db):
+    """#2203: Other versions takes a release link too, held to no artist."""
+    album = _views(imported_conn, musicbrainz_id="mb-us")
+    seen = []
+
+    def lookup(text):
+        seen.append(text)
+        return {"source": "musicbrainz", "message": "",
+                "albums": [{"id": "mb-us", "name": "Views", "total_tracks": 20, "artists": ["Someone Else"]}]}
+
+    out = album_versions.search_versions(
+        legacy_db, album, "https://musicbrainz.org/release/x", source="spotify",
+        search=lambda *_a: pytest.fail("a link is not searched"), lookup_link=lookup)
+    (group,) = out["groups"]
+    assert group["source"] == "musicbrainz"
+    assert [(v["id"], v["current"]) for v in group["versions"]] == [("mb-us", True)]
+    assert seen == ["https://musicbrainz.org/release/x"]
+
+    miss = album_versions.search_versions(
+        legacy_db, album, "x", lookup_link=lambda _t: {"source": "deezer", "albums": [],
+                                                       "message": "Deezer has no release with that id."})
+    assert miss["groups"][0]["versions"] == []
+    assert miss["groups"][0]["note"] == "Deezer has no release with that id."

@@ -1167,6 +1167,175 @@ describe('import route', () => {
     ).toBeInTheDocument();
   });
 
+  describe('#2203: a pasted release link, and a default search source', () => {
+    const SOURCES = [
+      { source: 'deezer', label: 'Deezer', active: true },
+      { source: 'musicbrainz', label: 'MusicBrainz', active: false },
+    ];
+
+    it('opens the picker on the saved default and searches it first', async () => {
+      const searchedSources: (string | null)[] = [];
+      server.use(
+        http.get('/api/import/search/sources', () =>
+          HttpResponse.json({
+            success: true,
+            sources: SOURCES,
+            default_source: 'musicbrainz',
+            can_set_default: true,
+          }),
+        ),
+        http.get('/api/import/search/albums', ({ request }) => {
+          searchedSources.push(new URL(request.url).searchParams.get('source'));
+          return HttpResponse.json({ success: true, primary_source: 'deezer', albums: [] });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      await waitFor(() => expect(searchedSources).toEqual(['musicbrainz']));
+      const picker = (await screen.findByRole('combobox', {
+        name: 'Search source',
+      })) as HTMLSelectElement;
+      expect(picker.value).toBe('musicbrainz');
+      // already the default: nothing to make default
+      expect(screen.queryByRole('button', { name: 'Make default' })).toBeNull();
+    });
+
+    it('with no default saved it opens on Any source, as before', async () => {
+      const searchedSources: (string | null)[] = [];
+      server.use(
+        http.get('/api/import/search/sources', () =>
+          HttpResponse.json({ success: true, sources: SOURCES, default_source: '' }),
+        ),
+        http.get('/api/import/search/albums', ({ request }) => {
+          searchedSources.push(new URL(request.url).searchParams.get('source'));
+          return HttpResponse.json({ success: true, primary_source: 'deezer', albums: [] });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      await waitFor(() => expect(searchedSources).toEqual([null]));
+      const picker = (await screen.findByRole('combobox', {
+        name: 'Search source',
+      })) as HTMLSelectElement;
+      expect(picker.value).toBe('');
+    });
+
+    it('an admin makes the picked source the default', async () => {
+      const saved: unknown[] = [];
+      server.use(
+        http.get('/api/import/search/sources', () =>
+          HttpResponse.json({
+            success: true,
+            sources: SOURCES,
+            default_source: '',
+            can_set_default: true,
+          }),
+        ),
+        http.put('/api/import/search/default-source', async ({ request }) => {
+          saved.push(await request.json());
+          return HttpResponse.json({ success: true, default_source: 'musicbrainz' });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      const picker = await screen.findByRole('combobox', { name: 'Search source' });
+      expect(screen.queryByRole('button', { name: 'Make default' })).toBeNull();
+      fireEvent.change(picker, { target: { value: 'musicbrainz' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
+      await waitFor(() => expect(saved).toEqual([{ source: 'musicbrainz' }]));
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Make default' })).toBeNull(),
+      );
+    });
+
+    it('offers no Make default to a profile that cannot change it', async () => {
+      server.use(
+        http.get('/api/import/search/sources', () =>
+          HttpResponse.json({
+            success: true,
+            sources: SOURCES,
+            default_source: '',
+            can_set_default: false,
+          }),
+        ),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      const picker = await screen.findByRole('combobox', { name: 'Search source' });
+      fireEvent.change(picker, { target: { value: 'musicbrainz' } });
+      expect(screen.queryByRole('button', { name: 'Make default' })).toBeNull();
+    });
+
+    it('a pasted release link shows that release, ready to pick', async () => {
+      const link = 'https://musicbrainz.org/release/9dfe45c8-4ad5-4811-853f-97291fdb957f';
+      server.use(
+        http.get('/api/import/search/albums', ({ request }) => {
+          const q = new URL(request.url).searchParams.get('q');
+          if (q !== link) {
+            return HttpResponse.json({ success: true, primary_source: 'spotify', albums: [] });
+          }
+          return HttpResponse.json({
+            success: true,
+            primary_source: 'spotify',
+            link: { source: 'musicbrainz', message: '' },
+            albums: [
+              {
+                id: '9dfe45c8-4ad5-4811-853f-97291fdb957f',
+                name: 'Discovery',
+                artist: 'Daft Punk',
+                source: 'musicbrainz',
+                total_tracks: 14,
+              },
+            ],
+          });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      const input = await screen.findByPlaceholderText('Artist and album, or a release link');
+      await screen.findByText('No releases found. Try another search.');
+      fireEvent.change(input, { target: { value: link } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(await screen.findByText('From the link')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+      await waitFor(() =>
+        expect(albumMatchBodies.at(-1)).toMatchObject({
+          album_id: '9dfe45c8-4ad5-4811-853f-97291fdb957f',
+          source: 'musicbrainz',
+        }),
+      );
+    });
+
+    it('a link that finds nothing says why', async () => {
+      server.use(
+        http.get('/api/import/search/albums', ({ request }) => {
+          const q = new URL(request.url).searchParams.get('q') ?? '';
+          return HttpResponse.json({
+            success: true,
+            primary_source: 'spotify',
+            albums: [],
+            ...(q.startsWith('https://')
+              ? {
+                  link: {
+                    source: 'musicbrainz',
+                    message:
+                      'MusicBrainz has no release with that id. Check the link and try again.',
+                  },
+                }
+              : {}),
+          });
+        }),
+      );
+      renderImportRoute(['/import/match/hash-1']);
+      const input = await screen.findByPlaceholderText('Artist and album, or a release link');
+      await screen.findByText('No releases found. Try another search.');
+      fireEvent.change(input, {
+        target: { value: 'https://musicbrainz.org/release/00000000-0000-0000-0000-000000000000' },
+      });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(
+        await screen.findByText(
+          'MusicBrainz has no release with that id. Check the link and try again.',
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('phase 2: upload, bulk singles, keyboard', () => {
     it('bulk-imports waiting singles from their own tags', async () => {
       let bodies: Record<string, unknown>[] = [];
@@ -1228,7 +1397,7 @@ describe('import route', () => {
 
     it('keyboard shortcuts stay out of text fields', async () => {
       renderImportRoute(['/import/match/hash-1']);
-      const input = await screen.findByPlaceholderText('Artist and album');
+      const input = await screen.findByPlaceholderText('Artist and album, or a release link');
       fireEvent.keyDown(input, { key: 'j' });
       // nothing to assert crashed; the inbox is not mounted on the matcher route
       expect(input).toBeInTheDocument();
@@ -1267,7 +1436,7 @@ describe('import route', () => {
         }),
       );
       renderImportRoute(['/import/match/hash-1']);
-      await screen.findByPlaceholderText('Artist and album');
+      await screen.findByPlaceholderText('Artist and album, or a release link');
       fireEvent.click(await screen.findByRole('button', { name: 'Identify by fingerprint' }));
       expect(
         await screen.findByText('Sounds like Artist A (Track One, Track Two)'),
