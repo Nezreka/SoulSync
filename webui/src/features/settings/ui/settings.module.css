@@ -2101,8 +2101,9 @@ button.chip:hover:not(:disabled) {
     padding-left: 30px;
   }
 
+  /* a long label wraps inside itself; its "i" stays beside it */
   .rowLabel {
-    flex-wrap: wrap;
+    align-items: flex-start;
   }
 
   .field {

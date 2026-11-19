@@ -62,7 +62,9 @@ function useAddressSync(model: SourcesModel) {
 
   useEffect(() => {
     if (!onSources || !state.kind || !(state.kind in CHAIN_KINDS)) return;
-    if (state.kind === model.getState().kind) return;
+    // a kind the address names is a pick: it outranks the side's own default
+    const now = model.getState();
+    if (state.kind === now.kind && now.kindChosen) return;
     fromAddress.current.kind = true;
     model.switchChain(state.kind);
   }, [state.kind, onSources]); // eslint-disable-line react-hooks/exhaustive-deps
