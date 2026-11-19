@@ -118,7 +118,7 @@ export const RELEASES: Release[] = [
       },
       {
         title: 'Titles before track numbers',
-        desc: 'Other versions, reassign and tracklist refresh match a file by its title first, a song sitting on another song’s number moves to its own, and a file deleted from its album is no longer found in another album’s folder (thanks wolf39us).',
+        desc: 'Other versions, reassign and tracklist refresh match a file by its title first, a song sitting on another song’s number moves to its own, and a file deleted from its album is no longer found in another album’s folder. Same-named albums from different years, like Weezer’s, split apart on every start and scan and stay apart (thanks wolf39us, #2110).',
         page: 'library',
       },
       {

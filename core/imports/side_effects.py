@@ -963,18 +963,29 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             existing_album = find_existing_soulsync_album_id(
                 cursor, name_key_id=album_id, artist_id=catalogue_artist,
                 album_name=album_name, album_source_id=album_source_id, source=album_id_source,
-                release_id=mb_release_id)
+                release_id=mb_release_id, release_year=year,
+                file_folder=os.path.dirname(str(final_path)))
             album_server_id = str(album_id)
-            if mb_release_id:
+            # what tells this release from another of the same name: its
+            # musicbrainz release, else the provider's own album id, else its
+            # year (weezer's "weezer"s, #2110)
+            release_scope = mb_release_id or (
+                f"{album_id_source}:{album_source_id}" if album_source_id and album_id_source
+                else str(year or ""))
+            other_release_holds_name = False
+            if release_scope:
                 holder = cursor.execute(
                     "SELECT id FROM lib2_albums WHERE server_source='soulsync' AND server_id=?",
                     (album_server_id,)).fetchone()
                 if holder and (existing_album is None or int(holder[0]) != existing_album):
                     # The name-hash id is held by a different release of the
                     # same name. A release-scoped id keeps each release its own
-                    # row, so a third one cannot collide either.
+                    # row, so a third one cannot collide either. Without it the
+                    # writer below found the other release by that very hash
+                    # and filed this one on it, whatever the grouping decided.
+                    other_release_holds_name = True
                     album_server_id = str(_stable_soulsync_id(
-                        f"{artist_name}::{album_name}::{mb_release_id}".lower().strip()))
+                        f"{artist_name}::{album_name}::{release_scope}".lower().strip()))
             if existing_album is not None:
                 cursor.execute(
                     "UPDATE lib2_albums SET server_source='soulsync', server_id=?,"
@@ -998,7 +1009,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # The grouping above already did the name match, release
                     # aware. The writer's own title fallback would fold a
                     # second release of the same name straight back in.
-                    title_fallback=not mb_release_id)
+                    title_fallback=not (mb_release_id or other_release_holds_name))
             from core.library2.release_kind import confirm_release_kind
             confirm_release_kind(cursor, catalogue_album, _import_record_type,
                                  known=album_ctx.get('_album_type_known') is not False)

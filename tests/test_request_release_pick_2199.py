@@ -95,6 +95,17 @@ def _as(pid):
     return c
 
 
+@pytest.fixture(autouse=True)
+def _wishlist_service_on_this_db(monkeypatch):
+    """the wishlist service is one per process and keeps the database it first
+    opened. an earlier test can leave it on another one, and then these tests
+    read an empty wishlist (dev CI, Nov 19). give it this run's database."""
+    from core.wishlist import service as ws
+    svc = ws.WishlistService()
+    svc._database = _db()
+    monkeypatch.setattr(ws, '_wishlist_service', svc)
+
+
 @pytest.fixture
 def cfg(monkeypatch):
     c = _Config()
