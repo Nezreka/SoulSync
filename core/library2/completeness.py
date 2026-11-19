@@ -415,6 +415,16 @@ def _from_a_known_release_id(
     return bool(known) and str(known) == str(provider_entity_id)
 
 
+def _another_song_at_slot(row: Any, title: str, duration: Any) -> bool:
+    """a file-backed row at an entry's position that is clearly another song:
+    the titles name different songs and the lengths say so too. either alone
+    is not enough here (a translated title, a provider's odd length), and a
+    row with no file is the tracklist's own placeholder."""
+    from core.imports.reassign_album import durations_disagree, titles_conflict
+    return bool(row["has_file"]) and titles_conflict(row["title"], title) \
+        and durations_disagree(row["duration"], duration)
+
+
 def _persist_tracklist_tracks(
     conn, album_id: int, tracks: List[dict], *, complete: bool = False, inherit_monitoring: bool = True,
 ) -> int:
@@ -532,11 +542,22 @@ def _persist_tracklist_tracks(
         # tracklist rewrite the numbers IN PLACE.
         heal_id = reserved.get(idx)
         existing = None if heal_id is not None else conn.execute(
-            """SELECT id FROM lib2_tracks
+            """SELECT id, title, duration,
+                      EXISTS(SELECT 1 FROM lib2_track_files f
+                              WHERE f.track_id=lib2_tracks.id
+                                AND COALESCE(f.file_state,'active')='active') AS has_file
+                 FROM lib2_tracks
                WHERE album_id=? AND COALESCE(disc_number, 1)=? AND track_number=?
                  AND id NOT IN (SELECT value FROM json_each(?))""",
             (album_id, disc, number, json.dumps(sorted(reserved.values()))),
         ).fetchone()
+        if existing is not None and _another_song_at_slot(existing, title, duration):
+            # wolf39us: the file of "Lost Stars" carried number 1 from a single
+            # and claimed the slot of "Maps": the song kept its own title and
+            # Maps never became a row. A file whose title AND length are
+            # another song's is not this entry; the entry gets its own row and
+            # the file is renumbered by heal_colliding_numbers below.
+            existing = None
         if heal_id is not None:
             conn.execute(
                 """UPDATE lib2_tracks
@@ -613,6 +634,10 @@ def _persist_tracklist_tracks(
     changed = created + _trim_excess_fileless_tracks(
         conn, album_id, expected, protect_ids=touched_ids
     )
+    # a row on another song's number (one the list doesn't carry) goes to the
+    # number its own file gives it
+    from core.library2.track_numbers import heal_colliding_numbers
+    heal_colliding_numbers(conn, [album_id], tracklist=entries)
     # Protected local/wanted rows can legitimately extend beyond the provider
     # count. Converge the stored expectation so precache does not retry the
     # same intentional mismatch forever.

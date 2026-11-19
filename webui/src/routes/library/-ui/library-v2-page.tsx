@@ -1218,6 +1218,10 @@ function refreshSummary(result: LibraryV2JobState['result']): string {
     parts.push(
       `${count('leftover_tracks_folded')} leftover row${count('leftover_tracks_folded') === 1 ? '' : 's'} with no file folded`,
     );
+  if (count('tracks_renumbered'))
+    parts.push(
+      `${count('tracks_renumbered')} track number${count('tracks_renumbered') === 1 ? '' : 's'} fixed from the file`,
+    );
   const drifting = count('path_drift') - count('path_repointed');
   if (drifting > 0) parts.push(`${drifting} needing review in Stale Index Paths`);
   return `Refresh & Scan: ${parts.join(', ')}.`;
