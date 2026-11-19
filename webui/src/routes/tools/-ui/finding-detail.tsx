@@ -29,6 +29,7 @@ import { createContext, Fragment, useContext, useState } from 'react';
 import type { FindingDetailRow } from '../-tools.core';
 import type { TagChange } from '../-tools.finding-copy';
 import type { RepairFinding } from '../-tools.types';
+import type { CoverApplyTarget } from './cover-art-finding';
 
 import { findExactArtist, searchLibraryArtists } from '../-tools.api';
 import {
@@ -422,7 +423,7 @@ export interface FindingDetailProps {
   /** `selectDuplicateToKeep` — click a duplicate to keep that version. */
   onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   /** `applyCoverArtTarget` — per-image apply on a cover-art finding. */
-  onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
   /** put back what this finding's fix changed */
   onUndo?: (finding: RepairFinding) => void;
   /** fix this finding with an answer of the user's own (#2150: a split

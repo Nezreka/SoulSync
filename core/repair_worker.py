@@ -848,6 +848,15 @@ def _duplicate_fix_action(action) -> tuple:
     raise ValueError('Choose Keep Best or an exact native file from this review')
 
 
+#: a cover Apply Art can take, in words (#2202)
+_COVER_PICK_WORDS = {
+    'library': "the library's cover",
+    'folder': "the album folder's cover",
+    'files': 'the cover inside the audio files',
+    'found': 'the found cover',
+}
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -6147,36 +6156,35 @@ class RepairWorker:
         from core.repair_jobs.cover_art_state import cover_image
         return cover_image(self.db, self._config_manager, details, place)
 
-    def _cover_bytes_for_apply(self, album_id, found_url, library_has):
-        """the exact cover apply writes into files and folders: what the
-        library shows when it has a saved cover, else the found image. None
-        leaves the older lookup in charge"""
-        try:
-            if library_has:
-                from contextlib import closing
-                from core.library2.artwork import build_artwork
-                with closing(self.db._get_connection()) as conn:
-                    conn.row_factory = sqlite3.Row
-                    path = build_artwork(self.db, conn, self._config_manager, 'album', int(album_id))
-                if path and os.path.isfile(path):
-                    with open(path, 'rb') as handle:
-                        return handle.read() or None
-                return None
-            if found_url:
-                from core.library2.artwork import _download_remote_artwork
-                return _download_remote_artwork(found_url)
-        except Exception as e:  # noqa: BLE001 - the older lookup still runs
-            logger.debug("cover bytes for album %s not read: %s", album_id, e)
-        return None
+    def _cover_for_apply(self, album_id, wanted, found_url):
+        """#2202: the cover Apply Art writes, as (pick, bytes): the tile the
+        user picked, else the best there is, the library's own first, then
+        the folder's, the files', and a found one. (None, None) when there
+        is none to read"""
+        from core.repair_jobs.cover_art_state import PICKS, pick_bytes
+        for pick in ([wanted] if wanted else PICKS):
+            try:
+                data = pick_bytes(self.db, self._config_manager, int(album_id), pick, found_url)
+            except Exception as e:  # noqa: BLE001 - one unreadable cover, try the next
+                logger.debug("cover %s for album %s not read: %s", pick, album_id, e)
+                data = None
+            if data:
+                return pick, data
+        return None, None
 
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
-        """Apply found artwork. ``_fix_action`` selects the target (Pache711):
+        """Apply a cover. ``_fix_action`` selects the target (Pache711):
         'album' (default — DB thumb + embed into files + cover.jpg), 'artist'
-        (the artist's DB image), or 'both'. Defaulting to 'album' keeps the
-        plain "Apply Art" button behaving exactly as before."""
-        target = (details.get('_fix_action') or 'album').strip().lower()
+        (the artist's DB image), or 'both'. 'album:<pick>' (#2202) uses the
+        cover of one tile of the finding: library, folder, files or found."""
+        # #2202: 'album:<pick>' applies the cover of one tile: library,
+        # folder, files or found. plain 'album' takes the best there is
+        target, _, wanted = str(details.get('_fix_action') or 'album').strip().lower().partition(':')
         if target not in ('album', 'artist', 'both'):
             target = 'album'
+        from core.repair_jobs.cover_art_state import PICKS
+        if wanted not in PICKS:
+            wanted = ''
 
         album_id = details.get('album_id') or entity_id
         if not album_id:
@@ -6194,22 +6202,30 @@ class RepairWorker:
             artist_result = self._fix_artist_art(album_id, details)
 
         artwork_url = details.get('found_artwork_url')
-        # sidecar_from_embedded: the album already has embedded art and just needs
-        # a cover.jpg sidecar — the apply writes it from the existing embedded art,
-        # so no API artwork_url is required (Sokhi #813).
-        sidecar_from_embedded = bool(details.get('sidecar_from_embedded'))
-        if not artwork_url and not sidecar_from_embedded:
+        native_album_id = _lib2_id(album_id)
+        # #2202: Apply Art writes the picked cover, or the best one the album
+        # already has: the library's, the folder's, the files'. a found url
+        # is only one of them. it used to be required, so a library cover
+        # that only had to reach the folder said "No artwork URL found"
+        picked, cover_bytes = (self._cover_for_apply(native_album_id, wanted, artwork_url)
+                               if native_album_id is not None else (None, None))
+        if cover_bytes is None and not artwork_url:
             # 'both' but no album art — report the artist outcome if that ran.
             if artist_result is not None:
                 return artist_result
-            return {'success': False, 'error': 'No artwork URL found in finding details'}
+            if wanted:
+                return {'success': False, 'error': (
+                    f"{_COVER_PICK_WORDS[wanted].capitalize()} could not be read any more. "
+                    "Rescan the album, or use Change cover to pick one")}
+            return {'success': False, 'error': (
+                'There is no cover to copy: none in the library, the audio files or the '
+                'album folder, and no source had one. Use Change cover to pick one')}
 
         conn = None
         track_paths = []
         album_title = details.get('album_title')
         artist_name = details.get('artist')
         mbid = details.get('musicbrainz_release_id')
-        native_album_id = _lib2_id(album_id)
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
@@ -6224,24 +6240,44 @@ class RepairWorker:
 
             library_has = bool((existing[0] or '').strip())
             locked = bool(existing[1]) and library_has
-            if locked:
-                # A manual pick outranks a repair/provider candidate. Use the
-                # chosen URL for the sidecar/embed work below as well.
-                if artwork_url:
-                    artwork_url = existing[0]
+            # the default pick tries the library's cover first: passing over
+            # it to a found one means its saved link no longer loads
+            library_dead = library_has and picked == 'found' and not wanted and not locked
+            if picked == 'found' and wanted == 'found' and library_has:
+                # the user picked the found cover over the library's own:
+                # it replaces it, the same as Change cover does
+                from core.library2.artwork import apply_manual_artwork
+                if apply_manual_artwork(self.db, conn, 'album', native_album_id, artwork_url,
+                                        profile_id=int(details.get('library_owner_id') or 1)):
+                    conn.commit()
+                else:
+                    conn.rollback()
+                    return {'success': False, 'error': 'The found cover could not be saved to the library'}
+            elif locked:
+                # A manual pick outranks a repair/provider candidate.
                 logger.info(
                     "[repair] album %s art is locked — keeping the chosen cover",
                     native_album_id,
                 )
-            elif artwork_url and not library_has:
-                # only when the library has no cover: a finding for a file
-                # with no embedded art replaced the album's cover with the
-                # provider's (a 360px discogs image over a good one). judged
-                # now, not at scan time: a cover saved since then is kept
+            elif artwork_url and picked in ('found', None) and (not library_has or library_dead):
+                # only when the library has no cover, or one that no longer
+                # loads (#2202): a finding for a file with no embedded art
+                # replaced the album's cover with the provider's (a 360px
+                # discogs image over a good one). judged now, not at scan
+                # time: a cover saved since then is kept
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
                 conn.commit()
+                if library_dead:
+                    from core.library2.artwork import invalidate_artwork
+                    invalidate_artwork(self.db, 'album', native_album_id)
+            if picked not in ('library', 'found'):
+                # the files' or the folder's cover fills the files and the
+                # folder; the library keeps what it has. the check after the
+                # fix judges only those
+                details['found_artwork_url'] = None
+                details['db_missing'] = not library_has
             cursor.execute("""
                 SELECT al.title, ar.name, al.musicbrainz_id
                 FROM lib2_albums al LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -6309,12 +6345,9 @@ class RepairWorker:
                 msg += ' + applied artist image'
             return {'success': True, 'action': 'applied_cover_art', 'message': msg}
 
-        # #2169: the files and the folder get one cover, the one the finding
-        # showed: the library's own when it has one (a pick included), else
-        # the found one. a lookup by the art order here could embed another
-        cover_bytes = self._cover_bytes_for_apply(
-            native_album_id, artwork_url if not library_has else None, library_has)
-
+        # #2169/#2202: the files and the folder get one cover, the one picked
+        # on the finding (read above). a lookup by the art order here could
+        # embed another
         from core.metadata.art_apply import apply_art_to_album_files
         metadata = {
             'artist': artist_name, 'album_artist': artist_name,
@@ -6383,7 +6416,7 @@ class RepairWorker:
             wrote_parts.append('wrote cover.jpg')
 
         if wrote_parts:
-            msg = 'Applied cover art: ' + ' + '.join(wrote_parts)
+            msg = f'Applied {_COVER_PICK_WORDS.get(picked, "the cover")}: ' + ' + '.join(wrote_parts)
         elif failed:
             # Real per-file write failures that were NOT a read-only mount
             # (genuine EROFS is handled above) — almost always file/folder

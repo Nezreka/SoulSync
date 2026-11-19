@@ -333,41 +333,26 @@ const WRITERS: Record<string, Writer> = {
       d.sidecar_missing === true ? 'the album folder' : '',
     ].filter(Boolean);
     const source = provider(d.artwork_source);
-    // #2169: say which cover apply uses and where it goes, the same choice
-    // the fix makes: the library's own cover first, then the found one
+    // #2169: say who has a cover to give, the library's own first. #2202:
+    // a saved cover that no longer loads is said so, not offered
+    const broken = d.library_cover_broken === true;
     const fromLibrary = d.db_missing === false;
     const found = !fromLibrary && Boolean(d.found_artwork_url);
-    const has = fromLibrary
-      ? ' The library has a cover to copy.'
-      : found
-        ? ` ${source || 'A source'} has one.`
-        : d.sidecar_from_embedded === true
-          ? ' The audio files have one to copy.'
-          : '';
-    const embed = d.embed_missing === true;
-    const sidecar = d.sidecar_missing === true;
-    // a missing cover.jpg is written from the cover inside the files when
-    // they have one, so it says so instead of naming the source
-    const fromFiles = `writes a cover.jpg into the album folder from the cover inside the audio files`;
-    let fix: string;
-    if (fromLibrary && !embed && sidecar) {
-      fix = `${verb} ${fromFiles}.`;
-    } else if (fromLibrary) {
-      fix = `${verb} copies the library's cover into the audio files without one${
-        sidecar ? ' and a cover.jpg in the album folder' : ''
-      }.`;
-    } else if (found) {
-      const into = embed
-        ? ` and puts it in the audio files without one${sidecar ? ' and a cover.jpg in the album folder' : ''}`
-        : '';
-      fix = `${verb} saves the ${source || 'found'} cover to the library${into}.${
-        sidecar && !embed ? ` It also ${fromFiles}.` : ''
-      }`;
-    } else if (d.sidecar_from_embedded === true) {
-      fix = `${verb} ${fromFiles}.`;
-    } else {
-      fix = `${verb} fills in the cover where it is missing.`;
-    }
+    const has = `${broken ? " The library's saved cover no longer loads." : ''}${
+      fromLibrary
+        ? ' The library has a cover to copy.'
+        : found
+          ? ` ${source || 'A source'} has one.`
+          : d.sidecar_from_embedded === true
+            ? ' The audio files have one to copy.'
+            : d.artwork_source === 'folder'
+              ? ' The album folder has one to copy.'
+              : ''
+    }`;
+    // #2202: the cover is picked on the finding, so the line names no
+    // source: it said "from the cover inside the audio files" over files
+    // with no cover
+    const fix = `${verb} puts the cover picked below in each place without one.`;
     return {
       title: s.album || withoutPrefix(finding.title),
       sub: s.artist,

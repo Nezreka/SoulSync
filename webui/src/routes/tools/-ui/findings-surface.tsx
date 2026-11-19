@@ -42,6 +42,7 @@ import type {
   RepairJob,
   RepairJobRun,
 } from '../-tools.types';
+import type { CoverApplyTarget } from './cover-art-finding';
 
 import {
   bulkFindingAction,
@@ -859,13 +860,14 @@ export function FindingsSurface({
 
   /** `applyCoverArtTarget` — per-image apply, no confirm. */
   const applyCoverArt = useCallback(
-    async (findingId: number, target: 'album' | 'artist') => {
+    async (findingId: number, target: CoverApplyTarget) => {
+      const kind = target === 'artist' ? 'artist' : 'album';
       try {
         const result = await fixFinding(findingId, target);
         toast(
           result.success
-            ? result.message || `Applied ${target} art`
-            : result.error || `Failed to apply ${target} art`,
+            ? result.message || `Applied ${kind} art`
+            : result.error || `Failed to apply ${kind} art`,
           result.success ? 'success' : 'error',
         );
         refreshAll();
@@ -2257,7 +2259,7 @@ function FindingCard({
   onDismiss: (id: number) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
-  onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
