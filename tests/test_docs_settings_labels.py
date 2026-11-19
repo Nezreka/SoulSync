@@ -82,7 +82,7 @@ LABELS: list[tuple[str, str]] = [
     ("Download Folder (input)", "11-settings.js"),
     ("Music Library Folder (output)", "11-settings.js"),
     ("Plex Server URL", "11-settings.js"),
-    ("Link to Plex (OAuth)", "11-settings.js"),
+    ("Link to Plex", "11-settings.js"),
     ("Jellyfin Server URL", "11-settings.js"),
     ("Navidrome Server URL", "11-settings.js"),
     ("API Key", "11-settings.js"),

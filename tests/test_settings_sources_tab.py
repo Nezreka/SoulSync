@@ -928,8 +928,12 @@ def test_no_two_cards_share_a_name():
     dupes = [t for t, n in Counter(titles).items() if n > 1]
     assert not dupes, f"more than one card claims this title: {dupes}"
 
-    # and the pair that caused it stays explicit about which side it serves
-    assert "Music Quality" in titles and "Video Quality" in titles
+    # and the pair that caused it stays explicit about which side it serves:
+    # (settings-bic phase 3) each is its own Quality pill, named for its kind
+    nav = (Path(__file__).resolve().parent.parent / "webui/src/features/settings/nav.ts").read_text(
+        encoding="utf-8")
+    assert "{ key: 'music', label: 'Music' }" in nav
+    assert "{ key: 'video', label: 'Movies and TV' }" in nav
 
 
 # ── Connections: services as tiles ─────────────────────────────────────────

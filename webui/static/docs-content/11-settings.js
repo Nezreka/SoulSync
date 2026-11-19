@@ -44,7 +44,7 @@ Connect your media server to enable library scans, metadata syncing, and in-app 
 
 ## Plex
 
-One **Plex Server URL** field — no separate port. Paste a token, or use **Link to Plex (OAuth)** and enter the PIN at plex.tv/link. After linking, pick which music library to read from the dropdown.
+One **Plex Server URL** field — no separate port. Paste a token, or use **Link to Plex** and enter the PIN at plex.tv/link. After linking, pick which music library to read from the dropdown.
 
 ## Jellyfin
 
