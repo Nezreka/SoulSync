@@ -606,5 +606,8 @@ def wishlist_rows_for_sweep(wishlist_service, profile_id: int) -> List[Dict[str,
     its download rows."""
     fn = getattr(wishlist_service, "get_wishlist_tracks_including_held", None)
     if callable(fn):
-        return fn(profile_id=profile_id)
+        rows = fn(profile_id=profile_id)
+        # a mock answers every name with another mock: only a list is rows
+        if isinstance(rows, list):
+            return rows
     return wishlist_service.get_wishlist_tracks_for_download(profile_id=profile_id)
