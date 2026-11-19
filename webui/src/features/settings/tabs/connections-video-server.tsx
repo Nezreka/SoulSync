@@ -130,7 +130,7 @@ function OtherTv() {
     <div data-video-lib-tv-more-row="" hidden={!others.length}>
       <div data-video-lib-tv-more="">
         {others.map((l) => (
-          <Row key={l.title} sub label={l.title} help="Another TV library on this server.">
+          <Row key={l.title} sub field label={l.title} help="Another TV library on this server.">
             <label className={s.inlineSwitch}>
               Scan
               <Switch

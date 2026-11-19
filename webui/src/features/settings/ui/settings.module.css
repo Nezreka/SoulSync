@@ -1863,9 +1863,12 @@ button.chip:hover:not(:disabled) {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  margin-left: 14px;
   color: var(--white-a70);
   font-size: 12.5px;
+}
+
+.inlineSwitch + .inlineSwitch {
+  margin-left: 18px;
 }
 
 /* a card's content that is not rows */
