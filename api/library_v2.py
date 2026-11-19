@@ -351,6 +351,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                # #2209: an artist on the watchlist is the Watchlist's, so a
+                # profile without that part gets no follow from here either
+                if _is_watchlist_write() and not _may_watch():
+                    from core.permissions import refusal
+                    return refusal("music.watchlist")
                 # a search downloads: a household member who asks first
                 # wishes (their wishlist becomes requests) but never grabs
                 if request.endpoint in _DOWNLOADING_ENDPOINTS and not _may_download():
@@ -479,6 +484,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return True
         from core.library2.sql_util import shared_library_member
         return shared_library_member() is not None
+
+    def _is_watchlist_write() -> bool:
+        """#2209: does this write follow or unfollow an artist (their watchlist
+        row), rather than wish for releases or tracks?"""
+        endpoint = request.endpoint
+        if endpoint == "lib2_set_monitored":
+            return (request.view_args or {}).get("entity") == "artists"
+        if endpoint == "lib2_artist_settings":
+            return request.method != "GET"
+        if endpoint == "lib2_discovery_artist":
+            body = request.get_json(silent=True)
+            return request.method == "POST" and isinstance(body, dict) and bool(body.get("monitored"))
+        return False
+
+    def _may_watch() -> bool:
+        """may the caller use the Watchlist (music.watchlist)? the admin always;
+        a member when their permissions give them the Watchlist page (#2209)"""
+        if _is_admin():
+            return True
+        try:
+            from core.permissions import can, enforcing
+            return can(None, "music.watchlist") if enforcing() and has_request_context() else True
+        except Exception:  # noqa: BLE001 - unreadable map: no watchlist
+            return False
 
     def _may_download() -> bool:
         """may the caller start a download (not just a request)?"""
@@ -753,6 +782,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_write": _is_admin(),
             # E-13: monitor/search in a library of one's own
             "can_wish": _can_wish(),
+            # #2209: following artists is the Watchlist's (music.watchlist)
+            "can_watch": _can_wish() and _may_watch(),
             # a wish that downloads right away (Automatic Search) needs this
             "can_download": _may_download(),
             # a grab for a library track straight from its Interactive Search
