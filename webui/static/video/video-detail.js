@@ -1963,6 +1963,99 @@
             .catch(function () { section.hidden = true; });
     }
 
+    // ── Shelf Life (admins only) ───────────────────────────────────────────────
+    // The score the Shelf Life job gave this title, its top reasons, when it
+    // was scored, and Keep. Members never fetch it (the route is admin-only
+    // too). The page reads the stored result; it never scores.
+    function _isAdmin() {
+        try {
+            if (typeof getCurrentProfileContext !== 'function') return false;
+            var ctx = getCurrentProfileContext();
+            return !!(ctx && ctx.isAdmin);
+        } catch (e) { return false; }
+    }
+    function shelfAgo(stamp) {
+        if (!stamp) return '';
+        var t = Date.parse(String(stamp).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(stamp) ? '' : 'Z'));
+        if (isNaN(t)) return '';
+        var hr = Math.max(0, Math.round((Date.now() - t) / 3600000));
+        if (hr < 1) return 'scored just now';
+        if (hr < 48) return 'scored ' + hr + ' hour' + (hr === 1 ? '' : 's') + ' ago';
+        return 'scored ' + Math.round(hr / 24) + ' days ago';
+    }
+    function shelfPanelHtml(v) {
+        var head, note = '';
+        if (v.keep) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">🛡 Kept</span>';
+            note = 'Never flagged while it is kept.';
+        } else if (!v.scored) {
+            head = '<span class="vd-shelf-chip">Not scored yet</span>';
+            note = 'It gets a score on the next Shelf Life run.';
+        } else if (v.gate) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">🛡 Protected</span>';
+            note = v.gate_text || '';
+        } else {
+            var low = v.score < v.threshold;
+            var band = low ? 'low' : (v.score < v.threshold + 15 ? 'mid' : 'ok');
+            head = '<span class="vd-shelf-chip vd-shelf-chip--' + band + '">' + esc(v.score) + '</span>' +
+                (low ? '<span class="vd-shelf-flag">Flagged for cleanup (under ' + esc(v.threshold) + ')</span>' : '');
+        }
+        var reasons = (!v.keep && v.scored && !v.gate) ? (v.reasons || []) : [];
+        var when = v.scored ? shelfAgo(v.scored_at) : '';
+        var btn = v.can_keep
+            ? '<button type="button" class="vd-shelf-keep' + (v.keep ? ' vd-shelf-keep--on' : '') + '" ' +
+              'data-vd-shelf-keep="' + (v.keep ? '0' : '1') + '" aria-pressed="' + (v.keep ? 'true' : 'false') + '" title="' +
+              (v.keep ? 'Stop keeping it: the next run can flag it again' : 'Keep it: Shelf Life never flags it') + '">' +
+              (v.keep ? 'Kept' : 'Keep') + '</button>'
+            : '';
+        return '<div class="vd-shelf-head"><span class="vd-shelf-label">Shelf Life</span>' + head +
+            (when ? '<span class="vd-shelf-when">' + esc(when) + '</span>' : '') + btn + '</div>' +
+            (note ? '<div class="vd-shelf-note">' + esc(note) + '</div>' : '') +
+            (reasons.length ? '<ul class="vd-shelf-reasons">' + reasons.map(function (r) {
+                return '<li>' + esc(r.text) + '</li>';
+            }).join('') + '</ul>' : '');
+    }
+    function renderShelf(v) {
+        var host = q('[data-vd-shelf]');
+        if (!host) return;
+        if (!v) { host.hidden = true; host.innerHTML = ''; return; }
+        host.innerHTML = shelfPanelHtml(v);
+        host.setAttribute('data-vd-shelf-for', v.kind + ':' + v.item_id);
+        host.hidden = false;
+    }
+    function loadShelfLife(kind, id) {
+        renderShelf(null);
+        if (!_isAdmin()) return;
+        fetch('/api/video/repair/shelf-life/' + kind + '/' + encodeURIComponent(id),
+              { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (v) {
+                // a late answer for a title the page has since left is dropped
+                if (String(currentId) !== String(id) || currentKind !== kind) return;
+                // the job switched off shows nothing: a stale score would read as live
+                renderShelf(v && v.success && v.enabled ? v : null);
+            })
+            .catch(function () { renderShelf(null); });
+    }
+    function toggleShelfKeep(btn) {
+        var host = btn.closest('[data-vd-shelf]');
+        var key = host && (host.getAttribute('data-vd-shelf-for') || '').split(':');
+        if (!key || key.length !== 2) return;
+        var keep = btn.getAttribute('data-vd-shelf-keep') === '1';
+        btn.disabled = true;
+        fetch('/api/video/repair/shelf-life/' + key[0] + '/' + encodeURIComponent(key[1]) + '/keep', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ keep: keep })
+        })
+            .then(function (r) { return r.json().catch(function () { return null; }); })
+            .then(function (v) {
+                if (!v || !v.success) { btn.disabled = false; toast((v && v.error) || 'Couldn\u2019t save Keep', 'error'); return; }
+                if (String(currentId) === String(key[1]) && currentKind === key[0]) renderShelf(v);
+                toast(keep ? 'Kept: Shelf Life will never flag it' : 'No longer kept', 'success');
+            })
+            .catch(function () { btn.disabled = false; toast('Couldn\u2019t reach the server', 'error'); });
+    }
+
     function loadTitleHistory(kind, id) {
         var section = q('[data-vd-history-section]'), host = q('[data-vd-history]');
         if (!section || !host) return;
@@ -2000,7 +2093,7 @@
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
          '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]',
-         '[data-vd-acq-section]', '[data-vd-essentials]'].forEach(function (s) {
+         '[data-vd-acq-section]', '[data-vd-essentials]', '[data-vd-shelf]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -3291,6 +3384,7 @@
                     loadExtras('movie', id);
                     loadTitleHistory('movie', id);    // acquisition history (P9)
                     loadAcquisition('movie', id);        // ...and where it stands now
+                    loadShelfLife('movie', id);          // admins: score, reasons, Keep
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -3381,6 +3475,7 @@
                     loadExtras('show', id);
                     loadTitleHistory('show', id);     // acquisition history (P9)
                     loadAcquisition('show', id);        // ...and where it stands now
+                    loadShelfLife('show', id);          // admins: score, reasons, Keep
                 }
             })
             .catch(function () { showLoading(false); showLoadError('show', 'offline'); });
@@ -4185,6 +4280,8 @@
         if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
         var vid = e.target.closest('[data-vd-video]');
         if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
+        var shelfKeep = e.target.closest('[data-vd-shelf-keep]');
+        if (shelfKeep && r.contains(shelfKeep)) { e.preventDefault(); toggleShelfKeep(shelfKeep); return; }
         var healthFix = e.target.closest('[data-vd-health-fix]');
         if (healthFix && r.contains(healthFix)) {
             e.preventDefault();

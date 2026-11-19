@@ -753,6 +753,113 @@ function KeepBestBulkPrompt({
   );
 }
 
+/** What a type-to-confirm gate says, and the exact text that unlocks it. */
+export interface TypeToConfirmOptions {
+  title: string;
+  message: string;
+  /** typed exactly (surrounding spaces aside) to enable the confirm button */
+  phrase: string;
+  confirmText: string;
+}
+
+/**
+ * A delete that can't be clicked through: the confirm button stays off until
+ * the phrase is typed. Resolves the typed text (the server checks it again)
+ * or null on cancel. Shelf Life's Delete Title fix types the title here.
+ */
+function TypeToConfirmDialog({
+  options,
+  resolve,
+}: {
+  options: TypeToConfirmOptions;
+  resolve: (value: string | null) => void;
+}) {
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const match = text.trim() !== '' && text.trim() === options.phrase.trim();
+
+  return (
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) resolve(null);
+      }}
+      viewportClassName={clsx('confirm-modal-overlay', styles.witnessOverlay)}
+      className={styles.witnessBox}
+      initialFocus={inputRef}
+      aria-label={options.title}
+    >
+      <h3 style={{ margin: '0 0 8px', color: 'var(--danger)', fontSize: '1.2em' }}>
+        {options.title}
+      </h3>
+      <p style={{ margin: '0 0 12px', fontSize: '0.9em', opacity: 0.85 }}>{options.message}</p>
+      <p style={{ margin: '0 0 6px', fontSize: '0.9em', opacity: 0.9 }}>
+        To confirm, type <strong style={{ color: 'var(--danger)' }}>{options.phrase}</strong> below:
+      </p>
+      <input
+        type="text"
+        id="type-to-confirm-input"
+        ref={inputRef}
+        autoComplete="off"
+        spellCheck={false}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && match) resolve(text);
+        }}
+        style={{
+          width: '100%',
+          padding: '10px',
+          border: '1px solid var(--white-a30)',
+          borderRadius: '6px',
+          background: 'var(--bg-primary)',
+          color: 'var(--text-primary)',
+          fontSize: '1em',
+          margin: '8px 0 16px',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          id="type-to-confirm-cancel"
+          type="button"
+          onClick={() => resolve(null)}
+          style={{
+            padding: '8px 20px',
+            border: '1px solid var(--white-a30)',
+            borderRadius: '6px',
+            background: 'transparent',
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+            fontSize: '0.9em',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          id="type-to-confirm-confirm"
+          type="button"
+          disabled={!match}
+          onClick={() => resolve(text)}
+          style={{
+            padding: '8px 20px',
+            border: 'none',
+            borderRadius: '6px',
+            background: match ? 'var(--danger)' : 'var(--white-a30)',
+            color: match ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: match ? 'pointer' : 'not-allowed',
+            fontSize: '0.9em',
+            fontWeight: 600,
+            transition: 'all 0.2s',
+          }}
+        >
+          {options.confirmText}
+        </button>
+      </div>
+    </DialogFrame>
+  );
+}
+
 // ── The hook ─────────────────────────────────────────────────────────────────
 
 type PendingPrompt =
@@ -779,7 +886,8 @@ type PendingPrompt =
       tally: (move: boolean, confirm: boolean) => KeepBestTally;
       pairs: RecordingPair[];
       resolve: (value: KeepBestBulkChoice | null) => void;
-    };
+    }
+  | { kind: 'typed'; options: TypeToConfirmOptions; resolve: (value: string | null) => void };
 
 export interface FindingPrompts {
   promptOrphan: () => Promise<OrphanFixAction | null>;
@@ -799,6 +907,8 @@ export interface FindingPrompts {
     tally: (move: boolean, confirm: boolean) => KeepBestTally,
     pairs?: RecordingPair[],
   ) => Promise<KeepBestBulkChoice | null>;
+  /** a delete gated on typing a phrase; resolves the typed text or null */
+  promptTypeToConfirm: (options: TypeToConfirmOptions) => Promise<string | null>;
   /** Render this somewhere inside the findings tab. */
   promptNode: React.ReactNode;
 }
@@ -869,6 +979,13 @@ export function useFindingPrompts(): FindingPrompts {
       }),
     [],
   );
+  const promptTypeToConfirm = useCallback(
+    (options: TypeToConfirmOptions) =>
+      new Promise<string | null>((resolve) => {
+        setPending({ kind: 'typed', options, resolve });
+      }),
+    [],
+  );
 
   let promptNode: React.ReactNode = null;
   if (pending?.kind === 'orphan') {
@@ -913,6 +1030,13 @@ export function useFindingPrompts(): FindingPrompts {
         resolve={(v) => settle(pending.resolve as never, v)}
       />
     );
+  } else if (pending?.kind === 'typed') {
+    promptNode = (
+      <TypeToConfirmDialog
+        options={pending.options}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
   }
 
   return {
@@ -924,6 +1048,7 @@ export function useFindingPrompts(): FindingPrompts {
     promptRetag,
     promptWitnessMe,
     promptKeepBest,
+    promptTypeToConfirm,
     promptNode,
   };
 }

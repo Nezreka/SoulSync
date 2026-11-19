@@ -546,7 +546,7 @@ class OpenSubtitlesWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("opensubtitles")
 
 
-# ── Trakt (free API key) — community audience rating + vote count ─────────────
+# ── Trakt (free API key) — community audience rating, vote count, list count ──
 class TraktWorker(VideoBackfillWorker):
     BASE = "https://api.trakt.tv"
     requires_key = True
@@ -598,7 +598,28 @@ class TraktWorker(VideoBackfillWorker):
         votes = j.get("votes")
         if isinstance(votes, int) and votes > 0:
             out["trakt_votes"] = votes
+        if out:
+            lists = self._lists(typ, j, imdb)
+            if lists is not None:
+                out["trakt_lists"] = lists
         return out or None
+
+    def _lists(self, typ, summary, imdb):
+        """how many Trakt user lists hold the title, from its stats. a second
+        call only once the summary found it; a failure here keeps the rating
+        (a rate limit or a rejected key still backs the worker off)."""
+        ids = summary.get("ids") if isinstance(summary.get("ids"), dict) else {}
+        slug = ids.get("trakt") or imdb
+        try:
+            j = _http_get_json(self.BASE + "/" + typ + "/" + str(slug) + "/stats",
+                               headers=self._headers())
+        except (_RateLimited, _Unauthorized):
+            raise
+        except Exception:
+            logger.debug("Trakt stats failed for %s", imdb, exc_info=True)
+            return None
+        lists = j.get("lists") if isinstance(j, dict) else None
+        return lists if isinstance(lists, int) and lists >= 0 else None
 
     def record_ok(self, item, data):
         self.db.backfill_mark("trakt", item["kind"], item["id"], "ok", columns=data)
@@ -856,7 +877,9 @@ class WikidataWorker(VideoBackfillWorker):
 
 class TmdbStreamingWorker(VideoBackfillWorker):
     """TMDB 'watch providers' → the primary streaming service a title is on, for
-    the Streaming overlay badge (and its logo pack via the resolver)."""
+    the Streaming overlay badge (and its logo pack via the resolver), plus how
+    many services carry it in the region (``streaming_count``): one service and
+    six are not the same answer to 'can we get this back if it goes'."""
     BASE = "https://api.themoviedb.org/3"
     requires_key = True
 
@@ -902,7 +925,11 @@ class TmdbStreamingWorker(VideoBackfillWorker):
         # the primary provider for the region, by TMDB's display priority
         best = sorted(flat, key=lambda p: p.get("display_priority", 999))[0]
         name = (best or {}).get("provider_name")
-        return {"streaming": name} if name else None
+        if not name:
+            return None
+        # distinct services, not rows: TMDB can list a provider more than once
+        count = len({p.get("provider_id") or p.get("provider_name") for p in flat if isinstance(p, dict)})
+        return {"streaming": name, "streaming_count": count}
 
     def record_ok(self, item, data):
         self.db.backfill_mark("streaming", item["kind"], item["id"], "ok", columns=data)

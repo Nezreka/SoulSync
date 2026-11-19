@@ -231,7 +231,83 @@ def test_streaming_fetch_picks_primary_flatrate_provider(db, monkeypatch):
             {"provider_name": "Netflix", "display_priority": 1},   # lower priority = primary
         ]}}})
     out = TmdbStreamingWorker(db).fetch({"kind": "movie", "tmdb_id": 438631})
-    assert out == {"streaming": "Netflix"}
+    assert out == {"streaming": "Netflix", "streaming_count": 2}
+
+
+def test_streaming_fetch_counts_distinct_services(db, monkeypatch):
+    # TMDB can list one service twice, and a plan tier is its own provider id
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {
+        "results": {"US": {"flatrate": [
+            {"provider_id": 8, "provider_name": "Netflix", "display_priority": 1},
+            {"provider_id": 8, "provider_name": "Netflix", "display_priority": 1},
+            {"provider_id": 1796, "provider_name": "Netflix Standard with Ads", "display_priority": 2},
+            {"provider_id": 15, "provider_name": "Hulu", "display_priority": 3},
+        ]}}})
+    out = TmdbStreamingWorker(db).fetch({"kind": "show", "tmdb_id": 1399})
+    assert out == {"streaming": "Netflix", "streaming_count": 3}
+
+
+def test_streaming_worker_records_count(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.set_setting("tmdb_api_key", "KEY")
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1 WHERE id=?", (mid,)); c.commit()
+    w = TmdbStreamingWorker(db)
+    w.fetch = lambda item: {"streaming": "Max", "streaming_count": 4}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["streaming"] == "Max" and r["streaming_count"] == 4
+
+
+def _reopen(path, monkeypatch):
+    """a fresh VideoDatabase that runs startup again for this one path"""
+    import database.video_database as vdb
+    monkeypatch.setattr(vdb, "_initialized_paths", set())
+    return VideoDatabase(database_path=path)
+
+
+def test_streaming_count_requeues_found_titles_once(tmp_path, monkeypatch):
+    # a title found on a service before the count existed goes back through the
+    # queue once for its count, keeping its name; a title on no service
+    # (not_found, i.e. 0) is left alone
+    path = str(tmp_path / "video_library.db")
+    db = VideoDatabase(database_path=path)
+    found = db.upsert_movie("plex", {"server_id": "m1", "title": "Found"})
+    nowhere = db.upsert_movie("plex", {"server_id": "m2", "title": "Nowhere"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1, streaming='Hulu', streaming_status='ok' WHERE id=?", (found,))
+        c.execute("UPDATE movies SET tmdb_id=2, streaming_status='not_found' WHERE id=?", (nowhere,))
+        c.execute("DELETE FROM video_settings WHERE key = ?", (VideoDatabase._STREAMING_COUNT_MARKER,))
+        c.commit()
+    db = _reopen(path, monkeypatch)
+    with db.connect() as c:
+        rows = {r["id"]: r for r in c.execute("SELECT id, streaming, streaming_status FROM movies")}
+    assert rows[found]["streaming_status"] is None and rows[found]["streaming"] == "Hulu"
+    assert rows[nowhere]["streaming_status"] == "not_found"
+    assert db.backfill_next("streaming")["id"] == found
+    # once only: after the count lands, another start re-queues nothing
+    db.backfill_mark("streaming", "movie", found, "ok", columns={"streaming_count": 1})
+    db = _reopen(path, monkeypatch)
+    assert db.backfill_next("streaming") is None
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count FROM movies WHERE id=?", (found,)).fetchone()
+    assert r["streaming"] == "Hulu" and r["streaming_count"] == 1
+
+
+def test_rematch_clears_streaming_count(db):
+    # the count was the old title's, like the provider name beside it
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1, streaming='Hulu', streaming_count=3, "
+                  "streaming_status='ok' WHERE id=?", (mid,)); c.commit()
+    assert db.rematch_item("movie", mid, "tmdb", 2) is True
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count, streaming_status FROM movies WHERE id=?",
+                      (mid,)).fetchone()
+    assert r["streaming"] is None and r["streaming_count"] is None and r["streaming_status"] is None
 
 
 def test_streaming_fetch_empty_when_no_providers(db, monkeypatch):
@@ -386,6 +462,114 @@ def test_trakt_fetch_parses_summary(db, monkeypatch):
     w = TraktWorker(db)
     out = w.fetch({"kind": "movie", "imdb_id": "tt0137523"})
     assert out == {"trakt_rating": 8.2, "trakt_votes": 5000}   # rounded to 1dp
+
+
+def test_trakt_fetch_counts_lists_from_stats(db, monkeypatch):
+    # the list count comes from the title's stats, asked by its trakt id
+    db.set_setting("trakt_api_key", "client-id")
+    import core.video.enrichment.backfill as bf
+    seen = []
+
+    def fake(url, params=None, headers=None, timeout=12):
+        seen.append(url)
+        if url.endswith("/stats"):
+            return {"watchers": 900, "collectors": 300, "lists": 4321, "votes": 5000}
+        return {"rating": 8.234, "votes": 5000, "ids": {"trakt": 432, "imdb": "tt0137523"}}
+    monkeypatch.setattr(bf, "_http_get_json", fake)
+    out = TraktWorker(db).fetch({"kind": "movie", "imdb_id": "tt0137523"})
+    assert out == {"trakt_rating": 8.2, "trakt_votes": 5000, "trakt_lists": 4321}
+    assert seen[1] == TraktWorker.BASE + "/movies/432/stats"
+
+
+def test_trakt_stats_failure_keeps_the_rating(db, monkeypatch):
+    # a stats hiccup after a good summary keeps the rating, with no count
+    db.set_setting("trakt_api_key", "client-id")
+    import core.video.enrichment.backfill as bf
+
+    def fake(url, params=None, headers=None, timeout=12):
+        if url.endswith("/stats"):
+            raise ConnectionError("reset")
+        return {"rating": 7.0, "votes": 40}
+    monkeypatch.setattr(bf, "_http_get_json", fake)
+    out = TraktWorker(db).fetch({"kind": "show", "imdb_id": "tt0303461"})
+    assert out == {"trakt_rating": 7.0, "trakt_votes": 40}
+
+
+def test_trakt_stats_rate_limit_backs_off(db, monkeypatch):
+    # a 429 on the stats call backs the worker off like any other: the title
+    # stays queued, nothing is marked
+    db.set_setting("trakt_api_key", "client-id")
+    import core.video.enrichment.backfill as bf
+
+    def fake(url, params=None, headers=None, timeout=12):
+        if url.endswith("/stats"):
+            raise bf._RateLimited(30)
+        return {"rating": 7.0, "votes": 40}
+    monkeypatch.setattr(bf, "_http_get_json", fake)
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1' WHERE id=?", (mid,)); c.commit()
+    w = TraktWorker(db)
+    assert w.process_one() is False
+    assert w._cooldown_until > 0
+    assert db.backfill_next("trakt")["id"] == mid
+
+
+def test_trakt_worker_records_lists(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.set_setting("trakt_api_key", "client-id")
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1' WHERE id=?", (mid,)); c.commit()
+    w = TraktWorker(db)
+    w.fetch = lambda item: {"trakt_rating": 6.5, "trakt_votes": 120, "trakt_lists": 77}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT trakt_lists FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["trakt_lists"] == 77
+
+
+def test_trakt_lists_requeues_rated_titles_once(tmp_path, monkeypatch):
+    # a title Trakt rated before the list count existed goes back through the
+    # queue once for its count, keeping its rating; a not_found title stays put
+    path = str(tmp_path / "video_library.db")
+    db = VideoDatabase(database_path=path)
+    rated = db.upsert_movie("plex", {"server_id": "m1", "title": "Rated"})
+    missing = db.upsert_movie("plex", {"server_id": "m2", "title": "Missing"})
+    show = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "seasons": []})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1', trakt_rating=7.5, trakt_votes=10, "
+                  "trakt_status='ok' WHERE id=?", (rated,))
+        c.execute("UPDATE movies SET imdb_id='tt2', trakt_status='not_found' WHERE id=?", (missing,))
+        c.execute("UPDATE shows SET imdb_id='tt3', trakt_rating=8.0, trakt_status='ok' WHERE id=?", (show,))
+        c.execute("DELETE FROM video_settings WHERE key = ?", (VideoDatabase._TRAKT_LISTS_MARKER,))
+        c.commit()
+    db = _reopen(path, monkeypatch)
+    with db.connect() as c:
+        movies = {r["id"]: r for r in c.execute("SELECT id, trakt_rating, trakt_status FROM movies")}
+        srow = c.execute("SELECT trakt_status FROM shows WHERE id=?", (show,)).fetchone()
+    assert movies[rated]["trakt_status"] is None and movies[rated]["trakt_rating"] == 7.5
+    assert movies[missing]["trakt_status"] == "not_found"
+    assert srow["trakt_status"] is None
+    # once only: after the count lands, another start re-queues nothing
+    db.backfill_mark("trakt", "movie", rated, "ok", columns={"trakt_lists": 12})
+    db.backfill_mark("trakt", "show", show, "ok", columns={"trakt_lists": 3})
+    db = _reopen(path, monkeypatch)
+    assert db.backfill_next("trakt") is None
+    with db.connect() as c:
+        r = c.execute("SELECT trakt_rating, trakt_lists FROM movies WHERE id=?", (rated,)).fetchone()
+    assert r["trakt_rating"] == 7.5 and r["trakt_lists"] == 12
+
+
+def test_rematch_clears_trakt_lists(db):
+    # the count was the old title's, like the rating beside it
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1, trakt_rating=7.0, trakt_lists=55, "
+                  "trakt_status='ok' WHERE id=?", (mid,)); c.commit()
+    assert db.rematch_item("movie", mid, "tmdb", 2) is True
+    with db.connect() as c:
+        r = c.execute("SELECT trakt_lists, trakt_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["trakt_lists"] is None and r["trakt_status"] is None
 
 
 def test_trakt_fetch_needs_imdb_and_key(db, monkeypatch):

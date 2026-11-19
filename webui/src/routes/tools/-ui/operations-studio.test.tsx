@@ -5,7 +5,12 @@ import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type { RepairJob } from '../-tools.types';
 
 import { Operations } from './operations';
-import { OperationsStudio, PLAYBOOK_PRESETS, STRATEGIC_PILLARS } from './operations-studio';
+import {
+  OperationsStudio,
+  PLAYBOOK_PRESETS,
+  STRATEGIC_PILLARS,
+  VIDEO_PILLARS,
+} from './operations-studio';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -363,6 +368,14 @@ describe('OperationsStudio (the top of the Jobs panel)', () => {
     // and the area that counts them also checks them
     expect(tags.jobIds).toContain('library_retag');
     expect(tags.jobIds).toContain('album_edition_review');
+  });
+
+  it('the video files area owns shelf life, its job and its findings', () => {
+    // the job list groups it under files & storage from the catalog; the area
+    // has its own list, so check now and its open count would skip it
+    const files = VIDEO_PILLARS.find((pillar) => pillar.id === 'files')!;
+    expect(files.jobIds).toContain('shelf_life');
+    expect(files.findingTypes).toContain('shelf_life');
   });
 });
 
