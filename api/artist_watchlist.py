@@ -1099,12 +1099,23 @@ def remove_batch_from_watchlist():
                     removed_descriptors.append(descriptor)
 
         try:
-            from core.library2.monitor_sync import sync_watchlist_removal
-            for descriptor in removed_descriptors:
-                sync_watchlist_removal(database, config_manager, descriptor,
-                                       profile_id=get_current_profile_id())
+            # one pass for the lot (#2200): one per artist recomputed and
+            # mirrored each artist on its own, 70 s for 57 artists
+            from core.library2.monitor_sync import sync_watchlist_removals
+            sync_watchlist_removals(database, removed_descriptors,
+                                    profile_id=get_current_profile_id())
         except Exception as _sync_e:
             logger.debug("watchlist reverse-sync (batch) failed: %s", _sync_e)
+
+        if removed:
+            # what a single removal does, once for the lot
+            pid = get_current_profile_id()
+            try:
+                socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid),
+                              room=f'profile:{pid}')
+            except Exception as e:
+                logger.debug("watchlist count emit failed: %s", e)
+            _artmap_cache_invalidate(pid)
 
         return jsonify({
             "success": True,

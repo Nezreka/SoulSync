@@ -160,8 +160,47 @@ class _WatchlistIndex:
         return bool(self.matching_entries(name, ids, identity))
 
 
+class _Lib2ArtistIndex:
+    """Every lib2 artist's identity, read and parsed once.
+
+    a removal used to read and json-parse the whole artist table and run the
+    identity match against every row, once per removed artist: a bulk
+    removal of 57 artists did that 57 times (#2200). the index answers the
+    same two questions through lookups: who holds this provider id, who
+    carries this normalized name."""
+
+    def __init__(self, conn) -> None:
+        from core.library2.importer import normalize_name
+        from core.library2.provider_ids import source_ids_from_values
+
+        self._normalize = normalize_name
+        self.by_pair: Dict[tuple, List[int]] = {}
+        self.by_value: Dict[str, List[int]] = {}
+        self.by_name: Dict[str, List[tuple]] = {}
+        for row in conn.execute(
+                "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"):
+            artist_id = int(row["id"])
+            candidate_ids = source_ids_from_values(
+                spotify_id=row["spotify_id"],
+                musicbrainz_id=row["musicbrainz_id"],
+                external_ids=row["external_ids"],
+            )
+            cleaned = _clean_ids(candidate_ids)
+            for pair in cleaned.items():
+                self.by_pair.setdefault(pair, []).append(artist_id)
+            for value in {str(value) for value in candidate_ids.values()}:
+                self.by_value.setdefault(value, []).append(artist_id)
+            key = normalize_name(row["name"])
+            if key:
+                self.by_name.setdefault(key, []).append((artist_id, cleaned))
+
+    def normalize(self, name: Optional[str]) -> str:
+        return self._normalize(name)
+
+
 def _match_lib2_artists(
-    conn, external_ids: Any, name: Optional[str]
+    conn, external_ids: Any, name: Optional[str],
+    index: Optional[_Lib2ArtistIndex] = None,
 ) -> List[int]:
     """lib2 artist ids matching a removed Watchlist row.
 
@@ -170,34 +209,35 @@ def _match_lib2_artists(
     ``external_ids`` JSON. Only when no provider id matches does the normalized
     name act as a fallback (the same name-equality the legacy manual-match
     bridge accepts, ``web_server._watchlist_row_matches_legacy_artist``).
-    """
-    from core.library2.provider_ids import source_ids_from_values
 
+    ``index`` is the artist table read once; a batch removal passes one so
+    the table is not read again for every artist (#2200).
+    """
     qualified = (
         {str(k).lower(): str(v) for k, v in external_ids.items() if v}
         if isinstance(external_ids, Mapping) else {}
     )
     exts = [str(e) for e in (external_ids or []) if e] if not qualified else []
     ids: set[int] = set()
-    rows = conn.execute(
-        "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
-    ).fetchall()
+    if qualified or exts:
+        index = index if index is not None else _Lib2ArtistIndex(conn)
     if qualified:
         # review 5 R5-F-2: a shared provider id first. the name fallback ran
         # alongside it, so removing the US Nirvana (spotify id) demonitored a
         # UK Nirvana that carries only a MusicBrainz id. a name is used only
         # when no id matched, and only when it names one artist (A9 below)
+        watched = _clean_ids(qualified)
+        for pair in watched.items():
+            ids.update(index.by_pair.get(pair, ()))
         by_name: set[int] = set()
-        for row in rows:
-            candidate_ids = source_ids_from_values(
-                spotify_id=row["spotify_id"],
-                musicbrainz_id=row["musicbrainz_id"],
-                external_ids=row["external_ids"],
-            )
-            if _artist_identity_matches(None, candidate_ids, None, qualified):
-                ids.add(int(row["id"]))
-            elif _artist_identity_matches(row["name"], candidate_ids, name, qualified):
-                by_name.add(int(row["id"]))
+        key = index.normalize(name)
+        if key:
+            for artist_id, candidate in index.by_name.get(key, ()):
+                if artist_id in ids or any(
+                        candidate[source] != watched[source]
+                        for source in set(candidate) & set(watched)):
+                    continue
+                by_name.add(artist_id)
         if not ids and len(by_name) > 1:
             logger.warning(
                 "Watchlist removal name fallback matched %d lib2 artists for "
@@ -208,15 +248,8 @@ def _match_lib2_artists(
             ids |= by_name
     elif exts:
         # Backward compatibility for descriptors captured by older builds.
-        wanted_ext = set(exts)
-        for row in rows:
-            candidate_ids = source_ids_from_values(
-                spotify_id=row["spotify_id"],
-                musicbrainz_id=row["musicbrainz_id"],
-                external_ids=row["external_ids"],
-            )
-            if wanted_ext & {str(value) for value in candidate_ids.values()}:
-                ids.add(int(row["id"]))
+        for value in set(exts):
+            ids.update(index.by_value.get(value, ()))
     if name and not ids and not qualified:
         # A9: a bare name match is a weak fallback — only usable when it
         # resolves to exactly ONE lib2 artist. Two rows sharing the removed
@@ -251,15 +284,35 @@ def demonitor_lib2_artists_for_removed_watchlist(
 ) -> Dict[str, int]:
     """Demonitor the lib2 artist(s) behind a removed Watchlist artist (§69.1).
 
+    One removal of :func:`demonitor_lib2_artists_for_removed_watchlists`.
+    """
+    return demonitor_lib2_artists_for_removed_watchlists(
+        db, [(external_ids, name)], profile_id=profile_id)
+
+
+def demonitor_lib2_artists_for_removed_watchlists(
+    db,
+    removals: Sequence[tuple],
+    *,
+    profile_id: int = 1,
+) -> Dict[str, int]:
+    """Demonitor the lib2 artists behind removed Watchlist artists (§69.1).
+
+    ``removals`` is ``(external_ids, name)`` per removed Watchlist row.
+
     Idempotent: records a ``user_explicit`` unmonitor rule even when a stale
     compatibility flag was already off, because the Watchlist removal is the
     authoritative user decision. Records the flag/rule change
     (removing an artist from the Watchlist is a deliberate decision about that
-    artist), recomputes the wanted projection for the artist's tracks, and
+    artist), recomputes the wanted projection for the artists' tracks, and
     mirrors the projection so any track that was wanted only via the artist tier
     is pulled from the Wishlist. A newer ``watchlist_remove`` is enqueued even
     though the row is already gone: it must supersede any older pending add that
     survived a crash or transient DB failure.
+
+    A batch is one pass (#2200): the artist table is read once, the rules go
+    in, then one recompute and one mirror over every affected track, one
+    commit and one drain. 57 artists one by one took 70 s, 46 s of it cpu.
 
     Best-effort by contract: raises nothing the caller can't ignore, but returns
     counts so the endpoint can log/observe.
@@ -267,31 +320,37 @@ def demonitor_lib2_artists_for_removed_watchlist(
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     from core.library2.wanted import entity_track_ids, recompute_wanted
 
+    if not removals:
+        return {"matched": 0, "demonitored": 0}
+    admin = _is_admin_profile(profile_id)
     with closing(db._get_connection()) as conn:
-        artist_ids = _match_lib2_artists(conn, external_ids, name)
+        index = _Lib2ArtistIndex(conn)
+        artist_ids: List[int] = []
+        demonitored = 0
+        for external_ids, name in removals:
+            for artist_id in _match_lib2_artists(conn, external_ids, name, index=index):
+                # the global column is the shared library's (the admin's); a
+                # household member's removal is their own rule only
+                if admin:
+                    cur = conn.execute(
+                        "UPDATE lib2_artists SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE id=? AND monitored=1",
+                        (artist_id,),
+                    )
+                    demonitored += int(cur.rowcount)
+                else:
+                    demonitored += 1
+                record_rule(conn, "artist", artist_id, False, PROVENANCE_USER,
+                            profile_id=profile_id)
+                if artist_id not in artist_ids:
+                    artist_ids.append(artist_id)
         if not artist_ids:
             return {"matched": 0, "demonitored": 0}
 
-        demonitored = 0
+        track_ids: set = set()
         for artist_id in artist_ids:
-            # the global column is the shared library's (the admin's); a
-            # household member's removal is their own rule only
-            if _is_admin_profile(profile_id):
-                cur = conn.execute(
-                    "UPDATE lib2_artists SET monitored=0, updated_at=CURRENT_TIMESTAMP "
-                    "WHERE id=? AND monitored=1",
-                    (artist_id,),
-                )
-                demonitored += int(cur.rowcount)
-            else:
-                demonitored += 1
-            record_rule(conn, "artist", artist_id, False, PROVENANCE_USER,
-                        profile_id=profile_id)
-
-        track_ids: List[int] = []
-        for artist_id in artist_ids:
-            track_ids.extend(entity_track_ids(conn, "artist", artist_id))
-        track_ids = sorted(set(track_ids))
+            track_ids.update(entity_track_ids(conn, "artist", artist_id))
+        track_ids = sorted(track_ids)
         recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
 
         from core.library2.mirror_outbox import (
@@ -311,7 +370,7 @@ def demonitor_lib2_artists_for_removed_watchlist(
         # never touched wishlist rows on a watchlist removal; neither does
         # a member's, now
         from core.library_scope import own_library_ids
-        projection_owns_wishlist = (_is_admin_profile(profile_id)
+        projection_owns_wishlist = (admin
                                     or int(profile_id) in set(own_library_ids()))
         if track_ids and projection_owns_wishlist:
             # Mirroring every affected projection is intentional: explicit
@@ -733,6 +792,31 @@ def sync_watchlist_removal(
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("watchlist reverse-sync skipped: %s", e)
+        return {"matched": 0, "demonitored": 0}
+
+
+def sync_watchlist_removals(
+    db,
+    descriptors: Sequence[Optional[Dict[str, Any]]],
+    *,
+    profile_id: int = 1,
+) -> Dict[str, int]:
+    """``sync_watchlist_removal`` for many removed rows in one pass (#2200).
+
+    Same end state as calling it once per descriptor; the recompute, the
+    mirror, the commit and the drain run once for the lot. Never raises.
+    """
+    try:
+        removals = [
+            (d.get("provider_ids") or d.get("external_ids") or [], d.get("name"))
+            for d in descriptors or () if d
+        ]
+        if not removals:
+            return {"matched": 0, "demonitored": 0}
+        return demonitor_lib2_artists_for_removed_watchlists(
+            db, removals, profile_id=profile_id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("watchlist reverse-sync (batch) skipped: %s", e)
         return {"matched": 0, "demonitored": 0}
 
 

@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import closing
 from functools import lru_cache
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple, Union
@@ -16994,49 +16995,72 @@ class MusicDatabase:
         by writers outside Library v2 look. Anything that names a *different*
         album is left alone.
         """
+        removed = self.remove_releases_from_wishlist(
+            [(spotify_track_id, album_id)], profile_id=profile_id,
+            raise_on_error=raise_on_error)
+        return bool(removed and removed[0])
+
+    def remove_releases_from_wishlist(self, releases, profile_id: int = 1,
+                                      raise_on_error: bool = False) -> List[bool]:
+        """:meth:`remove_release_from_wishlist` for many ``(track, album)``
+        releases on one connection and one commit, in order.
+
+        a watchlist removal of many artists withdraws thousands of releases;
+        one connection and one commit each was most of its 70 s (#2200).
+        Returns one removed-or-not per release; on an error nothing is
+        committed and ``[]`` comes back (or the error, with raise_on_error).
+        """
         try:
             from core.wishlist.identity import wishlist_row_key
+            from core.library2.catalogue_identity import merged_wishlist_key
 
-            track = str(spotify_track_id or "").strip()
-            if not track:
-                return False
-            album = str(album_id or "").strip()
-            release_key = wishlist_row_key(track, album)
-            with self._get_connection() as conn:
+            results: List[bool] = []
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
-                doomed = [release_key]
-                if release_key != track:
-                    row = cursor.execute(
-                        "SELECT id, spotify_data FROM wishlist_tracks "
-                        "WHERE spotify_track_id=? AND profile_id=?",
-                        (track, profile_id)).fetchone()
-                    if row is not None:
-                        try:
-                            stored = json.loads(row['spotify_data'] or '{}')
-                            stored_album = str(
-                                (stored.get('album') or {}).get('id') or '').strip()
-                        except Exception:
-                            stored_album = ''
-                        if stored_album in ('', album):
-                            doomed.append(track)
-                from core.library2.catalogue_identity import merged_wishlist_key
-                doomed.append(merged_wishlist_key(conn, release_key, profile_id) or release_key)
-                marks = ",".join("?" for _ in doomed)
-                cursor.execute(
-                    f"DELETE FROM wishlist_tracks WHERE profile_id=? "
-                    f"AND spotify_track_id IN ({marks})",
-                    (profile_id, *doomed))
+                for spotify_track_id, album_id in releases:
+                    track = str(spotify_track_id or "").strip()
+                    if not track:
+                        results.append(False)
+                        continue
+                    album = str(album_id or "").strip()
+                    release_key = wishlist_row_key(track, album)
+                    doomed = [release_key]
+                    if release_key != track:
+                        row = cursor.execute(
+                            "SELECT id, spotify_data FROM wishlist_tracks "
+                            "WHERE spotify_track_id=? AND profile_id=?",
+                            (track, profile_id)).fetchone()
+                        if row is not None:
+                            try:
+                                stored = json.loads(row['spotify_data'] or '{}')
+                                stored_album = str(
+                                    (stored.get('album') or {}).get('id') or '').strip()
+                            except Exception:
+                                stored_album = ''
+                            if stored_album in ('', album):
+                                doomed.append(track)
+                    doomed.append(merged_wishlist_key(conn, release_key, profile_id) or release_key)
+                    marks = ",".join("?" for _ in doomed)
+                    cursor.execute(
+                        f"DELETE FROM wishlist_tracks WHERE profile_id=? "
+                        f"AND spotify_track_id IN ({marks})",
+                        (profile_id, *doomed))
+                    if cursor.rowcount > 0:
+                        logger.info("Removed wishlist release: %s", release_key)
+                        results.append(True)
+                    else:
+                        logger.debug("Wishlist release not found: %s", release_key)
+                        results.append(False)
+                    if len(results) % 200 == 0:
+                        # a long write transaction slows every read in it
+                        conn.commit()
                 conn.commit()
-                if cursor.rowcount > 0:
-                    logger.info("Removed wishlist release: %s", release_key)
-                    return True
-                logger.debug("Wishlist release not found: %s", release_key)
-                return False
+            return results
         except Exception as e:
             logger.error(f"Error removing wishlist release: {e}")
             if raise_on_error:
                 raise
-            return False
+            return []
 
     def purge_podcast_tracks_from_wishlist(self) -> int:
         """Purge any podcast tracks that leaked into wishlist_tracks."""
@@ -18613,7 +18637,7 @@ class MusicDatabase:
                                      raise_on_error: bool = False, source: str = None) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
-            with self._get_connection() as conn:
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
 
                 # Get artist name for logging (check all ID columns)
@@ -18666,7 +18690,7 @@ class MusicDatabase:
         or name. Returns ``None`` when the id is not on the watchlist.
         """
         try:
-            with self._get_connection() as conn:
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(watchlist_artists)")
                 cols = {c[1] for c in cursor.fetchall()}
