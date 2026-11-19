@@ -569,8 +569,16 @@ def _pending_findings(db) -> list:
 def _cleanup_findings(db) -> list:
     """the open findings a cleanup can act on. one filed before its title was
     locked waits for the next run to clear it, and a cleanup leaves it out"""
-    return [f for f in _pending_findings(db)
-            if not db.is_hands_off(f["details"].get("kind"), f["details"]["item_id"])]
+    locked = db.hands_off_ids()
+    out = []
+    for f in _pending_findings(db):
+        try:
+            if (f["details"].get("kind"), int(f["details"]["item_id"])) in locked:
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append(f)
+    return out
 
 
 def plan_cleanup(db, target_bytes=None, ids=None) -> dict:

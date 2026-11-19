@@ -7840,6 +7840,17 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def hands_off_ids(self) -> set:
+        """{(kind, library id)} of every padlocked movie and show, one read"""
+        conn = self._get_connection()
+        try:
+            return {(kind, int(r[0])) for kind, table in (("movie", "movies"), ("show", "shows"))
+                    for r in conn.execute(f"SELECT id FROM {table} WHERE hands_off=1")}
+        except sqlite3.Error:
+            return set()
+        finally:
+            conn.close()
+
     def hands_off_tmdb_ids(self) -> dict:
         """{'movie': {tmdb ids}, 'show': {tmdb ids}} of the padlocked titles"""
         out = {"movie": set(), "show": set()}

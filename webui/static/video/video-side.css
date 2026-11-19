@@ -691,6 +691,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-shelf-chip--mid { color: var(--gold); border-color: rgba(var(--gold-rgb), 0.45); }
 .vd-shelf-chip--ok { color: var(--success); border-color: rgba(var(--success-strong-rgb), 0.4); }
 .vd-shelf-chip--gate { font-weight: 600; }
+.vd-shelf-chip--gate svg { width: 1em; height: 1em; vertical-align: -0.125em; }
 .vd-shelf-flag { color: var(--danger-soft); }
 .vd-shelf-when { color: var(--white-a50); font-size: 12px; }
 .vd-shelf-keep {
