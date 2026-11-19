@@ -7594,6 +7594,23 @@
       "asked": true,
       "shows": ["metadata_enhancement.tags.genre_merge"]
     },
+    "#import-default-search-source": {
+      "sel": "#import-default-search-source",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "musicbrainz",
+      "saves": {
+        "settings": {
+          "import": {
+            "default_search_source": "musicbrainz"
+          }
+        }
+      },
+      "asked": "musicbrainz",
+      "shows": ["import.default_search_source"]
+    },
     "#import-folder-artist-override": {
       "sel": "#import-folder-artist-override",
       "kind": "checkbox",
@@ -12770,6 +12787,18 @@
     },
     "#settings-open-feature-picker": {
       "id": "settings-open-feature-picker",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-optimize-btn": {
+      "id": "db-optimize-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-measure-btn": {
+      "id": "db-measure-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
