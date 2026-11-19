@@ -256,6 +256,7 @@ A member sees only what they can use:
 - request sheets say how many asks of that kind are left, like "3 of 5 movie asks left this week"
 - in the music library, a member who asks first gets the Wishlist and no Automatic Search, Interactive Search, Enhance Quality or Upgrade: those download right away, so they are only there for a profile that may download (Interactive Search also needs a library of their own)
 - the notification panel is their own notes, downloads and automations, never the server's health, numbers or jobs
+- the dashboards (music and video) have no worker orbs and no Manage Workers: the enrichment workers are the admin's
 - Help & Docs and the help sheet's search show only the guides for what they can use; setup, settings, tools, the API, troubleshooting and the diagnostics are the admin's
 
 ## What you can do

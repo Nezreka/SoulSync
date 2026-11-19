@@ -130,6 +130,7 @@ What the server is doing is the admin's. A member's session is refused (`403`) t
 
 - `GET /api/system/stats` (downloads across the server, speed, uptime, memory) and its push, `dashboard:stats`, which only the admins' sockets get
 - `GET /api/repair/progress`, `GET /api/video/health`, `GET /api/video/bulk/status`
+- the enrichment workers, music and video: every `/api/enrichment/*` and `/api/video/enrichment/*` route (status, breakdown, unmatched, priority, pause, resume, retry), `GET /api/soulid/status`, `GET /api/hydrabase-worker/status`, and the `enrichment:<worker>` pushes, which only the admins' sockets get (`enrichment:repair` stays everyone's, the Tools page reads it)
 - the diagnostics: `GET /api/debug-info`, `GET /api/logs/tail`, `/api/settings/log-level`, `/api/help/health`, `/api/help/bundle`, `/api/help/logs*`
 
 `GET /api/automations/progress` and the `automation:progress` push give a member the runs of their own automations only, never a system one.

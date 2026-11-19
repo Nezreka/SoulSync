@@ -198,7 +198,7 @@ The Video **Dashboard** uses the same layout as the music one.
 ![The video dashboard: a featured title up top, your watching and rails below](vdash-overview.jpg)
 
 - **Hero**: a greeting, your movies, shows, episodes and disk size (click one for the library), and the scan strip. **Scan** picks up what changed on your server; the **⋯** menu has a deep scan, the library, the poster manager and repair.
-- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view.
+- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view. Admins only: a member's hero has no orbs.
 - **Next up**: the calendar's billboard for the next episodes on your watchlist, each with its state. Click one to open it on the calendar.
 - **Make it yours** (admins): Overlay Studio and Collection Studio, with how much of your library has the metadata they draw on.
 

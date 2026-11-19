@@ -283,7 +283,13 @@ export interface DashboardHeaderState {
   wishlistCount: number | null;
 }
 
-export function useDashboardHeader(): DashboardHeaderState {
+/**
+ * `workers` is false for a member (#2196): the workers are server maintenance,
+ * the admins'. The orbs don't render, so nothing here asks the worker
+ * endpoints (they refuse a member) or reads dev mode for the Hydrabase orb.
+ * The watchlist/wishlist counts are everyone's.
+ */
+export function useDashboardHeader({ workers }: { workers: boolean }): DashboardHeaderState {
   const [pills, setPills] = useState<Record<HeaderPillId, HeaderPill>>(PILL_DEFAULTS);
   const [repairBadge, setRepairBadge] = useState({ count: 0, visible: false });
   const [jiosaavnVisible, setJiosaavnVisible] = useState<boolean>(
@@ -322,6 +328,11 @@ export function useDashboardHeader(): DashboardHeaderState {
   // ── Fallback polling (socket-down safety net; see the header comment) ──────
   useEffect(() => {
     mountedRef.current = true;
+    if (!workers) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
 
     const enrichTick = async () => {
       // Same gates as the vanilla poller twins: the socket push owns live
@@ -355,7 +366,7 @@ export function useDashboardHeader(): DashboardHeaderState {
       mountedRef.current = false;
       clearInterval(enrichTimer);
     };
-  }, [applyFrame]);
+  }, [applyFrame, workers]);
 
   // ── Refetch-own-provider after a toggle (`await update<X>Status()`) ────────
   const refreshProvider = useCallback(
@@ -472,6 +483,7 @@ export function useDashboardHeader(): DashboardHeaderState {
   );
   useDevModeEvent(useCallback((frame) => setHydrabaseVisible(frame.enabled === true), []));
   useEffect(() => {
+    if (!workers) return undefined;
     let cancelled = false;
     void fetchDevMode().then((enabled) => {
       if (!cancelled && enabled) setHydrabaseVisible(true);
@@ -479,7 +491,7 @@ export function useDashboardHeader(): DashboardHeaderState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workers]);
 
   // ── Quick-nav counts ───────────────────────────────────────────────────────
   const applyWatchlist = useCallback(

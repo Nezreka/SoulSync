@@ -364,7 +364,7 @@ export function useDismiss(open: boolean, close: () => void, ref: RefObject<HTML
  * Every id the state machine and the scan flows write into is kept; the menu
  * stays mounted (just hidden) so those ids always resolve.
  */
-export function LibraryCard() {
+export function LibraryCard({ workers }: { workers: boolean }) {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
@@ -445,15 +445,18 @@ export function LibraryCard() {
               >
                 Browse library
               </button>
-              <button
-                role="menuitem"
-                className="library-status-menu-item"
-                id="library-status-verify-btn"
-                title="Open the enrichment manager's Verify Matches repair flow"
-                onClick={pick(() => window.openEnrichmentManager?.())}
-              >
-                Verify matches
-              </button>
+              {/* the enrichment manager is the admins' (#2196) */}
+              {workers ? (
+                <button
+                  role="menuitem"
+                  className="library-status-menu-item"
+                  id="library-status-verify-btn"
+                  title="Open the enrichment manager's Verify Matches repair flow"
+                  onClick={pick(() => window.openEnrichmentManager?.())}
+                >
+                  Verify matches
+                </button>
+              ) : null}
               <button
                 role="menuitem"
                 className="library-status-menu-item"

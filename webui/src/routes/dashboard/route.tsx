@@ -30,7 +30,13 @@ export const Route = createFileRoute('/dashboard')({
 
 function DashboardRoute() {
   const { media } = Route.useSearch();
-  return media === 'video' ? <VideoDashboardRoute /> : <DashboardPage />;
+  return media === 'video' ? <VideoDashboardRoute /> : <MusicDashboardRoute />;
+}
+
+function MusicDashboardRoute() {
+  const profile = useProfile();
+  // the worker orbs and Manage Workers are the admins' (#2196)
+  return <DashboardPage isAdmin={profile.isAdmin} />;
 }
 
 function VideoDashboardRoute() {

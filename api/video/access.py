@@ -296,7 +296,10 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
              "/api/video/repair",
              "/api/video/server-config", "/api/video/jellyfin", "/api/video/libraries",
              "/api/video/organization", "/api/video/downloads/slskd",
-             "/api/video/enrichment/config", "/api/video/enrichment/priority",
+             # the enrichment workers, reads and writes: their status, what
+             # they matched, the controls and the keys are server
+             # maintenance (#2196)
+             "/api/video/enrichment",
              "/api/video/notifications",   # P11: GETs return webhook URLs/bot tokens
              "/api/video/backups",         # P10: restore/download the whole database
              # delete a whole title; its preview GET lists file paths
@@ -312,7 +315,6 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
 ADMIN_WRITES = ("/api/video/server", "/api/video/downloads/config",
                 "/api/video/downloads/quality",
                 "/api/video/downloads/youtube-quality",
-                "/api/video/enrichment",   # all enrichment mutations
                 # the household's recycle bin, download history and queue:
                 # restoring or purging files, forgetting grabs and clearing rows
                 # is the admin's, like the music downloads page. the GETs stay
