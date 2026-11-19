@@ -790,6 +790,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # (the server's profile_may_grab: the admin, or a profile in a
             # library of its own); everyone else grabs through the inspector
             "can_grab": _is_admin() or _wishes_in_own(),
+            # #2210: writing tags and ReplayGain into files: the admin, or a
+            # profile in a library of its own on its own files (the routes
+            # check every file); a member of the shared library never
+            "can_tag": _is_admin() or _wishes_in_own(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------

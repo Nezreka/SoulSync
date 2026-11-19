@@ -44,15 +44,15 @@ describe('library v2 remaining mutation boundaries', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage Tracks' }));
     fireEvent.click(screen.getByRole('button', { name: 'History' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     expect(openManageTracks).toHaveBeenCalledOnce();
     expect(openHistory).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+    // #2210: a write it may not make is not drawn at all
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it('keeps album details and history visible but disables album mutations read-only', () => {
+  it('keeps album details and history visible but hides album mutations read-only', () => {
     const album = {
       id: 12,
       title: 'Album',
@@ -74,14 +74,17 @@ describe('library v2 remaining mutation boundaries', () => {
     expect(screen.getByRole('button', { name: 'History' })).toBeEnabled();
     for (const name of [
       'Preview Retag',
+      'Use File Tags',
       'Analyze ReplayGain',
       'Preview Rename / Organize',
       /Reassign to another artist/,
+      /Other versions/,
       'Change Cover',
       /Enrich/,
       'Delete',
     ]) {
-      expect(screen.getByRole('button', { name })).toBeDisabled();
+      // #2210: not drawn for a profile that can't use them
+      expect(screen.queryByRole('button', { name })).toBeNull();
     }
   });
 
@@ -147,12 +150,10 @@ describe('library v2 remaining mutation boundaries', () => {
 
     renderWithQueryClient(<ArtistAliases artistId={7} artistName="Canonical" />, false);
 
-    const unlink = await screen.findByTitle(/Unlink Provider Alias/);
-    const link = screen.getByRole('button', { name: '+ Link alias' });
-    expect(unlink).toBeDisabled();
-    expect(link).toBeDisabled();
-    fireEvent.click(unlink);
-    fireEvent.click(link);
+    // #2210: the aliases read as names; unlinking and linking aren't drawn
+    expect(await screen.findByText('Provider Alias')).toBeInTheDocument();
+    expect(screen.queryByTitle(/Unlink Provider Alias/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Link alias' })).toBeNull();
     expect(writes).toBe(0);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

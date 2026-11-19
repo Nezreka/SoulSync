@@ -98,3 +98,14 @@ def test_the_admin_always_follows(world):
     r = world.client.post(f"/api/library/v2/artists/{house}/monitor", json={"monitored": True})
     assert r.status_code == 200, r.get_json()
     assert _rules(world, house).get(1) == 1
+
+
+def test_only_files_of_your_own_library_are_yours_to_tag(world):
+    """#2210: a shared-library member was offered Write Tags and ReplayGain,
+    which the server refuses; /enabled says who may (can_tag)"""
+    world.as_profile(world.sam)
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_tag"] is False
+    world.as_profile(world.kim)
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_tag"] is True
+    world.as_profile(1)
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_tag"] is True

@@ -9,6 +9,7 @@ import type { LibraryV2ArtistDetail } from '../-library-v2.types';
 
 import {
   ArtistSettingsModal,
+  LibraryV2CanWatchContext,
   LibraryV2CanWishContext,
   LibraryV2CanWriteContext,
 } from './library-v2-page';
@@ -129,17 +130,19 @@ describe('Library v2 Artist Settings', () => {
     renderModal(false);
     await screen.findByText('Watchlist identity');
 
+    // #2210: a read-only profile gets none of them, not dead buttons
     for (const name of [
       'Save name',
       'Save future-release settings',
       'Wishlist all',
       'Wishlist missing only',
       'Remove all from Wishlist',
+      'Use inherited profile',
     ]) {
-      const button = screen.getByRole('button', { name });
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
+      expect(screen.queryByRole('button', { name })).toBeNull();
     }
+    expect(screen.queryByRole('checkbox', { name: /Auto-download new releases/ })).toBeNull();
+    expect(await screen.findByText(/Quality profiles are up to the admin/)).toBeInTheDocument();
     expect(writes).toBe(0);
   });
 
@@ -159,18 +162,40 @@ describe('Library v2 Artist Settings', () => {
       <QueryClientProvider client={createTestQueryClient()}>
         <LibraryV2CanWriteContext.Provider value={false}>
           <LibraryV2CanWishContext.Provider value={true}>
-            <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+            <LibraryV2CanWatchContext.Provider value={true}>
+              <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+            </LibraryV2CanWatchContext.Provider>
           </LibraryV2CanWishContext.Provider>
         </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
     await screen.findByText('Watchlist identity');
-    expect(screen.getByRole('button', { name: 'Wishlist all' })).toBeDisabled();
-    expect(screen.getByDisplayValue('Add newly found releases to Wishlist')).toBeDisabled();
+    expect(screen.getByText('Linked to your Watchlist.')).toBeInTheDocument();
+    // #2210: the admin's parts aren't drawn for them at all
+    expect(screen.queryByRole('button', { name: 'Wishlist all' })).toBeNull();
+    expect(screen.queryByDisplayValue('Add newly found releases to Wishlist')).toBeNull();
     const save = screen.getByRole('button', { name: 'Save future-release settings' });
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
     await waitFor(() => expect(submitted).toBe(1));
+  });
+
+  it('#2209: a member without the Watchlist gets no watchlist part to save', async () => {
+    handlers();
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value={false}>
+          <LibraryV2CanWishContext.Provider value={true}>
+            <LibraryV2CanWatchContext.Provider value={false}>
+              <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+            </LibraryV2CanWatchContext.Provider>
+          </LibraryV2CanWishContext.Provider>
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText('Artist Settings');
+    expect(screen.queryByRole('button', { name: 'Save future-release settings' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /Auto-download new releases/ })).toBeNull();
   });
 
   it('edits the existing Watchlist settings through one combined contract', async () => {

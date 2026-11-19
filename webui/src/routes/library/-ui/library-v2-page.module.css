@@ -3675,6 +3675,13 @@ button.statusWarn:disabled {
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+/* #2210: the profile in use, shown to a member: nothing to click */
+.qpOptionStatic,
+.qpOptionStatic:hover {
+  cursor: default;
+  border-color: rgb(var(--accent-rgb));
+}
+
 .qpName {
   font-weight: 600;
   font-size: 14px;
