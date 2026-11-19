@@ -6259,6 +6259,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if folded:
                         conn.commit()
                         scan_stats["leftover_tracks_folded"] = folded
+                    # a song on another song's number goes to the one its
+                    # file says, now the tags were just read (wolf39us)
+                    from core.library2.track_numbers import heal_colliding_numbers
+                    renumbered = heal_colliding_numbers(conn, album_ids)
+                    if renumbered:
+                        conn.commit()
+                        scan_stats["tracks_renumbered"] = renumbered
                 # A scan is the moment we learn a file is gone or back, and
                 # acquisition is the consumer of exactly that. Handing it over
                 # here — scoped to the tracks that actually changed — is what

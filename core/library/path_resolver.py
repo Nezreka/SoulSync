@@ -400,6 +400,29 @@ def _resolve_ignoring_case(path_parts: List[str], base_dirs: List[str], *, accep
     return _single_physical_match(matches) if matches else None
 
 
+def _own_album_folders(path_parts: List[str], base_dirs: List[str]) -> List[str]:
+    """the stored path's own album folder, where it exists under a base.
+
+    both last resorts below are for a path whose ALBUM segment is wrong. when
+    that folder is there, the segment is right and a file missing from it is
+    gone, not elsewhere: wolf39us deleted `Maroon 5/2014 - V/15 - Lost
+    Stars.flac` and Refresh kept finding `2014 - Lost Stars/01 - Lost
+    Stars.flac` in another album folder, so the record never went missing
+    (and was measured as that other file)."""
+    if len(path_parts) < 3:
+        return []
+    artist_segment, album_segment = path_parts[-3], path_parts[-2]
+    if not artist_segment or not album_segment or "." in (artist_segment, album_segment) \
+            or ".." in (artist_segment, album_segment):
+        return []
+    folders = []
+    for base in base_dirs:
+        folder = os.path.join(base, artist_segment, album_segment)
+        if os.path.isdir(folder) and folder not in folders:
+            folders.append(folder)
+    return folders
+
+
 def _resolve_via_sibling_album_folder(
     path_parts: List[str], base_dirs: List[str]
 ) -> Optional[str]:
@@ -430,6 +453,9 @@ def _resolve_via_sibling_album_folder(
     basename = path_parts[-1]
     artist_segment = path_parts[-3]
     if not basename or not artist_segment or artist_segment in (".", ".."):
+        return None
+    if _own_album_folders(path_parts, base_dirs):
+        # the album folder is right, so the file isn't in another one
         return None
 
     matches: List[str] = []
@@ -564,6 +590,9 @@ def _resolve_via_synthesized_filename(
         return None
     synth = _SYNTH_NAME.match(wanted_base)
     album_segment = path_parts[-2]
+    # the album folder is there: only the filename can be wrong, so only that
+    # folder is searched, never the artist's other albums
+    own_folders = {os.path.normcase(f) for f in _own_album_folders(path_parts, base_dirs)}
 
     matches: List[str] = []
     prefixed: List[str] = []
@@ -585,6 +614,8 @@ def _resolve_via_synthesized_filename(
                     album_dirs.append(e)
             except OSError:
                 continue
+        if own_folders:
+            album_dirs = [d for d in album_dirs if os.path.normcase(d.path) in own_folders]
         for album_dir in album_dirs:
             try:
                 entries = list(os.scandir(album_dir.path))

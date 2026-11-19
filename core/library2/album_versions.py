@@ -559,6 +559,10 @@ def merge_album_into(conn: Any, keep_id: int, other_id: int) -> Dict[str, int]:
                    (other_id,))
     cursor.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (other_id,))
     cursor.execute("DELETE FROM lib2_albums WHERE id=?", (other_id,))
+    # a track that moved over kept the other row's number: one that lands on
+    # another song's goes to the number its own file gives it (wolf39us)
+    from core.library2.track_numbers import heal_colliding_numbers
+    stats["tracks_renumbered"] = heal_colliding_numbers(conn, [keep_id])
     cursor.execute("UPDATE lib2_albums SET track_count=(SELECT COUNT(*) FROM lib2_tracks"
                    " WHERE album_id=?), updated_at=CURRENT_TIMESTAMP WHERE id=?",
                    (keep_id, keep_id))

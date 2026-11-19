@@ -373,3 +373,87 @@ def test_a_copy_that_cannot_be_put_in_place_leaves_no_hint(tmp_path, cursor, mon
     assert result['staged'] == [] and 'could not stage' in result['failed'][0]['error']
     assert cursor.execute("SELECT COUNT(*) FROM rematch_hints").fetchone()[0] == 0
     assert list(staging.glob('*')) == []
+
+
+# ── number never beats a title that names another song (wolf39us) ───────────
+
+def _v_deluxe():
+    names = ['Maps', 'Animals', 'It Was Always You', 'Unkiss Me', 'Sugar',
+             'Leaving California', 'In Your Pocket', 'New Love', 'Coming Back For You',
+             'Feelings', 'My Heart Is Open', 'This Summer', 'Shoot Love',
+             'Sex And Candy', 'Lost Stars']
+    return [_target(i + 1, name) for i, name in enumerate(names)]
+
+
+def test_lost_stars_at_one_goes_to_lost_stars_not_maps():
+    """the album's Lost Stars row carried number 1, Maps' slot. the preview
+    said "1. Lost Stars -> 1. Maps" while 15. Lost Stars sat on the list."""
+    locals_ = [_local(1, 'Lost Stars', id='LS'), _local(5, 'Sugar', id='SU'),
+               _local(14, 'Sex and Candy', id='SC')]
+
+    pairings = {p.local_id: p for p in map_album_tracks(locals_, _v_deluxe())}
+
+    assert pairings['LS'].target_id == 'T15'
+    assert pairings['LS'].target_track_number == 15
+    assert pairings['LS'].matched_by == 'title'
+    assert pairings['SU'].target_id == 'T5'
+    assert pairings['SC'].target_id == 'T14'
+
+
+def test_a_title_that_names_another_song_is_not_placed_by_number():
+    """no Lost Stars on the target: unmapped, never Maps"""
+    pairings = map_album_tracks([_local(1, 'Lost Stars')], [_target(1, 'Maps'), _target(2, 'Animals')])
+
+    assert pairings[0].mapped is False
+
+
+def test_a_guest_credit_or_a_short_provider_title_still_fits_its_slot():
+    locals_ = [_local(11, 'My Heart Is Open (feat. Gwen Stefani)'),
+               _local(12, "This Summer's Gonna Hurt Like a MotherF****r")]
+    targets = [_target(11, 'My Heart Is Open'), _target(12, 'This Summer')]
+
+    pairings = map_album_tracks(locals_, targets)
+
+    assert [p.target_id for p in pairings] == ['T11', 'T12']
+    assert {p.matched_by for p in pairings} == {'track_number'}
+
+
+def test_a_length_from_another_song_blocks_the_slot():
+    local = {**_local(3, 'track 03'), 'duration': 180_000}
+    target = {**_target(3, 'It Was Always You'), 'duration_ms': 240_000}
+
+    assert map_album_tracks([local], [target])[0].mapped is False
+
+
+def test_a_length_close_enough_keeps_the_slot():
+    local = {**_local(3, 'track 03'), 'duration': 239_000}
+    target = {**_target(3, 'It Was Always You'), 'duration_ms': 240_000}
+
+    assert map_album_tracks([local], [target])[0].target_id == 'T3'
+
+
+def test_two_same_titles_split_by_number_then_length():
+    """one title twice on the target (a reprise kept its name): the number
+    picks first, the length breaks what is left"""
+    locals_ = [{**_local(None, 'Intro', id='A'), 'duration': 60_000}]
+    targets = [{**_target(1, 'Intro'), 'duration_ms': 120_000},
+               {**_target(9, 'Intro'), 'duration_ms': 61_000}]
+
+    assert map_album_tracks(locals_, targets)[0].target_id == 'T9'
+
+
+def test_a_slot_whose_title_is_exact_elsewhere_waits_for_the_title_pass():
+    """'Intro' at 1 where the target's 1 is 'Intro (Reprise)' and 12 is 'Intro'"""
+    pairings = map_album_tracks([_local(1, 'Intro')],
+                                [_target(1, 'Intro (Reprise)'), _target(12, 'Intro')])
+
+    assert pairings[0].target_id == 'T12'
+
+
+def test_titles_conflict_rules():
+    from core.imports.reassign_album import titles_conflict
+    assert titles_conflict('Lost Stars', 'Maps')
+    assert not titles_conflict('Sex and Candy', 'Sex And Candy')
+    assert not titles_conflict('Money - 2011 Remaster', 'Money')
+    assert not titles_conflict('track 02', 'Real Title')
+    assert not titles_conflict('', 'Real Title')
