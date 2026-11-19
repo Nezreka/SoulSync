@@ -378,3 +378,27 @@ def test_a_podcast_episode_is_never_held(cfg, made, monkeypatch):
     monkeypatch.setattr(media, 'start_approved', lambda req: None)
     r = _as(1).post(f'/api/requests/media/{rid}/approve', json={'acquisition': 'manual'})
     assert r.get_json()['acquisition'] == 'auto' and _db().get_media_request(rid)['status'] == 'approved'
+
+
+def test_a_book_already_in_the_library_is_never_held(cfg, book_ask, monkeypatch):
+    pid, asin, rid, started = book_ask
+    cfg.set('requests.acquisition.audiobook', 'manual')
+    import core.requests.media as media
+    monkeypatch.setattr(media, 'book_in_library', lambda a: str(a) == asin)
+    r = _as(1).post(f'/api/requests/media/{rid}/approve')
+    assert r.get_json()['acquisition'] == 'auto'
+    assert started == [rid] and _db().get_media_request(rid)['status'] == 'approved'
+
+
+def test_a_held_book_that_arrives_another_way_settles(cfg, book_ask, monkeypatch):
+    pid, asin, rid, started = book_ask
+    cfg.set('requests.acquisition.audiobook', 'manual')
+    admin = _as(1)
+    admin.post(f'/api/requests/media/{rid}/approve')
+    assert _db().get_media_request(rid)['status'] == 'awaiting_selection'
+    import core.requests.media as media
+    monkeypatch.setattr(media, 'book_in_library', lambda a: str(a) == asin)
+    from api.music_requests import sweep_fulfillment
+    sweep_fulfillment(_db(), only_pid=pid)
+    assert _db().get_media_request(rid)['status'] == 'available'
+    assert all(q['id'] != rid for q in admin.get('/api/requests/awaiting').get_json()['media'])

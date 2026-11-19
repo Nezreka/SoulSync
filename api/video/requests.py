@@ -363,6 +363,10 @@ def sweep_arrivals():
 
     from . import get_video_db
     try:
+        settle_manual(get_video_db())
+    except Exception:  # noqa: BLE001 - the page still loads without it
+        logger.exception("held video request settle failed")
+    try:
         return _sweep(get_video_db(), _notify)
     except Exception:  # noqa: BLE001 - the page still loads without the sweep
         logger.exception("video request arrival sweep failed")
@@ -576,12 +580,38 @@ def _held_rows_for(db, req):
                                  profile_ids=[int(req.get("profile_id") or 1)], **scope)
 
 
+def _anything_held(db, req, pids) -> bool:
+    """does this title have a held wishlist row for any of these askers?"""
+    scope = {}
+    if req.get("kind") == "episode":
+        scope = {"season_number": req.get("season_number"), "episode_number": req.get("episode_number")}
+    return bool(db.held_wishlist_rows(req.get("kind"), req.get("tmdb_id"), profile_ids=list(pids), **scope))
+
+
+def settle_manual(db) -> int:
+    """a held request with no held rows left has nothing more to pick: the
+    picks landed (the import takes each row off the wishlist) or the rows
+    were removed. it becomes an ordinary approved request, and a show joins
+    the asker's watchlist the way an automatic approval would have, so its
+    later episodes arrive. returns how many settled."""
+    settled = 0
+    for r in db.manual_video_requests():
+        if _held_rows_for(db, r):
+            continue
+        if r.get("kind") == "show":
+            db.add_to_watchlist("show", r["tmdb_id"], r["title"], poster_url=r.get("poster_url"),
+                                profile_id=int(r.get("profile_id") or 1))
+        settled += db.set_video_requests_acquisition([r["id"]], "auto")
+    return settled
+
+
 def _annotate_held(db, rows) -> None:
     """an approved request held for a pick says where the pick stands:
     ``awaiting_selection`` (nothing picked yet) or ``picking`` (a picked
     release is downloading). the requester's row reads from these."""
+    # a title already here (or partly here) reads from its progress instead
     held = [r for r in rows if r.get("status") == "approved" and r.get("acquisition") == "manual"
-            and not r.get("available_at")]
+            and r.get("state") not in ("available", "partial")]
     if not held:
         return
     active = _active_titles(db)
@@ -839,6 +869,17 @@ def register_routes(bp):
             vkind, acquisition.override_from(body)) == acquisition.MANUAL
         try:
             ok, wished = _land(db, req, claim_pids, body, held=held)
+            if ok and held and not _anything_held(db, req, claim_pids):
+                # nothing landed to pick between (a show followed for its
+                # future episodes, every wanted one unaired or filtered
+                # out): a hold nobody can see would sit forever, so this
+                # approval is an automatic one
+                held = False
+                if req["kind"] == "show":
+                    for pid in claim_pids:
+                        ok = db.add_to_watchlist("show", req["tmdb_id"], req["title"],
+                                                 poster_url=req.get("poster_url"),
+                                                 profile_id=pid) and ok
         except Exception:  # noqa: BLE001 - the claim already landed; put it back
             logger.exception("request approve: acquisition failed for request %s", request_id)
             try:

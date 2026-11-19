@@ -231,3 +231,53 @@ def test_a_failed_pick_is_never_retried_with_another_release(env, monkeypatch):
     db.release_held_wishlist("movie", 603)
     mon._fail_or_retry(db, dl, "peer went away")
     assert len(tried) == 1
+
+
+def test_a_held_show_with_nothing_to_pick_is_an_automatic_approval(env):
+    c, db, cfg, _admin, as_member, _notes = env
+    cfg.set("requests.acquisition.tv", "manual")
+    # followed for its future episodes: no wishlist rows land, nothing to hold
+    rid = _ask(db, kind="show", tmdb=95396, title="Severance", monitor="future")
+    out = c.post(f"/api/video/requests/{rid}/approve").get_json()
+    assert out["success"] and out["acquisition"] == "auto"
+    assert db.get_video_request(rid)["acquisition"] is None
+    assert 95396 in db.watchlist_states("show", profile_id=5)
+    assert c.get("/api/video/requests/awaiting").get_json()["titles"] == []
+    as_member()
+    row = c.get("/api/video/requests").get_json()["requests"][0]
+    assert not row.get("awaiting_selection")
+    # the per-request choice lands the same way
+    rid2 = _ask(db, kind="show", tmdb=1399, title="Thrones", monitor="future", pid=6, name="Kim")
+    _admin()
+    cfg.set("requests.acquisition.tv", "auto")
+    out = c.post(f"/api/video/requests/{rid2}/approve", json={"acquisition": "manual"}).get_json()
+    assert out["acquisition"] == "auto" and 1399 in db.watchlist_states("show", profile_id=6)
+
+
+def test_a_picked_show_joins_the_watchlist_once_its_last_held_row_is_gone(env, monkeypatch):
+    c, db, cfg, *_ = env
+
+    class _Eng:
+        def tmdb_detail(self, kind, tid):
+            return {"seasons": [{"season_number": 1}]}
+
+        def tmdb_season(self, tid, sn):
+            return {"episodes": [{"episode_number": 1, "title": "Pilot", "air_date": "2025-01-01"},
+                                 {"episode_number": 2, "title": "Two", "air_date": "2025-01-08"}]}
+
+    import core.video.enrichment.engine as eng_mod
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: _Eng())
+    cfg.set("requests.acquisition.tv", "manual")
+    rid = _ask(db, kind="show", tmdb=95396, title="Severance", monitor="all")
+    c.post(f"/api/video/requests/{rid}/approve")
+    # the show counts as arrived with its first episode: the rest still waits
+    db.remove_from_wishlist("episode", tmdb_id=95396, season_number=1, episode_number=1, profile_id=5)
+    db.mark_video_requests_available([rid])
+    queue = c.get("/api/video/requests/awaiting").get_json()["titles"]
+    assert [t["seasons"] for t in queue] == [[{"season_number": 1, "episodes": [2]}]]
+    assert db.watchlist_states("show", profile_id=5) == {}
+    # the last pick lands (the import takes its row off the wishlist)
+    db.remove_from_wishlist("episode", tmdb_id=95396, season_number=1, episode_number=2, profile_id=5)
+    assert c.get("/api/video/requests/awaiting").get_json()["titles"] == []
+    assert 95396 in db.watchlist_states("show", profile_id=5)
+    assert db.get_video_request(rid)["acquisition"] == "auto"

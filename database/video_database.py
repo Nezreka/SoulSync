@@ -12490,13 +12490,14 @@ class VideoDatabase:
             conn.close()
 
     def manual_video_requests(self) -> list:
-        """approved requests held for a pick that haven't arrived, oldest
-        approval first."""
+        """approved requests held for a pick, oldest approval first. arrived
+        or not: a show counts as arrived with its first episode, and the
+        rest of it can still be waiting for a pick."""
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
                 "SELECT * FROM video_requests WHERE status='approved' AND acquisition='manual' "
-                "AND available_at IS NULL ORDER BY resolved_at, id")]
+                "ORDER BY resolved_at, id")]
         except sqlite3.Error:
             logger.exception("manual_video_requests failed")
             return []

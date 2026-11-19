@@ -177,6 +177,11 @@ def _sweep_media(db, only_pid=None) -> int:
     """approved book and episode asks flip to available once they're here."""
     from core.requests.media import AUDIOBOOK, book_in_library, describe as describe_media, episode_on_disk
     changed = 0
+    # a held book that arrived some other way (someone else's grab, an
+    # import) has nothing left to pick: it moves on and settles too
+    for req in db.list_media_requests(profile_id=only_pid, status=AWAITING, kind=AUDIOBOOK):
+        if book_in_library(req.get("item_key")):
+            db.media_request_picked(req["id"])
     for req in db.list_media_requests(profile_id=only_pid, status="approved"):
         here = (book_in_library(req.get("item_key")) if req.get("kind") == AUDIOBOOK
                 else episode_on_disk(db, req.get("payload") or {}))
@@ -704,8 +709,12 @@ def _media_public(req):
 def _media_held(req, override=None) -> bool:
     """does this approval hold the ask for a release pick (#2199)? books
     only: an episode is one file, nothing to pick between."""
-    from core.requests.media import AUDIOBOOK
-    return req.get("kind") == AUDIOBOOK and acquisition.resolve("audiobook", override) == MANUAL
+    from core.requests import media
+    if req.get("kind") != media.AUDIOBOOK or acquisition.resolve("audiobook", override) != MANUAL:
+        return False
+    # already in the library: nothing to pick (the grab refuses an owned
+    # book), so it goes the automatic way and settles as arrived
+    return not media.book_in_library(req.get("item_key"))
 
 
 def _approve_media(db, req, override=None):
