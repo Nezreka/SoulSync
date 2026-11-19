@@ -234,7 +234,7 @@ _BACKFILL = {
 _BACKFILL_COLS = {
     "fanart": {"logo_url", "backdrop_url", "poster_url", "clearart_url", "banner_url"},
     "opensubtitles": {"subtitle_langs"},
-    "trakt": {"trakt_rating", "trakt_votes"},
+    "trakt": {"trakt_rating", "trakt_votes", "trakt_lists"},
     "tvmaze": {"tvmaze_rating"},
     "anilist": {"anilist_score"},
     "wikidata": {"wikidata_url"},
@@ -440,6 +440,8 @@ _COLUMN_MIGRATIONS = [
     ("movies", "trakt_status", "TEXT"), ("movies", "trakt_attempted", "TEXT"),
     ("shows", "trakt_rating", "REAL"), ("shows", "trakt_votes", "INTEGER"),
     ("shows", "trakt_status", "TEXT"), ("shows", "trakt_attempted", "TEXT"),
+    # how many Trakt user lists hold the title (its following)
+    ("movies", "trakt_lists", "INTEGER"), ("shows", "trakt_lists", "INTEGER"),
     # TVmaze community rating backfill (TV only)
     ("shows", "tvmaze_rating", "REAL"),
     ("shows", "tvmaze_status", "TEXT"), ("shows", "tvmaze_attempted", "TEXT"),
@@ -1310,8 +1312,25 @@ class VideoDatabase:
             if requeued:
                 logger.info("streaming: %d title(s) queued once to count their services", requeued)
 
+        # trakt_lists is new: a title Trakt already rated has no list count,
+        # and the worker only visits a row once. send those back through the
+        # queue once; the rating stays (backfill_mark never clobbers)
+        if conn.execute("SELECT 1 FROM video_settings WHERE key = ?",
+                        (VideoDatabase._TRAKT_LISTS_MARKER,)).fetchone() is None:
+            requeued = 0
+            for tbl in ("movies", "shows"):
+                requeued += conn.execute(
+                    f"UPDATE {tbl} SET trakt_status = NULL "
+                    "WHERE trakt_status = 'ok' AND trakt_lists IS NULL").rowcount
+            conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'",
+                         (VideoDatabase._TRAKT_LISTS_MARKER,))
+            if requeued:
+                logger.info("trakt: %d title(s) queued once to count their lists", requeued)
+
     _SEASON_MONITOR_MARKER = "season_monitor_backfill_done"
     _STREAMING_COUNT_MARKER = "streaming_count_backfill_done"
+    _TRAKT_LISTS_MARKER = "trakt_lists_backfill_done"
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -2720,7 +2739,7 @@ class VideoDatabase:
         "overview", "tagline", "status", "rating", "rating_critic", "content_rating",
         "network", "studio", "first_air_date", "last_air_date", "airs_time",
         "release_date", "runtime_minutes", "tmdb_collection_id", "tmdb_collection_name",
-        "trakt_rating", "trakt_votes", "tvmaze_rating", "anilist_score",
+        "trakt_rating", "trakt_votes", "trakt_lists", "tvmaze_rating", "anilist_score",
         "wikidata_url", "streaming", "streaming_count", "mediastinger", "awards", "subtitle_langs",
     }
 

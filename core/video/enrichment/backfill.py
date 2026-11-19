@@ -546,7 +546,7 @@ class OpenSubtitlesWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("opensubtitles")
 
 
-# ── Trakt (free API key) — community audience rating + vote count ─────────────
+# ── Trakt (free API key) — community audience rating, vote count, list count ──
 class TraktWorker(VideoBackfillWorker):
     BASE = "https://api.trakt.tv"
     requires_key = True
@@ -598,7 +598,28 @@ class TraktWorker(VideoBackfillWorker):
         votes = j.get("votes")
         if isinstance(votes, int) and votes > 0:
             out["trakt_votes"] = votes
+        if out:
+            lists = self._lists(typ, j, imdb)
+            if lists is not None:
+                out["trakt_lists"] = lists
         return out or None
+
+    def _lists(self, typ, summary, imdb):
+        """how many Trakt user lists hold the title, from its stats. a second
+        call only once the summary found it; a failure here keeps the rating
+        (a rate limit or a rejected key still backs the worker off)."""
+        ids = summary.get("ids") if isinstance(summary.get("ids"), dict) else {}
+        slug = ids.get("trakt") or imdb
+        try:
+            j = _http_get_json(self.BASE + "/" + typ + "/" + str(slug) + "/stats",
+                               headers=self._headers())
+        except (_RateLimited, _Unauthorized):
+            raise
+        except Exception:
+            logger.debug("Trakt stats failed for %s", imdb, exc_info=True)
+            return None
+        lists = j.get("lists") if isinstance(j, dict) else None
+        return lists if isinstance(lists, int) and lists >= 0 else None
 
     def record_ok(self, item, data):
         self.db.backfill_mark("trakt", item["kind"], item["id"], "ok", columns=data)
