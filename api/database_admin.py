@@ -26,7 +26,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, send_file
 
 from core.database_update_worker import DatabaseUpdateWorker
-from core.profile_context import admin_only
+from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 from core.runtime_state import add_activity_item
 from utils.logging_config import get_logger
 
@@ -1050,14 +1051,24 @@ def _run_deep_scan_task(server_type, run_epoch=None):
     db_update_worker.run_deep_scan()
 
 
+# what a member gets from /api/database/stats (#2207): how big their
+# library is. the database's size and path, the server and the scan times
+# are the admin's
+MEMBER_DB_STATS_KEYS = ('artists', 'albums', 'tracks')
+
+
 @bp.route('/api/database/stats', methods=['GET'])
-@admin_only
+@requires("music.access")
 def get_database_stats():
     """Endpoint to get current database statistics."""
     try:
         # This endpoint returns the same stats shape the UI expects.
         db = get_database()
+        # read in the caller's library scope, so a member's counts are the
+        # library they browse
         stats = db.get_database_info_for_server()
+        if not is_admin_request():
+            stats = {k: stats.get(k, 0) for k in MEMBER_DB_STATS_KEYS}
         return jsonify(stats)
     except Exception as e:
         logger.error(f"Error getting database stats: {e}")

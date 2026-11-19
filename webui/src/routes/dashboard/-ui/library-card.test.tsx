@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
 
+import { lastDbStats } from '../-dash.library';
 import { LibraryCard } from './library-card';
 
 vi.mock('@/routes/active-downloads/-adl.api', () => ({
@@ -116,36 +117,78 @@ describe('the hero status line', () => {
     }
   });
 
-  it("a member's menu has no Verify matches: the enrichment manager is the admins' (#2196)", async () => {
-    const view = await mountCard(false);
-    const menu = view.container.querySelector('.library-status-menu')!;
-    expect(menu.querySelector('#library-status-verify-btn')).toBeNull();
-    expect(menu.querySelector('#library-status-browse-btn')).not.toBeNull();
-  });
-
-  it('a member gets no scan, deep scan, backup or Repair: the server refuses them', async () => {
-    const view = await mountCard(false);
-    fireStatus(CONNECTED);
-    const scanBtn = view.container.querySelector<HTMLElement>('#library-status-scan-btn')!;
-    expect(scanBtn.style.display).toBe('none');
-    const deep = view.container.querySelector<HTMLElement>('#library-status-deep-btn')!;
-    expect(deep.style.display).toBe('none');
-    const menu = view.container.querySelector('.library-status-menu')!;
-    expect(menu.querySelector('#library-status-backup-btn')).toBeNull();
-    expect(menu.querySelector('#library-status-repair-btn')).toBeNull();
-    expect(menu.querySelector('#library-status-review-btn')).not.toBeNull();
-  });
-
-  it('a member an admin gave Tools keeps Repair', async () => {
-    window.SoulSyncWebShellBridge = { isPageAllowed: (id: string) => id === 'tools' } as never;
-    try {
-      const view = await mountCard(false);
-      const menu = view.container.querySelector('.library-status-menu')!;
-      expect(menu.querySelector('#library-status-repair-btn')).not.toBeNull();
-      expect(menu.querySelector('#library-status-backup-btn')).toBeNull();
-    } finally {
-      Reflect.deleteProperty(window, 'SoulSyncWebShellBridge');
+  // #2207: the server's name and state, the db size, scans, verify, backup
+  // and the review queue are the admin's. a member keeps the pages they may
+  // open, and asks nothing of the admin's feeds.
+  describe("a member's line (#2207)", () => {
+    function bridge(allowed: string[]) {
+      window.SoulSyncWebShellBridge = {
+        isPageAllowed: (id: string) => allowed.includes(id),
+      } as never;
     }
+    afterEach(() => {
+      Reflect.deleteProperty(window, 'SoulSyncWebShellBridge');
+    });
+
+    it('is Browse library and nothing of the admin', async () => {
+      bridge(['library']);
+      const view = await mountCard(false);
+      fireStatus(CONNECTED);
+      fireDbStats({ tracks: 5, albums: 2, artists: 1, database_size_mb: 8500 });
+      const root = view.container.querySelector('[data-card="library"]')!;
+      expect(root.querySelector('#library-status-browse-btn')).not.toBeNull();
+      for (const id of ['scan', 'deep', 'verify', 'repair', 'backup', 'review']) {
+        expect(root.querySelector(`#library-status-${id}-btn`)).toBeNull();
+      }
+      expect(root.querySelector('.library-status-menu')).toBeNull();
+      expect(root.querySelector('.library-status-dot')).toBeNull();
+      // no server name, no refresh time, no database size
+      expect(root.textContent).not.toMatch(/plex|refreshed|db|GB|MB/i);
+    });
+
+    it('asks only for its own counts, never the status, the scans or the review queue', async () => {
+      bridge(['library']);
+      routes({ '/api/database/stats': { tracks: 9, albums: 3, artists: 2 } });
+      await mountCard(false);
+      const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(urls).toEqual(['/api/database/stats']);
+      expect(reviewSummary).not.toHaveBeenCalled();
+      // the hero reads what it published
+      expect(lastDbStats()).toEqual({ tracks: 9, albums: 3, artists: 2 });
+    });
+
+    it('Browse library goes to the library page', async () => {
+      bridge(['library']);
+      const navigate = vi.fn();
+      window.navigateToPage = navigate;
+      try {
+        const view = await mountCard(false);
+        fireEvent.click(view.container.querySelector('#library-status-browse-btn')!);
+        expect(navigate).toHaveBeenCalledWith('library');
+      } finally {
+        Reflect.deleteProperty(window, 'navigateToPage');
+      }
+    });
+
+    it('a member an admin gave Tools keeps Repair', async () => {
+      bridge(['tools']);
+      const view = await mountCard(false);
+      expect(view.container.querySelector('#library-status-repair-btn')).not.toBeNull();
+      expect(view.container.querySelector('#library-status-browse-btn')).toBeNull();
+      expect(view.container.querySelector('#library-status-backup-btn')).toBeNull();
+    });
+
+    it('nothing they may open is no line at all, not an empty shell', async () => {
+      bridge([]);
+      const view = await mountCard(false);
+      expect(view.container.querySelector('[data-card="library"]')).toBeNull();
+      expect(view.container.innerHTML).toBe('');
+    });
+
+    it('no shell bridge is no line', async () => {
+      const view = await mountCard(false);
+      expect(view.container.innerHTML).toBe('');
+    });
   });
 
   it('the ⋯ button opens the menu, and Escape or a pick closes it', async () => {

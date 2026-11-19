@@ -33,6 +33,8 @@ function goVideo(page: string) {
   document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: { page } }));
 }
 
+/** an admin's strip is the server's state and its management; a member's
+ *  is only the library page, when they may open it (#2207) */
 export function VideoLibraryStrip({
   stats,
   scan,
@@ -41,6 +43,43 @@ export function VideoLibraryStrip({
   stats: VideoDashboardStats | undefined;
   scan: ScanStatus | undefined;
   isAdmin: boolean;
+}) {
+  return isAdmin ? (
+    <AdminVideoLibraryStrip stats={stats} scan={scan} />
+  ) : (
+    <MemberVideoLibraryStrip />
+  );
+}
+
+/** the server's name and state, when it was scanned, the scans and the
+ *  poster manager are the admin's (#2207). a member keeps a way into the
+ *  library page if they may open it, else there is no strip at all */
+function MemberVideoLibraryStrip() {
+  if (!(window.SoulSyncVideo?.pageAllowed?.('video-library') ?? false)) return null;
+  return (
+    <div className="dash-hero-library" data-card="library">
+      <div className="library-status-card">
+        <div className="library-status-header">
+          <div className="library-status-info">
+            <h4 className="library-status-title">Library</h4>
+          </div>
+          <div className="library-status-actions">
+            <button className="library-status-btn" onClick={() => goVideo('video-library')}>
+              <span>Browse library</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminVideoLibraryStrip({
+  stats,
+  scan,
+}: {
+  stats: VideoDashboardStats | undefined;
+  scan: ScanStatus | undefined;
 }) {
   const qc = useQueryClient();
   // the live scan, from video-scan.js's events; null = use the fetched status
@@ -90,7 +129,7 @@ export function VideoLibraryStrip({
               <button className="library-status-btn" onClick={() => goVideo('video-settings')}>
                 <span>Connect</span>
               </button>
-            ) : !isAdmin ? null : (
+            ) : (
               <button
                 className={scanning ? 'library-status-btn scanning' : 'library-status-btn'}
                 disabled={scanning}
@@ -122,8 +161,7 @@ export function VideoLibraryStrip({
               {MORE_ICON}
             </button>
             <div className="library-status-menu" role="menu" hidden={!menuOpen}>
-              {/* scanning the library is the admin's (the server refuses anyone else) */}
-              {view.state !== 'no-server' && isAdmin ? (
+              {view.state !== 'no-server' ? (
                 <button
                   role="menuitem"
                   className="library-status-menu-item"
@@ -148,15 +186,13 @@ export function VideoLibraryStrip({
               >
                 Poster manager
               </button>
-              {isAdmin ? (
-                <button
-                  role="menuitem"
-                  className="library-status-menu-item"
-                  onClick={pick(() => goVideo('video-tools'))}
-                >
-                  Repair
-                </button>
-              ) : null}
+              <button
+                role="menuitem"
+                className="library-status-menu-item"
+                onClick={pick(() => goVideo('video-tools'))}
+              >
+                Repair
+              </button>
             </div>
           </div>
         </div>
