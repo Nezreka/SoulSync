@@ -161,18 +161,29 @@ def _incremental_vacuum(conn) -> int:
     """the settings page's "enable incremental vacuum" switched the mode on,
     and nothing ever ran ``PRAGMA incremental_vacuum``, so no page was ever
     handed back. this does, in slices, so no one write holds the lock long."""
+    def _one(sql):
+        # fetchall, not fetchone: on python 3.11 a pragma read left part way
+        # stays open, and an open read on this connection stops
+        # incremental_vacuum from handing back a single page (dev CI, Nov 19)
+        return int(conn.execute(sql).fetchall()[0][0])
+
     try:
-        if int(conn.execute("PRAGMA auto_vacuum").fetchone()[0]) != 2:
+        if _one("PRAGMA auto_vacuum") != 2:
             return 0
         freed = 0
         while freed < INCREMENTAL_VACUUM_PAGES:
-            free = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+            free = _one("PRAGMA freelist_count")
             if free <= 0:
                 break
             step = min(_INCREMENTAL_STEP, free, INCREMENTAL_VACUUM_PAGES - freed)
             conn.execute(f"PRAGMA incremental_vacuum({step})").fetchall()
             conn.commit()
-            freed += step
+            # count what really went, so a step that frees nothing ends here
+            # instead of being reported as freed
+            gone = free - _one("PRAGMA freelist_count")
+            if gone <= 0:
+                break
+            freed += gone
         return freed
     except sqlite3.Error as exc:
         logger.debug("incremental vacuum skipped: %s", exc)

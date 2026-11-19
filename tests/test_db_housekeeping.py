@@ -118,10 +118,14 @@ def test_incremental_vacuum_mode_actually_hands_pages_back(tmp_path):
     conn.commit()
     conn.execute("DELETE FROM t")
     conn.commit()
-    assert conn.execute("PRAGMA freelist_count").fetchone()[0] > 500
+    # fetchall: on python 3.11 a pragma read left part way stays open, and
+    # an open read on the connection stops incremental_vacuum (dev CI, Nov 19)
+    before = conn.execute("PRAGMA freelist_count").fetchall()[0][0]
+    assert before > 500
     out = hk.optimize(conn)
-    assert out["pages_freed"] > 500
-    assert conn.execute("PRAGMA freelist_count").fetchone()[0] == 0
+    after = conn.execute("PRAGMA freelist_count").fetchall()[0][0]
+    assert after == 0
+    assert out["pages_freed"] == before - after
 
 
 def test_incremental_vacuum_leaves_a_normal_database_alone(tmp_path):
