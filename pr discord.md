@@ -4,7 +4,7 @@
 
 **Phones.** Worker status opens on a tap, the menu button stays on an open playlist, every page reaches its end, menus, import cards and long confirm boxes fit the screen, and Re-identify is a full-screen sheet (thanks Thibs, c5pie and wolf39us, #2180 to #2187, #2197).
 
-**People and permissions.** Audiobook and podcast episode requests can require approval, controls show the value the policy keeps them at, chat only reaches people allowed to chat, the enrichment workers are admin only (#2196), and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2188 to #2192). The admin menu no longer flashes after signing back in (#2156).
+**People and permissions.** Audiobook and podcast episode requests can require approval, controls show the value the policy keeps them at, chat only reaches people allowed to chat, the enrichment workers are admin only (#2196), and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2188 to #2192). Approved requests can wait for you to pick the release, per media type or per request (#2199), and audiobook search, files and details follow permissions (#2198, #2201).
 
 **Library.** Titles beat track numbers when lining up a tracklist, a song's number heals from its file, and a deleted file stops borrowing another album's (thanks wolf39us). Rename / Organize keeps $quality (thanks Maegfea, #2195) and skips a removed album (#2194). A track you own can move into an album's missing slot, and Reassign moves instead of copying (#2193).
 

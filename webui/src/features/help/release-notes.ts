@@ -78,6 +78,9 @@ export const RELEASES: Release[] = [
       'Titles beat track numbers when lining up a tracklist, a song’s number heals from its file, and a deleted file stops borrowing another album’s (thanks wolf39us).',
       'Rename / Organize keeps $quality in the name (thanks Maegfea, #2195) and skips a removed album instead of failing (thanks wolf39us, #2194).',
       'Move a track you own into an album’s missing slot, and Reassign moves instead of leaving a copy behind (#2193).',
+      'Pick the release yourself for approved requests: per media type, or per request when you approve, with a Pick a release queue on the Requests page (thanks SeadogsBooty, #2199).',
+      'Audiobook search, file details, matching and deleting follow permissions, and a member’s audiobook library is just the shelf (thanks SeadogsBooty, #2198, #2201).',
+      'Removing many artists from the Watchlist takes about a second, not a minute (thanks SeadogsBooty, #2200).',
       'The admin menu no longer flashes for a member after signing back in (thanks SeadogsBooty, #2156).',
       'The transfer folder is called the music library folder everywhere you read it. In Docker it is still the /app/Transfer mount.',
     ],
@@ -95,6 +98,14 @@ export const RELEASES: Release[] = [
         title: 'Require approval for books and episodes',
         desc: 'Audiobook and podcast episode requests can Require approval like movies, TV and music. Requests land on the Requests page, and approving one gets the book or episode (thanks SeadogsBooty, #2188).',
         page: 'settings',
+      },
+      {
+        title: 'Pick the release yourself',
+        desc: 'Approval settings on the Requests page sets each media type to Download automatically or I pick the release, and a request’s ⋯ menu can go the other way. Held requests wait on a Pick a release tab, automatic searches leave them alone, and the requester sees it is waiting for a pick (thanks SeadogsBooty, #2199).',
+      },
+      {
+        title: 'Audiobooks follow permissions',
+        desc: 'Search now, Find releases and grabbing need the right to get books, file details, matching, deleting and scans are the admin’s, and a member’s audiobook library shows cover, title, author, narrator, series and length (thanks SeadogsBooty, #2198, #2201).',
       },
       {
         title: 'Permissions say what is in force',
