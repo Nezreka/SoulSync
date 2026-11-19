@@ -462,18 +462,32 @@ export interface CoverPlanStep {
   why: string;
   count?: number;
   file?: string;
+  /** the picked cover replaces the library's own (#2202) */
+  replace?: boolean;
+  /** the library's saved cover no longer loads (#2202) */
+  broken?: boolean;
 }
 
+/** a cover Apply Art can take: one tile of the finding (#2202) */
+export type CoverPick = 'library' | 'folder' | 'files' | 'found';
+
+export const COVER_PICKS: readonly CoverPick[] = ['library', 'folder', 'files', 'found'];
+
 /** a cover finding as it is now: the library, the files and the folder,
- *  the found cover and its source, and what Apply Art does in each (#2169) */
+ *  the found cover and its source, and what Apply Art does in each (#2169).
+ *  `choices` are the tiles with a picture, `pick` the best of them, and
+ *  `plans` what Apply Art does with each one picked (#2202) */
 export interface CoverFindingState {
   album_id: number;
-  library: { has: boolean; locked: boolean; url: string | null };
+  library: { has: boolean; locked: boolean; broken?: boolean; url: string | null };
   files: { with: number; without: number; unknown: number; url: string | null };
   folder: { file: string | null; exists: boolean; url: string | null };
   found: { url: string | null; source: string | null };
   settings: { embed: boolean; sidecar: boolean };
   plan: CoverPlanStep[];
+  choices: CoverPick[];
+  pick: CoverPick | null;
+  plans: Partial<Record<CoverPick, CoverPlanStep[]>>;
 }
 
 /** null when the album left the library or the call failed: the finding
@@ -486,7 +500,16 @@ export async function fetchCoverFindingState(id: number): Promise<CoverFindingSt
     // anything not shaped like a state is no state: the scan's view stands
     if (data.success !== true || !data.library || !data.files || !data.folder || !data.found)
       return null;
-    return { ...data, plan: Array.isArray(data.plan) ? data.plan : [] } as CoverFindingState;
+    const choices = Array.isArray(data.choices)
+      ? data.choices.filter((pick): pick is CoverPick => COVER_PICKS.includes(pick))
+      : [];
+    return {
+      ...data,
+      plan: Array.isArray(data.plan) ? data.plan : [],
+      choices,
+      pick: data.pick && choices.includes(data.pick) ? data.pick : (choices[0] ?? null),
+      plans: data.plans && typeof data.plans === 'object' ? data.plans : {},
+    } as CoverFindingState;
   } catch {
     return null;
   }

@@ -271,7 +271,8 @@ def test_embedded_art_but_no_cover_jpg_is_flagged(monkeypatch):
 
     assert result.findings_created == 1
     assert context.findings[0]['details']['sidecar_from_embedded'] is True
-    assert context.findings[0]['details']['artwork_source'] == 'embedded'
+    # #2202: the library's own cover is the first pick when it has one
+    assert context.findings[0]['details']['artwork_source'] == 'library'
 
 
 def test_files_genuinely_without_art_are_flagged(monkeypatch):
