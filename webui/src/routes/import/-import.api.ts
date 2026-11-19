@@ -64,12 +64,21 @@ export async function searchImportAlbums(
         limit: '12',
         ...(source ? { source } : {}),
       },
+      // a pasted musicbrainz link is two or three rate-limited lookups
+      timeout: 30_000,
     }),
   );
 }
 
 export async function fetchImportSearchSources(): Promise<ImportSearchSourcesPayload> {
   return readJson<ImportSearchSourcesPayload>(apiClient.get('import/search/sources'));
+}
+
+/** save the source the matcher's picker opens on; '' is Any source (#2203) */
+export async function saveImportDefaultSearchSource(
+  source: string,
+): Promise<{ success: boolean; default_source?: string; error?: string }> {
+  return readJson(apiClient.put('import/search/default-source', { json: { source } }));
 }
 
 export async function matchImportAlbum(input: {

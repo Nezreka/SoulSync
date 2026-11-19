@@ -771,38 +771,89 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
 
     const { router } = renderArtist('/library?artist=1&releases=all&releaseView=table');
-    const dummyTitle = await screen.findByRole('button', { name: 'Dummy' });
+    const dummyTitle = await screen.findByRole('link', { name: 'Dummy' });
     const dummyRow = dummyTitle.parentElement?.parentElement as HTMLElement;
     const now = vi.spyOn(Date, 'now');
 
-    // The blank/header area and the title now share the same one-click rule.
+    // a click on the row (not the title) expands it
     now.mockReturnValue(1_000);
     fireEvent.click(dummyRow);
     expect(await screen.findByText('Inline track 1')).toBeInTheDocument();
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    const roselandTitle = screen.getByRole('button', { name: 'Roseland NYC Live' });
-    now.mockReturnValue(1_000);
-    fireEvent.click(roselandTitle);
+    // the chevron is a real button: it toggles, and says which way
+    const roselandToggle = screen.getByRole('button', {
+      name: 'Show the tracks of Roseland NYC Live',
+    });
+    expect(roselandToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(roselandToggle);
     expect(await screen.findByText('Inline track 2')).toBeInTheDocument();
+    expect(roselandToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(roselandToggle).toHaveAccessibleName('Hide the tracks of Roseland NYC Live');
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    // Repeated, deliberate single clicks keep toggling and never accumulate
-    // into a later full-view navigation.
+    // repeated, deliberate single clicks on the row keep toggling and never
+    // accumulate into a later full-view navigation
+    const roselandRow = screen.getByRole('link', { name: 'Roseland NYC Live' }).parentElement
+      ?.parentElement as HTMLElement;
     now.mockReturnValue(2_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockReturnValue(3_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    // Two clicks on the same album inside the explicit window are the only
-    // gesture that opens its full detail page.
+    // two clicks on the same row inside the window still open its page
     now.mockReturnValue(4_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockReturnValue(4_100);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockRestore();
     await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 2 }));
+  });
+
+  it('the album title is a link to the album page (#2204)', async () => {
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const title = await screen.findByRole('link', { name: 'Dummy' });
+    // a real href: middle click and "open in new tab" land on the album page
+    const href = new URL(title.getAttribute('href') ?? '', 'http://x');
+    expect(href.pathname).toBe('/library');
+    expect(href.searchParams.get('album')).toBe('1');
+    expect(href.searchParams.get('artist')).toBe('1');
+
+    // a modified click is the browser's (new tab): the page stays, the row stays shut
+    // (fireEvent answers false when the default was prevented)
+    expect(fireEvent.click(title, { ctrlKey: true })).toBe(true);
+    expect(router.state.location.search).not.toHaveProperty('album');
+    expect(screen.getByRole('button', { name: 'Show the tracks of Dummy' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    // a plain click opens the album page in place, without toggling the row
+    expect(fireEvent.click(title)).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Hide the tracks of Dummy' })).toBeNull();
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 1 }));
+  });
+
+  it('the title link and the expand button are reachable from the keyboard (#2204)', async () => {
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const title = await screen.findByRole('link', { name: 'Dummy' });
+    title.focus();
+    expect(document.activeElement).toBe(title);
+    const toggle = screen.getByRole('button', { name: 'Show the tracks of Dummy' });
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.tagName).toBe('BUTTON');
   });
 
   it('opens on the rich hero and switches to compact and back (ldp-05)', async () => {

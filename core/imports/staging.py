@@ -538,6 +538,22 @@ def search_import_albums(query: str, limit: int = 12, source_override: Optional[
     return results[:limit]
 
 
+def lookup_import_album_link(query: str) -> Optional[Dict[str, Any]]:
+    """A pasted release link or MBID, looked up by id (#2203).
+
+    None for ordinary text. Else ``{"source", "albums", "message"}`` with the
+    albums in the search's own shape, so the matcher shows the release as a
+    candidate like any other."""
+    from core.imports.album_link import lookup_album_link
+
+    found = lookup_album_link(query, client_for=get_client_for_source)
+    if found is None:
+        return None
+    source = found["source"]
+    found["albums"] = [_normalize_album_result(album, source) for album in found["albums"]]
+    return found
+
+
 def search_import_tracks(query: str, limit: int = 30) -> List[Dict[str, Any]]:
     """Search tracks using the configured metadata provider priority order."""
     query = (query or "").strip()

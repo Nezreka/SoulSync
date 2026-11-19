@@ -542,11 +542,25 @@
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Import</h3>
-                                        <span class="settings-section-hint">Folder-artist override, permanent
+                                        <span class="settings-section-hint">Default search source, folder-artist override, permanent
                                             library</span>
                                     </div>
                                     <div class="settings-section-body collapsed" data-stg="library">
                                         <div class="settings-group" data-stg="library">
+                                            <div class="form-group" id="import-default-search-source-group">
+                                                <label for="import-default-search-source">Default search source:</label>
+                                                <select id="import-default-search-source" class="form-select">
+                                                    <option value="">Any source</option>
+                                                    <option value="musicbrainz">MusicBrainz</option>
+                                                    <option value="spotify">Spotify</option>
+                                                    <option value="deezer">Deezer</option>
+                                                    <option value="itunes">iTunes</option>
+                                                    <option value="discogs">Discogs</option>
+                                                    <option value="jiosaavn">JioSaavn</option>
+                                                    <option value="bandcamp">Bandcamp</option>
+                                                </select>
+                                                <small class="settings-hint">The source the Import page searches when you identify or fix a match. Any source asks your primary metadata source first. A source that isn't connected falls back to Any source.</small>
+                                            </div>
                                             <div class="form-group">
                                                 <div class="setting-row">
                                                     <label class="checkbox-label">
