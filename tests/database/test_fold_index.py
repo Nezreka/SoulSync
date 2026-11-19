@@ -191,9 +191,28 @@ def test_a_stale_index_answers_from_the_snapshot_while_another_thread_looks(tmp_
     asked = []
     monkeypatch.setattr(fold_index, "_signature", lambda *a: asked.append(a) or (0, 0))
     flight = fold_index._flight((path, fold_index.ALBUM_TITLES))
-    with flight:  # someone else is looking
-        assert fold_index.matching_ids(conn, path, fold_index.ALBUM_TITLES, "tina") == [2, 3]
-    assert asked == []
+    held, done = threading.Event(), threading.Event()
+
+    def someone_else_looking():
+        with flight:
+            held.set()
+            done.wait(10)
+
+    holder = threading.Thread(target=someone_else_looking)
+    holder.start()
+    held.wait(5)
+    got = []
+    asker = threading.Thread(target=lambda: got.append(
+        fold_index.matching_ids(conn, path, fold_index.ALBUM_TITLES, "tina")))
+    asker.start()
+    asker.join(2)
+    answered_while_held = not asker.is_alive()
+    done.set()
+    holder.join(5)
+    asker.join(5)
+    # answered at once from the snapshot, without asking the table
+    assert answered_while_held
+    assert got == [[2, 3]] and asked == []
 
 
 def test_a_cold_index_waits_for_the_build_instead_of_answering_empty(tmp_path, monkeypatch):
