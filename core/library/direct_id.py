@@ -18,7 +18,7 @@ text search still runs (pasting "Idols" never looks like an ID).
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import NamedTuple, Optional
 
 # MusicBrainz MBIDs are UUIDs (8-4-4-4-12 hex). Accept a bare UUID or one
 # embedded in a musicbrainz.org URL (/artist/<id>, /release/<id>, ...).
@@ -264,3 +264,77 @@ def parse_direct_ref(service: str, entity_type: str, query: str) -> Optional[tup
         return (m.group(2).lower(), 'https://' + m.group(1).lower()) if m else None
 
     return None
+
+
+# ── which service a pasted link belongs to (#2203) ───────────────────────────
+#
+# The parsers above answer "is this text one of <service>'s ids". The import
+# matcher has no service to ask about: its search box takes a name or a link
+# from anywhere, so this reads the service off the link itself and hands the
+# rest to the same parsers. Links only (and a bare MusicBrainz UUID, the one
+# bare id that names its own source): "1989" stays a search for 1989.
+
+
+class LinkRef(NamedTuple):
+    """A pasted link. ``kind`` is album / track / artist, ``release-group``
+    for a MusicBrainz release group, or None for a bare MBID (release or
+    group, the lookup finds out). ``id`` is '' when the text is a link to a
+    site we know but not to anything on it we can read (a label page, a
+    short link), so the caller can say so instead of searching the url."""
+
+    service: str
+    kind: Optional[str]
+    id: str
+
+
+_MB_URL_RE = re.compile(
+    r"musicbrainz\.org/(release-group|release|recording|artist)/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+_MB_KIND = {'release': 'album', 'release-group': 'release-group',
+            'recording': 'track', 'artist': 'artist'}
+
+# the text that names a site, in the order to test them
+_LINK_SITES = (
+    ('musicbrainz.org', 'musicbrainz'),
+    ('open.spotify.com', 'spotify'), ('spotify:', 'spotify'),
+    ('music.apple.com', 'itunes'), ('itunes.apple.com', 'itunes'),
+    ('deezer.com', 'deezer'), ('deezer.page.link', 'deezer'),
+    ('discogs.com', 'discogs'),
+    ('tidal.com', 'tidal'),
+    ('qobuz.com', 'qobuz'),
+    ('music.amazon.', 'amazon'),
+    ('jiosaavn.com', 'jiosaavn'),
+    ('bandcamp.com', 'bandcamp'),
+)
+
+
+def detect_link(query: str) -> Optional[LinkRef]:
+    """The service, kind and id of a pasted link, or None for ordinary text.
+
+    Pure, no network. A known site's link that points at nothing readable
+    comes back with an empty id rather than None."""
+    text = (query or '').strip()
+    if not text:
+        return None
+    if _UUID_RE.fullmatch(text):
+        return LinkRef('musicbrainz', None, text.lower())
+    lowered = text.lower()
+    site = next((service for marker, service in _LINK_SITES if marker in lowered), None)
+    if site is None:
+        return None
+    # a name that merely mentions a site ("live at deezer.com") is still a search
+    if ' ' in text and '://' not in text and not lowered.startswith('spotify:'):
+        return None
+    if site == 'musicbrainz':
+        m = _MB_URL_RE.search(text)
+        return LinkRef('musicbrainz', _MB_KIND[m.group(1).lower()], m.group(2).lower()) if m \
+            else LinkRef('musicbrainz', None, '')
+    if site == 'deezer':
+        link = extract_deezer_link(text)
+        return LinkRef('deezer', link[0], link[1]) if link else LinkRef('deezer', None, '')
+    ref = parse_direct_ref(site, 'album', text)
+    if ref and ref[0]:
+        return LinkRef(site, ref[0], ref[1])
+    return LinkRef(site, None, '')

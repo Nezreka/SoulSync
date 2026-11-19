@@ -77,6 +77,34 @@ _planner_stats_lock = threading.Lock()
 _planner_stats_threads = {}
 
 
+def _env_mb(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# per-connection tuning (#2205, a 47 GB library with a 2.3 GB wal).
+# journal_size_limit: after a checkpoint resets the wal, the file is cut back
+# to this size. without it the wal keeps whatever size its busiest moment
+# grew it to, forever, and every reader maps that index.
+DB_JOURNAL_SIZE_LIMIT_MB = _env_mb("SOULSYNC_DB_WAL_LIMIT_MB", 64)
+# page cache per connection. sqlite's default is 2 MB; a big library's indexes
+# don't fit. kept modest: the pool holds up to 16 idle connections on a NAS
+DB_CACHE_MB = _env_mb("SOULSYNC_DB_CACHE_MB", 8)
+# memory-mapped reads, off unless asked: some docker/NAS volumes (network
+# shares, some fuse mounts) don't map safely
+DB_MMAP_MB = _env_mb("SOULSYNC_DB_MMAP_MB", 0)
+
+
+def _apply_tuning_pragmas(connection) -> None:
+    connection.execute(f"PRAGMA journal_size_limit = {DB_JOURNAL_SIZE_LIMIT_MB * 1024 * 1024}")
+    if DB_CACHE_MB:
+        connection.execute(f"PRAGMA cache_size = -{DB_CACHE_MB * 1024}")
+    if DB_MMAP_MB:
+        connection.execute(f"PRAGMA mmap_size = {DB_MMAP_MB * 1024 * 1024}")
+
+
 _CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
 
 
@@ -940,6 +968,7 @@ class MusicDatabase:
                 journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
                 if journal_mode and str(journal_mode[0]).lower() == "wal":
                     connection.execute("PRAGMA synchronous = NORMAL")
+                _apply_tuning_pragmas(connection)
                 # NOT `PRAGMA journal_mode = WAL` here. wal mode is persistent in
                 # the file and is set once per process in _ensure_wal_mode; the
                 # pragma takes a lock, and on an install with enrichment
@@ -5002,6 +5031,10 @@ class MusicDatabase:
             """)
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
+            # the housekeeping prune of stale lookups (#2205, core/db_housekeeping):
+            # without it each pass read the whole table, json and all
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_stale ON musicbrainz_cache (last_updated) "
+                           "WHERE entity_type IN ('recording', 'release')")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
             # Partial index for failed lookups — speeds up the management modal queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_failed ON musicbrainz_cache (entity_type, last_updated) WHERE musicbrainz_id IS NULL")
@@ -9139,6 +9172,10 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_open_counts "
                 "ON repair_findings (status, job_id, finding_type, severity)")
+            # the housekeeping prune of old resolved findings (#2205)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_resolved_age "
+                "ON repair_findings (resolved_at) WHERE status = 'resolved'")
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_manual_conflict "
                 "ON repair_findings (finding_type) WHERE status = 'pending' "

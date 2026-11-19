@@ -10,4 +10,6 @@
 
 The transfer folder is now called the music library folder everywhere. In Docker it is still the /app/Transfer mount, so your setup doesn't change.
 
+**Big libraries.** Library search no longer piles every request onto one rebuild, and the database prunes old caches and trims its log on its own (thanks xcrittpm, #2205).
+
 Full notes on GitHub.

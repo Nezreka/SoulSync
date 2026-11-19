@@ -1399,8 +1399,25 @@ def database_maintenance_info():
         free_bytes = free_pages * page_size
         auto_vacuum_labels = {0: 'None', 1: 'Full', 2: 'Incremental'}
 
+        from core import db_housekeeping
+        from database.music_database import DB_CACHE_MB, DB_JOURNAL_SIZE_LIMIT_MB, DB_MMAP_MB
+        wal_bytes = db_housekeeping.wal_size(db_path)
+        try:
+            free_disk = shutil.disk_usage(os.path.dirname(os.path.abspath(db_path))).free
+        except OSError:
+            free_disk = None
+
         return jsonify({
             'success': True,
+            'wal_size': wal_bytes,
+            'wal_size_display': f'{wal_bytes / 1024 / 1024:.1f} MB',
+            'free_disk': free_disk,
+            # VACUUM writes a whole new copy before it swaps it in
+            'vacuum_needs': total_bytes,
+            'vacuum_has_room': free_disk is None or free_disk > total_bytes * 1.1,
+            'tuning': {'cache_mb': DB_CACHE_MB, 'wal_limit_mb': DB_JOURNAL_SIZE_LIMIT_MB,
+                       'mmap_mb': DB_MMAP_MB,
+                       'checkpoint_minutes': db_housekeeping.CHECKPOINT_MINUTES},
             'total_size': total_bytes,
             'total_size_display': f'{total_bytes / 1024 / 1024:.1f} MB',
             'free_pages': free_pages,
@@ -1437,6 +1454,21 @@ def database_vacuum():
 
         # Get size before
         size_before = os.path.getsize(db_path)
+
+        # VACUUM builds a full copy of the database before it replaces the
+        # original: without room for it, it fails part way after a long wait
+        body = request.get_json(silent=True) or {}
+        try:
+            free_disk = shutil.disk_usage(os.path.dirname(os.path.abspath(db_path))).free
+        except OSError:
+            free_disk = None
+        if free_disk is not None and free_disk < size_before * 1.1 and not body.get('force'):
+            return jsonify({
+                'success': False,
+                'error': (f'not enough free disk space to compact: VACUUM needs about '
+                          f'{size_before / 1024 / 1024 / 1024:.1f} GB free next to the database, '
+                          f'there is {free_disk / 1024 / 1024 / 1024:.1f} GB'),
+            }), 409
 
         conn = sqlite3.connect(db_path)
         start = time.time()
@@ -1501,4 +1533,60 @@ def enable_incremental_vacuum():
         })
     except Exception as e:
         logger.error(f"Failed to enable incremental vacuum: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/database/maintenance/tables', methods=['GET'])
+@admin_only
+def database_table_sizes():
+    """what is taking the room (#2205). sizes come from a measuring pass that
+    reads every page, so it runs on its own thread: ``?measure=1`` starts it,
+    and this returns the last result plus the planner's row estimates now."""
+    try:
+        from core import db_housekeeping
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        started = False
+        if request.args.get('measure') in ('1', 'true', 'yes'):
+            started = db_housekeeping.start_measure(db_path)
+        conn = sqlite3.connect(db_path, timeout=10)
+        try:
+            # row estimates only: dbstat here would read the whole file inline
+            estimates = db_housekeeping.table_sizes(conn, use_dbstat=False)
+        finally:
+            conn.close()
+        state = db_housekeeping.measure_state()
+        return jsonify({'success': True, 'started': started, 'measure': state,
+                        'estimates': estimates.get('tables', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/database/maintenance/optimize', methods=['POST'])
+@admin_only
+def database_optimize():
+    """the safe tidy-up, no VACUUM: prune the caches and logs that keep their
+    own retention, merge the search indexes, refresh planner stats, and fold
+    the wal back in. it never deletes listening history or library rows."""
+    try:
+        from core import db_housekeeping
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        start = time.time()
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            conn.execute('PRAGMA busy_timeout = 30000')
+            pruned = db_housekeeping.prune(conn)
+            optimized = db_housekeeping.optimize(conn)
+        finally:
+            conn.close()
+        wal = db_housekeeping.checkpoint(db_path, truncate_over=0)
+        elapsed = time.time() - start
+        logger.info("database optimize: pruned %s, fts %s, wal %.1f -> %.1f MB in %.1fs",
+                    pruned, optimized.get('fts_optimized'), wal['wal_before'] / 1e6,
+                    wal['wal_after'] / 1e6, elapsed)
+        return jsonify({'success': True, 'pruned': pruned, 'elapsed_seconds': round(elapsed, 1),
+                        'fts_optimized': optimized.get('fts_optimized', []),
+                        'wal_before': wal['wal_before'], 'wal_after': wal['wal_after'],
+                        'wal_busy': bool(wal.get('busy'))})
+    except Exception as e:
+        logger.error(f"Database optimize failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

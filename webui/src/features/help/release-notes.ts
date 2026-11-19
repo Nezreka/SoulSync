@@ -81,6 +81,9 @@ export const RELEASES: Release[] = [
       'Pick the release yourself for approved requests: per media type, or per request when you approve, with a Pick a release queue on the Requests page (thanks SeadogsBooty, #2199).',
       'Audiobook search, file details, matching and deleting follow permissions, and a member’s audiobook library is just the shelf (thanks SeadogsBooty, #2198, #2201).',
       'Removing many artists from the Watchlist takes about a second, not a minute (thanks SeadogsBooty, #2200).',
+      'Big libraries: library search stops piling threads onto one rebuild, and the database tidies itself: old caches prune, the write-ahead log is trimmed, and Settings, System shows the biggest tables (thanks xcrittpm, #2205).',
+      'Cover art findings use the cover you pick, any of the four, and only appear when something is really missing (thanks Vidariondr, #2202).',
+      'Re-identify keeps the song you picked (thanks wolf39us, #2206), Import matches a pasted release link or MusicBrainz id with a default search source (thanks Ericsson, #2203), and an album title links to its page (thanks Ktzenjammer, #2204).',
       'The admin menu no longer flashes for a member after signing back in (thanks SeadogsBooty, #2156).',
       'The transfer folder is called the music library folder everywhere you read it. In Docker it is still the /app/Transfer mount.',
     ],
@@ -106,6 +109,20 @@ export const RELEASES: Release[] = [
       {
         title: 'Audiobooks follow permissions',
         desc: 'Search now, Find releases and grabbing need the right to get books, file details, matching, deleting and scans are the admin’s, and a member’s audiobook library shows cover, title, author, narrator, series and length (thanks SeadogsBooty, #2198, #2201).',
+      },
+      {
+        title: 'Big libraries stay quick',
+        desc: 'Library search no longer has every request rebuild the same index at once, old MusicBrainz cache rows and long-resolved findings prune themselves, the write-ahead log is trimmed, and Settings, System, Database Maintenance shows the biggest tables with a safe Tidy Up (thanks xcrittpm, #2205).',
+        page: 'settings',
+      },
+      {
+        title: 'Cover art findings, again',
+        desc: 'Apply Art uses the cover you pick (library, folder, the files’ or the one found), Change cover is always there, and an album with a cover in its disc folder’s parent or a cover.JPG no longer shows up (thanks Vidariondr, #2202).',
+        page: 'tools',
+      },
+      {
+        title: 'Match by link',
+        desc: 'Paste a MusicBrainz release or release group link, or a Spotify, Deezer, Apple Music or Discogs album link, into Import’s search to match it directly. Import can also start on your favourite source (thanks Ericsson, #2203).',
       },
       {
         title: 'Permissions say what is in force',

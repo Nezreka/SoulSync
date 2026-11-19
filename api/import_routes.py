@@ -22,6 +22,7 @@ from core.imports.routes import inbox as _import_inbox
 from core.imports.routes import process_single_import_file as _import_process_single_import_file
 from core.imports.routes import search_albums as _import_search_albums
 from core.imports.routes import search_sources as _import_search_sources
+from core.imports.routes import set_import_default_search_source as _import_set_default_search_source
 from core.imports.routes import search_tracks as _import_search_tracks
 from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
@@ -283,6 +284,19 @@ def import_search_albums():
 @requires("music.import")
 def import_search_sources_route():
     payload, status = _import_search_sources()
+    if status == 200:
+        from core.profile_context import is_admin_request
+        payload["can_set_default"] = bool(is_admin_request())
+    return jsonify(payload), status
+
+
+@bp.route('/api/import/search/default-source', methods=['PUT'])
+@admin_only
+def import_search_default_source_route():
+    """#2203: the source the import matcher's picker opens on. install-wide,
+    so an admin's to change, like the rest of the import settings."""
+    data = request.get_json(silent=True) or {}
+    payload, status = _import_set_default_search_source(data.get('source', ''))
     return jsonify(payload), status
 
 

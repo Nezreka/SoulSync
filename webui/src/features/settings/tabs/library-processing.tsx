@@ -424,6 +424,18 @@ function Row({ control, help }: { control: ReactNode; help: ReactNode }) {
   );
 }
 
+/** the import matcher's default search source (#2203); '' is Any source */
+export const IMPORT_SEARCH_SOURCE_OPTIONS = [
+  { value: '', label: 'Any source' },
+  { value: 'musicbrainz', label: 'MusicBrainz' },
+  { value: 'spotify', label: 'Spotify' },
+  { value: 'deezer', label: 'Deezer' },
+  { value: 'itunes', label: 'iTunes' },
+  { value: 'discogs', label: 'Discogs' },
+  { value: 'jiosaavn', label: 'JioSaavn' },
+  { value: 'bandcamp', label: 'Bandcamp' },
+] as const;
+
 export function ProcessingCards({ store }: SettingsTabProps) {
   const settings = useSettings(store);
   const loads = useLoads(store);
@@ -600,8 +612,32 @@ export function ProcessingCards({ store }: SettingsTabProps) {
         </div>
       </Section>
 
-      <Section tab={TAB} title="Import" hint="Folder-artist override, permanent library">
+      <Section
+        tab={TAB}
+        title="Import"
+        hint="Default search source, folder-artist override, permanent library"
+      >
         <div className="settings-group" data-stg={TAB}>
+          <div className="form-group" id="import-default-search-source-group">
+            <label htmlFor="import-default-search-source">Default search source:</label>
+            <select
+              id="import-default-search-source"
+              className="form-select"
+              value={loads ? text(imp.default_search_source) : ''}
+              onChange={(event) => store.set('import', 'default_search_source', event.target.value)}
+            >
+              {IMPORT_SEARCH_SOURCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <small className="settings-hint">
+              The source the Import page searches when you identify or fix a match. Any source asks
+              your primary metadata source first. A source that isn&apos;t connected falls back to
+              Any source.
+            </small>
+          </div>
           <Row
             control={check(
               'import-folder-artist-override',

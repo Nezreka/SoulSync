@@ -311,7 +311,7 @@ export function AlbumVersionsModal({
             <input
               className={styles.searchInput}
               value={query}
-              placeholder={`Search ${artistName}'s releases…`}
+              placeholder={`Search ${artistName}'s releases, or paste a release link…`}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && query.trim()) setSearched(query.trim());

@@ -304,8 +304,11 @@ def search_versions(
     *,
     source: Optional[str] = None,
     search: Callable[[str, str], Optional[list]] = None,
+    lookup_link: Callable[[str], Optional[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """a typed search for a version the lists don't have, kept to this artist."""
+    """a typed search for a version the lists don't have, kept to this artist.
+    a pasted release link or mbid is looked up by id instead (#2203), and not
+    held to the artist: the user named the release outright."""
     search = search or search_source_albums
     with closing(database._get_connection()) as conn:
         facts = album_facts(conn, album_id)
@@ -314,6 +317,16 @@ def search_versions(
     text = str(query or "").strip() or facts["title"]
     artist = facts["artist_name"]
     current = facts["release_ids"]
+    if lookup_link is None:
+        from core.imports.album_link import lookup_album_link as lookup_link
+    linked = lookup_link(text)
+    if linked is not None:
+        name = linked["source"]
+        group = {"source": name, "label": "MusicBrainz" if name == "musicbrainz" else _source_label(name),
+                 "versions": [r for r in (version_row(name, item, current) for item in linked["albums"]) if r]}
+        if linked["message"]:
+            group["note"] = linked["message"]
+        return {"groups": [group]}
     primary = str(source or primary_source() or "").lower()
     sources = [s for s in dict.fromkeys([primary, "musicbrainz"]) if s]
     groups = []

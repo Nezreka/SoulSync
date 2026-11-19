@@ -230,6 +230,11 @@ export interface ImportAlbumSearchPayload {
   primary_source?: string | null;
   /** Explicit source the caller picked, if any (echoed back). */
   source_override?: string | null;
+  /**
+   * Set when the query was a pasted release link or MBID (#2203): the
+   * source the link names, and why nothing came back when nothing did.
+   */
+  link?: { source: string; message: string } | null;
   ready?: boolean;
   error?: string;
 }
@@ -243,6 +248,10 @@ export interface ImportSearchSource {
 export interface ImportSearchSourcesPayload {
   success: boolean;
   sources?: ImportSearchSource[];
+  /** the source the picker opens on; '' is Any source (#2203) */
+  default_source?: string;
+  /** whether this profile may change that default (admins) */
+  can_set_default?: boolean;
   error?: string;
 }
 

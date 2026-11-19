@@ -8,15 +8,24 @@ library, every call holding the GIL the rest of the app needs).
 
 this folds each row once and keeps (id, folded) per table and database. a
 search scans the folded strings in python, which is a plain substring test.
-rows added since the last look are folded on their own (ids only grow);
-anything else (a delete, or the refresh interval passing, which covers an
-edited title) folds the table again. callers still put the id list back
-through sql, so the rest of their filters apply as before.
+rows added since the last look are folded on their own (ids only grow); a
+delete reads the id list (no text) and folds only rows it hasn't seen. the
+refresh interval passing, which covers an edited title, folds the table again
+on a thread of its own. callers still put the id list back through sql, so the
+rest of their filters apply as before.
+
+one thread looks at a table at a time (#2205). the rest answer from the
+snapshot it is replacing, or wait for it when there is none yet; before, every
+request that found it stale read and folded the whole table itself, and on a
+47 GB library 22 gunicorn threads sat in _rows together.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import sqlite3
 import threading
 from bisect import bisect_right
 import time
@@ -46,6 +55,8 @@ def _key(value: Optional[str]) -> str:
     return normalize_key(value) if value else ""
 
 
+logger = logging.getLogger(__name__)
+
 _FOLDS = {"fold": lambda v: fold(v), "key": _key}
 
 # (table, id column, text column, extra where, fold) the searches use
@@ -60,6 +71,16 @@ ARTIST_KEYS = ("lib2_artists", "id", "name", "", "key")
 _lock = threading.Lock()
 # (database path, spec) -> entry
 _entries: Dict[Tuple[str, Tuple[str, str, str, str]], dict] = {}
+# (database path, spec) -> the one lock a look at the table takes (#2205).
+# without it every request that found the entry stale read and folded the
+# whole table itself: 22 gunicorn threads in _rows at once on a 47 GB db
+_flights: Dict[Tuple[str, Tuple[str, str, str, str]], threading.Lock] = {}
+# keys with a background refold queued or running
+_refolding: set = set()
+# bumped by clear(); a refold that started before it never publishes after it
+_generation = 0
+# rows fetched by id per statement when a resync reads only the new ones
+_IN_CHUNK = 500
 
 
 def _like_matcher(needle: str):
@@ -80,7 +101,27 @@ def _rows(conn, spec, after_id: Optional[int] = None):
     sql = f"SELECT {id_col}, {text_col} FROM {table}"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    return conn.execute(sql, (after_id,) if after_id is not None else ()).fetchall()
+    rows = conn.execute(sql, (after_id,) if after_id is not None else ()).fetchall()
+    # id order whatever index the planner read, so an append keeps it sorted
+    return sorted(((int(i), v) for i, v in rows), key=lambda r: r[0])
+
+
+def _ids(conn, spec) -> List[int]:
+    """every id the spec covers and no text: the smallest index answers it."""
+    table, id_col, _text, where, _fold = spec
+    sql = f"SELECT {id_col} FROM {table}" + (f" WHERE {where}" if where else "")
+    return sorted(int(r[0]) for r in conn.execute(sql).fetchall())
+
+
+def _rows_for(conn, spec, ids: List[int]):
+    table, id_col, text_col, _where, _fold = spec
+    out = []
+    for start in range(0, len(ids), _IN_CHUNK):
+        chunk = ids[start:start + _IN_CHUNK]
+        sql = (f"SELECT {id_col}, {text_col} FROM {table} "
+               f"WHERE {id_col} IN ({','.join('?' for _ in chunk)})")
+        out.extend((int(i), v) for i, v in conn.execute(sql, chunk).fetchall())
+    return out
 
 
 def _signature(conn, spec) -> Tuple[int, int]:
@@ -92,42 +133,155 @@ def _signature(conn, spec) -> Tuple[int, int]:
     return int(count or 0), int(top or 0)
 
 
+def _entry(ids, folded, count, top, built, checked) -> dict:
+    return {"ids": ids, "folded": folded, "count": count, "top": top, "built": built,
+            "checked": checked, "blob": None, "by_key": None}
+
+
+def _full(conn, spec, now: float, signature=None) -> dict:
+    count, top = signature if signature is not None else _signature(conn, spec)
+    folder = _FOLDS[spec[4]]
+    rows = _rows(conn, spec)
+    return _entry([i for i, _ in rows], [folder(v) for _, v in rows], count, top, now, now)
+
+
+def _flight(key) -> threading.Lock:
+    with _lock:
+        flight = _flights.get(key)
+        if flight is None:
+            flight = _flights[key] = threading.Lock()
+        return flight
+
+
+def _publish(key, entry: dict, generation: int) -> None:
+    with _lock:
+        if generation == _generation:
+            _entries[key] = entry
+
+
+def _usable(entry: Optional[dict], now: float) -> bool:
+    return bool(entry) and now - entry["checked"] < CHECK_SECONDS \
+        and now - entry["built"] < REFRESH_SECONDS
+
+
 def _current(conn, db_key: str, spec) -> dict:
     key = (db_key, spec)
-    now = time.monotonic()
     with _lock:
         entry = _entries.get(key)
-        if entry and now - entry["checked"] < CHECK_SECONDS \
-                and now - entry["built"] < REFRESH_SECONDS:
+    if _usable(entry, time.monotonic()):
+        return entry
+    flight = _flight(key)
+    if entry is not None:
+        # someone is already looking at the table: the snapshot they are
+        # replacing answers this call. callers put the ids back through sql,
+        # so a deleted row never comes back; a new one shows on the next look
+        if not flight.acquire(blocking=False):
             return entry
-    count, top = _signature(conn, spec)
-    with _lock:
-        entry = _entries.get(key)
-        if entry and entry["count"] == count and entry["top"] == top \
-                and now - entry["built"] < REFRESH_SECONDS:
-            entry["checked"] = now
+    else:
+        # nothing to answer with yet: wait for the one build, don't start another
+        flight.acquire()
+    try:
+        with _lock:
+            entry = _entries.get(key)
+            generation = _generation
+        now = time.monotonic()
+        if _usable(entry, now):
             return entry
-        grows = (entry is not None and now - entry["built"] < REFRESH_SECONDS
-                 and top > entry["top"] and count > entry["count"])
+        return _look(conn, key, spec, entry, now, generation)
+    finally:
+        flight.release()
+
+
+def _look(conn, key, spec, entry: Optional[dict], now: float, generation: int) -> dict:
+    """bring ``entry`` up to the table. the caller holds the key's flight."""
+    signature = _signature(conn, spec)
+    if entry is None:
+        fresh = _full(conn, spec, now, signature)
+        _publish(key, fresh, generation)
+        return fresh
+    if now - entry["built"] >= REFRESH_SECONDS:
+        # the periodic refold that catches an edited title reads and folds the
+        # whole table. with a file to open it runs on its own thread and this
+        # call keeps the snapshot; in memory there is nothing else to read with
+        if _refold_in_background(key, spec, generation):
+            entry = dict(entry, built=now)
+        else:
+            fresh = _full(conn, spec, now, signature)
+            _publish(key, fresh, generation)
+            return fresh
+    count, top = signature
+    if entry["count"] == count and entry["top"] == top:
+        fresh = dict(entry, checked=now)
+        _publish(key, fresh, generation)
+        return fresh
     folder = _FOLDS[spec[4]]
-    if grows:
-        added = [(int(i), folder(v)) for i, v in _rows(conn, spec, after_id=entry["top"])]
+    if top > entry["top"] and count > entry["count"]:
+        added = [(i, folder(v)) for i, v in _rows(conn, spec, after_id=entry["top"])]
         # only rows added since: the count says nothing went in between
         if entry["count"] + len(added) == count:
-            with _lock:
-                fresh = {"ids": entry["ids"] + [i for i, _ in added],
-                         "folded": entry["folded"] + [f for _, f in added],
-                         "count": count, "top": top, "built": entry["built"],
-                         "checked": now, "blob": None, "by_key": None}
-                _entries[key] = fresh
+            fresh = _entry(entry["ids"] + [i for i, _ in added],
+                           entry["folded"] + [f for _, f in added],
+                           count, top, entry["built"], now)
+            _publish(key, fresh, generation)
             return fresh
-    rows = _rows(conn, spec)
-    fresh = {"ids": [int(i) for i, _ in rows], "folded": [folder(v) for _, v in rows],
-             "count": count, "top": top, "built": now, "checked": now, "blob": None,
-             "by_key": None}
-    with _lock:
-        _entries[key] = fresh
+    # a delete, or a delete and an add together. the ids alone say which rows
+    # went and which came, and only the new ones are read and folded
+    fresh = _resync(conn, spec, entry, signature, now)
+    _publish(key, fresh, generation)
     return fresh
+
+
+def _resync(conn, spec, entry: dict, signature, now: float) -> dict:
+    live = _ids(conn, spec)
+    known = dict(zip(entry["ids"], entry["folded"], strict=True))
+    missing = [i for i in live if i not in known]
+    if len(missing) > max(_IN_CHUNK * 20, len(live) // 4):
+        # most of the table is new (a reimport): one read beats the id lists
+        return _full(conn, spec, now, signature)
+    folder = _FOLDS[spec[4]]
+    for i, v in _rows_for(conn, spec, missing):
+        known[i] = folder(v)
+    ids = [i for i in live if i in known]
+    count, top = signature
+    return _entry(ids, [known[i] for i in ids], count, top, entry["built"], now)
+
+
+def _db_file(db_key: str) -> bool:
+    try:
+        return bool(db_key) and os.path.isfile(db_key)
+    except (TypeError, ValueError):
+        return False
+
+
+def _refold_in_background(key, spec, generation: int) -> bool:
+    """queue one refold of ``key`` on its own thread and connection. False
+    when there's no database file to open (an in-memory one); the caller
+    refolds itself then."""
+    db_key = key[0]
+    if not _db_file(db_key):
+        return False
+    with _lock:
+        if key in _refolding:
+            return True
+        _refolding.add(key)
+
+    def run():
+        try:
+            conn = sqlite3.connect(db_key, timeout=30.0, check_same_thread=False)
+            try:
+                conn.execute("PRAGMA query_only = ON")
+                with _flight(key):
+                    _publish(key, _full(conn, spec, time.monotonic()), generation)
+            finally:
+                conn.close()
+        except Exception as exc:  # the snapshot stays; the next refresh tries again
+            logger.debug("fold_index refold of %s failed: %s", spec[0], exc)
+        finally:
+            with _lock:
+                _refolding.discard(key)
+
+    threading.Thread(target=run, name=f"fold-refold-{spec[0]}", daemon=True).start()
+    return True
 
 
 def matching_ids(conn, db_key: str, spec, needle: str, limit: Optional[int] = None) -> List[int]:
@@ -192,8 +346,10 @@ def _joined(entry: dict):
 
 def clear() -> None:
     """drop every cached table (tests)."""
+    global _generation
     with _lock:
         _entries.clear()
+        _generation += 1
 
 
 __all__ = ["ALBUM_TITLES", "ARTIST_KEYS", "ARTIST_NAMES", "CHECK_SECONDS", "REFRESH_SECONDS",

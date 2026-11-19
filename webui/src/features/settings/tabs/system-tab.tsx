@@ -117,7 +117,23 @@ type DbInfo = {
   free_size_display?: string;
   auto_vacuum_label?: string;
   auto_vacuum?: number;
+  wal_size_display?: string;
+  vacuum_has_room?: boolean;
 };
+type TableRow = { name: string; bytes?: number; rows?: number };
+type TablesInfo = {
+  success?: boolean;
+  estimates?: TableRow[];
+  measure?: {
+    state?: 'idle' | 'running' | 'done' | 'error';
+    error?: string | null;
+    result?: { method?: string; tables?: TableRow[] } | null;
+  };
+};
+const mb = (bytes: number) =>
+  bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 type Status = { text: string; color: string } | null;
 
 const STATUS_STYLE = {
@@ -130,7 +146,8 @@ const STATUS_STYLE = {
 /** loadDbMaintenanceInfo, runDatabaseVacuum, enableIncrementalVacuum */
 function DatabaseMaintenance({ opened, active }: { opened: number; active: boolean }) {
   const [info, setInfo] = useState<DbInfo | null>(null);
-  const [busy, setBusy] = useState<'vacuum' | 'incremental' | null>(null);
+  const [busy, setBusy] = useState<'vacuum' | 'incremental' | 'optimize' | null>(null);
+  const [tables, setTables] = useState<TablesInfo | null>(null);
   const [status, setStatus] = useState<Status>(null);
 
   async function load() {
@@ -146,10 +163,61 @@ function DatabaseMaintenance({ opened, active }: { opened: number; active: boole
     if (active) void load();
   }, [opened, active]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function loadTables(measure: boolean) {
+    try {
+      const data = (await (
+        await fetch(`/api/database/maintenance/tables${measure ? '?measure=1' : ''}`)
+      ).json()) as TablesInfo;
+      if (data.success) setTables(data);
+    } catch (error) {
+      console.error('Error loading table sizes:', error);
+    }
+  }
+  // a measure runs on the server's own thread; ask again until it lands
+  const measuring = tables?.measure?.state === 'running';
+  useEffect(() => {
+    if (!measuring) return;
+    const timer = window.setTimeout(() => void loadTables(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [measuring, tables]);
+
+  async function optimize() {
+    setBusy('optimize');
+    setStatus({ color: 'rgba(255,255,255,0.6)', text: 'Tidying up the database...' });
+    try {
+      const data = (await (
+        await fetch('/api/database/maintenance/optimize', { method: 'POST' })
+      ).json()) as {
+        success?: boolean;
+        error?: string;
+        elapsed_seconds?: number;
+        pruned?: Record<string, number>;
+        wal_after?: number;
+      };
+      if (data.success) {
+        const rows = Object.values(data.pruned || {}).reduce((a, b) => a + b, 0);
+        const done = `Done in ${data.elapsed_seconds}s. ${rows.toLocaleString()} old cache/log rows removed, search indexes merged, write-ahead log now ${mb(data.wal_after || 0)}.`;
+        toast('Database tidied up', 'success');
+        setStatus({ color: '#4caf50', text: done });
+        void load();
+      } else {
+        const why = data.error || 'Unknown error';
+        toast('Tidy up failed: ' + why, 'error');
+        setStatus({ color: '#ef5350', text: 'Failed: ' + why });
+      }
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      toast('Tidy up failed: ' + why, 'error');
+      setStatus({ color: '#ef5350', text: 'Failed: ' + why });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function run(kind: 'vacuum' | 'incremental') {
     const vacuum = kind === 'vacuum';
     const ask = vacuum
-      ? 'This will compact the database by rewriting it. The database will be locked during this operation. For large databases this may take over a minute. Continue?'
+      ? 'This will compact the database by rewriting it. Back up first. It needs free disk space about the size of the database, and the database is locked while it runs (on a very large library that can be a long time). Continue?'
       : 'This will enable incremental vacuum mode. It requires a one-time full VACUUM to activate, which locks the database and may take over a minute on large databases. Continue?';
     if (!window.confirm(ask)) return;
     setBusy(kind);
@@ -219,6 +287,12 @@ function DatabaseMaintenance({ opened, active }: { opened: number; active: boole
         </span>
       </div>
       <div className="form-group">
+        <label>Write-Ahead Log:</label>
+        <span id="db-wal-display" className="readonly-field">
+          {info ? (info.wal_size_display ?? '—') : 'Loading...'}
+        </span>
+      </div>
+      <div className="form-group">
         <label>Auto-Vacuum Mode:</label>
         <span id="db-autovacuum-display" className="readonly-field">
           {info ? info.auto_vacuum_label : 'Loading...'}
@@ -226,6 +300,22 @@ function DatabaseMaintenance({ opened, active }: { opened: number; active: boole
       </div>
 
       <div className="form-actions" style={{ flexWrap: 'wrap' }}>
+        <button
+          className="test-button"
+          id="db-optimize-btn"
+          disabled={busy === 'optimize'}
+          onClick={() => void optimize()}
+        >
+          {busy === 'optimize' ? 'Tidying up...' : 'Tidy Up (safe)'}
+        </button>
+        <button
+          className="test-button"
+          id="db-measure-btn"
+          disabled={measuring}
+          onClick={() => void loadTables(true)}
+        >
+          {measuring ? 'Measuring...' : 'Show Biggest Tables'}
+        </button>
         <button
           className="test-button"
           id="db-vacuum-btn"
@@ -248,9 +338,42 @@ function DatabaseMaintenance({ opened, active }: { opened: number; active: boole
               : 'Enable Incremental Vacuum'}
         </button>
       </div>
+      {tables && (
+        <div className="form-group" id="db-tables">
+          <label>Biggest Tables:</label>
+          <div className="readonly-field">
+            {tables.measure?.state === 'error' && (
+              <div>Measuring failed: {tables.measure.error}</div>
+            )}
+            {(tables.measure?.result?.tables?.length
+              ? tables.measure.result.tables
+              : (tables.estimates ?? [])
+            )
+              .slice(0, 15)
+              .map((t) => (
+                <div key={t.name}>
+                  {t.name}:{' '}
+                  {t.bytes != null ? mb(t.bytes) : `~${(t.rows || 0).toLocaleString()} rows`}
+                </div>
+              ))}
+            {measuring && <div>Measuring every table, this reads the whole file...</div>}
+          </div>
+        </div>
+      )}
+      {info && info.vacuum_has_room === false && (
+        <div className="help-text" id="db-vacuum-room">
+          Not enough free disk space next to the database to compact it right now.
+        </div>
+      )}
       <div className="help-text">
-        <strong>Compact Database</strong> rewrites the entire DB to reclaim unused space. Locks the
-        database briefly — may take a minute on large databases.
+        <strong>Tidy Up</strong> is safe to run any time: it drops old rows from caches and logs
+        that keep their own retention (never listening history or library data), merges the search
+        indexes and folds the write-ahead log back in. It also runs on its own with Cache
+        Maintenance.
+        <br />
+        <strong>Compact Database</strong> rewrites the entire DB to reclaim unused space. Back up
+        first. It needs free disk space about the size of the database and locks it while it runs,
+        which on a very large library can take a long time.
         <br />
         <strong>Incremental Vacuum</strong> enables automatic page reclamation. Requires a one-time
         full compact to activate. After that, freed pages are reclaimed in small batches

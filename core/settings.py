@@ -1071,7 +1071,10 @@ class ConfigManager:
                 # off: staging keeps whatever an import didn't move (the user's
                 # own files). on: a folder whose every track was imported or
                 # found already in the library is removed from staging.
-                "clear_finished_from_staging": False
+                "clear_finished_from_staging": False,
+                # the import matcher's search picker opens on this source
+                # (#2203). '' is Any source: the primary, then the chain.
+                "default_search_source": ""
             },
             "m3u_export": {
                 "enabled": False,

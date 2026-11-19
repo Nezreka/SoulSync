@@ -995,6 +995,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'auto import match',
   },
   {
+    label: 'Import default search source',
+    tab: 'library',
+    anchor: id('import-default-search-source'),
+    file: 'library-processing.tsx',
+    hint: 'where Import searches first',
+    keywords: 'import search source musicbrainz default identify match any source',
+  },
+  {
     label: 'Duration tolerance',
     tab: 'library',
     anchor: id('duration-tolerance-seconds'),
