@@ -701,6 +701,8 @@ declare global {
     };
     SoulSyncVideo?: {
       openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
+      /** video-side.js videoPageAllowed: may this profile open a video page */
+      pageAllowed?: (pageId: string) => boolean;
     };
     /** video-download-view.js: the shared release-picker modal (manual search). */
     VideoDownload?: {

@@ -359,15 +359,83 @@ export function useDismiss(open: boolean, close: () => void, ref: RefObject<HTML
 }
 
 /**
+ * The hero's library line. An admin's is the server's status and its
+ * management; a member's is only the pages they may open from it (#2207).
+ */
+export function LibraryCard({ admin }: { admin: boolean }) {
+  return admin ? <AdminLibraryCard /> : <MemberLibraryCard />;
+}
+
+/**
+ * A member's library line (#2207). The server's name and state, the
+ * database's size, the scans and the review queue are the admin's: what is
+ * left is a way into the pages this member may open. They get the size of
+ * their own library for the hero from /api/database/stats (the counts and
+ * nothing else, for a member), once: the live db-stats push is the admins'.
+ * Nothing they may open, no line at all.
+ */
+function MemberLibraryCard() {
+  const bridge = getShellBridge();
+  const libraryAllowed = bridge?.isPageAllowed('library') ?? false;
+  // Repair opens Tools, which an admin can give a member
+  const toolsAllowed = bridge?.isPageAllowed('tools') ?? false;
+
+  useEffect(() => {
+    let live = true;
+    void fetchDatabaseStats().then((stats) => {
+      if (live && stats) publishDbStats(stats as DbStats);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!libraryAllowed && !toolsAllowed) return null;
+  return (
+    <div className="dash-hero-library" data-card="library">
+      <div className="library-status-card" id="library-status-card">
+        <div className="library-status-header">
+          <div className="library-status-info">
+            {/* no status dot: the server's state is the admin's */}
+            <h4 className="library-status-title" id="library-status-title">
+              Library
+            </h4>
+          </div>
+          <div className="library-status-actions" id="library-status-actions">
+            {libraryAllowed ? (
+              <button
+                className="library-status-btn"
+                id="library-status-browse-btn"
+                onClick={() => void window.navigateToPage?.('library')}
+              >
+                <span>Browse library</span>
+              </button>
+            ) : null}
+            {toolsAllowed ? (
+              <button
+                className="library-status-btn"
+                id="library-status-repair-btn"
+                title="Open the Tools maintenance center"
+                onClick={() => void window.navigateToPage?.('tools')}
+              >
+                <span>Repair</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The library, as the hero's status line: whose library, how fresh, one
  * primary action (Scan) and everything else behind "⋯". The page links that
  * only repeated the sidebar (wishlist, downloads, discover, sync) are gone.
  * Every id the state machine and the scan flows write into is kept; the menu
  * stays mounted (just hidden) so those ids always resolve.
  */
-export function LibraryCard({ admin }: { admin: boolean }) {
-  // the Repair item opens Tools, which an admin can give a member
-  const toolsAllowed = admin || (getShellBridge()?.isPageAllowed('tools') ?? false);
+function AdminLibraryCard() {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
@@ -396,11 +464,10 @@ export function LibraryCard({ admin }: { admin: boolean }) {
             </p>
           </div>
           <div className="library-status-actions" id="library-status-actions" ref={menuRef}>
-            {/* scans and backups are the admin's: the server refuses a member */}
             <button
               className={view.scanScanning ? 'library-status-btn scanning' : 'library-status-btn'}
               id="library-status-scan-btn"
-              style={admin && view.scanVisible ? undefined : { display: 'none' }}
+              style={view.scanVisible ? undefined : { display: 'none' }}
               onClick={() => void scan(false)}
             >
               <svg
@@ -435,7 +502,7 @@ export function LibraryCard({ admin }: { admin: boolean }) {
                 role="menuitem"
                 className="library-status-menu-item"
                 id="library-status-deep-btn"
-                style={admin && view.deepVisible ? undefined : { display: 'none' }}
+                style={view.deepVisible ? undefined : { display: 'none' }}
                 onClick={pick(() => void deepScan())}
               >
                 Deep scan
@@ -449,40 +516,33 @@ export function LibraryCard({ admin }: { admin: boolean }) {
               >
                 Browse library
               </button>
-              {/* the enrichment manager is the admins' (#2196) */}
-              {admin ? (
-                <button
-                  role="menuitem"
-                  className="library-status-menu-item"
-                  id="library-status-verify-btn"
-                  title="Open the enrichment manager's Verify Matches repair flow"
-                  onClick={pick(() => window.openEnrichmentManager?.())}
-                >
-                  Verify matches
-                </button>
-              ) : null}
-              {toolsAllowed ? (
-                <button
-                  role="menuitem"
-                  className="library-status-menu-item"
-                  id="library-status-repair-btn"
-                  title="Open the Tools maintenance center"
-                  onClick={pick(() => void window.navigateToPage?.('tools'))}
-                >
-                  Repair
-                </button>
-              ) : null}
-              {admin ? (
-                <button
-                  role="menuitem"
-                  className="library-status-menu-item"
-                  id="library-status-backup-btn"
-                  title="Back up the SoulSync database now"
-                  onClick={pick(() => void backupNow())}
-                >
-                  Back up now
-                </button>
-              ) : null}
+              <button
+                role="menuitem"
+                className="library-status-menu-item"
+                id="library-status-verify-btn"
+                title="Open the enrichment manager's Verify Matches repair flow"
+                onClick={pick(() => window.openEnrichmentManager?.())}
+              >
+                Verify matches
+              </button>
+              <button
+                role="menuitem"
+                className="library-status-menu-item"
+                id="library-status-repair-btn"
+                title="Open the Tools maintenance center"
+                onClick={pick(() => void window.navigateToPage?.('tools'))}
+              >
+                Repair
+              </button>
+              <button
+                role="menuitem"
+                className="library-status-menu-item"
+                id="library-status-backup-btn"
+                title="Back up the SoulSync database now"
+                onClick={pick(() => void backupNow())}
+              >
+                Back up now
+              </button>
               <button
                 role="menuitem"
                 className={

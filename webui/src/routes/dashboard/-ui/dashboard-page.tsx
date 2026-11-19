@@ -64,8 +64,10 @@ export function DashboardPage({ isAdmin }: { isAdmin: boolean }) {
         workers={isAdmin}
       />
       {/* The exception surface: renders NOTHING while every core connection
-          is healthy — the one place that shouts when a human is needed. */}
-      <AlertsBand />
+          is healthy — the one place that shouts when a human is needed.
+          That human is the admin: a down server or a spotify ban, with a
+          jump to Settings, is nothing a member can act on (#2208). */}
+      {isAdmin ? <AlertsBand /> : null}
       <div className="room-top">
         {/* What setup left for later. Renders nothing once it's all done,
             dismissed, or for anyone who isn't an admin. */}

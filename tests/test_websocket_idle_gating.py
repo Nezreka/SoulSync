@@ -104,6 +104,8 @@ def test_rate_monitor_loop_emits_with_a_connected_client(monkeypatch):
     fake_tracker.get_all_rates.assert_called_once()
     fake_emit.assert_called_once()
     assert fake_emit.call_args[0][0] == "rate-monitor:update"
+    # #2208: api rates, worker states and the spotify ban are the admins'
+    assert fake_emit.call_args.kwargs.get("to") == web_server.ADMIN_SOCKET_ROOM
 
 
 def test_enrichment_status_loop_still_auto_pauses_with_no_clients(monkeypatch):

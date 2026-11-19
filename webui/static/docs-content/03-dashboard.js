@@ -341,6 +341,8 @@ The bell sits bottom right on every page. The red count is notes you have not se
 
 The panel is everyone's, but what the server is doing is the admin's. A member's panel holds their own notes, their own downloads, their own automations and their listening imports. Health, the footer (downloads across the server, uptime, memory), library scans, repair jobs, the wishlist run and the video jobs are not there, and the server refuses those feeds to a member too.
 
+The dashboards follow the same line. A member's hero shows the size of their own library, and under it a **Browse library** button when they may open the Library page (and **Repair** when an admin gave them Tools). The media server's name and state, when it was last scanned, the database's size, the disk the video library takes, the scans, **Review downloads**, **Poster manager** and the alerts band (a server down, a Spotify ban) are the admin's. So is the **Spotify Rate Limited** window and the toasts around it: a member's searches fall back on their own, there is nothing for them to do about it.
+
 ## Toasts
 
 A note appears above the bell as it happens. Up to three stand at once, and the line along the bottom is the time left: it stops while you point at the toast. Problems stay about twice as long as good news. Click a toast to dismiss it.

@@ -132,6 +132,13 @@ What the server is doing is the admin's. A member's session is refused (`403`) t
 - `GET /api/repair/progress`, `GET /api/video/health`, `GET /api/video/bulk/status`
 - the enrichment workers, music and video: every `/api/enrichment/*` and `/api/video/enrichment/*` route (status, breakdown, unmatched, priority, pause, resume, retry), `GET /api/soulid/status`, `GET /api/hydrabase-worker/status`, and the `enrichment:<worker>` pushes, which only the admins' sockets get (`enrichment:repair` stays everyone's, the Tools page reads it)
 - the diagnostics: `GET /api/debug-info`, `GET /api/logs/tail`, `/api/settings/log-level`, `/api/help/health`, `/api/help/bundle`, `/api/help/logs*`
+- the spotify ban and the api rates: `GET /api/spotify/rate-limit-status`, `GET /api/rate-monitor/history/<service>`, and the `rate-monitor:update` push, which only the admins' sockets get
+
+Some answer a member with less instead of a `403`:
+
+- `GET /status` and the `status:update` push: a member's copy has no spotify ban (`rate_limited` false, `rate_limit` null, `post_ban_cooldown` 0) and no `enrichment`. The admins' sockets get the whole push, every member socket the trimmed one
+- `GET /api/database/stats` gives a member `artists`, `albums` and `tracks` of the library they browse, nothing else; the `dashboard:db_stats` push (size, path, scan times) only the admins' sockets get
+- `GET /api/video/dashboard` leaves `library.size_bytes` out for a member
 
 `GET /api/automations/progress` and the `automation:progress` push give a member the runs of their own automations only, never a system one.
 
