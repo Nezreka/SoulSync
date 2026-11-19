@@ -6,7 +6,7 @@
 
 **People and permissions.** Audiobook and podcast episode requests can require approval, controls show the value the policy keeps them at, chat only reaches people allowed to chat, and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2188 to #2192). The admin menu no longer flashes after signing back in (#2156).
 
-**Library.** Titles beat track numbers when lining up a tracklist, a song's number heals from its file, and a deleted file stops borrowing another album's (thanks wolf39us). Rename / Organize keeps $quality (thanks Maegfea, #2195) and skips a removed album (#2194).
+**Library.** Titles beat track numbers when lining up a tracklist, a song's number heals from its file, and a deleted file stops borrowing another album's (thanks wolf39us). Rename / Organize keeps $quality (thanks Maegfea, #2195) and skips a removed album (#2194). A track you own can move into an album's missing slot, and Reassign moves instead of copying (#2193).
 
 The transfer folder is now called the music library folder everywhere. In Docker it is still the /app/Transfer mount, so your setup doesn't change.
 

@@ -69,7 +69,7 @@ export const RELEASES: Release[] = [
     month: 'November 2026',
     headline: 'A phone pass, Last.fm without Pro and request fixes',
     summary:
-      'Last.fm API keys need a Pro subscription from 1 December 2026, so everything Last.fm did now falls back to free sources and keeps what it already knew. Phones get a pass over the worker status, menus, dialogs and pages, audiobooks and podcast episodes can ask first, and the permission screens show what is really in force. Plus track numbers stop beating titles, and the transfer folder is called the music library folder everywhere.',
+      'Last.fm API keys need a Pro subscription from 1 December 2026, so everything Last.fm did now falls back to free sources and keeps what it already knew. Phones get a pass over the worker status, menus, dialogs and pages, audiobooks and podcast episodes can ask first, and the permission screens show what is really in force. Plus a track you own can move into an album’s missing slot, track numbers stop beating titles, and the transfer folder is called the music library folder everywhere.',
     features: [
       'Last.fm keeps working with a Pro key and falls back to ListenBrainz, Deezer, MusicBrainz, TheAudioDB and Wikipedia without one. Answers are cached, so a lapsed key keeps what it knew.',
       'Phones: worker status opens on a tap, the menu button stays, every page reaches its end, menus and dialogs fit the screen (thanks Thibs, c5pie and wolf39us, #2180 to #2187).',
@@ -77,6 +77,7 @@ export const RELEASES: Release[] = [
       'Chat messages only reach people allowed to chat, and a member’s notifications skip refusals and progress noise (#2191).',
       'Titles beat track numbers when lining up a tracklist, a song’s number heals from its file, and a deleted file stops borrowing another album’s (thanks wolf39us).',
       'Rename / Organize keeps $quality in the name (thanks Maegfea, #2195) and skips a removed album instead of failing (thanks wolf39us, #2194).',
+      'Move a track you own into an album’s missing slot, and Reassign moves instead of leaving a copy behind (#2193).',
       'The admin menu no longer flashes for a member after signing back in (thanks SeadogsBooty, #2156).',
       'The transfer folder is called the music library folder everywhere you read it. In Docker it is still the /app/Transfer mount.',
     ],
@@ -107,6 +108,11 @@ export const RELEASES: Release[] = [
       {
         title: 'Titles before track numbers',
         desc: 'Other versions, reassign and tracklist refresh match a file by its title first, a song sitting on another song’s number moves to its own, and a file deleted from its album is no longer found in another album’s folder (thanks wolf39us).',
+        page: 'library',
+      },
+      {
+        title: 'Move a track here',
+        desc: 'A missing track’s ⋯ menu has Move a track here: pick a track you already own, see where its file goes and which tags change, and it moves into the slot with its plays and history. Nothing is copied. Reassign to another artist now moves too, so it no longer leaves the old album behind (#2193).',
         page: 'library',
       },
       {

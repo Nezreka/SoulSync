@@ -1,6 +1,6 @@
 # soulsync 3.6.8: `dev` → `main`
 
-last.fm api keys need a paid pro subscription from 1 december 2026, so everything soulsync used last.fm for now falls back to free sources when the key stops working, and keeps what it already knew. phones get a pass over the worker status, menus, dialogs and pages. audiobooks and podcast episodes can require approval, the permission screens show what's really in force, and one set of words covers requests everywhere. plus track numbers stop beating titles, and the transfer folder is called the music library folder everywhere you read it.
+last.fm api keys need a paid pro subscription from 1 december 2026, so everything soulsync used last.fm for now falls back to free sources when the key stops working, and keeps what it already knew. phones get a pass over the worker status, menus, dialogs and pages. audiobooks and podcast episodes can require approval, the permission screens show what's really in force, and one set of words covers requests everywhere. plus a track you own can move into an album's missing slot, track numbers stop beating titles, and the transfer folder is called the music library folder everywhere you read it.
 
 ## last.fm without pro
 
@@ -40,6 +40,8 @@ last.fm api keys need a paid pro subscription from 1 december 2026, so everythin
 - **a deleted file is gone.** when a file went missing, the lookup found the same song title in another album folder and treated it as the deleted one. a file elsewhere only counts now if it has the same file name or the same track number, so a moved album still resolves.
 - **rename / organize keeps $quality (thanks Maegfea, #2195).** the planner never read the file's quality, so the rename dropped it. it reads it the way a download does, only when a template uses $quality.
 - **preview rename skips an album you removed (thanks wolf39us, #2194)** instead of failing every album with "no tracks found".
+- **move a track into an album (#2193).** a missing track's ⋯ menu has "move a track here": search what you own, pick one, see where the file goes and which tags change, and it moves into that slot with its plays, history, playlist and wishlist links. nothing is copied, and an album it leaves empty goes the way removing it does.
+- **reassign moves, it doesn't copy (#2193).** reassign to another artist staged a copy and only removed the original on some paths, so the album came out twice. it always replaces now, and the old row folds into the new one instead of staying behind as a missing, still wanted track.
 
 ## also
 
