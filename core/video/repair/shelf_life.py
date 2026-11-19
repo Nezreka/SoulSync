@@ -818,6 +818,8 @@ class ShelfLifeJob(VideoRepairJob):
                        "trust_add_date_after_days": [90, 180]}
     auto_fix = False
     finding_types = (FINDING_TYPE,)
+    # the typed title confirms one title: a bulk fix can't spread one over many
+    fix_action_per_finding = True
 
     def estimate_scope(self, context: JobContext) -> int:
         return len(context.db.shelf_life_movies() or []) + len(context.db.shelf_life_shows() or [])

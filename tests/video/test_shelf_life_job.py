@@ -429,6 +429,34 @@ def test_fix_all_cannot_delete_anything(db, worker, monkeypatch):
     assert out["fixed"] == 0 and out["failed"] == 2 and calls == []
 
 
+def test_one_typed_title_never_rides_a_generic_bulk_fix(db, worker, monkeypatch):
+    # Dune (1984) and Dune (2021) must not both go on one typed "Dune" (#2211 review S4)
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "Dune", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _movie(db, "Dune ", tmdb=2, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    ids = [f["id"] for f in _pending(db)]
+    out = worker.bulk_fix_findings(ids=ids, fix_action="Dune")
+    assert out["fixed"] == 0 and "each need their own confirmation" in out["error"]
+    res = worker.start_bulk_fix(ids=ids, finding_type="shelf_life", fix_action="Dune")
+    assert res["started"] is False and res["invalid"] is True
+    assert calls == [] and len(_pending(db)) == 2
+
+
+def test_the_generic_bulk_fix_route_refuses_shelf_life(client, monkeypatch):
+    c, db, _ = client
+    calls = _capture_delete(monkeypatch)
+    _on(db)
+    mid = _movie(db, "Dune", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    fid = _flag(db, "Dune", score=10, size_gb=60, item_id=mid)
+    r = c.post("/api/video/repair/findings/bulk-fix-start",
+               json={"ids": [fid], "finding_type": "shelf_life", "fix_action": "Dune"})
+    assert r.status_code == 400 and "own confirmation" in r.get_json()["error"]
+    r = c.post("/api/video/repair/findings/bulk-fix", json={"ids": [fid], "fix_action": "Dune"})
+    assert r.get_json()["fixed"] == 0
+    assert calls == [] and db.repair_get_finding(fid)["status"] == "pending"
+
+
 def test_a_finding_names_its_title_the_way_the_findings_page_reads_posters(db, worker):
     # the findings page puts the poster beside a row from details library_id + kind
     from api.video.repair import finding_poster
