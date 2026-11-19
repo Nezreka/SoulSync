@@ -729,7 +729,7 @@ export function UsenetPanel({
 
       <SheetGroup title="For music" />
       <Row
-        field
+        stack
         id="music-usenet-remove-completed-group"
         label="When a download has imported"
         htmlFor="music-usenet-remove-completed"

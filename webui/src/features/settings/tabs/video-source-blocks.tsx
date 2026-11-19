@@ -219,7 +219,7 @@ export function VideoUsenetBlocks() {
   useEffect(() => void videoDownloads.load(), []);
   return (
     <Row
-      field
+      stack
       id="video-usenet-remove-completed-group"
       label="When a download has imported"
       htmlFor="video-usenet-remove-completed"
