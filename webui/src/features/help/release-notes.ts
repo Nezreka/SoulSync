@@ -74,7 +74,7 @@ export const RELEASES: Release[] = [
       'Last.fm keeps working with a Pro key and falls back to ListenBrainz, Deezer, MusicBrainz, TheAudioDB and Wikipedia without one. Answers are cached, so a lapsed key keeps what it knew.',
       'Phones: worker status opens on a tap, the menu button stays, every page reaches its end, menus and dialogs fit the screen, and Re-identify is a full-screen sheet (thanks Thibs, c5pie and wolf39us, #2180 to #2187, #2197).',
       'Require approval for audiobook and podcast episode requests, controls that show the setting in force, and one set of words for requests everywhere (thanks SeadogsBooty, #2188 to #2192).',
-      'Chat messages only reach people allowed to chat, a member’s notifications skip refusals and progress noise (#2191), and the enrichment workers are the admin’s alone (thanks SeadogsBooty, #2196).',
+      'Members see only what is theirs: no worker, server or Spotify status, a read-only library, and following artists needs the Watchlist (thanks SeadogsBooty, #2191, #2196, #2207 to #2210).',
       'Titles beat track numbers when lining up a tracklist, a song’s number heals from its file, and a deleted file stops borrowing another album’s (thanks wolf39us).',
       'Rename / Organize keeps $quality in the name (thanks Maegfea, #2195) and skips a removed album instead of failing (thanks wolf39us, #2194).',
       'Move a track you own into an album’s missing slot, and Reassign moves instead of leaving a copy behind (#2193).',
@@ -131,7 +131,7 @@ export const RELEASES: Release[] = [
       },
       {
         title: 'A member’s notifications',
-        desc: 'Chat messages only reach people allowed to chat, refusals and progress notes no longer pile up in a member’s notifications, and the enrichment workers, their status, Manage Workers and the Library card’s scan and backup are for admins only (thanks SeadogsBooty, #2191, #2196).',
+        desc: 'Chat messages only reach people allowed to chat, refusals and progress notes no longer pile up in a member’s notifications, and the enrichment workers, server status, Spotify limits and library management are for admins only. Following artists needs the Watchlist, and a member’s library is read-only (thanks SeadogsBooty, #2191, #2196, #2207 to #2210).',
       },
       {
         title: 'Titles before track numbers',
