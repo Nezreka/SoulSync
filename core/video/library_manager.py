@@ -566,8 +566,11 @@ _SORT_KEYS = {
 }
 
 
-def _sorted(rows: List[Dict[str, Any]], args: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _sorted(rows: List[Dict[str, Any]], args: Dict[str, Any],
+            shelf_life: Optional[Dict[int, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     name = str(args.get("sort") or "title")
+    if name == "shelf_life" and shelf_life is not None:
+        return _by_shelf_life(rows, args, shelf_life)
     key, desc = _SORT_KEYS.get(name) or _SORT_KEYS["title"]
     asked = str(args.get("dir") or "").lower()
     if asked in ("asc", "desc"):
@@ -579,16 +582,39 @@ def _sorted(rows: List[Dict[str, Any]], args: Dict[str, Any]) -> List[Dict[str, 
     return known + unknown                   # a title with no value sorts last either way
 
 
+def _by_shelf_life(rows: List[Dict[str, Any]], args: Dict[str, Any],
+                   shelf_life: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Shelf Life, lowest first (highest with dir=desc): the scored titles by
+    score, then the ones a gate protects, then the ones the job never scored.
+    the score is not on the summed-up rows, it comes from the job's last run"""
+    desc = str(args.get("dir") or "").lower() == "desc"
+    rows = sorted(rows, key=lambda r: (r["sort_title"], r["id"]))
+    scored, gated, rest = [], [], []
+    for r in rows:
+        stored = shelf_life.get(r["id"]) or {}
+        if stored.get("score") is not None:
+            scored.append(r)
+        elif stored.get("gate"):
+            gated.append(r)
+        else:
+            rest.append(r)
+    scored.sort(key=lambda r: shelf_life[r["id"]]["score"], reverse=desc)
+    return scored + gated + rest
+
+
 def _paging(args: Dict[str, Any], default_limit: int = 100) -> Tuple[int, int]:
     page = max(1, _int(args.get("page"), 1) or 1)
     limit = max(1, min(500, _int(args.get("limit"), default_limit) or default_limit))
     return page, limit
 
 
-def _public(row: Dict[str, Any], watched: Optional[set]) -> Dict[str, Any]:
+def _public(row: Dict[str, Any], watched: Optional[set],
+            shelf_life: Optional[Dict[int, Dict[str, Any]]] = None) -> Dict[str, Any]:
     out = {k: v for k, v in row.items() if k != "sort_title"}
     if watched is not None:
         out["watched"] = row["id"] in watched
+    if shelf_life and row["id"] in shelf_life:
+        out["shelf_life"] = shelf_life[row["id"]]
     return out
 
 
@@ -600,17 +626,19 @@ def _filtered(db, kind: str, args: Dict[str, Any], server_source, watcher) -> Tu
 
 
 def titles(db, kind: str, args: Optional[Dict[str, Any]] = None, *, server_source=None,
-           watcher: Any = None) -> Dict[str, Any]:
+           watcher: Any = None, shelf_life: Optional[Dict[int, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """One page of movies or shows as manager rows, plus what the whole
-    filtered set adds up to. ``args`` are the page's query parameters."""
+    filtered set adds up to. ``args`` are the page's query parameters.
+    ``shelf_life`` is the Shelf Life job's {id: {score, gate, gate_text}},
+    when it is on: each row carries its own and it can be sorted on."""
     args = dict(args or {})
     kind = kind if kind in KINDS else "movies"
     rows, watched = _filtered(db, kind, args, server_source, watcher)
-    rows = _sorted(rows, args)
+    rows = _sorted(rows, args, shelf_life)
     page, limit = _paging(args)
     total = len(rows)
     pages = max(1, (total + limit - 1) // limit)
-    return {"items": [_public(r, watched) for r in rows[(page - 1) * limit: page * limit]],
+    return {"items": [_public(r, watched, shelf_life) for r in rows[(page - 1) * limit: page * limit]],
             "kind": kind,
             "totals": {"titles": total, "size_bytes": sum(r["size_bytes"] for r in rows),
                        "files": sum(r["file_count"] for r in rows)},

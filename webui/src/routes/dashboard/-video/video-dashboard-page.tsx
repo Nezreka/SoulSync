@@ -37,7 +37,8 @@ export function VideoDashboardPage({
   canDownload: boolean;
 }) {
   const stats = useQuery(statsQuery());
-  const scan = useQuery(scanQuery());
+  // when the library was scanned and the scan itself are the admin's (#2207)
+  const scan = useQuery({ ...scanQuery(), enabled: isAdmin });
   const issues = useQuery(issuesQuery());
   const findings = useQuery(findingsQuery(isAdmin));
 

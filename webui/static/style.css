@@ -72572,6 +72572,23 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-actions .repair-finding-btn.fix,
 #tools-page .repair-finding-actions .repair-finding-btn.alt,
 #tools-page .repair-finding-actions .repair-finding-btn.reopen { margin-right: 6px; }
+/* Shelf Life's Keep: the other answer to a delete, so it reads first and green */
+#tools-page .repair-finding-actions .repair-finding-btn.keep {
+    height: 32px;
+    padding: 0 14px;
+    margin-right: 6px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--success-strong-rgb), 0.16);
+    color: rgb(var(--success-strong-rgb));
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+#tools-page .repair-finding-actions .repair-finding-btn.keep:hover { background: rgba(var(--success-strong-rgb), 0.26); }
 #tools-page .repair-finding-detail { display: none; }
 #tools-page .repair-finding-detail.open { display: block; max-height: none; overflow: visible; }
 #tools-page .repair-finding-detail-inner {

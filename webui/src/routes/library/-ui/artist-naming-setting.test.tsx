@@ -126,11 +126,13 @@ describe('#2165 Folder and tag name', () => {
         return HttpResponse.json({ success: true, overrides: {} });
       }),
     );
-    renderSetting({ canWrite: false });
-    const input = await screen.findByLabelText('Name for folders and tags');
-    expect(input).toBeDisabled();
-    fireEvent.submit(input.closest('form') as HTMLFormElement);
-    expect(screen.getByRole('button', { name: 'Save name' })).toBeDisabled();
+    renderSetting({ canWrite: false, onPreviewRename: vi.fn(), onPreviewRetag: vi.fn() });
+    // #2210: a member reads the name; there is no field, no save, no preview
+    expect(await screen.findByText('Filed and tagged as')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Name for folders and tags')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save name' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Preview rename' })).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
     expect(writes).toBe(0);
   });
 

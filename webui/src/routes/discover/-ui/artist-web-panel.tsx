@@ -1,3 +1,5 @@
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type {
   WebArtistCard,
   WebDiscoveryCard,
@@ -224,6 +226,8 @@ export function ArtWebDiscoveryCard({
   onTogglePreview,
   onAddToWatchlist,
 }: ArtWebDiscoveryCardProps) {
+  // no watchlist part, no add button (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
   const color = WEB_DISCOVERY_COLOR;
   return (
     <>
@@ -279,15 +283,17 @@ export function ArtWebDiscoveryCard({
           artists whose similars SoulSync fetched, so expanding an unowned
           candidate always comes back empty — 0 of 176 on real data.
         */}
-        <button
-          type="button"
-          id="artweb-add-btn"
-          className="artweb-btn-lens"
-          style={{ background: color }}
-          onClick={() => onAddToWatchlist(card.key)}
-        >
-          + Add to watchlist
-        </button>
+        {mayWatch ? (
+          <button
+            type="button"
+            id="artweb-add-btn"
+            className="artweb-btn-lens"
+            style={{ background: color }}
+            onClick={() => onAddToWatchlist(card.key)}
+          >
+            + Add to watchlist
+          </button>
+        ) : null}
         {card.detailPath && (
           <a className="artweb-btn-link" href={card.detailPath}>
             Open artist page (discography)

@@ -45,6 +45,7 @@ export function QualityProfilePicker({
   currentProfileSource = 'global',
   currentProfileExplicit = false,
   onSaved,
+  readOnly = false,
 }: {
   entity: 'artists' | 'albums' | 'tracks';
   id: number;
@@ -52,6 +53,8 @@ export function QualityProfilePicker({
   currentProfileSource?: LibraryV2QualityProfileSource;
   currentProfileExplicit?: boolean;
   onSaved?: () => void;
+  /** #2210: a member sees the profile in use, with nothing to pick */
+  readOnly?: boolean;
 }) {
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const queryClient = useQueryClient();
@@ -77,6 +80,34 @@ export function QualityProfilePicker({
             ? 'Artist override'
             : 'Inherited from artist'
           : 'App default';
+
+  if (readOnly) {
+    return (
+      <>
+        <div className={styles.qpHeadRow}>
+          <span className={styles.qpManagedHint}>
+            Effective: {currentProfile?.name ?? `Profile ${currentProfileId}`}
+            {sourceLabel !== 'App default' ? ` (${sourceLabel})` : ''}
+          </span>
+        </div>
+        {currentProfile ? (
+          <div className={styles.qpList}>
+            <div className={`${styles.qpOption} ${styles.qpOptionActive} ${styles.qpOptionStatic}`}>
+              <span className={styles.qpName}>{currentProfile.name}</span>
+              {currentProfile.description ? (
+                <span className={styles.qpDesc}>{currentProfile.description}</span>
+              ) : null}
+              {targetSummary(currentProfile) ? (
+                <span className={styles.qpTargets}>{targetSummary(currentProfile)}</span>
+              ) : null}
+              <span className={styles.qpPolicy}>{policyLabel(currentProfile)}</span>
+            </div>
+          </div>
+        ) : null}
+        <p className={styles.muted}>Quality profiles are up to the admin.</p>
+      </>
+    );
+  }
 
   return (
     <>

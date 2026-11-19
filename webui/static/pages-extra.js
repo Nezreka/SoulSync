@@ -1492,6 +1492,12 @@ let _rateLimitCountdownInterval = null;
 let _rateLimitExpiresAt = 0;
 
 function handleSpotifyRateLimit(rateLimitInfo) {
+    // the ban, its modal and the restored toast are the admin's (#2208).
+    // every path that raises the modal comes through here
+    if (typeof _statusViewerIsAdmin === 'function' && !_statusViewerIsAdmin()) {
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
+        return;
+    }
     if (!rateLimitInfo || !rateLimitInfo.active) {
         if (_spotifyRateLimitShown) {
             _spotifyRateLimitShown = false;

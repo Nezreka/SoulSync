@@ -5032,13 +5032,13 @@ Every emit below is server → client, pushed from a background thread — none 
 | \`repair:progress\` | S→C | \`{job_id: state}\` | Library Maintenance job progress; state carries \`status\`, \`progress\`, \`processed\`, \`total\`, \`log\`, \`finished_at\`. |
 | \`automation:progress\` | S→C | \`{automation_id: state}\` | Automation run progress (also pollable via \`GET /api/automations/progress\`). Admins get every run; a member only their own automations' runs. |
 | \`dashboard:stats\` | S→C | system stats | Admins only. Server numbers refreshed (every 10s): active/finished downloads, download speed, active syncs, uptime, memory. \`GET /api/system/stats\` is the same, admin only. |
-| \`dashboard:db_stats\` | S→C | database info | Database statistics refreshed (every 10s). |
+| \`dashboard:db_stats\` | S→C | database info | Admins only. Database statistics refreshed (every 10s): counts, size, path, scan times. A member's \`GET /api/database/stats\` gives the counts of their own library only. |
 | \`dashboard:activity\` | S→C | \`{activities}\` | New activity feed entry (last 10, every 2s). |
 | \`dashboard:toast\` | S→C | \`{icon, title, subtitle}\` | Toast notification shown in the UI. |
 | \`dashboard:wishlist_count\` | S→C | \`{count}\` | Wishlist count changed (per profile). |
 | \`wishlist:stats\` | S→C | \`{is_auto_processing, active_batches, next_run_in_seconds}\` | Wishlist statistics changed. |
 | \`watchlist:count\` | S→C | \`{success, count, next_run_in_seconds}\` | Watchlist count changed (per profile). |
-| \`status:update\` | S→C | service connectivity flags | System status changed (every 5s): metadata source, Spotify, media server, Soulseek, enrichment, active downloads. |
+| \`status:update\` | S→C | service connectivity flags | System status changed (every 5s): metadata source, Spotify, media server, Soulseek, enrichment, active downloads. A member's copy has no Spotify ban and no enrichment; the admins get the whole one. |
 | \`activity:update\` | S→C | activity snapshot | Server activity updated — join the \`activity:live\` room with \`activity:subscribe\` (admins only). |
 | \`enrichment:{worker}\` | S→C | worker stats | Enrichment worker progress — one event per worker (e.g. \`enrichment:youtube\`). Admins only, music and video, except \`enrichment:repair\` (the Tools page's maintenance header). |
 | \`tool:logs\` | S→C | \`{logs}\` | Tool output streamed (last 50 activity entries, formatted). |
@@ -5048,7 +5048,7 @@ Every emit below is server → client, pushed from a background thread — none 
 | \`logs:live\` | S→C | \`{lines, source}\` | Live log lines — admin only, subscribe with \`logs:subscribe\` first. |
 | \`lastfm:import-progress\` | S→C | import state | Last.fm history import progress (per profile). |
 | \`listenbrainz:import-progress\` | S→C | import state | ListenBrainz import progress (per profile). |
-| \`rate-monitor:update\` | S→C | per-service rate limits | API rate-monitor tick. |
+| \`rate-monitor:update\` | S→C | per-service rate limits | Admins only. API rate-monitor tick. |
 | \`chat:room_message\` | S→C | \`{room, messages}\` | New Soulseek chat messages (last 20 decoded). |
 | \`chat:room_protocol\` | S→C | \`{room, events}\` | Soulseek chat protocol events (last 40). |
 | \`chat:unread\` | S→C | \`{pms, users, grew}\` | PM unread count changed. |

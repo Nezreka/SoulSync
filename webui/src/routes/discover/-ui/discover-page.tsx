@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchSinCharts, type SinChart } from '@/features/metasync/charts';
 import { getShellProfileContext } from '@/platform/shell/bridge';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
@@ -261,6 +262,8 @@ export function DiscoverPage() {
   );
   const hero = useHero(heroArtists, (t) => toast(t.message, t.level));
   const rec = useRecommended((t) => toast(t.message, t.level));
+  // a member without the watchlist part gets no watch buttons (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
   const dial = useAdventurousness(
     okData<{ value?: number }>(page.sections.adventurousness?.data)?.value ?? 0.3,
   );
@@ -1699,7 +1702,7 @@ export function DiscoverPage() {
                         >
                           View artist
                         </a>
-                        {artistPick.artist_id ? (
+                        {mayWatch && artistPick.artist_id ? (
                           <button
                             type="button"
                             className="dsc-pulse-btn"

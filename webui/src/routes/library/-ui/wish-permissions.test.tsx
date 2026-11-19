@@ -31,13 +31,14 @@ describe('the wish tier', () => {
     expect(search).toBeEnabled();
     expect(search).toHaveAttribute('data-requires-wish');
     expect(search).not.toHaveAttribute('data-requires-write');
-    expect(screen.getByRole('button', { name: /Retag/ })).toBeDisabled();
+    // #2210: what it may not do isn't drawn, not drawn dead
+    expect(screen.queryByRole('button', { name: /Retag/ })).toBeNull();
   });
 
   it('gives a read-only profile neither', () => {
     renderAs(false, false);
-    expect(screen.getByRole('button', { name: /Automatic Search/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Retag/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Automatic Search/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Retag/ })).toBeNull();
   });
 
   it('gives the admin both', () => {

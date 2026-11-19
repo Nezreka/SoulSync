@@ -89,6 +89,13 @@ VIDEO_FINDING_TYPE_META = {
         "confirm": "Each file is renamed to its template name. Sidecars and subtitles "
                    "come along, and nothing is ever overwritten.",
     },
+    "shelf_life": {
+        "label": "Shelf Life", "verb": "Delete Title", "destructive": True,
+        "blurb": "Titles that have earned their space least: unwatched, easy to get back, big.",
+        "confirm": "Delete Title runs on it: no profile gets it again, and the whole folder "
+                   "goes to the recycle bin until its retention clears it. It's also hidden "
+                   "from Discover; undo that from Discover's ignored list.",
+    },
     "missing_subtitles": {
         "label": "Missing Subtitles", "verb": "Queue Subtitles",
         "blurb": "Videos with no subtitles in your languages.",
@@ -102,7 +109,7 @@ VIDEO_ACTION_LABELS = {
     "wishlisted": "Wishlisted", "grabbed": "Grabbed", "refreshed": "Refreshed",
     "removed": "Removed", "resolved": "Resolved", "marked_deleted": "Marked Deleted",
     "forgotten": "Forgotten", "flagged": "Flagged", "cleaned": "Cleaned",
-    "renamed": "Renamed", "queued": "Queued",
+    "renamed": "Renamed", "queued": "Queued", "deleted": "Deleted",
 }
 
 # The family each job is filed under, in the order the families show. Same
@@ -121,6 +128,7 @@ VIDEO_JOB_CATEGORIES = {
     "duplicate_movies": "Files & storage",
     "naming_conformance": "Files & storage",
     "watched_cleanup": "Files & storage",
+    "shelf_life": "Files & storage",
     "youtube_ghosts": "Files & storage",
     "quality_upgrade": "Quality",
     "missing_subtitles": "Quality",
@@ -133,7 +141,7 @@ VIDEO_JOB_CATEGORIES = {
 
 # Jobs whose fixes move, rename or delete real files. The settings drawer
 # shows its strongest warning on these.
-VIDEO_JOBS_WRITING_FILES = frozenset({"naming_conformance", "watched_cleanup"})
+VIDEO_JOBS_WRITING_FILES = frozenset({"naming_conformance", "watched_cleanup", "shelf_life"})
 
 
 def job_category(job_id: str) -> str:

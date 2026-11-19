@@ -184,10 +184,11 @@ describe('library route (live)', () => {
     canWrite = false;
     const { container } = renderRoute();
     await screen.findByText(/Read-only: library changes require the admin profile/);
+    // #2210: the write controls aren't drawn at all now; any left must be dead
     const mutations = [...container.querySelectorAll<HTMLElement>('[data-requires-write]')];
-    expect(mutations.length).toBeGreaterThan(0);
     expect(mutations.every((control) => control.matches(':disabled'))).toBe(true);
     mutations.forEach((control) => fireEvent.click(control));
+    expect(screen.queryByRole('button', { name: /Add to Watchlist/ })).toBeNull();
     expect(requestedWrites).toEqual([]);
   });
 

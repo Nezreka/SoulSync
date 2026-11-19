@@ -851,6 +851,9 @@
     // Ensures the video side is active first (the open-detail handler only
     // navigates; it doesn't flip data-side), then drills in.
     window.SoulSyncVideo = window.SoulSyncVideo || {};
+    // the sidebar's rule, for a react page linking to another video page
+    // (the dashboard's Browse library, #2207)
+    window.SoulSyncVideo.pageAllowed = videoPageAllowed;
     window.SoulSyncVideo.openDetail = function (detail) {
         if (!detail || !detail.kind) return;
         if (document.body.getAttribute('data-side') !== 'video') {

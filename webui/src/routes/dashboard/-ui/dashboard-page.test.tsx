@@ -132,8 +132,8 @@ describe('the workers are the admins (#2196)', () => {
     expect(view.container.querySelector('#manage-enrichment-btn')).toBeNull();
     expect(view.container.querySelector('.orb-stage-caption')).toBeNull();
     expect(view.container.querySelector('#library-status-verify-btn')).toBeNull();
-    // the greeting, the library and the board are still theirs
-    expect(hero.querySelector('.dash-hero-main [data-card="library"]')).not.toBeNull();
+    // the greeting and the board are still theirs; the library line too,
+    // when they may open the library page (#2207, below)
     expect(view.container.querySelector('.room-board #watchlist-button')).not.toBeNull();
   });
 
@@ -166,5 +166,83 @@ describe('the workers are the admins (#2196)', () => {
     expect(view.container.querySelector('#manage-enrichment-btn')).not.toBeNull();
     expect(view.container.querySelector('#library-status-verify-btn')).not.toBeNull();
     expect(urlsAsked()).toContain('/api/enrichment/status-all');
+  });
+});
+
+// #2207 #2208: the server's library status, its size, the review queue and
+// the alerts band (a down server, a spotify ban, with a jump to Settings)
+// are the admin's. a member keeps a way into the library page.
+const ADMIN_URLS = /^\/status$|\/api\/review-queue|\/api\/database\/update/;
+
+describe("the server's state is the admin's (#2207 #2208)", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'SoulSyncWebShellBridge');
+    fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
+  });
+
+  it("a member's hero has Browse library and nothing of the server's", async () => {
+    window.SoulSyncWebShellBridge = {
+      isPageAllowed: (id: string) => id === 'library',
+    } as never;
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin={false} />);
+    });
+    const line = view.container.querySelector('.dash-hero-main [data-card="library"]')!;
+    expect(line).not.toBeNull();
+    expect(line.querySelector('#library-status-browse-btn')).not.toBeNull();
+    expect(line.querySelector('#library-status-review-btn')).toBeNull();
+    expect(line.querySelector('#library-status-scan-btn')).toBeNull();
+    expect(view.container.querySelector('[data-card="alerts"]')).toBeNull();
+    expect(urlsAsked().filter((url) => ADMIN_URLS.test(url))).toEqual([]);
+  });
+
+  it('a member who may not open the library has no library line', async () => {
+    window.SoulSyncWebShellBridge = { isPageAllowed: () => false } as never;
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin={false} />);
+    });
+    expect(view.container.querySelector('[data-card="library"]')).toBeNull();
+  });
+
+  it('a member sees no alerts band, even with the server down', async () => {
+    fetchMock.mockImplementation((url: unknown) =>
+      String(url) === '/status'
+        ? Promise.resolve({
+            ok: true,
+            json: async () => ({ media_server: { connected: false, type: 'plex' } }),
+          } as never)
+        : Promise.reject(new Error('down')),
+    );
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin={false} />);
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:service-status', {
+          detail: { media_server: { connected: false, type: 'plex' } },
+        }),
+      );
+    });
+    expect(view.container.querySelector('[data-card="alerts"]')).toBeNull();
+  });
+
+  it('an admin keeps the alerts band and the review queue', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage isAdmin />);
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:service-status', {
+          detail: { media_server: { connected: false, type: 'plex' } },
+        }),
+      );
+    });
+    expect(view.container.querySelector('[data-card="alerts"]')).not.toBeNull();
+    expect(view.container.querySelector('#library-status-review-btn')).not.toBeNull();
+    expect(urlsAsked()).toContain('/status');
   });
 });

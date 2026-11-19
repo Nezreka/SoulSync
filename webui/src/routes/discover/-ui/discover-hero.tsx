@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { HeroWatchlistButton, WatchAllPhase } from '../-discover.hero';
 import type { DiscoverHeroArtist } from '../-discover.types';
 
@@ -186,6 +188,8 @@ export function DiscoverHero({
   onLiveChange,
 }: DiscoverHeroProps) {
   const empty = !artist;
+  // a member without the watchlist part gets no watch buttons (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
   const watchLabel = watchlist?.label ?? heroWatchlistLabel(false);
   const watchAll = watchAllState(watchAllPhase);
   const indicators = heroIndicators(count, index);
@@ -390,38 +394,40 @@ export function DiscoverHero({
           </div>
           {!empty && (
             <div className="discover-hero-actions">
-              <button
-                type="button"
-                className={`discover-hero-button primary watchlist-toggle-btn${watchlist?.watching ? ' watching' : ''}`}
-                id="discover-hero-add"
-                onClick={onToggleWatchlist}
-              >
-                <span className="watchlist-icon" aria-hidden="true">
-                  {watchlist?.watching ? (
-                    <svg viewBox="0 0 24 24" width="16" height="16">
-                      <path
-                        d="M5 12.5l4.5 4.5L19 7.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" width="16" height="16">
-                      <path
-                        d="M12 5v14M5 12h14"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.4"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  )}
-                </span>
-                <span className="watchlist-text">{watchLabel}</span>
-              </button>
+              {mayWatch ? (
+                <button
+                  type="button"
+                  className={`discover-hero-button primary watchlist-toggle-btn${watchlist?.watching ? ' watching' : ''}`}
+                  id="discover-hero-add"
+                  onClick={onToggleWatchlist}
+                >
+                  <span className="watchlist-icon" aria-hidden="true">
+                    {watchlist?.watching ? (
+                      <svg viewBox="0 0 24 24" width="16" height="16">
+                        <path
+                          d="M5 12.5l4.5 4.5L19 7.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" width="16" height="16">
+                        <path
+                          d="M12 5v14M5 12h14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    )}
+                  </span>
+                  <span className="watchlist-text">{watchLabel}</span>
+                </button>
+              ) : null}
               <a
                 className="discover-hero-button secondary"
                 id="discover-hero-discography"
@@ -482,23 +488,25 @@ export function DiscoverHero({
         </div>
 
         <div className="discover-hero-bottom-actions">
-          <button
-            type="button"
-            id="discover-hero-watch-all"
-            className={
-              watchAll.allWatched
-                ? 'discover-hero-watch-all all-watched'
-                : 'discover-hero-watch-all'
-            }
-            disabled={watchAll.disabled}
-            onClick={onWatchAll}
-          >
-            <span className="watch-all-text">
-              {watchAll.label === WATCH_ALL_IDLE && count > 1
-                ? `Watch all ${count}`
-                : watchAll.label}
-            </span>
-          </button>
+          {mayWatch ? (
+            <button
+              type="button"
+              id="discover-hero-watch-all"
+              className={
+                watchAll.allWatched
+                  ? 'discover-hero-watch-all all-watched'
+                  : 'discover-hero-watch-all'
+              }
+              disabled={watchAll.disabled}
+              onClick={onWatchAll}
+            >
+              <span className="watch-all-text">
+                {watchAll.label === WATCH_ALL_IDLE && count > 1
+                  ? `Watch all ${count}`
+                  : watchAll.label}
+              </span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="discover-hero-view-all"
