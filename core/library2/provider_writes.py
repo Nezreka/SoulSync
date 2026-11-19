@@ -129,6 +129,24 @@ def write_provider_enrichment(
     entity_id = int(entity_id)
     if _locked(conn, entity, entity_id, key):
         return
+    if entity == "album" and provider_id not in (None, ""):
+        # #2110: a name match can't tell weezer 1994 from weezer 2016. when
+        # the artist owns several albums of this name, a release of a year
+        # this album's files don't carry, or one a sibling already is, is not
+        # written at all: unmatched and right beats matched and wrong
+        from .release_split import refuses_release
+        dated = backfill or {}
+        try:
+            refused = refuses_release(conn, entity_id, key, provider_id,
+                                      dated.get("release_date") or dated.get("year"))
+        except Exception as exc:  # noqa: BLE001 - the guard never fails a write
+            logger.debug("same-named release check skipped for album %s: %s", entity_id, exc)
+            refused = False
+        if refused:
+            logger.info("Not matching album %s to %s release %s: the artist has another "
+                        "album of this name and this is not this one's year",
+                        entity_id, key, provider_id)
+            return
 
     cleaned = _clean(payload or {})
     if cleaned:

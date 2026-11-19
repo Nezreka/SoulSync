@@ -6300,6 +6300,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if folded:
                         conn.commit()
                         scan_stats["leftover_tracks_folded"] = folded
+                    # albums of one name merged into one row (weezer's three
+                    # "weezer"s) split back out, now the tags were just read
+                    # (#2110). before the renumbering: three track 1s of
+                    # three albums are not a numbering problem
+                    from core.library2.release_split import split_same_named_releases
+                    split = split_same_named_releases(conn, album_ids)
+                    if split["albums_made"]:
+                        conn.commit()
+                        scan_stats["same_named_albums_split"] = split["albums_made"]
+                        try:  # a provider listing a split album took over
+                            from core.library2.mirror_outbox import drain
+                            drain(db)
+                        except Exception as drain_err:  # noqa: BLE001
+                            logger.debug("post-split outbox drain failed: %s", drain_err)
                     # a song on another song's number goes to the one its
                     # file says, now the tags were just read (wolf39us)
                     from core.library2.track_numbers import heal_colliding_numbers
