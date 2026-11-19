@@ -2043,6 +2043,19 @@ button.chip:hover:not(:disabled) {
   align-items: center;
 }
 
+.fmtRow > * {
+  min-width: 0;
+}
+
+.fmtRow .field {
+  width: 100%;
+  min-width: 0;
+}
+
+.fmtRow .input {
+  min-width: 0;
+}
+
 .fmtHead {
   color: var(--white-a45);
   font-size: 11.5px;
@@ -2134,6 +2147,12 @@ button.chip:hover:not(:disabled) {
   border: 1px solid var(--white-a06);
   border-radius: var(--radius-card);
   background: var(--white-a03);
+}
+
+/* a row with no brand mark (the quality targets, the video ladder) */
+.srcNoMark {
+  grid-template-columns: 22px 30px minmax(0, 1fr) auto auto;
+  min-height: 56px;
 }
 
 .srcFirst {
@@ -2659,6 +2678,17 @@ button.chip:hover:not(:disabled) {
     width: 100%;
   }
 
+  /* a choice of segments goes under its label too, the whole width */
+  .row:has(> .rowCtl > .seg),
+  .row:has(> .rowCtl > span > .seg) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rowCtl > .seg,
+  .rowCtl > span > .seg {
+    width: 100%;
+  }
+
   .rowSub {
     padding-left: 30px;
   }
@@ -2686,8 +2716,11 @@ button.chip:hover:not(:disabled) {
 
   .segItem {
     flex: 1;
-    height: 38px;
-    padding: 0 8px;
+    height: auto;
+    min-height: 38px;
+    padding: 6px 8px;
+    line-height: 1.25;
+    white-space: normal;
   }
 
   .switch {
@@ -2807,6 +2840,11 @@ button.chip:hover:not(:disabled) {
     padding: 12px 6px 12px 4px;
   }
 
+  .srcNoMark {
+    grid-template-columns: 26px 22px minmax(0, 1fr) auto auto;
+    min-height: 60px;
+  }
+
   .src .mark {
     width: 36px;
     height: 36px;
@@ -2835,6 +2873,10 @@ button.chip:hover:not(:disabled) {
   .srcStatus,
   .srcSet {
     display: none;
+  }
+
+  .srcSet.srcSetKeep {
+    display: inline-flex;
   }
 
   .srcStatLine {

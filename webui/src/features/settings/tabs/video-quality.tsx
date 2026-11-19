@@ -633,7 +633,7 @@ export function VideoQualitySections() {
                 id: t.key,
                 name: tierName(t.key),
                 mark: null,
-                warn: false,
+                keepAction: true,
                 action: (
                   <Switch
                     data-vq-tier-toggle={t.key}

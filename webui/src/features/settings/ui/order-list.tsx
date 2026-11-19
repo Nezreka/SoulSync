@@ -59,6 +59,9 @@ export interface OrderItem {
   action?: ReactNode;
   /** ⋯ menu entries between the moves and the removal */
   menu?: OrderMenuEntry[];
+  /** the row's own control stays on a phone too (a switch per row); a
+   *  button that the menu repeats gives way there */
+  keepAction?: boolean;
 }
 
 export interface PoolItem {
@@ -672,6 +675,17 @@ export function OrderList({
         aria-label={label}
         data-busy={dragging || held ? '' : undefined}
       >
+        {/* first in the DOM, so the last row is still :last-child (its rail stops) */}
+        {marker && marker.after >= 0 && marker.after < ids.length - 1 ? (
+          <li
+            className={s.marker}
+            data-marker=""
+            role="presentation"
+            style={{ order: marker.after * 2 + 1 }}
+          >
+            <span>{marker.text}</span>
+          </li>
+        ) : null}
         {items.map((item) => {
           const index = shown.indexOf(item.id);
           const inHand = dragging?.id === item.id;
@@ -685,6 +699,7 @@ export function OrderList({
               data-first={first ? '' : undefined}
               className={clsx(
                 s.src,
+                item.mark == null && s.srcNoMark,
                 first && s.srcFirst,
                 item.warn && s.srcWarn,
                 inHand && s.srcLift,
@@ -737,7 +752,11 @@ export function OrderList({
                 <span />
               )}
               <div className={s.srcActs}>
-                {item.action ? <span className={s.srcSet}>{item.action}</span> : null}
+                {item.action ? (
+                  <span className={clsx(s.srcSet, item.keepAction && s.srcSetKeep)}>
+                    {item.action}
+                  </span>
+                ) : null}
                 <Btn
                   kind="ghost"
                   small
@@ -762,16 +781,6 @@ export function OrderList({
             </li>
           );
         })}
-        {marker && marker.after >= 0 && marker.after < ids.length - 1 ? (
-          <li
-            className={s.marker}
-            data-marker=""
-            role="presentation"
-            style={{ order: marker.after * 2 + 1 }}
-          >
-            <span>{marker.text}</span>
-          </li>
-        ) : null}
         {slotAt >= 0 && dragging ? (
           <li
             className={s.gap}
