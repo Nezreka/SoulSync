@@ -22,6 +22,8 @@ import type {
   WatchlistScanStatusResponse,
 } from './-watchlist.types';
 
+import { primaryArtistId } from './-watchlist.helpers';
+
 export const WATCHLIST_QUERY_KEY = ['watchlist'] as const;
 
 // The watchlist endpoints resolve the profile from the Flask SESSION
@@ -255,11 +257,39 @@ export async function removeWatchlistArtist(artistId: string): Promise<void> {
   assertSuccess(payload, 'Failed to remove artist from watchlist');
 }
 
-export async function removeWatchlistArtistsBatch(artistIds: string[]): Promise<void> {
-  const payload = await readJson<SuccessResponse>(
-    apiClient.post('watchlist/remove-batch', { json: { artist_ids: artistIds } }),
-  );
-  assertSuccess(payload, 'Failed to remove artists from watchlist');
+// a big library takes the server a while to unwatch many artists at once;
+// the 10s default gave up on a removal that went on to finish (#2200)
+export const REMOVE_BATCH_TIMEOUT_MS = 120_000;
+
+export interface WatchlistBatchRemoval {
+  removed: number;
+  /** still on the watchlist when the page stopped waiting */
+  pending: number;
+  timedOut: boolean;
+}
+
+export async function removeWatchlistArtistsBatch(
+  artistIds: string[],
+): Promise<WatchlistBatchRemoval> {
+  try {
+    const payload = await readJson<SuccessResponse & { removed?: number }>(
+      apiClient.post('watchlist/remove-batch', {
+        json: { artist_ids: artistIds },
+        timeout: REMOVE_BATCH_TIMEOUT_MS,
+      }),
+    );
+    assertSuccess(payload, 'Failed to remove artists from watchlist');
+    return { removed: payload.removed ?? artistIds.length, pending: 0, timedOut: false };
+  } catch (error) {
+    if (!(error instanceof Error && error.name === 'TimeoutError')) throw error;
+    // the server keeps going after the page stops waiting: say what the
+    // watchlist holds now instead of calling it a failure
+    const onList = new Set(
+      (await fetchWatchlistArtists()).map((artist) => primaryArtistId(artist)),
+    );
+    const pending = artistIds.filter((id) => onList.has(id)).length;
+    return { removed: artistIds.length - pending, pending, timedOut: true };
+  }
 }
 
 export async function addWatchlistArtist(input: {

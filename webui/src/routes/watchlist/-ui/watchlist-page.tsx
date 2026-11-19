@@ -334,8 +334,17 @@ export function WatchlistPage() {
 
   const batchRemove = useMutation({
     mutationFn: (artistIds: string[]) => removeWatchlistArtistsBatch(artistIds),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setSelectedIds(new Set());
+      if (result.timedOut) {
+        const plural = (n: number) => `${n} artist${n !== 1 ? 's' : ''}`;
+        window.showToast?.(
+          result.pending > 0
+            ? `Removed ${plural(result.removed)} so far, ${result.pending} still going. Refresh in a minute.`
+            : `Removed ${plural(result.removed)} from your watchlist`,
+          result.pending > 0 ? 'info' : 'success',
+        );
+      }
       await queryClient.invalidateQueries({ queryKey: WATCHLIST_QUERY_KEY });
       // Nav badge + hero count, and any artist cards on other pages. Both are
       // vanilla-owned DOM outside this route.
