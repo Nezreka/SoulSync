@@ -262,6 +262,10 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
         "image_url": "",
         "release_date": "",
         "track_number": hint.track_number or 1,
+        # the pick's own position, unset when the hint has none: the
+        # track_number above defaults to 1, and position 1 is a real track
+        "hint_track_number": hint.track_number,
+        "hint_disc_number": hint.disc_number,
         "total_tracks": 1,
         "source": hint.source,
         "method": "rematch_hint",
@@ -274,6 +278,97 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
         "force_album_match": True,
         "album_type": hint.album_type,
     }
+
+
+def _track_field(track: Any, key: str) -> Any:
+    if isinstance(track, dict):
+        return track.get(key)
+    return getattr(track, key, None)
+
+
+def _track_length_ms(track: Any) -> int:
+    if isinstance(track, dict):
+        from core.imports.album_matching import _track_duration_ms
+        return _track_duration_ms(track)
+    try:
+        return int(getattr(track, "duration_ms", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def pick_hinted_track(
+    tracks: list,
+    *,
+    track_id: Any = None,
+    title: Any = None,
+    track_number: Any = None,
+    disc_number: Any = None,
+    file_title: Any = None,
+    file_duration_ms: Any = None,
+) -> Optional[Any]:
+    """the track a re-identify names on the release it picked, or None.
+
+    the id the user picked wins outright. when the tracklist spells ids
+    another way, the pick's title decides (the file's title when the hint
+    has none): the same song first, the closest title next, the file's
+    length breaking a tie and position last. position alone only counts
+    when there's no title to read. "Let It Be" from "1" sits at 26, and
+    neither that nor a stale number may pick "Dig a Pony" over the song the
+    title names (#2206)."""
+    from core.imports.reassign_album import (
+        _song_similarity,
+        is_placeholder_title,
+        song_key,
+        titles_conflict,
+    )
+
+    tracks = list(tracks or [])
+    chosen = str(track_id or "").strip()
+    if chosen:
+        for track in tracks:
+            if str(_track_field(track, "id") or "") == chosen:
+                return track
+
+    want_number = _as_int(track_number)
+    want_disc = _as_int(disc_number) or 1
+
+    def _at_position(track: Any) -> bool:
+        return (want_number > 0 and _as_int(_track_field(track, "track_number")) == want_number
+                and (_as_int(_track_field(track, "disc_number")) or 1) == want_disc)
+
+    def _name(track: Any) -> str:
+        return str(_track_field(track, "name") or _track_field(track, "title") or "")
+
+    anchor = title if not is_placeholder_title(title) else file_title
+    if is_placeholder_title(anchor):
+        # no title on either side: the pick's position is all there is
+        at = [t for t in tracks if _at_position(t)]
+        return at[0] if len(at) == 1 else None
+
+    agreeing = [t for t in tracks if _name(t) and not titles_conflict(anchor, _name(t))]
+    if not agreeing:
+        return None
+    anchor_key = song_key(anchor)
+    file_ms = _as_int(file_duration_ms)
+
+    def _rank(track: Any):
+        length = _track_length_ms(track)
+        gap = abs(length - file_ms) if file_ms > 0 and length > 0 else float("inf")
+        return (
+            song_key(_name(track)) == anchor_key,
+            round(_song_similarity(anchor, _name(track)), 3),
+            -gap,
+            _at_position(track),
+        )
+
+    return max(agreeing, key=_rank)
 
 
 def _canonical(path: Optional[str]) -> str:
@@ -468,6 +563,7 @@ __all__ = [
     "consume_hint",
     "list_pending_hints",
     "build_identification_from_hint",
+    "pick_hinted_track",
     "delete_replaced_track",
     "fold_replaced_track",
     "quick_file_signature",
