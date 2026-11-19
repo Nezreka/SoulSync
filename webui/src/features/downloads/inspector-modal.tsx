@@ -393,6 +393,43 @@ export function openWishlistInspector(track: {
   });
 }
 
+/**
+ * A release picked for an approved request held for one (#2199): the same
+ * search as the wishlist's, for the requester's held row, run as them. The
+ * file downloads into their library and the request moves on.
+ */
+export function openRequestPickInspector(track: {
+  profileId: number;
+  trackId: string;
+  name: string;
+  artist?: string;
+  album?: string;
+  onPicked?: () => void;
+}): void {
+  openCandidateInspector({
+    name: track.name,
+    artist: track.artist,
+    album: track.album,
+    searchUrl: '/api/requests/music/pick/inspect',
+    searchBody: { profile_id: track.profileId, track_id: track.trackId },
+    editable: true,
+    cannotGrab: (c) =>
+      RELEASE_LEVEL.has(String(c.username || '').toLowerCase())
+        ? "A torrent or Usenet hit is a whole release, so it can't be picked for one track. Download automatically instead to let SoulSync use it."
+        : null,
+    onGrab: async (candidate, query) => {
+      await postJson('/api/requests/music/pick/download', {
+        profile_id: track.profileId,
+        track_id: track.trackId,
+        candidate: candidatePayload(candidate),
+        override: overrideOf(candidate),
+        ...query,
+      });
+      track.onPicked?.();
+    },
+  });
+}
+
 /** A failed or not-found download: what every source has, and retry with a pick. */
 export function openDownloadTaskInspector(
   taskId: string,

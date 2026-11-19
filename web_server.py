@@ -11701,7 +11701,14 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     # refused. captured here, while the request is still the context.
     from contextlib import nullcontext
     from core.download_plugins.candidate_store import candidate_binding
-    _bind_to = get_current_profile_id() if bind_profile else None
+    # True binds to the caller; a profile id binds to that profile (an admin
+    # picking a release for someone's request searches as them, #2199)
+    if bind_profile is True:
+        _bind_to = get_current_profile_id()
+    elif bind_profile:
+        _bind_to = int(bind_profile)
+    else:
+        _bind_to = None
 
     def _search_one_source(source_name, client):
         evaluated = []
@@ -11958,6 +11965,97 @@ def download_wishlist_pick():
         return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
     except Exception as e:
         logger.error(f"Error starting wishlist pick: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── a release picked for an approved request held for one (#2199) ──────
+# the same inspector and pinned one-file batch as the wishlist's own "search
+# manually", for the requester's held row: the search binds to them and the
+# batch downloads into their library, so a success takes their row off the
+# wishlist and the request settles the usual way.
+
+def _held_request_pick(data):
+    """(owner, formatted track, None) for a held track the caller may pick,
+    else (None, None, response)."""
+    from api.music_requests import held_music_track, may_pick
+    try:
+        owner = int(data.get('profile_id'))
+    except (TypeError, ValueError):
+        return None, None, (jsonify({"success": False, "error": "profile_id required"}), 400)
+    if not may_pick(owner):
+        from core.permissions import refusal
+        return None, None, refusal("requests.moderate")
+    row = held_music_track(get_database(), owner, data.get('track_id'))
+    if not row:
+        return None, None, (jsonify({"success": False,
+                                     "error": "That track isn't waiting for a pick any more"}), 404)
+    from core.wishlist.service import WishlistService
+    track = _wishlist_search_override(WishlistService.format_track_for_download(row), data)
+    return owner, track, None
+
+
+@app.route('/api/requests/music/pick/inspect', methods=['POST'])
+@signed_in
+def inspect_request_pick_sources():
+    """every source's hits for one held request track, with the verdicts."""
+    try:
+        data = request.get_json() or {}
+        owner, track, refused = _held_request_pick(data)
+        if refused:
+            return refused
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track), track.get('quality_profile_id'),
+            log_tag='RequestPick', bind_profile=owner,
+        )
+    except Exception as e:
+        logger.error(f"Error in request pick inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/requests/music/pick/download', methods=['POST'])
+@signed_in
+def download_request_pick():
+    """download the file picked for a held request track, into the
+    requester's library. the row stays held until the file lands (a failed
+    pick can be picked again, nothing automatic reaches for it)."""
+    try:
+        data = request.get_json() or {}
+        candidate = data.get('candidate') or {}
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+        if not _pinned_batch.is_pinnable(candidate.get('username')):
+            return jsonify({"success": False, "error": (
+                "Torrent and Usenet hits are whole releases and can't be picked one track at a time. "
+                "Pick a Soulseek or streaming file, or let it download automatically.")}), 400
+        owner, track, refused = _held_request_pick(data)
+        if refused:
+            return refused
+
+        from core.downloads.decisions import is_quality_override
+        name = f"Request: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(candidate),
+                track_info=dict(track),
+            )],
+            name=name, profile_id=owner,
+            source_page='Requests', playlist_prefix='request_pick',
+        )
+        if is_quality_override(data.get('override')):
+            with tasks_lock:
+                for task_id in task_ids:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['_override_quality'] = True
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        try:
+            from api.music_requests import music_pick_started
+            music_pick_started(get_database(), owner, data.get('track_id'))
+        except Exception:  # noqa: BLE001 - the download is the action, the note a follow-up
+            logger.debug("request pick: history update failed", exc_info=True)
+        add_activity_item("", "Request Download Started", name, "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
+    except Exception as e:
+        logger.error(f"Error starting request pick: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -14,6 +14,8 @@ from flask import Blueprint, jsonify, request
 from core.permissions import can, enforcing, may_moderate, may_see_request, profile_can_download, refusal, \
     requires, signed_in
 from core.profile_context import get_current_profile_id, is_admin_request
+from core.requests import acquisition
+from core.requests.acquisition import AWAITING, MANUAL
 from core.requests.music import describe, fulfillment_status, group_rows
 from utils.logging_config import get_logger
 
@@ -146,7 +148,11 @@ def sweep_fulfillment(db, only_pid=None) -> int:
     available when their download lands in the library history. returns how
     many changed."""
     changed = 0
-    for req in db.list_music_requests(profile_id=only_pid, status="approved"):
+    # a request held for a release pick (#2199) keeps its rows on the
+    # wishlist until the picks land, so it settles the same way
+    settling = (db.list_music_requests(profile_id=only_pid, status="approved")
+                + db.list_music_requests(profile_id=only_pid, status=AWAITING))
+    for req in settling:
         pid = int(req["profile_id"])
         state = fulfillment_status(req.get("tracks") or [],
                                    lambda tid, _pid=pid: db.wishlist_has_track(_pid, tid),
@@ -171,6 +177,11 @@ def _sweep_media(db, only_pid=None) -> int:
     """approved book and episode asks flip to available once they're here."""
     from core.requests.media import AUDIOBOOK, book_in_library, describe as describe_media, episode_on_disk
     changed = 0
+    # a held book that arrived some other way (someone else's grab, an
+    # import) has nothing left to pick: it moves on and settles too
+    for req in db.list_media_requests(profile_id=only_pid, status=AWAITING, kind=AUDIOBOOK):
+        if book_in_library(req.get("item_key")):
+            db.media_request_picked(req["id"])
     for req in db.list_media_requests(profile_id=only_pid, status="approved"):
         here = (book_in_library(req.get("item_key")) if req.get("kind") == AUDIOBOOK
                 else episode_on_disk(db, req.get("payload") or {}))
@@ -246,6 +257,8 @@ def list_music_requests():
                     "media_history": [_media_public(r) for r in media_history],
                     "asks_first": mode != "download", "can_request": mode != "none",
                     "moderator": _may_answer(None) and not is_admin_request(),
+                    "acquisition": acquisition.modes(),
+                    "awaiting": _awaiting_count(db) if _may_answer(None) else 0,
                     "quota": _quota(db, me)})
 
 
@@ -292,7 +305,10 @@ def music_request_counts():
     if is_admin_request():
         videos = len(db.list_music_video_requests(status="pending"))
         media = len(db.list_media_requests(status="pending"))
-        return jsonify({"success": True, "pending": len(_pending_groups(db)) + videos + media, "updates": 0})
+        # approved asks waiting for a release pick (#2199) are the admin's too
+        return jsonify({"success": True,
+                        "pending": len(_pending_groups(db)) + videos + media + _awaiting_count(db),
+                        "updates": 0})
     if _may_answer(None):
         # a moderator's badge: everyone else's waiting requests, plus news on
         # their own like any member
@@ -301,6 +317,7 @@ def music_request_counts():
                        if int(r["profile_id"]) != int(pid))
         waiting += sum(1 for r in db.list_media_requests(status="pending")
                        if int(r["profile_id"]) != int(pid))
+        waiting += _awaiting_count(db)
         unseen = sum(1 for h in db.list_music_requests(profile_id=pid) if not h.get("seen_at"))
         unseen += sum(1 for r in db.list_music_video_requests(profile_id=pid)
                       if r["status"] != "pending" and not r.get("seen_at"))
@@ -355,17 +372,31 @@ def approve_music_request():
         return _not_a_moderator()
     if not group:
         return jsonify({"success": False, "error": "That request isn't waiting any more"}), 404
-    flipped = db.approve_request_rows(owner, group["track_ids"])
+    held = acquisition.resolve("music", acquisition.override_from(body)) == MANUAL
+    flipped = _approve_group(db, owner, group, held,
+                             response=(str(body.get("response") or "").strip()[:500] or None))
     if not flipped:
         return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    return jsonify({"success": True, "approved": flipped, "acquisition": MANUAL if held else "auto"})
+
+
+def _approve_group(db, owner, group, held, response=None):
+    """flip one waiting group: approved (the scheduled run downloads it) or
+    held for a release pick (#2199). records the history, tells the
+    requester. returns how many rows moved."""
+    status = AWAITING if held else "approved"
+    flipped = db.approve_request_rows(owner, group["track_ids"], status=status)
+    if not flipped:
+        return 0
     db.add_music_request(profile_id=owner, requester_name=group.get("requester_name"),
                          group_key=group["key"], kind=group["kind"], title=group["title"],
                          artist=group.get("artist"), image_url=group.get("image_url"),
-                         tracks=group["tracks"], status="approved", resolved_by=get_current_profile_id(),
-                         admin_response=(str(body.get("response") or "").strip()[:500] or None))
-    _notify(owner, f"{describe(group)} was approved, it's on the way", "success")
+                         tracks=group["tracks"], status=status, resolved_by=get_current_profile_id(),
+                         admin_response=response)
+    _notify(owner, f"{describe(group)} was approved, " +
+            ("a release gets picked for it next" if held else "it's on the way"), "success")
     _event("music_request_approved", group, owner=owner)
-    return jsonify({"success": True, "approved": flipped})
+    return flipped
 
 
 @bp.route("/api/requests/music/approve-all", methods=["POST"])
@@ -385,17 +416,12 @@ def approve_all_music_requests():
     if only is not None and not _may_answer(only):
         return _not_a_moderator()
     approved = 0
+    # each kind's own setting: approve all never picks a release for anyone
+    held = acquisition.mode_for("music") == MANUAL
     for group in _pending_groups(db, only_pid=only):
         if not _may_answer(group["profile_id"]):
             continue
-        if db.approve_request_rows(group["profile_id"], group["track_ids"]):
-            db.add_music_request(profile_id=group["profile_id"], requester_name=group.get("requester_name"),
-                                 group_key=group["key"], kind=group["kind"], title=group["title"],
-                                 artist=group.get("artist"), image_url=group.get("image_url"),
-                                 tracks=group["tracks"], status="approved",
-                                 resolved_by=get_current_profile_id())
-            _notify(group["profile_id"], f"{describe(group)} was approved, it's on the way", "success")
-            _event("music_request_approved", group)
+        if _approve_group(db, group["profile_id"], group, held):
             approved += 1
     for req in db.list_music_video_requests(profile_id=only, status="pending"):
         if not _may_answer(req["profile_id"]):
@@ -680,10 +706,28 @@ def _media_public(req):
     return {k: v for k, v in req.items() if k != "payload"}
 
 
-def _approve_media(db, req):
-    """start what the approval means, then mark it. None on success, else
-    (error, status)."""
+def _media_held(req, override=None) -> bool:
+    """does this approval hold the ask for a release pick (#2199)? books
+    only: an episode is one file, nothing to pick between."""
+    from core.requests import media
+    if req.get("kind") != media.AUDIOBOOK or acquisition.resolve("audiobook", override) != MANUAL:
+        return False
+    # already in the library: nothing to pick (the grab refuses an owned
+    # book), so it goes the automatic way and settles as arrived
+    return not media.book_in_library(req.get("item_key"))
+
+
+def _approve_media(db, req, override=None):
+    """start what the approval means, then mark it. a book held for a
+    release pick starts nothing: it waits on the Requests page until someone
+    picks one. None on success, else (error, status)."""
     from core.requests.media import describe as describe_media, start_approved
+    if _media_held(req, override):
+        if not db.set_media_request_status(req["id"], AWAITING, resolved_by=get_current_profile_id()):
+            return "That request isn't waiting any more", 409
+        _notify(int(req["profile_id"]), f"{describe_media(req)} was approved, a release gets picked for it next",
+                "success")
+        return None
     error = start_approved(req)
     if error:
         return error, 502
@@ -706,10 +750,11 @@ def approve_media_request(request_id):
         return jsonify({"success": False, "error": "Not found"}), 404
     if req["status"] != "pending":
         return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
-    failed = _approve_media(db, req)
+    override = acquisition.override_from(request.get_json(silent=True) or {})
+    failed = _approve_media(db, req, override)
     if failed:
         return jsonify({"success": False, "error": failed[0]}), failed[1]
-    return jsonify({"success": True})
+    return jsonify({"success": True, "acquisition": MANUAL if _media_held(req, override) else "auto"})
 
 
 @bp.route("/api/requests/media/<int:request_id>/decline", methods=["POST"])
@@ -766,3 +811,197 @@ def delete_media_request_history(request_id):
         return jsonify({"success": False, "error": "Withdraw a pending request instead"}), 409
     ok = db.delete_media_request(request_id)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
+
+
+
+# ── approved requests that wait for a release pick (#2199) ─────────────
+# Settings: one mode per kind (core/requests/acquisition.py). in manual mode
+# an approval holds the ask: music rows sit on the requester's wishlist as
+# 'awaiting_selection', a book's ask as 'awaiting_selection' with nothing on
+# the wishlist yet. no automatic pass downloads either. the queue below is
+# where an admin (or a moderator, for anyone's but their own) picks.
+
+@bp.route("/api/requests/acquisition", methods=["GET"])
+@signed_in
+def get_request_acquisition():
+    """{modes: {music, movie, tv, audiobook}: auto | manual}. anyone may read
+    it (the approve buttons word themselves from it); only admins change it."""
+    return jsonify({"success": True, "modes": acquisition.modes(), "may_change": bool(is_admin_request())})
+
+
+@bp.route("/api/requests/acquisition", methods=["PUT"])
+@signed_in
+def set_request_acquisition():
+    """admin: {modes: {kind: auto | manual}} for the kinds that change."""
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Only an admin changes how approved requests download."}), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        modes = acquisition.set_modes(body.get("modes") or {})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    logger.info("approved request downloads set to %s", modes)
+    return jsonify({"success": True, "modes": modes})
+
+
+def _awaiting_groups(db, only_pid=None):
+    """music asks held for a pick, every profile's (a profile's rights may
+    have changed since the approval, the hold stays)."""
+    groups = []
+    for p in db.get_all_profiles() or []:
+        if only_pid is not None and int(p["id"]) != int(only_pid):
+            continue
+        rows = db.get_awaiting_request_rows(p["id"])
+        if not rows:
+            continue
+        approved = {}
+        for r in rows:
+            approved[str(r.get("spotify_track_id"))] = r.get("approved_at")
+        for g in group_rows(rows, p["id"], p.get("name") or ""):
+            g["status"] = AWAITING
+            g["approved_at"] = max((str(approved.get(t) or "") for t in g["track_ids"]), default="") or None
+            groups.append(g)
+    groups.sort(key=lambda g: str(g.get("approved_at") or ""), reverse=True)
+    return groups
+
+
+def _awaiting_media(db):
+    from core.requests.media import AUDIOBOOK
+    return db.list_media_requests(status=AWAITING, kind=AUDIOBOOK)
+
+
+def _awaiting_count(db) -> int:
+    """what the caller may pick, for the badge and the page's tab."""
+    try:
+        n = sum(1 for g in _awaiting_groups(db) if _may_answer(g["profile_id"]))
+        n += sum(1 for r in _awaiting_media(db) if _may_answer(r["profile_id"]))
+        return n
+    except Exception:  # noqa: BLE001 - a count never fails the page
+        logger.debug("awaiting request count failed", exc_info=True)
+        return 0
+
+
+@bp.route("/api/requests/awaiting", methods=["GET"])
+@signed_in
+def list_awaiting_requests():
+    """the pick queue: music asks and book asks approved on hold, the ones
+    the caller may pick (admins every one, a moderator anyone's but their
+    own). movies and TV keep theirs on the video side
+    (/api/video/requests/awaiting)."""
+    if not _may_answer(None):
+        return _not_a_moderator()
+    db = get_database()
+    music = [g for g in _awaiting_groups(db) if _may_answer(g["profile_id"])]
+    media = [_media_public(r) for r in _awaiting_media(db) if _may_answer(r["profile_id"])]
+    for r in media:
+        r["asin"] = r.get("item_key")
+    return jsonify({"success": True, "music": music, "media": media, "modes": acquisition.modes()})
+
+
+def _find_awaiting_group(db, owner, key):
+    for g in _awaiting_groups(db, only_pid=owner):
+        if g["key"] == key:
+            return g
+    return None
+
+
+def music_pick_started(db, owner, track_id) -> None:
+    """a release was picked for one held track: the request's history moves
+    on (awaiting -> approved, the requester hears it's on the way). the row
+    itself stays held until the picked file lands and takes it off the
+    wishlist, so a failed pick can be picked again and nothing automatic
+    ever reaches for it. called by the pick download (web_server.py)."""
+    from core.requests.music import group_key
+    row = db.get_wishlist_track(str(track_id), profile_id=int(owner)) or {}
+    data = row.get("spotify_data")
+    key = group_key({"spotify_track_id": row.get("spotify_track_id") or track_id,
+                     "spotify_data": data, "source_type": row.get("source_type")})
+    if db.music_request_picked(int(owner), key):
+        req = next((h for h in db.list_music_requests(profile_id=int(owner))
+                    if h.get("group_key") == key), None)
+        if req:
+            _notify(int(owner), f"{describe(req)} is on the way", "success")
+
+
+def held_music_track(db, owner, track_id):
+    """the wishlist row of a held track, or None (not held, not theirs)."""
+    row = db.get_wishlist_track(str(track_id), profile_id=int(owner))
+    if not row or row.get("request_status") != AWAITING:
+        return None
+    return row
+
+
+def may_pick(owner) -> bool:
+    """may the caller pick a release for ``owner``'s request? the same people
+    who may answer it (#2166)."""
+    return _may_answer(owner)
+
+
+@bp.route("/api/requests/music/awaiting/auto", methods=["POST"])
+@signed_in
+def release_music_request_to_auto():
+    """{profile_id, key}: stop waiting for a pick, the scheduled run
+    downloads it like any approved request."""
+    db = get_database()
+    body = request.get_json(silent=True) or {}
+    try:
+        owner = int(body.get("profile_id"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "bad profile_id"}), 400
+    if not _may_answer(owner):
+        return _not_a_moderator()
+    group = _find_awaiting_group(db, owner, str(body.get("key") or ""))
+    if not group:
+        return jsonify({"success": False, "error": "That request isn't waiting for a pick any more"}), 404
+    moved = db.release_awaiting_request_rows(owner, group["track_ids"])
+    if not moved:
+        return jsonify({"success": False, "error": "That request isn't waiting for a pick any more"}), 409
+    if db.music_request_picked(owner, group["key"]):
+        _notify(owner, f"{describe(group)} is on the way", "success")
+    return jsonify({"success": True, "released": moved})
+
+
+def _held_media(db, request_id):
+    """(request, None) for a held book the caller may pick, else (None, response)."""
+    req = db.get_media_request(request_id)
+    if not _may_answer(req["profile_id"] if req else None):
+        return None, _not_a_moderator()
+    if not req or req.get("status") != AWAITING:
+        return None, (jsonify({"success": False, "error": "That request isn't waiting for a pick any more"}), 404)
+    return req, None
+
+
+@bp.route("/api/requests/media/<int:request_id>/picked", methods=["POST"])
+@signed_in
+def media_request_picked(request_id):
+    """a release was grabbed for a held book (the release picker's own grab,
+    /api/audiobooks/grab): the request moves on to approved, and arrives
+    like any other once the book is in the library."""
+    from core.requests.media import describe as describe_media
+    db = get_database()
+    req, refused = _held_media(db, request_id)
+    if refused:
+        return refused
+    if not db.media_request_picked(request_id):
+        return jsonify({"success": False, "error": "That request isn't waiting for a pick any more"}), 409
+    _notify(int(req["profile_id"]), f"{describe_media(req)} is on the way", "success")
+    return jsonify({"success": True})
+
+
+@bp.route("/api/requests/media/<int:request_id>/auto", methods=["POST"])
+@signed_in
+def release_media_request_to_auto(request_id):
+    """stop waiting for a pick: the book goes on the requester's wishlist and
+    the wishlist pass grabs it, as an automatic approval would have."""
+    from core.requests.media import describe as describe_media, start_approved
+    db = get_database()
+    req, refused = _held_media(db, request_id)
+    if refused:
+        return refused
+    error = start_approved(req)
+    if error:
+        return jsonify({"success": False, "error": error}), 502
+    if not db.media_request_picked(request_id):
+        return jsonify({"success": False, "error": "That request isn't waiting for a pick any more"}), 409
+    _notify(int(req["profile_id"]), f"{describe_media(req)} is on the way", "success")
+    return jsonify({"success": True})

@@ -192,14 +192,43 @@ export function musicRequestAnswers(
         ),
       });
     }
+    const awaiting = list.awaiting ?? 0;
+    if (awaiting) {
+      out.push({
+        id: 'admin-pick',
+        title:
+          awaiting === 1
+            ? 'A request waits for you to pick its release'
+            : `${plural(awaiting, 'request')} wait for you to pick their release`,
+        live: true,
+        body: (
+          <>
+            <p>
+              You approved them to pick the release yourself, so nothing downloads them on its own.
+              Pick one and it downloads, imports and lands for whoever asked.
+            </p>
+            <Acts>
+              <Act kind="primary" onClick={() => goHref('/requests?tab=pick')}>
+                Pick a release
+              </Act>
+            </Acts>
+          </>
+        ),
+      });
+    }
+    const holds = list.acquisition?.music === 'manual';
     out.push({
       id: 'admin-approve',
       title: 'What happens when I approve?',
       body: (
         <>
           <p>
-            The tracks go on the asker's wishlist and download from there. When they land in the
-            library, the request moves to Available and the asker is told.
+            {holds
+              ? 'Music is set to have you pick the release: an approved request waits on the Pick a release tab until you choose one. '
+              : "The tracks go on the asker's wishlist and download from there. "}
+            When they land in the library, the request moves to Available and the asker is told.
+            Approval settings, at the top of the page, sets this for music, movies, TV and
+            audiobooks; a request's menu goes the other way for that one.
           </p>
           <Acts>
             <Act kind="ghost" onClick={() => readArticle('prof-requests')}>
@@ -214,6 +243,20 @@ export function musicRequestAnswers(
   }
 
   // ── member: their own asks ──
+  // approved, waiting for an admin to pick the release (#2199)
+  for (const d of decided.filter((x) => x.status === 'awaiting_selection').slice(0, 2)) {
+    out.push({
+      id: `picking:${d.title}`,
+      title: `When will ${d.title || 'it'} arrive?`,
+      live: true,
+      body: (
+        <p>
+          Your admin said yes, and picks the exact release themselves. Once they do, it downloads
+          and you'll get a note when it's in your library.
+        </p>
+      ),
+    });
+  }
   const onTheWay = decided.filter((d) => d.status === 'approved');
   for (const w of waiting.slice(0, 2)) {
     const example = onTheWay[0]?.title;

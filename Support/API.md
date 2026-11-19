@@ -137,6 +137,19 @@ What the server is doing is the admin's. A member's session is refused (`403`) t
 
 In the music library, `POST /api/library/v2/<entity>/<id>/search` (Automatic Search) and `/enhance` (Enhance Quality, Upgrade) download right away, so a profile that asks first is refused them; its way in is the Wishlist. `GET /api/library/v2/enabled` says what the caller may do: `can_wish`, `can_download`, and `can_grab` (an Interactive Search pick for a library row).
 
+### Approved requests that wait for a release pick (web UI routes)
+
+Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the release instead of grabbing the best match. Everything starts on automatic. Music videos, YouTube videos and podcast episodes always download right away.
+
+- `GET /api/requests/acquisition`: `{modes: {music, movie, tv, audiobook}}`, each `auto` or `manual`, plus `may_change`. `PUT` (admin only) with `{modes: {movie: "manual"}}` changes the kinds it names; an unknown kind or mode is a `400`.
+- Every approve route takes `{"acquisition": "auto" | "manual"}` for that one request: `POST /api/requests/music/approve`, `POST /api/requests/media/<id>/approve` (books only, an episode is never held), `POST /api/video/requests/<id>/approve`. Approve all always uses the settings.
+- A held music request keeps its wishlist rows with `request_status = 'awaiting_selection'` and its history row in that status. A held book is a `media_requests` row in `awaiting_selection` and isn't on the wishlist yet. A held movie or episode is on the requester's wishlist with `awaiting_selection = 1`, its request row says `acquisition: "manual"`, and a held show doesn't join their watchlist. No automatic path takes a held row: the wishlist runs, retries, rss, search all and the download monitor's retries all leave it alone.
+- `GET /api/requests/awaiting` (admins, moderators): `{music: [groups], media: [books]}`, what the caller may pick (a moderator never their own). `GET /api/video/requests/awaiting`: `{titles: [{id, kind, tmdb_id, title, requesters, approved_at, seasons, downloading}]}`.
+- Music picks: `POST /api/requests/music/pick/inspect` `{profile_id, track_id}` streams every source's hits for one held track (searched as the requester), and `POST /api/requests/music/pick/download` `{profile_id, track_id, candidate, override?}` downloads that file into their library. The row stays held until the file lands, so a failed pick can be picked again.
+- Books: the release picker grabs with `POST /api/audiobooks/grab`, then `POST /api/requests/media/<id>/picked` moves the request on. Movies and TV: the video release picker's own `POST /api/video/downloads/grab`.
+- Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
+- The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
+
 ---
 
 ## MCP for AI clients
@@ -2553,6 +2566,8 @@ For a calendar app, use the iCal feed instead: `GET /api/video/calendar/feed/<to
 File a request for an admin to approve. Body: `{"kind": "movie|show", "tmdb_id": 27205, "title": "Inception", "year"?: 2010, "note"?: "..."}`.
 
 #### `POST /api/v1/video/requests/<id>/approve`
+
+Optional body: `{"acquisition": "auto" | "manual"}` decides how this one gets its release. Left out, the kind's setting decides (see below). `manual` holds the request until someone picks a release. The answer says which way it went: `"acquisition": "auto" | "manual"`.
 
 #### `POST /api/v1/video/requests/<id>/deny`
 
