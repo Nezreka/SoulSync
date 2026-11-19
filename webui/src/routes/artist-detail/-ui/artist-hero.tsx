@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { getShellProfileContext } from '@/platform/shell/bridge';
 import { useMusicGet } from '@/platform/shell/download-rights';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
@@ -229,6 +230,7 @@ export function ArtistHero({
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const mayWatch = usePermNotOff('music.watchlist');
   const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
   // download, ask first, or can't request at all (#2166): the last has no
@@ -287,7 +289,7 @@ export function ArtistHero({
    *  long as the stream ran. That's the "watched/unwatched over and over"
    *  flapping, and it also swallowed toggles — an in-flight check that resolved
    *  after a toggle overwrote the new state with the old one. */
-  const watchlistId = watchlist?.id ?? null;
+  const watchlistId = mayWatch ? (watchlist?.id ?? null) : null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
@@ -459,18 +461,21 @@ export function ArtistHero({
               React: checkArtistEnhanceEligibility unhides it and rewrites
               `.enhance-text` with the count, so it has no React state.
             */}
-            <button
-              type="button"
-              className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
-              id="library-artist-watchlist-btn"
-              disabled={watchlistBusy}
-              onClick={() => void toggleWatchlist()}
-            >
-              <span className="watchlist-icon">👁️</span>
-              <span className="watchlist-text">
-                {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
-              </span>
-            </button>
+            {/* #2209: no Watchlist in the profile, no button (the server refuses it) */}
+            {mayWatch ? (
+              <button
+                type="button"
+                className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
+                id="library-artist-watchlist-btn"
+                disabled={watchlistBusy}
+                onClick={() => void toggleWatchlist()}
+              >
+                <span className="watchlist-icon">👁️</span>
+                <span className="watchlist-text">
+                  {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
+                </span>
+              </button>
+            ) : null}
             {artist.name ? (
               <AudiobookRouteToggle
                 name={String(artist.name)}

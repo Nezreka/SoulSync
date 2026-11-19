@@ -624,7 +624,7 @@ def export_library_artists():
 
 
 @bp.route('/api/watchlist/add', methods=['POST'])
-@requires("music.access")
+@requires("music.watchlist")
 def add_to_watchlist():
     """Add an artist to the watchlist"""
     try:
@@ -834,7 +834,7 @@ def add_to_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/remove', methods=['POST'])
-@requires("music.access")
+@requires("music.watchlist")
 def remove_from_watchlist():
     """Remove an artist from the watchlist"""
     try:
@@ -886,7 +886,7 @@ def remove_from_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/add-batch', methods=['POST'])
-@requires("music.access")
+@requires("music.watchlist")
 def add_batch_to_watchlist():
     """Add multiple artists to the watchlist at once"""
     try:
@@ -993,7 +993,7 @@ def add_batch_to_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/library/watchlist-all-unwatched', methods=['POST'])
-@requires("music.access")
+@requires("music.watchlist")
 def watchlist_all_unwatched_library_artists():
     """Add all unwatched library artists (that have valid external IDs) to the watchlist"""
     try:
@@ -1636,6 +1636,11 @@ def _watchlist_spotify_artist_info(artist_data, fallback_id):
 @requires("music.access")
 def watchlist_artist_config(artist_id):
     """Get or update watchlist artist configuration"""
+    # #2209: reading a row is the artist page's; changing it is the Watchlist's
+    if request.method == 'POST':
+        from core.permissions import can, enforcing, refusal
+        if enforcing() and not can(None, "music.watchlist"):
+            return refusal("music.watchlist")
     try:
         from database.music_database import get_database
 
@@ -2134,7 +2139,7 @@ def watchlist_artist_config(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/watchlist/artist/<artist_id>/link-provider', methods=['POST'])
-@requires("music.access")
+@requires("music.watchlist")
 def watchlist_artist_link_provider(artist_id):
     """Manually link a watchlist artist to a different Spotify/iTunes artist."""
     try:

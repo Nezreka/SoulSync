@@ -414,7 +414,9 @@ describe('library v2 album track table', () => {
 
       const { container } = render(
         <QueryClientProvider client={createTestQueryClient()}>
-          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+          <LibraryV2CanWriteContext.Provider value>
+            <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+          </LibraryV2CanWriteContext.Provider>
         </QueryClientProvider>,
       );
 
@@ -1059,12 +1061,12 @@ describe('library v2 album track table', () => {
     );
 
     await screen.findByRole('table');
-    const settings = screen.getByRole('button', {
+    const settings = screen.queryByRole('button', {
       name: 'View Settings',
     });
-    expect(settings).toBeDisabled();
+    // view settings write the shared layout: not offered read-only (#2210)
+    expect(settings).toBeNull();
     expect(screen.queryByRole('separator', { name: /Resize/ })).not.toBeInTheDocument();
-    fireEvent.click(settings);
     expect(writes).toBe(0);
   });
 

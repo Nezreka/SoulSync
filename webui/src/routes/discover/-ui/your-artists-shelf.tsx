@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { YourArtist } from '../-discover.your-artists';
 
 import {
@@ -135,6 +137,8 @@ export function YourArtistCard({
   const badges = artistSourceBadges(artist);
   const sources = artist.source_services ?? [];
   const watching = Boolean(artist.on_watchlist);
+  // no watchlist part, no eye button (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
 
   // The vanilla retries a failed image against Deezer's own artist endpoint
   // BEFORE giving up — a stale Spotify url is the common case, and Deezer will
@@ -172,30 +176,32 @@ export function YourArtistCard({
           <SourceBadgeChip key={badge.key} badge={badge} logos={logos} />
         ))}
       </div>
-      <button
-        type="button"
-        className={watching ? 'ya-watchlist-btn active' : 'ya-watchlist-btn'}
-        title={watchlistButtonTitle(artist.on_watchlist)}
-        aria-label={watchlistButtonTitle(artist.on_watchlist)}
-        onClick={(e) => {
-          // Without this the card's own click fires too and opens the info modal
-          // on top of the toggle.
-          e.stopPropagation();
-          onToggleWatchlist(artist);
-        }}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill={watching ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="2"
+      {mayWatch ? (
+        <button
+          type="button"
+          className={watching ? 'ya-watchlist-btn active' : 'ya-watchlist-btn'}
+          title={watchlistButtonTitle(artist.on_watchlist)}
+          aria-label={watchlistButtonTitle(artist.on_watchlist)}
+          onClick={(e) => {
+            // Without this the card's own click fires too and opens the info modal
+            // on top of the toggle.
+            e.stopPropagation();
+            onToggleWatchlist(artist);
+          }}
         >
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill={watching ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      ) : null}
       <div className="ya-card-info">
         <div className="ya-card-info-row">
           <div className="ya-origin-dots">

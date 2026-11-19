@@ -153,53 +153,56 @@ export function ArtistNamingSetting({
       </div>
       {sentence ? <p className={ls.nameSay}>{sentence}</p> : null}
 
-      <form className={ls.nameForm} onSubmit={submit}>
-        <label className={ls.nameFieldLabel} htmlFor={inputId}>
-          Name for folders and tags
-        </label>
-        <div className={ls.nameRow}>
-          <input
-            id={inputId}
-            className={ls.nameInput}
-            value={draft}
-            maxLength={200}
-            spellCheck={false}
-            autoComplete="off"
-            disabled={!canWrite || save.isPending}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button
-            type="submit"
-            className={`${ls.capsule} ${ls.capsuleAccent}`}
-            disabled={!canWrite || !changed || save.isPending}
-          >
-            {save.isPending ? 'Saving…' : 'Save name'}
-          </button>
-        </div>
-        <small className={ls.nameNote}>
-          Also the name SoulSync shows.
-          {naming.pinned && naming.scanned_name && naming.scanned_name !== naming.library_name ? (
-            <>
-              {' '}
-              <button
-                type="button"
-                className={ls.nameLink}
-                disabled={!canWrite || save.isPending}
-                onClick={() => save.mutate(null)}
-              >
-                Go back to {naming.scanned_name}
-              </button>
-            </>
-          ) : null}
-        </small>
-        {save.isError ? (
-          <div className={ls.nameError} role="alert">
-            {errorText(save.error)}
+      {/* #2210: the name is the admin's to change; a member reads it above */}
+      {canWrite ? (
+        <form className={ls.nameForm} onSubmit={submit}>
+          <label className={ls.nameFieldLabel} htmlFor={inputId}>
+            Name for folders and tags
+          </label>
+          <div className={ls.nameRow}>
+            <input
+              id={inputId}
+              className={ls.nameInput}
+              value={draft}
+              maxLength={200}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={!canWrite || save.isPending}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <button
+              type="submit"
+              className={`${ls.capsule} ${ls.capsuleAccent}`}
+              disabled={!canWrite || !changed || save.isPending}
+            >
+              {save.isPending ? 'Saving…' : 'Save name'}
+            </button>
           </div>
-        ) : null}
-      </form>
+          <small className={ls.nameNote}>
+            Also the name SoulSync shows.
+            {naming.pinned && naming.scanned_name && naming.scanned_name !== naming.library_name ? (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className={ls.nameLink}
+                  disabled={!canWrite || save.isPending}
+                  onClick={() => save.mutate(null)}
+                >
+                  Go back to {naming.scanned_name}
+                </button>
+              </>
+            ) : null}
+          </small>
+          {save.isError ? (
+            <div className={ls.nameError} role="alert">
+              {errorText(save.error)}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
 
-      {onPreviewRename || onPreviewRetag ? (
+      {canWrite && (onPreviewRename || onPreviewRetag) ? (
         <div className={ls.nameExisting}>
           <span>Files you already have stay put until you move them.</span>
           <div className={ls.chips}>

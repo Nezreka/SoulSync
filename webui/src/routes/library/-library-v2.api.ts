@@ -61,6 +61,10 @@ interface EnabledResponse extends Ok {
   can_download?: boolean;
   /** an Interactive Search pick may name a library row */
   can_grab?: boolean;
+  /** #2209: may it follow artists (the Watchlist part of its profile) */
+  can_watch?: boolean;
+  /** #2210: may it write tags / ReplayGain into files (its own library's) */
+  can_tag?: boolean;
 }
 
 export interface LibraryV2Availability {
@@ -74,6 +78,12 @@ export interface LibraryV2Availability {
   canDownload: boolean;
   /** #2173: Interactive Search may grab into a library row. */
   canGrab: boolean;
+  /** #2209: may follow artists on its own Watchlist. false for a member
+   *  whose profile has no Watchlist. */
+  canWatch: boolean;
+  /** #2210: may write tags and ReplayGain into files: the admin, or a
+   *  profile in a library of its own. never a shared-library member. */
+  canTag: boolean;
 }
 interface ArtistsResponse extends Ok {
   artists: LibraryV2ArtistSummary[];
@@ -102,6 +112,8 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
     // missing data is not permission to download either
     canDownload: payload.can_download === true || payload.can_write === true,
     canGrab: payload.can_grab === true || payload.can_write === true,
+    canWatch: payload.can_watch === true || payload.can_write === true,
+    canTag: payload.can_tag === true || payload.can_write === true,
   };
 }
 
