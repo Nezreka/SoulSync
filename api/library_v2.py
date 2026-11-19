@@ -5342,6 +5342,47 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, **result})
 
+    def _slot_move_source(body) -> Optional[int]:
+        try:
+            value = int((body or {}).get("source_track_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return value if value > 0 else None
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into/preview", methods=["POST"])
+    def lib2_slot_move_preview(track_id):
+        """#2193: what moving a track you have into this missing slot would
+        do (library rows, tags, folder), before anything changes."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, preview_slot_move
+        try:
+            return jsonify(preview_slot_move(get_database(), source_id, track_id,
+                                             config_manager=config_manager))
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into", methods=["POST"])
+    def lib2_slot_move_apply(track_id):
+        """#2193: move a track you have into this missing slot. The file
+        moves (never a copy), the old row and its emptied album go, the tags
+        are rewritten and the file is filed into this album's folder."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, apply_slot_move
+        try:
+            result = apply_slot_move(get_database(), source_id, track_id,
+                                     config_manager=config_manager,
+                                     profile_id=_intent_profile())
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+        except Exception as e:  # noqa: BLE001
+            logger.error("slot move failed (%s → %s): %s", source_id, track_id, e, exc_info=True)
+            return _fail(str(e), 500)
+        return jsonify(result)
+
     @_route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Merged history for this artist (Lidarr's History tab): grabs,

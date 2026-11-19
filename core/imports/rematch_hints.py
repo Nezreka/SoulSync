@@ -30,6 +30,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.rematch_hints")
+
 # Columns in INSERT/SELECT order — single source of truth so the dataclass, the
 # write, and the read can't drift apart.
 _FIELDS = (
@@ -357,6 +361,12 @@ def delete_replaced_track(
 
     from core.library2.track_files import set_file_state
     set_file_state(cursor.connection, file_id, "deleted")
+    # #2193: the replace is a move. the old row, left with no file, folds into
+    # the track the re-import made (plays, history, playlist and wishlist
+    # links go with it) and an album it leaves empty is taken out the way
+    # removing it does. it used to stay behind as a missing track on a
+    # release nobody had any more, still wanted, so it was searched again
+    fold_replaced_track(cursor, replace_track_id, new_paths)
     # Only unlink if no surviving row still points at this file (rows store the
     # stored path, so compare against the stored path, not the resolved one).
     cursor.execute(
@@ -371,6 +381,49 @@ def delete_replaced_track(
     except OSError:
         pass
     return None
+
+
+def fold_replaced_track(cursor: Any, old_track_id: Any, new_paths: Optional[list]) -> Optional[int]:
+    """Fold a replaced track with no live file left into the track its file
+    was re-imported as. Returns that track's id, or None when it kept a file,
+    the re-import's track can't be told, or the fold failed (then nothing of
+    it is kept). Does not commit."""
+    conn = cursor.connection
+    try:
+        old_id = int(old_track_id)
+    except (TypeError, ValueError):
+        return None
+    if conn.execute(
+            "SELECT 1 FROM lib2_track_files WHERE track_id=? AND path IS NOT NULL AND path<>''"
+            " AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed') LIMIT 1",
+            (old_id,)).fetchone():
+        return None
+    from core.library2.track_files import track_id_for_path
+    found = {track_id_for_path(conn, p, basename=False) for p in (new_paths or []) if p}
+    found.discard(None)
+    found.discard(old_id)
+    if len(found) != 1:
+        return None
+    new_id = int(found.pop())
+    row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (old_id,)).fetchone()
+    if row is None:
+        return None
+    old_album = row[0]
+    conn.execute("SAVEPOINT replaced_track_fold")
+    try:
+        from core.library2.track_slot_move import fold_track_into, retire_emptied_album
+        fold_track_into(conn, old_id, new_id)
+        new_album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (new_id,)).fetchone()
+        if old_album is not None and (new_album is None or new_album[0] != old_album):
+            retire_emptied_album(conn, old_album)
+        conn.execute("RELEASE SAVEPOINT replaced_track_fold")
+    except Exception as exc:  # noqa: BLE001 - the replace itself stands
+        conn.execute("ROLLBACK TO SAVEPOINT replaced_track_fold")
+        conn.execute("RELEASE SAVEPOINT replaced_track_fold")
+        logger.warning("Could not fold replaced track %s into %s: %s", old_id, new_id, exc)
+        return None
+    logger.info("Re-identify folded the replaced track %s into %s", old_id, new_id)
+    return new_id
 
 
 def _copies_span_libraries(cursor: Any, track_id: Any) -> bool:
@@ -416,6 +469,7 @@ __all__ = [
     "list_pending_hints",
     "build_identification_from_hint",
     "delete_replaced_track",
+    "fold_replaced_track",
     "quick_file_signature",
 ]
 

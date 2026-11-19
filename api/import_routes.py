@@ -248,7 +248,9 @@ def reassign_apply():
             artist_name=data.get('artist_name', ''),
             album_type=data.get('album_type'),
             staging_dir=get_staging_path(),
-            replace=bool(data.get('replace', True)),
+            # #2193: a reassign is a move. with replace off it staged a copy
+            # and left the original, so the album came out twice
+            replace=True,
             # Only ever true when the client has shown the user the preview and
             # they accepted an incomplete mapping.
             allow_partial=bool(data.get('allow_partial', False)),

@@ -1436,6 +1436,12 @@ class AutoImportWorker:
                 conn.commit()
             finally:
                 conn.close()
+            # a folded row's wishlist withdrawals (#2193)
+            try:
+                from core.library2.mirror_outbox import drain_soon
+                drain_soon(self.database)
+            except Exception as e:  # noqa: BLE001 - the outbox catches up later
+                logger.debug("[Auto-Import] outbox drain after re-identify skipped: %s", e)
             if removed:
                 logger.info("[Auto-Import] Re-identify replaced old track — removed %s", removed)
         except Exception as e:
