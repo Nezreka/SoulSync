@@ -12,6 +12,7 @@ import type {
 } from '@/routes/audiobooks/-audiobooks.types';
 
 import { Skeleton, Spinner } from '@/components/primitives';
+import { usePermMode } from '@/platform/shell/my-permissions';
 import {
   fetchWishlist,
   removeFromWishlist,
@@ -115,6 +116,10 @@ export function WishlistAudiobooks({
   const [searchingAsin, setSearchingAsin] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [releasesFor, setReleasesFor] = useState<AudiobookWishlistEntry | null>(null);
+  // searching indexers and picking a release is getting books right away
+  // (#2198): a profile that asks first, or can't get books, keeps its list
+  // and each book's status, and the server refuses the rest
+  const canGet = usePermMode('books') === 'download';
 
   const [viewMode, setViewMode] = useState<'grid' | 'shelf'>(() => {
     try {
@@ -319,25 +324,27 @@ export function WishlistAudiobooks({
             <strong>
               {failedCount} {failedCount === 1 ? 'title' : 'titles'} not found yet.
             </strong>{' '}
-            The automation keeps looking on its schedule — run a pass now, or review what&apos;s
-            stuck.
+            The automation keeps looking on its schedule
+            {canGet ? <> — run a pass now, or review what&apos;s stuck.</> : '.'}
           </span>
           <div className="wlp-triage-actions">
-            <button
-              type="button"
-              className="wlp-btn wlp-btn--sm wlp-btn--primary"
-              disabled={searching}
-              onClick={() => void searchNow()}
-            >
-              {searching ? (
-                <>
-                  <Spinner size={14} tone="light" />
-                  Searching…
-                </>
-              ) : (
-                <>⚡ Search now</>
-              )}
-            </button>
+            {canGet && (
+              <button
+                type="button"
+                className="wlp-btn wlp-btn--sm wlp-btn--primary"
+                disabled={searching}
+                onClick={() => void searchNow()}
+              >
+                {searching ? (
+                  <>
+                    <Spinner size={14} tone="light" />
+                    Searching…
+                  </>
+                ) : (
+                  <>⚡ Search now</>
+                )}
+              </button>
+            )}
             <button
               type="button"
               className="wlp-btn wlp-btn--sm"
@@ -425,22 +432,24 @@ export function WishlistAudiobooks({
           </button>
         )}
 
-        <button
-          type="button"
-          className="wlp-btn wlp-btn--primary"
-          aria-label="Search now"
-          disabled={searching}
-          onClick={() => void searchNow()}
-        >
-          {searching ? (
-            <>
-              <Spinner size={14} tone="light" />
-              Searching…
-            </>
-          ) : (
-            <>⚡ Search now</>
-          )}
-        </button>
+        {canGet && (
+          <button
+            type="button"
+            className="wlp-btn wlp-btn--primary"
+            aria-label="Search now"
+            disabled={searching}
+            onClick={() => void searchNow()}
+          >
+            {searching ? (
+              <>
+                <Spinner size={14} tone="light" />
+                Searching…
+              </>
+            ) : (
+              <>⚡ Search now</>
+            )}
+          </button>
+        )}
       </div>
 
       {/* ── Content Presentation ───────────────────────────────────────── */}
@@ -561,16 +570,18 @@ export function WishlistAudiobooks({
                 </div>
 
                 <div className={styles.shelfActions}>
-                  <button
-                    type="button"
-                    className={`${styles.action} ${styles.actionPrimary}`}
-                    title="Search indexers and grab now"
-                    aria-label={`Search for ${item.title} now`}
-                    disabled={searchingAsin === item.asin}
-                    onClick={() => void searchBook(item.asin)}
-                  >
-                    {searchingAsin === item.asin ? 'Searching…' : 'Search'}
-                  </button>
+                  {canGet && (
+                    <button
+                      type="button"
+                      className={`${styles.action} ${styles.actionPrimary}`}
+                      title="Search indexers and grab now"
+                      aria-label={`Search for ${item.title} now`}
+                      disabled={searchingAsin === item.asin}
+                      onClick={() => void searchBook(item.asin)}
+                    >
+                      {searchingAsin === item.asin ? 'Searching…' : 'Search'}
+                    </button>
+                  )}
                   {(item.status === 'failed' || item.status === 'cancelled') && (
                     <button
                       type="button"
@@ -581,13 +592,15 @@ export function WishlistAudiobooks({
                       Look again
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className={styles.action}
-                    onClick={() => setReleasesFor(item)}
-                  >
-                    Find releases
-                  </button>
+                  {canGet && (
+                    <button
+                      type="button"
+                      className={styles.action}
+                      onClick={() => setReleasesFor(item)}
+                    >
+                      Find releases
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`${styles.action} ${styles.actionDanger}`}
@@ -704,20 +717,22 @@ export function WishlistAudiobooks({
               </div>
 
               <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  className={`${styles.action} ${styles.actionPrimary}`}
-                  title="Search indexers and grab now"
-                  aria-label={`Search for ${item.title} now`}
-                  disabled={searchingAsin === item.asin}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void searchBook(item.asin);
-                  }}
-                >
-                  {searchingAsin === item.asin ? 'Searching…' : 'Search'}
-                </button>
+                {canGet && (
+                  <button
+                    type="button"
+                    className={`${styles.action} ${styles.actionPrimary}`}
+                    title="Search indexers and grab now"
+                    aria-label={`Search for ${item.title} now`}
+                    disabled={searchingAsin === item.asin}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void searchBook(item.asin);
+                    }}
+                  >
+                    {searchingAsin === item.asin ? 'Searching…' : 'Search'}
+                  </button>
+                )}
                 {item.narrators.length > 0 && (
                   <button
                     type="button"
@@ -757,17 +772,19 @@ export function WishlistAudiobooks({
                     Look again
                   </button>
                 )}
-                <button
-                  type="button"
-                  className={styles.action}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setReleasesFor(item);
-                  }}
-                >
-                  Find releases
-                </button>
+                {canGet && (
+                  <button
+                    type="button"
+                    className={styles.action}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setReleasesFor(item);
+                    }}
+                  >
+                    Find releases
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`${styles.action} ${styles.actionDanger}`}
@@ -785,7 +802,7 @@ export function WishlistAudiobooks({
         </ul>
       )}
 
-      {releasesFor && (
+      {canGet && releasesFor && (
         <AudiobookReleasesModal
           asin={releasesFor.asin}
           title={releasesFor.title}

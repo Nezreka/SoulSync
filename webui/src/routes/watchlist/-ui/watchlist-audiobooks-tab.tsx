@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AudiobookFollowedAuthor } from '@/routes/audiobooks/-audiobooks.types';
 
+import { usePermMode } from '@/platform/shell/my-permissions';
 import {
   fetchFollowedAuthors,
   followRole,
@@ -67,6 +68,9 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
   const [authors, setAuthors] = useState<AudiobookFollowedAuthor[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  // checking now wishlists what it finds for every follower, which the pass
+  // grabs: getting books right away (#2198), the server refuses the rest
+  const canGet = usePermMode('books') === 'download';
   const [notice, setNotice] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [settingsFor, setSettingsFor] = useState<AudiobookFollowedAuthor | null>(null);
@@ -159,14 +163,16 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
           Checked once a day. Authors and narrators: only books published after you followed.
           Series: every missing volume, or new books only if you chose that.
         </p>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => void scanNow()}
-          disabled={scanning}
-        >
-          {scanning ? 'Checking…' : 'Check now'}
-        </button>
+        {canGet && (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => void scanNow()}
+            disabled={scanning}
+          >
+            {scanning ? 'Checking…' : 'Check now'}
+          </button>
+        )}
       </div>
 
       {notice && (

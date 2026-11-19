@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
 import { EmptyState, Skeleton } from '@/components/primitives';
+import { useMyPermissions, usePermMode } from '@/platform/shell/my-permissions';
 
 import type {
   AudiobookCategory,
@@ -58,6 +59,11 @@ export function AudiobooksBrowsePage() {
   const mode = activeQuery ? 'search' : activeGenre ? 'genre' : 'home';
 
   const [showBlocklist, setShowBlocklist] = useState(false);
+  // the bin holds deleted books (the admin's) and refused releases (only
+  // someone who gets books has any): nobody else is offered it (#2201)
+  const isAdmin = useMyPermissions().isAdmin;
+  const booksGet = usePermMode('books');
+  const binAllowed = isAdmin || booksGet === 'download';
   const [draft, setDraft] = useState(activeQuery);
 
   const [home, setHome] = useState<AudiobookHome>({ hero: null, shelves: [] });
@@ -215,25 +221,27 @@ export function AudiobooksBrowsePage() {
 
               {/* Beside the wishlist because they are two halves of the same idea:
                 what to fetch, and what never to fetch again. */}
-              <button
-                type="button"
-                className="pgf-btn"
-                onClick={() => setShowBlocklist(true)}
-                title="Deleted books you can still restore, and releases that will never be grabbed"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="9"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                  />
-                  <path d="M5.6 5.6l12.8 12.8" stroke="currentColor" strokeWidth="1.8" />
-                </svg>
-                Bin
-              </button>
+              {binAllowed && (
+                <button
+                  type="button"
+                  className="pgf-btn"
+                  onClick={() => setShowBlocklist(true)}
+                  title="Deleted books you can still restore, and releases that will never be grabbed"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="9"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    />
+                    <path d="M5.6 5.6l12.8 12.8" stroke="currentColor" strokeWidth="1.8" />
+                  </svg>
+                  Bin
+                </button>
+              )}
             </>
           }
         />
@@ -248,7 +256,9 @@ export function AudiobooksBrowsePage() {
         />
       </div>
 
-      {showBlocklist && <AudiobookReviewModal onClose={() => setShowBlocklist(false)} />}
+      {binAllowed && showBlocklist && (
+        <AudiobookReviewModal onClose={() => setShowBlocklist(false)} />
+      )}
 
       <AudiobookGenreNav categories={categories} active={activeGenre} onSelect={selectGenre} />
 

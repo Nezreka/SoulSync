@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
+import { ADULT, clearPerms, stubPerms } from '@/test/perms';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
@@ -117,6 +118,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  clearPerms();
   vi.unstubAllGlobals();
   delete window.SoulSyncWebShellBridge;
 });
@@ -227,5 +229,45 @@ describe('audiobook wishlist tab', () => {
       ).toBe(true),
     );
     await screen.findByText('Found and sent to downloads!');
+  });
+});
+
+describe('a member who asks first for books (#2198)', () => {
+  for (const [label, mode] of [
+    ['Require approval', 'ask'],
+    ['no books', 'none'],
+  ] as const) {
+    it(`${label}: keeps the list and each status, gets no Search now, Search or Find releases`, async () => {
+      stubPerms({ ...ADULT, 'books.get': mode });
+      const record = stubFetch([
+        entry('B1', 'Catching Fire', 'failed'),
+        entry('B2', 'Mockingjay', 'grabbed', { download_status: 'downloading' }),
+      ]);
+      renderTab();
+      await screen.findByText('Catching Fire');
+      expect(screen.getByText('Mockingjay')).toBeTruthy();
+      expect(screen.getByText('Downloading')).toBeTruthy();
+      expect(screen.getAllByText('Not found yet').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByRole('button', { name: /Search now/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Search for / })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Find releases' })).toBeNull();
+      // their own list stays theirs
+      expect(screen.getAllByRole('button', { name: 'Remove' }).length).toBe(2);
+      // nothing the server would refuse was asked for
+      const asked = record.map((r) => `${r.method} ${new URL(r.url).pathname}`);
+      for (const call of asked) {
+        expect(call).not.toMatch(/\/search$|\/releases|\/grab|\/downloads/);
+      }
+    });
+  }
+
+  it('a member who gets books right away keeps them', async () => {
+    stubPerms(ADULT);
+    stubFetch([entry('B1', 'Catching Fire', 'failed')]);
+    renderTab();
+    await screen.findByText('Catching Fire');
+    expect(screen.getAllByRole('button', { name: /Search now/ }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: 'Search for Catching Fire now' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Find releases' })).toBeTruthy();
   });
 });

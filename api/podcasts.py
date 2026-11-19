@@ -45,6 +45,7 @@ from core.podcast_download_client import PodcastDownloadClient
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from utils.logging_config import get_logger
 from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 
 logger = get_logger("podcasts.api")
 
@@ -228,7 +229,12 @@ def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str
     episodes = []
     for ep in show_data.get("episodes") or []:
         path = on_disk.get(str(ep.get("enclosure_url") or "")) or on_disk.get(str(ep.get("guid") or ""))
-        episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
+        # where it sits on disk is the admin's (#2201): a member's page only
+        # needs to know it's there
+        if path and not is_admin_request():
+            episodes.append({**ep, "downloaded": True})
+        else:
+            episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
     return {**show_data, "episodes": episodes}
 
 
@@ -917,6 +923,9 @@ def create_podcasts_blueprint() -> Blueprint:
         with _download_lock:
             # Sort newest started first
             items = sorted(_downloads.values(), key=lambda x: x.get("started_at", 0), reverse=True)
+            # the file's path is the admin's (#2201)
+            if not is_admin_request():
+                items = [{k: v for k, v in rec.items() if k != "file_path"} for rec in items]
             return jsonify({"success": True, "downloads": items})
 
     @bp.route("/audio-proxy", methods=["GET"])
@@ -1182,9 +1191,11 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @bp.route("/downloads/cancel-queued", methods=["POST"])
-    @requires("podcasts.access")
+    @admin_only
     def cancel_queued_downloads():
-        """Cancel all pending/queued podcast downloads in memory."""
+        """Cancel all pending/queued podcast downloads in memory.
+
+        everyone's queue, not the caller's, so it's the admin's (#2201)."""
         cancelled_count = 0
         with tasks_lock:
             batch = download_batches.get("podcasts", {})
