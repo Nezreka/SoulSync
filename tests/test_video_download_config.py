@@ -233,25 +233,25 @@ def test_the_downloads_tab_holds_only_download_settings():
     index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="downloads"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
-    # Download Behaviour, Retry Logic, Album Publishing and Filtering are React
-    # now (SETTINGS_PORT.md step 5): their cards are rendered from the tab, in
-    # this order, into slots after Source Settings
-    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
-    # Source Settings (the download chain) is React too (step 7a), rendered
-    # into the first slot, ahead of the others
-    chain = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
-    assert markup.index('data-stg-part="chain"') < markup.index('data-stg-part="behaviour"')
-    titles += re.findall(r'settings-section-static" data-stg="downloads">\s*<h3>([^<]+)</h3>', chain)
-    titles += re.findall(r'title="([^"]+)"', tab[tab.index("function Behaviour("):])
+    # (settings-bic) Downloads is one page of three pills: Sources (the
+    # download order), Behaviour and Filtering. the pills are nav.ts's, and
+    # each view's cards are all about downloading
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs" / "downloads"
+    nav = (_WEBUI / "src" / "features" / "settings" / "nav.ts").read_text(encoding="utf-8")
+    downloads = nav[nav.index("key: 'downloads',"):nav.index("key: 'quality',")]
+    assert re.findall(r"\{ key: '(\w+)', label: '(\w+)'", downloads) == [
+        ("sources", "Sources"), ("behaviour", "Behaviour"), ("filtering", "Filtering")]
+    assert 'data-stg-react="downloads" data-stg-part="page"' in markup
+    titles = re.findall(r'title="([^"]+)"', (tabs / "sources-view.tsx").read_text(encoding="utf-8"))
+    titles = [t for t in titles if not t.startswith("Checks")]
+    behaviour = (tabs / "behaviour-view.tsx").read_text(encoding="utf-8")
+    titles += re.findall(r'<Card\s+title="([^"]+)"', behaviour)
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards
-    assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing",
-                      "Filtering"], titles
+    titles += re.findall(r'<Card\s+title="([^"]+)"', (tabs / "filtering-view.tsx").read_text(encoding="utf-8"))
+    assert titles == ["Download order", "Indexers", "Download behaviour", "Retry logic",
+                      "Album publishing", "When a download fails", "Explicit content",
+                      "Size and version", "Genres"], titles
 
     # the two that moved must not have crept back
     # #1822: notifications sit with the other connected services, import lists

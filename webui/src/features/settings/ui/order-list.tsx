@@ -100,6 +100,9 @@ export interface OrderListProps {
   keepText?: string;
   removeLabel?: string;
   addLabel?: string;
+  /** on <body> while a row's menu is open: on a phone the menu is a sheet
+   *  from the bottom, and the page's floating buttons must step aside */
+  menuBodyClass?: string;
 }
 
 interface Drag {
@@ -155,6 +158,7 @@ export function OrderList({
   keepText = 'Keep at least one',
   removeLabel = 'Stop using',
   addLabel = 'Use',
+  menuBodyClass,
 }: OrderListProps) {
   const ids = items.map((item) => item.id);
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -495,8 +499,12 @@ export function OrderList({
       setMenu(null);
     };
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
-  }, [menu]);
+    if (menuBodyClass) document.body.classList.add(menuBodyClass);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      if (menuBodyClass) document.body.classList.remove(menuBodyClass);
+    };
+  }, [menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {

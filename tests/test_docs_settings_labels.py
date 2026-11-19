@@ -136,7 +136,6 @@ LABELS: list[tuple[str, str]] = [
 # "Settings → Library → Folders" (01-getting-started.js).
 TABS: list[tuple[str, str]] = [
     ("Connections", "connections"),
-    ("Sources", "sources"),
     ("Downloads", "downloads"),
     ("Quality", "quality"),
     ("Library", "library"),
@@ -144,7 +143,15 @@ TABS: list[tuple[str, str]] = [
     ("Appearance", "appearance"),
     # #1822: the Advanced tab is labelled System; its slug stays
     ("System", "advanced"),
-    ("Logs", "logs"),
+]
+
+# (settings-bic) ten tabs became eight: Sources is a pill of Downloads and
+# Logs a pill of System. The docs still name both, so both must still be a
+# place on the page (features/settings/nav.ts), and their old keys must
+# still open them.
+PILLS: list[tuple[str, str, str]] = [
+    ("Sources", "sources", "downloads"),
+    ("Logs", "logs", "advanced"),
 ]
 
 # Labels that exist ONLY at runtime (rendered from server data, never
@@ -208,6 +215,17 @@ def test_settings_nav_tab_present(tab_label: str, slug: str):
     assert pattern.search(_INDEX), (
         f"settings tab {tab_label!r} has no visible stg-tab-label in index.html — "
         "the docs' Settings pages describe this tab"
+    )
+
+
+@pytest.mark.parametrize("label,slug,tab", PILLS, ids=[label for label, _, _ in PILLS])
+def test_settings_pill_present(label: str, slug: str, tab: str):
+    """A tab the docs name that is now a pill: still there, under its tab, and
+    its old tab key still lands on it."""
+    nav = (_ROOT / "webui" / "src" / "features" / "settings" / "nav.ts").read_text(encoding="utf-8")
+    assert f"{{ key: '{slug}', label: '{label}' }}" in nav, f"pill {label!r} missing from nav.ts"
+    assert f"{slug}: {{ tab: '{tab}', view: '{slug}' }}," in nav, (
+        f"the old tab key {slug!r} no longer opens {label!r}"
     )
 
 

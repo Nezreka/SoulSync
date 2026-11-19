@@ -473,6 +473,7 @@ export function SourcesView({
             poolEmpty={`Every source is in the ${word} order.`}
             removeLabel={`Stop using for ${word}`}
             keepText="Keep at least one source"
+            menuBodyClass="stg-menu-open"
           />
         </div>
       </div>

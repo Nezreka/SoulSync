@@ -269,14 +269,18 @@ def test_the_tile_renders_on_both_sides():
 
     import re
 
-    index = _html()
-    at = index.index('data-stg-part="youtube"')
-    stg = index.rfind('data-stg="', 0, at)
-    tab = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 32]).group(1)
-    assert tab == "sources", f"the updater is on the {tab} tab, not with its source"
-    home = index.index('id="source-config-home"')
-    # inside the parked panels: before the modal's slot, which follows them
-    assert home < at < index.index('data-stg-part="modal"', home)
+    # (settings-bic) Sources is a pill of Downloads, shared by both sides:
+    # the panels are parked in the Downloads page, with no side on them, and
+    # the Sources pill has none either
+    from pathlib import Path
+    tabs = Path("webui/src/features/settings")
+    home = (tabs / "tabs/downloads/sources-view.tsx").read_text(encoding="utf-8")
+    parked = home[home.index('<div id="source-config-home" hidden>'):]
+    parked = parked[:parked.index("</div>")]
+    assert '<MoreSourcePanels {...props} part="youtube" />' in parked
+    assert "data-video-only" not in home and "data-music-only" not in home
+    nav = (tabs / "nav.ts").read_text(encoding="utf-8")
+    assert "{ key: 'sources', label: 'Sources' }," in nav
     assert '<Panel id="youtube-settings-container"' in _youtube(), (
         "no longer inside the YouTube panel - which is the whole reason it moved"
     )

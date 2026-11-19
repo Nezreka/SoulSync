@@ -237,7 +237,11 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
   display: block;
   margin: 0;
   padding: 13px 0;
+  border: 0;
   border-top: 1px solid var(--white-a06);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 
 #settings-page #src-modal-body .src-config-panel > .form-group:first-child {

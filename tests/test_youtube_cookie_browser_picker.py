@@ -109,7 +109,11 @@ def test_the_warning_has_somewhere_to_render(js):
     # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
     from tests.support.settings_page import index_with_settings_page
     index = index_with_settings_page()
-    assert 'data-stg-part="youtube"' in index
+    # (settings-bic) the source panels are parked inside the Downloads page,
+    # which the settings page draws as one slot
+    assert 'data-stg-react="downloads" data-stg-part="page"' in index
+    home = _read("webui/src/features/settings/tabs/downloads/sources-view.tsx")
+    assert '<MoreSourcePanels {...props} part="youtube" />' in home
     panel = _youtube(js)
     assert 'id="youtube-cookie-abe-warning"' in panel
     assert 'role="status"' in panel.split('id="youtube-cookie-abe-warning"', 1)[1][:80]

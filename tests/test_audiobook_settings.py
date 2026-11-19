@@ -383,9 +383,15 @@ def test_the_chain_is_only_shown_when_it_applies(panel):
 
 
 def test_the_last_source_cannot_be_switched_off():
-    widget = (_TABS / "sources-tab.tsx").read_text(encoding="utf-8")
-    body = widget.split("const remove = (id: string) => {", 1)[1].split("};", 1)[0]
-    assert "full.length <= 1" in body
+    # the order list (settings-bic) holds the rule for all three orders: a
+    # row can only go while more than the fewest allowed are left, by the
+    # menu and by dragging it out
+    widget = (_TABS.parent / "ui" / "order-list.tsx").read_text(encoding="utf-8")
+    assert "minItems = 1," in widget
+    assert "const canRemove = ids.length > minItems;" in widget
+    body = widget.split("const remove = (id: string, by: 'menu' | 'drag') => {", 1)[1].split("};", 1)[0]
+    assert "if (!canRemove) return;" in body
+    assert "live.current.canRemove && middle > poolBox.top" in widget
 
 
 def test_the_order_is_loaded_and_saved(model):

@@ -1900,17 +1900,21 @@ button.chip:hover:not(:disabled) {
 /* ── phones ── */
 
 @media (max-width: 768px) {
+  /* the page frame already keeps 12px at the sides and 70px at the top for
+     the menu button (mobile.css .page) */
   .panel {
-    padding: 14px 16px 96px;
+    padding: 0 4px 96px;
     border: 0;
     border-radius: 0;
     background: none;
   }
 
+  /* the title sits beside the menu button, not under it */
   .top {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+    margin-top: -54px;
     margin-bottom: 8px;
   }
 
@@ -2177,6 +2181,7 @@ button.chip:hover:not(:disabled) {
 
   .sheetFoot {
     flex-wrap: wrap;
+    justify-content: space-between;
     padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
   }
 

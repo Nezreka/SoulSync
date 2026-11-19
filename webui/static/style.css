@@ -5464,7 +5464,10 @@ body.np-modal-open #helper-float-btn,
 /* a settings sheet's foot (Test, Done) sits where the floating buttons do */
 body.src-modal-open #notif-bell-btn,
 body.src-modal-open #helper-float-btn,
-body.src-modal-open #activity-float-btn {
+body.src-modal-open #activity-float-btn,
+body.stg-menu-open #notif-bell-btn,
+body.stg-menu-open #helper-float-btn,
+body.stg-menu-open #activity-float-btn {
     display: none !important;
 }
 
