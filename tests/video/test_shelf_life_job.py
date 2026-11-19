@@ -973,6 +973,26 @@ def test_playing_now_reads_every_session_linked_to_the_library(db, monkeypatch):
     assert _REAL_PLAYING_NOW(db) is None
 
 
+def test_a_show_playing_on_a_second_server_is_held(db, worker, monkeypatch):
+    # a show session the activity view could only place by its TMDB id (#2211 review S1)
+    from core import server_activity
+    from core.video import delete_title
+    calls = []
+    monkeypatch.setattr(delete_title, "run", lambda *a, **k: calls.append(a) or {"success": True})
+    sid = _show(db, "Nobody", tmdb=10, streaming="ok", count=5)
+    up = [{"server": "plex", "reachable": True}, {"server": "jellyfin", "reachable": True}]
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": True, "servers": up, "sessions": [
+        {"link": {"source": "tmdb", "kind": "show", "id": 10}}]})
+    assert _REAL_PLAYING_NOW(db) == {("show", sid)}
+    _run(worker)
+    fid = _pending(db)[0]["id"]                      # flagged while the stub says nothing plays
+    monkeypatch.setattr(job_module, "_playing_now", _REAL_PLAYING_NOW)
+    res = worker.fix_finding(fid, "Nobody")
+    assert res["success"] is False and "playing it right now" in res["error"] and calls == []
+    _run(worker)
+    assert _stored(db, "show", [sid])[sid]["gate"] == "playing"
+
+
 def test_playing_now_cant_say_while_any_server_cant_be_asked(db, monkeypatch):
     # plex answered with nothing playing, jellyfin didn't answer: not "nothing playing"
     from core import server_activity

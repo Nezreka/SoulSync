@@ -195,8 +195,8 @@ def _playing_now(db):
     """{(kind, library id)} for every title playing or paused right now, on
     any server, whoever is watching; a show is held for any of its episodes.
     an empty set when no server is set up, None when a server can't be
-    asked. a movie the activity view could only place by its TMDB id (playing
-    on a server the library wasn't scanned from) is found by that id."""
+    asked. a movie or show the activity view could only place by its TMDB id
+    (playing on a server the library wasn't scanned from) is found by that id."""
     from core import server_activity
     act = server_activity.get_activity(db)
     if not act.get("ok"):
@@ -204,17 +204,19 @@ def _playing_now(db):
     if any(not s.get("reachable") for s in act.get("servers") or []):
         return None
     out = set()
-    tmdb_movies = None
+    index = None
     for sess in act.get("sessions") or []:
         link = sess.get("link") or {}
         if not link.get("id") or link.get("kind") not in ("movie", "show"):
             continue
         if link.get("source") == "library":
             out.add((link["kind"], int(link["id"])))
-        elif link.get("source") == "tmdb" and link["kind"] == "movie":
-            if tmdb_movies is None:
-                tmdb_movies = db.shelf_life_external_index()["movie"]
-            out.update(("movie", mid) for mid in tmdb_movies.get(int(link["id"]), []))
+        elif link.get("source") == "tmdb":
+            if index is None:
+                index = db.shelf_life_external_index()
+            ids = (index["movie"].get(int(link["id"]), []) if link["kind"] == "movie"
+                   else index["show"].get(("tmdb", int(link["id"])), []))
+            out.update((link["kind"], i) for i in ids)
     return out
 
 
