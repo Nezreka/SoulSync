@@ -36,19 +36,41 @@ def _setting(config, key: str) -> bool:
 
 
 def _folder_cover(folders) -> Optional[str]:
-    """the name of the cover file sitting in the album's folders, if any"""
-    from core.library2.artwork import _ALBUM_FOLDER_STEMS, _FOLDER_IMAGE_EXTS
+    """the name of the cover file sitting in the album's folders, if any:
+    the same check the scan makes (#2202)"""
+    from core.metadata.art_apply import folder_cover_file
     for folder in folders:
-        try:
-            names = {name.lower(): name for name in os.listdir(folder)}
-        except OSError:
-            continue
-        for stem in _ALBUM_FOLDER_STEMS:
-            for ext in _FOLDER_IMAGE_EXTS:
-                found = names.get(f"{stem}.{ext}")
-                if found:
-                    return found
+        found = folder_cover_file(folder)
+        if found:
+            return os.path.basename(found)
     return None
+
+
+def library_picture(database, config_manager, album_id: int, image_url) -> bool:
+    """the library's saved cover is a picture SoulSync can show, not only a
+    url. a placeholder or a link that no longer loads is no cover (#2202: a
+    finding said "the library has a cover to copy" over an empty tile, and
+    Apply Art had nothing to copy). an error says nothing either way, so the
+    saved url is trusted then"""
+    url = str(image_url or "").strip()
+    if not url:
+        return False
+    try:
+        from core.metadata.artwork import is_placeholder_image_url
+        if is_placeholder_image_url(url):
+            return False
+        from core.library2 import artwork
+        cached = artwork.artwork_file(database, "album", album_id)
+        if cached.exists() and artwork.is_cached_jpeg(cached):
+            return True
+        import sqlite3
+        with closing(database._get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            path = artwork.build_artwork(database, conn, config_manager, "album", album_id)
+        return bool(path) and os.path.isfile(path)
+    except Exception as e:  # noqa: BLE001 - unknown is not missing
+        logger.debug("library cover check for album %s failed: %s", album_id, e)
+        return True
 
 
 def _file_counts(conn, album_id: int, owner) -> Dict[str, int]:
@@ -74,33 +96,59 @@ def _file_counts(conn, album_id: int, owner) -> Dict[str, int]:
     return counts
 
 
-def apply_plan(state: Dict[str, Any]) -> list:
-    """What Apply Art does in each place, the same choices the fix makes:
-    a saved or picked library cover goes to the files and the folder, else
-    the found one; a cover that is there is never replaced."""
-    library, files, folder, found = (state["library"], state["files"],
-                                     state["folder"], state["found"])
+#: the covers a finding can apply, best first: the library's own, the
+#: folder's, the one inside the files, then one a source found (#2202)
+PICKS = ("library", "folder", "files", "found")
+
+
+def choices(state: Dict[str, Any]) -> list:
+    """the tiles that hold a picture, in PICKS order"""
+    have = {
+        "library": state["library"]["has"],
+        "folder": bool(state["folder"].get("file")),
+        "files": bool(state["files"].get("with")),
+        "found": bool(state["found"].get("url")),
+    }
+    return [pick for pick in PICKS if have[pick]]
+
+
+def default_pick(state: Dict[str, Any]) -> Optional[str]:
+    found = choices(state)
+    return found[0] if found else None
+
+
+_UNSET = object()
+
+
+def apply_plan(state: Dict[str, Any], pick=_UNSET) -> list:
+    """What Apply Art does in each place with ``pick`` as the cover, the
+    same choices the fix makes: the pick fills each place without a cover,
+    a cover that is there is kept. picking a found cover over the library's
+    own replaces it, as Change cover would. no pick: the default one"""
+    library, files, folder = state["library"], state["files"], state["folder"]
     settings = state["settings"]
-    if library["locked"]:
-        uses = "chosen"
-    elif library["has"]:
-        uses = "library"
-    elif found.get("url"):
-        uses = "found"
-    else:
-        uses = None
+    if pick is _UNSET:
+        pick = default_pick(state)
+    if pick is not None and pick not in choices(state):
+        pick = None
+    # the library's own cover is the one the user picked when it is locked
+    uses = "chosen" if pick == "library" and library["locked"] else pick
 
     plan = []
-    if library["locked"]:
-        plan.append({"place": "library", "action": "keep", "why": "chosen"})
+    if pick == "found":
+        plan.append({"place": "library", "action": "write", "why": "found",
+                     **({"replace": True} if library["has"] else {}),
+                     **({"broken": True} if library.get("broken") else {})})
     elif library["has"]:
-        plan.append({"place": "library", "action": "keep", "why": "has"})
-    elif uses == "found":
-        plan.append({"place": "library", "action": "write", "why": "found"})
+        plan.append({"place": "library", "action": "keep",
+                     "why": "chosen" if library["locked"] else "has"})
+    elif library.get("broken"):
+        plan.append({"place": "library", "action": "skip", "why": "broken"})
+    elif pick:
+        plan.append({"place": "library", "action": "skip", "why": "local"})
     else:
         plan.append({"place": "library", "action": "skip", "why": "nothing_found"})
 
-    will_embed = False
     if not settings["embed"]:
         plan.append({"place": "files", "action": "skip", "why": "setting_off"})
     elif not (files["with"] or files["without"]):
@@ -108,7 +156,6 @@ def apply_plan(state: Dict[str, Any]) -> list:
     elif not files["without"]:
         plan.append({"place": "files", "action": "keep", "why": "has"})
     elif uses:
-        will_embed = True
         plan.append({"place": "files", "action": "write", "why": uses,
                      "count": files["without"]})
     else:
@@ -120,8 +167,6 @@ def apply_plan(state: Dict[str, Any]) -> list:
         plan.append({"place": "folder", "action": "keep", "why": "has", "file": folder["file"]})
     elif not folder["exists"]:
         plan.append({"place": "folder", "action": "skip", "why": "unreachable"})
-    elif files["with"] or will_embed:
-        plan.append({"place": "folder", "action": "write", "why": "files"})
     elif uses:
         plan.append({"place": "folder", "action": "write", "why": uses})
     else:
@@ -149,12 +194,14 @@ def cover_state(database, config_manager, finding_id: int, details: Dict[str, An
             return None
         files = _file_counts(conn, album_id, owner)
         folders = _album_folders(conn, config_manager, album_id)
-    has = bool(str(row[0] or "").strip())
+    saved = bool(str(row[0] or "").strip())
+    has = library_picture(database, config_manager, album_id, row[0])
     image = f"/api/repair/findings/{int(finding_id)}/cover-image?place="
     folder_file = _folder_cover(folders)
     state = {
         "album_id": album_id,
         "library": {"has": has, "locked": bool(row[1]) and has,
+                    "broken": saved and not has,
                     "url": image + "library" if has else None},
         "files": {**files, "url": image + "files" if files["with"] else None},
         "folder": {"file": folder_file, "exists": bool(folders),
@@ -165,8 +212,43 @@ def cover_state(database, config_manager, finding_id: int, details: Dict[str, An
         "settings": {"embed": _setting(config_manager, "embed_album_art"),
                      "sidecar": _setting(config_manager, "cover_art_download")},
     }
-    state["plan"] = apply_plan(state)
+    state["choices"] = choices(state)
+    state["pick"] = default_pick(state)
+    # what Apply Art does for each cover the user can pick, so a pick on the
+    # finding shows its own plan without asking the server again
+    state["plans"] = {pick: apply_plan(state, pick) for pick in state["choices"]}
+    state["plan"] = apply_plan(state, state["pick"])
     return state
+
+
+def pick_bytes(database, config_manager, album_id: int, pick: str,
+               found_url: Optional[str] = None) -> Optional[bytes]:
+    """the picture of one tile, for Apply Art to write (#2202). the library's
+    is what the library shows, only when it has a saved cover of its own"""
+    from core.library2 import artwork
+    import sqlite3
+    if pick == "found":
+        if not found_url:
+            return None
+        try:
+            return artwork._download_remote_artwork(found_url)
+        except Exception as e:  # noqa: BLE001 - a dead link is no cover
+            logger.debug("found cover for album %s not read: %s", album_id, e)
+            return None
+    if pick not in PLACES:
+        return None
+    with closing(database._get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        if pick == "library":
+            row = conn.execute("SELECT image_url FROM lib2_albums WHERE id = ?",
+                               (album_id,)).fetchone()
+            if not row or not str(row[0] or "").strip():
+                return None
+    if pick == "library":
+        if not library_picture(database, config_manager, album_id, row[0]):
+            return None
+    data = cover_image(database, config_manager, {"album_id": album_id}, pick)
+    return data or None
 
 
 def cover_image(database, config_manager, details: Dict[str, Any], place: str) -> Optional[bytes]:

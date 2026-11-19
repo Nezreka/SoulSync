@@ -51,6 +51,9 @@ const live = (over: Partial<CoverFindingState> = {}): CoverFindingState => ({
     { place: 'files', action: 'keep', why: 'has' },
     { place: 'folder', action: 'write', why: 'files' },
   ],
+  choices: ['files'],
+  pick: 'files',
+  plans: {},
   ...over,
 });
 
@@ -64,8 +67,10 @@ function serve(state: CoverFindingState | null) {
   return fetchMock;
 }
 
-const renderDetail = (finding: RepairFinding) =>
-  render(<FindingDetail finding={finding} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />);
+const renderDetail = (finding: RepairFinding, onApplyCoverArt = vi.fn()) =>
+  render(
+    <FindingDetail finding={finding} onKeepDuplicate={vi.fn()} onApplyCoverArt={onApplyCoverArt} />,
+  );
 
 describe('a cover art finding explains itself (#2169)', () => {
   it('shows the library, the files, the folder and the found cover, empty when missing', async () => {
@@ -136,6 +141,111 @@ describe('a cover art finding explains itself (#2169)', () => {
       expect(screen.getByText(/no longer in the library as it was/)).toBeTruthy(),
     );
     expect(screen.getByText('Has a cover')).toBeTruthy();
+  });
+});
+
+// the reporter's Stadium Arcadium: a library cover, none in the files, a
+// cover.jpg in the folder, and (say) a found one
+const everything = (over: Partial<CoverFindingState> = {}) =>
+  live({
+    library: { has: true, locked: false, url: '/api/repair/findings/9/cover-image?place=library' },
+    files: { with: 0, without: 2, unknown: 0, url: null },
+    folder: {
+      file: 'cover.jpg',
+      exists: true,
+      url: '/api/repair/findings/9/cover-image?place=folder',
+    },
+    found: { url: 'https://deezer/cover.jpg', source: 'deezer' },
+    choices: ['library', 'folder', 'found'],
+    pick: 'library',
+    plan: [{ place: 'library', action: 'keep', why: 'has' }],
+    plans: {
+      library: [{ place: 'library', action: 'keep', why: 'has' }],
+      folder: [{ place: 'files', action: 'write', why: 'folder', count: 2 }],
+      found: [{ place: 'library', action: 'write', why: 'found', replace: true }],
+    },
+    ...over,
+  });
+
+describe('every cover on a finding can be picked (#2202)', () => {
+  it('picks the library cover to start with and applies it', async () => {
+    serve(everything());
+    const apply = vi.fn();
+    renderDetail(coverFinding({ found_artwork_url: 'https://deezer/cover.jpg' }), apply);
+    const library = await screen.findByRole('radio', { name: 'Use the cover in the library' });
+    expect(library.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radiogroup', { name: 'Cover Apply Art uses' })).toBeTruthy();
+    expect(screen.getAllByText('Using this')).toHaveLength(1);
+    expect(screen.getByText('Already has a cover. Kept as it is.')).toBeTruthy();
+    // a tile with no picture is no pick
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Art' }));
+    expect(apply).toHaveBeenCalledWith(9, 'album:library');
+  });
+
+  it('a click picks another cover, shows its plan and applies it', async () => {
+    serve(everything());
+    const apply = vi.fn();
+    renderDetail(coverFinding({ found_artwork_url: 'https://deezer/cover.jpg' }), apply);
+    const found = await screen.findByRole('radio', { name: 'Use the cover found on Deezer' });
+    fireEvent.click(found);
+    expect(found.getAttribute('aria-checked')).toBe('true');
+    expect(
+      screen
+        .getByRole('radio', { name: 'Use the cover in the library' })
+        .getAttribute('aria-checked'),
+    ).toBe('false');
+    expect(
+      screen.getByText('Replaces its cover with the Deezer cover, the same as Change cover.'),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Use the cover in the album folder' }));
+    expect(
+      screen.getByText("Embeds the album folder's cover into the 2 files without one."),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Art' }));
+    expect(apply).toHaveBeenCalledWith(9, 'album:folder');
+    expect(screen.getByRole('button', { name: 'Change cover' })).toBeTruthy();
+  });
+
+  it('a cover that does not load is no pick, the next best is', async () => {
+    serve(everything());
+    const apply = vi.fn();
+    const { container } = renderDetail(coverFinding(), apply);
+    await screen.findByRole('radio', { name: 'Use the cover in the library' });
+    fireEvent.error(container.querySelector('img[src*="place=library"]') as Element);
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('radio', { name: 'Use the cover in the album folder' })
+          .getAttribute('aria-checked'),
+      ).toBe('true'),
+    );
+    expect(screen.queryByRole('radio', { name: 'Use the cover in the library' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Art' }));
+    expect(apply).toHaveBeenCalledWith(9, 'album:folder');
+  });
+
+  it('with no cover anywhere, Apply Art waits and Change cover is still there', async () => {
+    serve(
+      live({
+        library: { has: false, locked: false, broken: true, url: null },
+        files: { with: 0, without: 1, unknown: 0, url: null },
+        choices: [],
+        pick: null,
+        plan: [{ place: 'library', action: 'skip', why: 'broken' }],
+      }),
+    );
+    renderDetail(coverFinding());
+    await waitFor(() => expect(screen.getByText('Saved cover no longer loads')).toBeTruthy());
+    expect(
+      screen.getByText('Its saved cover no longer loads. Change cover lets you pick a new one.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Apply Art' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByText(/There is no cover here to apply/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Change cover' })).toBeTruthy();
   });
 });
 
