@@ -28,6 +28,8 @@ flagged again.
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 
 from core.video import shelf_life as sl
@@ -414,6 +416,78 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     return out
 
 
+# ── checked again at delete time ─────────────────────────────────────────────
+OFF_ERROR = ("Shelf Life is switched off, so nothing it flagged can be deleted. "
+             "Turn it on in Library Maintenance first. Nothing was deleted.")
+OFF_PLAN = ("Shelf Life is switched off, so nothing it flagged can be deleted. "
+            "Turn it on in Library Maintenance to plan a cleanup.")
+
+# a batch checks every title once up front (one gather, not one per title);
+# its deletes then skip the full check for this long.
+# {(database, finding id): when}
+_PRECHECK_TTL = 15 * 60
+_prechecked: dict = {}
+_precheck_lock = threading.Lock()
+
+
+def _config(db) -> dict:
+    """the job's saved config: {enabled, interval_hours, settings} with the
+    settings over the defaults."""
+    from core.video.repair.worker import VideoRepairWorker
+    cfg = VideoRepairWorker(db).job_config(ShelfLifeJob.job_id) or {}
+    return {**cfg, "settings": {**ShelfLifeJob.default_settings, **(cfg.get("settings") or {})}}
+
+
+def _threshold(settings) -> int:
+    return _int_setting(settings, "threshold", sl.DEFAULT_THRESHOLD)
+
+
+def recheck(db, findings, settings: dict, now: datetime | None = None) -> dict:
+    """each finding's title gathered and scored again, now, with the job's
+    current settings: {finding id: {ok, reason, score, size_bytes}}. a
+    finding is only still good while its title is in the library, no gate
+    holds it (playing, part-way, watched lately, padlock, Keep, a request in
+    its grace, a followed show airing, a new arrival) and it still scores
+    under the current line. ``reason`` says why not, in plain words. the
+    whole library is gathered once, however many findings there are."""
+    now = now or datetime.now()
+    titles = gather(db, settings, now)
+    by_row = {}
+    for kind in ("movie", "show"):
+        for row, facts in titles[kind]:
+            for rid in row.get("group_ids") or [row["id"]]:
+                by_row[(kind, int(rid))] = (row, facts)
+    threshold = _threshold(settings)
+    out = {}
+    for f in findings:
+        d = f.get("details") or {}
+        try:
+            hit = by_row.get((d.get("kind"), int(d.get("item_id"))))
+        except (TypeError, ValueError):
+            hit = None
+        if hit is None:
+            out[f["id"]] = {"ok": False, "reason": "it is no longer in the library", "score": None,
+                            "size_bytes": 0}
+            continue
+        row, facts = hit
+        r = sl.score(facts, settings, now)
+        size = int(row.get("size_bytes") or 0)
+        if r["gate"]:
+            reason = sl.GATE_TEXT.get(r["gate"]) or r["gate"]
+        elif not r["candidate"]:
+            reason = "it scores %d now, not under the line of %d" % (r["score"], threshold)
+        else:
+            reason = None
+        out[f["id"]] = {"ok": reason is None, "reason": reason, "score": r["score"], "size_bytes": size}
+    return out
+
+
+def _label(f) -> str:
+    d = f.get("details") or {}
+    name = d.get("title") or "?"
+    return "%s (%s)" % (name, d["year"]) if d.get("year") else name
+
+
 def batch_phrase(count: int) -> str:
     """what an admin types to delete a batch of titles at once."""
     return "delete %d title%s" % (count, "" if count == 1 else "s")
@@ -435,40 +509,63 @@ def _cleanup_findings(db) -> list:
 def plan_cleanup(db, target_bytes=None, ids=None) -> dict:
     """the titles a cleanup would delete, lowest Shelf Life first (the bigger
     one first on a tie). with ``target_bytes`` it stops once the total reaches
-    it; only titles already below the line are ever picked, so a target the
-    candidates can't reach says how short it falls instead of reaching higher.
-    with ``ids`` it plans exactly those findings. sizes go to the recycle bin
-    and come back as free space once the bin's retention clears them."""
+    it; only titles below the line NOW are ever picked: every open finding is
+    gathered and scored again with the job's current settings, and one that a
+    gate holds or that no longer scores under the current threshold is left
+    out (``skipped`` says why), so a target the candidates can't reach says
+    how short it falls instead of reaching higher. with ``ids`` it plans
+    exactly those findings. sizes go to the recycle bin and come back as free
+    space once the bin's retention clears them. while the job is switched off
+    nothing is planned and ``error`` says so."""
     from core.video import organization
+    cfg = _config(db)
+    settings = organization.load(db)
+    target = int(target_bytes) if target_bytes else None
+    out = {"items": [], "total_bytes": 0, "target_bytes": target, "short_bytes": 0,
+           "candidates": 0, "skipped": [], "enabled": bool(cfg.get("enabled")),
+           "threshold": _threshold(cfg["settings"]),
+           "recycling": bool(settings.get("recycle_deletes", True)),
+           "keep_days": int(settings.get("recycle_keep_days") or 7),
+           "phrase": batch_phrase(0)}
+    if not cfg.get("enabled"):
+        out["error"] = OFF_PLAN
+        return out
     pending = _cleanup_findings(db)
     if ids is not None:
         wanted = {int(i) for i in ids}
         pending = [f for f in pending if f["id"] in wanted]
-    pending.sort(key=lambda f: ((f["details"].get("score") if f["details"].get("score") is not None else 100),
-                                -(f["details"].get("size_bytes") or 0), f["id"]))
-    target = int(target_bytes) if target_bytes else None
+    fresh = recheck(db, pending, cfg["settings"]) if pending else {}
+    out["skipped"] = [{"id": f["id"], "title": (f["details"] or {}).get("title"),
+                       "year": (f["details"] or {}).get("year"), "reason": fresh[f["id"]]["reason"]}
+                      for f in pending if not fresh[f["id"]]["ok"]]
+    pending = [f for f in pending if fresh[f["id"]]["ok"]]
+    pending.sort(key=lambda f: (fresh[f["id"]]["score"], -fresh[f["id"]]["size_bytes"], f["id"]))
     picked, total = [], 0
     for f in pending:
         if target is not None and total >= target:
             break
         d = f["details"]
+        size = fresh[f["id"]]["size_bytes"]
         picked.append({"id": f["id"], "kind": d.get("kind"), "item_id": d.get("item_id"),
-                       "title": d.get("title"), "year": d.get("year"), "score": d.get("score"),
-                       "size_bytes": int(d.get("size_bytes") or 0)})
-        total += int(d.get("size_bytes") or 0)
-    settings = organization.load(db)
-    return {"items": picked, "total_bytes": total, "target_bytes": target,
-            "short_bytes": max(0, target - total) if target is not None else 0,
-            "candidates": len(pending),
-            "recycling": bool(settings.get("recycle_deletes", True)),
-            "keep_days": int(settings.get("recycle_keep_days") or 7),
-            "phrase": batch_phrase(len(picked))}
+                       "title": d.get("title"), "year": d.get("year"), "score": fresh[f["id"]]["score"],
+                       "size_bytes": size})
+        total += size
+    out.update({"items": picked, "total_bytes": total,
+                "short_bytes": max(0, target - total) if target is not None else 0,
+                "candidates": len(pending), "phrase": batch_phrase(len(picked))})
+    return out
 
 
 def batch_delete_actions(db, ids, phrase: str):
     """check a batch delete before it starts. returns ({finding id: typed
-    title}, None) for the run, or (None, error). every id must be a pending
-    Shelf Life finding, and the phrase must name exactly how many there are."""
+    title}, None) for the run, or (None, error). the job must be switched on,
+    every id must be a pending Shelf Life finding, the phrase must name
+    exactly how many there are, and every title must still be one the job
+    would flag now (gathered and scored again, once for the whole batch); a
+    title that isn't refuses the batch, naming it and why."""
+    cfg = _config(db)
+    if not cfg.get("enabled"):
+        return None, OFF_ERROR
     pending = {f["id"]: f for f in _cleanup_findings(db)}
     try:
         wanted = sorted({int(i) for i in (ids or [])})
@@ -481,7 +578,38 @@ def batch_delete_actions(db, ids, phrase: str):
         return None, "%d of these aren't open Shelf Life findings any more. Refresh and try again." % len(missing)
     if (phrase or "").strip() != batch_phrase(len(wanted)):
         return None, "Type '%s' to confirm. Nothing was deleted." % batch_phrase(len(wanted))
+    fresh = recheck(db, [pending[i] for i in wanted], cfg["settings"])
+    refused = ["%s: %s" % (_label(pending[i]), fresh[i]["reason"]) for i in wanted if not fresh[i]["ok"]]
+    if refused:
+        return None, ("%d of these can't be deleted now. %s. Nothing was deleted; plan the cleanup again."
+                      % (len(refused), "; ".join(refused)))
+    stamp = time.monotonic()
+    with _precheck_lock:
+        for i in wanted:
+            _prechecked[_precheck_key(db, i)] = stamp
     return {i: pending[i]["details"].get("title") or "" for i in wanted}, None
+
+
+def _precheck_key(db, finding_id):
+    return (str(getattr(db, "database_path", id(db))), int(finding_id))
+
+
+def _take_precheck(db, finding_id) -> bool:
+    """True once for a finding a batch checked moments ago."""
+    try:
+        key = _precheck_key(db, finding_id)
+    except (TypeError, ValueError):
+        return False
+    with _precheck_lock:
+        stamp = _prechecked.pop(key, None)
+    return stamp is not None and time.monotonic() - stamp < _PRECHECK_TTL
+
+
+def forget_precheck(db, ids) -> None:
+    """a batch that didn't start: its titles get the full check next time."""
+    with _precheck_lock:
+        for i in ids or ():
+            _prechecked.pop(_precheck_key(db, i), None)
 
 
 def title_view(db, kind: str, item_id) -> dict | None:
@@ -691,6 +819,9 @@ class ShelfLifeJob(VideoRepairJob):
         typed = fix_action if isinstance(fix_action, str) else ""
         if not typed.strip():
             return {"success": False, "error": "Type the title to confirm. Nothing was deleted."}
+        cfg = _config(context.db)
+        if not cfg.get("enabled"):
+            return {"success": False, "error": OFF_ERROR}
         # the scan may be a day old: ask the server again, right before deleting
         playing = _playing_now(context.db)
         if playing is None:
@@ -698,6 +829,14 @@ class ShelfLifeJob(VideoRepairJob):
                     "error": "Couldn't ask the server whether anyone is playing it. Nothing was deleted."}
         if (kind, int(item_id)) in playing:
             return {"success": False, "error": "Someone is playing it right now. Nothing was deleted."}
+        # the finding may be a day old: everything it was flagged on is checked
+        # again, with the settings as they are now. a batch did that for all
+        # its titles at once moments ago
+        if not _take_precheck(context.db, finding.get("id")):
+            fresh = recheck(context.db, [finding], cfg["settings"]).get(finding.get("id")) or {}
+            if not fresh.get("ok"):
+                return {"success": False,
+                        "error": "Not deleted: %s." % (fresh.get("reason") or "it can't be checked")}
         res = delete_title.run(context.db, kind, item_id, typed_title=typed,
                                resolved_by=_resolver_id(), notify=_notify)
         if not res.get("success"):
